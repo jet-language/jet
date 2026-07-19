@@ -2188,6 +2188,43 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
 }
 
 #[test]
+fn subjectless_guards_match_aot_in_resident_jit() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    n :: 7
+    if n > 10 -> print("too big")
+    if {
+        n < 0 -> print("negative")
+        n < 10 -> print("single digit")
+    }
+    label :: if {
+        n < 5 -> "small"
+        n < 10 -> "medium"
+        else -> "large"
+    }
+    print(label)
+}
+"#;
+    let jit = run_cranelift_without_fallback(src, "subjectless_guards");
+    let dir = std::env::temp_dir().join(format!("jet_guard_jit_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("subjectless_guards.jet");
+    fs::write(&file, src).unwrap();
+    let aot = compiled_binary_output(
+        &dir,
+        "subjectless_guards",
+        0,
+        "subjectless_guards",
+        file.to_str().unwrap(),
+    );
+    assert_eq!(jit, aot);
+    assert_eq!(jit.stdout, "single digit\nmedium\n");
+}
+
+#[test]
 fn resident_jit_numeric_methods_and_parse_are_native() {
     if skip_if_cranelift_host_unsupported() {
         return;

@@ -1,4 +1,4 @@
-// if_universal — D-IF3. `if` is the one branching keyword. Beyond the familiar
+// if_universal — D-IF3/D-IFGUARD1. `if` is the one branching keyword. Beyond the familiar
 // two-arm form, `if subject == { arm -> body }` is multi-arm dispatch:
 //   - the `==` marker enters value/pattern dispatch;
 //   - a bare value arm compares against the subject (`subject == value`);
@@ -37,4 +37,19 @@ fn run() {
     } else {
         print("small")
     }
+
+    // Ordered guards need no repeated subject. Statement tables may omit else.
+    if n > 10 -> print("too big")
+    if {
+        n < 0 -> print("negative")
+        n < 10 -> print("single digit")
+    }
+
+    // A value table is total: its final else is required.
+    size :: if {
+        n < 5 -> "small"
+        n < 10 -> "medium"
+        else -> "large"
+    }
+    print(size)
 }

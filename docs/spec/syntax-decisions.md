@@ -215,8 +215,8 @@ loop i := 0; i < n; i++ { … }     // counted (C-style header, semicolons kept)
 `expr ?? continue`, `expr ?? break` are the only spellings (`?return` etc.
 removed; E0115).
 
-**S68 — `if`: two-arm, expression, and dispatch** *(D-IF1 + D-IF3 +
-D-MATCHARM1/2)*: `if` is the only branching keyword.
+**S68 — `if`: two-arm, expression, dispatch, and subjectless guards** *(D-IF1 +
+D-IF3 + D-MATCHARM1/2 + D-IFGUARD1=A)*: `if` is the only branching keyword.
 
 - Statement form `if cond { } else { }`; parens optional, fmt strips them.
 - Expression form `m :: if a > b { a } else { b }` — `else` required (E0003),
@@ -239,6 +239,19 @@ predicates, guards via `&&`/`||` (booleans only — no comparison
 distribution); `|` binds tighter than `&&`/`||`, mixing without parens is
 E0328. Catch-all is `else ->`. Braceless single-expression bodies allowed.
 Exhaustive pattern arms may omit `else`.
+
+**D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
+#680)*: `if cond -> statement` is the one-line statement guard. `if { cond ->
+body ... [else -> body] }` is the ordered statement table; it evaluates heads
+once, top to bottom, runs only the first matching body, and does nothing when no
+head matches and no `else` exists. A direct braceless nested `if` is E0329; use
+a block. `if { cond -> value ... else -> value }` is the value table everywhere
+an expression is accepted; its final `else` is mandatory and all result types
+unify. A pattern binding under `&&` reaches the rest of that head and its body;
+a binding under `||` never reaches the body. A table whose every head starts
+with a pattern test of the same closed enum emits L0302 recommending exhaustive
+subject dispatch. Fmt keeps a fitting inline guard on one line, widens an
+overlong one once to a one-arm table, and keeps value-table outer braces.
 
 **D-PROTO1 / D-PROTO2 — Protocol blocks**: `protocol Name { client ->
 server: Msg(...) }` generates `.Client`/`.Server` handle types over

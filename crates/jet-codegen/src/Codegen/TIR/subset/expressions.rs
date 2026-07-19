@@ -246,10 +246,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             else_value,
             ..
         } => {
-            if !expr_in_subset(cond, cx, locals) {
-                return false;
-            }
+            let Some(bindings) = crate::Codegen::TIR::if_cond_in_subset(cond, cx, locals) else { return false };
             let mut then_locals = locals.clone();
+            then_locals.extend(bindings);
             if !then_body
                 .iter()
                 .all(|s| stmt_in_subset(s, cx, &mut then_locals))

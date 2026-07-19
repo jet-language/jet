@@ -1046,10 +1046,13 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             else_value,
             ..
         } => {
-            let c = lower_expr(cond, cx, env);
+            let (c, binding, mut then_prefix) = super::control_flow::lower_if_cond(cond, cx, env);
             // Value blocks scope their own bindings (like lambda block bodies).
             let mut then_env = clone_env(env);
-            let t_body = lower_stmts(then_body, cx, &mut then_env);
+            if let Some((name, place, ty)) = binding {
+                then_env.bind(&name, place, ty);
+            }
+            then_prefix.extend(lower_stmts(then_body, cx, &mut then_env));
             let t_val = lower_expr(then_value, cx, &mut then_env);
             let mut else_env = clone_env(env);
             let e_body = lower_stmts(else_body, cx, &mut else_env);
@@ -1060,7 +1063,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty,
                 kind: TExprKind::IfExpr {
                     cond: Box::new(c),
-                    then_body: t_body,
+                    then_body: then_prefix,
                     then_value: Box::new(t_val),
                     else_body: e_body,
                     else_value: Box::new(e_val),

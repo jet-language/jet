@@ -551,6 +551,43 @@ fn run() {
 }
 
 #[test]
+fn parse_subjectless_guard_tables_reuse_if_dispatch() {
+    let src = r#"
+fn run() {
+    ready :: false
+    stale :: true
+    if {
+        ready -> print("ready")
+        stale -> print("stale")
+    }
+    label :: if {
+        ready -> "ready"
+        stale -> "stale"
+        else -> "waiting"
+    }
+    if ready -> print(label)
+}
+"#;
+    let (toks, lex_diags) = jet::Lexer::lex(src);
+    assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+    let program = jet::Parser::parse(&toks).expect("subjectless guards should parse");
+    let jet::AST::Item::Func(run) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let jet::AST::Stmt::Switch { subject, arms, else_body, span } = &run.body[2] else {
+        panic!("braced statement guards must reuse dispatch AST");
+    };
+    assert!(matches!(subject, jet::AST::Expr::Bool(true, s) if s == span));
+    assert_eq!(arms.len(), 2);
+    assert!(else_body.is_none(), "statement guard fallback is optional");
+    let jet::AST::Stmt::Val(label) = &run.body[3] else {
+        panic!("expected value guard binding");
+    };
+    assert!(matches!(label.init, jet::AST::Expr::If { .. }));
+    assert!(matches!(run.body[4], jet::AST::Stmt::If(_)));
+}
+
+#[test]
 fn parse_bracket_collection_types_and_semicolon_list_items() {
     let src = r#"
 pub fn shell() -> [JSON] {

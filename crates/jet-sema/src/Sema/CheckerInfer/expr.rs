@@ -243,8 +243,24 @@ impl<'a> Checker<'a> {
                 let span = *span;
                 let before = self.moved.clone();
                 let mut after = before.clone();
-                self.require_bool(cond, "an `if` used as a value");
+                let bindings = self.check_condition_with_bindings(cond);
                 self.push_scope();
+                for (name, ty) in bindings {
+                    self.declare(
+                        &name,
+                        cond.span(),
+                        LocalInfo {
+                            def_span: cond.span(),
+                            ty,
+                            mutable: false,
+                            param_conv: None,
+                            decl_loop_depth: self.loop_depth,
+                            sendable: true,
+                            task_lint_span: None,
+                            single_use_span: None,
+                        },
+                    );
+                }
                 self.check_block(then_body, false);
                 let then_ty = self.infer(then_value);
                 self.pop_scope();

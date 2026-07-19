@@ -333,7 +333,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             else_body,
             else_value,
         } => {
-            matches!(&cond.ty, Type::Bool)
+            matches!(cond.as_ref(), TIfCond::Plain(e) if matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees))
                 && then_body.iter().all(|s| resident_safe_stmt(s, callees))
                 && resident_safe_expr(then_value, callees)
                 && else_body.iter().all(|s| resident_safe_stmt(s, callees))
@@ -760,12 +760,25 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
             }
         }
         TExprKind::IfExpr {
+            cond,
             then_body,
             then_value,
             else_body,
             else_value,
             ..
         } => {
+            match cond.as_ref() {
+                TIfCond::Plain(e) => count_spawn_sites_expr(e, n),
+                TIfCond::IfLet { subj, guard, .. } => {
+                    count_spawn_sites_expr(subj, n);
+                    if let Some(guard) = guard {
+                        count_spawn_sites_expr(guard, n);
+                    }
+                }
+                TIfCond::IsNone { subj, .. } | TIfCond::Matches { subj, .. } => {
+                    count_spawn_sites_expr(subj, n);
+                }
+            }
             count_spawn_sites_stmts(then_body, n);
             count_spawn_sites_expr(then_value, n);
             count_spawn_sites_stmts(else_body, n);

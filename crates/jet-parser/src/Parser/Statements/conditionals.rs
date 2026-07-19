@@ -62,6 +62,14 @@ impl<'a> Parser<'a> {
     pub(super) fn if_or_dispatch(&mut self) -> Result<Stmt, Diagnostic> {
         let span = self.bump().span; // `if`
 
+        // D-IFGUARD1=A: a leading `{` selects ordered Boolean guards. Reuse the
+        // dispatch AST with a compiler-private `true` subject whose span is the
+        // `if` keyword; source-authored `true` can never carry that span.
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            return self.guard_arms(span);
+        }
+
         // Parse the subject below comparison precedence so a trailing `==` marker
         // is left in the token stream (`expr_cmp` would eat it). If `== {`
         // follows, this is explicit dispatch.
@@ -92,6 +100,18 @@ impl<'a> Parser<'a> {
                     .to_string(),
                 Some(eq_span),
             ));
+        }
+        // D-IFGUARD1=A: the one-line form is statement-only. It lowers through
+        // the ordinary `IfStmt`; only its source shape differs.
+        if matches!(self.peek().kind, TokKind::Arrow) {
+            self.bump();
+            let then_body = self.guard_arm_body()?;
+            return Ok(Stmt::If(IfStmt {
+                cond,
+                then_body,
+                else_branch: None,
+                span,
+            }));
         }
         self.expect(TokKind::LBrace, "to open the `if` body")?;
 
@@ -134,6 +154,88 @@ impl<'a> Parser<'a> {
             else_branch,
             span,
         }))
+    }
+
+    /// D-IFGUARD1=A: `if { Bool -> body ... [else -> body] }` statement guards.
+    /// The existing switch node preserves first-match dispatch and checked TIR
+    /// lowering; `true` at the keyword span is the compiler-private subject.
+    fn guard_arms(&mut self, span: Span) -> Result<Stmt, Diagnostic> {
+        let mut arms = Vec::new();
+        let mut else_body = None;
+        loop {
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            match self.peek().kind {
+                TokKind::RBrace => {
+                    if arms.is_empty() {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            "a statement guard table needs at least one condition".to_string(),
+                            "an empty guard table can never perform an action".to_string(),
+                            "add a `condition -> statement` arm".to_string(),
+                            Some(self.peek().span),
+                        ));
+                    }
+                    self.bump();
+                    break;
+                }
+                TokKind::Eof => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "expected `}` to close this guard table, found the end of the file".to_string(),
+                        "every `{` needs a matching `}`".to_string(),
+                        "add a closing `}`".to_string(),
+                        Some(self.peek().span),
+                    ));
+                }
+                TokKind::KwElse => {
+                    self.bump();
+                    self.expect(TokKind::Arrow, "after `else` in a guard table")?;
+                    else_body = Some(self.guard_arm_body()?);
+                    while matches!(self.peek().kind, TokKind::Semi) {
+                        self.bump();
+                    }
+                    self.expect(TokKind::RBrace, "after the final `else` guard arm")?;
+                    break;
+                }
+                _ => {
+                    let arm_start = self.peek().span;
+                    let cond = self.expr_no_struct_lit()?;
+                    self.expect(TokKind::Arrow, "after a guard condition")?;
+                    let body = self.guard_arm_body()?;
+                    let end = body.last().map(Stmt::span).map_or(cond.span().end, |s| s.end);
+                    arms.push(SwitchArm {
+                        cond,
+                        body,
+                        span: Span::new(arm_start.start, end),
+                    });
+                }
+            }
+        }
+        Ok(Stmt::Switch {
+            subject: Expr::Bool(true, span),
+            arms,
+            else_body,
+            span,
+        })
+    }
+
+    fn guard_arm_body(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            return Ok(self.block_stmts());
+        }
+        if matches!(self.peek().kind, TokKind::KwIf) {
+            return Err(Diagnostic::error(
+                "E0329",
+                "a nested guard body needs braces".to_string(),
+                "a braceless guard owns exactly one non-`if` statement, so direct nesting would be ambiguous".to_string(),
+                "wrap the nested `if` in `{ ... }`".to_string(),
+                Some(self.peek().span),
+            ));
+        }
+        Ok(vec![self.stmt()?])
     }
 
     /// D-IF1: is the `if` body (cursor just past `{`) a multi-arm dispatch?
@@ -592,6 +694,10 @@ impl<'a> Parser<'a> {
     /// is a statement, parsed elsewhere).
     pub(in super::super) fn parse_if_expr(&mut self) -> Result<Expr, Diagnostic> {
         let start = self.bump().span; // `if`
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            return self.parse_guard_expr(start);
+        }
         let cond = self.expr_no_struct_lit()?;
         let (then_body, then_value) = self.parse_value_block()?;
         if !matches!(self.peek().kind, TokKind::KwElse) {
@@ -620,6 +726,88 @@ impl<'a> Parser<'a> {
             else_value: Box::new(else_value),
             span,
         })
+    }
+
+    /// D-IFGUARD1=A: a value guard is a nested ordinary if-expression chain.
+    /// The final `else` is syntactically mandatory because arbitrary Boolean
+    /// heads are not solver-proved exhaustive.
+    fn parse_guard_expr(&mut self, start: Span) -> Result<Expr, Diagnostic> {
+        let mut arms: Vec<(Expr, Vec<Stmt>, Expr)> = Vec::new();
+        let (else_body, else_value, end) = loop {
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            match self.peek().kind {
+                TokKind::KwElse => {
+                    self.bump();
+                    self.expect(TokKind::Arrow, "after `else` in a value guard")?;
+                    let (body, value) = self.guard_value_body()?;
+                    while matches!(self.peek().kind, TokKind::Semi) {
+                        self.bump();
+                    }
+                    let close = self.peek().span;
+                    self.expect(TokKind::RBrace, "after the final `else` value guard arm")?;
+                    break (body, value, close.end);
+                }
+                TokKind::RBrace => {
+                    let close = self.bump().span;
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "a guard table used as a value needs a final `else` arm".to_string(),
+                        "arbitrary Boolean guards cannot prove that one arm always matches".to_string(),
+                        "add `else -> value` so every path produces a value".to_string(),
+                        Some(close),
+                    ));
+                }
+                TokKind::Eof => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "expected a final `else` arm and `}` for this value guard".to_string(),
+                        "a value guard must produce a value on every path".to_string(),
+                        "add `else -> value` and a closing `}`".to_string(),
+                        Some(self.peek().span),
+                    ));
+                }
+                _ => {
+                    let cond = self.expr_no_struct_lit()?;
+                    self.expect(TokKind::Arrow, "after a value guard condition")?;
+                    let (body, value) = self.guard_value_body()?;
+                    arms.push((cond, body, value));
+                }
+            }
+        };
+        if arms.is_empty() {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a value guard needs at least one condition before `else`".to_string(),
+                "`else` is a fallback, not a condition".to_string(),
+                "add a `condition -> value` arm before `else`".to_string(),
+                Some(start),
+            ));
+        }
+        let span = Span::new(start.start, end);
+        let mut fallback_body = else_body;
+        let mut fallback_value = else_value;
+        for (cond, then_body, then_value) in arms.into_iter().rev() {
+            fallback_value = Expr::If {
+                cond: Box::new(cond),
+                then_body,
+                then_value: Box::new(then_value),
+                else_body: fallback_body,
+                else_value: Box::new(fallback_value),
+                span,
+            };
+            fallback_body = Vec::new();
+        }
+        Ok(fallback_value)
+    }
+
+    fn guard_value_body(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            return self.parse_value_block();
+        }
+        let value = self.expr()?;
+        Ok((Vec::new(), value))
     }
 
     /// S68 (D-SG2): parse `{ stmt* tail-expr }` where the trailing expression

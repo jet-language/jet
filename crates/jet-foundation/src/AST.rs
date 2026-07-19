@@ -40,7 +40,7 @@ pub use patterns::{
 
 #[path = "AST/statements.rs"]
 mod statements;
-pub use statements::{IfStmt, ElseBranch, SwitchArm, Stmt};
+pub use statements::{is_subjectless_guard, ElseBranch, IfStmt, Stmt, SwitchArm};
 
 #[path = "AST/lvalues.rs"]
 mod lvalues;

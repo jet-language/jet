@@ -5,6 +5,17 @@ use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use std::collections::{HashMap, HashSet};
 
+fn leading_guard_pattern_subject(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::PatternTest { subject, .. } => match subject.as_ref() {
+            Expr::Ident(name, _) => Some(name),
+            _ => None,
+        },
+        Expr::Binary(BinOp::And, left, _, _) => leading_guard_pattern_subject(left),
+        _ => None,
+    }
+}
+
 pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &Type) {
     if let Pattern::Or(alts, _) = pattern {
         for alt in alts {
@@ -95,7 +106,25 @@ impl<'a> Checker<'a> {
                 }
                 Expr::Binary(BinOp::And, l, r, _) => {
                     let left_bindings = self.check_condition_with_bindings(l);
+                    self.push_scope();
+                    for (name, ty) in &left_bindings {
+                        self.declare(
+                            name,
+                            l.span(),
+                            LocalInfo {
+                                def_span: l.span(),
+                                ty: ty.clone(),
+                                mutable: false,
+                                param_conv: None,
+                                decl_loop_depth: self.loop_depth,
+                                sendable: true,
+                                task_lint_span: None,
+                                single_use_span: None,
+                            },
+                        );
+                    }
                     let mut right_bindings = self.check_condition_with_bindings(r);
+                    self.pop_scope();
                     left_bindings.into_iter().for_each(|(k, v)| {
                         right_bindings.entry(k).or_insert(v);
                     });
@@ -115,6 +144,7 @@ impl<'a> Checker<'a> {
             else_body: &mut Option<Vec<Stmt>>,
             span: Span,
         ) {
+            let subjectless_guard = crate::AST::is_subjectless_guard(subject, span);
             let subj_ty = self.infer(subject);
             let subj_name = match &*subject {
                 Expr::Ident(n, _) => Some(n.clone()),
@@ -229,10 +259,6 @@ impl<'a> Checker<'a> {
                 }
                 let bindings = self.check_condition_with_bindings(&mut arm.cond);
                 if bindings.is_empty() {
-                    self.require_bool(
-                        &mut arm.cond,
-                        &format!("an `{}` arm's condition", Syntax::KW_IF),
-                    );
                     self.check_block(&mut arm.body, true);
                 } else {
                     self.push_scope();
@@ -317,7 +343,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-            } else if else_body.is_none() {
+            } else if else_body.is_none() && !subjectless_guard {
                 // D-PARSESTR1: a str-match pattern arm is always refutable — the
                 // literal text might not match, and a typed hole's read can fail
                 // — so it gets its own E0148 instead of the generic E0003.
@@ -389,6 +415,35 @@ impl<'a> Checker<'a> {
                         ),
                         Some(span),
                     ));
+                }
+            }
+            if subjectless_guard && arms.len() > 1 {
+                let subjects = arms
+                    .iter()
+                    .filter_map(|arm| leading_guard_pattern_subject(&arm.cond))
+                    .collect::<Vec<_>>();
+                if subjects.len() == arms.len()
+                    && subjects[1..].iter().all(|subject| *subject == subjects[0])
+                {
+                    let first = subjects[0];
+                    let enum_name = self.lookup(first).and_then(|local| match &local.ty {
+                        Type::Named(name) if self.registry.enum_variants(name).is_some() => {
+                            Some(name.clone())
+                        }
+                        _ => None,
+                    });
+                    if let Some(enum_name) = enum_name {
+                        self.diags.push(Diagnostic::lint(
+                            "L0302",
+                            format!("these guards all dispatch on `{enum_name}`"),
+                            "subject dispatch makes one closed enum's cases explicit and exhaustively checked"
+                                .to_string(),
+                            format!(
+                                "write `if {first} == {{ ... }}` and put each variant pattern in an arm"
+                            ),
+                            Some(span),
+                        ));
+                    }
                 }
             }
             if let Some(body) = else_body {

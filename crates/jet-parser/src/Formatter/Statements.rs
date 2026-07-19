@@ -79,7 +79,13 @@ impl<'a> Fmt<'a> {
                 self.write("yield ");
                 self.fmt_expr(e, Prec::OrFallback);
             }
-            Stmt::If(i) => self.fmt_if(i),
+            Stmt::If(i) => {
+                if self.is_inline_guard(i) {
+                    self.fmt_inline_guard(i);
+                } else {
+                    self.fmt_if(i);
+                }
+            }
             Stmt::While {
                 cond, body, label, ..
             } => {
@@ -134,11 +140,15 @@ impl<'a> Fmt<'a> {
                 subject,
                 arms,
                 else_body,
-                ..
+                span,
             } => {
                 self.write(Syntax::KW_IF);
                 self.write(" ");
-                self.fmt_dispatch(subject, arms, else_body.as_deref());
+                if crate::AST::is_subjectless_guard(subject, *span) {
+                    self.fmt_guard_dispatch(arms, else_body.as_deref());
+                } else {
+                    self.fmt_dispatch(subject, arms, else_body.as_deref());
+                }
             }
             Stmt::Break(_) => self.write("break"),
             Stmt::Continue(_) => self.write("continue"),
@@ -446,6 +456,46 @@ impl<'a> Fmt<'a> {
         self.fmt_if_chain(i, inline);
     }
 
+    fn is_inline_guard(&self, i: &IfStmt) -> bool {
+        i.else_branch.is_none()
+            && i.then_body.len() == 1
+            && self
+                .src
+                .get(i.cond.span().end..i.then_body[0].span().start)
+                .is_some_and(|between| between.contains(Syntax::OP_ARM_ARROW))
+    }
+
+    fn fmt_inline_guard(&mut self, i: &IfStmt) {
+        let saved_out = self.out.len();
+        let saved_col = self.col;
+        let saved_line_start = self.at_line_start;
+        let saved_pending_blank = self.pending_blank;
+        let saved_comment_i = self.comment_i;
+        self.write(Syntax::KW_IF);
+        self.write(" ");
+        self.fmt_cond(&i.cond);
+        self.write(" ");
+        self.write(Syntax::OP_ARM_ARROW);
+        self.write(" ");
+        self.fmt_stmt(&i.then_body[0]);
+        if self.col <= MAX_WIDTH {
+            return;
+        }
+        self.out.truncate(saved_out);
+        self.col = saved_col;
+        self.at_line_start = saved_line_start;
+        self.pending_blank = saved_pending_blank;
+        self.comment_i = saved_comment_i;
+        self.write("if {");
+        self.newline();
+        self.with_indent(|f| {
+            f.fmt_cond(&i.cond);
+            f.write(" -> {");
+            f.fmt_body(&i.then_body);
+        });
+        self.end_block();
+    }
+
     /// True when every branch of the if/else chain is eligible to render inline
     /// (D-FMT1 gates a–d) AND the author wrote each on a single source line.
     fn chain_inlineable(&self, i: &IfStmt) -> bool {
@@ -523,6 +573,34 @@ impl<'a> Fmt<'a> {
                 f.newline();
                 f.with_indent(|f| f.fmt_block_stmts(else_b));
                 f.end_block();
+            }
+        });
+        self.end_block();
+    }
+
+    fn fmt_guard_dispatch(&mut self, arms: &[SwitchArm], else_body: Option<&[Stmt]>) {
+        self.write("{");
+        self.newline();
+        self.with_indent(|f| {
+            for (index, arm) in arms.iter().enumerate() {
+                if index > 0 {
+                    f.newline();
+                }
+                f.fmt_expr(&arm.cond, Prec::OrFallback);
+                f.write(" ");
+                f.write(Syntax::OP_ARM_ARROW);
+                f.write(" {");
+                f.fmt_body(&arm.body);
+            }
+            if let Some(body) = else_body {
+                if !arms.is_empty() {
+                    f.newline();
+                }
+                f.write(Syntax::KW_ELSE);
+                f.write(" ");
+                f.write(Syntax::OP_ARM_ARROW);
+                f.write(" {");
+                f.fmt_body(body);
             }
         });
         self.end_block();

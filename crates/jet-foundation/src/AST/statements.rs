@@ -24,6 +24,12 @@ pub struct SwitchArm {
     pub span: Span,
 }
 
+/// D-IFGUARD1=A: subjectless guard tables reuse `Stmt::Switch` with a
+/// compiler-private `true` subject located at the `if` keyword span.
+pub fn is_subjectless_guard(subject: &Expr, span: Span) -> bool {
+    matches!(subject, Expr::Bool(true, subject_span) if *subject_span == span)
+}
+
 #[derive(Debug, Clone)]
 pub enum Stmt {
     /// A call used for its effect, e.g. `print(x);`.

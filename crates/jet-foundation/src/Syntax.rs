@@ -40,6 +40,8 @@
 // ordinary resolution and access rules.
 // D-SHAPE-CASE1=C owns the identifier category table and its two enforced
 // shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
+// D-IFGUARD1=A adds no spelling: subjectless statement/value guard tables
+// reuse KW_IF, KW_ELSE, OP_ARM_ARROW, braces, and ordinary Bool expressions.
 // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a
 // destination-owned `Target.from_source(value)` static method. Text remains
 // the existing `Target.parse(text)` operation; source-owned `to_*` aliases are

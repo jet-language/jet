@@ -290,6 +290,31 @@ pub(crate) fn lower_if_cond(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> (TIfCond, Option<(String, String, Option<Type>)>, Vec<TStmt>) {
+    if let Expr::Binary(BinOp::And, left, right, _) = cond {
+        let (head, binding, prefix) = lower_if_cond(left, cx, env);
+        if let (
+            TIfCond::IfLet {
+                pat_str,
+                subj,
+                guard: None,
+            },
+            Some((name, place, ty)),
+        ) = (head, binding)
+        {
+            let mut guard_env = clone_env(env);
+            guard_env.bind(&name, place.clone(), ty.clone());
+            let guard = lower_expr(right, cx, &mut guard_env);
+            return (
+                TIfCond::IfLet {
+                    pat_str,
+                    subj,
+                    guard: Some(Box::new(guard)),
+                },
+                Some((name, place, ty)),
+                prefix,
+            );
+        }
+    }
     if let Expr::PatternTest {
         subject,
         pattern: Pattern::Absent(_),
@@ -348,14 +373,14 @@ pub(crate) fn lower_if_cond(
                 gc_transferred: false,
                     };
                     return (
-                        TIfCond::IfLet { pat_str, subj },
+                        TIfCond::IfLet { pat_str, subj, guard: None },
                         Some((name.clone(), place, Some(map_ty))),
                         vec![prefix],
                     );
                 }
                 let pat_str = emit_if_let_pattern(cx, pattern);
                 return (
-                    TIfCond::IfLet { pat_str, subj },
+                    TIfCond::IfLet { pat_str, subj, guard: None },
                     Some((name.clone(), place, ty)),
                     Vec::new(),
                 );
@@ -372,7 +397,7 @@ pub(crate) fn lower_if_cond(
                 let ty = variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next());
                 let place = mangle(name);
                 return (
-                    TIfCond::IfLet { pat_str, subj },
+                    TIfCond::IfLet { pat_str, subj, guard: None },
                     Some((name.clone(), place, ty)),
                     Vec::new(),
                 );
@@ -383,7 +408,7 @@ pub(crate) fn lower_if_cond(
             if let Some(PatSlot::Wildcard) = bindings.first() {
                 let subj = lower_if_let_subject(subject, cx, env);
                 let pat_str = emit_if_let_pattern(cx, pattern);
-                return (TIfCond::IfLet { pat_str, subj }, None, Vec::new());
+                return (TIfCond::IfLet { pat_str, subj, guard: None }, None, Vec::new());
             }
         }
     }
@@ -426,7 +451,7 @@ pub(crate) fn lower_if_cond(
             let (name, ty) = binding;
             let place = mangle(&name);
             return (
-                TIfCond::IfLet { pat_str, subj },
+                TIfCond::IfLet { pat_str, subj, guard: None },
                 Some((name, place, ty)),
                 Vec::new(),
             );
@@ -501,9 +526,13 @@ pub(crate) fn lower_switch(
     subject: &Expr,
     arms: &[SwitchArm],
     else_body: &Option<Vec<Stmt>>,
+    span: Span,
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TStmt {
+    if crate::AST::is_subjectless_guard(subject, span) {
+        return lower_guard_switch(arms, else_body, cx, env);
+    }
     // Shape B: all arm-head ranges + else → if/else chain (`emit_mixed_switch`).
     if else_body.is_some()
         && arms
@@ -535,6 +564,33 @@ pub(crate) fn lower_switch(
     }
     // Shape A: exhaustive enum match (`emit_pattern_match_switch`).
     lower_enum_match(subject, arms, else_body, cx, env)
+}
+
+fn lower_guard_switch(
+    arms: &[SwitchArm],
+    else_body: &Option<Vec<Stmt>>,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TStmt {
+    let mut chain = else_body.as_ref().map_or_else(Vec::new, |body| {
+        let mut branch = clone_env(env);
+        lower_stmts(body, cx, &mut branch)
+    });
+    for arm in arms.iter().rev() {
+        let (cond, binding, mut body) = lower_if_cond(&arm.cond, cx, env);
+        let mut branch = if binding.is_some() { fork_panic(env) } else { clone_env(env) };
+        if let Some((name, place, ty)) = binding {
+            branch.bind(&name, place, ty);
+        }
+        body.extend(lower_stmts(&arm.body, cx, &mut branch));
+        chain = vec![TStmt::If {
+            cond,
+            then_body: body,
+            else_body: (!chain.is_empty()).then_some(chain),
+            else_is_elseif: true,
+        }];
+    }
+    chain.into_iter().next().expect("guard table has at least one arm")
 }
 
 /// D-IF3: `subject >= lo && subject <= hi` as a lowered bool expression.

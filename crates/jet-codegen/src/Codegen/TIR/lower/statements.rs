@@ -1111,8 +1111,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             subject,
             arms,
             else_body,
-            ..
-        } => lower_switch(subject, arms, else_body, cx, env),
+            span,
+        } => lower_switch(subject, arms, else_body, *span, cx, env),
         // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` runs at
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),

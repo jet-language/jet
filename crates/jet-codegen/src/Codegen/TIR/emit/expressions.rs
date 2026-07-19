@@ -9,6 +9,7 @@ use crate::Codegen::TIR::emit_tir_core_call;
 use crate::Codegen::TIR::emit_tir_orfallback_rhs;
 use crate::Codegen::TIR::emit_tir_str;
 use crate::Codegen::TIR::emit_tir_value_block;
+use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::bin_match_scan_closure_ex;
 use crate::Codegen::TIR::str_match_scan_closure_ex;
@@ -898,7 +899,30 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             else_body,
             else_value,
         } => {
-            let c = emit_tir_expr(cond, cx);
+            if let TIfCond::IfLet {
+                pat_str,
+                subj,
+                guard: Some(guard),
+            } = cond.as_ref()
+            {
+                return format!(
+                    "match {} {{ {} if {} => {}, _ => {} }}",
+                    emit_tir_expr(subj, cx),
+                    pat_str,
+                    emit_tir_expr(guard, cx),
+                    emit_tir_value_block(then_body, then_value, cx),
+                    emit_tir_value_block(else_body, else_value, cx),
+                );
+            }
+            let c = match cond.as_ref() {
+                TIfCond::Plain(cond) => emit_tir_expr(cond, cx),
+                TIfCond::IfLet { pat_str, subj, guard } => {
+                    debug_assert!(guard.is_none());
+                    format!("let {} = {}", pat_str, emit_tir_expr(subj, cx))
+                }
+                TIfCond::IsNone { subj } => format!("{}.is_none()", emit_tir_expr(subj, cx)),
+                TIfCond::Matches { pat_str, subj } => format!("matches!(&({}), {})", emit_tir_expr(subj, cx), pat_str),
+            };
             let then_block = emit_tir_value_block(then_body, then_value, cx);
             let else_block = emit_tir_value_block(else_body, else_value, cx);
             format!("if {} {} else {}", c, then_block, else_block)

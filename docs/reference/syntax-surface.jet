@@ -185,6 +185,17 @@ fn branch(a: Int, b: Int) -> Int {
     // expression form — `else` required, both branches share a type (S68)
     m :: if a > b { a } else { b }
 
+    // subjectless guards are ordered and run only their first matching arm.
+    if a < 0 -> print("negative")
+    if {
+        a == 0 -> print("zero")
+        a < b -> print("smaller")
+    }
+    word :: if {
+        a < b -> "low"
+        else -> "high"
+    }
+
     // multi-arm dispatch; bare-value arms compare against the subject (D-IF1/D-IF2)
     //<<< Owner Multi-Arm Dispatch: Modify syntax for consistency.
     // HAVE:

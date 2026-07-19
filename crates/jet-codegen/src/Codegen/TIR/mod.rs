@@ -647,7 +647,13 @@ pub enum TForInMethod {
 ///  - `Matches` — a binding-free enum variant/group test (`d == .Fire`): `if matches!(&{subj}, {pat}) {`.
 pub enum TIfCond {
     Plain(TExpr),
-    IfLet { pat_str: String, subj: TExpr },
+    IfLet {
+        pat_str: String,
+        subj: TExpr,
+        /// D-IFGUARD1=A/S31: condition to the right of a binding pattern in
+        /// `pattern && guard`; lowered with the new binding in scope.
+        guard: Option<Box<TExpr>>,
+    },
     IsNone { subj: TExpr },
     Matches { pat_str: String, subj: TExpr },
 }
@@ -1523,7 +1529,7 @@ pub enum TExprKind {
     },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {
-        cond: Box<TExpr>,
+        cond: Box<TIfCond>,
         then_body: Vec<TStmt>,
         then_value: Box<TExpr>,
         else_body: Vec<TStmt>,

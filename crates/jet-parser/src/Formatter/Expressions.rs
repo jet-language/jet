@@ -30,6 +30,62 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    fn is_guard_expr(&self, expr: &Expr) -> bool {
+        let Expr::If { span, .. } = expr else { return false };
+        self.src
+            .get(span.start + Syntax::KW_IF.len()..span.end)
+            .is_some_and(|tail| tail.trim_start().starts_with('{'))
+    }
+
+    fn fmt_guard_expr(&mut self, expr: &Expr) {
+        let Expr::If { span, .. } = expr else { unreachable!() };
+        let table_span = *span;
+        self.write(Syntax::KW_IF);
+        self.write(" {");
+        self.newline();
+        self.with_indent(|f| {
+            let mut arm = expr;
+            loop {
+                let Expr::If {
+                    cond,
+                    then_body,
+                    then_value,
+                    else_body,
+                    else_value,
+                    span,
+                } = arm else { unreachable!() };
+                f.fmt_expr(cond, Prec::OrFallback);
+                f.write(" ");
+                f.write(Syntax::OP_ARM_ARROW);
+                f.write(" ");
+                if then_body.is_empty() {
+                    f.fmt_expr(then_value, Prec::OrFallback);
+                } else {
+                    f.fmt_value_block(then_body, then_value, false);
+                }
+                f.newline();
+                if else_body.is_empty()
+                    && matches!(else_value.as_ref(), Expr::If { span: next, .. } if *next == *span && *span == table_span)
+                {
+                    arm = else_value;
+                    continue;
+                }
+                f.write(Syntax::KW_ELSE);
+                f.write(" ");
+                f.write(Syntax::OP_ARM_ARROW);
+                f.write(" ");
+                if else_body.is_empty() {
+                    f.fmt_expr(else_value, Prec::OrFallback);
+                } else {
+                    f.fmt_value_block(else_body, else_value, false);
+                }
+                f.newline();
+                break;
+            }
+        });
+        self.end_block();
+    }
+
     /// D-FMT1: every branch of an `if`-expression chain is inline-eligible (gates
     /// a–d, author wrote each on one line). A nested `else if` recurses.
     fn if_expr_chain_inlineable(&self, expr: &Expr) -> bool {
@@ -193,6 +249,10 @@ impl<'a> Fmt<'a> {
         match expr {
             // S68 (D-SG2): `if` used as a value.
             Expr::If { .. } => {
+                if self.is_guard_expr(expr) {
+                    self.fmt_guard_expr(expr);
+                    return;
+                }
                 // D-FMT1: the whole if-expression chain shares one line shape —
                 // inline only when every branch is inline-eligible.
                 let inline = self.if_expr_chain_inlineable(expr);

@@ -279,6 +279,7 @@ renumbered, and no new `W` code may be allocated.
 | E0326 | sema  | a partial struct destructure (`.{ … }`) with no trailing `..` (D-DESTRUCT1) |
 | E0327 | sema  | a redundant `..` on a destructure that already names every field (D-DESTRUCT1) |
 | E0328 | parse | value alternates (`\|`) mixed with `&&`/`\|\|` without grouping parens in an arm head (D-MATCHARM2=B) |
+| E0329 | parse | direct braceless nesting in a subjectless guard arm (D-IFGUARD1=A) |
 | E0330 | sema  | leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A) |
 | E0331 | parse | a payload on a variant group name (D-TAG1) |
 | E0332 | sema  | a group name used as a value (D-TAG1) |
@@ -312,6 +313,7 @@ renumbered, and no new `W` code may be allocated.
 | E0361 | sema  | an operator hook directly dispatches back to itself through its symbol (D-OPDEF1) |
 | E0362 | sema  | a hooked compound assignment targets a nested field place not yet lowerable as one write (D-OPDEF1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
+| L0302 | sema  | guard table should use closed-enum subject dispatch (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
 | E0402 | sema  | fallible call ignored as a statement      |
 | E0403 | sema  | `?` error type / return context mismatch  |

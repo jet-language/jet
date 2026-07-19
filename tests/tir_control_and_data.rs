@@ -78,6 +78,74 @@ fn run() {
     assert_eq!(stdout, "Fizz\nBuzz\nFizzBuzz\n7\n");
 }
 
+/// D-IFGUARD1=A: statement/value guards share ordered `if` lowering. Heads run
+/// once, stop at the first match, preserve Boolean short-circuiting, and an
+/// unmatched statement table performs no action.
+#[test]
+fn subjectless_guards_order_totality_and_nested_forms() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn check(note: String, answer: Bool) -> Bool {
+    print(note)
+    return answer
+}
+
+fn run() {
+    if {
+        check("first", false) -> print("wrong")
+        check("second", true) -> {
+            print("chosen")
+            if true -> print("nested")
+        }
+        check("never", true) -> print("wrong")
+    }
+    if {
+        false && check("short-circuited", true) -> print("wrong")
+    }
+    label :: if {
+        false -> "wrong"
+        true -> "value"
+        else -> "fallback"
+    }
+    print(label)
+}
+"#;
+    let (code, stdout) = build_and_run("tir_subjectless_guards", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "first\nsecond\nchosen\nnested\nvalue\n");
+}
+
+#[test]
+fn subjectless_guard_pattern_bindings_dominate_selected_body() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+enum Choice {
+    A(Int)
+    B
+}
+
+fn run() {
+    choice :: Choice.A(4)
+    if {
+        choice == .A(n) && n > 2 -> print(n)
+        choice == .B -> print(0)
+    }
+    label :: if {
+        choice == .A(n) && n > 2 -> "large {n}"
+        else -> "other"
+    }
+    print(label)
+}
+"#;
+    let (code, stdout) = build_and_run("tir_subjectless_guard_patterns", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "4\nlarge 4\n");
+}
+
 /// Coexistence: a free function and a method in the same program both route
 /// through the executable TIR. A construct outside TIR coverage is an ICE gate,
 /// not a legacy AST fallback.

@@ -1358,7 +1358,12 @@ impl LowerCtx<'_, '_> {
                 else_body,
                 else_value,
             } => {
-                let cond_val = self.lower_expr(cond)?;
+                let cond_val = match cond.as_ref() {
+                    TIfCond::Plain(cond) => self.lower_expr(cond)?,
+                    TIfCond::IfLet { .. } => return Err("jit if-expression if-let unsupported".to_string()),
+                    TIfCond::IsNone { .. } => return Err("jit if-expression is-none unsupported".to_string()),
+                    TIfCond::Matches { .. } => return Err("jit if-expression pattern match unsupported".to_string()),
+                };
                 let ret_ty = clif_ty(&expr.ty).ok_or("jit if-expr result type unsupported")?;
                 let then_block = self.b.create_block();
                 let else_block = self.b.create_block();

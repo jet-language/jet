@@ -1,5 +1,6 @@
-use crate::AST::{BindPattern, ElseBranch, Expr, ForKind, IfStmt, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm};
+use crate::AST::{BinOp, BindPattern, ElseBranch, Expr, ForKind, IfStmt, IndexKind, LValue, PatSlot, Pattern, Stmt, SwitchArm};
 use crate::Codegen::Cx;
+use crate::Diagnostics::Span;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
 use crate::Codegen::TIR::add_pattern_binding_names;
@@ -265,8 +266,8 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             subject,
             arms,
             else_body,
-            ..
-        } => switch_in_subset(subject, arms, else_body, cx, locals),
+            span,
+        } => switch_in_subset(subject, arms, else_body, *span, cx, locals),
         // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` erases entirely.
         // Always "in subset" since it emits nothing in Rust (I3).
         Stmt::ComptimeBlock { .. } => true,
@@ -416,6 +417,14 @@ pub(crate) fn if_cond_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> Option<Vec<String>> {
+    if let Expr::Binary(BinOp::And, left, right, _) = cond {
+        let bindings = if_cond_in_subset(left, cx, locals)?;
+        if !bindings.is_empty() {
+            let mut right_locals = locals.clone();
+            right_locals.extend(bindings.iter().cloned());
+            return expr_in_subset(right, cx, &right_locals).then_some(bindings);
+        }
+    }
     // The `x == null` (`Pattern::Absent`) form: `if {subj}.is_none()`.
     if let Expr::PatternTest {
         subject,
@@ -580,6 +589,7 @@ pub(crate) fn switch_in_subset(
     subject: &Expr,
     arms: &[SwitchArm],
     else_body: &Option<Vec<Stmt>>,
+    span: Span,
     cx: &Cx,
     locals: &mut HashSet<String>,
 ) -> bool {
@@ -589,6 +599,26 @@ pub(crate) fn switch_in_subset(
     // The subject must itself be in-subset (so it lowers + so `it` never escapes).
     if !expr_in_subset(subject, cx, locals) {
         return false;
+    }
+    if crate::AST::is_subjectless_guard(subject, span) {
+        for arm in arms {
+            let Some(bindings) = if_cond_in_subset(&arm.cond, cx, locals) else {
+                return false;
+            };
+            let mut body_locals = locals.clone();
+            body_locals.extend(bindings);
+            if !arm
+                .body
+                .iter()
+                .all(|stmt| stmt_in_subset(stmt, cx, &mut body_locals))
+            {
+                return false;
+            }
+        }
+        return else_body.as_ref().is_none_or(|body| {
+            let mut else_locals = locals.clone();
+            body.iter().all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
+        });
     }
     // Shape A: all arms are variant patterns (exhaustive enum match).
     if arms

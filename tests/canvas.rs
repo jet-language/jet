@@ -938,6 +938,34 @@ fn run() {
 }
 
 #[test]
+fn canvas_projects_and_edits_subjectless_guard_arms() {
+    let path = write_fixture(
+        "subjectless_guards",
+        r#"fn run() {
+    ready :: true
+    if {
+        ready -> print("ready")
+        else -> print("waiting")
+    }
+}
+"#,
+    );
+    let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas guard graph");
+    assert!(graph.contains("\"title\":\"if guards\""), "{graph}");
+    assert!(graph.contains("\"pattern_source\":\"ready\""), "{graph}");
+    let graph_id = graph_id_for_title(&graph, "run");
+    let (node_start, node_end) = source_span_near(&graph, "\"title\":\"if guards\"");
+    let source = fs::read_to_string(&path).unwrap();
+    let add = format!(
+        "{{\"schema_version\":1,\"op\":\"add_pattern_arm\",\"revision\":\"{}\",\"graph_id\":\"{}\",\"node_start\":{},\"node_end\":{},\"pattern\":\"false\"}}",
+        jet::Canvas::source_revision(&source), graph_id, node_start, node_end
+    );
+    jet::Canvas::apply_transaction_json(&path, &add).expect("add guard arm");
+    let edited = fs::read_to_string(&path).unwrap();
+    assert!(edited.contains("false ->"), "{edited}");
+}
+
+#[test]
 fn canvas_wired_insert_transaction_writes_call_with_origin_value() {
     let path = write_fixture(
         "wired_insert",

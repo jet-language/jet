@@ -2390,3 +2390,48 @@ fn run() {}
         assert!(once.contains(preserved), "formatter lost `{preserved}`:\n{once}");
     }
 }
+
+#[test]
+fn subjectless_guards_preserve_tokens_and_are_byte_stable() {
+    // D-IFGUARD1=A: STABILITY means the first pass retains both arrow forms,
+    // all heads/bodies, outer value braces, and the second pass is identical.
+    let src = r#"fn run() {
+    ready :: true
+    if ready -> print("inline")
+    if {
+        ready -> print("ready")
+        false -> print("never")
+    }
+    label :: if {
+        ready -> "ready"
+        else -> "waiting"
+    }
+    print(label)
+}
+
+"#;
+    let once = jet::format_source(src).expect("subjectless guards should format");
+    for preserved in [
+        "if ready -> print(\"inline\")",
+        "if {",
+        "ready ->",
+        "false ->",
+        "else -> \"waiting\"",
+        "print(label)",
+    ] {
+        assert!(once.contains(preserved), "formatter lost `{preserved}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("formatted guards should reparse");
+    assert_eq!(once, twice, "subjectless guard formatting must be byte-stable");
+}
+
+#[test]
+fn overwide_inline_guard_widens_once() {
+    let src = "fn run() {\n    if this_condition_name_is_deliberately_longer_than_the_formatter_width_limit && another_deliberately_long_condition_name -> print(\"wide\")\n}\n";
+    let out = jet::format_source(src).expect("format guard");
+    assert_eq!(
+        out,
+        "fn run() {\n    if {\n        this_condition_name_is_deliberately_longer_than_the_formatter_width_limit && another_deliberately_long_condition_name -> {\n            print(\"wide\")\n        }\n    }\n}\n"
+    );
+    assert_eq!(jet::format_source(&out).expect("format guard twice"), out);
+}

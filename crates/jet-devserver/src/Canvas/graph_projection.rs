@@ -814,39 +814,46 @@ fn project_stmt(
             else_body,
             span,
         } => {
+            let subjectless = AST::is_subjectless_guard(subject, *span);
             let node_id = format!("{}:stmt:{ordinal}:dispatch", g.graph_id);
             add_node(
                 g,
                 &node_id,
                 "function",
                 "control",
-                "if ==",
+                if subjectless { "if guards" } else { "if ==" },
                 (*span).into(),
                 x,
                 y,
                 vec!["control"],
                 vec!["add_pattern_arm", "edit_inline_expr", "source_jump"],
             );
-            let ty = expr_type(g, index, subject);
-            let subject_pin = add_pin(g, &node_id, "subject", "input", &ty, "", false);
-            connect_expr_to_input(
-                g,
-                index,
-                src,
-                subject,
-                ordinal,
-                "subject",
-                &node_id,
-                &subject_pin,
-                x - 220,
-                y,
-            );
+            if !subjectless {
+                let ty = expr_type(g, index, subject);
+                let subject_pin = add_pin(g, &node_id, "subject", "input", &ty, "", false);
+                connect_expr_to_input(
+                    g,
+                    index,
+                    src,
+                    subject,
+                    ordinal,
+                    "subject",
+                    &node_id,
+                    &subject_pin,
+                    x - 220,
+                    y,
+                );
+            }
             for (i, arm) in arms.iter().enumerate() {
                 add_arm_pin(
                     g,
                     &node_id,
                     &format!("arm{}", i + 1),
-                    &dispatch_arm_pattern_label(src, &arm.cond),
+                    &if subjectless {
+                        balance_closing_parens(snippet(src, arm.cond.span()).trim())
+                    } else {
+                        dispatch_arm_pattern_label(src, &arm.cond)
+                    },
                     arm.cond.span().into(),
                 );
                 add_inline(

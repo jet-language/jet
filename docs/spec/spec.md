@@ -80,8 +80,12 @@ assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
 // D-IF1: `if` is the one branching keyword. Two forms by body shape:
 if       = "if" cond block { "else" "if" cond block } [ "else" block ]   // two-arm
-         | "if" subject "==" "{" { arm } [ "else" "->" arm-body ] "}" ;  // multi-arm dispatch
+         | "if" subject "==" "{" { arm } [ "else" "->" arm-body ] "}"    // multi-arm dispatch
+         | "if" cond "->" guard-stmt-body                                  // inline guard
+         | "if" "{" guard-arm { guard-arm } [ "else" "->" arm-body ] "}" ; // subjectless guards
 arm      = arm-head "->" arm-body NL ;
+guard-arm = cond "->" arm-body NL ;
+guard-stmt-body = block | non-if-stmt ; // direct nesting requires braces (E0329)
 arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
 range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
 arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
@@ -92,7 +96,10 @@ loop-body= "loop" block
 break    = "break" [ ident "@" ] NL ;           // D-LABEL1: `break name@` targets a label
 continue = "continue" [ ident "@" ] NL ;        // D-LABEL1: `continue name@`
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
-if-expr  = "if" cond value-block "else" ( if-expr | value-block ) ;  // S68/D-SG2: value form
+if-expr  = "if" cond value-block "else" ( if-expr | value-block )
+         | "if" "{" value-guard-arm { value-guard-arm } "else" "->" value-arm-body "}" ;
+value-guard-arm = cond "->" value-arm-body NL ;
+value-arm-body = expr | value-block ;
 value-block = "{" { stmt } expr "}" ;
 expr     = precedence climbing over:
            "||"  >  "&&"  >  "==" "!=" "<" ">" "<=" ">="

@@ -479,18 +479,41 @@ fn emit_tir_stmt(
             else_body,
             else_is_elseif,
         } => {
+            if let TIfCond::IfLet {
+                pat_str,
+                subj,
+                guard: Some(guard),
+            } = cond
+            {
+                out.push_str(&format!(
+                    "{}match {} {{\n{}    {} if {} => {{\n",
+                    pad,
+                    emit_expr_with_cleanups(subj, cx, active_deferred_closes),
+                    pad,
+                    pat_str,
+                    emit_expr_with_cleanups(guard, cx, active_deferred_closes),
+                ));
+                emit_tir_stmts_nested(then_body, cx, out, indent + 2, active_deferred_closes);
+                out.push_str(&format!("{}    }},\n{}    _ => {{\n", pad, pad));
+                if let Some(body) = else_body {
+                    emit_tir_stmts_nested(body, cx, out, indent + 2, active_deferred_closes);
+                }
+                out.push_str(&format!("{}    }},\n{}}}\n", pad, pad));
+                return;
+            }
             // c109 Phase 22: render the head per the condition form, byte-for-byte
             // `emit_if` (Source/Codegen/Statement.rs).
             match cond {
                 TIfCond::Plain(c) => {
                     out.push_str(&format!("{}if {} {{\n", pad, emit_expr_with_cleanups(c, cx, active_deferred_closes)));
                 }
-                TIfCond::IfLet { pat_str, subj } => {
+                TIfCond::IfLet { pat_str, subj, guard } => {
+                    debug_assert!(guard.is_none());
                     out.push_str(&format!(
                         "{}if let {} = {} {{\n",
                         pad,
                         pat_str,
-                        emit_expr_with_cleanups(subj, cx, active_deferred_closes)
+                        emit_expr_with_cleanups(subj, cx, active_deferred_closes),
                     ));
                 }
                 TIfCond::IsNone { subj } => {
