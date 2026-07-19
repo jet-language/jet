@@ -445,6 +445,9 @@ impl LowerCtx<'_, '_> {
                     TIfCond::IfLet { .. } => {
                         return Err("jit if-let condition unsupported".to_string());
                     }
+                    TIfCond::And { .. } => {
+                        return Err("jit binding conjunction unsupported".to_string());
+                    }
                     TIfCond::IsNone { .. } => {
                         return Err("jit is-none condition unsupported".to_string());
                     }
@@ -1360,6 +1363,7 @@ impl LowerCtx<'_, '_> {
             } => {
                 let cond_val = match cond.as_ref() {
                     TIfCond::Plain(cond) => self.lower_expr(cond)?,
+                    TIfCond::And { .. } => return Err("jit if-expression binding conjunction unsupported".to_string()),
                     TIfCond::IfLet { .. } => return Err("jit if-expression if-let unsupported".to_string()),
                     TIfCond::IsNone { .. } => return Err("jit if-expression is-none unsupported".to_string()),
                     TIfCond::Matches { .. } => return Err("jit if-expression pattern match unsupported".to_string()),

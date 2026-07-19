@@ -405,7 +405,7 @@ pub(crate) fn forin_method_collection_in_subset(
 
 /// c109 Phase 22: classify an `if` condition. Returns `None` if the condition is not
 /// in-subset; otherwise returns the binding name(s) the condition introduces into the
-/// then-branch scope (empty for a plain/`is_none` condition). Mirrors `emit_if`'s three
+/// then-branch scope (empty for a plain/`is_none` condition). Mirrors `emit_if`'s
 /// condition shapes via `if_pattern_test` (Source/Codegen/Statement.rs):
 ///  - a plain boolean expr → in-subset iff `expr_in_subset`, no bindings;
 ///  - an `x == null` test (`Pattern::Absent`) → `is_none`, subject in-subset, no bindings;
@@ -418,15 +418,11 @@ pub(crate) fn if_cond_in_subset(
     locals: &HashSet<String>,
 ) -> Option<Vec<String>> {
     if let Expr::Binary(BinOp::And, left, right, _) = cond {
-        let bindings = if_cond_in_subset(left, cx, locals)?;
-        if !bindings.is_empty() {
-            let mut right_locals = locals.clone();
-            right_locals.extend(bindings.iter().cloned());
-            return expr_in_subset(right, cx, &right_locals).then_some(bindings);
-        }
-        if expr_in_subset(left, cx, locals) {
-            return if_cond_in_subset(right, cx, locals);
-        }
+        let mut bindings = if_cond_in_subset(left, cx, locals)?;
+        let mut right_locals = locals.clone();
+        right_locals.extend(bindings.iter().cloned());
+        bindings.extend(if_cond_in_subset(right, cx, &right_locals)?);
+        return Some(bindings);
     }
     // The `x == null` (`Pattern::Absent`) form: `if {subj}.is_none()`.
     if let Expr::PatternTest {
@@ -437,10 +433,8 @@ pub(crate) fn if_cond_in_subset(
     {
         return expr_in_subset(subject, cx, locals).then(Vec::new);
     }
-    // The optional-binding (if-let) form — only a DIRECT `PatternTest` (not the
-    // `Binary(And, …)` shape `if_pattern_test` also admits, which we leave on the AST
-    // path). Covered patterns: `value(b)`/`Ok(b)`/`Err(b)` (single binding). Variant/
-    // Or/Range patterns are excluded (conservative).
+    // The atomic optional-binding (if-let) form. Conjunctions recurse above so each
+    // later atom is checked with every earlier binding in scope.
     if let Expr::PatternTest {
         subject, pattern, ..
     } = cond

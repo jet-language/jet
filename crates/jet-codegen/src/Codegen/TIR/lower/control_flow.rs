@@ -285,16 +285,14 @@ mod borrowed_pattern_tests {
     }
 }
 
-fn and_tir(left: TExpr, right: TExpr) -> TExpr {
-    TExpr {
-        ty: Type::Bool,
-        kind: TExprKind::Binary {
-            op: BinOp::And,
-            overflow: false,
-            line: 0,
-            lhs: Box::new(left),
-            rhs: Box::new(right),
-        },
+type IfBinding = (String, String, Option<Type>);
+
+fn flatten_and<'a>(cond: &'a Expr, terms: &mut Vec<&'a Expr>) {
+    if let Expr::Binary(BinOp::And, left, right, _) = cond {
+        flatten_and(left, terms);
+        flatten_and(right, terms);
+    } else {
+        terms.push(cond);
     }
 }
 
@@ -302,63 +300,48 @@ pub(crate) fn lower_if_cond(
     cond: &Expr,
     cx: &Cx,
     env: &mut LowerEnv,
-) -> (TIfCond, Option<(String, String, Option<Type>)>, Vec<TStmt>) {
-    if let Expr::Binary(BinOp::And, left, right, _) = cond {
-        let (head, binding, prefix) = lower_if_cond(left, cx, env);
-        match (head, binding) {
-            (
-                TIfCond::IfLet {
-                    pat_str,
-                    subj,
-                    pre_guard,
-                    guard,
-                },
-                Some((name, place, ty)),
-            ) => {
-                let mut guard_env = clone_env(env);
-                guard_env.bind(&name, place.clone(), ty.clone());
-                let right = lower_expr(right, cx, &mut guard_env);
-                return (
-                    TIfCond::IfLet {
-                        pat_str,
-                        subj,
-                        pre_guard,
-                        guard: Some(Box::new(match guard {
-                            Some(left) => and_tir(*left, right),
-                            None => right,
-                        })),
-                    },
-                    Some((name, place, ty)),
-                    prefix,
-                );
-            }
-            (TIfCond::Plain(left), _) => {
-                let (right, binding, prefix) = lower_if_cond(right, cx, env);
-                if let TIfCond::IfLet {
-                    pat_str,
-                    subj,
-                    pre_guard,
-                    guard,
-                } = right
-                {
-                    return (
-                        TIfCond::IfLet {
-                            pat_str,
-                            subj,
-                            pre_guard: Some(Box::new(match pre_guard {
-                                Some(right) => and_tir(left, *right),
-                                None => left,
-                            })),
-                            guard,
-                        },
-                        binding,
-                        prefix,
-                    );
-                }
-            }
-            _ => {}
-        }
+) -> (TIfCond, Vec<IfBinding>, Vec<TStmt>) {
+    let mut terms = Vec::new();
+    flatten_and(cond, &mut terms);
+    if terms.len() == 1 {
+        let (cond, binding, prefix) = lower_if_cond_atom(cond, cx, env);
+        return (cond, binding.into_iter().collect(), prefix);
     }
+
+    let mut cond_env = clone_env(env);
+    let mut lowered = Vec::with_capacity(terms.len());
+    let mut bindings = Vec::new();
+    let mut prefixes = Vec::new();
+    for term in terms {
+        let (term, binding, prefix) = lower_if_cond_atom(term, cx, &mut cond_env);
+        if let Some((name, place, ty)) = binding {
+            cond_env.bind(&name, place.clone(), ty.clone());
+            bindings.push((name, place, ty));
+        }
+        prefixes.extend(prefix);
+        lowered.push(term);
+    }
+
+    if bindings.is_empty() {
+        return (TIfCond::Plain(lower_expr(cond, cx, env)), bindings, prefixes);
+    }
+
+    let mut lowered = lowered.into_iter().rev();
+    let mut combined = lowered.next().expect("conjunction has at least two terms");
+    for left in lowered {
+        combined = TIfCond::And {
+            left: Box::new(left),
+            right: Box::new(combined),
+        };
+    }
+    (combined, bindings, prefixes)
+}
+
+fn lower_if_cond_atom(
+    cond: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> (TIfCond, Option<IfBinding>, Vec<TStmt>) {
     if let Expr::PatternTest {
         subject,
         pattern: Pattern::Absent(_),
@@ -417,14 +400,14 @@ pub(crate) fn lower_if_cond(
                 gc_transferred: false,
                     };
                     return (
-                        TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None },
+                        TIfCond::IfLet { pat_str, subj },
                         Some((name.clone(), place, Some(map_ty))),
                         vec![prefix],
                     );
                 }
                 let pat_str = emit_if_let_pattern(cx, pattern);
                 return (
-                    TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None },
+                    TIfCond::IfLet { pat_str, subj },
                     Some((name.clone(), place, ty)),
                     Vec::new(),
                 );
@@ -441,7 +424,7 @@ pub(crate) fn lower_if_cond(
                 let ty = variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next());
                 let place = mangle(name);
                 return (
-                    TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None },
+                    TIfCond::IfLet { pat_str, subj },
                     Some((name.clone(), place, ty)),
                     Vec::new(),
                 );
@@ -452,7 +435,7 @@ pub(crate) fn lower_if_cond(
             if let Some(PatSlot::Wildcard) = bindings.first() {
                 let subj = lower_if_let_subject(subject, cx, env);
                 let pat_str = emit_if_let_pattern(cx, pattern);
-                return (TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None }, None, Vec::new());
+                return (TIfCond::IfLet { pat_str, subj }, None, Vec::new());
             }
         }
     }
@@ -495,7 +478,7 @@ pub(crate) fn lower_if_cond(
             let (name, ty) = binding;
             let place = mangle(&name);
             return (
-                TIfCond::IfLet { pat_str, subj, pre_guard: None, guard: None },
+                TIfCond::IfLet { pat_str, subj },
                 Some((name, place, ty)),
                 Vec::new(),
             );
@@ -521,19 +504,18 @@ pub(crate) fn lower_if_cond(
 }
 
 pub(crate) fn lower_if(ifs: &IfStmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
-    // c109 Phase 22: classify the condition (plain / if-let / is_none), reproducing
-    // `emit_if`'s three head shapes. The if-let form binds its name into the
-    // then-branch scope (mirroring `add_pattern_bindings`).
-    let (cond, then_binding, then_prefix) = lower_if_cond(&ifs.cond, cx, env);
+    // c109 Phase 22: classify the condition and collect every binding introduced by
+    // a short-circuiting conjunction into the then-branch scope.
+    let (cond, then_bindings, then_prefix) = lower_if_cond(&ifs.cond, cx, env);
     // Each branch gets its own lexical scope, so its bindings are available to panic
     // context inside the branch but not after the `if`.
     let then_body = {
-        let mut branch = if then_binding.is_some() {
-            fork_panic(env)
-        } else {
+        let mut branch = if then_bindings.is_empty() {
             clone_env(env)
+        } else {
+            fork_panic(env)
         };
-        if let Some((name, place, ty)) = then_binding {
+        for (name, place, ty) in then_bindings {
             branch.bind(&name, place, ty);
         }
         // D-ENC-DYN1=A+: a `Data` `Object(entries)` if-let prepends a `let` that
@@ -621,9 +603,9 @@ fn lower_guard_switch(
         lower_stmts(body, cx, &mut branch)
     });
     for arm in arms.iter().rev() {
-        let (cond, binding, mut body) = lower_if_cond(&arm.cond, cx, env);
-        let mut branch = if binding.is_some() { fork_panic(env) } else { clone_env(env) };
-        if let Some((name, place, ty)) = binding {
+        let (cond, bindings, mut body) = lower_if_cond(&arm.cond, cx, env);
+        let mut branch = if bindings.is_empty() { clone_env(env) } else { fork_panic(env) };
+        for (name, place, ty) in bindings {
             branch.bind(&name, place, ty);
         }
         body.extend(lower_stmts(&arm.body, cx, &mut branch));

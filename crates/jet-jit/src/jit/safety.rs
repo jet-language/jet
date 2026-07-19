@@ -509,7 +509,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             let cond_ok = match cond {
                 TIfCond::Plain(e) => matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees),
                 TIfCond::Matches { .. } => false,
-                TIfCond::IfLet { .. } | TIfCond::IsNone { .. } => false,
+                TIfCond::And { .. } | TIfCond::IfLet { .. } | TIfCond::IsNone { .. } => false,
             };
             cond_ok
                 && then_body.iter().all(|s| resident_safe_stmt(s, callees))
@@ -767,21 +767,7 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
             else_value,
             ..
         } => {
-            match cond.as_ref() {
-                TIfCond::Plain(e) => count_spawn_sites_expr(e, n),
-                TIfCond::IfLet { subj, pre_guard, guard, .. } => {
-                    if let Some(pre_guard) = pre_guard {
-                        count_spawn_sites_expr(pre_guard, n);
-                    }
-                    count_spawn_sites_expr(subj, n);
-                    if let Some(guard) = guard {
-                        count_spawn_sites_expr(guard, n);
-                    }
-                }
-                TIfCond::IsNone { subj, .. } | TIfCond::Matches { subj, .. } => {
-                    count_spawn_sites_expr(subj, n);
-                }
-            }
+            count_spawn_sites_if_cond(cond, n);
             count_spawn_sites_stmts(then_body, n);
             count_spawn_sites_expr(then_value, n);
             count_spawn_sites_stmts(else_body, n);
@@ -798,6 +784,19 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
         | TExprKind::TaskGroupRace { tasks }
         | TExprKind::TaskGroupAny { tasks } => count_spawn_sites_expr(tasks, n),
         _ => {}
+    }
+}
+
+fn count_spawn_sites_if_cond(cond: &TIfCond, n: &mut usize) {
+    match cond {
+        TIfCond::Plain(expr) => count_spawn_sites_expr(expr, n),
+        TIfCond::And { left, right } => {
+            count_spawn_sites_if_cond(left, n);
+            count_spawn_sites_if_cond(right, n);
+        }
+        TIfCond::IfLet { subj, .. }
+        | TIfCond::IsNone { subj }
+        | TIfCond::Matches { subj, .. } => count_spawn_sites_expr(subj, n),
     }
 }
 

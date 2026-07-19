@@ -639,6 +639,8 @@ pub enum TForInMethod {
 /// c109 Phase 22: an `if` condition, resolved at lowering from the AST node shape
 /// (`emit_if`/`if_pattern_test`, Source/Codegen/Statement.rs):
 ///  - `Plain` — a boolean expression: `if {cond} {`.
+///  - `And` — a short-circuiting conjunction whose earlier pattern bindings
+///    dominate every later condition and the selected body.
 ///  - `IfLet` — an optional-binding test (`x == value(b)` → `Some(b)`, `Ok(b)`/`Err(b)`,
 ///    a variant `c == Active(id)`): `if let {pat_str} = {subj} {`. The bound name(s)
 ///    are in scope in the then-branch (the binding's resolved type is bound at lowering,
@@ -647,15 +649,15 @@ pub enum TForInMethod {
 ///  - `Matches` — a binding-free enum variant/group test (`d == .Fire`): `if matches!(&{subj}, {pat}) {`.
 pub enum TIfCond {
     Plain(TExpr),
+    /// A right-associated, short-circuiting conjunction. `left` is atomic;
+    /// bindings it introduces dominate `right` and the selected body.
+    And {
+        left: Box<TIfCond>,
+        right: Box<TIfCond>,
+    },
     IfLet {
         pat_str: String,
         subj: TExpr,
-        /// Boolean work to the left of the binding pattern in a dominating
-        /// conjunction. It must short-circuit before the pattern subject.
-        pre_guard: Option<Box<TExpr>>,
-        /// D-IFGUARD1=A/S31: condition to the right of a binding pattern in
-        /// `pattern && guard`; lowered with the new binding in scope.
-        guard: Option<Box<TExpr>>,
     },
     IsNone { subj: TExpr },
     Matches { pat_str: String, subj: TExpr },

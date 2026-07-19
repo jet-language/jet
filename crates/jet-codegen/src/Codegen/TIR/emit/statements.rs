@@ -117,6 +117,111 @@ pub(crate) fn emit_tir_lambda_block(
     }
 }
 
+fn emit_if_head(
+    cond: &TIfCond,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_cleanups: &[ActiveCleanup],
+) {
+    let pad = "    ".repeat(indent);
+    match cond {
+        TIfCond::Plain(cond) => out.push_str(&format!(
+            "{}if {} {{\n",
+            pad,
+            emit_expr_with_cleanups(cond, cx, active_cleanups)
+        )),
+        TIfCond::IfLet { pat_str, subj } => out.push_str(&format!(
+            "{}if let {} = {} {{\n",
+            pad,
+            pat_str,
+            emit_expr_with_cleanups(subj, cx, active_cleanups),
+        )),
+        TIfCond::IsNone { subj } => out.push_str(&format!(
+            "{}if {}.is_none() {{\n",
+            pad,
+            emit_expr_with_cleanups(subj, cx, active_cleanups)
+        )),
+        TIfCond::Matches { pat_str, subj } => out.push_str(&format!(
+            "{}if matches!(&({}), {}) {{\n",
+            pad,
+            emit_expr_with_cleanups(subj, cx, active_cleanups),
+            pat_str
+        )),
+        TIfCond::And { .. } => unreachable!("conjunction heads are atomic"),
+    }
+}
+
+fn emit_if_else(
+    else_body: &Option<Vec<TStmt>>,
+    else_is_elseif: bool,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_cleanups: &[ActiveCleanup],
+) {
+    let pad = "    ".repeat(indent);
+    match else_body {
+        None => out.push_str(&format!("{}}}\n", pad)),
+        Some(body) if else_is_elseif => {
+            out.push_str(&format!("{}}} else ", pad));
+            let mut nested = String::new();
+            let mut branch_cleanups = active_cleanups.to_vec();
+            emit_tir_stmt(&body[0], cx, &mut nested, indent, &mut branch_cleanups);
+            out.push_str(nested.trim_start_matches(&pad as &str));
+        }
+        Some(body) => {
+            out.push_str(&format!("{}}} else {{\n", pad));
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_cleanups);
+            out.push_str(&format!("{}}}\n", pad));
+        }
+    }
+}
+
+fn emit_tir_if(
+    cond: &TIfCond,
+    then_body: &[TStmt],
+    else_body: &Option<Vec<TStmt>>,
+    else_is_elseif: bool,
+    cx: &Cx,
+    out: &mut String,
+    indent: usize,
+    active_cleanups: &[ActiveCleanup],
+) {
+    if let TIfCond::And { left, right } = cond {
+        emit_if_head(left, cx, out, indent, active_cleanups);
+        emit_tir_if(
+            right,
+            then_body,
+            else_body,
+            else_is_elseif,
+            cx,
+            out,
+            indent + 1,
+            active_cleanups,
+        );
+        emit_if_else(
+            else_body,
+            else_is_elseif,
+            cx,
+            out,
+            indent,
+            active_cleanups,
+        );
+        return;
+    }
+    emit_if_head(cond, cx, out, indent, active_cleanups);
+    emit_tir_stmts_nested(then_body, cx, out, indent + 1, active_cleanups);
+    emit_if_else(
+        else_body,
+        else_is_elseif,
+        cx,
+        out,
+        indent,
+        active_cleanups,
+    );
+}
+
 fn emit_tir_stmt(
     s: &TStmt,
     cx: &Cx,
@@ -478,144 +583,16 @@ fn emit_tir_stmt(
             then_body,
             else_body,
             else_is_elseif,
-        } => {
-            if let TIfCond::IfLet {
-                pat_str,
-                subj,
-                pre_guard,
-                guard,
-            } = cond
-            {
-                if pre_guard.is_some() || guard.is_some() {
-                    let match_indent = indent + usize::from(pre_guard.is_some());
-                    let match_pad = "    ".repeat(match_indent);
-                    if let Some(pre_guard) = pre_guard {
-                        out.push_str(&format!(
-                            "{}if {} {{\n",
-                            pad,
-                            emit_expr_with_cleanups(pre_guard, cx, active_deferred_closes),
-                        ));
-                    }
-                    let guard = guard
-                        .as_ref()
-                        .map(|guard| {
-                            format!(
-                                " if {}",
-                                emit_expr_with_cleanups(guard, cx, active_deferred_closes)
-                            )
-                        })
-                        .unwrap_or_default();
-                    out.push_str(&format!(
-                        "{}match {} {{\n{}    {}{} => {{\n",
-                        match_pad,
-                        emit_expr_with_cleanups(subj, cx, active_deferred_closes),
-                        match_pad,
-                        pat_str,
-                        guard,
-                    ));
-                    emit_tir_stmts_nested(
-                        then_body,
-                        cx,
-                        out,
-                        match_indent + 2,
-                        active_deferred_closes,
-                    );
-                    out.push_str(&format!(
-                        "{}    }},\n{}    _ => {{\n",
-                        match_pad, match_pad
-                    ));
-                    if let Some(body) = else_body {
-                        emit_tir_stmts_nested(
-                            body,
-                            cx,
-                            out,
-                            match_indent + 2,
-                            active_deferred_closes,
-                        );
-                    }
-                    out.push_str(&format!("{}    }},\n{}}}\n", match_pad, match_pad));
-                    if pre_guard.is_some() {
-                        out.push_str(&format!("{}}} else {{\n", pad));
-                        if let Some(body) = else_body {
-                            emit_tir_stmts_nested(
-                                body,
-                                cx,
-                                out,
-                                indent + 1,
-                                active_deferred_closes,
-                            );
-                        }
-                        out.push_str(&format!("{}}}\n", pad));
-                    }
-                    return;
-                }
-            }
-            // c109 Phase 22: render the head per the condition form, byte-for-byte
-            // `emit_if` (Source/Codegen/Statement.rs).
-            match cond {
-                TIfCond::Plain(c) => {
-                    out.push_str(&format!("{}if {} {{\n", pad, emit_expr_with_cleanups(c, cx, active_deferred_closes)));
-                }
-                TIfCond::IfLet { pat_str, subj, pre_guard, guard } => {
-                    debug_assert!(pre_guard.is_none());
-                    debug_assert!(guard.is_none());
-                    out.push_str(&format!(
-                        "{}if let {} = {} {{\n",
-                        pad,
-                        pat_str,
-                        emit_expr_with_cleanups(subj, cx, active_deferred_closes),
-                    ));
-                }
-                TIfCond::IsNone { subj } => {
-                    out.push_str(&format!(
-                        "{}if {}.is_none() {{\n",
-                        pad,
-                        emit_expr_with_cleanups(subj, cx, active_deferred_closes)
-                    ));
-                }
-                TIfCond::Matches { pat_str, subj } => {
-                    out.push_str(&format!(
-                        "{}if matches!(&({}), {}) {{\n",
-                        pad,
-                        emit_expr_with_cleanups(subj, cx, active_deferred_closes),
-                        pat_str
-                    ));
-                }
-            }
-            emit_tir_stmts_nested(then_body, cx, out, indent + 1, active_deferred_closes);
-            match else_body {
-                None => out.push_str(&format!("{}}}\n", pad)),
-                Some(body) => {
-                    // Match the AST path EXACTLY: it renders `} else if …` ONLY for a
-                    // real `else if` chain (`ElseBranch::ElseIf` → `else_is_elseif`), and
-                    // `} else { … }` for an explicit `else` block — even when the block
-                    // holds a single `if` (do NOT flatten that, or parity drifts).
-                    if *else_is_elseif {
-                        out.push_str(&format!("{}}} else ", pad));
-                        let mut nested = String::new();
-                        let mut branch_deferred = active_deferred_closes.clone();
-                        emit_tir_stmt(
-                            &body[0],
-                            cx,
-                            &mut nested,
-                            indent,
-                            &mut branch_deferred,
-                        );
-                        out.push_str(nested.trim_start_matches(&pad as &str));
-                    } else {
-                        out.push_str(&format!("{}}} else {{\n", pad));
-                        emit_tir_stmts_nested(
-                            body,
-                            cx,
-                            out,
-                            indent + 1,
-                            active_deferred_closes,
-                        );
-                        out.push_str(&format!("{}}}\n", pad));
-                    }
-                }
-            }
-        }
+        } => emit_tir_if(
+            cond,
+            then_body,
+            else_body,
+            *else_is_elseif,
+            cx,
+            out,
+            indent,
+            active_deferred_closes,
+        ),
         // c109 Phase 2: control-flow loops. Each mirrors the AST emit path
         // (Statement.rs) byte-for-byte; all decisions are read off the TIR.
         TStmt::Loop { label, body } => {

@@ -27,6 +27,42 @@ use crate::Codegen::TIR::TNumericOp;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::tuple_join;
 
+fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx) -> String {
+    if let TIfCond::And { left, right } = cond {
+        let right = emit_tir_if_expr(right, then_block, else_block, cx);
+        return emit_tir_if_expr(left, &format!("{{ {right} }}"), else_block, cx);
+    }
+    match cond {
+        TIfCond::Plain(cond) => format!(
+            "if {} {} else {}",
+            emit_tir_expr(cond, cx),
+            then_block,
+            else_block
+        ),
+        TIfCond::IfLet { pat_str, subj } => format!(
+            "if let {} = {} {} else {}",
+            pat_str,
+            emit_tir_expr(subj, cx),
+            then_block,
+            else_block
+        ),
+        TIfCond::IsNone { subj } => format!(
+            "if {}.is_none() {} else {}",
+            emit_tir_expr(subj, cx),
+            then_block,
+            else_block
+        ),
+        TIfCond::Matches { pat_str, subj } => format!(
+            "if matches!(&({}), {}) {} else {}",
+            emit_tir_expr(subj, cx),
+            pat_str,
+            then_block,
+            else_block
+        ),
+        TIfCond::And { .. } => unreachable!("handled above"),
+    }
+}
+
 /// c109 Phase 16: emit one enum-literal payload arg, applying its resolved
 /// `clone`/`boxed` wrappers — `(…).clone()` first, then `Box::new(…)`, exactly as
 /// `emit_boxed_enum_arg` (Expression.rs) does.
@@ -899,49 +935,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             else_body,
             else_value,
         } => {
-            if let TIfCond::IfLet {
-                pat_str,
-                subj,
-                pre_guard,
-                guard,
-            } = cond.as_ref()
-            {
-                if pre_guard.is_some() || guard.is_some() {
-                    let guard = guard
-                        .as_ref()
-                        .map(|guard| format!(" if {}", emit_tir_expr(guard, cx)))
-                        .unwrap_or_default();
-                    let matched = format!(
-                        "match {} {{ {}{} => {}, _ => {} }}",
-                        emit_tir_expr(subj, cx),
-                        pat_str,
-                        guard,
-                        emit_tir_value_block(then_body, then_value, cx),
-                        emit_tir_value_block(else_body, else_value, cx),
-                    );
-                    return pre_guard.as_ref().map_or(matched.clone(), |pre_guard| {
-                        format!(
-                            "if {} {{ {} }} else {}",
-                            emit_tir_expr(pre_guard, cx),
-                            matched,
-                            emit_tir_value_block(else_body, else_value, cx),
-                        )
-                    });
-                }
-            }
-            let c = match cond.as_ref() {
-                TIfCond::Plain(cond) => emit_tir_expr(cond, cx),
-                TIfCond::IfLet { pat_str, subj, pre_guard, guard } => {
-                    debug_assert!(pre_guard.is_none());
-                    debug_assert!(guard.is_none());
-                    format!("let {} = {}", pat_str, emit_tir_expr(subj, cx))
-                }
-                TIfCond::IsNone { subj } => format!("{}.is_none()", emit_tir_expr(subj, cx)),
-                TIfCond::Matches { pat_str, subj } => format!("matches!(&({}), {})", emit_tir_expr(subj, cx), pat_str),
-            };
             let then_block = emit_tir_value_block(then_body, then_value, cx);
             let else_block = emit_tir_value_block(else_body, else_value, cx);
-            format!("if {} {} else {}", c, then_block, else_block)
+            emit_tir_if_expr(cond, &then_block, &else_block, cx)
         }
         // c109 Phase 5: `[a, b, c]` → `vec![a, b, c]` (growable) or `[a, b, c]` (fixed).
         // D-FIXARR1: if the expression type is FixedList, emit a Rust array literal `[…]`.

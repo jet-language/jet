@@ -1046,10 +1046,10 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             else_value,
             ..
         } => {
-            let (c, binding, mut then_prefix) = super::control_flow::lower_if_cond(cond, cx, env);
+            let (c, bindings, mut then_prefix) = super::control_flow::lower_if_cond(cond, cx, env);
             // Value blocks scope their own bindings (like lambda block bodies).
             let mut then_env = clone_env(env);
-            if let Some((name, place, ty)) = binding {
+            for (name, place, ty) in bindings {
                 then_env.bind(&name, place, ty);
             }
             then_prefix.extend(lower_stmts(then_body, cx, &mut then_env));

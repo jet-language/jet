@@ -125,19 +125,26 @@ fn subjectless_guard_pattern_bindings_dominate_selected_body() {
     let src = r#"
 enum Choice {
     A(Int)
-    B
+    B(Int)
+}
+
+fn choose(note: String, value: Int) -> Choice {
+    print(note)
+    return Choice.A(value)
 }
 
 fn run() {
-    choice :: Choice.A(4)
+    left :: Choice.A(4)
+    right :: Choice.A(6)
+    if choose("first only", 4) == .B(x) && choose("never", 6) == .A(y) && x < y -> print("wrong")
     if {
-        choice == .A(n) && n > 2 && n < 10 -> print(n)
-        choice == .B -> print(0)
+        left == .A(x) && right == .A(y) && x < y -> print("table {x} {y}")
+        left == .B(_) -> print(0)
     }
-    if choice == .A(n) && n > 2 && n < 10 -> print("inline {n}")
-    if true && choice == .A(n) -> print("pre {n}")
+    if choose("left", 4) == .A(x) && choose("right", 6) == .A(y) && x < y -> print("inline {x} {y}")
+    if true && left == .A(n) -> print("pre {n}")
     label :: if {
-        true && choice == .A(n) && n > 2 && n < 10 -> "large {n}"
+        left == .A(x) && right == .A(y) && x < y -> "value {x} {y}"
         else -> "other"
     }
     print(label)
@@ -145,7 +152,7 @@ fn run() {
 "#;
     let (code, stdout) = build_and_run("tir_subjectless_guard_patterns", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "4\ninline 4\npre 4\nlarge 4\n");
+    assert_eq!(stdout, "first only\ntable 4 6\nleft\nright\ninline 4 6\npre 4\nvalue 4 6\n");
 }
 
 /// Coexistence: a free function and a method in the same program both route
