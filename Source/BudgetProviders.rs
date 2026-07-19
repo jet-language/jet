@@ -21,13 +21,15 @@ pub const MAX_DETAIL_SCALARS: usize = 512;
 const MAGIC: &[u8] = b"JETBUDGET1\n";
 #[cfg(test)]static FILE_READER_DELAY_MS:AtomicU64=AtomicU64::new(0);
 #[cfg(test)]static ACTIVE_FILE_READERS:AtomicU64=AtomicU64::new(0);
+#[cfg(test)]static ACTIVE_ISOLATED_WORKERS:AtomicU64=AtomicU64::new(0);
 #[cfg(test)]static LAST_ISOLATED_GROUP:AtomicU64=AtomicU64::new(0);
 #[cfg(test)]use std::sync::atomic::AtomicU64;
 #[cfg(test)]struct ActiveFileReader;
 #[cfg(test)]impl ActiveFileReader{fn new()->Self{ACTIVE_FILE_READERS.fetch_add(1,AtomicOrdering::SeqCst);Self}}
 #[cfg(test)]impl Drop for ActiveFileReader{fn drop(&mut self){ACTIVE_FILE_READERS.fetch_sub(1,AtomicOrdering::SeqCst);}}
-#[cfg(not(test))]struct ActiveFileReader;
-#[cfg(not(test))]impl ActiveFileReader{fn new()->Self{Self}}
+#[cfg(test)]struct ActiveIsolatedWorker;
+#[cfg(test)]impl ActiveIsolatedWorker{fn new()->Self{ACTIVE_ISOLATED_WORKERS.fetch_add(1,AtomicOrdering::SeqCst);Self}}
+#[cfg(test)]impl Drop for ActiveIsolatedWorker{fn drop(&mut self){ACTIVE_ISOLATED_WORKERS.fetch_sub(1,AtomicOrdering::SeqCst);}}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProviderSpec {
@@ -234,6 +236,7 @@ fn read_bounded_isolated(path:&Path,timeout:Duration)->Result<Vec<u8>,ProviderFa
     #[repr(C)]struct StatxTimestamp{sec:i64,nsec:u32,reserved:i32}#[repr(C)]struct Statx{mask:u32,blksize:u32,attributes:u64,nlink:u32,uid:u32,gid:u32,mode:u16,spare0:u16,ino:u64,size:u64,blocks:u64,attributes_mask:u64,atime:StatxTimestamp,btime:StatxTimestamp,ctime:StatxTimestamp,mtime:StatxTimestamp,rdev_major:u32,rdev_minor:u32,dev_major:u32,dev_minor:u32,mnt_id:u64,dio_mem_align:u32,dio_offset_align:u32,spare3:[u64;12]}
     const O_RDONLY:i32=0;const O_NONBLOCK:i32=0o4000;const O_CLOEXEC:i32=0o2000000;const O_NOFOLLOW:i32=0o400000;const AT_EMPTY_PATH:i32=0x1000;const STATX_TYPE:u32=1;const S_IFMT:u16=0o170000;const S_IFREG:u16=0o100000;
     extern "C"{fn open(path:*const i8,flags:i32,...)->i32;fn read(fd:i32,buffer:*mut u8,count:usize)->isize;fn close(fd:i32)->i32;fn statx(fd:i32,path:*const i8,flags:i32,mask:u32,stat:*mut Statx)->i32;#[cfg(test)]fn usleep(micros:u32)->i32;}
+    #[cfg(test)]let _active=ActiveFileReader::new();
     run_isolated_bytes(timeout,&format!("provider response {}",path.display()),move||unsafe{#[cfg(test)]{let delay=FILE_READER_DELAY_MS.load(AtomicOrdering::Relaxed);if delay>0{usleep((delay.min(u32::MAX as u64)*1000)as u32);}}let fd=open(name.as_ptr(),O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_NOFOLLOW);if fd<0{return Err(ProviderFailure::operation(FailureClass::Execution,"cannot open provider response without following links"))}let empty=b"\0";let mut info:Statx=std::mem::zeroed();if statx(fd,empty.as_ptr()as*const i8,AT_EMPTY_PATH,STATX_TYPE,&mut info)!=0||info.mode&S_IFMT!=S_IFREG{close(fd);return Err(ProviderFailure::operation(FailureClass::Execution,"provider response is not a regular file"))}let mut bytes=Vec::new();let mut buffer=[0u8;8192];loop{let count=read(fd,buffer.as_mut_ptr(),buffer.len());if count<0{close(fd);return Err(ProviderFailure::operation(FailureClass::Execution,"cannot read provider response"))}if count==0{break}bytes.extend_from_slice(&buffer[..count as usize]);if bytes.len()>MAX_BYTES{close(fd);return Err(ProviderFailure::malformed("provider stream exceeds 16 MiB"))}}close(fd);Ok(bytes)})
 }
 
@@ -245,7 +248,7 @@ fn run_isolated_bytes<F>(timeout:Duration,label:&str,work:F)->Result<Vec<u8>,Pro
     fn byte_class(value:u8)->Option<FailureClass>{Some(match value{0=>FailureClass::Unavailable,1=>FailureClass::Malformed,2=>FailureClass::Panic,3=>FailureClass::Timeout,4=>FailureClass::Execution,5=>FailureClass::Incompatible,6=>FailureClass::Unsupported,7=>FailureClass::Unresolved,_=>return None})}
     let mut pipes=[-1,-1];if unsafe{pipe(pipes.as_mut_ptr())}!=0{return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot create isolated worker pipe: {}",std::io::Error::last_os_error())))}let pid=unsafe{fork()};if pid<0{unsafe{close(pipes[0]);close(pipes[1]);}return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot isolate {label}: {}",std::io::Error::last_os_error())))}
     if pid==0{unsafe{close(pipes[0]);setpgid(0,0);close(2);let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).map_err(|_|ProviderFailure::operation(FailureClass::Panic,"isolated worker panicked")).and_then(|value|value);let frame=match result{Ok(bytes)=>{let mut frame=Vec::with_capacity(bytes.len()+1);frame.push(0);frame.extend_from_slice(&bytes);frame},Err(failure)=>{let mut frame=Vec::with_capacity(failure.reason.len()+2);frame.push(1);frame.push(class_byte(failure.class));frame.extend_from_slice(failure.reason.as_bytes());frame}};let mut at=0;while at<frame.len(){let sent=write(pipes[1],frame[at..].as_ptr(),frame.len()-at);if sent<=0{break}at+=sent as usize}close(pipes[1]);_exit(0)}}
-    let _active=ActiveFileReader::new();unsafe{close(pipes[1]);setpgid(pid,pid);fcntl(pipes[0],F_SETFL,O_NONBLOCK);}#[cfg(test)]LAST_ISOLATED_GROUP.store(pid as u64,AtomicOrdering::SeqCst);let deadline=Instant::now()+timeout;let mut frame=Vec::new();let mut worker_reaped=false;loop{let mut buffer=[0u8;8192];let count=unsafe{read(pipes[0],buffer.as_mut_ptr(),buffer.len())};if count>0{frame.extend_from_slice(&buffer[..count as usize]);continue}if count==0{unsafe{close(pipes[0]);}break}if !worker_reaped{let mut status=0;let waited=unsafe{waitpid(pid,&mut status,WNOHANG)};if waited==pid{worker_reaped=true}}if Instant::now()>=deadline{unsafe{kill(-pid,SIGKILL);if !worker_reaped{let mut status=0;waitpid(pid,&mut status,0);}close(pipes[0]);}return Err(ProviderFailure::operation(FailureClass::Timeout,format!("{label} timed out and its isolated process group was terminated")))}std::thread::sleep(Duration::from_millis(1));}if !worker_reaped{let mut status=0;unsafe{waitpid(pid,&mut status,0);}}
+    #[cfg(test)]let _active=ActiveIsolatedWorker::new();unsafe{close(pipes[1]);setpgid(pid,pid);fcntl(pipes[0],F_SETFL,O_NONBLOCK);}#[cfg(test)]LAST_ISOLATED_GROUP.store(pid as u64,AtomicOrdering::SeqCst);let deadline=Instant::now()+timeout;let mut frame=Vec::new();let mut worker_reaped=false;loop{let mut buffer=[0u8;8192];let count=unsafe{read(pipes[0],buffer.as_mut_ptr(),buffer.len())};if count>0{frame.extend_from_slice(&buffer[..count as usize]);continue}if count==0{unsafe{close(pipes[0]);}break}if !worker_reaped{let mut status=0;let waited=unsafe{waitpid(pid,&mut status,WNOHANG)};if waited==pid{worker_reaped=true}}if Instant::now()>=deadline{unsafe{kill(-pid,SIGKILL);if !worker_reaped{let mut status=0;waitpid(pid,&mut status,0);}close(pipes[0]);}return Err(ProviderFailure::operation(FailureClass::Timeout,format!("{label} timed out and its isolated process group was terminated")))}std::thread::sleep(Duration::from_millis(1));}if !worker_reaped{let mut status=0;unsafe{waitpid(pid,&mut status,0);}}
     match frame.first().copied(){Some(0)=>Ok(frame[1..].to_vec()),Some(1)=>{let class=frame.get(1).copied().and_then(byte_class).ok_or_else(||ProviderFailure::operation(FailureClass::Execution,"isolated worker returned an invalid failure class"))?;let reason=String::from_utf8(frame[2..].to_vec()).map_err(|_|ProviderFailure::operation(FailureClass::Execution,"isolated worker returned non-UTF-8 failure text"))?;Err(ProviderFailure::operation(class,reason))},_=>Err(ProviderFailure::operation(FailureClass::Execution,format!("{label} exited without a result")))}
 }
 
@@ -318,7 +321,7 @@ mod tests {
         let req=request();let mut registry=ProviderRegistry::default();registry.register_in_process("panic",panic_provider).unwrap();let failure=registry.collect("panic",&req,Duration::from_secs(1)).unwrap_err();let diagnostic=failure.diagnostic("api-p99");assert_eq!((diagnostic.code,diagnostic.what.as_str()),("E2908","performance budget operation failed"));
         registry.register_in_process("unavailable",unavailable_provider).unwrap();let evidence=registry.collect("unavailable",&req,Duration::from_secs(1)).unwrap();let diagnostic=unavailable_if_too_few("api-p99",&evidence,20).unwrap_err();assert_eq!((diagnostic.code,diagnostic.what.as_str()),("E2906","performance budget api-p99 has no usable evidence"));assert!(diagnostic.why.contains("ready event"));
         fn hostile(_: &ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{loop{std::hint::spin_loop()}}
-        let _guard=PROCESS_TEST_LOCK.lock().unwrap_or_else(|poisoned|poisoned.into_inner());registry.register_in_process("hostile",hostile).unwrap();let started=Instant::now();for _ in 0..25{let failure=registry.collect("hostile",&req,Duration::from_millis(5)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert_last_group_gone();assert_eq!(ACTIVE_FILE_READERS.load(Ordering::SeqCst),0);}assert!(started.elapsed()<Duration::from_secs(1));
+        let _guard=PROCESS_TEST_LOCK.lock().unwrap_or_else(|poisoned|poisoned.into_inner());registry.register_in_process("hostile",hostile).unwrap();let started=Instant::now();for _ in 0..25{let failure=registry.collect("hostile",&req,Duration::from_millis(5)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert_last_group_gone();assert_eq!(ACTIVE_ISOLATED_WORKERS.load(Ordering::SeqCst),0);}assert!(started.elapsed()<Duration::from_secs(1));
     }
 
     #[cfg(unix)]
@@ -341,4 +344,16 @@ mod tests {
     }
 
     #[cfg(unix)]#[test]fn repeated_timed_file_readers_are_killed_and_reaped(){let _guard=PROCESS_TEST_LOCK.lock().unwrap_or_else(|poisoned|poisoned.into_inner());let req=request();let path=temporary("delayed");std::fs::write(&path,encode_stream(&valid_events(&req))).unwrap();let mut registry=ProviderRegistry::default();registry.register_file("delayed",path.clone()).unwrap();FILE_READER_DELAY_MS.store(100,Ordering::SeqCst);let started=Instant::now();for _ in 0..25{let failure=registry.collect("delayed",&req,Duration::from_millis(5)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert_last_group_gone();assert_eq!(ACTIVE_FILE_READERS.load(Ordering::SeqCst),0);}FILE_READER_DELAY_MS.store(0,Ordering::SeqCst);assert!(started.elapsed()<Duration::from_secs(1));let _=std::fs::remove_file(path);}
+
+    #[cfg(target_os="linux")]
+    #[test]
+    fn concurrent_isolated_workers_do_not_mask_file_reader_reaping(){
+        fn hostile(_: &ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{loop{std::hint::spin_loop()}}
+        let _guard=PROCESS_TEST_LOCK.lock().unwrap_or_else(|poisoned|poisoned.into_inner());
+        let workers=(0..4).map(|_|std::thread::spawn(||{let req=request();let mut registry=ProviderRegistry::default();registry.register_in_process("hostile",hostile).unwrap();registry.collect("hostile",&req,Duration::from_millis(500)).unwrap_err()})).collect::<Vec<_>>();
+        let deadline=Instant::now()+Duration::from_secs(1);while ACTIVE_ISOLATED_WORKERS.load(Ordering::SeqCst)<4&&Instant::now()<deadline{std::thread::yield_now()}assert!(ACTIVE_ISOLATED_WORKERS.load(Ordering::SeqCst)>=4,"hostile isolated workers did not overlap");
+        let req=request();let path=temporary("parallel-delayed");std::fs::write(&path,encode_stream(&valid_events(&req))).unwrap();let mut registry=ProviderRegistry::default();registry.register_file("delayed",path.clone()).unwrap();FILE_READER_DELAY_MS.store(100,Ordering::SeqCst);
+        for _ in 0..10{let failure=registry.collect("delayed",&req,Duration::from_millis(5)).unwrap_err();assert_eq!(failure.class,FailureClass::Timeout);assert_eq!(ACTIVE_FILE_READERS.load(Ordering::SeqCst),0);assert!(ACTIVE_ISOLATED_WORKERS.load(Ordering::SeqCst)>=4,"generic workers ended before file-reader lifecycle was checked");}
+        FILE_READER_DELAY_MS.store(0,Ordering::SeqCst);for worker in workers{assert_eq!(worker.join().unwrap().class,FailureClass::Timeout);}assert_eq!(ACTIVE_FILE_READERS.load(Ordering::SeqCst),0);let _=std::fs::remove_file(path);
+    }
 }
