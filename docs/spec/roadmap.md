@@ -228,7 +228,6 @@ implemented; use git-based dependencies. Jetpack hangar cleanup uses `jet clean`
 Items with Epoch 2/3 plans are tracked in those plan directories — not
 duplicated here:
 
-- Async/await, Go-scale networking → [`docs/plans/epoch-3/`](../../docs/plans/epoch-3/)
 - Full adoption documentation (migration, services, debugging guides) → Epoch 3
   (owner, 2026-06-18); per-milestone docs stay as written
 - User token macros (rejected by S26; sanctioned path is S56 comptime derives)

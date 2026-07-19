@@ -45,7 +45,8 @@ scripts/agent/jet-env jet run examples/features/basics/hello.jet
 
 ```bash
 scripts/agent/jet-env jet check examples/features/basics/functions.jet
-scripts/agent/jet-env cargo test --test golden examples_compile_and_run
+scripts/agent/jet-env env JET_GOLDEN_FILTER=examples/features/basics/hello.jet \
+  cargo test --test golden examples_compile_and_run -- --nocapture
 ```
 
 The language spec lives in [docs/spec/spec.md](docs/spec/spec.md). Ratified syntax decisions are in [docs/spec/syntax-decisions.md](docs/spec/syntax-decisions.md).
@@ -102,8 +103,8 @@ The language, compiler, and core library are post-v1.0. Pin your toolchain with
 `edition:` in `pkg.jet` and read [versioning](docs/reference/versioning.md).
 Not yet ready: registry upload (`jet registry publish` validates but does not upload —
 use git-based dependencies), `jet store gc` (stub until M12.2 registry lands), and
-`jet self doctor --online` (registry not wired). TLS requires the separate `jet.tls`
-package; the built-in HTTP client is plain HTTP only.
+`jet self doctor --online` (registry not wired). HTTPS clients use rustls with
+system roots by default; `core.tls` provides advanced client TLS configuration.
 
 ## Repo map
 
