@@ -3,12 +3,14 @@
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Lexer::{TokKind, Token};
 use crate::AST::ProgramBundle;
-use jet_queries::{InputKey, QueryEngine, QueryKey};
+use jet_driver::QueryService::CompilerQueries;
+#[cfg(test)]
+use jet_queries::{FileKey, QueryKey};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::sync::Arc;
 
-use super::Check::{check_document_with_bundle, collect_fixes, Fix};
+use super::Check::{fixes_from_diagnostics, Fix};
 use super::Completion::compute_completions;
 use super::Features::{
     compute_definition, compute_generated_definition, compute_hover, compute_references,
@@ -72,8 +74,8 @@ struct Server {
     workspace_folders: bool,
     /// URIs of documents that changed since last diagnostic publish (D-LSP3).
     dirty: std::collections::HashSet<String>,
-    /// D-LSP1 stage 1: shared query engine for memoized document facts.
-    queries: std::cell::RefCell<QueryEngine>,
+    /// D-LSP1=C: the canonical driver query service shared with `jet check`.
+    queries: std::cell::RefCell<CompilerQueries>,
     shutdown: bool,
 }
 
@@ -84,15 +86,9 @@ impl Server {
             workspace_roots: Vec::new(),
             workspace_folders: false,
             dirty: std::collections::HashSet::new(),
-            queries: std::cell::RefCell::new(QueryEngine::new()),
+            queries: std::cell::RefCell::new(CompilerQueries::new()),
             shutdown: false,
         }
-    }
-
-    fn sync_doc_input(&self, doc: &Document) {
-        self.queries
-            .borrow_mut()
-            .set_input(InputKey::new(doc.path.clone()), doc.text.clone());
     }
 
     /// D-LSP1 stage 2: diagnostics run through the query engine instead of a
@@ -102,47 +98,25 @@ impl Server {
     }
 
     fn check_with_bundle(&self, doc: &Document) -> CheckedBundle {
-        let path = doc.path.clone();
-        self.sync_doc_input(doc);
-        self.queries.borrow_mut().query(
-            QueryKey::new("lsp.checked_bundle", path.clone()),
-            |queries| {
-                let text = queries
-                    .input_text(&InputKey::new(path.clone()))
-                    .unwrap_or_default();
-                let (diags, bundle, facts) = check_document_with_bundle(&path, &text);
-                CheckedBundle {
-                    diags,
-                    bundle: bundle.map(Arc::new),
-                    facts,
-                }
-            },
-        )
+        let checked = self
+            .queries
+            .borrow_mut()
+            .check_text(&doc.path, &doc.text, true);
+        CheckedBundle {
+            diags: checked.diagnostics.as_ref().clone(),
+            bundle: checked.bundle,
+            facts: checked.effect_facts.as_ref().clone(),
+        }
     }
 
     fn lex(&self, doc: &Document) -> Arc<Vec<Token>> {
-        let path = doc.path.clone();
-        self.sync_doc_input(doc);
         self.queries
             .borrow_mut()
-            .query(QueryKey::new("lsp.tokens", path.clone()), |queries| {
-                let text = queries.input_text(&InputKey::new(path)).unwrap_or_default();
-                let (toks, _) = crate::Lexer::lex(&text);
-                Arc::new(toks)
-            })
+            .lex_text(&doc.path, &doc.text)
     }
 
     fn fixes(&self, doc: &Document) -> Vec<Fix> {
-        let path = doc.path.clone();
-        self.sync_doc_input(doc);
-        self.queries
-            .borrow_mut()
-            .query(QueryKey::new("lsp.fixes", path.clone()), |queries| {
-                let text = queries
-                    .input_text(&InputKey::new(path.clone()))
-                    .unwrap_or_default();
-                collect_fixes(&path, &text)
-            })
+        fixes_from_diagnostics(self.check(doc))
     }
 }
 
@@ -453,10 +427,7 @@ fn handle_notification(
                 .and_then(json_str)
             {
                 if let Some(doc) = server.docs.remove(uri) {
-                    server
-                        .queries
-                        .borrow_mut()
-                        .remove_input(&InputKey::new(doc.path));
+                    server.queries.borrow_mut().remove_document(&doc.path);
                 }
             }
             Ok(())
@@ -622,10 +593,6 @@ fn publish_after_change_impl(
         }
         server.docs.insert(uri.clone(), updated);
     }
-    if let Some(doc) = server.docs.get(&uri) {
-        server.sync_doc_input(doc);
-    }
-
     if is_open {
         // Always publish on open — client expects initial diagnostics.
         if let Some(doc) = server.docs.get(&uri) {
@@ -974,9 +941,9 @@ fn workspace_symbol_response(
                 None => SymbolDB::new(),
             }
         } else {
-            let (_diags, bundle, facts) = check_document_with_bundle(&path, &text);
-            match bundle {
-                Some(b) => build_symbol_db(&b, &facts),
+            let checked = server.queries.borrow_mut().check_text(&path, &text, true);
+            match checked.bundle {
+                Some(b) => build_symbol_db(&b, &checked.effect_facts),
                 None => SymbolDB::new(),
             }
         };
@@ -1916,9 +1883,9 @@ fn merge_workspace_defs(server: &Server, current: &Document, db: &mut SymbolDB) 
         if path == current.path {
             continue;
         }
-        let (_diags, bundle, facts) = check_document_with_bundle(&path, &text);
-        if let Some(bundle) = bundle {
-            let mut other = build_symbol_db(&bundle, &facts);
+        let checked = server.queries.borrow_mut().check_text(&path, &text, true);
+        if let Some(bundle) = checked.bundle {
+            let mut other = build_symbol_db(&bundle, &checked.effect_facts);
             db.symbols.extend(other.symbols.symbols().iter().cloned());
             db.defs.append(&mut other.defs);
             db.refs.append(&mut other.refs);
@@ -2059,6 +2026,36 @@ mod project_part_tests {
         for uri in ["file:///tmp/%", "file:///tmp/%GG", "file:///tmp/%FF"] {
             assert_eq!(uri_to_path(uri), "", "malformed URI must be rejected: {uri}");
         }
+    }
+
+    #[test]
+    fn shared_queries_report_hits_and_conservative_invalidation() {
+        let server = Server::new();
+        let mut a = Document::new("/tmp/query-a.jet".into(), "fn run() {}\n".into(), 1);
+        let b = Document::new("/tmp/query-b.jet".into(), "fn helper() {}\n".into(), 1);
+
+        assert!(server.check(&a).is_empty());
+        assert!(server.check(&a).is_empty());
+        assert!(server.check(&b).is_empty());
+        a.replace_text("fn run() { print(\"changed\") }\n".into());
+        assert!(server.check(&a).is_empty());
+        assert!(server.check(&b).is_empty());
+
+        let queries = server.queries.borrow();
+        let stats = queries.stats();
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.recomputes, 4);
+        assert_eq!(stats.live_inputs, 2);
+        assert_eq!(stats.live_memos, 2);
+        assert_eq!(stats.live_query_counters, 2);
+        assert_eq!(
+            queries.recompute_count(&QueryKey::for_file(
+                "checked.lsp",
+                FileKey::new("/tmp/query-b.jet")
+            )),
+            2,
+            "conservatively invalidated roots recompute on demand"
+        );
     }
 
     #[test]

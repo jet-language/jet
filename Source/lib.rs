@@ -137,8 +137,8 @@ pub fn compile_with_target(
 /// Front-end check for a file on disk (and its imports). Library modules
 /// need not define `main`; use `compile_with_path` when building or running.
 pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
-    let (diags, _) = Driver::check_file(file, None, true);
-    diags
+    let mut queries = jet_driver::QueryService::CompilerQueries::new();
+    queries.check_disk(file, true).diagnostics.as_ref().clone()
 }
 
 /// Full sema type-check for `jet eval`: runs the same pipeline as `compile`

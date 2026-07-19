@@ -14,6 +14,7 @@ pub mod InterpreterBoundary;
 pub mod Loader;
 pub mod PhaseTiming;
 pub mod ProjectParts;
+pub mod QueryService;
 // Card #367 / D-PRODUCT-SPLIT1=C: the compiler's module loader needs the
 // read-only package/config data model (manifest/lock/store-listing/script-
 // deps/FFI-binding parsing), never the `jetpack` package-manager engine

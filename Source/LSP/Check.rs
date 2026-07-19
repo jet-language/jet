@@ -60,7 +60,11 @@ pub struct Fix {
 /// Collect every machine-applicable fix for a document, in diagnostic order.
 /// Both the CLI and the LSP go through here.
 pub fn collect_fixes(path: &str, text: &str) -> Vec<Fix> {
-    check_document(path, text)
+    fixes_from_diagnostics(check_document(path, text))
+}
+
+pub fn fixes_from_diagnostics(diagnostics: Vec<Diagnostic>) -> Vec<Fix> {
+    diagnostics
         .into_iter()
         .filter_map(|d| {
             d.edit.clone().map(|edit| Fix {

@@ -6,28 +6,54 @@
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct InputKey(String);
+pub struct FileKey(String);
+
+impl FileKey {
+    pub fn new(path: impl Into<String>) -> Self {
+        Self(path.into())
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum Subject {
+    Named(String),
+    File(FileKey),
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct InputKey(Subject);
 
 impl InputKey {
     pub fn new(name: impl Into<String>) -> Self {
-        InputKey(name.into())
+        Self(Subject::Named(name.into()))
     }
+
+    pub fn file(file: FileKey) -> Self {
+        Self(Subject::File(file))
+    }
+
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct QueryKey {
     kind: &'static str,
-    name: String,
+    subject: Subject,
 }
 
 impl QueryKey {
     pub fn new(kind: &'static str, name: impl Into<String>) -> Self {
         QueryKey {
             kind,
-            name: name.into(),
+            subject: Subject::Named(name.into()),
+        }
+    }
+
+    pub fn for_file(kind: &'static str, file: FileKey) -> Self {
+        Self {
+            kind,
+            subject: Subject::File(file),
         }
     }
 
@@ -36,7 +62,6 @@ impl QueryKey {
 struct InputCell {
     revision: u64,
     text: String,
-    text_hash: u64,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -47,14 +72,24 @@ enum DepKey {
 
 #[derive(Clone, Debug)]
 enum Dep {
-    Input(InputKey, u64),
+    Input(InputKey, Option<u64>),
     Query(QueryKey, u64),
 }
 
 struct MemoEntry {
     deps: Vec<Dep>,
     value: Box<dyn Any>,
-    recomputes: u64,
+    generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct QueryStats {
+    pub hits: u64,
+    pub recomputes: u64,
+    pub live_inputs: usize,
+    pub live_input_bytes: usize,
+    pub live_memos: usize,
+    pub live_query_counters: usize,
 }
 
 #[derive(Default)]
@@ -62,7 +97,10 @@ pub struct QueryEngine {
     revision: u64,
     inputs: HashMap<InputKey, InputCell>,
     memo: HashMap<QueryKey, MemoEntry>,
+    recompute_by_key: HashMap<QueryKey, u64>,
     dep_stack: Vec<Vec<DepKey>>,
+    hits: u64,
+    recomputes: u64,
 }
 
 impl QueryEngine {
@@ -70,35 +108,32 @@ impl QueryEngine {
         Self::default()
     }
 
-    pub fn set_input(&mut self, key: InputKey, text: String) {
-        let text_hash = hash_text(&text);
+    pub fn set_input(&mut self, key: InputKey, text: String) -> bool {
         if let Some(cell) = self.inputs.get_mut(&key) {
-            if cell.text_hash == text_hash && cell.text == text {
-                return;
+            if cell.text == text {
+                return false;
             }
             self.revision += 1;
             cell.revision = self.revision;
             cell.text = text;
-            cell.text_hash = text_hash;
-            return;
+            self.prune_invalid_memos(false);
+            return true;
         }
 
         self.revision += 1;
         let revision = self.revision;
-        self.inputs.insert(
-            key,
-            InputCell {
-                revision,
-                text,
-                text_hash,
-            },
-        );
+        self.inputs.insert(key, InputCell { revision, text });
+        self.prune_invalid_memos(false);
+        true
     }
 
     pub fn remove_input(&mut self, key: &InputKey) -> bool {
         let removed = self.inputs.remove(key).is_some();
         if removed {
             self.revision += 1;
+            self.prune_invalid_memos(true);
+            self.recompute_by_key
+                .retain(|query, _| query.subject != key.0);
         }
         removed
     }
@@ -114,38 +149,59 @@ impl QueryEngine {
         F: FnOnce(&mut QueryEngine) -> T,
     {
         self.record_query_dep(&key);
-        if let Some(entry) = self.memo.get(&key) {
-            if self.memo_entry_valid(entry, &mut HashSet::new()) {
-                if let Some(value) = entry.value.downcast_ref::<T>() {
-                    return value.clone();
-                }
-            }
+        let cached = self.memo.get(&key).and_then(|entry| {
+            (self.memo_entry_valid(entry, &mut HashSet::new()))
+                .then(|| entry.value.downcast_ref::<T>().cloned())
+                .flatten()
+        });
+        if let Some(value) = cached {
+            self.hits += 1;
+            return value;
         }
 
-        let previous_recomputes = self
-            .memo
-            .remove(&key)
-            .map(|entry| entry.recomputes)
-            .unwrap_or(0);
+        self.memo.remove(&key);
         self.dep_stack.push(Vec::new());
         let value = compute(self);
         let deps = self.finish_deps();
+        let generation = self.recompute_by_key.get(&key).copied().unwrap_or(0) + 1;
+        self.recompute_by_key.insert(key.clone(), generation);
+        self.recomputes += 1;
         self.memo.insert(
             key,
             MemoEntry {
                 deps,
                 value: Box::new(value.clone()),
-                recomputes: previous_recomputes + 1,
+                generation,
             },
         );
         value
     }
 
     pub fn recompute_count(&self, key: &QueryKey) -> u64 {
-        self.memo
-            .get(key)
-            .map(|entry| entry.recomputes)
-            .unwrap_or(0)
+        self.recompute_by_key.get(key).copied().unwrap_or(0)
+    }
+
+    pub fn stats(&self) -> QueryStats {
+        QueryStats {
+            hits: self.hits,
+            recomputes: self.recomputes,
+            live_inputs: self.inputs.len(),
+            live_input_bytes: self.inputs.values().map(|cell| cell.text.len()).sum(),
+            live_memos: self.memo.len(),
+            live_query_counters: self.recompute_by_key.len(),
+        }
+    }
+
+    pub fn invalidate_kind(&mut self, kind: &'static str) {
+        let dead = self
+            .memo
+            .keys()
+            .filter(|key| key.kind == kind)
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in dead {
+            self.memo.remove(&key);
+        }
     }
 
     fn record_dep(&mut self, key: &InputKey) {
@@ -170,13 +226,12 @@ impl QueryEngine {
             }
             match dep {
                 DepKey::Input(input) => {
-                    if let Some(cell) = self.inputs.get(&input) {
-                        out.push(Dep::Input(input, cell.revision));
-                    }
+                    let revision = self.inputs.get(&input).map(|cell| cell.revision);
+                    out.push(Dep::Input(input, revision));
                 }
                 DepKey::Query(query) => {
                     if let Some(entry) = self.memo.get(&query) {
-                        out.push(Dep::Query(query, entry.recomputes));
+                        out.push(Dep::Query(query, entry.generation));
                     }
                 }
             }
@@ -186,16 +241,14 @@ impl QueryEngine {
 
     fn memo_entry_valid(&self, entry: &MemoEntry, visiting: &mut HashSet<QueryKey>) -> bool {
         entry.deps.iter().all(|dep| match dep {
-            Dep::Input(input, rev) => self
-                .inputs
-                .get(input)
-                .map(|cell| cell.revision == *rev)
-                .unwrap_or(false),
+            Dep::Input(input, revision) => {
+                self.inputs.get(input).map(|cell| cell.revision) == *revision
+            }
             Dep::Query(query, recomputes) => self
                 .memo
                 .get(query)
                 .map(|entry| {
-                    entry.recomputes == *recomputes && self.memo_key_valid(query, visiting)
+                    entry.generation == *recomputes && self.memo_key_valid(query, visiting)
                 })
                 .unwrap_or(false),
         })
@@ -213,12 +266,21 @@ impl QueryEngine {
         visiting.remove(key);
         valid
     }
-}
 
-fn hash_text(text: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+    fn prune_invalid_memos(&mut self, purge_counters: bool) {
+        let dead = self
+            .memo
+            .keys()
+            .filter(|key| !self.memo_key_valid(key, &mut HashSet::new()))
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in dead {
+            self.memo.remove(&key);
+            if purge_counters {
+                self.recompute_by_key.remove(&key);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -322,5 +384,101 @@ mod tests {
         assert_eq!(second, "symbols:3");
         assert_eq!(db.recompute_count(&tokens), 2);
         assert_eq!(db.recompute_count(&symbols), 2);
+    }
+
+    #[test]
+    fn counters_and_live_memory_are_deterministic() {
+        let file = FileKey::new("a.jet");
+        let input = InputKey::file(file.clone());
+        let query = QueryKey::for_file("tokens", file);
+        let mut db = QueryEngine::new();
+        db.set_input(input.clone(), "one two".into());
+        assert_eq!(
+            db.query(query.clone(), |q| q.input_text(&input).unwrap()),
+            "one two"
+        );
+        let hit: String = db.query(query, |_| unreachable!("memo hit"));
+        assert_eq!(hit, "one two");
+
+        assert_eq!(
+            db.stats(),
+            QueryStats {
+                hits: 1,
+                recomputes: 1,
+                live_inputs: 1,
+                live_input_bytes: 7,
+                live_memos: 1,
+                live_query_counters: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn removing_input_reclaims_dead_memos_and_key_counters() {
+        let input = InputKey::new("gone.jet");
+        let query = QueryKey::new("tokens", "gone.jet");
+        let mut db = QueryEngine::new();
+        db.set_input(input.clone(), "gone".into());
+        let _: String = db.query(query.clone(), |q| q.input_text(&input).unwrap());
+
+        assert!(db.remove_input(&input));
+        assert_eq!(db.stats().live_inputs, 0);
+        assert_eq!(db.stats().live_input_bytes, 0);
+        assert_eq!(db.stats().live_memos, 0);
+        assert_eq!(db.stats().live_query_counters, 0);
+        assert_eq!(db.stats().recomputes, 1);
+        assert_eq!(db.recompute_count(&query), 0);
+    }
+
+    #[test]
+    fn removing_input_reclaims_counter_after_explicit_invalidation() {
+        let input = InputKey::new("gone.jet");
+        let query = QueryKey::new("check", "gone.jet");
+        let mut db = QueryEngine::new();
+        db.set_input(input.clone(), "gone".into());
+        let _: String = db.query(query.clone(), |q| q.input_text(&input).unwrap());
+        db.invalidate_kind("check");
+
+        assert_eq!(db.stats().live_memos, 0);
+        assert_eq!(db.stats().live_query_counters, 1);
+        assert!(db.remove_input(&input));
+        assert_eq!(db.stats().live_query_counters, 0);
+        assert_eq!(db.recompute_count(&query), 0);
+    }
+
+    #[test]
+    fn adding_previously_missing_input_invalidates_reader() {
+        let input = InputKey::new("late.jet");
+        let query = QueryKey::new("tokens", "late.jet");
+        let mut db = QueryEngine::new();
+        let first: String = db.query(query.clone(), |q| {
+            q.input_text(&input).unwrap_or_default()
+        });
+        assert!(first.is_empty());
+
+        db.set_input(input.clone(), "now present".into());
+        let second: String = db.query(query.clone(), |q| {
+            q.input_text(&input).unwrap_or_default()
+        });
+        assert_eq!(second, "now present");
+        assert_eq!(db.recompute_count(&query), 2);
+    }
+
+    #[test]
+    fn document_churn_does_not_retain_query_history() {
+        let mut db = QueryEngine::new();
+        for index in 0..64 {
+            let file = FileKey::new(format!("closed-{index}.jet"));
+            let input = InputKey::file(file.clone());
+            db.set_input(input.clone(), "fn run() {}".into());
+            let _: String = db.query(QueryKey::for_file("check", file), |q| {
+                q.input_text(&input).unwrap()
+            });
+            assert!(db.remove_input(&input));
+        }
+        assert_eq!(db.stats().recomputes, 64);
+        assert_eq!(db.stats().live_inputs, 0);
+        assert_eq!(db.stats().live_memos, 0);
+        assert_eq!(db.stats().live_query_counters, 0);
     }
 }
