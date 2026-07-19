@@ -6,6 +6,7 @@
 //! Nothing here does I/O; every function takes its inputs explicitly
 //! (including terminal width) and returns a `String`.
 
+use jet_foundation::Terminal::Theme;
 use std::collections::HashSet;
 
 use super::{bold, dim, type_name, ReplTurn, Session};
@@ -24,8 +25,10 @@ pub const DEFAULT_WORKSPACE_SPLIT: usize = 32;
 /// Printed unconditionally (TTY and non-TTY) — only the wording changed from
 /// the pre-redesign banner, not whether it prints.
 pub fn render_banner(version: &str, color: bool) -> String {
+    let theme = Theme::new(color);
     format!(
-        "Jet {} — interactive REPL  ({}, {}, {} bindings)",
+        "{} {} — interactive REPL  ({}, {}, {} bindings)",
+        theme.accent("Jet"),
         version,
         bold(":quit", color),
         bold(":help", color),
@@ -61,7 +64,8 @@ pub fn render_discovery_hint(raw_mode: bool, color: bool) -> String {
 /// `user> ` prompt (see `lib.rs::run_cooked`) — this is never
 /// called from there.
 pub fn render_prompt(turn_no: usize, color: bool) -> String {
-    format!("{} user> ", dim(&turn_no.to_string(), color))
+    let theme = Theme::new(color);
+    format!("{} {} ", theme.dim(&turn_no.to_string()), theme.accent("user>"))
 }
 
 /// `name: Type :: value` (immutable) / `name: Type := value` (mutable) —
@@ -117,6 +121,7 @@ pub fn render_fold_marker(count: usize, elem_type: &str, color: bool) -> String 
 /// active prompt every cycle. `width` is the terminal column count (falls
 /// back to 64 in non-TTY/unknown-width callers).
 pub fn render_pin_rail(label: &str, turn_id: usize, width: usize, color: bool) -> String {
+    let theme = Theme::new(color);
     let width = width.max(20);
     let hint_plain = format!("turn {} · unpin ^P", turn_id);
     let pin = "📌";
@@ -126,8 +131,15 @@ pub fn render_pin_rail(label: &str, turn_id: usize, width: usize, color: bool) -
         .saturating_sub(hint_plain.chars().count())
         .max(1);
     let hint = format!("turn {} · unpin {}", turn_id, bold("^P", color));
-    let sep: String = "─".repeat(width);
-    format!("{} {}{}{}\n{}", pin, label, " ".repeat(pad), hint, sep)
+    let sep = theme.border(&"─".repeat(width));
+    format!(
+        "{} {}{}{}\n{}",
+        theme.accent(pin),
+        label,
+        " ".repeat(pad),
+        hint,
+        sep
+    )
 }
 
 /// One row of the `^B` bindings pane: `name : Type = value`, with a
@@ -158,7 +170,13 @@ pub fn render_bindings_pane(session: &Session, changed: &HashSet<String>) -> Vec
 pub fn render_workspace_row(left: &str, right: &str, split_col: usize, color: bool) -> String {
     let left_len = left.chars().count();
     let pad = split_col.saturating_sub(left_len).max(1);
-    format!("{}{}{} {}", left, " ".repeat(pad), dim("│", color), right)
+    format!(
+        "{}{}{} {}",
+        left,
+        " ".repeat(pad),
+        Theme::new(color).border("│"),
+        right
+    )
 }
 
 /// `:turns`-style one-line label for a pinned rail entry: prefers the turn's

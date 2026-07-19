@@ -5,6 +5,7 @@
 //! behavior is unit-testable without a real pty (card #360 test plan).
 
 use crate::Explain::Explanation;
+use jet_foundation::Terminal::Theme;
 use super::{Entry, Hit};
 
 const MIN_WIDTH: usize = 24;
@@ -74,24 +75,17 @@ fn truncate_visible(s: &str, width: usize) -> String {
     out
 }
 
-fn paint(on: bool, sgr: &str, text: &str) -> String {
-    if on {
-        format!("\x1b[{sgr}m{text}\x1b[0m")
-    } else {
-        text.to_string()
-    }
-}
-
 fn top(width: usize, label: &str, color: bool) -> String {
     let width = w(width);
+    let theme = Theme::new(color);
     let plain = format!("┌─ {} ", label);
     let fill = width.saturating_sub(cols(&plain) + 1);
     if color {
         format!(
-            "{}\x1b[1;96m{}\x1b[0m{}",
-            paint(true, "90", "┌─ "),
-            label,
-            paint(true, "90", &format!(" {}┐", "─".repeat(fill)))
+            "{}{}{}",
+            theme.border("┌─ "),
+            theme.accent(label),
+            theme.border(&format!(" {}┐", "─".repeat(fill)))
         )
     } else {
         format!("{}{}┐", plain, "─".repeat(fill))
@@ -100,12 +94,12 @@ fn top(width: usize, label: &str, color: bool) -> String {
 
 fn mid(width: usize, color: bool) -> String {
     let width = w(width);
-    paint(color, "90", &format!("├{}┤", "─".repeat(width.saturating_sub(2))))
+    Theme::new(color).border(&format!("├{}┤", "─".repeat(width.saturating_sub(2))))
 }
 
 fn bottom(width: usize, color: bool) -> String {
     let width = w(width);
-    paint(color, "90", &format!("└{}┘", "─".repeat(width.saturating_sub(2))))
+    Theme::new(color).border(&format!("└{}┘", "─".repeat(width.saturating_sub(2))))
 }
 
 /// One content row. `selected` draws the NO_COLOR `>` marker; color mode uses
@@ -119,21 +113,22 @@ fn row(width: usize, text: &str, selected: bool) -> String {
 
 fn selected_row(width: usize, text: &str, selected: bool, color: bool) -> String {
     let width = w(width);
+    let theme = Theme::new(color);
     if selected && color {
         let inner = width.saturating_sub(2);
         format!(
-            "{}\x1b[48;5;24;97;1m{}\x1b[0m{}",
-            paint(true, "90", "│"),
-            pad(text, inner),
-            paint(true, "90", "│")
+            "{}{}{}",
+            theme.border("│"),
+            theme.invert(&pad(text, inner)),
+            theme.border("│")
         )
     } else if color {
         let inner = width.saturating_sub(4);
         format!(
             "{}  {}{}",
-            paint(true, "90", "│"),
+            theme.border("│"),
             pad(text, inner),
-            paint(true, "90", "│")
+            theme.border("│")
         )
     } else {
         row(width, text, selected)
@@ -188,7 +183,7 @@ fn color_matches(text: &str, positions: &[usize]) -> String {
     let mut i = 0;
     while i < chars.len() {
         if marked[i] {
-            out.push_str("\x1b[36m");
+            out.push_str(&format!("\x1b[{}m", Theme::ACCENT_SGR));
             while i < chars.len() && marked[i] {
                 out.push(chars[i]);
                 i += 1;
@@ -224,11 +219,12 @@ pub fn render_categorized(
     color: bool,
 ) -> String {
     let width = w(width);
+    let theme = Theme::new(color);
     let mut out = String::new();
     out.push_str(&top(width, "jet ? — command palette", color));
     out.push('\n');
     let hint = if color {
-        paint(true, "2;37", "type to search · ↑↓ move · ⏎ prefill · ⇥ detail · F1 reference")
+        theme.dim("type to search · ↑↓ move · ⏎ prefill · ⇥ detail · F1 reference")
     } else {
         "type to search · ↑↓ move · ⏎ prefill · ⇥ detail · F1 reference".to_string()
     };
@@ -245,9 +241,9 @@ pub fn render_categorized(
         let marker = if is_expanded { "▾" } else { "▸" };
         let plain = format!("{} {}", marker, cat);
         let label = if color && ci == selected_category {
-            format!("\x1b[1;96m{}\x1b[0m", plain)
+            theme.accent(&plain)
         } else if color {
-            format!("\x1b[1;37m{}\x1b[0m", plain)
+            theme.bold(&plain)
         } else {
             plain
         };
@@ -256,7 +252,7 @@ pub fn render_categorized(
         if is_expanded {
             if *cat == "Error codes" {
                 let tip = if color {
-                    paint(true, "2;37", "type an E-code, such as E0102, for verbatim help")
+                    theme.dim("type an E-code, such as E0102, for verbatim help")
                 } else {
                     "type an E-code, such as E0102, for verbatim help".to_string()
                 };
@@ -268,9 +264,9 @@ pub fn render_categorized(
                     let cmd_col = format!("{:<20}", e.symbol.name);
                     format!(
                         "{} {} {}",
-                        paint(true, "1;36", "jet"),
-                        paint(true, "1;37", &cmd_col),
-                        paint(true, "2;37", &e.symbol.summary)
+                        theme.accent("jet"),
+                        theme.bold(&cmd_col),
+                        theme.dim(&e.symbol.summary)
                     )
                 } else {
                     format!("jet {:<20} {}", e.symbol.name, e.symbol.summary)
@@ -297,11 +293,12 @@ pub fn categorized_order(index: &[Entry]) -> Vec<&str> {
 /// `jet ? <query>` floor when `selected` is `None`.
 pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, selected: Option<usize>) -> String {
     let width = w(width);
+    let theme = Theme::new(color);
     let mut out = String::new();
     out.push_str(&top(width, "find a command", color));
     out.push('\n');
     let query_line = if color {
-        format!("{} {}", paint(true, "1;96", ">"), paint(true, "1;37", query))
+        format!("{} {}", theme.accent(">"), theme.bold(query))
     } else {
         format!("> {}", query)
     };
@@ -310,7 +307,7 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
     out.push_str(&mid(width, color));
     out.push('\n');
     if hits.is_empty() {
-        let empty = if color { paint(true, "2;37", "no matches") } else { "no matches".to_string() };
+        let empty = theme.warn("no matches");
         out.push_str(&selected_row(width, &empty, false, color));
         out.push('\n');
     }
@@ -330,7 +327,8 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
                 out.push_str(&selected_row(width, &line, is_sel, color));
             }
             Hit::Code(ex) => {
-                out.push_str(&selected_row(width, &format!("{}   {}", ex.code, ex.meaning), is_sel, color));
+                let line = format!("{}   {}", theme.error(&ex.code), theme.dim(&ex.meaning));
+                out.push_str(&selected_row(width, &line, is_sel, color));
             }
         }
         out.push('\n');
@@ -342,8 +340,8 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
             let ex_line = if color {
                 format!(
                     "{} {}",
-                    paint(true, "2;37", "example"),
-                    paint(true, "37", ex)
+                    theme.dim("example"),
+                    theme.bold(ex)
                 )
             } else {
                 format!("example  {}", ex)
@@ -353,7 +351,7 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
         }
     }
     let footer = if color {
-        paint(true, "2;37", "↑↓ move · ⏎ prefill shell · ⇥ detail · F1 reference")
+        theme.dim("↑↓ move · ⏎ prefill shell · ⇥ detail · F1 reference")
     } else {
         "↑↓ move · ⏎ prefill shell · ⇥ detail · F1 reference".to_string()
     };
@@ -367,6 +365,7 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
 /// see-also, matching the ratified mock's "step 3".
 pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
     let width = w(width);
+    let theme = Theme::new(color);
     let mut out = String::new();
     out.push_str(&top(
         width,
@@ -415,7 +414,7 @@ pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
         .cloned()
         .unwrap_or_else(|| format!("jet {}", entry.symbol.name));
     let footer = if color {
-        format!("\x1b[2;37m⏎ prefill: {} · F1 open in reference\x1b[0m", prefill)
+        theme.dim(&format!("⏎ prefill: {} · F1 open in reference", prefill))
     } else {
         format!("prefill: {} · F1 open in reference", prefill)
     };
@@ -511,18 +510,25 @@ pub fn render_reference(
     let left_width = (width / 3).max(18);
     let right_width = width - left_width - 2;
 
-    let header = if color {
-        format!("\x1b[36;1mjet ?\x1b[0m reference{}", if query.is_empty() { String::new() } else { format!(" · search: {query}") })
+    let theme = Theme::new(color);
+    let search = if query.is_empty() {
+        String::new()
     } else {
-        format!("jet ? reference{}", if query.is_empty() { "".to_string() } else { format!(" · search: {query}") })
+        format!(" · search: {}", theme.bold(query))
     };
+    let header = format!("{} reference{}", theme.accent("jet ?"), search);
     let mut lines = vec![pad(&header, width)];
 
     let mut left_rows: Vec<String> = Vec::new();
     let mut selected_row = None;
     for (ci, cat) in super::CATEGORIES.iter().enumerate() {
         let marker = if ci == selected_category { "▾" } else { "▸" };
-        left_rows.push(format!("{} {}", marker, cat));
+        let category = format!("{} {}", marker, cat);
+        left_rows.push(if ci == selected_category {
+            theme.accent(&category)
+        } else {
+            theme.bold(&category)
+        });
         if ci == selected_category {
             for e in index.iter().filter(|e| &e.category == cat) {
                 let sel = selected_entry.map(|s| s.symbol.name.as_str()) == Some(e.symbol.name.as_str());
@@ -530,7 +536,8 @@ pub fn render_reference(
                 if sel {
                     selected_row = Some(left_rows.len());
                 }
-                left_rows.push(format!("{}  {}", prefix, e.symbol.name));
+                let entry = format!("{}  {}", prefix, e.symbol.name);
+                left_rows.push(if sel { theme.invert(&entry) } else { entry });
             }
         }
     }
@@ -540,7 +547,7 @@ pub fn render_reference(
             .lines()
             .map(str::to_string)
             .collect(),
-        None => vec!["select a command on the left".to_string()],
+        None => vec![theme.dim("select a command on the left")],
     };
 
     let body_rows = height.saturating_sub(2);
@@ -551,9 +558,12 @@ pub fn render_reference(
     for i in 0..body_rows {
         let l = left_rows.get(left_start + i).map(|s| pad(s, left_width)).unwrap_or_else(|| " ".repeat(left_width));
         let r = pad(right_rows.get(i).map(String::as_str).unwrap_or(""), right_width);
-        lines.push(format!("│{}│{}", l, r));
+        lines.push(format!("{}{}{}{}", theme.border("│"), l, theme.border("│"), r));
     }
-    lines.push(pad("↑↓ move · → into · ⏎ prefill shell · Esc back to overlay", width));
+    lines.push(pad(
+        &theme.dim("↑↓ move · → into · ⏎ prefill shell · Esc back to overlay"),
+        width,
+    ));
     lines.join("\n")
 }
 
@@ -625,6 +635,16 @@ mod tests {
     }
 
     #[test]
+    fn result_list_styles_semantic_codes_and_no_match_with_shared_roles() {
+        let index = build_index();
+        let code = super::super::search(&index, "E0102");
+        let code_out = render_result_list(&code, "E0102", 64, true, None);
+        assert!(code_out.contains("\x1b[31mE0102\x1b[0m"), "{code_out}");
+        let empty = render_result_list(&[], "definitely-not-a-command", 64, true, None);
+        assert!(empty.contains("\x1b[33mno matches\x1b[0m"), "{empty}");
+    }
+
+    #[test]
     fn code_page_is_verbatim_from_explain() {
         let ex = crate::Explain::lookup("E0102").unwrap();
         assert_eq!(render_code_page(&ex, false), crate::Explain::render(&ex, false));
@@ -648,6 +668,15 @@ mod tests {
         assert!(out.contains("Esc back to overlay"));
         assert_eq!(out.lines().count(), 12);
         assert!(out.lines().all(|line| cols(line) == 80));
+
+        let selected = index
+            .iter()
+            .find(|entry| entry.category == super::super::CATEGORIES[0]);
+        let colored = render_reference(&index, 0, selected, 80, 12, true, "run");
+        assert!(colored.contains("\x1b[1;96mjet ?\x1b[0m"), "{colored}");
+        assert!(colored.contains("\x1b[48;5;24;97;1m"), "{colored}");
+        assert!(colored.contains("\x1b[2;37m↑↓ move"), "{colored}");
+        assert!(colored.lines().all(|line| cols(line) == 80));
     }
 
     #[test]
@@ -683,7 +712,11 @@ mod tests {
             row.text
                 .split('\x1b')
                 .skip(1)
-                .all(|suffix| suffix.starts_with("[1m") || suffix.starts_with("[0m"))
+                .all(|suffix| {
+                    suffix.starts_with("[1;96m")
+                        || suffix.starts_with("[1m")
+                        || suffix.starts_with("[0m")
+                })
         }));
         let mut reconstructed = String::new();
         for row in rows {

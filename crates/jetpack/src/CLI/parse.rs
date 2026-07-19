@@ -13,12 +13,13 @@ use super::usage_tests::usage;
 use crate::Output::Theme;
 use crate::Store;
 use crate::Syntax;
+use jet_foundation::Terminal::ColorChoice;
 use std::path::PathBuf;
 
 /// Parsed global flags shared by every command.
 #[derive(Clone)]
 pub(super) struct Flags {
-    pub(super) no_color: bool,
+    pub(super) color: ColorChoice,
     pub(super) fixtures: Option<PathBuf>,
     pub(super) offline: bool,
     pub(super) online: bool,
@@ -97,7 +98,7 @@ pub(super) fn parse_args(args: &[String]) -> Parsed {
 pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
     let workspace_select = matches!(verb, "build" | "test" | "run");
     let mut flags = Flags {
-        no_color: false,
+        color: ColorChoice::Auto,
         fixtures: None,
         offline: false,
         online: false,
@@ -131,9 +132,10 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
             break;
         }
         match a.as_str() {
-            "--no-color" => flags.no_color = true,
-            "--color=never" => flags.no_color = true,
-            "--color=auto" | "--color=always" => {}
+            "--no-color" => flags.color = ColorChoice::Never,
+            a if a.starts_with("--color=") => {
+                flags.color = ColorChoice::parse(a.trim_start_matches("--color="));
+            }
             "--offline" => flags.offline = true,
             "--online" => flags.online = true,
             a if a == Syntax::CLI_FLAG_YES_SHORT || a == Syntax::CLI_FLAG_YES_LONG => {
@@ -253,13 +255,13 @@ pub fn main(args: Vec<String>) -> i32 {
         eprintln!("{}", usage());
         return 2;
     };
+    let parsed = parse_args_for(verb, rest);
     if let Some(diag) = crate::MemberSelect::reject_filter_dsl(rest) {
-        let theme = Theme::resolve(false);
+        let theme = Theme::resolve(parsed.flags.color);
         theme.error_coded(&diag.code, &diag.what, &diag.why, &diag.fix);
         return 2;
     }
-    let parsed = parse_args_for(verb, rest);
-    let theme = Theme::resolve(parsed.flags.no_color);
+    let theme = Theme::resolve(parsed.flags.color);
     // Doctor must observe state without repairing or migrating it.
     if verb != "doctor" {
         if let Err(error) = Store::migrate_nix_gc_roots(&Store::resolve()) {
@@ -315,7 +317,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::SECRETS_SUBCOMMAND => cmd_secrets(&theme, &parsed),
         v if v == Syntax::TOOL_SUBCOMMAND => cmd_tool(&theme, &parsed),
         "help" | "--help" | "-h" => {
-            println!("{}", usage());
+            println!("{}", super::usage_tests::usage_with_color(theme.color));
             0
         }
         other => {

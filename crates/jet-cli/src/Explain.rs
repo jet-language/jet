@@ -6,6 +6,7 @@
 //! entry by construction (invariant I4: no code without an explain), and any
 //! code that also has a detailed *what/why/fix* block gets the richer essay.
 
+use jet_foundation::Terminal::Theme;
 use std::collections::BTreeMap;
 
 /// The embedded diagnostics spec — the single source of truth for codes.
@@ -148,14 +149,8 @@ pub fn lookup_policy(key: jet_foundation::Policy::PolicyKey, declarations: impl 
 /// headers. `color` bolds the code line on a TTY.
 pub fn render(ex: &Explanation, color: bool) -> String {
     let mut out = String::new();
-    let bold = |s: &str| {
-        if color {
-            format!("\x1b[1m{}\x1b[0m", s)
-        } else {
-            s.to_string()
-        }
-    };
-    out.push_str(&format!("{}\n\n", bold(&ex.code)));
+    let theme = Theme::new(color);
+    out.push_str(&format!("{}\n\n", theme.accent(&ex.code)));
     if ex.retired {
         out.push_str("This code is retired: it is no longer produced by the current\n");
         out.push_str("compiler, and is kept here only so old build logs stay readable.\n");
@@ -163,17 +158,17 @@ pub fn render(ex: &Explanation, color: bool) -> String {
     }
     let what = ex.what.as_deref().or(Some(ex.meaning.as_str()));
     if let Some(w) = what {
-        out.push_str(&format!("What this means:\n  {}\n\n", w));
+        out.push_str(&format!("{}\n  {}\n\n", theme.bold("What this means:"), w));
     }
     if let Some(why) = &ex.why {
         out.push_str(&format!(
-            "Why {} enforces it:\n  {}\n\n",
-            crate::Syntax::LANG_NAME,
+            "{}\n  {}\n\n",
+            theme.bold(&format!("Why {} enforces it:", crate::Syntax::LANG_NAME)),
             why
         ));
     }
     if let Some(fix) = &ex.fix {
-        out.push_str(&format!("How to fix it:\n  {}\n\n", fix));
+        out.push_str(&format!("{}\n  {}\n\n", theme.bold("How to fix it:"), fix));
     }
     if ex.what.is_none() {
         // No detailed block yet: show stage so the entry is still useful.
@@ -199,11 +194,7 @@ pub fn pointer_line(code: &str, color: bool) -> String {
         crate::Syntax::BINARY_NAME,
         code
     );
-    if color {
-        format!("\x1b[2m{}\x1b[0m", body)
-    } else {
-        body
-    }
+    Theme::new(color).dim(&body)
 }
 
 fn normalize(code: &str) -> String {

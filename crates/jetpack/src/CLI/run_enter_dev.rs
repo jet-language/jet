@@ -644,6 +644,11 @@ fn enter_foreign_flake(
     };
     let mut cmd = std::process::Command::new("nix");
     cmd.arg("develop").args(&args);
+    if theme.color {
+        cmd.env_remove("NO_COLOR");
+    } else {
+        cmd.env("NO_COLOR", "");
+    }
     if let Some(b) = &branded {
         for (k, v) in &b.env_vars {
             cmd.env(k, v);

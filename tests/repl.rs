@@ -2046,34 +2046,66 @@ fn repl_raw_color_highlights_live_input() {
         .args(["-c", shell])
         .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
         .env("JET_REPL_HISTORY", "off")
-        .env("CLICOLOR", "1")
+        .env("FORCE_COLOR", "1")
         .env_remove("NO_COLOR")
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
     assert!(out.contains("\u{1b}["), "live editor emitted no ANSI highlighting: {out:?}");
-    assert!(out.contains("\u{1b}[3") || out.contains("\u{1b}[9"), "input tokens were not colorized: {out:?}");
+    assert!(out.contains("\u{1b}[1;96m") || out.contains("\u{1b}[32m"), "input tokens were not colorized: {out:?}");
 }
 
 #[cfg(target_os = "linux")]
 #[test]
 fn repl_terminal_matrix_raw_width_color_eof_and_ctrl_d() {
     use std::process::Command;
-    for (cols, no_color) in [(20, true), (120, false)] {
-        let shell = format!(
-            "{{ sleep 0.2; printf '1 + 1\\r'; sleep 0.12; printf '\\004'; }} | timeout 8s script -qec 'stty cols {cols}; \"$JET_REPL_BIN\" repl' /dev/null"
-        );
-        let mut command = Command::new("sh");
-        command.args(["-c", &shell]).env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet")).env("JET_REPL_HISTORY", "off");
-        if no_color { command.env("NO_COLOR", "1"); } else { command.env_remove("NO_COLOR").env("CLICOLOR", "1"); }
-        let output = command.output().unwrap();
-        let out = String::from_utf8_lossy(&output.stdout);
-        assert!(output.status.success(), "raw {cols}-column Ctrl-D row failed: {out}");
-        assert!(out.contains("Tab") && out.contains("F3") && !out.contains("interactive keys require a TTY"), "raw mode not reached at width {cols}: {out:?}");
-        assert!(out.contains("2 : Int"), "raw evaluation failed at width {cols}: {out:?}");
-        if no_color { assert!(!out.contains("\u{1b}[32m") && !out.contains("\u{1b}[35m") && !out.contains("\u{1b}[36m"), "NO_COLOR emitted token colors: {out:?}"); }
-        else { assert!(out.contains("\u{1b}[36m"), "color row emitted no numeric highlight: {out:?}"); }
+    for cols in [20, 120] {
+        for (name, flag, no_color, force_color, expect_color) in [
+            ("auto", "", false, false, true),
+            ("always", "--color=always", true, false, true),
+            ("never", "--color=never", false, true, false),
+            ("empty-NO_COLOR", "", true, true, false),
+            ("FORCE_COLOR", "", false, true, true),
+        ] {
+            let shell = format!(
+                "{{ sleep 0.2; printf '1 + 1\\r'; sleep 0.12; printf '\\004'; }} | timeout 8s script -qec 'stty cols {cols}; \"$JET_REPL_BIN\" repl {flag}' /dev/null"
+            );
+            let mut command = Command::new("sh");
+            command
+                .args(["-c", &shell])
+                .env("JET_REPL_BIN", env!("CARGO_BIN_EXE_jet"))
+                .env("JET_REPL_HISTORY", "off")
+                .env_remove("NO_COLOR")
+                .env_remove("FORCE_COLOR");
+            if no_color {
+                command.env("NO_COLOR", "");
+            }
+            if force_color {
+                command.env("FORCE_COLOR", "1");
+            }
+            let output = command.output().unwrap();
+            let out = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success(),
+                "raw {name}/{cols}-column Ctrl-D row failed: {out}"
+            );
+            assert!(
+                out.contains("Tab")
+                    && out.contains("F3")
+                    && !out.contains("interactive keys require a TTY"),
+                "raw mode not reached for {name} at width {cols}: {out:?}"
+            );
+            assert!(
+                out.contains("2 : Int"),
+                "raw evaluation failed for {name} at width {cols}: {out:?}"
+            );
+            assert_eq!(
+                out.contains("\u{1b}[1;96m"),
+                expect_color,
+                "wrong color policy for {name} at width {cols}: {out:?}"
+            );
+        }
     }
 
     let eof = Command::new("sh")

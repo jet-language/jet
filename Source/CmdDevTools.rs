@@ -337,8 +337,14 @@ fn run_resident_restart(
 /// `jet repl` — interactive REPL session (E2-M18, D-REPL3=A).
 /// `project_dir` sets the base for `:load` paths and (eventually) import
 /// context (D-REPL10=A sandbox; `--project <dir>` enables project mode).
-pub(crate) fn run_repl(project_dir: Option<&str>, allow: &[String], deny: &[String]) {
-    let code = jet::REPL::run(project_dir, jet::REPL::ReplFlags::new(allow, deny));
+pub(crate) fn run_repl(
+    project_dir: Option<&str>,
+    allow: &[String],
+    deny: &[String],
+    color: ColorChoice,
+) {
+    let flags = jet::REPL::ReplFlags::new(allow, deny).with_color(color);
+    let code = jet::REPL::run(project_dir, flags);
     exit(code);
 }
 

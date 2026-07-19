@@ -13,7 +13,7 @@
 //!   D-REPL17=A  diagnostics byte-identical to batch compiler (I4)
 //!   D-REPL-FUEL=A   ~10M steps/input; E1801 on overshoot
 //!   D-REPL-BANNER=A banner + `:help` hint on startup
-//!   D-REPL-COLOR=A  respect `NO_COLOR`/`CLICOLOR`
+//!   D-REPL-COLOR=A  respect the shared Jet color policy
 //!   D-REPL-PRELOAD=A auto-import `core.io`; teaching note on first use
 //!
 //! Error codes (E18xx):
@@ -43,6 +43,7 @@ pub use jet_driver::{AST, Comptime, Diagnostics, Lexer, Loader, Parser, Sema, Sy
 pub mod SemanticSymbols;
 pub mod Term;
 
+use jet_foundation::Terminal::{ColorChoice, Theme};
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
@@ -66,6 +67,7 @@ use crate::Term as Terminal;
 pub struct ReplFlags {
     pub allow: HashSet<String>,
     pub deny: HashSet<String>,
+    pub color: ColorChoice,
 }
 
 impl ReplFlags {
@@ -73,7 +75,13 @@ impl ReplFlags {
         Self {
             allow: allow.iter().map(|s| s.to_ascii_lowercase()).collect(),
             deny: deny.iter().map(|s| s.to_ascii_lowercase()).collect(),
+            color: ColorChoice::Auto,
         }
+    }
+
+    pub fn with_color(mut self, color: ColorChoice) -> Self {
+        self.color = color;
+        self
     }
 }
 
@@ -476,50 +484,26 @@ fn normalize_repl_input(input: &str) -> String {
 // ── color helpers ──────────────────────────────────────────────────────────
 
 /// Return true if color output is desired on stdout.
-/// Respects `NO_COLOR` and `CLICOLOR` (D-REPL-COLOR=A).
+/// Respects the shared `NO_COLOR` / `FORCE_COLOR` policy.
 pub fn color_on() -> bool {
-    if std::env::var_os("NO_COLOR").is_some() {
-        return false;
-    }
-    if let Ok(v) = std::env::var("CLICOLOR") {
-        if v == "0" {
-            return false;
-        }
-    }
     use std::io::IsTerminal;
-    io::stdout().is_terminal()
+    ColorChoice::Auto.resolve(io::stdout().is_terminal())
 }
 
 pub(crate) fn bold(s: &str, color: bool) -> String {
-    if color {
-        format!("\x1b[1m{}\x1b[0m", s)
-    } else {
-        s.to_string()
-    }
+    Theme::new(color).bold(s)
 }
 
 pub(crate) fn dim(s: &str, color: bool) -> String {
-    if color {
-        format!("\x1b[2m{}\x1b[0m", s)
-    } else {
-        s.to_string()
-    }
+    Theme::new(color).dim(s)
 }
 
 fn green(s: &str, color: bool) -> String {
-    if color {
-        format!("\x1b[32m{}\x1b[0m", s)
-    } else {
-        s.to_string()
-    }
+    Theme::new(color).success(s)
 }
 
 fn yellow(s: &str, color: bool) -> String {
-    if color {
-        format!("\x1b[33m{}\x1b[0m", s)
-    } else {
-        s.to_string()
-    }
+    Theme::new(color).warn(s)
 }
 
 // ── REPL diagnostics (E18xx) ───────────────────────────────────────────────
@@ -2005,7 +1989,8 @@ fn render_diags(file: &str, src: &str, diags: &[Diagnostic], color: bool) {
 /// crate). The cooked loop is also the exact non-TTY floor `run_transcript`
 /// mirrors — piped/redirected sessions keep the pre-redesign plain output.
 pub fn run(project_dir: Option<&str>, flags: ReplFlags) -> i32 {
-    let color = color_on();
+    use std::io::IsTerminal;
+    let color = flags.color.resolve(io::stdout().is_terminal());
     let raw_guard = Terminal::RawGuard::enable();
     println!("{}", Render::render_banner(env!("CARGO_PKG_VERSION"), color));
     println!();
@@ -2772,6 +2757,7 @@ pub fn run_transcript_with_flags(
     let flags = ReplFlags {
         allow: allow.iter().map(|s| s.to_ascii_lowercase()).collect(),
         deny: deny.iter().map(|s| s.to_ascii_lowercase()).collect(),
+        color: ColorChoice::Never,
     };
     let mut policy = ReplPolicy::new(flags, &base_dir);
     let mut out = String::new();

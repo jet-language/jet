@@ -878,7 +878,7 @@ mod tests {
         .unwrap();
         let refs = [ref_spec("nixpkgs:fastfetch")];
         let table = SourceTable::empty();
-        let theme = Theme::resolve(true);
+        let theme = Theme::resolve(jet_foundation::Terminal::ColorChoice::Never);
 
         assert!(gate(
             &theme,
@@ -956,7 +956,7 @@ mod tests {
         let store = dir.join("trust");
         let flake = dir.join("flake.nix");
         std::fs::write(&flake, "{ }").unwrap();
-        let theme = Theme::resolve(true);
+        let theme = Theme::resolve(jet_foundation::Terminal::ColorChoice::Never);
         assert!(gate_flake(&theme, &store, &dir, &flake, true).is_ok());
         // A one-shot bypass persists nothing (mirrors `gate`'s `--trust`).
         assert!(!is_trusted(&store, &dir, &flake_definition_hash("{ }")));

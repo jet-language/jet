@@ -20,7 +20,7 @@ fn run_pty_sized(keys: &[u8], color: &str, no_color: bool, rows: usize, cols: us
     command.args(["-qfec", &shell_line, "/dev/null"])
         .env_remove("NO_COLOR").env_remove("FORCE_COLOR")
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    if no_color { command.env("NO_COLOR", "1"); }
+    if no_color { command.env("NO_COLOR", ""); }
     let mut child = command.spawn()
         .expect("util-linux script must allocate a real PTY");
     child.stdin.take().unwrap().write_all(keys).unwrap();

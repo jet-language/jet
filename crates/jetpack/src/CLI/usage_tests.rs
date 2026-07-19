@@ -1,18 +1,16 @@
 use crate::Syntax;
+use jet_foundation::Terminal::{ColorChoice, Theme};
 use std::io::IsTerminal;
 
 pub(super) fn usage() -> String {
+    usage_with_color(ColorChoice::Auto.resolve(std::io::stdout().is_terminal()))
+}
+
+pub(super) fn usage_with_color(color: bool) -> String {
     let bin = Syntax::JETPACK_BINARY_NAME;
     let pack = Syntax::ENV_FILE;
-    // Bold section headers on a TTY only; the text is identical when piped.
-    let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-    let h = |s: &str| {
-        if color {
-            format!("\x1b[1m{s}\x1b[0m")
-        } else {
-            s.to_string()
-        }
-    };
+    let theme = Theme::new(color);
+    let h = |s: &str| theme.accent(s);
     format!(
         "\
 {title}
@@ -100,6 +98,7 @@ pub(super) fn usage() -> String {
   Button, Label, Input, Container      starter kit — ownable, editable .jet source
 
 {flags}
+  --color=auto|always|never            choose terminal color policy
   --no-color                           disable colored output (also: NO_COLOR)
   --offline                            resolve from fixtures only, never network
   --online                             (doctor) probe configured network registries
@@ -181,10 +180,25 @@ mod tests {
             .map(|s| s.to_string())
             .collect();
         let p = parse_args(&args);
-        assert!(p.flags.no_color);
+        assert_eq!(p.flags.color, ColorChoice::Never);
         assert!(p.flags.assume_yes);
         assert_eq!(p.flags.fixtures, Some(fixtures));
         assert_eq!(p.positional, vec!["nixpkgs:jq"]);
+    }
+
+    #[test]
+    fn explicit_color_is_retained_and_last_choice_wins() {
+        let args = ["--no-color", "--color=always", "--color=auto"]
+            .map(str::to_string);
+        assert_eq!(parse_args(&args).flags.color, ColorChoice::Auto);
+        let args = ["--color=auto", "--color=always"].map(str::to_string);
+        assert_eq!(parse_args(&args).flags.color, ColorChoice::Always);
+    }
+
+    #[test]
+    fn usage_uses_shared_accent_role_only_when_colored() {
+        assert!(usage_with_color(true).contains("\x1b[1;96m"));
+        assert!(!usage_with_color(false).contains('\x1b'));
     }
 
     #[test]
@@ -220,7 +234,7 @@ mod tests {
             .collect();
         let p = parse_args(&args);
         assert_eq!(p.flags.packages, vec!["nodejs"]);
-        assert!(p.flags.no_color);
+        assert_eq!(p.flags.color, ColorChoice::Never);
     }
 
     #[test]

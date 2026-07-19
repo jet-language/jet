@@ -7,6 +7,7 @@
 
 use super::RefSpec::RefError;
 use crate::Syntax;
+use jet_foundation::Terminal::{ColorChoice, Theme as SharedTheme};
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -31,53 +32,40 @@ impl PlanMark {
             PlanMark::Change => "~",
         }
     }
-
-    fn sgr(self) -> &'static str {
-        match self {
-            PlanMark::Add => "32",
-            PlanMark::Remove => "31",
-            PlanMark::Change => "33",
-        }
-    }
 }
 
 impl Theme {
-    /// Resolve color from flags + environment. Precedence: explicit
-    /// `--no-color` wins, then `NO_COLOR` (any value), then TTY detection.
-    pub fn resolve(no_color_flag: bool) -> Theme {
-        if no_color_flag || std::env::var_os("NO_COLOR").is_some() {
-            return Theme { color: false };
-        }
+    /// Resolve the shared explicit > NO_COLOR > FORCE_COLOR > TTY policy.
+    pub fn resolve(choice: ColorChoice) -> Theme {
         Theme {
-            color: std::io::stderr().is_terminal(),
+            color: choice.resolve(std::io::stderr().is_terminal()),
         }
     }
 
-    fn paint(&self, sgr: &str, text: &str) -> String {
-        if self.color {
-            format!("\x1b[{sgr}m{text}\x1b[0m")
-        } else {
-            text.to_string()
-        }
+    fn shared(&self) -> SharedTheme {
+        SharedTheme::new(self.color)
     }
 
     pub fn bold(&self, t: &str) -> String {
-        self.paint("1", t)
+        self.shared().bold(t)
     }
     pub fn green(&self, t: &str) -> String {
-        self.paint("32", t)
+        self.shared().success(t)
     }
     pub fn yellow(&self, t: &str) -> String {
-        self.paint("33", t)
+        self.shared().warn(t)
     }
     pub fn red(&self, t: &str) -> String {
-        self.paint("31", t)
+        self.shared().error(t)
     }
     pub fn cyan(&self, t: &str) -> String {
-        self.paint("36", t)
+        self.shared().accent(t)
     }
     pub fn gray(&self, t: &str) -> String {
-        self.paint("90", t)
+        self.shared().dim(t)
+    }
+    pub fn border(&self, t: &str) -> String {
+        self.shared().border(t)
     }
 
     /// The aligned `jetpack` gutter every status line shares.
@@ -135,7 +123,11 @@ impl Theme {
         from: &str,
         to: &str,
     ) -> String {
-        let symbol = self.paint(mark.sgr(), mark.symbol());
+        let symbol = match mark {
+            PlanMark::Add => self.green(mark.symbol()),
+            PlanMark::Remove => self.red(mark.symbol()),
+            PlanMark::Change => self.yellow(mark.symbol()),
+        };
         format!(
             "{} {}  {} -> {}",
             symbol,
@@ -360,11 +352,11 @@ impl Theme {
         let tail = rest.join(" · ");
         let plain_len = 3 + label.len() + if tail.is_empty() { 0 } else { 3 + tail.len() } + 1;
         let fill = "─".repeat(width.saturating_sub(plain_len).max(2));
-        let mut line = format!("{} {} ", self.gray("──"), self.paint("1;36", label));
+        let mut line = format!("{} {} ", self.border("──"), self.cyan(label));
         if !tail.is_empty() {
-            line.push_str(&format!("{} {} ", self.gray("─"), self.gray(&tail)));
+            line.push_str(&format!("{} {} ", self.border("─"), self.gray(&tail)));
         }
-        line.push_str(&self.gray(&fill));
+        line.push_str(&self.border(&fill));
         eprintln!("\n  {line}\n");
     }
 
@@ -696,7 +688,7 @@ mod tests {
         // Explicit `--no-color` is the deterministic floor (also covers the
         // NO_COLOR path's `color: false` branch without mutating process env
         // under parallel cargo test).
-        let theme = Theme::resolve(true);
+        let theme = Theme::resolve(ColorChoice::Never);
         assert!(!theme.color, "--no-color flag must force color=false");
     }
 

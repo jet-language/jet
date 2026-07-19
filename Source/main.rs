@@ -873,7 +873,7 @@ fn main() {
 
     // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.
     if raw.is_empty() {
-        run_repl(None, &[], &[]);
+        run_repl(None, &[], &[], ColorChoice::Auto);
         return;
     }
     if raw[0] == "?" {
@@ -1594,7 +1594,7 @@ fn main() {
                 .filter(|root| raw.iter().any(|arg| arg == &format!("--deny-{root}")))
                 .map(str::to_string)
                 .collect();
-            run_repl(project.as_deref(), &allow, &deny);
+            run_repl(project.as_deref(), &allow, &deny, mode.color);
             return;
         }
         // Teaching error: E0043 `jet install` -> `jet fetch`

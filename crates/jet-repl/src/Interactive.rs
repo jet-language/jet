@@ -15,6 +15,7 @@
 //! `?name` resolves to) come from `Render`/`RerunPlan`/`Docs` — this module
 //! is the only place that writes raw ANSI/cursor-control bytes.
 
+use jet_foundation::Terminal::Theme;
 use std::collections::HashSet;
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -536,6 +537,7 @@ fn highlight_input(line: &str, color: bool) -> String {
         return line.to_string();
     }
     let mut out = String::new();
+    let theme = Theme::new(color);
     let chars: Vec<char> = line.chars().collect();
     let mut i = 0;
     while i < chars.len() {
@@ -547,25 +549,19 @@ fn highlight_input(line: &str, color: bool) -> String {
                 i += 1;
                 if chars[i - 1] == '"' && !escaped { break; }
             }
-            out.push_str("\x1b[32m");
-            out.extend(chars[start..i].iter());
-            out.push_str("\x1b[0m");
+            out.push_str(&theme.success(&chars[start..i].iter().collect::<String>()));
         } else if chars[i].is_ascii_digit() {
             let start = i;
             i += 1;
             while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') { i += 1; }
-            out.push_str("\x1b[36m");
-            out.extend(chars[start..i].iter());
-            out.push_str("\x1b[0m");
+            out.push_str(&theme.accent(&chars[start..i].iter().collect::<String>()));
         } else if chars[i].is_alphabetic() || chars[i] == '_' {
             let start = i;
             i += 1;
             while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') { i += 1; }
             let word: String = chars[start..i].iter().collect();
             if matches!(word.as_str(), "fn" | "if" | "else" | "loop" | "return" | "use" | "struct" | "enum" | "match" | "true" | "false") {
-                out.push_str("\x1b[35m");
-                out.push_str(&word);
-                out.push_str("\x1b[0m");
+                out.push_str(&theme.warn(&word));
             } else {
                 out.push_str(&word);
             }
@@ -970,12 +966,16 @@ fn apply_completion<R: Read>(
 }
 
 fn completion_menu(candidates: &[jet_semindex::SemanticSymbol], selected: usize, color: bool) -> String {
-    let mut out = String::from("completion — ↑↓ move · Tab next · Enter insert · Esc close\r\n");
+    let theme = Theme::new(color);
+    let mut out = format!(
+        "{}\r\n",
+        theme.accent("completion — ↑↓ move · Tab next · Enter insert · Esc close")
+    );
     for (index, symbol) in candidates.iter().enumerate() {
         let marker = if index == selected { ">" } else { " " };
         let line = format!("{marker} {:<20} {}", symbol.qualified_name, symbol.signature);
         if index == selected && color {
-            out.push_str(&format!("\x1b[7m{line}\x1b[0m\r\n"));
+            out.push_str(&format!("{}\r\n", theme.invert(&line)));
         } else {
             out.push_str(&line);
             out.push_str("\r\n");

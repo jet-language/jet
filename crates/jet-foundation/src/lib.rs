@@ -19,6 +19,7 @@ pub mod RingLayer;
 pub mod SHA256;
 pub mod Syntax;
 pub mod TargetProfile;
+pub mod Terminal;
 pub mod Traits;
 pub mod WebPartition;
 pub mod XmlPull;

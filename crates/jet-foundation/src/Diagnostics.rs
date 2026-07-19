@@ -69,81 +69,13 @@ pub const JSON_SCHEMA_VERSION: u32 = 1;
 ///
 /// Resolution order, highest priority first:
 ///   1. `--color=always|never` (the flag always wins)
-///   2. `FORCE_COLOR` (any value) forces on; `NO_COLOR` (any value) forces off
+///   2. `NO_COLOR` presence forces off; otherwise `FORCE_COLOR` presence forces on
 ///   3. `auto`: color only when the target stream is a real terminal
 ///
 /// Color never changes the bytes a script parses: it is suppressed whenever
 /// the stream is piped, redirected, in CI, or `NO_COLOR` is set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ColorChoice {
-    Auto,
-    Always,
-    Never,
-}
-
-impl ColorChoice {
-    /// Parse a `--color=<value>` argument. Unknown values fall back to `Auto`.
-    pub fn parse(value: &str) -> ColorChoice {
-        match value {
-            "always" => ColorChoice::Always,
-            "never" => ColorChoice::Never,
-            _ => ColorChoice::Auto,
-        }
-    }
-
-    /// Resolve to a concrete on/off decision for a given stream's TTY-ness,
-    /// honoring `NO_COLOR` / `FORCE_COLOR`. `is_tty` is the caller's
-    /// `std::io::IsTerminal` check on the target stream.
-    pub fn resolve(self, is_tty: bool) -> bool {
-        match self {
-            ColorChoice::Always => true,
-            ColorChoice::Never => false,
-            ColorChoice::Auto => {
-                if std::env::var_os("NO_COLOR").is_some() {
-                    return false;
-                }
-                if std::env::var_os("FORCE_COLOR").is_some() {
-                    return true;
-                }
-                is_tty
-            }
-        }
-    }
-}
-
-/// ANSI style codes, applied only when color is on.
-struct Style {
-    on: bool,
-}
-
-impl Style {
-    fn new(on: bool) -> Self {
-        Style { on }
-    }
-    fn wrap(&self, code: &str, s: &str) -> String {
-        if self.on {
-            format!("\x1b[{}m{}\x1b[0m", code, s)
-        } else {
-            s.to_string()
-        }
-    }
-    /// Bold red — error labels.
-    fn error(&self, s: &str) -> String {
-        self.wrap("1;31", s)
-    }
-    /// Bold yellow — warning labels.
-    fn warn(&self, s: &str) -> String {
-        self.wrap("1;33", s)
-    }
-    /// Bold — headings (`Why:` / `Fix:`).
-    fn bold(&self, s: &str) -> String {
-        self.wrap("1", s)
-    }
-    /// Dim — the caret line / location.
-    fn dim(&self, s: &str) -> String {
-        self.wrap("2", s)
-    }
-}
+pub use crate::Terminal::ColorChoice;
+use crate::Terminal::Theme;
 
 /// A single-span text replacement (LSP quick-fix / M6 S14 autocorrect).
 #[derive(Debug, Clone)]
@@ -272,11 +204,11 @@ impl Diagnostic {
     }
 
     fn render_inner(&self, file: &str, src: &str, color: bool, hyperlinks: bool) -> String {
-        let st = Style::new(color);
+        let theme = Theme::new(color);
         let mut out = String::new();
         let label = match self.severity {
-            Severity::Error => st.error("Error"),
-            Severity::Lint => st.warn("Warning"),
+            Severity::Error => theme.error("Error"),
+            Severity::Lint => theme.warn("Warning"),
         };
         out.push_str(&format!("{} [{}]: {}\n", label, self.code, self.what));
         if let Some(span) = self.span {
@@ -287,7 +219,7 @@ impl Diagnostic {
             } else {
                 loc
             };
-            out.push_str(&format!("  {}\n", st.dim(&loc)));
+            out.push_str(&format!("  {}\n", theme.dim(&loc)));
             let line_text = src.lines().nth(line - 1).unwrap_or("");
             out.push_str("    |\n");
             out.push_str(&format!("{:>3} | {}\n", line, line_text));
@@ -314,13 +246,13 @@ impl Diagnostic {
             // Color only the caret glyphs, not the leading pad (keeps columns).
             if color {
                 let (pad, marks) = carets.split_at(color_start);
-                out.push_str(&format!("    | {}{}\n", pad, st.error(marks)));
+                out.push_str(&format!("    | {}{}\n", pad, theme.error(marks)));
             } else {
                 out.push_str(&format!("    | {}\n", carets));
             }
         }
-        out.push_str(&format!(" {} {}\n", st.bold("Why:"), self.why));
-        out.push_str(&format!(" {} {}\n", st.bold("Fix:"), self.fix));
+        out.push_str(&format!(" {} {}\n", theme.bold("Why:"), self.why));
+        out.push_str(&format!(" {} {}\n", theme.bold("Fix:"), self.fix));
         if let Some(detail) = &self.detail {
             out.push_str(detail);
             if !detail.ends_with('\n') {
