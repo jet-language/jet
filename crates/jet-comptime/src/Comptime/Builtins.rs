@@ -750,33 +750,6 @@ pub(super) fn apply_method(
             };
             Ok(CtValue::ResOk(Box::new(CtValue::Int(ms / scale))))
         }
-        (CtValue::Struct { type_name, fields }, "int") if type_name == crate::Syntax::RNG_TYPE => {
-            let mut state = fields
-                .iter()
-                .find(|(n, _)| n == "state")
-                .and_then(|(_, v)| match v {
-                    CtValue::Int(n) => Some(*n as u64),
-                    _ => None,
-                })
-                .unwrap_or(0);
-            let low = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-            let high = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
-            let draw = super::Methods::random_int(&mut state, low, high);
-            Ok(CtValue::Int(draw))
-        }
-        (CtValue::Struct { type_name, fields }, "float")
-            if type_name == crate::Syntax::RNG_TYPE =>
-        {
-            let mut state = fields
-                .iter()
-                .find(|(n, _)| n == "state")
-                .and_then(|(_, v)| match v {
-                    CtValue::Int(n) => Some(*n as u64),
-                    _ => None,
-                })
-                .unwrap_or(0);
-            Ok(CtValue::Float(super::Methods::random_float(&mut state)))
-        }
         _ => Err(unsupported(
             &format!("the method `.{}` at compile time", method),
             span,

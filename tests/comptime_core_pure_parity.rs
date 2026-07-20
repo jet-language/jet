@@ -35,6 +35,30 @@ const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
 }"#;
 const SCALAR_EXPR: &str = "scalar_view()";
 const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|-12|-1234|-123456|255|1234|123456|123456789";
+const RNG_DECLS: &str = r#"use core.random as random
+fn rng_view() -> String {
+    rng := random.rng(99)
+    items := ["a", "b", "c", "d"]
+    weights := [1.0, 2.0, 3.0, 4.0]
+    deck := [1, 2, 3, 4, 5]
+    int_draw :: rng.int(1, 100)
+    float_draw :: rng.float()
+    range_draw :: rng.float_range(-2.0, 2.0)
+    coin :: rng.bool()
+    chance :: rng.bool(0.25)
+    normal :: rng.normal(1.0, 2.0)
+    exponential :: rng.exponential(1.5)
+    bytes :: rng.bytes(4)
+    picked :: rng.pick(items) ?? "none"
+    weighted :: rng.weighted_pick(items, weights) ?? "none"
+    sample :: rng.sample(items, 2)
+    rng.shuffle(&deck)
+    child := rng.split()
+    child_draw :: child.int(1, 100)
+    after_split :: rng.int(1, 100)
+    return "{int_draw}|{float_draw}|{range_draw}|{coin}|{chance}|{normal}|{exponential}|{bytes}|{picked}|{weighted}|{sample}|{deck}|{child_draw}|{after_split}"
+}"#;
+const RNG_EXPECTED: &str = "4|0.0316577610861849|1.3390388981797772|true|true|-0.6237918784672982|0.21210139132324568|[62, 20, 83, 254]|b|c|[c, a]|[1, 2, 5, 3, 4]|71|87";
 
 fn exact_values(inputs: &[&str]) -> Vec<String> {
     let output = run_transcript(inputs, None);
@@ -192,6 +216,15 @@ fn check_aot_comptime(label: &str, source: &str) -> String {
 }
 
 fn check_dev_tiers(label: &str, source: &str, expected: &str) {
+    check_dev_tiers_with_boundary(label, source, expected, false);
+}
+
+fn check_dev_tiers_with_boundary(
+    label: &str,
+    source: &str,
+    expected: &str,
+    force_interpreter: bool,
+) {
     let id = SEQ.fetch_add(1, Ordering::Relaxed);
     let dir = common::unique_tmp(&format!("jet_core_pure_dev_{id}"));
     fs::create_dir_all(&dir).unwrap();
@@ -199,7 +232,7 @@ fn check_dev_tiers(label: &str, source: &str, expected: &str) {
     fs::write(&path, source).unwrap();
     let path = path.to_string_lossy();
     for (tier, interpreter_only) in [("interpreter", true), ("default-dev", false)] {
-        match dev_iteration(&path, false, interpreter_only) {
+        match dev_iteration(&path, force_interpreter && interpreter_only, interpreter_only) {
             RunOutcome::Ran { stdout, stderr, exit_code } => {
                 assert_eq!(exit_code, 0, "{label} {tier} exit");
                 assert_eq!(stderr, "", "{label} {tier} stderr");
@@ -336,4 +369,14 @@ fn rustc_backed_scalar_value_methods_match_all_execution_tiers_exactly() {
         SCALAR_EXPECTED
     );
     check_dev_tiers("scalar", &source, SCALAR_EXPECTED);
+}
+
+#[test]
+fn rustc_backed_seeded_rng_methods_match_all_execution_tiers_exactly() {
+    let source = parity_source("rng_view()", RNG_DECLS);
+    assert_eq!(check_aot_comptime("rng/all-methods", &source), RNG_EXPECTED);
+    // `core.random` keeps its ambient-effect E2201 boundary. `try_anyway`
+    // proves the seeded handle itself is interpreter-resident; default dev
+    // proves its normal AOT fallback remains byte-identical.
+    check_dev_tiers_with_boundary("rng", &source, RNG_EXPECTED, true);
 }

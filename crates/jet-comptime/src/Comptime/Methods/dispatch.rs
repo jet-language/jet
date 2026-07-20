@@ -19,10 +19,175 @@ use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
 use super::super::Value::CtValue;
 use super::core_calls::{
-    apply_core_call, apply_impure_core_call, as_bytes, display_core_pure_value, shuffle_ct_list,
-    with_ambient_rng,
+    apply_core_call, apply_impure_core_call, as_bytes, as_float, display_core_pure_value,
+    shuffle_ct_list, with_ambient_rng,
 };
 use super::repl_process::{apply_repl_fs_call, pin_repl_command, repl_effect_request};
+
+// Keep this seeded SplitMix64 stream byte-for-byte with the AOT `jet_rng_*`
+// helpers. `core.random`'s ambient interpreter RNG is intentionally separate.
+fn seeded_rng_next(state: &mut u64) -> u64 {
+    *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut value = *state;
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
+}
+
+fn seeded_rng_int(state: &mut u64, low: i64, high: i64) -> i64 {
+    if high <= low {
+        return low;
+    }
+    low + (seeded_rng_next(state) % ((high - low + 1) as u64)) as i64
+}
+
+fn seeded_rng_float(state: &mut u64) -> f64 {
+    (seeded_rng_next(state) >> 11) as f64 / (1u64 << 53) as f64
+}
+
+fn apply_seeded_rng_method(
+    state: &mut u64,
+    method: &str,
+    args: &mut [CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let float = |index| {
+        args.get(index)
+            .ok_or_else(|| unsupported("this Rng method argument", span))
+            .and_then(|value| as_float(value, span))
+    };
+    let list = |index| match args.get(index) {
+        Some(CtValue::List(values)) => Ok(values.as_slice()),
+        _ => Err(unsupported("this Rng method list argument", span)),
+    };
+    match method {
+        "int" => Ok(CtValue::Int(seeded_rng_int(
+            state,
+            as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?,
+            as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?,
+        ))),
+        "float" => Ok(CtValue::Float(seeded_rng_float(state))),
+        "float_range" => {
+            let low = float(0)?;
+            let high = float(1)?;
+            Ok(CtValue::Float(if high > low {
+                low + (high - low) * seeded_rng_float(state)
+            } else {
+                low
+            }))
+        }
+        "bool" if args.is_empty() => Ok(CtValue::Bool((seeded_rng_next(state) & 1) == 1)),
+        "bool" => {
+            let p = float(0)?;
+            Ok(CtValue::Bool(if p <= 0.0 || p.is_nan() {
+                false
+            } else if p >= 1.0 {
+                true
+            } else {
+                seeded_rng_float(state) < p
+            }))
+        }
+        "normal" => {
+            let mean = float(0)?;
+            let stddev = float(1)?;
+            let first = seeded_rng_float(state).max(f64::MIN_POSITIVE);
+            let second = seeded_rng_float(state);
+            let normal = (-2.0 * first.ln()).sqrt()
+                * (std::f64::consts::TAU * second).cos();
+            Ok(CtValue::Float(mean + normal * stddev.max(0.0)))
+        }
+        "exponential" => {
+            let lambda = float(0)?;
+            Ok(CtValue::Float(if lambda <= 0.0 || lambda.is_nan() {
+                0.0
+            } else {
+                -seeded_rng_float(state).max(f64::MIN_POSITIVE).ln() / lambda
+            }))
+        }
+        "bytes" => {
+            let count = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            Ok(CtValue::Bytes(
+                (0..count).map(|_| seeded_rng_next(state) as u8).collect(),
+            ))
+        }
+        "split" => Ok(CtValue::Struct {
+            type_name: crate::Syntax::RNG_TYPE.to_string(),
+            fields: vec![(
+                "state".to_string(),
+                CtValue::Int(seeded_rng_next(state) as i64),
+            )],
+        }),
+        "pick" => {
+            let values = list(0)?;
+            Ok(if values.is_empty() {
+                CtValue::None(Type::Int)
+            } else {
+                let index = seeded_rng_int(state, 0, values.len() as i64 - 1) as usize;
+                CtValue::Some(Box::new(values[index].clone()))
+            })
+        }
+        "weighted_pick" => {
+            let values = list(0)?;
+            let weights = list(1)?;
+            if values.is_empty() || values.len() != weights.len() {
+                return Ok(CtValue::None(Type::Int));
+            }
+            let weights = weights
+                .iter()
+                .map(|weight| as_float(weight, span))
+                .collect::<Result<Vec<_>, _>>()?;
+            let total = weights
+                .iter()
+                .filter(|weight| weight.is_finite() && **weight > 0.0)
+                .sum::<f64>();
+            if total <= 0.0 {
+                return Ok(CtValue::None(Type::Int));
+            }
+            let mut needle = seeded_rng_float(state) * total;
+            let picked = values
+                .iter()
+                .zip(weights)
+                .find_map(|(value, weight)| {
+                    let weight = if weight.is_finite() && weight > 0.0 {
+                        weight
+                    } else {
+                        0.0
+                    };
+                    if needle < weight {
+                        Some(value.clone())
+                    } else {
+                        needle -= weight;
+                        None
+                    }
+                })
+                .or_else(|| values.last().cloned());
+            Ok(CtValue::Some(Box::new(picked.unwrap())))
+        }
+        "sample" => {
+            let values = list(0)?;
+            let count = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
+            let count = (count.max(0) as usize).min(values.len());
+            let mut pool = values.to_vec();
+            for index in 0..count {
+                let picked = seeded_rng_int(state, index as i64, pool.len() as i64 - 1) as usize;
+                pool.swap(index, picked);
+            }
+            pool.truncate(count);
+            Ok(CtValue::List(pool))
+        }
+        "shuffle" => {
+            let Some(CtValue::List(values)) = args.first_mut() else {
+                return Err(unsupported("Rng.shuffle with a non-list argument", span));
+            };
+            for index in (1..values.len()).rev() {
+                let picked = seeded_rng_int(state, 0, index as i64) as usize;
+                values.swap(index, picked);
+            }
+            Ok(CtValue::Unit)
+        }
+        _ => Err(unsupported("this Rng method", span)),
+    }
+}
 
 /// D-CTIO1 (ratified 2026-06-22): a comptime embed path must be a string
 /// literal that stays inside the project — never computed, never absolute, and
@@ -1818,6 +1983,56 @@ impl<'a> Interp<'a> {
         let mut argv = Vec::new();
         for a in args {
             argv.push(self.eval(&a.expr, scope)?);
+        }
+        match (&recv, method) {
+            (
+                CtValue::Struct { type_name, fields },
+                method @ ("int"
+                    | "float"
+                    | "float_range"
+                    | "bool"
+                    | "normal"
+                    | "exponential"
+                    | "bytes"
+                    | "split"
+                    | "pick"
+                    | "weighted_pick"
+                    | "sample"
+                    | "shuffle"),
+            ) if type_name == crate::Syntax::RNG_TYPE => {
+                if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                    return Err(unsupported("Rng method on a temporary value", span));
+                }
+                if method == "shuffle"
+                    && !matches!(
+                        args.first().map(|arg| &arg.expr),
+                        Some(Expr::Ident(..) | Expr::Field(..))
+                    )
+                {
+                    return Err(unsupported("Rng.shuffle with a temporary list", span));
+                }
+                let mut state = fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("state", CtValue::Int(state)) => Some(*state as u64),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                let value = apply_seeded_rng_method(&mut state, method, &mut argv, span)?;
+                if method == "shuffle" {
+                    self.write_back(&args[0].expr, argv[0].clone(), scope)?;
+                }
+                self.write_back(
+                    receiver,
+                    CtValue::Struct {
+                        type_name: crate::Syntax::RNG_TYPE.to_string(),
+                        fields: vec![("state".to_string(), CtValue::Int(state as i64))],
+                    },
+                    scope,
+                )?;
+                return Ok(value);
+            }
+            _ => {}
         }
         if is_build_context && method == "fetch" {
             return self
