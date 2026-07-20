@@ -687,6 +687,91 @@ fn host_authority_is_single_valid_and_required_for_http11() {
 }
 
 #[test]
+fn absolute_form_target_matches_host_before_routing() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => response.extend_from_slice(&buf[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(error) => panic!("response read: {error}"),
+            }
+        }
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/resource", move |req| {
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &req.path)
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 16;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    for (request, expected_path) in [
+        ("GET http://local/resource?x=1 HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=1"),
+        ("GET HTTP://EXAMPLE.COM:80/resource HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET https://[::1]/resource HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET http://percent%2Dname.example/resource HTTP/1.1\r\nHost: percent%2dname.example:80\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET http://local/resource HTTP/1.0\r\nConnection: close\r\n\r\n", "/resource"),
+    ] {
+        let response = exchange(addr, request.as_bytes());
+        assert!(response.starts_with("HTTP/1.") && response.contains(" 200 OK\r\n"), "valid absolute-form rejected: {response}");
+        assert!(response.ends_with(&format!("\r\n\r\n{expected_path}")), "target was not normalized once: {response}");
+    }
+
+    for invalid_target in [
+        "GET http://one/resource HTTP/1.1\r\nHost: two\r\n",
+        "GET http://local:8080/resource HTTP/1.1\r\nHost: local\r\n",
+        "GET http://user@local/resource HTTP/1.1\r\nHost: local\r\n",
+        "GET http://local/resource#fragment HTTP/1.1\r\nHost: local\r\n",
+        "GET ftp://local/resource HTTP/1.1\r\nHost: local\r\n",
+        "GET relative HTTP/1.1\r\nHost: local\r\n",
+        "GET http://local\t/resource HTTP/1.1\r\nHost: local\r\n",
+        "GET http:///resource HTTP/1.1\r\nHost: local\r\n",
+    ] {
+        let request = format!(
+            "{invalid_target}\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        );
+        let response = exchange(addr, request.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "accepted invalid target: {response}");
+        assert!(!response.contains("200 OK"), "invalid target dispatched or reused: {response}");
+        assert_eq!(response.matches("HTTP/1.1").count(), 1, "invalid target reused connection: {response}");
+    }
+
+    let mismatched_expect = exchange(
+        addr,
+        b"POST http://one/resource HTTP/1.1\r\nHost: two\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n",
+    );
+    assert!(mismatched_expect.starts_with("HTTP/1.1 400 Bad Request"), "{mismatched_expect}");
+    assert!(!mismatched_expect.contains("100 Continue"), "mismatch received body permission: {mismatched_expect}");
+
+    assert_eq!(calls.load(Ordering::Acquire), 5, "invalid target reached handler");
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 14);
+    assert_eq!(report.user_completed, 14);
+}
+
+#[test]
 fn shutdown_closes_idle_keepalive_and_starts_no_new_request() {
     use std::io::Write;
 

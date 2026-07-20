@@ -58,10 +58,11 @@ enum JetHttpRequestFraming {
     Chunked,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct JetHttpRequestHead {
     framing: JetHttpRequestFraming,
     expect_continue: bool,
+    target: String,
 }
 
 #[derive(Clone, Copy)]
@@ -772,23 +773,118 @@ fn jet_http_ipv_future_valid(host: &str) -> bool {
         })
 }
 
-fn jet_http_host_authority_valid(value: &str) -> bool {
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetHttpAuthority {
+    host: String,
+    port: Option<u16>,
+}
+
+fn jet_http_normalize_reg_name(host: &str) -> String {
+    let mut normalized = String::with_capacity(host.len());
+    let bytes = host.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            normalized.push('%');
+            normalized.push((bytes[index + 1] as char).to_ascii_uppercase());
+            normalized.push((bytes[index + 2] as char).to_ascii_uppercase());
+            index += 3;
+        } else {
+            normalized.push((bytes[index] as char).to_ascii_lowercase());
+            index += 1;
+        }
+    }
+    normalized
+}
+
+fn jet_http_parse_authority(value: &str) -> Option<JetHttpAuthority> {
     let authority = jet_http_trim_ows(value);
     if let Some(bracketed) = authority.strip_prefix('[') {
-        let Some((host, suffix)) = bracketed.split_once(']') else { return false };
-        if host.parse::<std::net::Ipv6Addr>().is_err() && !jet_http_ipv_future_valid(host) {
-            return false;
-        }
-        return suffix.is_empty()
-            || suffix.strip_prefix(':').is_some_and(jet_http_host_port_valid);
+        let (host, suffix) = bracketed.split_once(']')?;
+        let host = if let Ok(address) = host.parse::<std::net::Ipv6Addr>() {
+            address.to_string()
+        } else if jet_http_ipv_future_valid(host) {
+            host.to_ascii_lowercase()
+        } else {
+            return None;
+        };
+        let port = if suffix.is_empty() {
+            None
+        } else {
+            let port = suffix.strip_prefix(':')?;
+            if !jet_http_host_port_valid(port) {
+                return None;
+            }
+            Some(port.parse().unwrap())
+        };
+        return Some(JetHttpAuthority { host: format!("[{host}]"), port });
     }
     let mut parts = authority.split(':');
     let host = parts.next().unwrap_or("");
     let port = parts.next();
     if parts.next().is_some() || !jet_http_reg_name_valid(host) {
-        return false;
+        return None;
     }
-    port.is_none_or(jet_http_host_port_valid)
+    let port = match port {
+        Some(port) if jet_http_host_port_valid(port) => Some(port.parse().unwrap()),
+        Some(_) => return None,
+        None => None,
+    };
+    Some(JetHttpAuthority {
+        host: jet_http_normalize_reg_name(host),
+        port,
+    })
+}
+
+fn jet_http_absolute_target(
+    method: &str,
+    target: &str,
+    host: Option<&JetHttpAuthority>,
+    host_required: bool,
+) -> Result<String, JetHttpReadError> {
+    if target.bytes().any(|byte| byte <= b' ' || byte >= 0x7f) {
+        return Err(JetHttpReadError { status: 400, message: "request target contains invalid bytes" });
+    }
+    if target.starts_with('/') {
+        if target.contains('#') {
+            return Err(JetHttpReadError { status: 400, message: "request target contains a fragment" });
+        }
+        return Ok(target.to_string());
+    }
+    if target == "*" && method == "OPTIONS" {
+        return Ok(target.to_string());
+    }
+    let Some(scheme_end) = target.find("://") else {
+        return Err(JetHttpReadError { status: 400, message: "request target form is not supported" });
+    };
+    let scheme = &target[..scheme_end];
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") || target.contains('#') {
+        return Err(JetHttpReadError { status: 400, message: "absolute request target is malformed" });
+    }
+    let remainder = &target[scheme_end + 3..];
+    let authority_end = remainder.find(['/', '?']).unwrap_or(remainder.len());
+    let authority = jet_http_parse_authority(&remainder[..authority_end]).ok_or(JetHttpReadError {
+        status: 400,
+        message: "absolute request authority is malformed",
+    })?;
+    let default_port = if scheme.eq_ignore_ascii_case("http") { 80 } else { 443 };
+    if let Some(host) = host {
+        if authority.host != host.host
+            || authority.port.unwrap_or(default_port) != host.port.unwrap_or(default_port)
+        {
+            return Err(JetHttpReadError { status: 400, message: "absolute request authority does not match host" });
+        }
+    } else if host_required {
+        return Err(JetHttpReadError { status: 400, message: "absolute request target requires a host header" });
+    }
+    let suffix = &remainder[authority_end..];
+    Ok(if suffix.is_empty() {
+        "/".to_string()
+    } else if suffix.starts_with('?') {
+        format!("/{suffix}")
+    } else {
+        suffix.to_string()
+    })
 }
 
 fn jet_http_chunk_token_byte(byte: u8) -> bool {
@@ -969,21 +1065,20 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
             }
         }
     }
-    match host {
-        Some(value) if !jet_http_host_authority_valid(value) => {
-            return Err(JetHttpReadError {
-                status: 400,
-                message: "host authority is malformed",
-            });
-        }
+    let host = match host {
+        Some(value) => Some(jet_http_parse_authority(value).ok_or(JetHttpReadError {
+            status: 400,
+            message: "host authority is malformed",
+        })?),
         None if version == "HTTP/1.1" => {
             return Err(JetHttpReadError {
                 status: 400,
                 message: "HTTP/1.1 requires one host header",
             });
         }
-        _ => {}
-    }
+        None => None,
+    };
+    let target = jet_http_absolute_target(method, target, host.as_ref(), version == "HTTP/1.1")?;
     if transfer_encoding.is_some() && content_length.is_some() {
         return Err(JetHttpReadError { status: 400, message: "content-length and transfer-encoding cannot be combined" });
     }
@@ -1005,7 +1100,7 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
             });
         }
     };
-    Ok(JetHttpRequestHead { framing, expect_continue })
+    Ok(JetHttpRequestHead { framing, expect_continue, target })
 }
 
 fn jet_http_srv_read_error_response(error: &JetHttpReadError) -> String {
@@ -1104,7 +1199,7 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpSrvReq, JetHttpReadError> {
     let req_line = lines.next().unwrap_or("");
     let mut parts = req_line.splitn(3, ' ');
     let method = parts.next().unwrap_or("").to_string();
-    let path = parts.next().unwrap_or("").to_string();
+    let path = head.target;
     let mut headers = JetHttpHeaders::new();
     for line in lines {
         let (name, value) = line.split_once(':').ok_or(JetHttpReadError {
