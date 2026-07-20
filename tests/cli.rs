@@ -93,6 +93,13 @@ fn lua_bind_discovers_without_executing_and_launders_parse_errors() {
     let invalid=dir.join("invalid.lua");fs::write(&invalid,"function broken(input)\n  return {\nend\n").unwrap();let failed=Command::new(jet()).args(["inspect","bind","lua"]).arg(&invalid).args(["--pkg","bad"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert_eq!(failed.status.code(),Some(1));let stderr=String::from_utf8_lossy(&failed.stderr);assert!(stderr.contains("Error [E3208]"));assert!(!stderr.contains("invalid.lua:")&&!stderr.contains("near 'end'"),"raw Lua parser detail escaped: {stderr}");
 }
 
+#[test]
+fn lua_bind_rejects_generated_table_view_abi_name() {
+    if Command::new("luac").arg("-v").output().is_err() { return }
+    let dir=isolated_cwd("lua_bind_reserved_view");let script=dir.join("reserved.lua");fs::write(&script,"function view_release(input) return input end\n").unwrap();
+    let failed=Command::new(jet()).args(["inspect","bind","lua"]).arg(&script).args(["--pkg","reserved_ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert_eq!(failed.status.code(),Some(1));let stderr=String::from_utf8_lossy(&failed.stderr);assert!(stderr.contains("Error [E3208]")&&stderr.contains("`view_release` cannot be exported"),"{stderr}");assert!(!stderr.contains("E0105"),"duplicate generated extern escaped binder validation: {stderr}");assert!(!dir.join(".jet/bindings/lua/reserved_ops.jet").exists());
+}
+
 fn cli_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/cli")
 }
