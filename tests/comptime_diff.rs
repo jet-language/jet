@@ -227,6 +227,21 @@ fn comptime_matches_runtime() {
     }
 }
 
+#[test]
+fn comptime_bigint_matches_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping BigInt differential battery");
+        return;
+    }
+    for (i, expr) in CASES
+        .iter()
+        .enumerate()
+        .filter(|(_, expr)| expr.contains("BigInt"))
+    {
+        check_comptime_case(i, expr);
+    }
+}
+
 fn check_comptime_case(i: usize, expr: &str) {
     let src = format!(
         "comptime comptime_value = {e}\n\nfn run() {{\n    r :: {e}\n    print(\"{{comptime_value}}\")\n    print(\"{{r}}\")\n}}\n",

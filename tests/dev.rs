@@ -2273,6 +2273,45 @@ fn run() {
 }
 
 #[test]
+fn bigint_example_matches_interpreter_resident_jit_default_dev_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let file = "examples/features/text/bigint.jet";
+    let expected = ProgramOutput::ran(golden_stdout("text/bigint"), String::new(), 0);
+
+    let interpreted = match dev_iteration(file, false, true) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("BigInt example must execute in interpreter tier: {diags:?}")
+        }
+    };
+
+    let source = fs::read_to_string(file).unwrap();
+    let resident = run_cranelift_without_fallback(&source, "bigint_example");
+    let default = match dev_iteration(file, false, false) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => panic!("default dev failed BigInt example: {diags:?}"),
+    };
+
+    let dir = std::env::temp_dir().join(format!("jet_bigint_example_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output(&dir, "bigint_example", 0, "bigint_example", file);
+
+    assert_eq!(interpreted, expected);
+    assert_eq!(resident, expected);
+    assert_eq!(default, expected);
+    assert_eq!(aot, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
     let counted = "fn run() {\n    loop i := 0; i < 4; i += 1 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n";
     if !skip_if_cranelift_host_unsupported() {

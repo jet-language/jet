@@ -732,6 +732,24 @@ fn ct_static_methods(text: &str) -> BTreeSet<(String, String)> {
     out
 }
 
+fn ct_build_context_methods() -> BTreeSet<String> {
+    let bridge = read("crates/jet-comptime/src/Comptime/Build/runtime_bridge.rs");
+    let mut methods = method_candidates(source_between(
+        &bridge,
+        "let result = match method {",
+        Some("_ => return None.ok_or_else"),
+    ));
+    let dispatch = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
+    for method in ["find", "fetch", "embed"] {
+        if dispatch.contains(&format!("method == \"{method}\""))
+            || dispatch.contains(&format!("\"{method}\" =>"))
+        {
+            methods.insert(method.to_string());
+        }
+    }
+    methods
+}
+
 fn string_equalities(text: &str, subject: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     let needle = format!("{subject} == \"");
@@ -860,16 +878,17 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
             .iter()
             .filter_map(|constant| values.get(constant).cloned()),
     );
-    let ct_values = ct_value_methods(source_between(
-        &builtin_dispatch_src,
-        "pub(super) fn apply_method(",
-        None,
-    ));
+    // Value methods live in both the leaf builtin table and the interpreter
+    // spine: higher-order calls need `&mut self` for closure dispatch, while
+    // mutators need write-back. Audit the complete canonical comptime tree so
+    // those real paths are not mislabeled as open gaps.
+    let ct_values = ct_value_methods(&core_dispatch_src);
     let ct_statics = ct_static_methods(source_between(
         &builtin_dispatch_src,
         "pub(super) fn apply_static_type_method(",
         Some("pub(super) fn apply_mutating("),
     ));
+    let ct_build_context = ct_build_context_methods();
     let mut errors = Vec::new();
     for &(module, method) in KNOWN_OPEN_GAPS {
         let pair_is_discovered = discovered.iter().any(|entry| {
@@ -926,7 +945,11 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
             }
             Surface::Value => {
                 let owner = if entry.owner == "FixedList" { "List" } else { &entry.owner };
-                if ct_values.contains(&(owner.to_string(), entry.method.clone())) {
+                if entry.method == "to_string" {
+                    Some((Class::Covered, "universal comptime value dispatch"))
+                } else if owner == "BuildContext" && ct_build_context.contains(&entry.method) {
+                    Some((Class::Covered, "interpreter-owned build context dispatch"))
+                } else if ct_values.contains(&(owner.to_string(), entry.method.clone())) {
                     Some((Class::Covered, "comptime value dispatch"))
                 } else if let Some(reason) = value_boundary(&entry.owner) {
                     Some((Class::Boundary, reason))
@@ -1021,6 +1044,10 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::PurePending);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::PurePending);
     assert_eq!(record(&records, Surface::Value, "String", "trim").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "BigInt", "to_string").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "List", "filter").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "List", "clear").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "BuildContext", "generate").class, Class::Covered);
     assert_eq!(record(&records, Surface::Value, "Duration", "in").class, Class::Covered);
     assert_eq!(record(&records, Surface::Value, "Rng", "int").class, Class::Covered);
     assert_eq!(record(&records, Surface::Value, "Rng", "float").class, Class::Covered);
@@ -1043,7 +1070,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     );
     assert_eq!(
         stable_hash(&rendered),
-        6050875465191043088,
+        5421219311749255364,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

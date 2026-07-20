@@ -627,6 +627,11 @@ fn repl_basics_transcript() {
     run_transcript_file(txt);
 }
 
+#[test]
+fn repl_bigint_exact_transcript() {
+    run_transcript_file(include_str!("repl/bigint.txt"));
+}
+
 // ── D-REPL8=A: move semantics across inputs ───────────────────────────────
 
 #[test]
