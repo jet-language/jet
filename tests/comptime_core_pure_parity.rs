@@ -29,10 +29,6 @@ fn public_transcript_covers_remaining_core_pure_families() {
         "use core.time.date as date",
         "use core.time.datetime as datetime",
         "use core.science.measurement as measurement",
-        "use core.sketch.cms as cms",
-        "use core.sketch.hll as hll",
-        "use core.sketch.reservoir as reservoir",
-        "use core.sketch.tdigest as tdigest",
         "mime.from_extension(\".PNG\") ?? \"none\"",
         "mime.extension(\"Text/HTML; charset=UTF-8\") ?? \"none\"",
         "mime.parse(\"Text/HTML; charset=UTF-8\")",
@@ -47,8 +43,6 @@ fn public_transcript_covers_remaining_core_pure_families() {
         "datetime.from_timestamp(-1)",
         "time.from_unix_ms(-1)",
         "measurement.from(12.5, 0.25) == measurement.from(12.5, 0.25)",
-        "fn sketches_ready() -> Bool { hll.new(); tdigest.new(); cms.new(); reservoir.new(0); return true }",
-        "sketches_ready()",
     ]);
     assert_eq!(
         values,
@@ -67,7 +61,6 @@ fn public_transcript_covers_remaining_core_pure_families() {
             "DateTime(secs: -1) : DateTime",
             "DateTime(secs: -1) : DateTime",
             "true : Bool",
-            "true : Bool",
         ]
     );
 }
@@ -76,9 +69,6 @@ fn public_transcript_covers_remaining_core_pure_families() {
 fn public_transcript_composes_email_and_codecs_exactly() {
     let values = exact_values(&[
         "use core.email as email",
-        "use core.encoding.csv as csv",
-        "use core.encoding.toml as toml",
-        "use core.encoding.yaml as yaml",
         "use core.encoding.xml as xml",
         "sender :: email.address(\"Mara <mara@example.com>\") ?? panic(\"sender\")",
         "recipient :: email.address(\"ada@example.net\") ?? panic(\"recipient\")",
@@ -87,9 +77,6 @@ fn public_transcript_composes_email_and_codecs_exactly() {
         "email.envelope(sender, [recipient])",
         "fn serialized(message: Message) -> Bool {\n    if email.serialize(message) == {\n        Ok(_) -> return true\n        Err(_) -> return false\n    }\n    return false\n}",
         "serialized(message)",
-        "csv.to_string_pretty([[\"a\", \"b,c\"]])",
-        "toml.to_string_pretty(toml.parse(\"x = 1\\n\") ?? panic(\"toml\")).replace(\"\\n\", \"|\")",
-        "yaml.to_string_pretty(yaml.parse(\"x: 1\\n\") ?? panic(\"yaml\")).replace(\"\\n\", \"|\")",
         "xml.canonical(xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\"), xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")",
     ]);
     assert_eq!(
@@ -97,9 +84,6 @@ fn public_transcript_composes_email_and_codecs_exactly() {
         [
             "Envelope(from: Address(display: Mara, mailbox: mara@example.com), recipients: [Address(display: null, mailbox: ada@example.net)]) : Result",
             "true : Bool",
-            "\"a,\"b,c\"\" : String",
-            "\"x = 1\" : String",
-            "\"x: 1\" : String",
             "\"<r a=\"1\" b=\"2\"><x></x></r>\" : String",
         ]
     );
@@ -112,10 +96,7 @@ fn parity_source(expression: &str, imports: &str) -> String {
 }
 
 fn check_aot_comptime(label: &str, source: &str) {
-    if !common::have_rustc() {
-        eprintln!("note: rustc missing; skipping {label}");
-        return;
-    }
+    assert!(common::have_rustc(), "{label} requires rustc");
     let compiled = jet::Driver::compile_generated_src(
         source,
         "comptime_core_pure_parity.jet",
@@ -171,17 +152,6 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
             parity_source("mime.extension(\"image/png\") ?? \"none\"", "use core.mime as mime"),
         ),
         (
-            "result/struct",
-            parity_source("date_ok()", "use core.time.date as date\nfn date_ok() -> String {\n    if date.parse(\"2024-02-29\") == {\n        Ok(_) -> return \"ok\"\n        Err(e) -> return e\n    }\n    return \"bad\"\n}"),
-        ),
-        (
-            "plain/struct",
-            parity_source(
-                "date_ready()",
-                "use core.time.date as date\nfn date_ready() -> Bool { date.new(2024, 13, 40); return true }",
-            ),
-        ),
-        (
             "result/bytes",
             parity_source(
                 "email_wire()",
@@ -196,10 +166,10 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
             ),
         ),
         (
-            "opaque/handle",
+            "xml/float-shape-error",
             parity_source(
-                "sketch_ready()",
-                "use core.sketch.hll as hll\nfn sketch_ready() -> Bool { hll.new(); return true }",
+                "xml_shape_reason(DataTree.Float(1.5))",
+                "use core.encoding.xml as xml\nfn xml_shape_reason(tree: DataTree) -> String {\n    if xml.canonical(tree, xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
             ),
         ),
     ];

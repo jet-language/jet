@@ -1611,7 +1611,9 @@ fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
     }
 }
 
-fn xml_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String> {
+pub(super) fn xml_from_ct(
+    value: &CtValue,
+) -> Result<jet_foundation::XmlPull::Value, String> {
     use jet_foundation::XmlPull::Value;
     if matches!(
         value,

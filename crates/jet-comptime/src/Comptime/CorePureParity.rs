@@ -31,15 +31,6 @@ pub(super) fn evaluate(
         ("core.email", "message") => email_message(args, span),
         ("core.email", "envelope") => email_envelope(args, span),
         ("core.email", "serialize") => email_serialize(args, span),
-        ("core.encoding.csv", "to_string_pretty") => {
-            string_rows(args, 0, span).map(|rows| {
-                CtValue::Str(crate::Comptime::EncodingLite::csv_render(&rows))
-            })
-        }
-        ("core.encoding.toml", "to_string_pretty") => one(args, 0, module, method, span)
-            .map(|value| CtValue::Str(crate::Comptime::EncodingLite::toml_render(value))),
-        ("core.encoding.yaml", "to_string_pretty") => one(args, 0, module, method, span)
-            .map(|value| CtValue::Str(crate::Comptime::EncodingLite::yaml_render(value))),
         ("core.encoding.xml", "canonical") => xml_canonical(args, span),
         ("core.time", "period") => period(args, span),
         ("core.time", "period_days") => period_unit(args, span, 2),
@@ -49,10 +40,6 @@ pub(super) fn evaluate(
         ("core.time", "parse_rfc3339") => datetime_parse(args, span),
         ("core.time", "parse_time") => local_time_parse(args, span),
         ("core.science.measurement", "from") => measurement(args, span),
-        ("core.sketch.hll", "new") => Ok(sketch_hll()),
-        ("core.sketch.tdigest", "new") => Ok(sketch_tdigest()),
-        ("core.sketch.cms", "new") => Ok(sketch_cms()),
-        ("core.sketch.reservoir", "new") => sketch_reservoir(args, span),
         ("core.time.date", "new") => date_new_call(args, span),
         ("core.time.date", "parse") => date_parse_call(args, span),
         ("core.time.datetime", "from_timestamp") => datetime_from_timestamp(args, span),
@@ -118,26 +105,6 @@ fn field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtVa
             .map(|(_, value)| value),
         _ => None,
     }
-}
-
-fn string_rows(args: &[CtValue], index: usize, span: Span) -> Result<Vec<Vec<String>>, Diagnostic> {
-    let Some(CtValue::List(rows)) = args.get(index) else {
-        return Err(unsupported("encoding call expected [[String]]", span));
-    };
-    rows.iter()
-        .map(|row| {
-            let CtValue::List(columns) = row else {
-                return Err(unsupported("encoding call expected [[String]]", span));
-            };
-            columns
-                .iter()
-                .map(|column| match column {
-                    CtValue::Str(value) => Ok(value.clone()),
-                    _ => Err(unsupported("encoding call expected [[String]]", span)),
-                })
-                .collect()
-        })
-        .collect()
 }
 
 // ── MIME ───────────────────────────────────────────────────────────────────
@@ -513,62 +480,17 @@ fn measurement(args: &[CtValue], span: Span) -> EvalResult {
     ))
 }
 
-// ── Sketch constructors ────────────────────────────────────────────────────
-
-fn sketch_hll() -> CtValue {
-    structure(
-        "HyperLogLog",
-        vec![("registers", CtValue::Bytes(vec![0; 256]))],
-    )
-}
-
-fn sketch_tdigest() -> CtValue {
-    structure("TDigest", vec![("centroids", CtValue::List(Vec::new()))])
-}
-
-fn sketch_cms() -> CtValue {
-    structure(
-        "CountMinSketch",
-        vec![(
-            "rows",
-            CtValue::List(
-                (0..4)
-                    .map(|_| CtValue::List(vec![CtValue::Int(0); 256]))
-                    .collect(),
-            ),
-        )],
-    )
-}
-
-fn sketch_reservoir(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "ReservoirSampler",
-        vec![
-            ("capacity", CtValue::Int(int_arg(args, 0, span)?.max(1))),
-            ("reservoir", CtValue::List(Vec::new())),
-            ("count", CtValue::Int(0)),
-            ("rng", CtValue::Int(0x5ead_beef_cafe_babe)),
-        ],
-    ))
-}
-
 // ── XML canonicalization ───────────────────────────────────────────────────
 
 fn xml_canonical(args: &[CtValue], span: Span) -> EvalResult {
     let tree = one(args, 0, "core.encoding.xml", "canonical", span)?;
     let options = one(args, 1, "core.encoding.xml", "canonical", span)?;
-    let rendered = crate::Comptime::EncodingLite::xml_render(tree);
-    if rendered.is_empty() {
-        return Ok(CtValue::ResErr(Box::new(xml_shape_error(
-            "XML tree contains a non-DataTree value",
-        ))));
-    }
-    let value = match jet_foundation::XmlPull::parse_document(&rendered) {
+    let value = match crate::Comptime::EncodingLite::xml_from_ct(tree) {
         Ok(value) => value,
-        Err(error) => {
-            return Ok(CtValue::ResErr(Box::new(
-                crate::Comptime::EncodingLite::xml_error_value(error),
-            )))
+        Err(_) => {
+            return Ok(CtValue::ResErr(Box::new(xml_shape_error(
+                "XML tree cannot contain Float or Bytes values",
+            ))))
         }
     };
     let (mode, comments, inclusive_prefixes) = xml_canonical_options(options, span)?;
@@ -1911,4 +1833,39 @@ fn percent_encode(value: &str) -> Result<String, EmailError> {
         }
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn xml_canonical_rejects_internal_bytes_with_aot_shape_reason() {
+        let options = structure(
+            "XMLCanonical",
+            vec![
+                (
+                    "mode",
+                    CtValue::Enum {
+                        type_name: "XMLCanonicalMode".to_string(),
+                        variant: "Inclusive11".to_string(),
+                        args: Vec::new(),
+                    },
+                ),
+                ("comments", CtValue::Bool(false)),
+                ("inclusive_prefixes", CtValue::List(Vec::new())),
+            ],
+        );
+        let actual = xml_canonical(
+            &[CtValue::Bytes(vec![1, 2, 3]), options],
+            Span::new(0, 0),
+        )
+        .expect("invalid DataTree is a user Result error");
+        assert_eq!(
+            actual,
+            CtValue::ResErr(Box::new(xml_shape_error(
+                "XML tree cannot contain Float or Bytes values",
+            )))
+        );
+    }
 }
