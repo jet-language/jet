@@ -732,6 +732,8 @@ fn absolute_form_target_matches_host_before_routing() {
         ("GET https://[::1]/resource HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n", "/resource"),
         ("GET http://percent%2Dname.example/resource HTTP/1.1\r\nHost: percent%2dname.example:80\r\nConnection: close\r\n\r\n", "/resource"),
         ("GET http://local/resource HTTP/1.0\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET /resource?x=%2F:@!$&'()*+,;=~._-/? HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=%2F:@!$&'()*+,;=~._-/?"),
+        ("GET http://local/resource?x=%2f:@!$&'()*+,;=~._-/? HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=%2f:@!$&'()*+,;=~._-/?"),
     ] {
         let response = exchange(addr, request.as_bytes());
         assert!(response.starts_with("HTTP/1.") && response.contains(" 200 OK\r\n"), "valid absolute-form rejected: {response}");
@@ -747,6 +749,12 @@ fn absolute_form_target_matches_host_before_routing() {
         "GET relative HTTP/1.1\r\nHost: local\r\n",
         "GET http://local\t/resource HTTP/1.1\r\nHost: local\r\n",
         "GET http:///resource HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource% HTTP/1.1\r\nHost: local\r\n",
+        "GET http://local/resource%zz HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource\\evil HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource?x=<bad> HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource#fragment HTTP/1.1\r\nHost: local\r\n",
+        "OPTIONS * HTTP/1.1\r\nHost: local\r\n",
     ] {
         let request = format!(
             "{invalid_target}\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
@@ -764,11 +772,18 @@ fn absolute_form_target_matches_host_before_routing() {
     assert!(mismatched_expect.starts_with("HTTP/1.1 400 Bad Request"), "{mismatched_expect}");
     assert!(!mismatched_expect.contains("100 Continue"), "mismatch received body permission: {mismatched_expect}");
 
-    assert_eq!(calls.load(Ordering::Acquire), 5, "invalid target reached handler");
+    let malformed_expect = exchange(
+        addr,
+        b"POST /resource?x=%zz HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n",
+    );
+    assert!(malformed_expect.starts_with("HTTP/1.1 400 Bad Request"), "{malformed_expect}");
+    assert!(!malformed_expect.contains("100 Continue"), "malformed target received body permission: {malformed_expect}");
+
+    assert_eq!(calls.load(Ordering::Acquire), 7, "invalid target reached handler");
     shutdown.store(true, Ordering::Release);
     let report = server.join().expect("server join");
-    assert_eq!(report.user_accepted, 14);
-    assert_eq!(report.user_completed, 14);
+    assert_eq!(report.user_accepted, 23);
+    assert_eq!(report.user_completed, 23);
 }
 
 #[test]

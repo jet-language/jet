@@ -836,55 +836,92 @@ fn jet_http_parse_authority(value: &str) -> Option<JetHttpAuthority> {
     })
 }
 
+fn jet_http_path_query_valid(target: &str) -> bool {
+    let bytes = target.as_bytes();
+    if bytes.first() != Some(&b'/') {
+        return false;
+    }
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'%' {
+            if !bytes.get(index + 1).is_some_and(u8::is_ascii_hexdigit)
+                || !bytes.get(index + 2).is_some_and(u8::is_ascii_hexdigit)
+            {
+                return false;
+            }
+            index += 3;
+            continue;
+        }
+        if byte == b'?' {
+            index += 1;
+            continue;
+        }
+        if !(byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')'
+                    | b'*' | b'+' | b',' | b';' | b'=' | b':' | b'@' | b'/'
+            ))
+        {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
 fn jet_http_absolute_target(
-    method: &str,
     target: &str,
     host: Option<&JetHttpAuthority>,
     host_required: bool,
 ) -> Result<String, JetHttpReadError> {
-    if target.bytes().any(|byte| byte <= b' ' || byte >= 0x7f) {
-        return Err(JetHttpReadError { status: 400, message: "request target contains invalid bytes" });
-    }
-    if target.starts_with('/') {
-        if target.contains('#') {
-            return Err(JetHttpReadError { status: 400, message: "request target contains a fragment" });
-        }
-        return Ok(target.to_string());
-    }
-    if target == "*" && method == "OPTIONS" {
-        return Ok(target.to_string());
-    }
-    let Some(scheme_end) = target.find("://") else {
-        return Err(JetHttpReadError { status: 400, message: "request target form is not supported" });
-    };
-    let scheme = &target[..scheme_end];
-    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") || target.contains('#') {
-        return Err(JetHttpReadError { status: 400, message: "absolute request target is malformed" });
-    }
-    let remainder = &target[scheme_end + 3..];
-    let authority_end = remainder.find(['/', '?']).unwrap_or(remainder.len());
-    let authority = jet_http_parse_authority(&remainder[..authority_end]).ok_or(JetHttpReadError {
-        status: 400,
-        message: "absolute request authority is malformed",
-    })?;
-    let default_port = if scheme.eq_ignore_ascii_case("http") { 80 } else { 443 };
-    if let Some(host) = host {
-        if authority.host != host.host
-            || authority.port.unwrap_or(default_port) != host.port.unwrap_or(default_port)
-        {
-            return Err(JetHttpReadError { status: 400, message: "absolute request authority does not match host" });
-        }
-    } else if host_required {
-        return Err(JetHttpReadError { status: 400, message: "absolute request target requires a host header" });
-    }
-    let suffix = &remainder[authority_end..];
-    Ok(if suffix.is_empty() {
-        "/".to_string()
-    } else if suffix.starts_with('?') {
-        format!("/{suffix}")
+    let path_query = if target.starts_with('/') {
+        target.to_string()
     } else {
-        suffix.to_string()
-    })
+        if target == "*" {
+            return Err(JetHttpReadError { status: 400, message: "asterisk request target is not supported" });
+        }
+        let Some(scheme_end) = target.find("://") else {
+            return Err(JetHttpReadError { status: 400, message: "request target form is not supported" });
+        };
+        let scheme = &target[..scheme_end];
+        if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
+            return Err(JetHttpReadError { status: 400, message: "absolute request target is malformed" });
+        }
+        let remainder = &target[scheme_end + 3..];
+        let authority_end = remainder.find(['/', '?']).unwrap_or(remainder.len());
+        let raw_authority = &remainder[..authority_end];
+        if jet_http_trim_ows(raw_authority) != raw_authority {
+            return Err(JetHttpReadError { status: 400, message: "absolute request authority is malformed" });
+        }
+        let authority = jet_http_parse_authority(raw_authority).ok_or(JetHttpReadError {
+            status: 400,
+            message: "absolute request authority is malformed",
+        })?;
+        let default_port = if scheme.eq_ignore_ascii_case("http") { 80 } else { 443 };
+        if let Some(host) = host {
+            if authority.host != host.host
+                || authority.port.unwrap_or(default_port) != host.port.unwrap_or(default_port)
+            {
+                return Err(JetHttpReadError { status: 400, message: "absolute request authority does not match host" });
+            }
+        } else if host_required {
+            return Err(JetHttpReadError { status: 400, message: "absolute request target requires a host header" });
+        }
+        let suffix = &remainder[authority_end..];
+        if suffix.is_empty() {
+            "/".to_string()
+        } else if suffix.starts_with('?') {
+            format!("/{suffix}")
+        } else {
+            suffix.to_string()
+        }
+    };
+    if !jet_http_path_query_valid(&path_query) {
+        return Err(JetHttpReadError { status: 400, message: "request target path or query is malformed" });
+    }
+    Ok(path_query)
 }
 
 fn jet_http_chunk_token_byte(byte: u8) -> bool {
@@ -1078,7 +1115,7 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
         }
         None => None,
     };
-    let target = jet_http_absolute_target(method, target, host.as_ref(), version == "HTTP/1.1")?;
+    let target = jet_http_absolute_target(target, host.as_ref(), version == "HTTP/1.1")?;
     if transfer_encoding.is_some() && content_length.is_some() {
         return Err(JetHttpReadError { status: 400, message: "content-length and transfer-encoding cannot be combined" });
     }
