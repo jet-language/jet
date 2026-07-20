@@ -2763,6 +2763,40 @@ fn run() {
 }
 
 #[test]
+fn nested_generic_user_derive_reaches_resident_jit() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let src = r#"
+derive T.Access {
+    info :: T.reflect()
+    name :: info.name
+    param :: info.type_params[0].name
+    emit("impl $name {{ fn get_value(self) -> $param {{ return ~self.value }} }}")
+}
+
+@Access
+struct Inner<T: Printable> { value: T }
+
+struct Outer<T: Printable> {
+    value: T
+
+    fn read(self) -> T {
+        inner := Inner<T>.{ value: ~self.value }
+        return inner.get_value()
+    }
+}
+
+fn run() {
+    outer := Outer<Int>.{ value: 7 }
+    print(outer.read())
+}
+"#;
+    let output = run_cranelift_without_fallback(src, "nested_generic_user_derive");
+    assert_eq!(output, ProgramOutput::ran("7\n".into(), "".into(), 0));
+}
+
+#[test]
 fn nested_ordinary_module_generic_instance_matches_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
     let src = r#"

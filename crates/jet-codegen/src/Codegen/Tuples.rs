@@ -481,6 +481,72 @@ fn collect_func_shapes(f: &Func, inherited: &[String], out: &mut CollectedTypeSh
     });
 }
 
+fn close_concrete_generic_apps(
+    items: &[Item],
+    owner_params: &BTreeMap<String, Vec<String>>,
+    out: &mut CollectedTypeShapes,
+) {
+    let mut processed = std::collections::BTreeSet::new();
+    loop {
+        let next = out
+            .generic_apps
+            .iter()
+            .find(|(key, _)| !processed.contains(*key))
+            .map(|(key, ty)| (key.clone(), ty.clone()));
+        let Some((key, Type::Apply { name, args })) = next else {
+            break;
+        };
+        processed.insert(key);
+        let Some(params) = owner_params.get(&name) else {
+            continue;
+        };
+        let subst = params
+            .iter()
+            .zip(args)
+            .map(|(param, arg)| (param.clone(), arg))
+            .collect();
+        for item in items {
+            match item {
+                Item::Struct(def) if def.name == name => {
+                    for field in &def.fields {
+                        let ty = crate::Generics::substitute_type(&field.ty, &subst);
+                        collect_tuple_shapes_from_type(&ty, out);
+                    }
+                    for method in &def.methods {
+                        let method = crate::Sema::specialize_function_types(method.clone(), &subst);
+                        collect_func_shapes(&method, &[], out);
+                    }
+                }
+                Item::Enum(def) if def.name == name => {
+                    for variant in &def.variants {
+                        match &variant.payload {
+                            VariantPayload::Unit => {}
+                            VariantPayload::Single(ty, _) => {
+                                let ty = crate::Generics::substitute_type(ty, &subst);
+                                collect_tuple_shapes_from_type(&ty, out);
+                            }
+                            VariantPayload::Named(fields) => {
+                                for field in fields {
+                                    let ty =
+                                        crate::Generics::substitute_type(&field.ty, &subst);
+                                    collect_tuple_shapes_from_type(&ty, out);
+                                }
+                            }
+                        }
+                    }
+                }
+                Item::Impl(imp) if imp.type_name == name && imp.trait_name.is_none() => {
+                    for method in &imp.methods {
+                        let method = crate::Sema::specialize_function_types(method.clone(), &subst);
+                        collect_func_shapes(&method, &[], out);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
 pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
     let owner_params: BTreeMap<String, Vec<String>> = items
         .iter()
@@ -561,6 +627,7 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
             | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
         }
     }
+    close_concrete_generic_apps(items, &owner_params, &mut out);
     out
 }
 
