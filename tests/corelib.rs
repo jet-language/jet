@@ -5501,7 +5501,7 @@ fn main() {
 }
 
 #[test]
-fn core_http_client_rejects_negative_phase_timeouts_before_transport() {
+fn core_http_client_rejects_invalid_options_before_transport() {
     use std::io::{Read, Write};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -5568,6 +5568,11 @@ fn main() {
         Some("HTTP read timeout must be non-negative".to_string()),
         Some("HTTP total timeout must be non-negative".to_string()),
     ]);
+    let proxy_error = bridge::jet_http_client_send_impl(
+        "GET", &url, &[], None, None, None, None, None, None, Some("ftp://proxy.invalid"),
+        &[], &[], &[],
+    ).unwrap_err();
+    assert_eq!(proxy_error, "HTTP proxy URL is invalid");
 }
 "#,
     )
@@ -5584,7 +5589,7 @@ fn main() {
     stop.store(true, Ordering::Release);
     server.join().unwrap();
     assert!(output.status.success(), "bridge harness failed:\n{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(accepted.load(Ordering::Acquire), 0, "invalid timeout reached transport");
+    assert_eq!(accepted.load(Ordering::Acquire), 0, "invalid option reached transport");
     let _ = fs::remove_dir_all(&dir);
 }
 

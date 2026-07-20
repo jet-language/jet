@@ -96,7 +96,9 @@ pub fn jet_http_client_send_impl(
         builder = builder.timeout(timeout);
     }
     if let Some(p) = proxy {
-        builder = builder.proxy(ureq::Proxy::new(p).map_err(|e| e.to_string())?);
+        builder = builder.proxy(
+            ureq::Proxy::new(p).map_err(|_| "HTTP proxy URL is invalid".to_string())?,
+        );
     }
     let agent = builder.build();
     let mut req = agent.request(method, url.as_str());
