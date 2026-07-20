@@ -219,6 +219,7 @@ pub fn render_categorized(
     selected_cmd: Option<&str>,
     width: usize,
     color: bool,
+    height: Option<usize>,
 ) -> String {
     let width = w(width);
     let theme = Theme::new(color);
@@ -234,6 +235,8 @@ pub fn render_categorized(
     out.push('\n');
     out.push_str(&mid(width, color));
     out.push('\n');
+    let mut body = Vec::new();
+    let mut selected_header = None;
     for (ci, cat) in super::CATEGORIES.iter().enumerate() {
         let entries: Vec<&Entry> = index.iter().filter(|e| &e.category == cat).collect();
         if entries.is_empty() && *cat != "Error codes" {
@@ -249,8 +252,10 @@ pub fn render_categorized(
         } else {
             plain
         };
-        out.push_str(&selected_row(width, &label, ci == selected_category && !is_expanded, color));
-        out.push('\n');
+        if ci == selected_category {
+            selected_header = Some(body.len());
+        }
+        body.push((label, ci == selected_category && !is_expanded));
         if is_expanded {
             if *cat == "Error codes" {
                 let tip = if color {
@@ -258,8 +263,7 @@ pub fn render_categorized(
                 } else {
                     "type an E-code, such as E0102, for verbatim help".to_string()
                 };
-                out.push_str(&selected_row(width, &tip, false, color));
-                out.push('\n');
+                body.push((tip, false));
             }
             for e in entries {
                 let line = if color {
@@ -273,10 +277,24 @@ pub fn render_categorized(
                 } else {
                     format!("jet {:<20} {}", e.symbol.name, e.symbol.summary)
                 };
-                out.push_str(&selected_row(width, &line, selected_cmd == Some(e.symbol.name.as_str()), color));
-                out.push('\n');
+                body.push((line, selected_cmd == Some(e.symbol.name.as_str())));
             }
         }
+    }
+    let visible_rows = height
+        .map(|height| height.saturating_sub(4).max(1))
+        .unwrap_or(body.len());
+    let selected_body_row = body
+        .iter()
+        .position(|(_, selected)| *selected)
+        .or(selected_header)
+        .unwrap_or(0);
+    let start = selected_body_row
+        .saturating_sub(visible_rows.saturating_sub(1))
+        .min(body.len().saturating_sub(visible_rows));
+    for (line, selected) in body.into_iter().skip(start).take(visible_rows) {
+        out.push_str(&selected_row(width, &line, selected, color));
+        out.push('\n');
     }
     out.push_str(&bottom(width, color));
     out
@@ -593,7 +611,7 @@ mod tests {
     #[test]
     fn categorized_view_lists_every_command_once() {
         let index = build_index();
-        let out = render_categorized(&index, 0, false, None, 72, false);
+        let out = render_categorized(&index, 0, false, None, 72, false, None);
         for e in &index {
             assert!(
                 !out.contains(&format!("jet {}", e.symbol.name)),
@@ -606,7 +624,7 @@ mod tests {
     #[test]
     fn categorized_view_box_is_well_formed_at_fixed_width() {
         let index = build_index();
-        let out = render_categorized(&index, 0, true, Some("run"), 64, false);
+        let out = render_categorized(&index, 0, true, Some("run"), 64, false, None);
         let lines: Vec<&str> = out.lines().collect();
         assert!(lines.first().unwrap().starts_with('┌'));
         assert!(lines.last().unwrap().starts_with('└'));
@@ -618,7 +636,7 @@ mod tests {
     #[test]
     fn categorized_view_expands_only_selected_category() {
         let index = build_index();
-        let out = render_categorized(&index, 0, true, Some("run"), 72, false);
+        let out = render_categorized(&index, 0, true, Some("run"), 72, false, None);
         assert!(out.contains("jet run"));
         assert!(!out.contains("jet add"));
     }
@@ -626,7 +644,7 @@ mod tests {
     #[test]
     fn color_mode_styles_header_and_selection_without_breaking_width() {
         let index = build_index();
-        let out = render_categorized(&index, 0, true, Some("run"), 64, true);
+        let out = render_categorized(&index, 0, true, Some("run"), 64, true, None);
         assert!(out.contains("\x1b[1;96m"));
         assert!(out.contains("\x1b[48;5;24;97;1m"));
         for line in out.lines() {

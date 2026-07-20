@@ -853,7 +853,7 @@ fn run_question_mark(args: &[String]) -> ! {
         jet::Help::Interactive::run(color).ok();
         exit(ExitCodes::OK);
     }
-    print!("{}\n", jet::Help::Render::render_categorized(&jet::Help::build_index(), 0, false, None, 72, color));
+    print!("{}\n", jet::Help::Render::render_categorized(&jet::Help::build_index(), 0, false, None, 72, color, None));
     exit(ExitCodes::OK);
 }
 

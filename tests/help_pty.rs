@@ -14,9 +14,13 @@ fn run_pty_sized(keys: &[u8], color: &str, no_color: bool, rows: usize, cols: us
 }
 
 fn run_pty_sized_steps(steps: &[&[u8]], color: &str, no_color: bool, rows: usize, cols: usize) -> String {
+    run_pty_steps(&format!("stty rows {rows} cols {cols};"), steps, color, no_color)
+}
+
+fn run_pty_steps(setup: &str, steps: &[&[u8]], color: &str, no_color: bool) -> String {
     let jet = env!("CARGO_BIN_EXE_jet");
     let shell_line = format!(
-        "stty rows {rows} cols {cols}; exec '{}' '?' '--color={}'",
+        "{setup} exec '{}' '?' '--color={}'",
         jet.replace('\'', "'\\''"),
         color
     );
@@ -210,6 +214,44 @@ fn fuzzy_results_scroll_selected_row_within_terminal_height() {
     assert!(
         frame.lines().all(|line| visible_cols(line) <= 80),
         "final frame exceeded 80 cols:\n{frame}"
+    );
+}
+
+#[test]
+fn zero_size_pty_bounds_initial_transition_to_effective_height() {
+    let transcript = run_pty_sized_steps(&[b"E", b"\x7fq"], "never", false, 0, 0);
+    let frame = final_frame_before_cleanup(&transcript);
+    assert!(
+        cursor_up_counts(&transcript).into_iter().all(|count| count < 8),
+        "zero-size transition moved above the effective viewport"
+    );
+    assert!(frame.lines().count() <= 8, "zero-size frame exceeded 8 rows:\n{frame}");
+    assert!(
+        frame.lines().all(|line| visible_cols(line) <= 50),
+        "zero-size frame exceeded 50 cols:\n{frame}"
+    );
+}
+
+#[test]
+fn live_shrink_redraws_categorized_view_within_new_height() {
+    let setup = "stty rows 24 cols 80; (sleep 0.4; stty rows 8 cols 50 </dev/tty) &";
+    let down = b"\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B";
+    let transcript = run_pty_steps(
+        setup,
+        &[b"", b"", b"", down, b"", b"q"],
+        "never",
+        false,
+    );
+    let frame = final_frame_before_cleanup(&transcript);
+    assert!(
+        cursor_up_counts(&transcript).into_iter().all(|count| count < 8),
+        "live shrink moved above the new viewport"
+    );
+    assert_eq!(frame.lines().count(), 8, "shrunken frame did not use 8 rows:\n{frame}");
+    assert!(frame.contains("│> ▸ Reference"), "later selected category was clipped:\n{frame}");
+    assert!(
+        frame.lines().all(|line| visible_cols(line) <= 50),
+        "shrunken frame exceeded 50 cols:\n{frame}"
     );
 }
 

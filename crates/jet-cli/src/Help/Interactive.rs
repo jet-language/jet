@@ -52,11 +52,12 @@ impl Drop for AltScreen {
 /// prints the new one. All writes are `\r\n`-terminated (raw mode doesn't
 /// translate `\n`) and go to stderr (see module docs). Returns the new
 /// frame's line count, to feed back in as `prev_lines` next call.
-fn redraw(prev_lines: usize, frame: &str) -> usize {
-    if prev_lines > 0 {
+fn redraw(prev_lines: usize, frame: &str, height: usize) -> usize {
+    let visible_prev = prev_lines.min(height.max(1));
+    if visible_prev > 0 {
         eprint!("\r");
-        if prev_lines > 1 {
-            eprint!("\x1b[{}A", prev_lines - 1);
+        if visible_prev > 1 {
+            eprint!("\x1b[{}A", visible_prev - 1);
         }
         eprint!("\x1b[J");
     }
@@ -80,7 +81,7 @@ pub fn run(color: bool) -> io::Result<()> {
     if !io::stdin().is_terminal()
         || (!io::stdout().is_terminal() && !(shell_prefill && io::stderr().is_terminal()))
     {
-        print!("{}", super::Render::render_categorized(&build_index(), 0, false, None, 72, color));
+        print!("{}", super::Render::render_categorized(&build_index(), 0, false, None, 72, color, None));
         println!();
         return Ok(());
     }
@@ -90,13 +91,13 @@ pub fn run(color: bool) -> io::Result<()> {
         RawGuard::enable()
     };
     let Some(_guard) = guard else {
-        eprint!("{}", Render::render_categorized(&build_index(), 0, false, None, 72, color));
+        eprint!("{}", Render::render_categorized(&build_index(), 0, false, None, 72, color, None));
         eprintln!();
         return Ok(());
     };
 
     let index = build_index();
-    let (width, height) = terminal_size();
+    let (mut width, mut height) = terminal_size();
     let stdin = io::stdin();
     let mut reader = KeyReader::new(stdin.lock());
 
@@ -114,12 +115,12 @@ pub fn run(color: bool) -> io::Result<()> {
     let mut alt: Option<AltScreen> = None;
     let mut prev_lines = 0usize;
 
-    let mut frame = Render::render_categorized(&index, cat_selected, cat_entry.is_some(), selected_category_cmd(&index, cat_selected, cat_entry), width, color);
-    prev_lines = redraw(prev_lines, &frame);
+    let mut frame = Render::render_categorized(&index, cat_selected, cat_entry.is_some(), selected_category_cmd(&index, cat_selected, cat_entry), width, color, Some(height));
+    prev_lines = redraw(prev_lines, &frame, height);
 
     loop {
         match reader.read_key() {
-            Key::Idle => continue,
+            Key::Idle if terminal_size() == (width, height) => continue,
             Key::Eof | Key::CtrlC => {
                 quit_without_prefill(prev_lines);
                 return Ok(());
@@ -217,8 +218,9 @@ pub fn run(color: bool) -> io::Result<()> {
             Key::Enter => {
                 if matches!(mode, Mode::Categorized) && cat_entry.is_none() {
                     cat_entry = Some(0);
+                    (width, height) = terminal_size();
                     frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, res_scroll, ref_category, ref_entry, &ref_query, ref_scroll, width, height, color);
-                    prev_lines = redraw(prev_lines, &frame);
+                    prev_lines = redraw(prev_lines, &frame, height);
                     continue;
                 }
                 if matches!(mode, Mode::Categorized)
@@ -244,16 +246,18 @@ pub fn run(color: bool) -> io::Result<()> {
             _ => {}
         }
 
+        (width, height) = terminal_size();
         frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, res_scroll, ref_category, ref_entry, &ref_query, ref_scroll, width, height, color);
-        prev_lines = redraw(prev_lines, &frame);
+        prev_lines = redraw(prev_lines, &frame, height);
     }
 }
 
 fn quit_without_prefill(prev_lines: usize) {
-    if prev_lines > 0 {
+    let visible_prev = prev_lines.min(terminal_size().1);
+    if visible_prev > 0 {
         eprint!("\r");
-        if prev_lines > 1 {
-            eprint!("\x1b[{}A", prev_lines - 1);
+        if visible_prev > 1 {
+            eprint!("\x1b[{}A", visible_prev - 1);
         }
         eprint!("\x1b[J");
     }
@@ -340,7 +344,7 @@ fn render_current(
         }
     }
     match mode {
-        Mode::Categorized => Render::render_categorized(index, cat_selected, cat_entry.is_some(), selected_category_cmd(index, cat_selected, cat_entry), width, color),
+        Mode::Categorized => Render::render_categorized(index, cat_selected, cat_entry.is_some(), selected_category_cmd(index, cat_selected, cat_entry), width, color, Some(height)),
         Mode::Results => Render::render_result_list(hits, query, width, color, Some(res_selected), Some(height)),
         Mode::Detail => {
             let entry = current_entry(cat_selected, cat_entry, hits, res_selected, index);
