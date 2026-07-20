@@ -282,6 +282,48 @@ mod vault_key_tests {
     }
 
     #[test]
+    fn concurrent_reader_defers_backup_recovery_until_writer_releases_lock() {
+        use std::os::unix::fs::MetadataExt;
+        let root = scratch("reader-writer-backup");
+        provision(&root);
+        jet_vault_set_test_authorizer(|_| true);
+        let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+        let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+        jet_vault_commit_generate_at(&root, plan, write).unwrap();
+        let plan = jet_vault_prepare_rotate_at::<JetSigningKey>(&root, "release").unwrap();
+        let write = jet_vault_authorize_write_impl(&plan, "concurrent rotation").unwrap();
+        let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let release = std::sync::Arc::new(std::sync::Barrier::new(2));
+        jet_vault_set_test_backup_barrier(Some((root.clone(), entered.clone(), release.clone())));
+        let writer_root = root.clone();
+        let writer = std::thread::spawn(move || {
+            jet_vault_set_test_fault(Some("durability-after-install"));
+            let result = jet_vault_commit_rotate_at(&writer_root, plan, write);
+            jet_vault_set_test_fault(None);
+            result
+        });
+        entered.wait();
+        let backup = root.join(".jet/.secrets.age.backup");
+        let backup_inode = std::fs::metadata(&backup).unwrap().ino();
+        assert!(matches!(
+            jet_vault_current_at::<JetSigningKey>(&root, "release"),
+            Err(JetVaultError::Conflict)
+        ));
+        assert_eq!(std::fs::metadata(&backup).unwrap().ino(), backup_inode);
+        release.wait();
+        assert!(matches!(writer.join().unwrap(), Err(JetVaultError::DurabilityUnknown)));
+        jet_vault_set_test_backup_barrier(None);
+        assert_eq!(std::fs::metadata(&backup).unwrap().ino(), backup_inode);
+        let backup_bytes = std::fs::read(&backup).unwrap();
+        assert_eq!(vault_decode_ciphertext_at(&root, &backup_bytes).unwrap().0.revision, 1);
+        assert_eq!(decoded_store(&root).revision, 2);
+        assert_eq!(jet_vault_current_at::<JetSigningKey>(&root, "release").unwrap().unwrap().generation(), 2);
+        assert!(!backup.exists());
+        jet_vault_clear_test_authorizer();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn linux_openat2_rejects_a_symlinked_vault_directory() {
         use std::os::unix::fs::symlink;
         let root = scratch("symlink");
