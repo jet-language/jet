@@ -122,6 +122,19 @@ fn map_view() -> String {
     return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
 }"#;
 const MAP_EXPECTED: &str = "false|-1|2|true|false|[a, b, c, d]|[a, b, c, d]|[1, 20, 3, 4]|1|true|false|3|3|true|0";
+const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() -> String {
+    values := [1, 2, 3, 4]
+    each_seen: [Int] := []
+    shadow := 99
+    values.each((shadow: Int) => { each_seen.push(shadow) })
+    predicate_seen: Set<Int> := Set.from([0])
+    has_three :: values.any((n: Int) => predicate_seen.add(n) && n == 3)
+    fold_seen: [Int: Int] := [0: 0]
+    total :: values.fold(0, (acc: Int, n: Int) => fold_seen.add(n, n) ?? (acc + n))
+    return "{each_seen}|{shadow}|{predicate_seen.len()}:{predicate_seen.has(1)}:{predicate_seen.has(2)}:{predicate_seen.has(3)}:{predicate_seen.has(4)}|{has_three}|{fold_seen.values()}|{total}"
+}"#;
+const INLINE_HOF_EXPECTED: &str =
+    "[1, 2, 3, 4]|99|4:true:true:true:false|true|[0, 1, 2, 3, 4]|10";
 const MAP_CALL_RECEIVER_DECLS: &str = r#"fn map_call_receiver_view() -> String {
     receiver_hits := 0
     found :: counted_map(&receiver_hits).has_key("a")
@@ -443,6 +456,15 @@ fn public_transcript_covers_lru_methods_exactly() {
 fn public_transcript_covers_map_methods_exactly() {
     let values = exact_values(&[MAP_DECLS, "map_view()"]);
     assert_eq!(values, [format!("\"{MAP_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_preserves_sequential_inline_hof_mutations_exactly() {
+    let values = exact_values(&[INLINE_HOF_DECLS, "inline_hof_view()"]);
+    assert_eq!(
+        values,
+        [format!("\"{INLINE_HOF_EXPECTED}\" : String")]
+    );
 }
 
 #[test]
@@ -777,6 +799,19 @@ fn rustc_backed_map_matches_aot_comptime_forced_interpreter_and_default_dev_fall
     // Map remains outside the resident JIT subset: forced interpreter proves
     // its comptime execution, while default dev proves the normal AOT fallback.
     check_dev_tiers_with_boundary("map", &source, MAP_EXPECTED, true);
+}
+
+#[test]
+fn rustc_backed_sequential_inline_hofs_match_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+) {
+    let source = parity_source("inline_hof_view()", INLINE_HOF_DECLS);
+    assert_eq!(
+        check_aot_comptime("sequential-inline-hof/writeback", &source),
+        INLINE_HOF_EXPECTED
+    );
+    // Mutable captures remain outside the resident JIT subset: force the
+    // interpreter explicitly, then prove default dev's normal AOT fallback.
+    check_dev_tiers_with_boundary("sequential-inline-hof", &source, INLINE_HOF_EXPECTED, true);
 }
 
 #[test]

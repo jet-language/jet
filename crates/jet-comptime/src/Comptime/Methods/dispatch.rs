@@ -951,7 +951,7 @@ impl<'a> Interp<'a> {
         self.call_closure_inner(f, args, span, None)
     }
 
-    fn call_closure_with_writeback(
+    pub(in super::super) fn call_inline_closure(
         &mut self,
         f: &CtValue,
         args: Vec<CtValue>,
@@ -1976,7 +1976,12 @@ impl<'a> Interp<'a> {
                 let b = self.eval(&args[2].expr, scope)?;
                 return Ok(match (a, b) {
                     (CtValue::Some(av), CtValue::Some(bv)) => {
-                        CtValue::Some(Box::new(self.call_closure(&f, vec![*av, *bv], span)?))
+                        CtValue::Some(Box::new(self.call_inline_closure(
+                            &f,
+                            vec![*av, *bv],
+                            span,
+                            scope,
+                        )?))
                     }
                     _ => CtValue::None(Type::Int),
                 });
@@ -1996,7 +2001,10 @@ impl<'a> Interp<'a> {
                     let f = self.eval(&args[0].expr, scope)?;
                     let mut out = Vec::new();
                     for x in xs {
-                        if as_bool(&self.call_closure(&f, vec![x.clone()], span)?, span)? {
+                        if as_bool(
+                            &self.call_inline_closure(&f, vec![x.clone()], span, scope)?,
+                            span,
+                        )? {
                             out.push(x.clone());
                         }
                     }
@@ -2006,21 +2014,26 @@ impl<'a> Interp<'a> {
                     let f = self.eval(&args[0].expr, scope)?;
                     let mut out = Vec::with_capacity(xs.len());
                     for x in xs {
-                        out.push(self.call_closure(&f, vec![x.clone()], span)?);
+                        out.push(self.call_inline_closure(
+                            &f,
+                            vec![x.clone()],
+                            span,
+                            scope,
+                        )?);
                     }
                     return Ok(CtValue::List(out));
                 }
                 (CtValue::List(xs), "each") => {
                     let f = self.eval(&args[0].expr, scope)?;
                     for x in xs {
-                        self.call_closure(&f, vec![x.clone()], span)?;
+                        self.call_inline_closure(&f, vec![x.clone()], span, scope)?;
                     }
                     return Ok(CtValue::Unit);
                 }
                 (CtValue::Map(entries), "each") => {
                     let f = self.eval(&args[0].expr, scope)?;
                     for (key, value) in entries {
-                        self.call_closure_with_writeback(
+                        self.call_inline_closure(
                             &f,
                             vec![key.to_value(), value.clone()],
                             span,
@@ -2032,7 +2045,10 @@ impl<'a> Interp<'a> {
                 (CtValue::List(xs), "find") => {
                     let f = self.eval(&args[0].expr, scope)?;
                     for x in xs {
-                        if as_bool(&self.call_closure(&f, vec![x.clone()], span)?, span)? {
+                        if as_bool(
+                            &self.call_inline_closure(&f, vec![x.clone()], span, scope)?,
+                            span,
+                        )? {
                             return Ok(CtValue::Some(Box::new(x.clone())));
                         }
                     }
@@ -2048,7 +2064,12 @@ impl<'a> Interp<'a> {
                     let f = self.eval(&args[0].expr, scope)?;
                     let mut keyed = Vec::with_capacity(xs.len());
                     for x in xs {
-                        let k = self.call_closure(&f, vec![x.clone()], span)?;
+                        let k = self.call_inline_closure(
+                            &f,
+                            vec![x.clone()],
+                            span,
+                            scope,
+                        )?;
                         keyed.push((k, x.clone()));
                     }
                     let mut sort_err = None;
@@ -2068,7 +2089,12 @@ impl<'a> Interp<'a> {
                 }
                 (CtValue::Some(inner), "map") => {
                     let f = self.eval(&args[0].expr, scope)?;
-                    let v = self.call_closure(&f, vec![(**inner).clone()], span)?;
+                    let v = self.call_inline_closure(
+                        &f,
+                        vec![(**inner).clone()],
+                        span,
+                        scope,
+                    )?;
                     return Ok(CtValue::Some(Box::new(v)));
                 }
                 (CtValue::None(t), "map") => return Ok(CtValue::None(t.clone())),
@@ -2182,7 +2208,12 @@ impl<'a> Interp<'a> {
                             let mut found = false;
                             for item in &items {
                                 if as_bool(
-                                    &self.call_closure(&argv[0], vec![item.clone()], span)?,
+                                    &self.call_inline_closure(
+                                        &argv[0],
+                                        vec![item.clone()],
+                                        span,
+                                        scope,
+                                    )?,
                                     span,
                                 )? {
                                     found = true;
@@ -2815,6 +2846,7 @@ impl<'a> Interp<'a> {
                     &argv,
                     sequence_result_ty.as_ref(),
                     span,
+                    scope,
                 ) {
                     return match result? {
                         sequence_parity::SequenceOutcome::Value(value) => Ok(value),
@@ -3051,6 +3083,7 @@ impl<'a> Interp<'a> {
             &argv,
             sequence_result_ty.as_ref(),
             span,
+            scope,
         ) {
             return match result? {
                 sequence_parity::SequenceOutcome::Value(value) => Ok(value),

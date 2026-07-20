@@ -1,7 +1,7 @@
 //! Card #392 packet A: effect-free List/FixedList/View/ViewMut method parity.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtKey, CtValue, Type};
@@ -22,6 +22,7 @@ pub(super) fn eval_sequence_method(
     args: &[CtValue],
     resolved_ret: Option<&Type>,
     span: Span,
+    scope: &mut HashMap<String, CtValue>,
 ) -> Option<Result<SequenceOutcome, Diagnostic>> {
     let CtValue::List(xs) = recv else {
         return None;
@@ -83,7 +84,7 @@ pub(super) fn eval_sequence_method(
             Ok(SequenceOutcome::WriteBack(CtValue::List(out)))
         })());
     }
-    Some(eval(interp, xs, method, args, resolved_ret, span).map(SequenceOutcome::Value))
+    Some(eval(interp, xs, method, args, resolved_ret, span, scope).map(SequenceOutcome::Value))
 }
 
 fn eval(
@@ -93,11 +94,15 @@ fn eval(
     args: &[CtValue],
     resolved_ret: Option<&Type>,
     span: Span,
+    scope: &mut HashMap<String, CtValue>,
 ) -> Result<CtValue, Diagnostic> {
     let value = match (method, args) {
         ("all", [f]) => {
             for x in xs {
-                if !as_bool(&interp.call_closure(f, vec![x.clone()], span)?, span)? {
+                if !as_bool(
+                    &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+                    span,
+                )? {
                     return Ok(CtValue::Bool(false));
                 }
             }
@@ -105,7 +110,10 @@ fn eval(
         }
         ("any", [f]) => {
             for x in xs {
-                if as_bool(&interp.call_closure(f, vec![x.clone()], span)?, span)? {
+                if as_bool(
+                    &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+                    span,
+                )? {
                     return Ok(CtValue::Bool(true));
                 }
             }
@@ -118,7 +126,10 @@ fn eval(
         ("count_by", [f]) => {
             let mut out = BTreeMap::new();
             for x in xs {
-                let key = key(interp.call_closure(f, vec![x.clone()], span)?, span)?;
+                let key = key(
+                    interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+                    span,
+                )?;
                 let count = out.entry(key).or_insert(CtValue::Int(0));
                 let CtValue::Int(count) = count else { unreachable!() };
                 *count += 1;
@@ -146,7 +157,7 @@ fn eval(
         ("filter_map", [f]) => {
             let mut out = Vec::new();
             for x in xs {
-                match interp.call_closure(f, vec![x.clone()], span)? {
+                match interp.call_inline_closure(f, vec![x.clone()], span, scope)? {
                     CtValue::ResOk(value) => out.push(*value),
                     CtValue::ResErr(_) => {}
                     _ => {
@@ -163,7 +174,9 @@ fn eval(
         ("flat_map", [f]) => {
             let mut out = Vec::new();
             for x in xs {
-                let CtValue::List(values) = interp.call_closure(f, vec![x.clone()], span)? else {
+                let CtValue::List(values) =
+                    interp.call_inline_closure(f, vec![x.clone()], span, scope)?
+                else {
                     return Err(unsupported("flat_map callback returning a non-list", span));
                 };
                 out.extend(values);
@@ -180,7 +193,14 @@ fn eval(
             }
             CtValue::List(out)
         }
-        ("reduce" | "fold" | "par_fold", [initial, f]) => {
+        ("reduce" | "fold", [initial, f]) => {
+            let mut acc = initial.clone();
+            for x in xs {
+                acc = interp.call_inline_closure(f, vec![acc, x.clone()], span, scope)?;
+            }
+            acc
+        }
+        ("par_fold", [initial, f]) => {
             let mut acc = initial.clone();
             for x in xs {
                 acc = interp.call_closure(f, vec![acc, x.clone()], span)?;
@@ -190,7 +210,10 @@ fn eval(
         ("group_by", [f]) => {
             let mut out = BTreeMap::new();
             for x in xs {
-                let key = key(interp.call_closure(f, vec![x.clone()], span)?, span)?;
+                let key = key(
+                    interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+                    span,
+                )?;
                 match out.entry(key).or_insert_with(|| CtValue::List(Vec::new())) {
                     CtValue::List(group) => group.push(x.clone()),
                     _ => unreachable!(),
@@ -217,8 +240,8 @@ fn eval(
         ("last", []) => option(xs.last().cloned(), xs),
         ("min", []) => option(extreme(xs, false, span)?, xs),
         ("max", []) => option(extreme(xs, true, span)?, xs),
-        ("min_by", [f]) => option(extreme_by(interp, xs, f, false, span)?, xs),
-        ("max_by", [f]) => option(extreme_by(interp, xs, f, true, span)?, xs),
+        ("min_by", [f]) => option(extreme_by(interp, xs, f, false, span, scope)?, xs),
+        ("max_by", [f]) => option(extreme_by(interp, xs, f, true, span, scope)?, xs),
         ("par_filter", [f]) => {
             let mut out = Vec::new();
             for x in xs {
@@ -250,7 +273,10 @@ fn eval(
         ("position", [f]) => {
             let mut found = None;
             for (index, x) in xs.iter().enumerate() {
-                if as_bool(&interp.call_closure(f, vec![x.clone()], span)?, span)? {
+                if as_bool(
+                    &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+                    span,
+                )? {
                     found = Some(CtValue::Int(index as i64));
                     break;
                 }
@@ -263,7 +289,7 @@ fn eval(
             let mut acc = initial.clone();
             let mut out = Vec::with_capacity(xs.len());
             for x in xs {
-                acc = interp.call_closure(f, vec![acc, x.clone()], span)?;
+                acc = interp.call_inline_closure(f, vec![acc, x.clone()], span, scope)?;
                 out.push(acc.clone());
             }
             CtValue::List(out)
@@ -287,7 +313,10 @@ fn eval(
         ("take_while", [f]) => {
             let mut out = Vec::new();
             for x in xs {
-                if !as_bool(&interp.call_closure(f, vec![x.clone()], span)?, span)? {
+                if !as_bool(
+                    &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+                    span,
+                )? {
                     break;
                 }
                 out.push(x.clone());
@@ -299,7 +328,10 @@ fn eval(
             let mut out = Vec::new();
             for x in xs {
                 if skipping {
-                    skipping = as_bool(&interp.call_closure(f, vec![x.clone()], span)?, span)?;
+                    skipping = as_bool(
+                        &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+                        span,
+                    )?;
                 }
                 if !skipping {
                     out.push(x.clone());
@@ -400,13 +432,15 @@ fn extreme_by(
     f: &CtValue,
     maximum: bool,
     span: Span,
+    scope: &mut HashMap<String, CtValue>,
 ) -> Result<Option<CtValue>, Diagnostic> {
     let Some(mut best) = xs.first().cloned() else {
         return Ok(None);
     };
-    let mut best_key = interp.call_closure(f, vec![best.clone()], span)?;
+    let mut best_key = interp.call_inline_closure(f, vec![best.clone()], span, scope)?;
     for candidate in &xs[1..] {
-        let candidate_key = interp.call_closure(f, vec![candidate.clone()], span)?;
+        let candidate_key =
+            interp.call_inline_closure(f, vec![candidate.clone()], span, scope)?;
         let order = cmp(best_key.clone(), candidate_key.clone(), span)?;
         if (maximum && order != Ordering::Greater) || (!maximum && order == Ordering::Greater) {
             best = candidate.clone();
