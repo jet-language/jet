@@ -452,6 +452,85 @@ mod tests {
     }
 
     #[test]
+    fn expert_xchacha20poly1305_matches_cfrg_vector() {
+        // draft-irtf-cfrg-xchacha-02, Appendix A.3.1.
+        let key = decode_hex(
+            "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        );
+        let nonce = decode_hex("404142434445464748494a4b4c4d4e4f5051525354555657");
+        let plaintext = decode_hex(concat!(
+            "4c616469657320616e642047656e746c656d656e206f662074686520636c6173",
+            "73206f66202739393a204966204920636f756c64206f6666657220796f75206f",
+            "6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73",
+            "637265656e20776f756c642062652069742e",
+        ));
+        let aad = decode_hex("50515253c0c1c2c3c4c5c6c7");
+        let expected = decode_hex(concat!(
+            "bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb",
+            "731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b452",
+            "2f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff9",
+            "21f9664c97637da9768812f615c68b13b52e",
+            "c0875924c1c7987947deafd8780acf49",
+        ));
+
+        let sealed = jet_crypto_expert_xchacha20poly1305_seal_impl(
+            &key, &nonce, &plaintext, &aad,
+        )
+        .unwrap();
+        assert_eq!(sealed, expected);
+        assert_eq!(
+            jet_crypto_expert_xchacha20poly1305_open_impl(&key, &nonce, &sealed, &aad),
+            Ok(plaintext)
+        );
+    }
+
+    #[test]
+    fn expert_aes256gcm_matches_nist_cavs_vector() {
+        // NIST CAVS gcmEncryptExtIV256.rsp, first 96-bit-IV case.
+        let key = decode_hex(
+            "b52c505a37d78eda5dd34f20c22540ea1b58963cf8e5bf8ffa85f9f2492505b4",
+        );
+        let nonce = decode_hex("516c33929df5a3284ff463d7");
+        let expected = decode_hex("bdc1ac884d332457a1d2664f168c76f0");
+        let empty = Vec::new();
+
+        let sealed =
+            jet_crypto_expert_aes256gcm_seal_impl(&key, &nonce, &empty, &empty).unwrap();
+        assert_eq!(sealed, expected);
+        assert_eq!(
+            jet_crypto_expert_aes256gcm_open_impl(&key, &nonce, &sealed, &empty),
+            Ok(empty)
+        );
+    }
+
+    #[test]
+    fn argon2id_dependency_matches_rfc_9106_vector() {
+        // RFC 9106 section 5.3, including its secret and associated data.
+        let params = argon2::ParamsBuilder::new()
+            .m_cost(32)
+            .t_cost(3)
+            .p_cost(4)
+            .data(argon2::AssociatedData::new(&[0x04; 12]).unwrap())
+            .build()
+            .unwrap();
+        let engine = argon2::Argon2::new_with_secret(
+            &[0x03; 8],
+            argon2::Algorithm::Argon2id,
+            argon2::Version::V0x13,
+            params,
+        )
+        .unwrap();
+        let mut actual = [0u8; 32];
+        engine
+            .hash_password_into(&[0x01; 32], &[0x02; 16], &mut actual)
+            .unwrap();
+        assert_eq!(
+            actual.to_vec(),
+            decode_hex("0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659")
+        );
+    }
+
+    #[test]
     fn jetc_v1_expert_open_accepts_only_the_pinned_grammar() {
         let source = include_str!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
         for retired in [
