@@ -438,7 +438,7 @@ Client surface:
 | `req.header(name, value)` / `.body(text)` | `HttpClientReq` | Add headers or a string body |
 | `req.form(name, value)` / `.multipart_text(name, value)` | `HttpClientReq` | Encode form or text multipart fields |
 | `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or redirect limit |
-| `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` | `HttpClientReq` | Set global/per-phase deadlines |
+| `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` | `HttpClientReq` | Set nonnegative global/per-phase deadlines; negative milliseconds fail before transport |
 | `req.proxy(url)` | `HttpClientReq` | Use an explicit proxy; env proxies are honored by default |
 | `req.send()` | `HttpClientResp ? String` | Execute the request |
 | `resp.status()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, text body, headers, and Set-Cookie values |

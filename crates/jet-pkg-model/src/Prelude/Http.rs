@@ -12,6 +12,12 @@ use std::time::Duration;
 const HTTP_CLIENT_TEXT_LIMIT: usize = 8 * 1024 * 1024;
 const HTTP_CLIENT_READ_CHUNK: usize = 64 * 1024;
 
+fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, String> {
+    let milliseconds = u64::try_from(milliseconds)
+        .map_err(|_| format!("HTTP {name} must be non-negative"))?;
+    Ok(Duration::from_millis(milliseconds))
+}
+
 /// Perform an HTTP GET. Returns (status_code, body, headers_flat) where headers_flat
 /// is alternating [key, value, key, value, ...].
 pub fn jet_http_client_get_impl(url: &String) -> Result<(i64, String, Vec<String>), String> {
@@ -57,18 +63,25 @@ pub fn jet_http_client_send_impl(
     form_flat: &[String],
     multipart_flat: &[String],
 ) -> Result<(i64, String, Vec<String>), String> {
-    let default_timeout = timeout_ms.unwrap_or(30_000);
+    let default_timeout = validated_timeout("timeout", timeout_ms.unwrap_or(30_000))?;
+    let connect_timeout = connect_timeout_ms
+        .map(|milliseconds| validated_timeout("connect timeout", milliseconds))
+        .transpose()?
+        .unwrap_or(default_timeout);
+    let read_timeout = read_timeout_ms
+        .map(|milliseconds| validated_timeout("read timeout", milliseconds))
+        .transpose()?
+        .unwrap_or(default_timeout);
+    let total_timeout = total_timeout_ms
+        .map(|milliseconds| validated_timeout("total timeout", milliseconds))
+        .transpose()?;
     let mut builder = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_millis(
-            connect_timeout_ms.unwrap_or(default_timeout) as u64,
-        ))
-        .timeout_read(Duration::from_millis(
-            read_timeout_ms.unwrap_or(default_timeout) as u64,
-        ))
-        .timeout_write(Duration::from_millis(default_timeout as u64))
+        .timeout_connect(connect_timeout)
+        .timeout_read(read_timeout)
+        .timeout_write(default_timeout)
         .try_proxy_from_env(true);
-    if let Some(ms) = total_timeout_ms {
-        builder = builder.timeout(Duration::from_millis(ms as u64));
+    if let Some(timeout) = total_timeout {
+        builder = builder.timeout(timeout);
     }
     if let Some(n) = redirects {
         builder = builder.redirects(n.max(0) as u32);

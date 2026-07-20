@@ -5338,6 +5338,94 @@ fn main() {
 }
 
 #[test]
+fn core_http_client_rejects_negative_phase_timeouts_before_transport() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let accepted = std::sync::Arc::new(AtomicUsize::new(0));
+    let server_stop = stop.clone();
+    let server_accepted = accepted.clone();
+    let server = std::thread::spawn(move || {
+        while !server_stop.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    server_accepted.fetch_add(1, Ordering::AcqRel);
+                    stream.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+                    let mut request = [0; 4096];
+                    let _ = stream.read(&mut request);
+                    stream.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    ).unwrap();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
+        }
+    });
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_http_timeout_range_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let compiled = compile_temp(
+        "http_timeout_seed.jet",
+        "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n",
+    );
+    let link = compiled.ffi.expect("HTTP client bridge");
+    let harness = dir.join("bridge_timeout_range.rs");
+    let bin = dir.join("bridge_timeout_range");
+    fs::write(
+        &harness,
+        r#"
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let cases = [
+        (Some(-1), None, None, None),
+        (None, Some(-1), None, None),
+        (None, None, Some(-1), None),
+        (None, None, None, Some(-1)),
+    ];
+    let errors = cases.into_iter().map(|(timeout, connect, read, total)| {
+        bridge::jet_http_client_send_impl(
+            "GET", &url, &[], None, timeout, connect, read, total, None, None,
+            &[], &[], &[],
+        ).err()
+    }).collect::<Vec<_>>();
+    assert_eq!(errors, vec![
+        Some("HTTP timeout must be non-negative".to_string()),
+        Some("HTTP connect timeout must be non-negative".to_string()),
+        Some("HTTP read timeout must be non-negative".to_string()),
+        Some("HTTP total timeout must be non-negative".to_string()),
+    ]);
+}
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args(["--edition", "2021", harness.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
+    rustc.arg("--extern").arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc.arg("-L").arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(built.status.success(), "bridge harness compile failed:\n{}", String::from_utf8_lossy(&built.stderr));
+    let output = Command::new(&bin).arg(format!("http://{addr}/")).output().unwrap();
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
+    assert!(output.status.success(), "bridge harness failed:\n{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(accepted.load(Ordering::Acquire), 0, "invalid timeout reached transport");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_http_client_bounds_and_strictly_decodes_response_bodies() {
     use std::io::{Read, Write};
 
