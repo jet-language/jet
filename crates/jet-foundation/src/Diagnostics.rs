@@ -84,6 +84,44 @@ pub struct TextEdit {
     pub new_text: String,
 }
 
+/// Closed machine-readable reasons for E2702 (D-CRYPTO-DIAG1=A).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CryptoMisuseReason {
+    InvalidLength,
+    NonceLength,
+    OutputLength,
+    SaltLength,
+    MemoryCost,
+    IterationCount,
+    LaneCount,
+    MemoryTimeCost,
+}
+
+impl CryptoMisuseReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidLength => "invalid_length",
+            Self::NonceLength => "nonce_length",
+            Self::OutputLength => "output_length",
+            Self::SaltLength => "salt_length",
+            Self::MemoryCost => "memory_cost",
+            Self::IterationCount => "iteration_count",
+            Self::LaneCount => "lane_count",
+            Self::MemoryTimeCost => "memory_time_cost",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructuredDiagnostic {
+    CryptoMisuse {
+        reason: CryptoMisuseReason,
+        operation: &'static str,
+        expected: &'static str,
+        actual: i128,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: Severity,
@@ -96,6 +134,9 @@ pub struct Diagnostic {
     pub edit: Option<TextEdit>,
     /// Extra indented detail (e.g. tool output for E0704).
     pub detail: Option<String>,
+    /// Decision-owned machine fields. Human prose never gets parsed back into
+    /// protocol data.
+    pub structured: Option<StructuredDiagnostic>,
 }
 
 impl Diagnostic {
@@ -146,6 +187,7 @@ impl Diagnostic {
             span,
             edit: None,
             detail: None,
+            structured: None,
         };
         d.attach_teaching_edit();
         d
@@ -167,12 +209,38 @@ impl Diagnostic {
             span,
             edit: None,
             detail: None,
+            structured: None,
         }
     }
 
     pub fn with_detail(mut self, detail: String) -> Self {
         self.detail = Some(detail);
         self
+    }
+
+    pub fn crypto_misuse(
+        why: String,
+        fix: String,
+        span: Span,
+        reason: CryptoMisuseReason,
+        operation: &'static str,
+        expected: &'static str,
+        actual: i128,
+    ) -> Self {
+        let mut diagnostic = Self::error(
+            "E2702",
+            "crypto API misuse".to_string(),
+            why,
+            fix,
+            Some(span),
+        );
+        diagnostic.structured = Some(StructuredDiagnostic::CryptoMisuse {
+            reason,
+            operation,
+            expected,
+            actual,
+        });
+        diagnostic
     }
 
     /// Render in the exact format specified by docs/spec/diagnostics.md, plain
@@ -279,6 +347,9 @@ impl Diagnostic {
     ///
     /// `edit` is the machine-applicable fix the LSP / fix engine consumes.
     pub fn to_json(&self, file: &str, src: &str) -> String {
+        if let Some(json) = self.structured_json(file, src) {
+            return json;
+        }
         let mut o = String::from("{");
         o.push_str(&format!("\"schema_version\":{}", JSON_SCHEMA_VERSION));
         o.push_str(&format!(",\"code\":{}", json_str(&self.code)));
@@ -322,6 +393,42 @@ impl Diagnostic {
         o.push('}');
         o
     }
+
+    /// Decision-owned protocol object for diagnostics with a closed machine
+    /// projection. Generic diagnostics keep the D-DX1 schema above.
+    pub fn structured_json(&self, file: &str, src: &str) -> Option<String> {
+        let StructuredDiagnostic::CryptoMisuse {
+            reason,
+            operation,
+            expected,
+            actual,
+        } = self.structured.as_ref()?;
+        let span = self.span?;
+        let (line, col) = line_col(src, span.start);
+        Some(format!(
+            concat!(
+                "{{\"schema\":\"jet.diagnostic/v1\",",
+                "\"code\":\"E2702\",\"class\":\"user\",",
+                "\"severity\":\"error\",\"phase\":\"sema\",",
+                "\"what\":{},\"why\":{},\"fix\":{},",
+                "\"reason\":{},\"operation\":{},\"expected\":{},\"actual\":{},",
+                "\"primarySpan\":{{\"file\":{},\"start\":{},\"end\":{},\"line\":{},\"col\":{}}},",
+                "\"relatedSpans\":[]}}"
+            ),
+            json_str(&self.what),
+            json_str(&self.why),
+            json_str(&self.fix),
+            json_str(reason.as_str()),
+            json_str(operation),
+            json_str(expected),
+            actual,
+            json_str(file),
+            span.start,
+            span.end,
+            line,
+            col,
+        ))
+    }
 }
 
 /// Escape a string as a JSON string literal (RFC 8259), std-only (I6).
@@ -348,6 +455,18 @@ pub fn json_str(s: &str) -> String {
 /// Render a batch of diagnostics as a single JSON document in the `--json`
 /// schema: `{ "schema_version": 1, "diagnostics": [ … ] }`.
 pub fn render_all_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
+    if diags.iter().any(|diagnostic| diagnostic.structured.is_some()) {
+        let mut out = String::new();
+        for diagnostic in diags {
+            out.push_str(
+                &diagnostic
+                    .structured_json(file, src)
+                    .unwrap_or_else(|| diagnostic.to_json(file, src)),
+            );
+            out.push('\n');
+        }
+        return out;
+    }
     let mut out = String::from("{");
     out.push_str(&format!("\"schema_version\":{}", JSON_SCHEMA_VERSION));
     out.push_str(",\"diagnostics\":[");
@@ -663,7 +782,6 @@ pub fn render_all(file: &str, src: &str, diags: &[Diagnostic]) -> String {
     let rendered: Vec<String> = diags.iter().map(|d| d.render(file, src)).collect();
     rendered.join("\n")
 }
-
 #[cfg(test)]
 mod unicode_display_width_tests {
     use super::*;
@@ -677,5 +795,87 @@ mod unicode_display_width_tests {
         assert_eq!(display_width("©️"), 2);
         assert_eq!(display_width("\u{301}\u{200D}"), 0);
         assert_eq!(display_width("界"), 2);
+    }
+}
+
+#[cfg(test)]
+mod crypto_diagnostic_contract_tests {
+    use super::*;
+
+    #[test]
+    fn e2702_json_is_one_closed_redacted_object() {
+        let diagnostic = Diagnostic::crypto_misuse(
+            "HKDF-SHA256 output length is 8161 bytes; this operation requires 0..8160".into(),
+            "pass an output length from 0 through 8160 bytes".into(),
+            Span::new(4, 8),
+            CryptoMisuseReason::OutputLength,
+            "hkdf_sha256",
+            "0..8160",
+            8161,
+        );
+        let json = render_all_json("secret-name.jet", "xxxx8161", &[diagnostic]);
+        assert_eq!(
+            json,
+            concat!(
+                "{\"schema\":\"jet.diagnostic/v1\",\"code\":\"E2702\",",
+                "\"class\":\"user\",\"severity\":\"error\",\"phase\":\"sema\",",
+                "\"what\":\"crypto API misuse\",",
+                "\"why\":\"HKDF-SHA256 output length is 8161 bytes; this operation requires 0..8160\",",
+                "\"fix\":\"pass an output length from 0 through 8160 bytes\",",
+                "\"reason\":\"output_length\",\"operation\":\"hkdf_sha256\",",
+                "\"expected\":\"0..8160\",\"actual\":8161,",
+                "\"primarySpan\":{\"file\":\"secret-name.jet\",\"start\":4,\"end\":8,\"line\":1,\"col\":5},",
+                "\"relatedSpans\":[]}\n"
+            )
+        );
+        for forbidden in ["password", "plaintext", "ciphertext", "backend", "rustc", "dependency"] {
+            assert!(!json.contains(forbidden), "leaked `{forbidden}`: {json}");
+        }
+    }
+
+    #[test]
+    fn ordinary_diagnostics_keep_the_stable_batch_schema() {
+        let diagnostic = Diagnostic::error(
+            "E0001",
+            "bad token".into(),
+            "grammar".into(),
+            "remove it".into(),
+            None,
+        );
+        assert!(render_all_json("x.jet", "", &[diagnostic])
+            .starts_with("{\"schema_version\":1,\"diagnostics\":["));
+    }
+
+    #[test]
+    fn every_crypto_reason_is_closed_and_batches_keep_structured_fields() {
+        let reasons = [
+            (CryptoMisuseReason::InvalidLength, "invalid_length"),
+            (CryptoMisuseReason::NonceLength, "nonce_length"),
+            (CryptoMisuseReason::OutputLength, "output_length"),
+            (CryptoMisuseReason::SaltLength, "salt_length"),
+            (CryptoMisuseReason::MemoryCost, "memory_cost"),
+            (CryptoMisuseReason::IterationCount, "iteration_count"),
+            (CryptoMisuseReason::LaneCount, "lane_count"),
+            (CryptoMisuseReason::MemoryTimeCost, "memory_time_cost"),
+        ];
+        for (reason, spelling) in reasons {
+            assert_eq!(reason.as_str(), spelling);
+        }
+
+        let diagnostic = || {
+            Diagnostic::crypto_misuse(
+                "invalid length".into(),
+                "pass the required length".into(),
+                Span::new(0, 1),
+                CryptoMisuseReason::InvalidLength,
+                "x25519",
+                "exactly 32",
+                31,
+            )
+        };
+        let json = render_all_json("x.jet", "x", &[diagnostic(), diagnostic()]);
+        assert_eq!(json.lines().count(), 2);
+        assert_eq!(json.matches("\"schema\":\"jet.diagnostic/v1\"").count(), 2);
+        assert_eq!(json.matches("\"reason\":\"invalid_length\"").count(), 2);
     }
 }

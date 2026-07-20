@@ -753,7 +753,7 @@ fn publish_diagnostics(uri: &str, src: &str, version: i32, diags: &[Diagnostic])
         if i > 0 {
             items.push(',');
         }
-        items.push_str(&diagnostic_json(d, src));
+        items.push_str(&diagnostic_json(d, uri, src));
     }
     format!(
         r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{}","version":{},"diagnostics":[{}]}}}}"#,
@@ -763,7 +763,7 @@ fn publish_diagnostics(uri: &str, src: &str, version: i32, diags: &[Diagnostic])
     )
 }
 
-fn diagnostic_json(d: &Diagnostic, src: &str) -> String {
+fn diagnostic_json(d: &Diagnostic, file: &str, src: &str) -> String {
     let severity = match d.severity {
         Severity::Error => 1,
         Severity::Lint => 2,
@@ -772,12 +772,17 @@ fn diagnostic_json(d: &Diagnostic, src: &str) -> String {
         .span
         .map(|s| byte_span_to_range(src, s))
         .unwrap_or(full_document_range(src));
+    let data = d
+        .structured_json(file, src)
+        .map(|json| format!(r#", "data":{}"#, json))
+        .unwrap_or_default();
     format!(
-        r#"{{"range":{},"severity":{},"code":"{}","source":"jet","message":"{}"}}"#,
+        r#"{{"range":{},"severity":{},"code":"{}","source":"jet","message":"{}"{}}}"#,
         range_json(range),
         severity,
         json_escape(&d.code),
-        json_escape(&d.what)
+        json_escape(&d.what),
+        data,
     )
 }
 
@@ -2123,6 +2128,37 @@ fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 #[cfg(test)]
 mod project_part_tests {
     use super::*;
+
+    #[test]
+    fn e2702_lsp_diagnostic_carries_the_closed_compiler_projection() {
+        let diagnostic = Diagnostic::crypto_misuse(
+            "nonce has 1 byte; this operation requires exactly 24".into(),
+            "pass a 24-byte nonce".into(),
+            Span::new(4, 7),
+            crate::Diagnostics::CryptoMisuseReason::NonceLength,
+            "xchacha20poly1305_seal",
+            "exactly 24",
+            1,
+        );
+        let json = diagnostic_json(&diagnostic, "file:///secret-name.jet", "xxxx[0]");
+        assert_eq!(
+            json,
+            concat!(
+                "{\"range\":{\"start\":{\"line\":0,\"character\":4},",
+                "\"end\":{\"line\":0,\"character\":7}},\"severity\":1,",
+                "\"code\":\"E2702\",\"source\":\"jet\",\"message\":\"crypto API misuse\", ",
+                "\"data\":{\"schema\":\"jet.diagnostic/v1\",\"code\":\"E2702\",",
+                "\"class\":\"user\",\"severity\":\"error\",\"phase\":\"sema\",",
+                "\"what\":\"crypto API misuse\",",
+                "\"why\":\"nonce has 1 byte; this operation requires exactly 24\",",
+                "\"fix\":\"pass a 24-byte nonce\",\"reason\":\"nonce_length\",",
+                "\"operation\":\"xchacha20poly1305_seal\",\"expected\":\"exactly 24\",",
+                "\"actual\":1,\"primarySpan\":{\"file\":\"file:///secret-name.jet\",",
+                "\"start\":4,\"end\":7,\"line\":1,\"col\":5},\"relatedSpans\":[]}}"
+            )
+        );
+        assert!(!json.contains("backend"), "{json}");
+    }
 
     #[test]
     fn cancellation_suppresses_an_in_flight_success_response() {

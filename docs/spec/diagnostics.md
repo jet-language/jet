@@ -978,7 +978,29 @@ Wave-1 ring packages (`core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.ti
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2701 | `{parser}` found malformed input at row/line {n} — {detail}. | The ring library parse function encountered text it can't interpret: a missing delimiter, an unclosed quote, or an unexpected character. The row or line number points at the first offending record. | Fix the input at the location named, or validate it before parsing. |
-| E2702 | Crypto API misuse. | After syntax, effects, and types succeed, a compiler-known `core.crypto` argument violates a public cryptographic bound. Live reasons include fixed or literal expert AEAD, Ed25519, or X25519 key, public-key, seed, signature, and nonce lengths; a literal HKDF-SHA256 output length outside 0..8160 bytes; and literal expert Argon2id salt, memory, iteration, lane, output, or memory-time values outside the ratified password policy. | Pass the exact bound named by the diagnostic; use `core.crypto.seal` for managed nonces. |
+| E2702 | Crypto API misuse. | After syntax, effects, and types succeed, a compiler-known `core.crypto` argument violates a public cryptographic bound. Live reasons include fixed or literal expert AEAD, Ed25519, or X25519 key, public-key, seed, signature, and nonce lengths; a literal HKDF-SHA256 output length outside 0..8160 bytes; and literal expert Argon2id salt, memory, iteration, lane, output, or memory-time values outside the ratified password policy. Dynamic values remain ordinary runtime `CryptoError` results. | Pass the exact bound named by the diagnostic; use `core.crypto.seal` for managed nonces. |
+
+E2702 is emitted only after parsing, effect checking, and ordinary typing have
+succeeded; those diagnostics win at the same call site. Dynamic or
+attacker-controlled values remain ordinary `CryptoError` results at runtime and
+never become E2702. Its machine projection is one `jet.diagnostic/v1` object
+with `code`, `class`, `severity`, `phase`, `what`, `why`, `fix`, a closed
+`reason`, `operation`, optional `expected`/`actual`, `primarySpan`, and an empty
+`relatedSpans` list. LSP carries the same object in diagnostic `data`. Neither
+projection may include secret material, ciphertext, parser offsets, operating
+system errors or paths, dependency errors, backend prose, or generated Rust.
+
+The public runtime projection is closed. `CryptoError` has only
+`InvalidLength`, `InvalidEncoding`, `UnsupportedVersion`,
+`UnsupportedAlgorithm`, `OpenFailed`, `NonContributoryKey`, `OutputLength`,
+`PasswordPolicy`, `EntropyUnavailable`, `ResourceUnavailable`, and `Internal`.
+`FileCryptoError` exposes only `OpenFailed`, `SealFailed(CryptoError)`,
+`SourceIo`, `DestinationExists`, and `DestinationIo`; internal cancellation is
+collapsed before the Jet-visible boundary. `VaultError` has only `InvalidName`,
+`NotFound`, `WrongType`, `Revoked`, `Locked`, `AuthorityDenied`, `Conflict`,
+`UnsupportedProvider`, `InvalidEncoding`, `DurabilityUnknown`,
+`Crypto(CryptoError)`, redacted `Io`, and `Internal`. These values contain only
+the named closed fields; handled errors are ordinary values.
 | E2710 | `` `derive T.{Trait}` body failed while expanding `@[{Trait}]` on `{Type}` ``. | The user-authored derive body ran at compile time (D-METADERIVE1=A, D-CTCODEGEN1=A) and threw a comptime error — typically an undefined name, a bad method call, or a type mismatch in the body. The span points at the `@[Trait]` rule on the struct that triggered expansion. | Fix the `derive T.{Trait}` body: check that every name it references is bound in scope, every method it calls is valid on the reflected type, and every `emit()` argument is a `String`. |
 | E2711 | Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local. | A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract. | Define `derive T.{Trait}` or `{Type}` in the entry module. |
 | E2712 | *retired by D-CTBLOCKEXPOSE1* (was: `$` splice outside comptime context). | Runtime `$name` splices are allowed when a comptime value is in scope. | Define the value with `comptime name = ...`, or remove the `$` prefix. |
