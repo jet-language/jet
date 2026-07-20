@@ -43,7 +43,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// A primitive effect. Closed, compiler-known set; each Core operation
 /// contributes exactly one. Ordered for deterministic diagnostics.
@@ -791,11 +791,15 @@ mod inferred_purity_display_tests {
 
 /// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* body row is
 /// empty. Callees need not repeat `--[]->`; their solved row is the authority.
+/// D-CRYPTO-DIAG1 uses that same solved result to suppress later E2702 facts in
+/// a pure function whose effect check failed.
 pub fn check_inferred_purity(
     items: &[crate::AST::Item],
     module_alias: &str,
     summaries: &HashMap<String, EffectSummary>,
     solved: &HashMap<String, EffectSet>,
+    body_diagnostic_range: &std::ops::Range<usize>,
+    suppressed_diagnostic_indices: &mut HashSet<usize>,
     diags: &mut Vec<Diagnostic>,
 ) {
     fn first_effectful_chain(
@@ -825,6 +829,8 @@ pub fn check_inferred_purity(
         module_alias: &str,
         summaries: &HashMap<String, EffectSummary>,
         solved: &HashMap<String, EffectSet>,
+        body_diagnostic_range: &std::ops::Range<usize>,
+        suppressed_diagnostic_indices: &mut HashSet<usize>,
         diags: &mut Vec<Diagnostic>,
     ) {
         if !f.is_pure {
@@ -836,6 +842,19 @@ pub fn check_inferred_purity(
         let key = format!("{module_alias}::{identity}");
         if solved.get(&key).map_or(true, EffectSet::is_empty) {
             return;
+        }
+        // D-CRYPTO-DIAG1=A: solved effect failures outrank later compiler-known
+        // crypto facts. The body range keeps spans module-local while this
+        // existing post-effect pass suppresses only E2702 inside this function.
+        for index in body_diagnostic_range.clone() {
+            let diagnostic = &diags[index];
+            if diagnostic.code == "E2702"
+                && diagnostic.span.is_some_and(|span| {
+                    span.start >= f.span.start && span.end <= f.span.end
+                })
+            {
+                suppressed_diagnostic_indices.insert(index);
+            }
         }
         let chain = first_effectful_chain(&key, summaries, solved, &mut BTreeSet::new());
         let Some(first) = chain.first() else {
@@ -879,15 +898,15 @@ pub fn check_inferred_purity(
     use crate::AST::Item;
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, None, module_alias, summaries, solved, diags),
-            Item::Impl(i) => for f in &i.methods { check_one(f, Some(&i.type_name), None, module_alias, summaries, solved, diags); },
+            Item::Func(f) => check_one(f, None, None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags),
+            Item::Impl(i) => for f in &i.methods { check_one(f, Some(&i.type_name), None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags); },
             Item::Struct(s) => {
-                for f in &s.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, diags); }
+                for f in &s.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags); }
                 for block in &s.trait_impls {
-                    for f in &block.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, diags); }
+                    for f in &block.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags); }
                 }
             }
-            Item::Enum(e) => for f in &e.methods { check_one(f, Some(&e.name), None, module_alias, summaries, solved, diags); },
+            Item::Enum(e) => for f in &e.methods { check_one(f, Some(&e.name), None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags); },
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
                     for item in body {
@@ -900,6 +919,8 @@ pub fn check_inferred_purity(
                                 module_alias,
                                 summaries,
                                 solved,
+                                body_diagnostic_range,
+                                suppressed_diagnostic_indices,
                                 diags,
                             );
                         }

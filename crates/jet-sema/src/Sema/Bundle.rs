@@ -2588,6 +2588,7 @@ fn check_bundle_opts_for_output(
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
     let mut reference_anchors = HashMap::new();
     let mut module_effect_summaries: Vec<(String, HashMap<String, EffectSummary>)> = Vec::new();
+    let mut module_body_diagnostic_ranges = Vec::new();
     // D-METHODMACRO1=A: top-level function names whose address was taken
     // anywhere in the bundle, accumulated across every module below; the
     // `@InlineAlways` address-taken pass (E0918) runs after the loop, once
@@ -2595,6 +2596,7 @@ fn check_bundle_opts_for_output(
     let mut global_addr_taken: HashSet<String> = HashSet::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let mut local_summaries = HashMap::new();
+        let body_diagnostic_start = diags.len();
         diags.extend(check_module_bodies(
             module,
             idx,
@@ -2608,6 +2610,7 @@ fn check_bundle_opts_for_output(
             &mut reference_anchors,
             incremental.as_deref_mut(),
         ));
+        module_body_diagnostic_ranges.push(body_diagnostic_start..diags.len());
         seed_trait_dispatch_effects(&module.items, &mut local_summaries);
         apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());
         effect_summaries.extend(local_summaries.clone());
@@ -2674,7 +2677,8 @@ fn check_bundle_opts_for_output(
         .filter(|(key, _)| module_aliases.iter().any(|prefix| key.starts_with(prefix)))
         .map(|(key, summary)| (key.clone(), summary.clone()))
         .collect::<HashMap<_, _>>();
-    for module in &bundle.modules {
+    let mut suppressed_diagnostic_indices = HashSet::new();
+    for (module_index, module) in bundle.modules.iter().enumerate() {
         let prefix = format!("{}::", module.alias);
         let local_solved = public_solved
             .iter()
@@ -2714,6 +2718,8 @@ fn check_bundle_opts_for_output(
             &module.alias,
             &validation_summaries,
             &public_solved,
+            &module_body_diagnostic_ranges[module_index],
+            &mut suppressed_diagnostic_indices,
             &mut diags,
         );
         check_replayable_effects(&module.items, &local_solved, &mut diags);
@@ -2723,6 +2729,14 @@ fn check_bundle_opts_for_output(
             &validation_summaries,
             &mut diags,
         );
+    }
+    if !suppressed_diagnostic_indices.is_empty() {
+        let mut index = 0;
+        diags.retain(|_| {
+            let keep = !suppressed_diagnostic_indices.contains(&index);
+            index += 1;
+            keep
+        });
     }
     check_region_caps(&validation_summaries, &public_solved, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).

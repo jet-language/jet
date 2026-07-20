@@ -48,10 +48,11 @@ fn crypto_expert_nonce_diagnostic(
     let nonce = args.get(1)?;
     let actual = literal_list_len(&nonce.expr)?;
     if actual == expected { return None; }
+    let unit = if actual == 1 { "byte" } else { "bytes" };
     Some(Diagnostic::error(
         "E2702",
         "crypto API misuse".to_string(),
-        format!("{operation} nonce has {actual} bytes; this operation requires exactly {expected}"),
+        format!("{operation} nonce has {actual} {unit}; this operation requires exactly {expected}"),
         format!("pass a {expected}-byte nonce, or use core.crypto.seal so Jet generates it"),
         Some(nonce.expr.span()),
     ))
