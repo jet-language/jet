@@ -1016,7 +1016,8 @@ fn rustc_backed_testing_fake_clock_matches_aot_comptime_forced_interpreter_and_d
 }
 
 #[test]
-fn rustc_backed_testing_fake_clock_writeback_matches_all_tiers_exactly() {
+fn rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+) {
     let declarations = format!(
         "use core.testing as testing\n{TESTING_FAKE_CLOCK_WRITEBACK_DECLS}"
     );
@@ -1025,6 +1026,8 @@ fn rustc_backed_testing_fake_clock_writeback_matches_all_tiers_exactly() {
         check_aot_comptime("testing/fake-clock-writeback", &source),
         TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED
     );
+    // Clock mutation remains outside the resident JIT subset: force the
+    // interpreter, then prove default dev's ordinary AOT fallback.
     check_dev_tiers_with_boundary(
         "testing-fake-clock-writeback",
         &source,
