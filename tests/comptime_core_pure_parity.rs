@@ -53,6 +53,25 @@ const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() -> String {
     return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
 }"#;
 const BYTE_BUFFER_EXPECTED: &str = "true|31|[18, 86, 52, 120, 154, 4, 3, 2, 1, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1, 17, 18, 19, 20, 21, 22, 23, 24, 9, 10]|true|0|[255, 0]|2";
+const DEQUE_DECLS: &str = r#"fn deque_view() -> String {
+    deque: Deque<Int> := Deque.new()
+    empty_before :: deque.is_empty()
+    missing_front :: deque.peek_front() ?? -1
+    missing_back :: deque.peek_back() ?? -1
+    deque.push_back(2)
+    deque.push_front(1)
+    deque.push_back(3)
+    length :: deque.len()
+    front :: deque.peek_front() ?? -1
+    back :: deque.peek_back() ?? -1
+    popped_front :: deque.pop_front() ?? -1
+    popped_back :: deque.pop_back() ?? -1
+    remaining :: deque.peek_front() ?? -1
+    deque.clear()
+    empty_pop :: deque.pop_front() ?? -1
+    return "{empty_before}|{missing_front}|{missing_back}|{length}|{front}|{back}|{popped_front}|{popped_back}|{remaining}|{deque.is_empty()}|{deque.len()}|{empty_pop}"
+}"#;
+const DEQUE_EXPECTED: &str = "true|-1|-1|3|1|3|1|3|2|true|0|-1";
 const LRU_DECLS: &str = r#"fn lru_view() -> String {
     cache: Lru<String, Int> := Lru.new(2)
     empty_before :: cache.is_empty()
@@ -201,6 +220,12 @@ fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
 fn public_transcript_covers_lru_methods_exactly() {
     let values = exact_values(&[LRU_DECLS, "lru_view()"]);
     assert_eq!(values, [format!("\"{LRU_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_covers_deque_methods_exactly() {
+    let values = exact_values(&[DEQUE_DECLS, "deque_view()"]);
+    assert_eq!(values, [format!("\"{DEQUE_EXPECTED}\" : String")]);
 }
 
 fn parity_source(expression: &str, imports: &str) -> String {
@@ -430,6 +455,13 @@ fn rustc_backed_lru_matches_all_execution_tiers_exactly() {
     let source = parity_source("lru_view()", LRU_DECLS);
     assert_eq!(check_aot_comptime("lru/all-methods", &source), LRU_EXPECTED);
     check_dev_tiers("lru", &source, LRU_EXPECTED);
+}
+
+#[test]
+fn rustc_backed_deque_matches_all_execution_tiers_exactly() {
+    let source = parity_source("deque_view()", DEQUE_DECLS);
+    assert_eq!(check_aot_comptime("deque/all-methods", &source), DEQUE_EXPECTED);
+    check_dev_tiers("deque", &source, DEQUE_EXPECTED);
 }
 
 #[test]

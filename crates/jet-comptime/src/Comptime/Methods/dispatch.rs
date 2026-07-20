@@ -1336,6 +1336,12 @@ impl<'a> Interp<'a> {
                     ],
                 });
             }
+            if type_name == crate::Syntax::TYPE_DEQUE && method == "new" {
+                return Ok(CtValue::Struct {
+                    type_name: crate::Syntax::TYPE_DEQUE.to_string(),
+                    fields: vec![("items".to_string(), CtValue::List(Vec::new()))],
+                });
+            }
         }
         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
@@ -1950,9 +1956,97 @@ impl<'a> Interp<'a> {
                 | "len"
                 | "is_empty"
                 | "clear"
+                | "push_front"
+                | "push_back"
+                | "pop_front"
+                | "pop_back"
+                | "peek_front"
+                | "peek_back"
         ) {
             let peek = self.eval(receiver, scope)?;
             match (&peek, method) {
+                (
+                    CtValue::Struct { type_name, fields },
+                    method @ ("push_front"
+                        | "push_back"
+                        | "pop_front"
+                        | "pop_back"
+                        | "peek_front"
+                        | "peek_back"
+                        | "len"
+                        | "is_empty"
+                        | "clear"),
+                ) if type_name == crate::Syntax::TYPE_DEQUE => {
+                    let mut items = fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("items", CtValue::List(items)) => Some(items.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut argv = Vec::with_capacity(args.len());
+                    for arg in args {
+                        argv.push(self.eval(&arg.expr, scope)?);
+                    }
+                    let option_none = || {
+                        CtValue::None(match resolved_ret {
+                            Some(Type::Option(inner)) => (**inner).clone(),
+                            _ => Type::Int,
+                        })
+                    };
+                    let mut changed = false;
+                    let result = match method {
+                        "len" => CtValue::Int(items.len() as i64),
+                        "is_empty" => CtValue::Bool(items.is_empty()),
+                        "peek_front" => items
+                            .first()
+                            .cloned()
+                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                        "peek_back" => items
+                            .last()
+                            .cloned()
+                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                        "push_front" => {
+                            items.insert(0, argv[0].clone());
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        "push_back" => {
+                            items.push(argv[0].clone());
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        "pop_front" if items.is_empty() => option_none(),
+                        "pop_front" => {
+                            changed = true;
+                            CtValue::Some(Box::new(items.remove(0)))
+                        }
+                        "pop_back" => match items.pop() {
+                            Some(value) => {
+                                changed = true;
+                                CtValue::Some(Box::new(value))
+                            }
+                            None => option_none(),
+                        },
+                        "clear" => {
+                            items.clear();
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        _ => unreachable!("Deque method set is closed"),
+                    };
+                    if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                        self.write_back(
+                            receiver,
+                            CtValue::Struct {
+                                type_name: crate::Syntax::TYPE_DEQUE.to_string(),
+                                fields: vec![("items".to_string(), CtValue::List(items))],
+                            },
+                            scope,
+                        )?;
+                    }
+                    return Ok(result);
+                }
                 (
                     CtValue::Struct { type_name, fields },
                     method @ ("add"
