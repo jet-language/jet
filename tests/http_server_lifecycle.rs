@@ -128,7 +128,7 @@ fn live_server_round_trips_repeated_headers_in_order() {
         let mut headers = JetHttpHeaders::new();
         headers.append("Set-Cookie", "a=1").unwrap();
         headers.append("set-cookie", "b=2").unwrap();
-        JetHttpSrvResp { status: 200, body: "ok".to_string(), headers }
+        JetHttpSrvResp { status: 200, body: "ok".to_string(), headers, head_content_length: None }
     });
     let client = std::thread::spawn(move || {
         request(addr, b"GET /headers HTTP/1.1\r\nHost: local\r\nX-Tag: one\r\nx-tag: two\r\n\r\n")
@@ -328,6 +328,117 @@ fn plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries() {
     assert_eq!(report.user_completed, 8);
     assert_eq!(JET_HTTP_KEEPALIVE_IDLE_TIMEOUT, std::time::Duration::from_secs(60));
     assert_eq!(JET_HTTP_MAX_REQUESTS_PER_CONNECTION, 1000);
+}
+
+#[test]
+fn head_preserves_representation_length_without_a_wire_body() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("response read");
+        response
+    }
+
+    fn assert_head(response: &str, status: &str, length: usize) {
+        let (headers, body) = response.split_once("\r\n\r\n").expect("response framing");
+        assert!(headers.starts_with(status), "{response}");
+        assert!(headers.contains(&format!("Content-Length: {length}\r\n")), "{response}");
+        assert!(body.is_empty(), "HEAD emitted representation bytes: {response}");
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let implicit_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/implicit", move |_| {
+        implicit_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response_header(
+            jet_http_srv_response(200, &"hello".to_string()),
+            &"x-origin".to_string(),
+            &"get".to_string(),
+        )
+    });
+    let explicit_calls = calls.clone();
+    jet_http_mux_add(&mux, "HEAD", "/explicit", move |_| {
+        explicit_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"explicit".to_string())
+    });
+    jet_http_mux_add(&mux, "POST", "/post", |_| jet_http_srv_response(200, &"posted".to_string()));
+    let empty_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/empty", move |_| {
+        empty_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(204, &"forbidden".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 8;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    let implicit = exchange(
+        addr,
+        b"HEAD /implicit HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_head(&implicit, "HTTP/1.1 200 OK", 5);
+    assert!(implicit.contains("x-origin: get\r\n"), "HEAD lost GET metadata: {implicit}");
+
+    let explicit = exchange(
+        addr,
+        b"HEAD /explicit HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_head(&explicit, "HTTP/1.1 200 OK", 8);
+
+    let missing = exchange(
+        addr,
+        b"HEAD /missing HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_head(&missing, "HTTP/1.1 404 Not Found", 13);
+
+    let bad_route = exchange(
+        addr,
+        b"HEAD /%FF HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_head(&bad_route, "HTTP/1.1 400 Bad Request", 15);
+
+    let not_allowed = exchange(
+        addr,
+        b"HEAD /post HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_head(&not_allowed, "HTTP/1.1 405 Method Not Allowed", 22);
+
+    let no_content = exchange(
+        addr,
+        b"HEAD /empty HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    let (no_content_headers, no_content_body) = no_content.split_once("\r\n\r\n").expect("204 framing");
+    assert!(no_content_headers.starts_with("HTTP/1.1 204 No Content"), "{no_content}");
+    assert!(!no_content_headers.to_ascii_lowercase().contains("content-length:"), "{no_content}");
+    assert!(no_content_body.is_empty(), "{no_content}");
+
+    let pipelined = exchange(
+        addr,
+        b"HEAD /implicit HTTP/1.1\r\nHost: local\r\n\r\nGET /implicit HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    let second = pipelined[1..].find("HTTP/1.1 200 OK").map(|index| index + 1).expect("second response");
+    let first_response = &pipelined[..second];
+    assert!(first_response.contains("Content-Length: 5\r\n"), "{pipelined}");
+    assert!(first_response.ends_with("\r\n\r\n"), "HEAD body shifted pipeline: {pipelined}");
+    assert!(pipelined[second..].ends_with("\r\n\r\nhello"), "GET response missing after HEAD: {pipelined}");
+
+    assert_eq!(calls.load(Ordering::Acquire), 5);
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 7);
+    assert_eq!(report.user_completed, 7);
 }
 
 #[test]

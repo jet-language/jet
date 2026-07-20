@@ -12,6 +12,7 @@ struct JetHttpSrvResp {
     status: i64,
     body: String,
     headers: JetHttpHeaders,
+    head_content_length: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -295,6 +296,7 @@ fn jet_http_srv_response(status: i64, body: &String) -> JetHttpSrvResp {
         status,
         body: body.clone(),
         headers: JetHttpHeaders::new(),
+        head_content_length: None,
     }
 }
 
@@ -1288,13 +1290,18 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpSrvReq, JetHttpReadError> {
 }
 
 fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp {
+    let requested_method = req.method.to_uppercase();
+    let is_head = requested_method == "HEAD";
     let path = match jet_http_route_path(&req.path) {
         Ok(path) => path,
-        Err(_) => return JetHttpSrvResp {
-            status: 400,
-            body: "400 Bad Request".to_string(),
-            headers: JetHttpHeaders::new(),
-        },
+        Err(_) => {
+            return jet_http_srv_head_response(JetHttpSrvResp {
+                status: 400,
+                body: "400 Bad Request".to_string(),
+                headers: JetHttpHeaders::new(),
+                head_content_length: None,
+            }, is_head);
+        }
     };
     // Route lookup is a short snapshot operation. Never retain the registry
     // lock while composing middleware or running user code: handlers may
@@ -1310,13 +1317,17 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
             })
             .collect()
     };
-    let requested_method = req.method.to_uppercase();
     let effective_method = if requested_method == "HEAD"
         && !path_matches.iter().any(|(_, route, _, _)| route.method == "HEAD")
     { "GET" } else { requested_method.as_str() };
     if requested_method == "OPTIONS" && !path_matches.iter().any(|(_, route, _, _)| route.method == "OPTIONS") {
         let allow = jet_http_allowed_methods(&path_matches);
-        return JetHttpSrvResp { status: 204, body: String::new(), headers: [("Allow".to_string(), allow)].into_iter().collect() };
+        return JetHttpSrvResp {
+            status: 204,
+            body: String::new(),
+            headers: [("Allow".to_string(), allow)].into_iter().collect(),
+            head_content_length: None,
+        };
     }
     if let Some((_, route, params, _)) = path_matches.iter()
         .filter(|(_, route, _, _)| route.method == effective_method)
@@ -1330,29 +1341,39 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
         let middlewares = mux.1.lock().unwrap().clone();
         let mut handler = route.handler.clone();
         for middleware in middlewares.iter().rev() { handler = middleware(handler); }
-        let mut response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(r2))) {
+        let response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(r2))) {
             Ok(response) => response,
             Err(_) => JetHttpSrvResp {
                 status: 500,
                 body: "500 Internal Server Error".to_string(),
                 headers: JetHttpHeaders::new(),
+                head_content_length: None,
             },
         };
-        if requested_method == "HEAD" { response.body.clear(); }
-        return response;
+        return jet_http_srv_head_response(response, is_head);
     }
     if !path_matches.is_empty() {
-        return JetHttpSrvResp {
+        return jet_http_srv_head_response(JetHttpSrvResp {
             status: 405,
             body: "405 Method Not Allowed".to_string(),
             headers: [("Allow".to_string(), jet_http_allowed_methods(&path_matches))].into_iter().collect(),
-        };
+            head_content_length: None,
+        }, is_head);
     }
-    JetHttpSrvResp {
+    jet_http_srv_head_response(JetHttpSrvResp {
         status: 404,
         body: "404 Not Found".to_string(),
         headers: JetHttpHeaders::new(),
+        head_content_length: None,
+    }, is_head)
+}
+
+fn jet_http_srv_head_response(mut response: JetHttpSrvResp, is_head: bool) -> JetHttpSrvResp {
+    if is_head {
+        response.head_content_length = Some(response.body.len());
+        response.body.clear();
     }
+    response
 }
 
 fn jet_http_allowed_methods(
@@ -1405,7 +1426,10 @@ fn jet_http_srv_format_connection(resp: &JetHttpSrvResp, version: &str, close: b
     let body_forbidden = (100..200).contains(&resp.status) || matches!(resp.status, 204 | 304);
     let mut out = format!("{} {} {}\r\n", version, resp.status, reason);
     if !body_forbidden {
-        out.push_str(&format!("Content-Length: {}\r\n", resp.body.len()));
+        out.push_str(&format!(
+            "Content-Length: {}\r\n",
+            resp.head_content_length.unwrap_or(resp.body.len()),
+        ));
     }
     out.push_str(&format!("Connection: {}\r\n", if close { "close" } else { "keep-alive" }));
     let connection_headers = resp
@@ -1428,7 +1452,7 @@ fn jet_http_srv_format_connection(resp: &JetHttpSrvResp, version: &str, close: b
         }
     }
     out.push_str("\r\n");
-    if !body_forbidden {
+    if !body_forbidden && resp.head_content_length.is_none() {
         out.push_str(&resp.body);
     }
     out
