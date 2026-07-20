@@ -296,6 +296,9 @@ pub(super) fn apply_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(result) = super::Methods::apply_core_pure_method(recv, method, &args, span) {
+        return result;
+    }
     match (recv, method) {
         // Universal
         (v, "to_string") => Ok(CtValue::Str(v.jet_show())),

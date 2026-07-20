@@ -13,6 +13,15 @@ use super::repl_process::run_repl_process;
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
 
+pub(in super::super) fn apply_core_pure_method(
+    recv: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    core_pure_parity::evaluate_method(recv, method, args, span)
+}
+
 const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // D-FIDELITY-API1=A: this signal must behave like the AOT binary's
 // process-global static (fresh default per program run, persists across

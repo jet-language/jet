@@ -7,7 +7,9 @@ mod repl_process;
 #[path = "Methods/core_calls.rs"]
 mod core_calls;
 
-pub(super) use core_calls::{as_float, as_string, random_float, random_int};
+pub(super) use core_calls::{
+    apply_core_pure_method, as_float, as_string, random_float, random_int,
+};
 
 #[cfg(test)]
 mod structure_tests {

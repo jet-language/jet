@@ -11,6 +11,9 @@ mod common;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
+const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String; bucket: String; score: Float }\nfn pivot_view() -> String {\n    prefix :: \"p\"\n    rows :: [PivotRow.{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) => \"{prefix}{row.team}\", (row) => row.bucket, (row) => row.score)\n    return \"{groups[0].key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
+const PIVOT_EXPR: &str = "pivot_view()";
+
 fn exact_values(inputs: &[&str]) -> Vec<String> {
     let output = run_transcript(inputs, None);
     assert!(!output.contains("error ["), "transcript failed:\n{output}");
@@ -42,7 +45,7 @@ fn public_transcript_covers_remaining_core_pure_families() {
         "date.parse(\"2024-02-29\")",
         "datetime.from_timestamp(-1)",
         "time.from_unix_ms(-1)",
-        "measurement.from(12.5, 0.25) == measurement.from(12.5, 0.25)",
+        "measurement.from(12.5, 0.25).value()",
     ]);
     assert_eq!(
         values,
@@ -60,7 +63,7 @@ fn public_transcript_covers_remaining_core_pure_families() {
             "LocalDate(year: 2024, month: 2, day: 29) : Result",
             "DateTime(secs: -1) : DateTime",
             "DateTime(secs: -1) : DateTime",
-            "true : Bool",
+            "12.5 : Float",
         ]
     );
 }
@@ -95,7 +98,7 @@ fn parity_source(expression: &str, imports: &str) -> String {
     )
 }
 
-fn check_aot_comptime(label: &str, source: &str) {
+fn check_aot_comptime(label: &str, source: &str) -> String {
     assert!(common::have_rustc(), "{label} requires rustc");
     let compiled = jet::Driver::compile_generated_src(
         source,
@@ -142,6 +145,7 @@ fn check_aot_comptime(label: &str, source: &str) {
     let lines = lines.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 2, "{label} emitted unexpected output: {lines:?}");
     assert_eq!(lines[0], lines[1], "{label} comptime/AOT divergence");
+    lines[0].to_string()
 }
 
 #[test]
@@ -172,8 +176,47 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
                 "use core.encoding.xml as xml\nfn xml_shape_reason(tree: DataTree) -> String {\n    if xml.canonical(tree, xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
             ),
         ),
+        (
+            "mime/observable-methods",
+            parity_source(
+                "mime_view()",
+                "use core.mime as mime\nfn mime_view() -> String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+            ),
+        ),
+        (
+            "date/observable-methods",
+            parity_source(
+                "date_view()",
+                "use core.time.date as date\nfn date_view() -> String {\n    parsed :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    clamped :: date.new(2024, 13, 40)\n    return \"{parsed.year()}-{parsed.month()}-{parsed.day()}|{parsed.to_string()}|{clamped.to_string()}\"\n}",
+            ),
+        ),
+        (
+            "time/observable-methods",
+            parity_source(
+                "time_view()",
+                "use core.time as time\nfn time_view() -> String {\n    local :: time.parse_time(\"23:59:58\") ?? panic(\"time\")\n    datetime :: time.from_unix_ms(-1)\n    period :: time.period(1, 2, 3)\n    return \"{local.hour()}:{local.minute()}:{local.second()}|{local.to_string()}|{datetime.to_timestamp()}|{datetime.to_unix_ms()}|{period.to_string()}\"\n}",
+            ),
+        ),
+        (
+            "measurement/observable-methods",
+            parity_source(
+                "measurement_view()",
+                "use core.science.measurement as measurement\nfn measurement_view() -> String {\n    value :: measurement.from(12.5, 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
+            ),
+        ),
     ];
     for (label, source) in cases {
-        check_aot_comptime(label, &source);
+        let _ = check_aot_comptime(label, &source);
     }
+}
+
+#[test]
+fn rustc_backed_pivot_sum_invokes_capturing_closures_exactly() {
+    assert_eq!(
+        check_aot_comptime(
+            "data/pivot-sum-closures",
+            &parity_source(PIVOT_EXPR, PIVOT_DECLS),
+        ),
+        "pA|x:2:4.0:2.0|pB|y:1:5.0:5.0"
+    );
 }

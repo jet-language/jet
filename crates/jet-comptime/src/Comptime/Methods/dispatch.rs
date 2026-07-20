@@ -1533,6 +1533,9 @@ impl<'a> Interp<'a> {
                             repl_root.as_ref(),
                         );
                 }
+                if matches!((module.as_str(), method), ("core.data", "pivot_sum")) {
+                    return self.eval_pivot_sum(argv, span);
+                }
                 return apply_core_call(&module, method, argv, span, self.repl_mode);
             }
         }

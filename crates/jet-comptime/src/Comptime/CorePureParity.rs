@@ -48,6 +48,44 @@ pub(super) fn evaluate(
     Some(result)
 }
 
+pub(super) fn evaluate_method(
+    recv: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<EvalResult> {
+    let CtValue::Struct { type_name, .. } = recv else {
+        return None;
+    };
+    let result = match (type_name.as_str(), method, args.len()) {
+        ("Mime", "media_type", 0) => string_field(recv, "Mime", "top", span),
+        ("Mime", "subtype", 0) => string_field(recv, "Mime", "sub", span),
+        ("Mime", "essence", 0) => mime_essence(recv, span).map(CtValue::Str),
+        ("Mime", "to_string", 0) => mime_string(recv, span).map(CtValue::Str),
+        ("Mime", "param", 1) => mime_param(recv, args, span),
+        ("Mime", "params", 0) => value_field(recv, "Mime", "params", span),
+        ("Date" | "LocalDate", "year" | "month" | "day", 0) => {
+            value_field(recv, type_name, method, span)
+        }
+        ("Date" | "LocalDate", "to_string", 0) => date_from_value(recv, type_name, span)
+            .map(|date| CtValue::Str(date.to_string_fmt())),
+        ("LocalTime", "hour" | "minute" | "second", 0) => {
+            value_field(recv, "LocalTime", method, span)
+        }
+        ("LocalTime", "to_string", 0) => local_time_from_value(recv, span)
+            .map(|time| CtValue::Str(time.to_string_fmt())),
+        ("DateTime", "to_timestamp", 0) => value_field(recv, "DateTime", "secs", span),
+        ("DateTime", "to_unix_ms", 0) => int_field(recv, "DateTime", "secs", span)
+            .map(|seconds| CtValue::Int(seconds.saturating_mul(1_000))),
+        ("Period", "to_string", 0) => period_string(recv, span).map(CtValue::Str),
+        ("Measurement", "value" | "uncertainty", 0) => {
+            value_field(recv, "Measurement", method, span)
+        }
+        _ => return None,
+    };
+    Some(result)
+}
+
 fn one<'a>(
     args: &'a [CtValue],
     index: usize,
@@ -107,6 +145,45 @@ fn field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtVa
     }
 }
 
+fn value_field(
+    value: &CtValue,
+    type_name: &str,
+    name: &str,
+    span: Span,
+) -> EvalResult {
+    field(value, type_name, name)
+        .cloned()
+        .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))
+}
+
+fn int_field(
+    value: &CtValue,
+    type_name: &str,
+    name: &str,
+    span: Span,
+) -> Result<i64, Diagnostic> {
+    as_int(
+        field(value, type_name, name)
+            .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))?,
+        span,
+    )
+}
+
+fn string_field(
+    value: &CtValue,
+    type_name: &str,
+    name: &str,
+    span: Span,
+) -> EvalResult {
+    match field(value, type_name, name) {
+        Some(CtValue::Str(value)) => Ok(CtValue::Str(value.clone())),
+        _ => Err(unsupported(
+            &format!("malformed {type_name}.{name} value"),
+            span,
+        )),
+    }
+}
+
 // ── MIME ───────────────────────────────────────────────────────────────────
 
 fn mime_token(value: &str) -> bool {
@@ -157,6 +234,56 @@ fn parse_mime(input: &str) -> Result<CtValue, String> {
             ("params", CtValue::List(params)),
         ],
     ))
+}
+
+fn mime_essence(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+    let CtValue::Str(top) = field(value, "Mime", "top")
+        .ok_or_else(|| unsupported("malformed Mime.top value", span))?
+    else {
+        return Err(unsupported("malformed Mime.top value", span));
+    };
+    let CtValue::Str(sub) = field(value, "Mime", "sub")
+        .ok_or_else(|| unsupported("malformed Mime.sub value", span))?
+    else {
+        return Err(unsupported("malformed Mime.sub value", span));
+    };
+    Ok(format!("{top}/{sub}"))
+}
+
+fn mime_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+    let Some(CtValue::List(params)) = field(value, "Mime", "params") else {
+        return Err(unsupported("malformed Mime.params value", span));
+    };
+    let mut output = mime_essence(value, span)?;
+    for param in params {
+        let CtValue::List(pair) = param else {
+            return Err(unsupported("malformed Mime parameter", span));
+        };
+        let [CtValue::Str(key), CtValue::Str(value)] = pair.as_slice() else {
+            return Err(unsupported("malformed Mime parameter", span));
+        };
+        output.push_str(&format!("; {key}={value}"));
+    }
+    Ok(output)
+}
+
+fn mime_param(value: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+    let name = string_arg(args, 0, span)?.to_ascii_lowercase();
+    let Some(CtValue::List(params)) = field(value, "Mime", "params") else {
+        return Err(unsupported("malformed Mime.params value", span));
+    };
+    Ok(params
+        .iter()
+        .find_map(|param| match param {
+            CtValue::List(pair) => match pair.as_slice() {
+                [CtValue::Str(key), CtValue::Str(value)] if key == &name => {
+                    Some(CtValue::Some(Box::new(CtValue::Str(value.clone()))))
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap_or(CtValue::None(Type::String)))
 }
 
 fn mime_parse(args: &[CtValue], span: Span) -> EvalResult {
@@ -297,6 +424,10 @@ impl Date {
             - 1
     }
 
+    fn to_string_fmt(self) -> String {
+        format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+
     fn value(self) -> CtValue {
         structure(
             "LocalDate",
@@ -348,6 +479,10 @@ impl LocalTime {
         self.hour * 3600 + self.minute * 60 + self.second
     }
 
+    fn to_string_fmt(self) -> String {
+        format!("{:02}:{:02}:{:02}", self.hour, self.minute, self.second)
+    }
+
     fn value(self) -> CtValue {
         structure(
             "LocalTime",
@@ -358,6 +493,31 @@ impl LocalTime {
             ],
         )
     }
+}
+
+fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date, Diagnostic> {
+    Ok(Date::new(
+        int_field(value, type_name, "year", span)?,
+        int_field(value, type_name, "month", span)?,
+        int_field(value, type_name, "day", span)?,
+    ))
+}
+
+fn local_time_from_value(value: &CtValue, span: Span) -> Result<LocalTime, Diagnostic> {
+    Ok(LocalTime {
+        hour: int_field(value, "LocalTime", "hour", span)?,
+        minute: int_field(value, "LocalTime", "minute", span)?,
+        second: int_field(value, "LocalTime", "second", span)?,
+    })
+}
+
+fn period_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+    Ok(format!(
+        "P{}Y{}M{}D",
+        int_field(value, "Period", "years", span)?,
+        int_field(value, "Period", "months", span)?,
+        int_field(value, "Period", "days", span)?
+    ))
 }
 
 fn date_value(year: i64, month: i64, day: i64) -> CtValue {

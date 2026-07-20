@@ -41,6 +41,15 @@ const EFFECT_GATED_MODULES: &[&str] = &[
     "core.vault",
 ];
 
+// The tuple extractor intentionally over-approximates alternation arms. JSON's
+// `to_string_pretty` must not cross-product onto adapters whose sema surface
+// exposes only `to_string`.
+const EXTRACTOR_ARTIFACTS: &[(&str, &str)] = &[
+    ("core.encoding.csv", "to_string_pretty"),
+    ("core.encoding.toml", "to_string_pretty"),
+    ("core.encoding.yaml", "to_string_pretty"),
+];
+
 /// Known, currently-open comptime gaps: real AOT `(module, method)` pairs
 /// with no comptime dispatch yet, each with why it isn't in this card's
 /// slice. Every entry here is a to-do, not a shrug — remove a line the same
@@ -59,11 +68,8 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // approximation was in scope (done, see `TextLite.rs`) but the
     // underlying algorithm gap versus true Unicode isn't this card's job to
     // fix on either tier. (Card #392 ported everything else in core.text.)
-    // core.time: mixes pure calendar-period construction with genuine ambient
-    // effects (`now`/`today`/`utc`/`local_time`/`sleep`/`instant` — wall-clock/monotonic
-    // clock reads, non-deterministic). Splitting the pure half out and
-    // gating the effectful half behind `@Impure` (like `core.files` etc)
-    // needs its own pass to avoid rushing the effect boundary.
+    // core.time ambient calls read wall or monotonic clocks. Packet B ports
+    // the deterministic constructors/parsers; these remain named boundaries.
     ("core.time", "now"),
     ("core.time", "now_utc"),
     ("core.time", "today"),
@@ -75,13 +81,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.time", "instant"),
     ("core.time", "sleep"),
     ("core.time", "start"),
-    ("core.time", "period"),
-    ("core.time", "period_days"),
-    ("core.time", "period_months"),
-    ("core.time", "period_years"),
-    ("core.time", "from_unix_ms"),
-    ("core.time", "parse_rfc3339"),
-    ("core.time", "parse_time"),
     // Everything below is PRE-EXISTING debt this card's audit surfaced, not
     // new: entire modules that comptime has never dispatched at all (no
     // `apply_core_call` arm for the module exists, so every call in the
@@ -100,11 +99,8 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // `Table<T>`/`Series<T>`/`LazyFrame<T>` are plain `CtValue::Struct`
     // wrappers over already-dynamically-typed rows, with closures applied
     // through the same `call_closure` path `list.map`/`.filter` use.
-    // `inner_join`/`left_join`/`pivot_sum` are a pre-existing, separate blind
-    // spot in this test's own extractor (they live in `core_call.rs`'s
-    // `infer_core_call`, not `fixed_sigs.rs`, so this scan never sees them) —
-    // still an open gap at comptime, but out of this test's coverage either
-    // way; left for a future card rather than folded into this one's scope.
+    // `inner_join`/`left_join` and Packet B's `pivot_sum` route through the
+    // interpreter because their closure arguments need live `Interp` access.
     //
     // core.archive / core.compress.*: zip/tar and gzip/zstd — needs a hand-rolled
     // (I6) compression implementation ported into the interpreter, not a
@@ -231,9 +227,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // Misc small surfaces, each its own small future card.
     ("core.args", "spec"),
     ("core.game", "run"),
-    ("core.mime", "extension"),
-    ("core.mime", "from_extension"),
-    ("core.mime", "parse"),
     ("core.math", "decimal"),
     ("core.testing", "corpus"),
     ("core.testing", "fake_clock"),
@@ -242,28 +235,11 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.testing", "golden"),
     ("core.testing", "snap"),
     ("core.testing", "temp_dir"),
-    // D-DATA-SURFACE1: sema accepts this bespoke generic call, but the
-    // comptime data pipeline has no implementation yet.
-    ("core.data", "pivot_sum"),
-    // Pure constructors/formatters and generic helpers accepted by sema but
-    // not yet implemented by the comptime interpreter.
-    ("core.email", "address"),
-    ("core.email", "attachment"),
-    ("core.email", "envelope"),
-    ("core.email", "message"),
-    ("core.email", "serialize"),
-    ("core.encoding.csv", "to_string_pretty"),
-    ("core.encoding.toml", "to_string_pretty"),
-    ("core.encoding.yaml", "to_string_pretty"),
-    ("core.encoding.xml", "canonical"),
-    ("core.science.measurement", "from"),
+    // Opaque mutable handles still pending.
     ("core.sketch.cms", "new"),
     ("core.sketch.hll", "new"),
     ("core.sketch.reservoir", "new"),
     ("core.sketch.tdigest", "new"),
-    ("core.time.date", "new"),
-    ("core.time.date", "parse"),
-    ("core.time.datetime", "from_timestamp"),
     // core.url: PORTED (card #392 pass 3) — see `UrlLite.rs` + `Methods.rs`'s
     // `("core.url", ...)` arms, ported verbatim from `JetUrl`/`jet_url_*`
     // (`UrlMime.rs` + `MathRandomTime.rs`).
@@ -827,6 +803,9 @@ fn discover_inventory() -> BTreeSet<Entry> {
     let core_all = extract_pairs(&bespoke_src);
     let mut entries = BTreeSet::new();
     for (module, method) in &fixed {
+        if EXTRACTOR_ARTIFACTS.contains(&(module.as_str(), method.as_str())) {
+            continue;
+        }
         entries.insert(Entry { surface: Surface::Fixed, owner: module.clone(), method: method.clone() });
     }
     for (module, method) in core_all.difference(&fixed) {
@@ -1034,6 +1013,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert!(bespoke >= 3, "bespoke inventory lost data joins/pivot: {bespoke}");
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
     assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "idle").class, Class::Covered);
     assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "loading").class, Class::Covered);
     assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "loaded").class, Class::Covered);
@@ -1054,7 +1034,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Value, "Task", "detach").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Bespoke, "core.data", "inner_join").class, Class::Covered);
     assert_eq!(record(&records, Surface::Bespoke, "core.data", "left_join").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Bespoke, "core.data", "pivot_sum").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::Bespoke, "core.data", "pivot_sum").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
 
     let rendered = render_inventory(&records);
@@ -1070,7 +1050,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     );
     assert_eq!(
         stable_hash(&rendered),
-        5421219311749255364,
+        4293548259066301034,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
