@@ -162,11 +162,26 @@ impl<'a> Checker<'a> {
             return Some(Type::Named("Limits".to_string()));
         }
         let Some((owner_mod, mut msig)) = self.resolve_method_sig(type_name, method) else {
+            let builtin = crate::Sema::Diagnostics::builtin_type_from_ident(type_name).is_some();
             self.diags.push(Diagnostic::error(
                 "E0102",
-                format!("`{}` has no method `{}`", type_name, method),
-                "check the method name on this type".to_string(),
-                format!("define it inside `struct {type_name}` or `impl {type_name}`"),
+                if builtin {
+                    format!("`{type_name}` has no static method `{method}`")
+                } else {
+                    format!("`{type_name}` has no method `{method}`")
+                },
+                if builtin {
+                    "built-in types expose only their documented static methods".to_string()
+                } else {
+                    "check the method name on this type".to_string()
+                },
+                if builtin {
+                    format!(
+                        "call a documented static method on `{type_name}`, or call `.{method}()` on a value that provides it"
+                    )
+                } else {
+                    format!("define it inside `struct {type_name}` or `impl {type_name}`")
+                },
                 Some(span),
             ));
             for a in args.iter_mut() {

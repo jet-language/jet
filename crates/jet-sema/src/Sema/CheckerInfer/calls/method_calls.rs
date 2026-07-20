@@ -1011,6 +1011,15 @@ impl<'a> Checker<'a> {
                         return Some(ret);
                     }
                 }
+                // Built-in type identity does not depend on whether a particular
+                // static method is registered. All valid builtin static shapes
+                // returned above; an unknown one follows the ordinary E0102
+                // method diagnostic instead of reinterpreting the type as a value.
+                if self.lookup(type_name).is_none()
+                    && builtin_type_from_ident(type_name).is_some()
+                {
+                    return self.check_static_method(type_name, method, span, type_args, args);
+                }
             }
             self.borrow_ctx = true;
             // D-MEM1 stage S5: chaining `.trim()`/`.after()`/`.before()` onto a

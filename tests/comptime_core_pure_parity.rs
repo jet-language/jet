@@ -35,6 +35,10 @@ const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
 }"#;
 const SCALAR_EXPR: &str = "scalar_view()";
 const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|-12|-1234|-123456|255|1234|123456|123456789";
+const PRIMITIVE_INSTANCE_DECLS: &str = r#"fn primitive_instance_view() -> String {
+    return "{true.to_string()}|{false.to_string()}|{'e'.to_string()}|{'é'.to_string()}"
+}"#;
+const PRIMITIVE_INSTANCE_EXPECTED: &str = "true|false|e|é";
 const INTEGER_BIT_QUERIES_DECLS: &str = r#"fn bit_byte(value: Int) -> U8 {
     return U8.from_int(value) ?? 0
 }
@@ -479,6 +483,26 @@ fn public_transcript_covers_integer_bit_queries_exactly() {
     assert_eq!(
         values,
         [format!("\"{INTEGER_BIT_QUERIES_EXPECTED}\" : String")]
+    );
+}
+
+#[test]
+fn primitive_static_stringification_is_rejected_by_sema() {
+    let source = r#"fn run() {
+    print(Bool.to_string())
+    print(Char.to_string())
+}"#;
+    let diagnostics = jet::compile(source)
+        .expect_err("primitive stringification belongs to values, not static type names");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| (diagnostic.code.as_str(), diagnostic.what.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("E0102", "`Bool` has no static method `to_string`"),
+            ("E0102", "`Char` has no static method `to_string`"),
+        ]
     );
 }
 
@@ -938,6 +962,21 @@ fn rustc_backed_scalar_value_methods_match_all_execution_tiers_exactly() {
         SCALAR_EXPECTED
     );
     check_dev_tiers("scalar", &source, SCALAR_EXPECTED);
+}
+
+#[test]
+fn rustc_backed_primitive_instance_stringification_matches_all_execution_tiers_exactly() {
+    let source = parity_source("primitive_instance_view()", PRIMITIVE_INSTANCE_DECLS);
+    assert_eq!(
+        check_aot_comptime("primitive-instance-stringification", &source),
+        PRIMITIVE_INSTANCE_EXPECTED,
+    );
+    check_dev_tiers_with_boundary(
+        "primitive-instance-stringification",
+        &source,
+        PRIMITIVE_INSTANCE_EXPECTED,
+        true,
+    );
 }
 
 #[test]

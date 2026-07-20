@@ -377,8 +377,6 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             ok: Box::new(Type::String),
             err: Box::new(Type::Named(crate::Syntax::TYPE_UTF8_ERROR.to_string())),
         })),
-        (Type::Bool, "to_string", 0) => Some(Some(Type::String)),
-        (Type::Char, "to_string", 0) => Some(Some(Type::String)),
         (Type::Named(n), "new", 1) if n == crate::Syntax::SOLVER_TYPE => {
             Some(Some(Type::Named(crate::Syntax::SOLVER_TYPE.to_string())))
         }
