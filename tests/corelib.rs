@@ -5338,6 +5338,119 @@ fn main() {
 }
 
 #[test]
+fn core_http_client_bounds_and_strictly_decodes_response_bodies() {
+    use std::io::{Read, Write};
+
+    const LIMIT: usize = 8 * 1024 * 1024;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let cases = [
+            ("200 OK", vec![b'a'; LIMIT], false, None),
+            ("200 OK", vec![0xff], false, None),
+            ("404 Not Found", b"missing".to_vec(), false, None),
+            ("413 Payload Too Large", vec![b'b'; LIMIT + 1], false, None),
+            ("200 OK", vec![b'c'; LIMIT], true, None),
+            ("413 Payload Too Large", vec![b'd'; LIMIT + 1], true, None),
+            ("200 OK", b"no".to_vec(), false, Some(5)),
+            ("502 Bad Gateway", b"no".to_vec(), true, Some(2)),
+        ];
+        for (status, body, chunked, claimed_len) in cases {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).unwrap();
+            if chunked {
+                write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n",
+                    claimed_len.unwrap_or(body.len())
+                )
+                .unwrap();
+                stream.write_all(&body).unwrap();
+                if claimed_len.is_none() {
+                    stream.write_all(b"\r\n0\r\n\r\n").unwrap();
+                } else {
+                    stream.write_all(b"\r\n").unwrap();
+                }
+            } else {
+                write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    claimed_len.unwrap_or(body.len())
+                )
+                .unwrap();
+                stream.write_all(&body).unwrap();
+            }
+        }
+    });
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_http_body_bounds_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.http.client as client
+
+fn run() {
+    first :: client.get("http://__ADDR__/")
+    if first == {
+        Ok(response) -> { print(response.body().len()) }
+        Err(error) -> { print(error) }
+    }
+    second :: client.get("http://__ADDR__/")
+    if second == {
+        Ok(response) -> { print("unexpected utf8 success: {response.body().len()}") }
+        Err(error) -> { print(error) }
+    }
+    third :: client.get("http://__ADDR__/")
+    if third == {
+        Ok(response) -> { print("{response.status()}:{response.body()}") }
+        Err(error) -> { print(error) }
+    }
+    fourth :: client.get("http://__ADDR__/")
+    if fourth == {
+        Ok(response) -> { print("unexpected oversized success: {response.body().len()}") }
+        Err(error) -> { print(error) }
+    }
+    fifth :: client.get("http://__ADDR__/")
+    if fifth == {
+        Ok(response) -> { print(response.body().len()) }
+        Err(error) -> { print(error) }
+    }
+    sixth :: client.get("http://__ADDR__/")
+    if sixth == {
+        Ok(response) -> { print("unexpected chunked oversized success: {response.body().len()}") }
+        Err(error) -> { print(error) }
+    }
+    seventh :: client.get("http://__ADDR__/")
+    if seventh == {
+        Ok(response) -> { print("unexpected partial content-length success: {response.body()}") }
+        Err(error) -> { print(error) }
+    }
+    eighth :: client.get("http://__ADDR__/")
+    if eighth == {
+        Ok(response) -> { print("unexpected partial chunked success: {response.status()}:{response.body()}") }
+        Err(error) -> { print(error) }
+    }
+}
+"#
+    .replace("__ADDR__", &addr.to_string());
+    let (code, stdout, stderr) = build_and_run(&dir, "http_body_bounds", &src, &[], None);
+    server.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "8388608\nHTTP response body is not valid UTF-8\n404:missing\nHTTP response body exceeds 8388608-byte limit\n8388608\nHTTP response body exceeds 8388608-byte limit\nHTTP response body read failed\nHTTP response body read failed\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_http_server_public_response_appends_repeated_headers() {
     let dir = std::env::temp_dir().join(format!(
         "jet_corelib_http_server_headers_{}",

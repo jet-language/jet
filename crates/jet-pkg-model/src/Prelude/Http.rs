@@ -9,6 +9,9 @@
 
 use std::time::Duration;
 
+const HTTP_CLIENT_TEXT_LIMIT: usize = 8 * 1024 * 1024;
+const HTTP_CLIENT_READ_CHUNK: usize = 64 * 1024;
+
 /// Perform an HTTP GET. Returns (status_code, body, headers_flat) where headers_flat
 /// is alternating [key, value, key, value, ...].
 pub fn jet_http_client_get_impl(url: &String) -> Result<(i64, String, Vec<String>), String> {
@@ -115,16 +118,39 @@ pub fn jet_http_client_send_impl(
         Ok(resp) => {
             let status = resp.status() as i64;
             let flat = flatten_response_headers(&resp);
-            let body = resp.into_string().unwrap_or_default();
+            let body = read_response_text(resp)?;
             Ok((status, body, flat))
         }
         Err(ureq::Error::Status(code, resp)) => {
             let flat = flatten_response_headers(&resp);
-            let body = resp.into_string().unwrap_or_default();
+            let body = read_response_text(resp)?;
             Ok((code as i64, body, flat))
         }
         Err(e) => Err(e.to_string()),
     }
+}
+
+fn read_response_text(response: ureq::Response) -> Result<String, String> {
+    use std::io::Read;
+
+    let mut reader = response.into_reader();
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; HTTP_CLIENT_READ_CHUNK];
+    loop {
+        let read = reader
+            .read(&mut chunk)
+            .map_err(|_| "HTTP response body read failed".to_string())?;
+        if read == 0 {
+            break;
+        }
+        if bytes.len() + read > HTTP_CLIENT_TEXT_LIMIT {
+            return Err(format!(
+                "HTTP response body exceeds {HTTP_CLIENT_TEXT_LIMIT}-byte limit"
+            ));
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    }
+    String::from_utf8(bytes).map_err(|_| "HTTP response body is not valid UTF-8".to_string())
 }
 
 fn flatten_response_headers(response: &ureq::Response) -> Vec<String> {
