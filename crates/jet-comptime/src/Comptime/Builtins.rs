@@ -4,7 +4,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{BinOp, Type};
 
-use super::Diagnostics::{divide_by_zero, index_oob, overflow, unsupported};
+use super::Diagnostics::{comptime_panic, divide_by_zero, index_oob, overflow, unsupported};
 use super::Value::{CtKey, CtValue};
 
 pub(super) fn as_bool(v: &CtValue, span: Span) -> Result<bool, Diagnostic> {
@@ -439,6 +439,9 @@ pub(super) fn apply_method(
             .map(CtValue::Int)
             .ok_or_else(|| overflow("take the absolute value of", span)),
         (CtValue::Float(f), "abs") => Ok(CtValue::Float(f.abs())),
+        (CtValue::Float(f), "is_nan") => Ok(CtValue::Bool(f.is_nan())),
+        (CtValue::Float(f), "is_infinite") => Ok(CtValue::Bool(f.is_infinite())),
+        (CtValue::Float(f), "is_finite") => Ok(CtValue::Bool(f.is_finite())),
         // List
         (CtValue::List(xs), "len") => Ok(CtValue::Int(xs.len() as i64)),
         (CtValue::List(xs), "is_empty") => Ok(CtValue::Bool(xs.is_empty())),
@@ -512,6 +515,48 @@ pub(super) fn apply_method(
             Some(CtValue::Str(n)) => Ok(CtValue::Bool(s.ends_with(&n))),
             _ => Err(unsupported("ends_with with a non-text argument", span)),
         },
+        (CtValue::Str(s), "after") => match args.into_iter().next() {
+            Some(CtValue::Str(sep)) => Ok(CtValue::Str(match s.find(&sep) {
+                Some(i) => s[i + sep.len()..].to_string(),
+                None => s.clone(),
+            })),
+            _ => Err(unsupported("after with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "before") => match args.into_iter().next() {
+            Some(CtValue::Str(sep)) => Ok(CtValue::Str(match s.find(&sep) {
+                Some(i) => s[..i].to_string(),
+                None => s.clone(),
+            })),
+            _ => Err(unsupported("before with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "bytes") => Ok(CtValue::List(
+            s.as_bytes()
+                .iter()
+                .map(|byte| CtValue::Int(i64::from(*byte)))
+                .collect(),
+        )),
+        (CtValue::Str(s), "slice") => {
+            let mut args = args.into_iter();
+            let a = match args.next() {
+                Some(CtValue::Int(n)) => n,
+                _ => return Err(unsupported("slice with a non-Int start", span)),
+            };
+            let b = match args.next() {
+                Some(CtValue::Int(n)) => n,
+                _ => return Err(unsupported("slice with a non-Int end", span)),
+            };
+            let chars = s.chars().collect::<Vec<_>>();
+            let len = chars.len() as i64;
+            if a < 0 || b < 0 || a > b || b >= len {
+                return Err(comptime_panic(
+                    &format!("can't slice {len} characters from {a} to {b} (inclusive)"),
+                    span,
+                ));
+            }
+            Ok(CtValue::Str(
+                chars[a as usize..=b as usize].iter().collect(),
+            ))
+        }
         (CtValue::Str(s), "repeat") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             Ok(CtValue::Str(s.repeat(n.max(0) as usize)))
