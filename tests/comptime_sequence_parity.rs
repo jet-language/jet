@@ -33,6 +33,10 @@ fn repl_list_and_fixed_list_sequence_methods_are_exact() {
             "[\"bbb\", \"a\", \"cc\"].max_by((s: String) => s.len())",
             "[3, 9, 2].min()",
             "[\"bbb\", \"a\", \"cc\"].min_by((s: String) => s.len())",
+            "[true, false, true].min()",
+            "[true, false, true].max()",
+            "[true, false, true].min_by((b: Bool) => b)",
+            "[true, false, true].max_by((b: Bool) => b)",
             "[1, 2, 3, 4].par_filter((n: Int) => n % 2 == 0)",
             "[1, 2, 3].par_fold(0, (acc: Int, n: Int) => acc + n)",
             "[1, 2, 3].par_map((n: Int) => n * 2)",
@@ -80,6 +84,10 @@ fn repl_list_and_fixed_list_sequence_methods_are_exact() {
         "bbb : Option",
         "2 : Option",
         "a : Option",
+        "false : Option",
+        "true : Option",
+        "false : Option",
+        "true : Option",
         "[2, 4] : List",
         "6 : Int",
         "[2, 4, 6] : List",
@@ -160,6 +168,15 @@ fn repl_view_and_view_mut_sequence_methods_are_exact() {
 }
 
 #[test]
+fn repl_non_slice_write_place_is_not_silently_copied() {
+    let out = run_transcript(
+        &["values := [1, 2]", "edit :: &values", "edit.len()"],
+        None,
+    );
+    assert!(out.contains("E0956"), "non-slice write place was copied: {out}");
+}
+
+#[test]
 fn sequence_return_shapes_match_rustc_backed_aot() {
     if !common::have_rustc() {
         eprintln!("note: rustc not found; skipping sequence differential battery");
@@ -167,6 +184,57 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
     }
     let cases = [
         ("scalar", "", "[1, 2, 3].all((n: Int) => n > 0)"),
+        (
+            "float-literal-receiver",
+            "",
+            "[1.5, 2.5].all((n: Float) => n > 1.0)",
+        ),
+        (
+            "bool-literal-receiver",
+            "",
+            "[true, false].any((b: Bool) => b)",
+        ),
+        (
+            "float-fold-seed",
+            "",
+            "[1.5, 2.5].fold(0.5, (a: Float, n: Float) => a + n)",
+        ),
+        (
+            "bool-fold-seed",
+            "",
+            "[true, false].fold(true, (a: Bool, b: Bool) => a && b)",
+        ),
+        (
+            "float-reduce-seed",
+            "",
+            "[1.5, 2.5].reduce(0.5, (a: Float, n: Float) => a + n)",
+        ),
+        (
+            "bool-scan-seed",
+            "",
+            "[true, false].scan(true, (a: Bool, b: Bool) => a && b)",
+        ),
+        (
+            "float-par-fold-seed",
+            "",
+            "[1.5, 2.5].par_fold(0.5, (a: Float, n: Float) => a + n)",
+        ),
+        (
+            "empty-float-sum",
+            "fn empty_sum() -> Float {\n\
+                 empty: [Float] :: []\n\
+                 return empty.sum()\n\
+             }",
+            "empty_sum()",
+        ),
+        (
+            "empty-float-product",
+            "fn empty_product() -> Float {\n\
+                 empty: [Float] :: []\n\
+                 return empty.product()\n\
+             }",
+            "empty_product()",
+        ),
         ("optional", "", "[3, 1, 2].min()"),
         ("owned-list", "", "[1, 2, 3].take(2)"),
         ("nested-list", "", "[1, 2, 3, 4].chunks(3)"),

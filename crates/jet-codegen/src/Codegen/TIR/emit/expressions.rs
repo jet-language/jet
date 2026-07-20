@@ -440,8 +440,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     recv,
                     a(0)
                 ),
-                TBuiltinOp::Sum => format!("jet_list_sum(({}).clone())", recv),
-                TBuiltinOp::Product => format!("jet_list_product(({}).clone())", recv),
+                TBuiltinOp::Sum { float: true } => format!(
+                    "({}).clone().into_iter().fold(0.0, |__acc, __item| __acc + __item)",
+                    recv
+                ),
+                TBuiltinOp::Sum { float: false } => {
+                    format!("jet_list_sum(({}).clone())", recv)
+                }
+                TBuiltinOp::Product { float: true } => format!(
+                    "({}).clone().into_iter().fold(1.0, |__acc, __item| __acc * __item)",
+                    recv
+                ),
+                TBuiltinOp::Product { float: false } => {
+                    format!("jet_list_product(({}).clone())", recv)
+                }
                 TBuiltinOp::Min => format!("({}).iter().cloned().min()", recv),
                 TBuiltinOp::Max => format!("({}).iter().cloned().max()", recv),
                 TBuiltinOp::Flatten => format!("jet_list_flatten(({}).clone())", recv),

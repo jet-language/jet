@@ -89,6 +89,7 @@ pub(super) fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Orderi
         (Float(a), Float(b)) => a
             .partial_cmp(&b)
             .ok_or_else(|| unsupported("comparing NaN", span)),
+        (Bool(a), Bool(b)) => Ok(a.cmp(&b)),
         (Char(a), Char(b)) => Ok(a.cmp(&b)),
         (Str(a), Str(b)) => Ok(a.cmp(&b)),
         (BigInt(a), BigInt(b)) => Ok(a.compare(&b)),

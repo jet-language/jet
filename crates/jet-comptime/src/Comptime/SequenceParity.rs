@@ -20,6 +20,7 @@ pub(super) fn eval_sequence_method(
     recv: &CtValue,
     method: &str,
     args: &[CtValue],
+    resolved_ret: Option<&Type>,
     span: Span,
 ) -> Option<Result<SequenceOutcome, Diagnostic>> {
     let CtValue::List(xs) = recv else {
@@ -53,6 +54,7 @@ pub(super) fn eval_sequence_method(
             | "partition"
             | "position"
             | "product"
+            | "reduce"
             | "scan"
             | "skip"
             | "skip_while"
@@ -81,7 +83,7 @@ pub(super) fn eval_sequence_method(
             Ok(SequenceOutcome::WriteBack(CtValue::List(out)))
         })());
     }
-    Some(eval(interp, xs, method, args, span).map(SequenceOutcome::Value))
+    Some(eval(interp, xs, method, args, resolved_ret, span).map(SequenceOutcome::Value))
 }
 
 fn eval(
@@ -89,6 +91,7 @@ fn eval(
     xs: &[CtValue],
     method: &str,
     args: &[CtValue],
+    resolved_ret: Option<&Type>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     let value = match (method, args) {
@@ -177,7 +180,7 @@ fn eval(
             }
             CtValue::List(out)
         }
-        ("fold" | "par_fold", [initial, f]) => {
+        ("reduce" | "fold" | "par_fold", [initial, f]) => {
             let mut acc = initial.clone();
             for x in xs {
                 acc = interp.call_closure(f, vec![acc, x.clone()], span)?;
@@ -254,8 +257,8 @@ fn eval(
             }
             option(found, &[])
         }
-        ("sum", []) => aggregate(xs, false, span)?,
-        ("product", []) => aggregate(xs, true, span)?,
+        ("sum", []) => aggregate(xs, false, resolved_ret, span)?,
+        ("product", []) => aggregate(xs, true, resolved_ret, span)?,
         ("scan", [initial, f]) => {
             let mut acc = initial.clone();
             let mut out = Vec::with_capacity(xs.len());
@@ -413,9 +416,22 @@ fn extreme_by(
     Ok(Some(best))
 }
 
-fn aggregate(xs: &[CtValue], product: bool, span: Span) -> Result<CtValue, Diagnostic> {
+fn aggregate(
+    xs: &[CtValue],
+    product: bool,
+    resolved_ret: Option<&Type>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
     let Some(first) = xs.first() else {
-        return Ok(CtValue::Int(if product { 1 } else { 0 }));
+        return Ok(match resolved_ret {
+            Some(Type::Float | Type::Float32) => {
+                CtValue::Float(if product { 1.0 } else { 0.0 })
+            }
+            Some(Type::Named(name)) if name == crate::Syntax::TYPE_BIGINT => {
+                CtValue::BigInt(crate::Numeric::CtBigInt::from_int(if product { 1 } else { 0 }))
+            }
+            _ => CtValue::Int(if product { 1 } else { 0 }),
+        });
     };
     match first {
         CtValue::Int(_) => {

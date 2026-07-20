@@ -186,8 +186,12 @@ pub(crate) fn resolve_builtin_op(
         ("reverse", 0) => TBuiltinOp::Reverse,
         ("sort", 0) => TBuiltinOp::Sort,
         ("join", 1) => TBuiltinOp::JoinSep,
-        ("sum", 0) => TBuiltinOp::Sum,
-        ("product", 0) => TBuiltinOp::Product,
+        ("sum", 0) => TBuiltinOp::Sum {
+            float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
+        },
+        ("product", 0) => TBuiltinOp::Product {
+            float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
+        },
         ("min", 0) => TBuiltinOp::Min,
         ("max", 0) => TBuiltinOp::Max,
         ("flatten", 0) => TBuiltinOp::Flatten,
@@ -382,13 +386,11 @@ pub(crate) fn builtin_result_ty(method: &str, nargs: usize, recv_ty: Option<&Typ
 /// proved a literal lambda arg, so `needs_fn_mut` is always readable; a non-lambda
 /// arg defaults to the non-mut form, matching the AST `else` branch.
 pub(crate) fn resolve_closure_op(
-    receiver: &Expr,
+    recv_ty: &Type,
     method: &str,
     args: &[crate::AST::CallArg],
-    env: &LowerEnv,
     cx: &Cx,
 ) -> TClosureOp {
-    let rty = tir_recv_jet_ty(receiver, env);
     // The lambda arg's FnMut fact (the AST checks `args[0]` for map/each).
     let fn_mut =
         matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(l)) if l.meta.needs_fn_mut);
@@ -396,9 +398,9 @@ pub(crate) fn resolve_closure_op(
         "map" => {
             // D-HOLE1: `.map` on `T?` uses Rust's native `Option::map` directly —
             // never the mutable-list form.
-            if matches!(rty, Some(Type::Option(_))) {
+            if matches!(recv_ty, Type::Option(_)) {
                 TClosureOp::OptionMap
-            } else if matches!(&rty, Some(Type::Apply { name, .. }) if matches!(name.as_str(), "View" | "ViewMut")) {
+            } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
                 // D-DYNARRAY1: map-to-owned — never the `.clone()`-into-Vec form
                 // the other list ops use (`recv` is already a borrow, not owned).
                 TClosureOp::ViewMap
@@ -412,9 +414,9 @@ pub(crate) fn resolve_closure_op(
         "each" => {
             // The AST: `match rty { Map => jet_map_each, _ => list_each }`, where
             // `list_each` checks trait-object-list FIRST, then lambda FnMut.
-            match &rty {
-                Some(Type::Map { .. }) => TClosureOp::EachMap,
-                Some(Type::List(inner)) if list_carries_trait(cx, inner) => TClosureOp::EachRef,
+            match recv_ty {
+                Type::Map { .. } => TClosureOp::EachMap,
+                Type::List(inner) if list_carries_trait(cx, inner) => TClosureOp::EachRef,
                 _ if fn_mut => TClosureOp::EachMut,
                 _ => TClosureOp::Each,
             }
@@ -436,7 +438,7 @@ pub(crate) fn resolve_closure_op(
         "fold" => {
             // D-DYNARRAY1: a View's `recv` is already `&[T]` — fold it directly,
             // no `.clone()`-to-owned-Vec step.
-            if matches!(&rty, Some(Type::Apply { name, .. }) if matches!(name.as_str(), "View" | "ViewMut")) {
+            if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
                 TClosureOp::ViewFold
             } else {
                 TClosureOp::Fold
@@ -450,8 +452,8 @@ pub(crate) fn resolve_closure_op(
         "partition" => {
             // Compute the tuple struct name from the receiver element type.
             // recv = List<T>; partition returns (false_: [T], true_: [T]).
-            let elem_ty = match tir_recv_jet_ty(receiver, env) {
-                Some(Type::List(inner)) => *inner,
+            let elem_ty = match recv_ty {
+                Type::List(inner) => (**inner).clone(),
                 _ => Type::Int,
             };
             let list_ty = Type::List(Box::new(elem_ty.clone()));

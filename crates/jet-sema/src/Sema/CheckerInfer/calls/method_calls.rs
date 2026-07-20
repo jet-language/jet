@@ -2700,11 +2700,11 @@ impl<'a> Checker<'a> {
                     *recv_type_out = Some(recv_ty.name());
                 }
                 let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-                // D-ITER1: enumerate/zip/partition return named-tuple types. Store the
-                // resolved return type in `resolved_ret_out` so Tuples.rs can collect
-                // the JetTup_ shape and the TIR lowering pass can read the field names.
+                // D-ITER1: tuple-producing methods need their exact named shape;
+                // sum/product need the static numeric identity when the list is empty.
+                // Preserve those resolved result types for codegen/comptime consumers.
                 if let Some(ref ty) = result {
-                    if contains_tuple_type(ty) {
+                    if contains_tuple_type(ty) || matches!(method, "sum" | "product") {
                         *resolved_ret_out = Some(ty.clone());
                     }
                 }

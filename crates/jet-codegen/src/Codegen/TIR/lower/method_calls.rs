@@ -1911,20 +1911,21 @@ pub(crate) fn lower_method_call(
     // `TClosureOp` (reproducing `emit_builtin_method`'s closure arms, incl. its
     // `expr_jet_ty(receiver)` Map/trait-object branches), so emit makes no decision.
     if recv_type.is_none() && crate::Collections::is_closure_method(method) {
-        let op = resolve_closure_op(receiver, method, args, env, cx);
         let recv_t = lower_expr(receiver, cx, env);
         let recv_ast_ty = tir_recv_jet_ty(receiver, env);
-        let result_ty = builtin_result_ty(method, args.len(), recv_ast_ty.as_ref());
+        let recv_ty = recv_ast_ty.unwrap_or_else(|| recv_t.ty.clone());
+        let op = resolve_closure_op(&recv_ty, method, args, cx);
+        let result_ty = resolved_ret
+            .cloned()
+            .unwrap_or_else(|| builtin_result_ty(method, args.len(), Some(&recv_ty)));
         // Collection helpers lend callback inputs (`&T`, or `&U, &T` for
         // folds). Lower that host borrow exactly once, including scalar
         // payloads. `Option.map` emits through `.as_ref()` for the same law.
         // `tir_recv_jet_ty` intentionally returns `None` for literals, while the
         // lowered receiver still carries their resolved type. Use that total type
         // for the helper's borrowed callback convention as well.
-        let mut callback_params = crate::Collections::builtin_method_arg_types(
-            recv_ast_ty.as_ref().unwrap_or(&recv_t.ty),
-            method,
-        )
+        let mut callback_params =
+            crate::Collections::builtin_method_arg_types(&recv_ty, method)
             .and_then(|types| {
                 types.into_iter().find_map(|ty| match ty {
                     Type::Fn { params, .. } => Some(params),
@@ -1932,10 +1933,7 @@ pub(crate) fn lower_method_call(
                 })
             });
         if matches!(method, "reduce" | "fold" | "scan" | "par_fold") {
-            if let Some(seed_ty) = args
-                .first()
-                .and_then(|arg| tir_recv_jet_ty(&arg.expr, env))
-            {
+            if let Some(seed_ty) = args.first().map(|arg| lower_expr(&arg.expr, cx, env).ty) {
                 if let Some(first) = callback_params
                     .as_mut()
                     .and_then(|params| params.first_mut())

@@ -176,7 +176,34 @@ impl<'a> Checker<'a> {
                 return ret;
             }
             let mut refined_ret = ret.clone();
-            if let Some(expected) = Collections::builtin_method_arg_types(recv_ty, method) {
+            if let Some(mut expected) = Collections::builtin_method_arg_types(recv_ty, method) {
+                let inferred_seed = if matches!(
+                    method,
+                    "reduce" | "fold" | "scan" | "par_fold"
+                ) {
+                    let saved_exp = self.expected_type.take();
+                    let seed = args.first_mut().and_then(|arg| self.infer(&mut arg.expr));
+                    self.expected_type = saved_exp;
+                    if let Some(seed_ty) = &seed {
+                        if let Some(slot) = expected.first_mut() {
+                            *slot = seed_ty.clone();
+                        }
+                        if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(1) {
+                            if let Some(acc) = params.first_mut() {
+                                *acc = seed_ty.clone();
+                            }
+                            *ret = Some(Box::new(seed_ty.clone()));
+                        }
+                        refined_ret = Some(if method == "scan" {
+                            Type::List(Box::new(seed_ty.clone()))
+                        } else {
+                            seed_ty.clone()
+                        });
+                    }
+                    seed
+                } else {
+                    None
+                };
                 for (i, arg) in args.iter_mut().enumerate() {
                     let saved_esc = self.lambda_escapes;
                     if Collections::is_closure_method(method) {
@@ -186,7 +213,11 @@ impl<'a> Checker<'a> {
                     if let Some(et) = expected.get(i) {
                         self.expected_type = Some(et.clone());
                     }
-                    let got = self.infer(&mut arg.expr);
+                    let got = if i == 0 && inferred_seed.is_some() {
+                        inferred_seed.clone()
+                    } else {
+                        self.infer(&mut arg.expr)
+                    };
                     self.expected_type = saved_exp;
                     self.lambda_escapes = saved_esc;
                     if method == "zip" && i == 0 {

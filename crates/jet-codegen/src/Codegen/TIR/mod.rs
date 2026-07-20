@@ -2223,8 +2223,8 @@ pub enum TBuiltinOp {
     Sort,
     /// `join(sep)` → `(recv).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join((a0).as_str())`.
     JoinSep,
-    Sum,
-    Product,
+    Sum { float: bool },
+    Product { float: bool },
     Min,
     Max,
     Flatten,

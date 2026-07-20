@@ -221,6 +221,10 @@ pub(super) struct Interp<'a> {
     /// D-METADERIVE1=A: source fragments emitted by `emit(…)` calls inside
     /// a user-authored `derive` body. Drained by `evaluate_derive_body`.
     pub(super) emitted_fragments: Vec<String>,
+    /// Static types for bindings in the active interpreter frame. An empty
+    /// CtValue::List has no element to sample, so sequence identities use this
+    /// declared fact instead of guessing Int.
+    pub(super) binding_types: HashMap<String, Type>,
     /// c139 JIT/interpreter-parity: top-level `const`/`comptime` bindings,
     /// pre-evaluated (in declaration order, each seeing the ones before it)
     /// so any function body — not just the initializer that names them
@@ -423,6 +427,9 @@ impl<'a> Interp<'a> {
                 if let Some(pat) = &b.pattern {
                     self.bind_pattern(pat, v, scope)?;
                 } else {
+                    if let Some(ty) = &b.ty {
+                        self.binding_types.insert(b.name.clone(), ty.clone());
+                    }
                     scope.insert(b.name.clone(), v);
                 }
                 Ok(Flow::Normal)
@@ -1196,12 +1203,20 @@ impl<'a> Interp<'a> {
             // already hands every value around as an owned `CtValue` clone
             // (no aliasing), so `~` is a plain pass-through here too.
             Expr::Copy(inner, _) => self.eval(inner, scope),
-            // D-SHAPE-PLACE1=A: sema wraps read-only bindings from a field or
-            // index in a transparent place borrow. CtValue has value semantics,
-            // so either access mode uses the same sliced List value for the
-            // read-only View/ViewMut method surface. Sema already enforces the
-            // write window's alias/provenance rules before comptime runs.
-            Expr::Place(inner, _, _) => self.eval(inner, scope),
+            // D-SHAPE-PLACE1=A: read places are transparent to CtValue's value
+            // semantics. A write place is only safe to read when sema constructed
+            // the bounded ViewMut slice whose methods cannot escape the window.
+            Expr::Place(inner, crate::AST::PlaceAccess::Read, _) => {
+                self.eval(inner, scope)
+            }
+            Expr::Place(inner, crate::AST::PlaceAccess::Write, _)
+                if matches!(inner.as_ref(), Expr::Slice { .. }) =>
+            {
+                self.eval(inner, scope)
+            }
+            Expr::Place(_, crate::AST::PlaceAccess::Write, span) => {
+                Err(unsupported("this mutable place", *span))
+            }
             Expr::Present(inner, _) => Ok(CtValue::Some(Box::new(self.eval(inner, scope)?))),
             Expr::Absent(_) => Ok(CtValue::None(Type::Int)),
             Expr::Call(call) => self.eval_call(&call.name, call.name_span, &call.args, scope),
@@ -1223,8 +1238,17 @@ impl<'a> Interp<'a> {
                 method_span,
                 type_args,
                 args,
+                resolved_ret,
                 ..
-            } => self.eval_method(receiver, method, *method_span, type_args, args, scope),
+            } => self.eval_method(
+                receiver,
+                method,
+                *method_span,
+                type_args,
+                resolved_ret.as_ref(),
+                args,
+                scope,
+            ),
             Expr::If {
                 cond,
                 then_body,

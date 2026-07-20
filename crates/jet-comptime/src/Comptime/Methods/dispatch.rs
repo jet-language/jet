@@ -570,10 +570,17 @@ impl<'a> Interp<'a> {
         // track correctly, then restore both on the way out (every path).
         let prev_depth = self.depth;
         let prev_func = std::mem::replace(&mut self.cur_func, name.to_string());
+        let frame_types = func
+            .params
+            .iter()
+            .map(|param| (param.name.clone(), param.ty.clone()))
+            .collect();
+        let prev_types = std::mem::replace(&mut self.binding_types, frame_types);
         self.depth = prev_depth + 1;
         let result = self.exec_block(&func.body, &mut frame);
         self.depth = prev_depth;
         self.cur_func = prev_func;
+        self.binding_types = prev_types;
         let value = match result {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(CtValue::Unit),
@@ -740,16 +747,22 @@ impl<'a> Interp<'a> {
             ));
         }
         let mut frame = data.captured.clone();
+        let previous_types = self.binding_types.clone();
         for (p, a) in data.lambda.params.iter().zip(args) {
+            if let Some(ty) = &p.ty {
+                self.binding_types.insert(p.name.clone(), ty.clone());
+            }
             frame.insert(p.name.clone(), a);
         }
-        match &data.lambda.body {
+        let result = (|| match &data.lambda.body {
             LambdaBody::Expr(e) => self.eval(e, &mut frame),
             LambdaBody::Block(stmts) => match self.exec_block(stmts, &mut frame)? {
                 Flow::Return(v) => Ok(v),
                 _ => Ok(CtValue::Unit),
             },
-        }
+        })();
+        self.binding_types = previous_types;
+        result
     }
 
     /// c139: `Name(expr)` — the distinct-type / `@UnitFamily` constructor.
@@ -1043,9 +1056,24 @@ impl<'a> Interp<'a> {
         method: &str,
         span: Span,
         type_args: &[Type],
+        resolved_ret: Option<&Type>,
         args: &[crate::AST::CallArg],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        let sequence_result_ty = resolved_ret.cloned().or_else(|| {
+            if !matches!(method, "sum" | "product") {
+                return None;
+            }
+            let Expr::Ident(name, _) = receiver else {
+                return None;
+            };
+            match self.binding_types.get(name) {
+                Some(Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
+                    Some((**inner).clone())
+                }
+                _ => None,
+            }
+        });
         // D-ENC-XML-SURFACE1=A: qualified safe whole-value XML constructors.
         if method == "safe" && args.is_empty() {
             if let Expr::Field(base, type_name, _) = receiver {
@@ -1612,7 +1640,7 @@ impl<'a> Interp<'a> {
         // plain `apply_method` entries. Guarded to the receiver shapes they
         // actually apply to; anything else falls through to the generic
         // dispatch at the end of this function.
-        const HOF_METHODS: &[&str] = &["filter", "map", "each", "sort_by", "find", "reduce"];
+        const HOF_METHODS: &[&str] = &["filter", "map", "each", "sort_by", "find"];
         if HOF_METHODS.contains(&method) {
             let recv = self.eval(receiver, scope)?;
             match (&recv, method) {
@@ -1649,14 +1677,6 @@ impl<'a> Interp<'a> {
                         }
                     }
                     return Ok(CtValue::None(Type::Int));
-                }
-                (CtValue::List(xs), "reduce") => {
-                    let f = self.eval(&args[0].expr, scope)?;
-                    let mut acc = self.eval(&args[1].expr, scope)?;
-                    for x in xs {
-                        acc = self.call_closure(&f, vec![acc, x.clone()], span)?;
-                    }
-                    return Ok(acc);
                 }
                 // `.sort_by` writes back like the MUTATING list methods below
                 // (D-BIND4 `:=` receiver) — key every element once, sort the
@@ -1733,6 +1753,7 @@ impl<'a> Interp<'a> {
                 &container,
                 method,
                 &argv,
+                sequence_result_ty.as_ref(),
                 span,
             ) {
                 return match result? {
@@ -1835,6 +1856,7 @@ impl<'a> Interp<'a> {
             &recv,
             method,
             &argv,
+            sequence_result_ty.as_ref(),
             span,
         ) {
             return match result? {
