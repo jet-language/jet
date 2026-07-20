@@ -1010,6 +1010,7 @@ fn snapshot_source(
     use std::io::{Seek, SeekFrom};
     let mut source_file = open_source_nofollow(source)?;
     let source_meta = source_file.metadata().map_err(|_| JetFileCryptoError::SourceIo)?;
+    if source_meta.len() > JETC_V2_MAX_PLAINTEXT { return Err(JetFileCryptoError::SourceIo); }
     let mut stage_file = create_unlinked_stage(parent)?;
     #[cfg(test)]
     observe_jetc_boundary("seal-stage");

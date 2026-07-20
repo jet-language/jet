@@ -23,6 +23,7 @@ mod tests {
         static PUBLISH_RACE: RefCell<Option<PublishRace>> = const { RefCell::new(None) };
         static CANCEL_BOUNDARY: RefCell<Option<&'static str>> = const { RefCell::new(None) };
         static CANCEL_NOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        static OVERSIZE_BOUNDARY_HIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
     #[cfg(target_os = "linux")]
@@ -90,6 +91,21 @@ mod tests {
     fn assert_cancellation_fired() {
         CANCEL_BOUNDARY.with(|slot| assert!(slot.borrow().is_none()));
         CANCEL_NOW.with(|cancel| assert!(cancel.get()));
+    }
+
+    #[cfg(target_os = "linux")]
+    fn record_oversize_boundary(observed: &'static str) {
+        if matches!(observed, "seal-stage" | "seal-output") {
+            OVERSIZE_BOUNDARY_HIT.with(|hit| hit.set(true));
+            CANCEL_NOW.with(|cancel| cancel.set(true));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn arm_oversize_boundary_trap() {
+        OVERSIZE_BOUNDARY_HIT.with(|hit| hit.set(false));
+        CANCEL_NOW.with(|cancel| cancel.set(false));
+        jet_crypto_set_file_boundary_test_observer(record_oversize_boundary);
     }
 
     #[cfg(target_os = "linux")]
@@ -638,6 +654,48 @@ mod tests {
             assert_eq!(std::fs::read(&restored).unwrap(), plaintext);
             assert_eq!(std::fs::read(&source).unwrap(), plaintext);
         }
+        assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+        }));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn jetc_v2_rejects_oversize_source_before_staging() {
+        use std::io::{Read, Seek, SeekFrom, Write};
+
+        let root = test_dir("oversize-source");
+        let source = root.join("oversize.bin");
+        let destination = root.join("oversize.jetc");
+        let mut sparse = std::fs::File::create(&source).unwrap();
+        sparse.write_all(b"oversize-source").unwrap();
+        sparse.seek(SeekFrom::Start(JETC_V2_MAX_PLAINTEXT)).unwrap();
+        sparse.write_all(&[0x7f]).unwrap();
+        drop(sparse);
+        assert_eq!(std::fs::metadata(&source).unwrap().len(), JETC_V2_MAX_PLAINTEXT + 1);
+
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        arm_oversize_boundary_trap();
+        assert_eq!(jet_crypto_file_seal_impl(
+            vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+            &source.to_string_lossy().into_owned(),
+            &destination.to_string_lossy().into_owned(),
+            cancel_at_boundary,
+        ), Err(JetFileCryptoError::SourceIo));
+        jet_crypto_clear_file_boundary_test_observer();
+        OVERSIZE_BOUNDARY_HIT.with(|hit| assert!(!hit.get()));
+        CANCEL_NOW.with(|cancel| assert!(!cancel.get()));
+        assert!(!destination.exists());
+        assert_eq!(std::fs::metadata(&source).unwrap().len(), JETC_V2_MAX_PLAINTEXT + 1);
+        let mut preserved = std::fs::File::open(&source).unwrap();
+        let mut prefix = [0u8; 15];
+        preserved.read_exact(&mut prefix).unwrap();
+        assert_eq!(&prefix, b"oversize-source");
+        preserved.seek(SeekFrom::Start(JETC_V2_MAX_PLAINTEXT)).unwrap();
+        let mut marker = [0u8; 1];
+        preserved.read_exact(&mut marker).unwrap();
+        assert_eq!(marker, [0x7f]);
         assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
             !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
         }));
