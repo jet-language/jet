@@ -5510,8 +5510,10 @@ fn core_http_client_owns_pre_response_errors() {
     let addr = listener.local_addr().unwrap();
     let stop = std::sync::Arc::new(AtomicBool::new(false));
     let accepted = std::sync::Arc::new(AtomicUsize::new(0));
+    let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let server_stop = stop.clone();
     let server_accepted = accepted.clone();
+    let server_captured = captured.clone();
     let server = std::thread::spawn(move || {
         while !server_stop.load(Ordering::Acquire) {
             match listener.accept() {
@@ -5519,9 +5521,10 @@ fn core_http_client_owns_pre_response_errors() {
                     server_accepted.fetch_add(1, Ordering::AcqRel);
                     stream.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
                     let mut request = [0; 4096];
-                    let _ = stream.read(&mut request);
+                    let read = stream.read(&mut request).unwrap();
+                    *server_captured.lock().unwrap() = request[..read].to_vec();
                     stream.write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                     ).unwrap();
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -5589,6 +5592,12 @@ fn main() {
         &[], &[], &[],
     ).unwrap_err();
     assert_eq!(proxy_error, "HTTP proxy URL is invalid");
+    let proxy_connection_error = bridge::jet_http_client_send_impl(
+        "GET", &"https://example.invalid/".to_string(), &[], None, None, None, None, None, None,
+        Some(url.as_str()),
+        &[], &[], &[],
+    ).unwrap_err();
+    assert_eq!(proxy_connection_error, "HTTP proxy connection failed");
 }
 "#,
     )
@@ -5605,7 +5614,13 @@ fn main() {
     stop.store(true, Ordering::Release);
     server.join().unwrap();
     assert!(output.status.success(), "bridge harness failed:\n{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(accepted.load(Ordering::Acquire), 0, "invalid option reached transport");
+    assert_eq!(accepted.load(Ordering::Acquire), 1, "pre-response transport count changed");
+    let proxy_request = captured.lock().unwrap();
+    assert!(
+        proxy_request.starts_with(b"CONNECT example.invalid:443 HTTP/1.1\r\n"),
+        "unexpected proxy request: {}",
+        String::from_utf8_lossy(&proxy_request)
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
