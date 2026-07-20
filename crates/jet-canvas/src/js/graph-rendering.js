@@ -1007,8 +1007,8 @@
         postTransaction(body);
         return true;
       },
-      undo: () => !!undoTransaction(),
-      redo: () => !!redoTransaction(),
+      undo: undoTransaction,
+      redo: redoTransaction,
       setViewMode: (mode) => { setViewMode(mode); return viewMode; },
       runCurrentGraph: () => { runCurrentGraph(); return true; },
       selectVariable: (name) => { selectVariable(name); return true; },

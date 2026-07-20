@@ -236,26 +236,38 @@ export class CanvasScenario {
 
   async undo() {
     const before = await this.source();
-    const ok = await this.driver.evaluate(`window.__jetCanvasTest.undo()`);
-    if (!ok) throw new Error("undo helper missing or stack empty");
-    await this.waitFor(async () => {
-      const after = await this.source();
-      return after !== before;
-    }, "undo source change");
-    await this.waitForCanvas();
-    return await this.source();
+    const state = await this.state();
+    if (!state || state.undoDepth < 1) throw new Error("undo helper missing or stack empty");
+    const asyncUndo = await this.driver.evaluate(`(() => {
+      window.__jetCanvasHistoryPromise = window.__jetCanvasTest.undo();
+      return window.__jetCanvasHistoryPromise instanceof Promise;
+    })()`);
+    if (!asyncUndo) throw new Error("undo helper did not return asynchronous completion");
+    await this.driver.evaluate(`window.__jetCanvasHistoryPromise`);
+    const fresh = await this.graph();
+    const ui = await this.uiDoc();
+    if (!fresh || !ui || fresh.source_text === before || ui.source_id !== fresh.source_id || ui.revision !== fresh.revision || ui.source_text !== fresh.source_text) {
+      throw new Error(`undo UI did not reach restored revision/source: ${JSON.stringify({ freshSource: fresh && fresh.source_id, freshRevision: fresh && fresh.revision, uiSource: ui && ui.source_id, uiRevision: ui && ui.revision })}`);
+    }
+    return fresh.source_text;
   }
 
   async redo() {
     const before = await this.source();
-    const ok = await this.driver.evaluate(`window.__jetCanvasTest.redo()`);
-    if (!ok) throw new Error("redo helper missing or stack empty");
-    await this.waitFor(async () => {
-      const after = await this.source();
-      return after !== before;
-    }, "redo source change");
-    await this.waitForCanvas();
-    return await this.source();
+    const state = await this.state();
+    if (!state || state.redoDepth < 1) throw new Error("redo helper missing or stack empty");
+    const asyncRedo = await this.driver.evaluate(`(() => {
+      window.__jetCanvasHistoryPromise = window.__jetCanvasTest.redo();
+      return window.__jetCanvasHistoryPromise instanceof Promise;
+    })()`);
+    if (!asyncRedo) throw new Error("redo helper did not return asynchronous completion");
+    await this.driver.evaluate(`window.__jetCanvasHistoryPromise`);
+    const fresh = await this.graph();
+    const ui = await this.uiDoc();
+    if (!fresh || !ui || fresh.source_text === before || ui.source_id !== fresh.source_id || ui.revision !== fresh.revision || ui.source_text !== fresh.source_text) {
+      throw new Error(`redo UI did not reach restored revision/source: ${JSON.stringify({ freshSource: fresh && fresh.source_id, freshRevision: fresh && fresh.revision, uiSource: ui && ui.source_id, uiRevision: ui && ui.revision })}`);
+    }
+    return fresh.source_text;
   }
 
   async replaceSource(source) {
