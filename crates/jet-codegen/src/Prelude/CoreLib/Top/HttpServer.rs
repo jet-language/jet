@@ -709,6 +709,24 @@ fn jet_http_connection_options(value: &str) -> impl Iterator<Item = &str> {
     value.split(',').map(jet_http_trim_ows).filter(|token| !token.is_empty())
 }
 
+fn jet_http_parse_content_length(
+    value: &str,
+    mut expected: Option<usize>,
+) -> Result<usize, JetHttpReadError> {
+    for member in value.split(',').map(jet_http_trim_ows) {
+        if member.is_empty() || !member.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(JetHttpReadError { status: 400, message: "content-length is malformed" });
+        }
+        let parsed = member.parse::<usize>()
+            .map_err(|_| JetHttpReadError { status: 400, message: "content-length is malformed" })?;
+        if expected.is_some_and(|old| old != parsed) {
+            return Err(JetHttpReadError { status: 400, message: "conflicting content-length headers" });
+        }
+        expected = Some(parsed);
+    }
+    expected.ok_or(JetHttpReadError { status: 400, message: "content-length is malformed" })
+}
+
 fn jet_http_srv_request_keep_alive(version: &str, headers: &JetHttpHeaders) -> bool {
     let mut close = false;
     let mut keep_alive = false;
@@ -1088,11 +1106,7 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
                 });
             }
         } else if name.eq_ignore_ascii_case("content-length") {
-            let parsed = jet_http_trim_ows(value).parse::<usize>()
-                .map_err(|_| JetHttpReadError { status: 400, message: "content-length is malformed" })?;
-            if content_length.replace(parsed).is_some_and(|old| old != parsed) {
-                return Err(JetHttpReadError { status: 400, message: "conflicting content-length headers" });
-            }
+            content_length = Some(jet_http_parse_content_length(value, content_length)?);
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
             if transfer_encoding.replace(jet_http_trim_ows(value)).is_some() {
                 return Err(JetHttpReadError {

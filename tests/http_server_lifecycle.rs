@@ -954,6 +954,100 @@ fn connection_options_are_tokens_before_reuse_or_body_permission() {
 }
 
 #[test]
+fn content_length_is_one_identical_decimal_value_before_body_permission() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => response.extend_from_slice(&buf[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(error) => panic!("response read: {error}"),
+            }
+        }
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let post_calls = calls.clone();
+    jet_http_mux_add(&mux, "POST", "/echo", move |req| {
+        post_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &req.body)
+    });
+    let get_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/next", move |_| {
+        get_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"next".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 16;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    for content_length in [
+        "Content-Length: 03",
+        "Content-Length: 3, 003",
+        "Content-Length: 3\r\nContent-Length: 003",
+    ] {
+        let response = exchange(
+            addr,
+            format!("POST /echo HTTP/1.1\r\nHost: local\r\n{content_length}\r\nConnection: close\r\n\r\nabc").as_bytes(),
+        );
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "valid Content-Length rejected: {response}");
+        assert!(response.ends_with("\r\n\r\nabc"), "body boundary changed: {response}");
+    }
+
+    for invalid_content_length in [
+        "Content-Length: +3",
+        "Content-Length: -3",
+        "Content-Length: 3, 4",
+        "Content-Length: 3,",
+        "Content-Length: ,3",
+        "Content-Length: 3,,3",
+        "Content-Length: 3 3",
+        "Content-Length: 3;",
+        "Content-Length: café",
+        "Content-Length: 184467440737095516160000000000000000000",
+        "Content-Length: 3\r\nContent-Length: 4",
+    ] {
+        let request = format!(
+            "POST /echo HTTP/1.1\r\nHost: local\r\n{invalid_content_length}\r\n\r\nabcGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        );
+        let response = exchange(addr, request.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "accepted invalid Content-Length: {response}");
+        assert!(!response.contains("200 OK"), "invalid Content-Length dispatched or reused: {response}");
+        assert_eq!(response.matches("HTTP/1.1").count(), 1, "invalid Content-Length reused socket: {response}");
+    }
+
+    let invalid_expect = exchange(
+        addr,
+        b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: +3\r\nExpect: 100-continue\r\n\r\n",
+    );
+    assert!(invalid_expect.starts_with("HTTP/1.1 400 Bad Request"), "{invalid_expect}");
+    assert!(!invalid_expect.contains("100 Continue"), "invalid Content-Length received body permission: {invalid_expect}");
+
+    assert_eq!(calls.load(Ordering::Acquire), 3, "invalid Content-Length reached handler");
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 15);
+    assert_eq!(report.user_completed, 15);
+}
+
+#[test]
 fn shutdown_closes_idle_keepalive_and_starts_no_new_request() {
     use std::io::Write;
 
