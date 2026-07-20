@@ -1046,8 +1046,11 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
     let (Some(method), Some(target), Some(version), None) = request_shape else {
         return Err(JetHttpReadError { status: 400, message: "request line is malformed" });
     };
-    if request_line.len() > 8 * 1024 || method.is_empty() || target.is_empty() {
+    if request_line.len() > 8 * 1024 || target.is_empty() {
         return Err(JetHttpReadError { status: 400, message: "request line is malformed" });
+    }
+    if !JetHttpHeaders::valid_name(method) {
+        return Err(JetHttpReadError { status: 400, message: "request method is malformed" });
     }
     if !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
         return Err(JetHttpReadError { status: 505, message: "HTTP version is not supported" });

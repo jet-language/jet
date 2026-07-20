@@ -789,6 +789,81 @@ fn absolute_form_target_matches_host_before_routing() {
 }
 
 #[test]
+fn request_method_is_one_http_token_before_body_or_dispatch() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => response.extend_from_slice(&buf[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(error) => panic!("response read: {error}"),
+            }
+        }
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    for method in ["GET", "M-SEARCH", "custom!#$%&'*+-.^_`|~"] {
+        let handler_calls = calls.clone();
+        jet_http_mux_add(&mux, method, "/resource", move |req| {
+            handler_calls.fetch_add(1, Ordering::AcqRel);
+            jet_http_srv_response(200, &req.method)
+        });
+    }
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 16;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    for method in ["GET", "M-SEARCH", "custom!#$%&'*+-.^_`|~"] {
+        let response = exchange(
+            addr,
+            format!("{method} /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n").as_bytes(),
+        );
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "valid method rejected: {response}");
+        assert!(response.ends_with(&format!("\r\n\r\n{method}")), "method changed before dispatch: {response}");
+    }
+
+    for invalid_method in ["G/ET", "G:ET", "G\\ET", "GÉT", "GET\t", "GE(T", "", "\x7fGET"] {
+        let request = format!(
+            "{invalid_method} /resource HTTP/1.1\r\nHost: local\r\n\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        );
+        let response = exchange(addr, request.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "accepted invalid method: {response}");
+        assert!(!response.contains("200 OK"), "invalid method dispatched or reused: {response}");
+        assert_eq!(response.matches("HTTP/1.1").count(), 1, "invalid method reused connection: {response}");
+    }
+
+    let invalid_expect = exchange(
+        addr,
+        b"G/ET /resource HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\n",
+    );
+    assert!(invalid_expect.starts_with("HTTP/1.1 400 Bad Request"), "{invalid_expect}");
+    assert!(!invalid_expect.contains("100 Continue"), "invalid method received body permission: {invalid_expect}");
+
+    assert_eq!(calls.load(Ordering::Acquire), 3, "invalid method reached handler");
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 12);
+    assert_eq!(report.user_completed, 12);
+}
+
+#[test]
 fn shutdown_closes_idle_keepalive_and_starts_no_new_request() {
     use std::io::Write;
 
