@@ -483,6 +483,19 @@ fn public_transcript_covers_integer_bit_queries_exactly() {
 }
 
 #[test]
+fn public_transcript_keeps_checked_types_in_imported_functions() {
+    let values = exact_values(&[
+        "use core.math as math",
+        r#"fn imported_g(x: U8) -> Int {
+    y :: math.abs(-1.0)
+    return (x).leading_zeros()
+}"#,
+        "imported_g(13)",
+    ]);
+    assert_eq!(values, ["4 : Int"]);
+}
+
+#[test]
 fn public_transcript_composes_email_and_codecs_exactly() {
     let values = exact_values(&[
         "use core.email as email",

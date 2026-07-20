@@ -1841,7 +1841,12 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
 
 /// Rebuild the func_defs table from accumulated item sources.
 fn rebuild_funcs(session: &mut Session) {
-    let src = format!("{}{}", PRELOAD_SRC, session.accumulated_src());
+    let src = format!(
+        "{}{}{}",
+        PRELOAD_SRC,
+        session.import_src(),
+        session.accumulated_src()
+    );
     if let Ok(bundle) = checked_program(&src) {
         session.func_defs = checked_top_level_funcs(&bundle);
         return;
