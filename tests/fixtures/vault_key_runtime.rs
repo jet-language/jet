@@ -138,6 +138,28 @@ mod vault_key_tests {
     }
 
     #[test]
+    fn decoder_rejects_a_downgraded_current_generation() {
+        let root = scratch("downgrade");
+        provision(&root);
+        jet_vault_set_test_authorizer(|_| true);
+        let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+        let write = jet_vault_authorize_write_impl(&plan, "first").unwrap();
+        jet_vault_commit_generate_at(&root, plan, write).unwrap();
+        let plan = jet_vault_prepare_rotate_at::<JetSigningKey>(&root, "release").unwrap();
+        let write = jet_vault_authorize_write_impl(&plan, "second").unwrap();
+        jet_vault_commit_rotate_at(&root, plan, write).unwrap();
+        let mut bytes = jet_vault_encode_v2(&decoded_store(&root)).unwrap();
+        let current_at = 44 + 1 + 2 + "release".len();
+        bytes[current_at..current_at + 8].copy_from_slice(&1u64.to_le_bytes());
+        let hash_at = bytes.len() - 32;
+        let hash = vault_hash(&[b"JVLT2 payload", &bytes[..hash_at]]);
+        bytes[hash_at..].copy_from_slice(&hash);
+        assert_eq!(jet_vault_decode_v2(&bytes).unwrap_err(), JetVaultError::InvalidEncoding);
+        jet_vault_clear_test_authorizer();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn exact_operation_preview_provider_and_session_are_bound() {
         let root = scratch("binding");
         provision(&root);
@@ -232,7 +254,11 @@ mod vault_key_tests {
         jet_vault_set_test_fault(Some("cancel-before-install"));
         assert_eq!(jet_vault_commit_generate_at(&root, plan, write).unwrap_err(), JetVaultError::Conflict);
         assert!(!root.join(".jet/secrets.age").exists());
-        assert!(!std::fs::read_dir(root.join(".jet")).unwrap().any(|entry| entry.unwrap().file_name().to_string_lossy().contains(".new.")));
+        assert!(!std::fs::read_dir(root.join(".jet")).unwrap().any(|entry| {
+            let name = entry.unwrap().file_name();
+            let name = name.to_string_lossy();
+            name.contains(".next.") || name == ".secrets.age.backup"
+        }));
 
         jet_vault_set_test_fault(Some("cancel-after-install"));
         let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
@@ -245,7 +271,11 @@ mod vault_key_tests {
         jet_vault_set_test_fault(Some("durability-after-install"));
         assert_eq!(jet_vault_commit_rotate_at(&root, plan, write).unwrap_err(), JetVaultError::DurabilityUnknown);
         assert_eq!(decoded_store(&root).revision, 2, "installed revision is visible");
-        assert!(std::fs::read_dir(root.join(".jet")).unwrap().any(|entry| entry.unwrap().file_name().to_string_lossy().contains(".new.")), "old store remains as recovery backup");
+        assert!(root.join(".jet/.secrets.age.backup").exists(), "authenticated old inode remains as recovery backup");
+        std::fs::write(root.join(".jet/secrets.age"), b"substituted").unwrap();
+        assert_eq!(jet_vault_current_at::<JetSigningKey>(&root, "release").unwrap(), Some(first));
+        assert_eq!(decoded_store(&root).revision, 1, "next open restores authenticated backup");
+        assert!(!root.join(".jet/.secrets.age.backup").exists());
         jet_vault_set_test_fault(None);
         jet_vault_clear_test_authorizer();
         std::fs::remove_dir_all(root).unwrap();
@@ -325,6 +355,61 @@ mod vault_key_tests {
         assert_eq!(jet_vault_commit_generate_at(&root, plan, write).unwrap().generation(), 1);
         assert!(!lock.exists());
         assert!(!std::fs::read_dir(root.join(".jet")).unwrap().any(|entry| entry.unwrap().file_name().to_string_lossy().contains("lock.stale")));
+        jet_vault_clear_test_authorizer();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lock_drop_never_unlinks_an_inode_substituted_after_its_check() {
+        use std::os::unix::fs::MetadataExt;
+        let root = scratch("lock-substitution");
+        provision(&root);
+        let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+        let guard = vault_acquire_lock(&root, plan.repo_uuid, plan.start_revision, plan.start_hash).unwrap();
+        let lock = root.join(".jet/.secrets.age.lock");
+        jet_vault_set_test_fault(Some("substitute-lock-after-check"));
+        drop(guard);
+        jet_vault_set_test_fault(None);
+        let replacement_inode = std::fs::metadata(&lock).unwrap().ino();
+        assert_eq!(std::fs::read(&lock).unwrap(), b"replacement");
+        assert_eq!(std::fs::metadata(&lock).unwrap().ino(), replacement_inode);
+        let acquired = root.join(".jet/.secrets.age.lock.acquired");
+        assert_ne!(std::fs::metadata(&acquired).unwrap().ino(), replacement_inode);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn anonymous_temp_substitution_never_reaches_the_visible_store() {
+        let root = scratch("temp-substitution");
+        provision(&root);
+        jet_vault_set_test_authorizer(|_| true);
+        let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+        let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+        jet_vault_set_test_fault(Some("substitute-temp-before-install"));
+        assert_eq!(jet_vault_commit_generate_at(&root, plan, write).unwrap_err(), JetVaultError::Conflict);
+        assert!(!root.join(".jet/secrets.age").exists());
+        jet_vault_set_test_fault(None);
+        jet_vault_clear_test_authorizer();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn lifecycle_timestamps_do_not_decrease_when_wall_clock_rolls_back() {
+        let root = scratch("clock-rollback");
+        provision(&root);
+        jet_vault_set_test_authorizer(|_| true);
+        let plan = jet_vault_prepare_generate_at::<JetSigningKey>(&root, "release").unwrap();
+        let write = jet_vault_authorize_write_impl(&plan, "initial signer").unwrap();
+        jet_vault_commit_generate_at(&root, plan, write).unwrap();
+        let before = decoded_store(&root).keys[0].created_unix_ms;
+        let plan = jet_vault_prepare_rotate_at::<JetSigningKey>(&root, "release").unwrap();
+        let write = jet_vault_authorize_write_impl(&plan, "rollback rotation").unwrap();
+        jet_vault_set_test_fault(Some("clock-rollback"));
+        jet_vault_commit_rotate_at(&root, plan, write).unwrap();
+        let store = decoded_store(&root);
+        assert!(store.keys[0].status_unix_ms >= before);
+        assert!(store.keys[1].created_unix_ms >= store.keys[0].status_unix_ms);
+        jet_vault_set_test_fault(None);
         jet_vault_clear_test_authorizer();
         std::fs::remove_dir_all(root).unwrap();
     }

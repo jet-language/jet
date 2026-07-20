@@ -579,8 +579,9 @@ authorized typed mutation. Interactive authorization uses the native preview;
 a headless process needs the exact reviewed grant
 `jet trust grant vault.write:<repository_uuid>`. Source, workspace settings,
 environment variables, DAP, and stdin cannot approve a write. Linux uses
-`openat2`, `pidfd`, `renameat2(RENAME_EXCHANGE)`, file/directory fsync, and
-same-directory recovery; unsupported providers fail closed. `VaultError`
+`openat2`, `pidfd`, anonymous `O_TMPFILE` staging, inode-bound locks,
+`renameat2(RENAME_EXCHANGE)`, file/directory fsync, and authenticated
+next-open backup recovery; unsupported providers fail closed. `VaultError`
 redacts paths, identities, recipients, backend text, and key/store bytes. Safe
 portable backup is intentionally absent. Expert raw imports are prepared and
 committed only through `core.vault.expert` inside `@Unsafe`; raw export remains

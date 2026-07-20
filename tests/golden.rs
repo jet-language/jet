@@ -269,6 +269,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         || stem == "memory/uninit"
         || stem == "memory/uninit_buffer"
         || stem == "crypto/crypto_migration"
+        || stem == "crypto/vault_keys"
     {
         assert!(
             user_code.contains("unsafe"),
