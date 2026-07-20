@@ -1,6 +1,6 @@
 // ── C-FFI data types ──────────────────────────────────────────────────────────
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The result of resolving one C `use` in one file.
 #[derive(Debug, Clone)]
@@ -53,7 +53,10 @@ pub struct ComptimeInput {
 pub struct FfiLink {
     pub crate_name: String,
     pub rlib_path: PathBuf,
-    pub deps_dir: PathBuf,
+    /// Selected-target runtime dependencies emitted by Cargo.
+    pub target_deps_dir: PathBuf,
+    /// Host artifacts needed while rustc loads target metadata (notably proc macros).
+    pub host_deps_dir: PathBuf,
     /// Path to the built `jet-crypto-helper` binary, present only when the
     /// bridge was built with `needs_crypto` (card c146 — package signing shells
     /// out to this helper for Ed25519 keygen/sign/verify). `None` otherwise.
@@ -63,4 +66,13 @@ pub struct FfiLink {
     /// `jetpack secrets set/get/recipients/keygen` shells out to this for the
     /// age-style encrypt/decrypt/keygen operations. `None` otherwise.
     pub secrets_helper_bin_path: Option<PathBuf>,
+}
+
+impl FfiLink {
+    /// Cargo's dependency search paths, target artifacts first and without duplicates.
+    pub fn dependency_dirs(&self) -> impl Iterator<Item = &Path> {
+        std::iter::once(self.target_deps_dir.as_path()).chain(
+            (self.host_deps_dir != self.target_deps_dir).then_some(self.host_deps_dir.as_path()),
+        )
+    }
 }

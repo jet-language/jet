@@ -334,10 +334,10 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         rustc_cmd
             .arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        if link.deps_dir.is_dir() {
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
             rustc_cmd
                 .arg("-L")
-                .arg(format!("dependency={}", link.deps_dir.display()));
+                .arg(format!("dependency={}", deps_dir.display()));
         }
     }
     let clinks = jet::resolve_c_links(entry.path.to_str().unwrap())

@@ -1221,7 +1221,8 @@ fn build_bridge_full(
     let target_dir = cache_root.join("target");
     let target = target_dir.join(selected_target).join("release");
     let rlib = target.join(format!("lib{}.rlib", crate_name));
-    let deps_dir = target.join("deps");
+    let target_deps_dir = target.join("deps");
+    let host_deps_dir = target_dir.join("release/deps");
 
     // c146: when the bridge carries crypto, it also emits a `jet-crypto-helper`
     // binary (a thin stdin wrapper around `jet_crypto_*_impl`) that `jet`'s own
@@ -1256,7 +1257,8 @@ fn build_bridge_full(
         return Ok(FfiLink {
             crate_name,
             rlib_path: rlib,
-            deps_dir,
+            target_deps_dir,
+            host_deps_dir,
             helper_bin_path: helper_bin,
             secrets_helper_bin_path: secrets_helper_bin,
         });
@@ -1290,7 +1292,8 @@ fn build_bridge_full(
         return Ok(FfiLink {
             crate_name,
             rlib_path: rlib,
-            deps_dir,
+            target_deps_dir,
+            host_deps_dir,
             helper_bin_path: helper_bin,
             secrets_helper_bin_path: secrets_helper_bin,
         });
@@ -1480,7 +1483,8 @@ fn build_bridge_full(
     Ok(FfiLink {
         crate_name,
         rlib_path: rlib,
-        deps_dir,
+        target_deps_dir,
+        host_deps_dir,
         helper_bin_path: helper_bin,
         secrets_helper_bin_path: secrets_helper_bin,
     })

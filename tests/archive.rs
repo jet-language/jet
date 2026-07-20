@@ -9,8 +9,58 @@
 //! verifying the rlib artifact lands in the hangar.
 
 use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+struct TempTree(PathBuf);
+
+impl TempTree {
+    fn new(prefix: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "{prefix}_{}_{}",
+            std::process::id(),
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+}
+
+impl Drop for TempTree {
+    fn drop(&mut self) {
+        make_tree_owner_writable(&self.0);
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn make_tree_owner_writable(path: &Path) {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if metadata.file_type().is_symlink() {
+        return;
+    }
+    let is_dir = metadata.is_dir();
+    let mut permissions = metadata.permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        permissions.set_mode(permissions.mode() | if is_dir { 0o700 } else { 0o600 });
+    }
+    #[cfg(not(unix))]
+    permissions.set_readonly(false);
+    let _ = fs::set_permissions(path, permissions);
+    if is_dir {
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                make_tree_owner_writable(&entry.path());
+            }
+        }
+    }
+}
 
 #[test]
 fn archive_bridge_embeds_the_canonical_ring_source() {
@@ -58,14 +108,8 @@ fn run() {
 
 /// Compile, FFI-link, and run a Core bridge program; return stdout.
 fn run_core_bridge(src: &str) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let dir = std::env::temp_dir().join(format!(
-        "jet_archive_{}_{}",
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::Relaxed)
-    ));
-    fs::create_dir_all(&dir).unwrap();
+    let temp = TempTree::new("jet_archive");
+    let dir = &temp.0;
     let path = dir.join("archive_test.jet");
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy();
@@ -87,18 +131,13 @@ fn run_core_bridge(src: &str) -> String {
     let bin = dir.join("archive_test_bin");
     fs::write(&rs, &out.rust).unwrap();
     let link = out.ffi.as_ref().unwrap();
-    let status = Command::new("rustc")
-        .args(["--edition", "2021"])
-        .arg(&rs)
-        .arg("-o")
-        .arg(&bin)
-        .arg("--extern")
-        .arg(format!("{}={}", link.crate_name, link.rlib_path.display()))
-        .arg("-L")
-        .arg(format!("dependency={}", link.deps_dir.display()))
-        .status()
-        .unwrap();
-    assert!(status.success(), "I2: rustc rejected archive-linked output");
+    let dependency_dirs: Vec<_> = link.dependency_dirs().collect();
+    let built = rustc_bridge(&rs, &bin, link, &dependency_dirs);
+    assert!(
+        built.status.success(),
+        "I2: rustc rejected archive-linked output:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
 
     let run = Command::new(&bin).output().unwrap();
     assert!(
@@ -107,6 +146,26 @@ fn run_core_bridge(src: &str) -> String {
         String::from_utf8_lossy(&run.stderr)
     );
     String::from_utf8_lossy(&run.stdout).into_owned()
+}
+
+fn rustc_bridge(
+    rs: &Path,
+    bin: &Path,
+    link: &jet::FFI::FfiLink,
+    dependency_dirs: &[&Path],
+) -> Output {
+    let mut rustc = Command::new("rustc");
+    rustc
+        .args(["--edition", "2021"])
+        .arg(rs)
+        .arg("-o")
+        .arg(bin)
+        .arg("--extern")
+        .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+    for deps_dir in dependency_dirs {
+        rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+    }
+    rustc.output().unwrap()
 }
 
 #[test]
@@ -156,6 +215,117 @@ data: [U8] :: [72, 101, 108, 108, 111]
     );
 }
 
+#[test]
+fn archive_direct_rustc_requires_target_and_host_dependency_dirs() {
+    if !have_toolchain() {
+        eprintln!("note: cargo/rustc not found; skipping archive link-contract test");
+        return;
+    }
+    let temp = TempTree::new("jet_archive_link_contract");
+    let jet_path = temp.0.join("archive_link_contract.jet");
+    let src = r#"
+use core.archive as ar
+
+fn run() {
+data: [U8] :: [1, 2, 3]
+    zipped :: ar.zip_compress("data.bin", data)
+    print((ar.zip_decompress(zipped) == data))
+}
+"#;
+    fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy();
+    let out = jet::compile_with_path(src, &shown).unwrap();
+    let link = out.ffi.as_ref().expect("core.archive must build an FFI bridge");
+
+    let dirs: Vec<_> = link.dependency_dirs().collect();
+    assert_eq!(dirs, [&*link.target_deps_dir, &*link.host_deps_dir]);
+    assert_ne!(link.target_deps_dir, link.host_deps_dir);
+    assert!(link.target_deps_dir.is_dir());
+    assert!(link.host_deps_dir.is_dir());
+    assert!(
+        fs::read_dir(&link.host_deps_dir).unwrap().flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .ends_with(std::env::consts::DLL_SUFFIX)
+        }),
+        "Cargo host dependency directory must contain a proc-macro dynamic library"
+    );
+
+    let rs = temp.0.join("archive_link_contract.rs");
+    fs::write(&rs, out.rust).unwrap();
+    let missing = rustc_bridge(
+        &rs,
+        &temp.0.join("missing_host_bin"),
+        link,
+        &[&link.target_deps_dir],
+    );
+    assert_link_dir_failure("missing host dependency directory", &missing);
+
+    let wrong = temp.0.join("wrong-host-deps");
+    fs::create_dir(&wrong).unwrap();
+    let wrong_dir = rustc_bridge(
+        &rs,
+        &temp.0.join("wrong_host_bin"),
+        link,
+        &[&link.target_deps_dir, &wrong],
+    );
+    assert_link_dir_failure("wrong host dependency directory", &wrong_dir);
+
+    let complete = rustc_bridge(
+        &rs,
+        &temp.0.join("complete_bin"),
+        link,
+        &dirs,
+    );
+    assert!(
+        complete.status.success(),
+        "target + host dependency directories must link:\n{}",
+        String::from_utf8_lossy(&complete.stderr)
+    );
+}
+
+fn assert_link_dir_failure(case: &str, output: &Output) {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{case} unexpectedly linked");
+    assert!(
+        stderr.contains("E0463") && stderr.contains("can't find crate"),
+        "{case} must fail as an honest missing dependency, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn archive_temp_cleanup_restores_permissions_on_success_and_unwind() {
+    for unwind in [false, true] {
+        let path = std::env::temp_dir().join(format!(
+            "jet_archive_cleanup_{}_{}_{}",
+            std::process::id(),
+            TEMP_SEQ.fetch_add(1, Ordering::Relaxed),
+            unwind
+        ));
+        let result = std::panic::catch_unwind(|| {
+            fs::create_dir_all(path.join("objects/item/src")).unwrap();
+            let _cleanup = TempTree(path.clone());
+            let file = path.join("objects/item/src/lib.rs");
+            fs::write(&file, "readonly").unwrap();
+            let mut file_permissions = fs::metadata(&file).unwrap().permissions();
+            file_permissions.set_readonly(true);
+            fs::set_permissions(&file, file_permissions).unwrap();
+            let src = path.join("objects/item/src");
+            let mut dir_permissions = fs::metadata(&src).unwrap().permissions();
+            dir_permissions.set_readonly(true);
+            fs::set_permissions(&src, dir_permissions).unwrap();
+            assert!(fs::metadata(&file).unwrap().permissions().readonly());
+            assert!(fs::metadata(&src).unwrap().permissions().readonly());
+            if unwind {
+                panic!("exercise archive fixture unwind cleanup");
+            }
+        });
+        assert_eq!(result.is_err(), unwind);
+        assert!(!path.exists(), "archive fixture cleanup leaked {}", path.display());
+    }
+}
+
 // ── D-BFS1: build-from-source via CoreProvider ────────────────────────────────
 
 /// Verify that `CoreProvider::realize()` compiles a library package that ships
@@ -183,11 +353,8 @@ fn core_provider_compiles_ring_package_to_rlib() {
         return;
     }
 
-    let base = std::env::temp_dir().join(format!(
-        "jet-bfs1-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
+    let temp = TempTree::new("jet-bfs1");
+    let base = temp.0.clone();
     let store = base.join("hangar");
     fs::create_dir_all(&store).unwrap();
 
@@ -263,6 +430,4 @@ fn core_provider_compiles_ring_package_to_rlib() {
             .contains("has no dependency references or store-validated closure proof"),
         "changed output must fail its content-bound closure proof: {error}"
     );
-
-    let _ = fs::remove_dir_all(&base);
 }

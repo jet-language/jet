@@ -2862,10 +2862,10 @@ fn build_and_run(
         rustc_cmd
             .arg("--extern")
             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        if link.deps_dir.is_dir() {
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
             rustc_cmd
                 .arg("-L")
-                .arg(format!("dependency={}", link.deps_dir.display()));
+                .arg(format!("dependency={}", deps_dir.display()));
         }
     }
     let rustc = rustc_cmd.output().unwrap();
@@ -4710,8 +4710,8 @@ fn main() {
         .arg(&rs).arg("-o").arg(&bin);
     if let Some(link) = compiled.ffi {
         rustc.arg("--extern").arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        if link.deps_dir.is_dir() {
-            rustc.arg("-L").arg(format!("dependency={}", link.deps_dir.display()));
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+            rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
         }
     }
     let built = rustc.output().unwrap();
@@ -8926,7 +8926,7 @@ fn run() {
     rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin);
     if let Some(link) = compiled.ffi {
         rustc.arg("--extern").arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-        if link.deps_dir.is_dir() { rustc.arg("-L").arg(format!("dependency={}", link.deps_dir.display())); }
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) { rustc.arg("-L").arg(format!("dependency={}", deps_dir.display())); }
     }
     let built = rustc.output().unwrap();
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));

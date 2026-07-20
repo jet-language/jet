@@ -60,7 +60,7 @@ pub fn build_compute(guest_rust:&str,host_rust:&str,ffi:Option<&crate::AST::FfiL
     let source=cache.join(format!("{lib}_compute.rs"));let output=cache.join(format!("libjet_dart_{lib}_compute{}",shared_ext()));
     std::fs::write(&source,format!("{guest_rust}\n{host_rust}")).map_err(|e|BindError::Io(format!("could not write the native Jet plugin source: {e}")))?;
     let mut command=Command::new("rustc");command.args(["--edition","2021","--crate-type","cdylib","-O","--crate-name"]).arg(format!("jet_dart_{lib}")).arg(&source).arg("-o").arg(&output);
-    if let Some(link)=ffi { command.arg("--extern").arg(format!("{}={}",link.crate_name,link.rlib_path.display()));if link.deps_dir.is_dir(){command.arg("-L").arg(format!("dependency={}",link.deps_dir.display()));} }
+    if let Some(link)=ffi { command.arg("--extern").arg(format!("{}={}",link.crate_name,link.rlib_path.display()));for deps_dir in link.dependency_dirs().filter(|dir|dir.is_dir()){command.arg("-L").arg(format!("dependency={}",deps_dir.display()));} }
     for arg in clinks {command.arg(arg);}command.arg("-L").arg(format!("native={}",cache.display())).arg("-l").arg(format!("static=jet_dart_{lib}"));
     run(&mut command,"rustc")?;if !output.is_file(){return Err(BindError::Source("rustc did not produce the native Jet compute library".into()))}Ok(output)
 }

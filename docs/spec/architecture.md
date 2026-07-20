@@ -186,7 +186,9 @@ become dependencies of the compiler workspace crates.
    bridge (re-exported at `crates/jetpack::FFI`/`::CFFI` and `crates/jet-driver::FFI`).
    The Rust bridge is a generated, content-addressed crate under Jet's cache: its
    generated `Cargo.toml` owns foreign dependencies, `cargo build` produces an
-   rlib, and `FfiLink` records the crate name, rlib, and dependency directory.
+   rlib, and `FfiLink` records the crate name, rlib, selected-target runtime
+   dependency directory, and host proc-macro dependency directory. Every rustc
+   consumer passes the deterministic target-then-host, deduplicated search list.
    Do not put the dependency in the root or compiler-seam `Cargo.toml` files.
    Inline `#FFI(c|cpp|asm)` bodies use the same `FFI.rs` bridge and include the
    exact raw body, checked signature, target, and bridge schema in their cache

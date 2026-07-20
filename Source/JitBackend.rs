@@ -149,10 +149,10 @@ fn try_aot_subprocess(bundle: &ProgramBundle) -> AotAttempt {
             rustc
                 .arg("--extern")
                 .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-            if link.deps_dir.is_dir() {
+            for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
                 rustc
                     .arg("-L")
-                    .arg(format!("dependency={}", link.deps_dir.display()));
+                    .arg(format!("dependency={}", deps_dir.display()));
             }
         }
         for arg in clinks {

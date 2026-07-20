@@ -1675,17 +1675,18 @@ fn ffi_example_compiles_and_runs() {
     fs::write(&rs, &out.rust).unwrap();
 
     let link = out.ffi.as_ref().unwrap();
-    let status = Command::new("rustc")
+    let mut rustc = Command::new("rustc");
+    rustc
         .args(["--edition", "2021"])
         .arg(&rs)
         .arg("-o")
         .arg(&bin)
         .arg("--extern")
-        .arg(format!("{}={}", link.crate_name, link.rlib_path.display()))
-        .arg("-L")
-        .arg(format!("dependency={}", link.deps_dir.display()))
-        .status()
-        .unwrap();
+        .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+    for deps_dir in link.dependency_dirs() {
+        rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+    }
+    let status = rustc.status().unwrap();
     assert!(status.success(), "rustc rejected FFI-linked output (I2)");
 
     let run = Command::new(&bin).output().unwrap();
