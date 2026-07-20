@@ -1312,6 +1312,21 @@ impl<'a> Interp<'a> {
                 }
             }
         }
+        if let Expr::Ident(type_name, _) = receiver {
+            if type_name == crate::Syntax::TYPE_BYTE_BUFFER
+                && matches!(method, "new" | "from")
+            {
+                let bytes = if method == "new" {
+                    Vec::new()
+                } else {
+                    as_bytes(&self.eval(&args[0].expr, scope)?, span)?
+                };
+                return Ok(CtValue::Struct {
+                    type_name: crate::Syntax::TYPE_BYTE_BUFFER.to_string(),
+                    fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+                });
+            }
+        }
         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
         if let Expr::Ident(type_name, _) = receiver {
@@ -1922,25 +1937,31 @@ impl<'a> Interp<'a> {
                 argv.push(self.eval(&a.expr, scope)?);
             }
             let mut container = self.eval(receiver, scope)?;
-            if let Some(result) = sequence_parity::eval_sequence_method(
-                self,
+            if !matches!(
                 &container,
-                method,
-                &argv,
-                sequence_result_ty.as_ref(),
-                span,
+                CtValue::Struct { type_name, .. }
+                    if type_name == crate::Syntax::TYPE_BYTE_BUFFER
             ) {
-                return match result? {
-                    sequence_parity::SequenceOutcome::Value(value) => Ok(value),
-                    sequence_parity::SequenceOutcome::WriteBack(value) => {
-                        self.write_back(receiver, value, scope)?;
-                        Ok(CtValue::Unit)
-                    }
-                };
+                if let Some(result) = sequence_parity::eval_sequence_method(
+                    self,
+                    &container,
+                    method,
+                    &argv,
+                    sequence_result_ty.as_ref(),
+                    span,
+                ) {
+                    return match result? {
+                        sequence_parity::SequenceOutcome::Value(value) => Ok(value),
+                        sequence_parity::SequenceOutcome::WriteBack(value) => {
+                            self.write_back(receiver, value, scope)?;
+                            Ok(CtValue::Unit)
+                        }
+                    };
+                }
+                let ret = apply_mutating(&mut container, method, argv, span)?;
+                self.write_back(receiver, container, scope)?;
+                return Ok(ret);
             }
-            let ret = apply_mutating(&mut container, method, argv, span)?;
-            self.write_back(receiver, container, scope)?;
-            return Ok(ret);
         }
         let recv = self.eval(receiver, scope)?;
         // c139: an instance method the user wrote — `impl Type { fn … }` /
@@ -1968,6 +1989,85 @@ impl<'a> Interp<'a> {
                     return self.call_func(&format!("{}.{}", tn, method), f, frame);
                 }
             }
+        }
+        match (&recv, method) {
+            (
+                CtValue::Struct { type_name, fields },
+                method @ ("len"
+                    | "is_empty"
+                    | "clear"
+                    | "to_bytes"
+                    | "write_u8"
+                    | "write_u16_le"
+                    | "write_u16_be"
+                    | "write_u32_le"
+                    | "write_u32_be"
+                    | "write_u64_le"
+                    | "write_u64_be"
+                    | "write_bytes"),
+            ) if type_name == crate::Syntax::TYPE_BYTE_BUFFER => {
+                let mut argv = Vec::with_capacity(args.len());
+                for arg in args {
+                    argv.push(self.eval(&arg.expr, scope)?);
+                }
+                let mut bytes = fields
+                    .iter()
+                    .find(|(name, _)| name == "bytes")
+                    .map(|(_, value)| as_bytes(value, span))
+                    .transpose()?
+                    .unwrap_or_default();
+                let result = match method {
+                    "len" => return Ok(CtValue::Int(bytes.len() as i64)),
+                    "is_empty" => return Ok(CtValue::Bool(bytes.is_empty())),
+                    "to_bytes" => return Ok(CtValue::Bytes(bytes)),
+                    "clear" => {
+                        bytes.clear();
+                        CtValue::Unit
+                    }
+                    "write_bytes" => {
+                        bytes.extend(as_bytes(&argv[0], span)?);
+                        CtValue::Unit
+                    }
+                    method => {
+                        let value = as_int(&argv[0], span)?;
+                        match method {
+                            "write_u8" => bytes.push(value as u8),
+                            "write_u16_le" => {
+                                bytes.extend_from_slice(&(value as u16).to_le_bytes())
+                            }
+                            "write_u16_be" => {
+                                bytes.extend_from_slice(&(value as u16).to_be_bytes())
+                            }
+                            "write_u32_le" => {
+                                bytes.extend_from_slice(&(value as u32).to_le_bytes())
+                            }
+                            "write_u32_be" => {
+                                bytes.extend_from_slice(&(value as u32).to_be_bytes())
+                            }
+                            "write_u64_le" => {
+                                bytes.extend_from_slice(&(value as u64).to_le_bytes())
+                            }
+                            "write_u64_be" => {
+                                bytes.extend_from_slice(&(value as u64).to_be_bytes())
+                            }
+                            _ => unreachable!("ByteBuffer method set is closed"),
+                        }
+                        CtValue::Unit
+                    }
+                };
+                if matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                    self.write_back(
+                        receiver,
+                        CtValue::Struct {
+                            type_name: crate::Syntax::TYPE_BYTE_BUFFER.to_string(),
+                            fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+                        },
+                        scope,
+                    )?;
+                }
+                return Ok(result);
+            }
+            _ => {}
         }
         let is_build_context = matches!(
             &recv,

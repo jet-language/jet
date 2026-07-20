@@ -35,6 +35,24 @@ const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
 }"#;
 const SCALAR_EXPR: &str = "scalar_view()";
 const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|-12|-1234|-123456|255|1234|123456|123456789";
+const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() -> String {
+    buffer := ByteBuffer.new()
+    empty_before :: buffer.is_empty()
+    buffer.write_u8(18)
+    buffer.write_u16_le(13398)
+    buffer.write_u16_be(30874)
+    buffer.write_u32_le(16909060)
+    buffer.write_u32_be(84281096)
+    buffer.write_u64_le(72623859790382856)
+    buffer.write_u64_be(1230066625199609624)
+    buffer.write_bytes([9, 10])
+    length :: buffer.len()
+    bytes :: buffer.to_bytes()
+    buffer.clear()
+    from := ByteBuffer.from([255, 0])
+    return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
+}"#;
+const BYTE_BUFFER_EXPECTED: &str = "true|31|[18, 86, 52, 120, 154, 4, 3, 2, 1, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1, 17, 18, 19, 20, 21, 22, 23, 24, 9, 10]|true|0|[255, 0]|2";
 const RNG_DECLS: &str = r#"use core.random as random
 fn rng_view() -> String {
     rng := random.rng(99)
@@ -369,6 +387,16 @@ fn rustc_backed_scalar_value_methods_match_all_execution_tiers_exactly() {
         SCALAR_EXPECTED
     );
     check_dev_tiers("scalar", &source, SCALAR_EXPECTED);
+}
+
+#[test]
+fn rustc_backed_byte_buffer_matches_all_execution_tiers_exactly() {
+    let source = parity_source("byte_buffer_view()", BYTE_BUFFER_DECLS);
+    assert_eq!(
+        check_aot_comptime("byte-buffer/all-methods", &source),
+        BYTE_BUFFER_EXPECTED
+    );
+    check_dev_tiers("byte-buffer", &source, BYTE_BUFFER_EXPECTED);
 }
 
 #[test]
