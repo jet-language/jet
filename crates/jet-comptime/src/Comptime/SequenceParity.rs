@@ -262,7 +262,10 @@ fn eval(
             let mut no = Vec::new();
             let mut yes = Vec::new();
             for x in xs {
-                if as_bool(&interp.call_closure(f, vec![x.clone()], span)?, span)? {
+                if as_bool(
+                    &interp.call_inline_closure(f, vec![x.clone()], span, scope)?,
+                    span,
+                )? {
                     yes.push(x.clone());
                 } else {
                     no.push(x.clone());

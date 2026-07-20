@@ -131,10 +131,13 @@ const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() -> String {
     has_three :: values.any((n: Int) => predicate_seen.add(n) && n == 3)
     fold_seen: [Int: Int] := [0: 0]
     total :: values.fold(0, (acc: Int, n: Int) => fold_seen.add(n, n) ?? (acc + n))
-    return "{each_seen}|{shadow}|{predicate_seen.len()}:{predicate_seen.has(1)}:{predicate_seen.has(2)}:{predicate_seen.has(3)}:{predicate_seen.has(4)}|{has_three}|{fold_seen.values()}|{total}"
+    partition_seen: Set<Int> := Set.from([0])
+    partition_shadow := 88
+    split :: values.partition((partition_shadow: Int) => partition_seen.add(partition_shadow) && partition_shadow % 2 == 0)
+    return "{each_seen}|{shadow}|{predicate_seen.len()}:{predicate_seen.has(1)}:{predicate_seen.has(2)}:{predicate_seen.has(3)}:{predicate_seen.has(4)}|{has_three}|{fold_seen.values()}|{total}|{partition_shadow}|{partition_seen.len()}:{partition_seen.has(1)}:{partition_seen.has(2)}:{partition_seen.has(3)}:{partition_seen.has(4)}|{split.false_}|{split.true_}"
 }"#;
 const INLINE_HOF_EXPECTED: &str =
-    "[1, 2, 3, 4]|99|4:true:true:true:false|true|[0, 1, 2, 3, 4]|10";
+    "[1, 2, 3, 4]|99|4:true:true:true:false|true|[0, 1, 2, 3, 4]|10|88|5:true:true:true:true|[1, 3]|[2, 4]";
 const MAP_CALL_RECEIVER_DECLS: &str = r#"fn map_call_receiver_view() -> String {
     receiver_hits := 0
     found :: counted_map(&receiver_hits).has_key("a")

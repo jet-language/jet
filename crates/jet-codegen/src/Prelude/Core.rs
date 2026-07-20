@@ -2473,9 +2473,9 @@ where
 }
 /// `partition(f)` — splits into (true-list, false-list) as a named-tuple struct.
 /// `build` receives `(true_vec, false_vec)` and wraps them into the JetTup struct.
-fn jet_list_partition<T, F, S, B>(xs: Vec<T>, f: F, build: B) -> S
+fn jet_list_partition<T, F, S, B>(xs: Vec<T>, mut f: F, build: B) -> S
 where
-    F: Fn(&T) -> bool,
+    F: FnMut(&T) -> bool,
     B: FnOnce(Vec<T>, Vec<T>) -> S,
 {
     let mut yes: Vec<T> = Vec::new();

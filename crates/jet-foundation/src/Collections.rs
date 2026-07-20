@@ -72,6 +72,7 @@ pub fn is_closure_method(method: &str) -> bool {
         // D-ITER1: lazy adapter set
         | "take_while" | "skip_while" | "flat_map" | "scan"
         | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by"
+        | "partition"
         // D-FAILCOMP1: failure-aware adapters
         | "filter_map"
         // D-AUTOPAR1=A: explicit parallel adapters
