@@ -571,6 +571,43 @@ mod tests {
     }
 
     #[test]
+    fn missing_first_import_tracks_both_module_candidates() {
+        for nested in [false, true] {
+            let root = std::env::temp_dir().join(format!(
+                "jet-query-missing-repair-{}-{nested}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).unwrap();
+            let main = root.join("main.jet");
+            let source = "module b;\nfn run() -> Int { return b.value() }\n";
+            let mut service = CompilerQueries::new();
+            let missing = service.check_text(&main.to_string_lossy(), source, true);
+            assert!(missing
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0607"));
+
+            let dependency = if nested {
+                let directory = root.join("b");
+                std::fs::create_dir(&directory).unwrap();
+                directory.join("module.jet")
+            } else {
+                root.join("b.jet")
+            };
+            std::fs::write(&dependency, "pub fn value() -> Int { return 1 }\n").unwrap();
+            let repaired = service.check_text(&main.to_string_lossy(), source, true);
+            let fresh = CompilerQueries::new().check_text(&main.to_string_lossy(), source, true);
+            assert_eq!(
+                diagnostic_summary(&repaired.diagnostics),
+                diagnostic_summary(&fresh.diagnostics)
+            );
+            assert!(repaired.diagnostics.is_empty(), "{:#?}", repaired.diagnostics);
+            let _ = std::fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
     fn comptime_local_disables_replay() {
         let mut service = CompilerQueries::new();
         let source = "fn run() {\n    comptime value = 1\n    print(\"{value}\")\n}\n";

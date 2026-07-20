@@ -910,7 +910,7 @@ fn load_file(
         .collect();
 
     for cm in code_module_decls {
-        let target = match resolve_code_module_file(&cm.name, cm.name_span, path) {
+        let target = match resolve_code_module_file(&cm.name, cm.name_span, path, dependencies) {
             Ok(p) => p,
             Err(d) => {
                 stack.pop();
@@ -981,13 +981,19 @@ fn resolve_code_module_file(
     name: &str,
     name_span: Span,
     importing: &Path,
+    dependencies: &mut Vec<PathBuf>,
 ) -> Result<PathBuf, Diagnostic> {
     let dir = importing.parent().unwrap_or(Path::new("."));
     let direct = normalize_path(&dir.join(format!("{}.{}", name, Syntax::FILE_EXT)));
+    let module_jet = normalize_path(&dir.join(name).join(format!("module.{}", Syntax::FILE_EXT)));
+    for candidate in [&direct, &module_jet] {
+        if !dependencies.contains(candidate) {
+            dependencies.push(candidate.clone());
+        }
+    }
     if direct.is_file() {
         return Ok(direct);
     }
-    let module_jet = normalize_path(&dir.join(name).join(format!("module.{}", Syntax::FILE_EXT)));
     if module_jet.is_file() {
         return Ok(module_jet);
     }
