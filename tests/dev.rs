@@ -2797,6 +2797,28 @@ fn run() {
 }
 
 #[test]
+fn unused_expanding_generic_signature_does_not_expand_jit_worklist() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let src = r#"
+struct Grow<T: Printable> {
+    value: T
+
+    fn read(self) -> T { return ~self.value }
+    fn unused(self, next: Grow<[T]>) -> Int { return 0 }
+}
+
+fn run() {
+    value := Grow<Int>.{ value: 7 }
+    print(value.read())
+}
+"#;
+    let output = run_cranelift_without_fallback(src, "unused_expanding_generic_signature");
+    assert_eq!(output, ProgramOutput::ran("7\n".into(), "".into(), 0));
+}
+
+#[test]
 fn nested_ordinary_module_generic_instance_matches_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
     let src = r#"

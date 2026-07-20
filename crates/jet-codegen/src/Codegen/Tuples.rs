@@ -481,6 +481,21 @@ fn collect_func_shapes(f: &Func, inherited: &[String], out: &mut CollectedTypeSh
     });
 }
 
+fn collect_func_body_shapes(f: &Func, out: &mut CollectedTypeShapes) {
+    let params = f
+        .type_params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect();
+    with_type_params(out, params, |out| {
+        for stmt in &f.body {
+            collect_tuple_shapes_from_stmt(stmt, out);
+        }
+    });
+}
+
+/// Close only applications demanded by specialized executable bodies. A field or
+/// unused signature may validly name an expanding family such as `Grow<[T]>`.
 fn close_concrete_generic_apps(
     items: &[Item],
     owner_params: &BTreeMap<String, Vec<String>>,
@@ -508,37 +523,15 @@ fn close_concrete_generic_apps(
         for item in items {
             match item {
                 Item::Struct(def) if def.name == name => {
-                    for field in &def.fields {
-                        let ty = crate::Generics::substitute_type(&field.ty, &subst);
-                        collect_tuple_shapes_from_type(&ty, out);
-                    }
                     for method in &def.methods {
                         let method = crate::Sema::specialize_function_types(method.clone(), &subst);
-                        collect_func_shapes(&method, &[], out);
-                    }
-                }
-                Item::Enum(def) if def.name == name => {
-                    for variant in &def.variants {
-                        match &variant.payload {
-                            VariantPayload::Unit => {}
-                            VariantPayload::Single(ty, _) => {
-                                let ty = crate::Generics::substitute_type(ty, &subst);
-                                collect_tuple_shapes_from_type(&ty, out);
-                            }
-                            VariantPayload::Named(fields) => {
-                                for field in fields {
-                                    let ty =
-                                        crate::Generics::substitute_type(&field.ty, &subst);
-                                    collect_tuple_shapes_from_type(&ty, out);
-                                }
-                            }
-                        }
+                        collect_func_body_shapes(&method, out);
                     }
                 }
                 Item::Impl(imp) if imp.type_name == name && imp.trait_name.is_none() => {
                     for method in &imp.methods {
                         let method = crate::Sema::specialize_function_types(method.clone(), &subst);
-                        collect_func_shapes(&method, &[], out);
+                        collect_func_body_shapes(&method, out);
                     }
                 }
                 _ => {}
