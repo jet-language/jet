@@ -214,6 +214,42 @@ mod tests {
     }
 
     #[test]
+    fn jetc_v1_expert_open_accepts_only_the_pinned_grammar() {
+        let key = (0u8..32).collect::<Vec<_>>();
+        let nonce = (0u8..12).collect::<Vec<_>>();
+        let plaintext = b"historical JETC v1".to_vec();
+
+        for (algorithm, ciphertext) in [
+            (1u8, ChaCha20Poly1305::new_from_slice(&key).unwrap().encrypt(ChaNonce::from_slice(&nonce), plaintext.as_slice()).map_err(|_| JetCryptoError::OpenFailed)),
+            (2u8, jet_crypto_expert_aes256gcm_seal_impl(&key, &nonce, &plaintext, &vec![])),
+        ] {
+            let ciphertext = ciphertext.expect("pinned v1 cipher");
+            let mut envelope = b"JETC".to_vec();
+            envelope.extend_from_slice(&[1, algorithm]);
+            envelope.extend_from_slice(&nonce);
+            envelope.extend_from_slice(&ciphertext);
+            assert_eq!(hex_encode(&envelope), match algorithm {
+                1 => "4a4554430101000102030405060708090a0be1927b744665cc23d6ef1fb9dd494d43bf41ffb4f45df6e23cf92a743b8c2c35892f",
+                _ => "4a4554430102000102030405060708090a0b2f6ba56faa97ab78ec2db7c1f4bd3b4df5e703347885e9b8d1d5780ecb37c61ac49c",
+            });
+            assert_eq!(jet_crypto_expert_open_v1_impl(&key, &envelope), Ok(plaintext.clone()));
+
+            for hostile in [
+                { let mut bytes = envelope.clone(); bytes[0] ^= 1; bytes },
+                { let mut bytes = envelope.clone(); bytes[4] = 2; bytes },
+                { let mut bytes = envelope.clone(); bytes[5] = 3; bytes },
+                { let mut bytes = envelope.clone(); *bytes.last_mut().unwrap() ^= 1; bytes },
+                { let mut bytes = envelope.clone(); bytes.push(0); bytes },
+            ] {
+                assert_eq!(jet_crypto_expert_open_v1_impl(&key, &hostile), Err(JetCryptoError::OpenFailed));
+            }
+        }
+
+        assert_eq!(jet_crypto_expert_open_v1_impl(&vec![0; 31], &vec![0; 34]), Err(JetCryptoError::OpenFailed));
+        assert_eq!(jet_crypto_expert_open_v1_impl(&key, &vec![0; 33]), Err(JetCryptoError::OpenFailed));
+    }
+
+    #[test]
     fn bech32m_recipient_parser_rejects_hostile_noncanonical_text() {
         let key = JetX25519PublicKey([0; 32]);
         let canonical = jet_crypto_x25519_public_text_impl(&key);

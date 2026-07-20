@@ -401,6 +401,9 @@ const VERSION: u8 = 1;
 const ALGO_CHACHA20: u8 = 1;
 const ALGO_AES256: u8 = 2;
 const NONCE_LEN: usize = 12;
+const JETC_V1_MIN_LEN: usize = 4 + 2 + NONCE_LEN + 16;
+const JETC_V1_MAX_PLAINTEXT: usize = 1_073_741_824;
+const JETC_V1_MAX_LEN: usize = JETC_V1_MIN_LEN + JETC_V1_MAX_PLAINTEXT;
 const JETC_V2_VERSION: u8 = 2;
 const JETC_V2_CHUNK: usize = 1_048_576;
 const JETC_V2_MAX_PLAINTEXT: u64 = 1_099_511_627_776;
@@ -497,6 +500,34 @@ fn open_envelope(key: &[u8], envelope: &[u8]) -> Result<Vec<u8>, String> {
                 })
         }
         other => Err(format!("crypto.open: unknown algorithm id {other}")),
+    }
+}
+
+/// D-CRYPTO-ENVELOPE2=A: the only historical JETC v1 reader. Every grammar,
+/// key, and authentication failure is deliberately collapsed to OpenFailed.
+pub fn jet_crypto_expert_open_v1_impl(
+    key: &Vec<u8>,
+    envelope: &Vec<u8>,
+) -> Result<Vec<u8>, JetCryptoError> {
+    if key.len() != 32
+        || !(JETC_V1_MIN_LEN..=JETC_V1_MAX_LEN).contains(&envelope.len())
+        || &envelope[..4] != MAGIC
+        || envelope[4] != VERSION
+    {
+        return Err(JetCryptoError::OpenFailed);
+    }
+    let nonce = &envelope[6..6 + NONCE_LEN];
+    let ciphertext = &envelope[6 + NONCE_LEN..];
+    match envelope[5] {
+        ALGO_CHACHA20 => ChaCha20Poly1305::new_from_slice(key)
+            .map_err(|_| JetCryptoError::OpenFailed)?
+            .decrypt(ChaNonce::from_slice(nonce), ciphertext)
+            .map_err(|_| JetCryptoError::OpenFailed),
+        ALGO_AES256 => Aes256Gcm::new_from_slice(key)
+            .map_err(|_| JetCryptoError::OpenFailed)?
+            .decrypt(AesNonce::from_slice(nonce), ciphertext)
+            .map_err(|_| JetCryptoError::OpenFailed),
+        _ => Err(JetCryptoError::OpenFailed),
     }
 }
 
