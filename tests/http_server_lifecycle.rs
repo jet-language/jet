@@ -729,6 +729,7 @@ fn absolute_form_target_matches_host_before_routing() {
     for (request, expected_path) in [
         ("GET http://local/resource?x=1 HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n", "/resource?x=1"),
         ("GET HTTP://EXAMPLE.COM:80/resource HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n", "/resource"),
+        ("GET http://local:8080/resource HTTP/1.1\r\nHost: local:8080\r\nConnection: close\r\n\r\n", "/resource"),
         ("GET https://[::1]/resource HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n", "/resource"),
         ("GET http://percent%2Dname.example/resource HTTP/1.1\r\nHost: percent%2dname.example:80\r\nConnection: close\r\n\r\n", "/resource"),
         ("GET http://local/resource HTTP/1.0\r\nConnection: close\r\n\r\n", "/resource"),
@@ -753,6 +754,7 @@ fn absolute_form_target_matches_host_before_routing() {
         "GET http://local/resource%zz HTTP/1.1\r\nHost: local\r\n",
         "GET /resource\\evil HTTP/1.1\r\nHost: local\r\n",
         "GET /resource?x=<bad> HTTP/1.1\r\nHost: local\r\n",
+        "GET /resource?x=é HTTP/1.1\r\nHost: local\r\n",
         "GET /resource#fragment HTTP/1.1\r\nHost: local\r\n",
         "OPTIONS * HTTP/1.1\r\nHost: local\r\n",
     ] {
@@ -779,11 +781,11 @@ fn absolute_form_target_matches_host_before_routing() {
     assert!(malformed_expect.starts_with("HTTP/1.1 400 Bad Request"), "{malformed_expect}");
     assert!(!malformed_expect.contains("100 Continue"), "malformed target received body permission: {malformed_expect}");
 
-    assert_eq!(calls.load(Ordering::Acquire), 7, "invalid target reached handler");
+    assert_eq!(calls.load(Ordering::Acquire), 8, "invalid target reached handler");
     shutdown.store(true, Ordering::Release);
     let report = server.join().expect("server join");
-    assert_eq!(report.user_accepted, 23);
-    assert_eq!(report.user_completed, 23);
+    assert_eq!(report.user_accepted, 25);
+    assert_eq!(report.user_completed, 25);
 }
 
 #[test]
