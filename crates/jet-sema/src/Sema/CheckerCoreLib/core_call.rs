@@ -2836,7 +2836,7 @@ impl<'a> Checker<'a> {
                 && self.diags.len() == validation_diag_start
             {
                 if let Some(diagnostic) = crypto_expert_nonce_diagnostic(name, args) {
-                    self.diags.push(diagnostic);
+                    self.fx_pending_diagnostics.push(diagnostic);
                 }
             }
             ret

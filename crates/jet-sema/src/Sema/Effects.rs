@@ -789,38 +789,14 @@ mod inferred_purity_display_tests {
     }
 }
 
-/// D-CRYPTO-DIAG1: mark compiler-known crypto facts owned by one function for
-/// removal after an existing solved-effect check reports the higher-priority
-/// failure. The caller supplies its module's original body-diagnostic range.
-pub(crate) fn suppress_e2702_in_function(
-    function: &crate::AST::Func,
-    body_diagnostic_range: &std::ops::Range<usize>,
-    suppressed_diagnostic_indices: &mut HashSet<usize>,
-    diagnostics: &[Diagnostic],
-) {
-    for index in body_diagnostic_range.clone() {
-        let diagnostic = &diagnostics[index];
-        if diagnostic.code == "E2702"
-            && diagnostic.span.is_some_and(|span| {
-                span.start >= function.span.start && span.end <= function.span.end
-            })
-        {
-            suppressed_diagnostic_indices.insert(index);
-        }
-    }
-}
-
 /// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* body row is
 /// empty. Callees need not repeat `--[]->`; their solved row is the authority.
-/// D-CRYPTO-DIAG1 uses that same solved result to suppress later E2702 facts in
-/// a pure function whose effect check failed.
+/// D-CRYPTO-DIAG1 defers E2702 facts until this solved-effect phase completes.
 pub fn check_inferred_purity(
     items: &[crate::AST::Item],
     module_alias: &str,
     summaries: &HashMap<String, EffectSummary>,
     solved: &HashMap<String, EffectSet>,
-    body_diagnostic_range: &std::ops::Range<usize>,
-    suppressed_diagnostic_indices: &mut HashSet<usize>,
     diags: &mut Vec<Diagnostic>,
 ) {
     fn first_effectful_chain(
@@ -850,8 +826,6 @@ pub fn check_inferred_purity(
         module_alias: &str,
         summaries: &HashMap<String, EffectSummary>,
         solved: &HashMap<String, EffectSet>,
-        body_diagnostic_range: &std::ops::Range<usize>,
-        suppressed_diagnostic_indices: &mut HashSet<usize>,
         diags: &mut Vec<Diagnostic>,
     ) {
         if !f.is_pure {
@@ -864,14 +838,6 @@ pub fn check_inferred_purity(
         if solved.get(&key).map_or(true, EffectSet::is_empty) {
             return;
         }
-        // D-CRYPTO-DIAG1=A: solved effect failures outrank later compiler-known
-        // crypto facts. The recorded body range keeps suppression module-local.
-        suppress_e2702_in_function(
-            f,
-            body_diagnostic_range,
-            suppressed_diagnostic_indices,
-            diags,
-        );
         let chain = first_effectful_chain(&key, summaries, solved, &mut BTreeSet::new());
         let Some(first) = chain.first() else {
             // Direct ambient operations are diagnosed while checking the body,
@@ -914,15 +880,15 @@ pub fn check_inferred_purity(
     use crate::AST::Item;
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags),
-            Item::Impl(i) => for f in &i.methods { check_one(f, Some(&i.type_name), None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags); },
+            Item::Func(f) => check_one(f, None, None, module_alias, summaries, solved, diags),
+            Item::Impl(i) => for f in &i.methods { check_one(f, Some(&i.type_name), None, module_alias, summaries, solved, diags); },
             Item::Struct(s) => {
-                for f in &s.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags); }
+                for f in &s.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, diags); }
                 for block in &s.trait_impls {
-                    for f in &block.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags); }
+                    for f in &block.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, diags); }
                 }
             }
-            Item::Enum(e) => for f in &e.methods { check_one(f, Some(&e.name), None, module_alias, summaries, solved, body_diagnostic_range, suppressed_diagnostic_indices, diags); },
+            Item::Enum(e) => for f in &e.methods { check_one(f, Some(&e.name), None, module_alias, summaries, solved, diags); },
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
                     for item in body {
@@ -935,8 +901,6 @@ pub fn check_inferred_purity(
                                 module_alias,
                                 summaries,
                                 solved,
-                                body_diagnostic_range,
-                                suppressed_diagnostic_indices,
                                 diags,
                             );
                         }
@@ -1092,9 +1056,10 @@ pub fn e0748_not_callback(fn_name: &str, param: &str, ty: String, span: Span) ->
 pub fn check_callback_bounds(
     summaries: &HashMap<String, EffectSummary>,
     solved: &HashMap<String, EffectSet>,
+    failed_diagnostic_phases: &mut HashSet<String>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    for summary in summaries.values() {
+    for (key, summary) in summaries {
         for ob in &summary.callback_obligations {
             let mut cb = ob.direct.clone();
             if ob.maximal {
@@ -1107,6 +1072,7 @@ pub fn check_callback_bounds(
             }
             let over: EffectSet = effects_uncovered(&cb, &ob.bound);
             if !over.is_empty() {
+                failed_diagnostic_phases.insert(key.clone());
                 diags.push(e0747(&over, &ob.bound, ob.span));
             }
         }
@@ -1294,9 +1260,10 @@ pub fn e0749(fn_name: &str, reached: &EffectSet, prohibited: &EffectSet, span: S
 pub fn check_region_caps(
     summaries: &HashMap<String, EffectSummary>,
     solved: &HashMap<String, EffectSet>,
+    failed_diagnostic_phases: &mut HashSet<String>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    for summary in summaries.values() {
+    for (key, summary) in summaries {
         for region in &summary.regions {
             let mut inferred = region.direct.clone();
             if region.maximal {
@@ -1309,6 +1276,7 @@ pub fn check_region_caps(
             }
             let over: EffectSet = effects_uncovered(&inferred, &region.caps);
             if !over.is_empty() {
+                failed_diagnostic_phases.insert(key.clone());
                 if region.grant {
                     diags.push(e0712(&over, &region.caps, region.caps_span));
                 } else {

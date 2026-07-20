@@ -44,6 +44,34 @@ pub(super) struct CachedFunctionBody {
     pub comptime_inputs: Vec<crate::AST::ComptimeInput>,
     pub address_taken: HashSet<String>,
     pub anchors: HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    pub pending_diagnostics: Vec<PendingFunctionDiagnostic>,
+}
+
+#[derive(Clone)]
+pub(crate) struct PendingFunctionDiagnostic {
+    pub function_key: String,
+    pub function_span: Span,
+    pub diagnostic: Diagnostic,
+}
+
+fn mark_failed_pending_functions(
+    diagnostics: &[Diagnostic],
+    pending: &[PendingFunctionDiagnostic],
+    failed: &mut HashSet<String>,
+) {
+    for diagnostic in diagnostics {
+        if !matches!(diagnostic.severity, crate::Diagnostics::Severity::Error) {
+            continue;
+        }
+        let Some(span) = diagnostic.span else { continue };
+        for candidate in pending {
+            if span.start >= candidate.function_span.start
+                && span.end <= candidate.function_span.end
+            {
+                failed.insert(candidate.function_key.clone());
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -2588,7 +2616,7 @@ fn check_bundle_opts_for_output(
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
     let mut reference_anchors = HashMap::new();
     let mut module_effect_summaries: Vec<(String, HashMap<String, EffectSummary>)> = Vec::new();
-    let mut module_body_diagnostic_ranges = Vec::new();
+    let mut module_pending_diagnostics = Vec::new();
     // D-METHODMACRO1=A: top-level function names whose address was taken
     // anywhere in the bundle, accumulated across every module below; the
     // `@InlineAlways` address-taken pass (E0918) runs after the loop, once
@@ -2596,7 +2624,7 @@ fn check_bundle_opts_for_output(
     let mut global_addr_taken: HashSet<String> = HashSet::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let mut local_summaries = HashMap::new();
-        let body_diagnostic_start = diags.len();
+        let mut local_pending_diagnostics = Vec::new();
         diags.extend(check_module_bodies(
             module,
             idx,
@@ -2608,9 +2636,13 @@ fn check_bundle_opts_for_output(
             &mut embed_inputs,
             &mut global_addr_taken,
             &mut reference_anchors,
+            &mut local_pending_diagnostics,
             incremental.as_deref_mut(),
         ));
-        module_body_diagnostic_ranges.push(body_diagnostic_start..diags.len());
+        for pending in &mut local_pending_diagnostics {
+            pending.function_key = format!("{}::{}", module.alias, pending.function_key);
+        }
+        module_pending_diagnostics.push(local_pending_diagnostics);
         seed_trait_dispatch_effects(&module.items, &mut local_summaries);
         apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());
         effect_summaries.extend(local_summaries.clone());
@@ -2621,7 +2653,9 @@ fn check_bundle_opts_for_output(
     // bodies checked first. Methods can't appear in `global_addr_taken`
     // (Jet's grammar has no way to read a method's bare name as a value), so
     // this only ever fires for top-level functions.
-    for module in &bundle.modules {
+    let mut failed_diagnostic_phases = HashSet::new();
+    for (module_index, module) in bundle.modules.iter().enumerate() {
+        let phase_diagnostic_start = diags.len();
         for item in &module.items {
             if let Item::Func(f) = item {
                 if f.is_inline_always && global_addr_taken.contains(&f.name) {
@@ -2632,11 +2666,22 @@ fn check_bundle_opts_for_output(
                 }
             }
         }
+        mark_failed_pending_functions(
+            &diags[phase_diagnostic_start..],
+            &module_pending_diagnostics[module_index],
+            &mut failed_diagnostic_phases,
+        );
     }
     // D-EFF2 (`#(via f)`): seed each via-fn's summary with its callback's bound
     // before the fixpoint, so its published effect set is a tight pass-through.
-    for module in &bundle.modules {
+    for (module_index, module) in bundle.modules.iter().enumerate() {
+        let phase_diagnostic_start = diags.len();
         apply_effect_via(&module.items, &mut effect_summaries, &mut diags);
+        mark_failed_pending_functions(
+            &diags[phase_diagnostic_start..],
+            &module_pending_diagnostics[module_index],
+            &mut failed_diagnostic_phases,
+        );
     }
     // File modules need qualified facts: bare top-level names overwrite one
     // another, while D-EFFECT-OMIT1 requires one cross-package solver answer.
@@ -2677,8 +2722,10 @@ fn check_bundle_opts_for_output(
         .filter(|(key, _)| module_aliases.iter().any(|prefix| key.starts_with(prefix)))
         .map(|(key, summary)| (key.clone(), summary.clone()))
         .collect::<HashMap<_, _>>();
-    let mut suppressed_diagnostic_indices = HashSet::new();
+    // D-CRYPTO-DIAG1: candidate facts survive only when their entire function
+    // remains error-free through the solved effect phases below.
     for (module_index, module) in bundle.modules.iter().enumerate() {
+        let phase_diagnostic_start = diags.len();
         let prefix = format!("{}::", module.alias);
         let local_solved = public_solved
             .iter()
@@ -2711,8 +2758,6 @@ fn check_bundle_opts_for_output(
             &module.items,
             &local_solved,
             &local_summaries,
-            &module_body_diagnostic_ranges[module_index],
-            &mut suppressed_diagnostic_indices,
             &mut diags,
         );
         super::Effects::check_inferred_purity(
@@ -2720,8 +2765,6 @@ fn check_bundle_opts_for_output(
             &module.alias,
             &validation_summaries,
             &public_solved,
-            &module_body_diagnostic_ranges[module_index],
-            &mut suppressed_diagnostic_indices,
             &mut diags,
         );
         check_replayable_effects(&module.items, &local_solved, &mut diags);
@@ -2731,18 +2774,20 @@ fn check_bundle_opts_for_output(
             &validation_summaries,
             &mut diags,
         );
+        mark_failed_pending_functions(
+            &diags[phase_diagnostic_start..],
+            &module_pending_diagnostics[module_index],
+            &mut failed_diagnostic_phases,
+        );
     }
-    if !suppressed_diagnostic_indices.is_empty() {
-        let mut index = 0;
-        diags.retain(|_| {
-            let keep = !suppressed_diagnostic_indices.contains(&index);
-            index += 1;
-            keep
-        });
-    }
-    check_region_caps(&validation_summaries, &public_solved, &mut diags);
+    check_region_caps(&validation_summaries, &public_solved, &mut failed_diagnostic_phases, &mut diags);
     // D-EFF2: callback param effect bounds (E0747).
-    check_callback_bounds(&validation_summaries, &public_solved, &mut diags);
+    check_callback_bounds(&validation_summaries, &public_solved, &mut failed_diagnostic_phases, &mut diags);
+    for pending in module_pending_diagnostics.into_iter().flatten() {
+        if !failed_diagnostic_phases.contains(&pending.function_key) {
+            diags.push(pending.diagnostic);
+        }
+    }
 
     // D-WASM1=A (c123 M1): JS/WASM partition inference and boundary checks.
     // D-MEM-FACTS1: module `@Policy(no_alloc)` declarations are checked only

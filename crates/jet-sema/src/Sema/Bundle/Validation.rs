@@ -953,6 +953,7 @@ fn check_func_body_incremental(
     no_alloc: bool,
     no_prelude: bool,
     reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
     cache: Option<&mut IncrementalSemaCache>,
     cache_allowed: bool,
 ) -> Vec<Diagnostic> {
@@ -980,6 +981,7 @@ fn check_func_body_incremental(
             no_alloc,
             no_prelude,
             reference_anchors,
+            pending_diagnostics_out,
         );
     };
     if let Some(hit) = cache.get(&key, &input) {
@@ -988,6 +990,7 @@ fn check_func_body_incremental(
         embed_inputs_out.extend(hit.comptime_inputs);
         global_addr_taken.extend(hit.address_taken);
         reference_anchors.extend(hit.anchors);
+        pending_diagnostics_out.extend(hit.pending_diagnostics);
         return hit.diagnostics;
     }
 
@@ -995,6 +998,7 @@ fn check_func_body_incremental(
     let mut local_inputs = Vec::new();
     let mut local_address_taken = HashSet::new();
     let mut local_anchors = HashMap::new();
+    let mut local_pending_diagnostics = Vec::new();
     let diagnostics = check_func_body_bundle(
         function,
         module_idx,
@@ -1012,11 +1016,13 @@ fn check_func_body_incremental(
         no_alloc,
         no_prelude,
         &mut local_anchors,
+        &mut local_pending_diagnostics,
     );
     summaries.extend(local_summaries.clone());
     embed_inputs_out.extend(local_inputs.clone());
     global_addr_taken.extend(local_address_taken.clone());
     reference_anchors.extend(local_anchors.clone());
+    pending_diagnostics_out.extend(local_pending_diagnostics.clone());
     if !local_inputs.is_empty() {
         return diagnostics;
     }
@@ -1030,6 +1036,7 @@ fn check_func_body_incremental(
             comptime_inputs: local_inputs,
             address_taken: local_address_taken,
             anchors: local_anchors,
+            pending_diagnostics: local_pending_diagnostics,
         },
     );
     diagnostics
@@ -1046,6 +1053,7 @@ pub(crate) fn check_module_bodies(
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
     reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
     mut incremental: Option<&mut IncrementalSemaCache>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
@@ -1221,6 +1229,7 @@ pub(crate) fn check_module_bodies(
             let mut scratch_inputs = Vec::new();
             let mut scratch_addr_taken = HashSet::new();
             let mut scratch_anchors = HashMap::new();
+            let mut scratch_pending_diagnostics = Vec::new();
             let _ = check_func_body_bundle(
                 &mut function,
                 module_idx,
@@ -1238,6 +1247,7 @@ pub(crate) fn check_module_bodies(
                 no_alloc,
                 no_prelude,
                 &mut scratch_anchors,
+                &mut scratch_pending_diagnostics,
             );
             if let (Some(trait_name), Some(provenance)) =
                 (&job.trait_name, function.return_view_provenance)
@@ -1291,6 +1301,7 @@ pub(crate) fn check_module_bodies(
                     no_alloc,
                     no_prelude,
                     reference_anchors,
+                    pending_diagnostics_out,
                     incremental.as_deref_mut(),
                     cache_allowed,
                 ));
@@ -1319,6 +1330,7 @@ pub(crate) fn check_module_bodies(
                         no_alloc,
                         no_prelude,
                         reference_anchors,
+                        pending_diagnostics_out,
                         incremental.as_deref_mut(),
                         cache_allowed,
                     ));
@@ -1358,6 +1370,7 @@ pub(crate) fn check_module_bodies(
                             no_alloc,
                             no_prelude,
                             reference_anchors,
+                            pending_diagnostics_out,
                             incremental.as_deref_mut(),
                             cache_allowed,
                         ));
@@ -1396,6 +1409,7 @@ pub(crate) fn check_module_bodies(
                         no_alloc,
                         no_prelude,
                         reference_anchors,
+                        pending_diagnostics_out,
                         incremental.as_deref_mut(),
                         cache_allowed,
                     ));
@@ -1430,6 +1444,7 @@ pub(crate) fn check_module_bodies(
                             no_alloc,
                             no_prelude,
                             reference_anchors,
+                            pending_diagnostics_out,
                             incremental.as_deref_mut(),
                             cache_allowed,
                         ));
@@ -1487,6 +1502,7 @@ pub(crate) fn check_module_bodies(
                         no_alloc,
                         no_prelude,
                         reference_anchors,
+                        pending_diagnostics_out,
                         incremental.as_deref_mut(),
                         cache_allowed,
                     ));
@@ -1561,8 +1577,9 @@ pub(crate) fn check_module_bodies(
                     embed_inputs_out,
                     global_addr_taken,
                     no_alloc,
-                no_prelude,
-                reference_anchors,
+                    no_prelude,
+                    reference_anchors,
+                    pending_diagnostics_out,
                 ));
                 t.body = synthetic.body;
             }
@@ -1628,8 +1645,9 @@ pub(crate) fn check_module_bodies(
                     embed_inputs_out,
                     global_addr_taken,
                     no_alloc,
-                no_prelude,
-                reference_anchors,
+                    no_prelude,
+                    reference_anchors,
+                    pending_diagnostics_out,
                 ));
                 b.body = synthetic.body;
             }
@@ -1645,6 +1663,7 @@ pub(crate) fn check_module_bodies(
                             // same-name summary while the shared body checker
                             // emits this function's local summary.
                             let previous = summaries.remove(&f.name);
+                            let pending_start = pending_diagnostics_out.len();
                             diags.extend(check_func_body_incremental(
                                 format!("{module_key}::module:{}::fn:{}", cm.name, f.name),
                                 f,
@@ -1663,9 +1682,13 @@ pub(crate) fn check_module_bodies(
                                 no_alloc,
                                 no_prelude,
                                 reference_anchors,
+                                pending_diagnostics_out,
                                 incremental.as_deref_mut(),
                                 cache_allowed,
                             ));
+                            for pending in &mut pending_diagnostics_out[pending_start..] {
+                                pending.function_key = format!("{}__{}", cm.name, f.name);
+                            }
                             if let Some(summary) = summaries.remove(&f.name) {
                                 summaries.insert(format!("{}__{}", cm.name, f.name), summary);
                             }
@@ -1740,6 +1763,7 @@ pub(crate) fn check_module_bodies(
                 let mut conversion_inputs = Vec::new();
                 let mut conversion_addr_taken = HashSet::new();
                 let mut conversion_anchors = HashMap::new();
+                let mut conversion_pending_diagnostics = Vec::new();
                 diags.extend(check_func_body_bundle(
                     &mut synthetic,
                     module_idx,
@@ -1757,7 +1781,9 @@ pub(crate) fn check_module_bodies(
                     no_alloc,
                     no_prelude,
                     &mut conversion_anchors,
+                    &mut conversion_pending_diagnostics,
                 ));
+                pending_diagnostics_out.extend(conversion_pending_diagnostics);
                 ec.body = synthetic.body;
             }
             _ => {}
@@ -1860,6 +1886,7 @@ pub(crate) fn check_func_body_bundle(
     // D-PRELUDEX1=A: this file's `@NoPrelude` state.
     no_prelude: bool,
     reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut ck = Checker {
@@ -1894,6 +1921,7 @@ pub(crate) fn check_func_body_bundle(
         region_stack: Vec::new(),
         fx_regions: Vec::new(),
         fx_callback_obligations: Vec::new(),
+        fx_pending_diagnostics: Vec::new(),
         fx_memory_events: Vec::new(),
         fx_memory_open: Vec::new(),
         memory_policy_stack: Vec::new(),
@@ -2025,6 +2053,21 @@ pub(crate) fn check_func_body_bundle(
                 st.module_path
             );
         }
+    }
+    if !ck
+        .diags
+        .iter()
+        .any(|diagnostic| matches!(diagnostic.severity, crate::Diagnostics::Severity::Error))
+    {
+        pending_diagnostics_out.extend(
+            std::mem::take(&mut ck.fx_pending_diagnostics)
+                .into_iter()
+                .map(|diagnostic| PendingFunctionDiagnostic {
+                    function_key: effect_key(owner_type, &f.name),
+                    function_span: f.span,
+                    diagnostic,
+                }),
+        );
     }
     summaries.insert(
         effect_key(owner_type, &f.name),

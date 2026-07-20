@@ -1,0 +1,24 @@
+// D-CRYPTO-DIAG1=A: a callback-bound failure suppresses later crypto facts.
+use core.crypto.expert as expert
+
+fn transform(items: [Int], f: fn(Int) --[]-> Int) -> [Int] {
+    return items.map((x) => f(x));
+}
+
+fn noisy(n: Int) -> Int {
+    print("{n}");
+    return n;
+}
+
+fn run() {
+    r :: transform([1, 2], noisy)
+    @Unsafe("fixed interop vector") {
+        _ :: expert.xchacha20poly1305_seal(
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0],
+            [],
+            []
+        )
+    }
+    print("{r}")
+}

@@ -686,8 +686,6 @@ pub(crate) fn check_effect_boundaries(
     items: &[Item],
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
-    body_diagnostic_range: &std::ops::Range<usize>,
-    suppressed_diagnostic_indices: &mut HashSet<usize>,
     diags: &mut Vec<Diagnostic>,
 ) {
     fn unbounded_dispatch(
@@ -726,8 +724,6 @@ pub(crate) fn check_effect_boundaries(
         identity: Option<&str>,
         solved: &HashMap<String, EffectSet>,
         summaries: &HashMap<String, EffectSummary>,
-        body_diagnostic_range: &std::ops::Range<usize>,
-        suppressed_diagnostic_indices: &mut HashSet<usize>,
         diags: &mut Vec<Diagnostic>,
     ) {
         let Some(declared_list) = &f.declared_effects else {
@@ -793,14 +789,6 @@ pub(crate) fn check_effect_boundaries(
                     .first()
                     .map(|(_, s)| *s)
                     .unwrap_or(f.name_span);
-                // D-CRYPTO-DIAG1=A: the effect-bound failure is the only
-                // actionable diagnostic until the function's effects pass.
-                super::Effects::suppress_e2702_in_function(
-                    f,
-                    body_diagnostic_range,
-                    suppressed_diagnostic_indices,
-                    diags,
-                );
                 diags.push(e0740(&f.name, &over, &declared, span));
             }
         }
@@ -822,25 +810,25 @@ pub(crate) fn check_effect_boundaries(
     }
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, None, solved, summaries, body_diagnostic_range, suppressed_diagnostic_indices, diags),
+            Item::Func(f) => check_one(f, None, None, solved, summaries, diags),
             Item::Impl(i) => {
                 for m in &i.methods {
-                    check_one(m, Some(&i.type_name), None, solved, summaries, body_diagnostic_range, suppressed_diagnostic_indices, diags);
+                    check_one(m, Some(&i.type_name), None, solved, summaries, diags);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    check_one(m, Some(&s.name), None, solved, summaries, body_diagnostic_range, suppressed_diagnostic_indices, diags);
+                    check_one(m, Some(&s.name), None, solved, summaries, diags);
                 }
                 for block in &s.trait_impls {
                     for m in &block.methods {
-                        check_one(m, Some(&s.name), None, solved, summaries, body_diagnostic_range, suppressed_diagnostic_indices, diags);
+                        check_one(m, Some(&s.name), None, solved, summaries, diags);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    check_one(m, Some(&e.name), None, solved, summaries, body_diagnostic_range, suppressed_diagnostic_indices, diags);
+                    check_one(m, Some(&e.name), None, solved, summaries, diags);
                 }
             }
             Item::CodeModule(module) => {
@@ -854,8 +842,6 @@ pub(crate) fn check_effect_boundaries(
                                 Some(&identity),
                                 solved,
                                 summaries,
-                                body_diagnostic_range,
-                                suppressed_diagnostic_indices,
                                 diags,
                             );
                         }

@@ -1,0 +1,20 @@
+// D-CRYPTO-DIAG1=A: an unbounded trait effect suppresses later crypto facts.
+use core.crypto.expert as expert
+
+trait Shape {
+    fn area(self) -> Int;
+}
+
+fn protect(shape: Shape) --[]-> Int {
+    @Unsafe("fixed interop vector") {
+        _ :: expert.xchacha20poly1305_seal(
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0],
+            [],
+            []
+        )
+    }
+    return shape.area();
+}
+
+fn run() {}

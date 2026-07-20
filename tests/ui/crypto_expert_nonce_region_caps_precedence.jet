@@ -1,0 +1,17 @@
+// D-CRYPTO-DIAG1=A: a region-cap failure suppresses later crypto facts.
+use core.crypto.expert as expert
+use core.files as fs
+
+fn run() {
+    @Caps(Net) {
+        _ :: fs.read("x")
+    }
+    @Unsafe("fixed interop vector") {
+        _ :: expert.xchacha20poly1305_seal(
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0],
+            [],
+            []
+        )
+    }
+}
