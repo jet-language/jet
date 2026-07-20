@@ -408,6 +408,7 @@ const JETC_V2_VERSION: u8 = 2;
 const JETC_V2_CHUNK: usize = 1_048_576;
 const JETC_V2_MAX_PLAINTEXT: u64 = 1_099_511_627_776;
 const JETC_V2_MAX_RECORDS: u64 = 1_048_577;
+const JETC_V2_MAX_BODY_LEN: u64 = JETC_V2_MAX_PLAINTEXT + 21 * JETC_V2_MAX_RECORDS;
 const JETC_V2_STANZA: usize = 96;
 const JETC_V2_HEADER_BASE: usize = 74;
 const JETC_V2_HEADER_TAG: usize = 16;
@@ -630,23 +631,23 @@ static JETC_STAGE_COUNTER: std::sync::atomic::AtomicU64 =
 
 #[cfg(test)]
 thread_local! {
-    static JETC_TEMP_CREATED_TEST_OBSERVER: std::cell::RefCell<Option<fn(&'static str)>> = const { std::cell::RefCell::new(None) };
+    static JETC_BOUNDARY_TEST_OBSERVER: std::cell::RefCell<Option<fn(&'static str)>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
-fn jet_crypto_set_file_temp_test_observer(observer: fn(&'static str)) {
-    JETC_TEMP_CREATED_TEST_OBSERVER.with(|slot| *slot.borrow_mut() = Some(observer));
+fn jet_crypto_set_file_boundary_test_observer(observer: fn(&'static str)) {
+    JETC_BOUNDARY_TEST_OBSERVER.with(|slot| *slot.borrow_mut() = Some(observer));
 }
 
 #[cfg(test)]
-fn jet_crypto_clear_file_temp_test_observer() {
-    JETC_TEMP_CREATED_TEST_OBSERVER.with(|slot| *slot.borrow_mut() = None);
+fn jet_crypto_clear_file_boundary_test_observer() {
+    JETC_BOUNDARY_TEST_OBSERVER.with(|slot| *slot.borrow_mut() = None);
 }
 
 #[cfg(test)]
-fn observe_jetc_temp_created(kind: &'static str) {
-    JETC_TEMP_CREATED_TEST_OBSERVER.with(|slot| {
-        if let Some(observer) = *slot.borrow() { observer(kind); }
+fn observe_jetc_boundary(boundary: &'static str) {
+    JETC_BOUNDARY_TEST_OBSERVER.with(|slot| {
+        if let Some(observer) = *slot.borrow() { observer(boundary); }
     });
 }
 
@@ -889,7 +890,7 @@ fn snapshot_source(
     let source_meta = source_file.metadata().map_err(|_| JetFileCryptoError::SourceIo)?;
     let mut stage_file = create_unlinked_stage(parent)?;
     #[cfg(test)]
-    observe_jetc_temp_created("seal-stage");
+    observe_jetc_boundary("seal-stage");
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     let mut buffer = Zeroizing(vec![0u8; JETC_V2_CHUNK]);
     let mut source_hash = Sha256::new();
@@ -931,6 +932,12 @@ fn jetc_v2_body_len(plain_len: u64) -> Option<u64> {
     let tail = plain_len % JETC_V2_CHUNK as u64;
     let non_final = full.checked_mul(JETC_V2_CHUNK as u64 + 21)?;
     non_final.checked_add(tail + 21)
+}
+
+fn jetc_v2_container_len_matches(total: u64, header_len: usize, body_len: u64) -> bool {
+    header_len <= 32 * 1024 * 1024
+        && body_len <= JETC_V2_MAX_BODY_LEN
+        && 20u64.checked_add(header_len as u64).and_then(|n| n.checked_add(body_len)) == Some(total)
 }
 
 fn recipient_id(public: &[u8; 32]) -> [u8; 16] {
@@ -1051,13 +1058,15 @@ fn seal_jetc_v2_from_snapshot(
     let header_hash: [u8; 32] = Sha256::digest(&header_hash_input).into();
     let mut output = create_publish_temp(parent, "jetc-output")?;
     #[cfg(test)]
-    observe_jetc_temp_created(if verify_output { "migrate-output" } else { "seal-output" });
+    observe_jetc_boundary(if verify_output { "migrate-output" } else { "seal-output" });
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     let out = output.file.as_mut().ok_or(JetFileCryptoError::DestinationIo)?;
     out.write_all(&fixed).and_then(|_| out.write_all(&header)).map_err(|_| JetFileCryptoError::DestinationIo)?;
     let mut buffer = Zeroizing(vec![0u8; JETC_V2_CHUNK]); let mut index = 1u64; let mut remaining = plain_len;
     stage.seek(SeekFrom::Start(0)).map_err(|_| JetFileCryptoError::SourceIo)?;
     while remaining >= JETC_V2_CHUNK as u64 {
+        #[cfg(test)]
+        observe_jetc_boundary(if verify_output { "migrate-record" } else { "seal-record" });
         if cancelled() { return Err(JetFileCryptoError::Cancelled); }
         stage.read_exact(&mut buffer).map_err(|_| JetFileCryptoError::SourceIo)?;
         let flags = 0u8; let length = JETC_V2_CHUNK as u32;
@@ -1068,6 +1077,9 @@ fn seal_jetc_v2_from_snapshot(
         remaining -= JETC_V2_CHUNK as u64; index += 1;
     }
     if index > JETC_V2_MAX_RECORDS { return Err(JetFileCryptoError::SourceIo); }
+    #[cfg(test)]
+    observe_jetc_boundary(if verify_output { "migrate-final" } else { "seal-final" });
+    if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     stage.read_exact(&mut buffer[..remaining as usize]).map_err(|_| JetFileCryptoError::SourceIo)?;
     let flags = 1u8; let length = remaining as u32;
     let mut aad = b"JETC2 chunk".to_vec(); aad.extend_from_slice(&header_hash); aad.extend_from_slice(&index.to_le_bytes()); aad.extend_from_slice(&length.to_le_bytes()); aad.push(flags);
@@ -1084,6 +1096,8 @@ fn seal_jetc_v2_from_snapshot(
                 _ => JetFileCryptoError::DestinationIo,
             })?;
     }
+    #[cfg(test)]
+    observe_jetc_boundary(if verify_output { "migrate-before-publish" } else { "seal-before-publish" });
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     publish_temp(output, parent, destination)
 }
@@ -1156,7 +1170,7 @@ fn open_jetc_v2_file(
     if &fixed[..4] != b"JETC" || fixed[4] != 2 || fixed[5] != 1 || fixed[6] != 1 || fixed[7] != 0 { return Err(JetFileCryptoError::OpenFailed); }
     let header_len = u32::from_le_bytes(fixed[8..12].try_into().map_err(|_| JetFileCryptoError::OpenFailed)?) as usize;
     let body_len = u64::from_le_bytes(fixed[12..20].try_into().map_err(|_| JetFileCryptoError::OpenFailed)?);
-    if header_len > 32 * 1024 * 1024 || total != 20u64.checked_add(header_len as u64).and_then(|n| n.checked_add(body_len)).ok_or(JetFileCryptoError::OpenFailed)? { return Err(JetFileCryptoError::OpenFailed); }
+    if !jetc_v2_container_len_matches(total, header_len, body_len) { return Err(JetFileCryptoError::OpenFailed); }
     let mut header = vec![0u8; header_len]; input.read_exact(&mut header).map_err(|_| JetFileCryptoError::OpenFailed)?;
     if header.len() < JETC_V2_HEADER_BASE + JETC_V2_HEADER_TAG { return Err(JetFileCryptoError::OpenFailed); }
     let file_id: [u8; 16] = header[0..16].try_into().map_err(|_| JetFileCryptoError::OpenFailed)?;
@@ -1230,7 +1244,7 @@ fn open_jetc_v2_file(
     let parent = destination.map(hold_destination_parent).transpose()?;
     let mut output = parent.as_ref().map(|parent| create_publish_temp(parent, "jetc-open")).transpose()?;
     #[cfg(test)]
-    if output.is_some() { observe_jetc_temp_created("open-output"); }
+    if output.is_some() { observe_jetc_boundary("open-output"); }
     if output.is_some() && cancelled() { return Err(JetFileCryptoError::Cancelled); }
     let mut discard = std::io::sink();
     let out: &mut dyn Write = if let Some(temp) = output.as_mut() {
@@ -1240,6 +1254,8 @@ fn open_jetc_v2_file(
     };
     let mut consumed = 0u64; let mut index = 1u64; let mut saw_final = false; let mut plaintext = Zeroizing(vec![0u8; JETC_V2_CHUNK]);
     while consumed < body_len {
+        #[cfg(test)]
+        observe_jetc_boundary(if known_writer_secrets.is_some() { "migrate-verify-record" } else { "open-record" });
         if cancelled() { return Err(JetFileCryptoError::Cancelled); }
         if index > JETC_V2_MAX_RECORDS || body_len - consumed < 21 { return Err(JetFileCryptoError::OpenFailed); }
         let mut record = [0u8; 5]; input.read_exact(&mut record).map_err(|_| JetFileCryptoError::OpenFailed)?;
@@ -1256,6 +1272,8 @@ fn open_jetc_v2_file(
         saw_final = flags == 1; index += 1;
     }
     if !saw_final || consumed != body_len { return Err(JetFileCryptoError::OpenFailed); }
+    #[cfg(test)]
+    if destination.is_some() { observe_jetc_boundary("open-before-publish"); }
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     if let Some(destination) = destination {
         publish_temp(
@@ -1308,6 +1326,8 @@ pub fn jet_crypto_expert_migrate_v1_impl(
     let mut envelope = Zeroizing(Vec::with_capacity(total as usize));
     let mut buffer = Zeroizing(vec![0u8; JETC_V2_CHUNK]);
     loop {
+        #[cfg(test)]
+        observe_jetc_boundary("migrate-v1-read");
         if cancelled() { return Err(JetFileCryptoError::Cancelled); }
         let read = input.read(&mut buffer).map_err(|_| JetFileCryptoError::SourceIo)?;
         if read == 0 { break; }
@@ -1324,7 +1344,7 @@ pub fn jet_crypto_expert_migrate_v1_impl(
     let parent = hold_destination_parent(destination_path)?;
     let mut clear_file = create_unlinked_stage(&parent)?;
     #[cfg(test)]
-    observe_jetc_temp_created("migrate-stage");
+    observe_jetc_boundary("migrate-stage");
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     clear_file.write_all(plaintext.bytes()).map_err(|_| JetFileCryptoError::DestinationIo)?;
     clear_file.sync_all().map_err(|_| JetFileCryptoError::DestinationIo)?;

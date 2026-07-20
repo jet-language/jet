@@ -21,6 +21,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     thread_local! {
         static PUBLISH_RACE: RefCell<Option<PublishRace>> = const { RefCell::new(None) };
+        static CANCEL_BOUNDARY: RefCell<Option<&'static str>> = const { RefCell::new(None) };
+        static CANCEL_NOW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
     #[cfg(target_os = "linux")]
@@ -59,7 +61,35 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn arm_publish_race(action: PublishRace) {
         PUBLISH_RACE.with(|slot| *slot.borrow_mut() = Some(action));
-        jet_crypto_set_file_temp_test_observer(publication_race);
+        jet_crypto_set_file_boundary_test_observer(publication_race);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn cancellation_boundary(observed: &'static str) {
+        CANCEL_BOUNDARY.with(|slot| {
+            if slot.borrow().is_some_and(|boundary| boundary == observed) {
+                slot.borrow_mut().take();
+                CANCEL_NOW.with(|cancel| cancel.set(true));
+            }
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    fn arm_cancellation(boundary: &'static str) {
+        CANCEL_BOUNDARY.with(|slot| *slot.borrow_mut() = Some(boundary));
+        CANCEL_NOW.with(|cancel| cancel.set(false));
+        jet_crypto_set_file_boundary_test_observer(cancellation_boundary);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn cancel_at_boundary() -> bool {
+        CANCEL_NOW.with(|cancel| cancel.get())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn assert_cancellation_fired() {
+        CANCEL_BOUNDARY.with(|slot| assert!(slot.borrow().is_none()));
+        CANCEL_NOW.with(|cancel| assert!(cancel.get()));
     }
 
     #[cfg(target_os = "linux")]
@@ -550,6 +580,19 @@ mod tests {
             never_cancelled,
         ).unwrap();
         let canonical = std::fs::read(&envelope).unwrap();
+        let header_len = u32::from_le_bytes(canonical[8..12].try_into().unwrap()) as usize;
+        let body_at = 20 + header_len;
+        assert_eq!(jetc_v2_body_len(JETC_V2_MAX_PLAINTEXT), Some(JETC_V2_MAX_BODY_LEN));
+        assert!(jetc_v2_container_len_matches(
+            20 + header_len as u64 + JETC_V2_MAX_BODY_LEN,
+            header_len,
+            JETC_V2_MAX_BODY_LEN,
+        ));
+        assert!(!jetc_v2_container_len_matches(
+            21 + header_len as u64 + JETC_V2_MAX_BODY_LEN,
+            header_len,
+            JETC_V2_MAX_BODY_LEN + 1,
+        ));
         let mut tampered = canonical.clone();
         *tampered.last_mut().unwrap() ^= 1;
         for (name, hostile) in [
@@ -557,6 +600,19 @@ mod tests {
             ("truncated", canonical[..canonical.len()-1].to_vec()),
             ("appended", { let mut b = canonical.clone(); b.push(0); b }),
             ("v1", { let mut b = canonical.clone(); b[4] = 1; b }),
+            ("kind", { let mut b = canonical.clone(); b[5] = 2; b }),
+            ("suite", { let mut b = canonical.clone(); b[6] = 2; b }),
+            ("fixed-flags", { let mut b = canonical.clone(); b[7] = 1; b }),
+            ("header-cap", { let mut b = canonical.clone(); b[8..12].copy_from_slice(&(32u32 * 1024 * 1024 + 1).to_le_bytes()); b }),
+            ("body-cap", { let mut b = canonical.clone(); b[12..20].copy_from_slice(&(JETC_V2_MAX_BODY_LEN + 1).to_le_bytes()); b }),
+            ("chunk-size", { let mut b = canonical.clone(); b[84..88].copy_from_slice(&1u32.to_le_bytes()); b }),
+            ("recipient-zero", { let mut b = canonical.clone(); b[88..90].copy_from_slice(&0u16.to_le_bytes()); b }),
+            ("recipient-cap", { let mut b = canonical.clone(); b[88..90].copy_from_slice(&257u16.to_le_bytes()); b }),
+            ("metadata", { let mut b = canonical.clone(); b[90..94].copy_from_slice(&1u32.to_le_bytes()); b }),
+            ("recipient-id", { let mut b = canonical.clone(); b[94] ^= 1; b }),
+            ("zero-public", { let mut b = canonical.clone(); b[110..142].fill(0); b }),
+            ("record-length", { let mut b = canonical.clone(); b[body_at..body_at+4].copy_from_slice(&(JETC_V2_CHUNK as u32 + 1).to_le_bytes()); b }),
+            ("record-flags", { let mut b = canonical.clone(); b[body_at+4] = 2; b }),
         ] {
             let input = root.join(format!("{name}.jetc"));
             let output = root.join(format!("{name}.out"));
@@ -583,6 +639,101 @@ mod tests {
             Err(JetFileCryptoError::Cancelled)
         );
         assert!(!cancelled.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn jetc_v2_cancellation_at_stage_record_and_publish_boundaries_publishes_nothing() {
+        let root = test_dir("cancellation-boundaries");
+        let source = root.join("source.bin");
+        let plaintext = vec![0x5a; JETC_V2_CHUNK + 1];
+        std::fs::write(&source, &plaintext).unwrap();
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let public = jet_crypto_x25519_public_typed_impl(&recipient);
+        let envelope = root.join("stable.jetc");
+        jet_crypto_file_seal_impl(
+            vec![public.clone()],
+            &source.to_string_lossy().into_owned(),
+            &envelope.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+
+        for boundary in ["seal-stage", "seal-output", "seal-record", "seal-final", "seal-before-publish"] {
+            let output = root.join(format!("{boundary}.jetc"));
+            arm_cancellation(boundary);
+            assert_eq!(
+                jet_crypto_file_seal_impl(
+                    vec![public.clone()],
+                    &source.to_string_lossy().into_owned(),
+                    &output.to_string_lossy().into_owned(),
+                    cancel_at_boundary,
+                ),
+                Err(JetFileCryptoError::Cancelled),
+                "seal cancellation boundary {boundary}",
+            );
+            assert_cancellation_fired();
+            assert!(!output.exists());
+        }
+
+        for boundary in ["open-output", "open-record", "open-before-publish"] {
+            let output = root.join(format!("{boundary}.bin"));
+            arm_cancellation(boundary);
+            assert_eq!(
+                jet_crypto_file_open_impl(
+                    &recipient,
+                    &envelope.to_string_lossy().into_owned(),
+                    &output.to_string_lossy().into_owned(),
+                    cancel_at_boundary,
+                ),
+                Err(JetFileCryptoError::Cancelled),
+                "open cancellation boundary {boundary}",
+            );
+            assert_cancellation_fired();
+            assert!(!output.exists());
+        }
+
+        let key = (0u8..32).collect::<Vec<_>>();
+        let nonce = (0u8..12).collect::<Vec<_>>();
+        let ciphertext = ChaCha20Poly1305::new_from_slice(&key).unwrap()
+            .encrypt(ChaNonce::from_slice(&nonce), plaintext.as_slice()).unwrap();
+        let mut v1 = b"JETC".to_vec();
+        v1.extend_from_slice(&[1, 1]);
+        v1.extend_from_slice(&nonce);
+        v1.extend_from_slice(&ciphertext);
+        let v1_source = root.join("historical.jetc");
+        std::fs::write(&v1_source, &v1).unwrap();
+        for boundary in [
+            "migrate-v1-read",
+            "migrate-stage",
+            "migrate-output",
+            "migrate-record",
+            "migrate-final",
+            "migrate-verify-record",
+            "migrate-before-publish",
+        ] {
+            let output = root.join(format!("{boundary}.jetc"));
+            arm_cancellation(boundary);
+            assert_eq!(
+                jet_crypto_expert_migrate_v1_impl(
+                    &key,
+                    &v1_source.to_string_lossy().into_owned(),
+                    vec![public.clone()],
+                    &output.to_string_lossy().into_owned(),
+                    cancel_at_boundary,
+                ),
+                Err(JetFileCryptoError::Cancelled),
+                "migration cancellation boundary {boundary}",
+            );
+            assert_cancellation_fired();
+            assert!(!output.exists());
+            assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+        }
+
+        jet_crypto_clear_file_boundary_test_observer();
+        assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+        }));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -705,7 +856,7 @@ mod tests {
         );
         assert!(!real_parent.join("sealed.jetc").exists());
         PUBLISH_RACE.with(|slot| assert!(slot.borrow().is_none()));
-        jet_crypto_clear_file_temp_test_observer();
+        jet_crypto_clear_file_boundary_test_observer();
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -824,7 +975,7 @@ mod tests {
         assert!(std::fs::read_dir(&moved_parent).unwrap().next().is_none());
         assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
         PUBLISH_RACE.with(|slot| assert!(slot.borrow().is_none()));
-        jet_crypto_clear_file_temp_test_observer();
+        jet_crypto_clear_file_boundary_test_observer();
         std::fs::remove_dir_all(root).unwrap();
     }
 
