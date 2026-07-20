@@ -505,13 +505,12 @@ fn run() {
 | `seal(recipients, bytes, aad)` / `open(&identity, box, aad)` | `Sealed ? CryptoError` / `[U8] ? CryptoError` | Canonical recipient-based JETV value envelope with internal key and nonce handling |
 | `file_seal(recipients, source, destination)` / `file_open(&identity, source, destination)` | `() ? FileCryptoError` | Recipient-based JETC v2 files with bounded 1 MiB authenticated chunks and atomic no-overwrite publication |
 | `expert.open_v1(key, envelope)` | `[U8] ? CryptoError` | Audited `@Unsafe`-only reader for canonical historical JETC v1 ChaCha20-Poly1305 or AES-256-GCM bytes; every failure is `OpenFailed` |
-| `sign(seed, bytes)` / `verify(public, bytes, sig)` | mixed | Ed25519 signatures (`verify` returns `() ? String`) |
-| `x25519_public(secret)` / `x25519_shared(secret, public)` | `[U8] ? String` | X25519 key agreement |
-| `hkdf_sha256(ikm, salt, info, len)` | `[U8] ? String` | HKDF-SHA256 expand |
-| `password_hash(password)` | `String ? String` | Argon2id PHC string with generated salt and safe defaults |
-| `password_hash_with_salt(password, salt)` | `String ? String` | Deterministic Argon2id PHC for fixtures/imports; salt must be at least 8 bytes |
-| `password_verify(password, stored)` | `Bool` | Verify a PHC string; malformed strings return `false` |
-| `constant_time_eq(a, b)` | `Bool` | Constant-time byte equality |
+| `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature ? CryptoError` / `Bool ? CryptoError` | Ed25519 signing and verification with nominal key and signature types |
+| `x25519(secret_key, public_key)` | `SharedSecret ? CryptoError` | X25519 key agreement with nominal key and shared-secret types |
+| `hkdf_sha256(ikm, salt, info, len)` | `Secret ? CryptoError` | HKDF-SHA256 expand without exposing derived secret bytes |
+| `password_hash(password)` | `PasswordHash ? CryptoError` | Argon2id password hash with generated salt and safe defaults; accepts a nominal `Secret` |
+| `password_verify(password, stored)` | `Bool ? CryptoError` | Verify a nominal `Secret` against a validated `PasswordHash` |
+| `constant_time_equal(a, b)` | `Bool` | Constant-time comparison of nominal `Secret` values |
 
 Card 302 audit state:
 
@@ -524,7 +523,7 @@ Card 302 audit state:
 | Hashes / comparison | Shipped: SHA-256, SHA-512, BLAKE3, constant-time equality |
 | File envelope | JETC v2 recipient streaming is shipped on Linux; exact expert JETC v1 open is shipped for migration. `migrate_v1`, hardened held-parent publication, non-Linux filesystem backends, and wider fault injection remain open on #302 |
 | Entropy | Shipped: one D-CRYPTO-RNG1 provider shared by `random.bytes`, envelope nonces, Ed25519 key generation, Argon2id salts, and file envelopes; Linux glibc uses `getrandom`, macOS uses `SecRandomCopyBytes`, Windows MSVC uses `BCryptGenRandom`, WASI preview 1 uses `random_get`; unsupported targets fail closed with no fallback. D-CRYPTO-WASI-ALLOC2: every interrupted WASI call's exact-count zeroed `Vec` is volatile-zeroized and dropped before a new ownership generation; allocator address reuse is allowed; no failed bytes escape; at most seventeen calls occur. Package key generation maps provider failure through a closed helper status to E1292, never raw provider/helper text |
-| Secret display types | Not a separate runtime type today; APIs pass `[U8]`, and docs keep key material in byte values. A future `Secret<T>` wrapper must be a real type, not a display shim |
+| Secret display types | Shipped: `Secret` is a nominal runtime type used by secret-taking APIs; display, debug, print, serialization, reflection, comparison, hashing, and cloning are rejected |
 | PQ hybrid agility | Tracked by #71, not duplicated here |
 
 Examples: `examples/features/crypto/crypto_suite.jet`,
