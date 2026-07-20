@@ -1005,6 +1005,11 @@
             format!("Clock {{ now: {} }}", self.now)
         }
     }
+    impl super::JetDebug for Clock {
+        fn jet_debug(&self) -> String {
+            <Self as super::JetShow>::jet_show(self)
+        }
+    }
     impl super::JetShow for Rng {
         fn jet_show(&self) -> String {
             format!("Rng {{ .. }}")

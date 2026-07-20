@@ -187,6 +187,29 @@ const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() -> String {
     return "{initial}|{ticked}|{after_tick}|{advanced}|{after_advance}|{waited}|{clock.now()}|{canonical_ticked}|{canonical.now()}"
 }"#;
 const TESTING_FAKE_CLOCK_EXPECTED: &str = "42|50|50|100|100|125|125|50|50";
+const TESTING_FAKE_CLOCK_WRITEBACK_DECLS: &str = r#"struct ClockHolder { clock: Clock }
+fn drive(clock: &Clock) -> String {
+    ticked :: clock.tick(1)
+    advanced :: clock.advance(10)
+    duration :: Duration.milliseconds(2) ?? panic("duration")
+    waited :: clock.wait(duration)
+    return "{ticked}|{advanced}|{waited}|{clock.now()}"
+}
+fn counted_clock(hits: &Int) -> Clock {
+    hits += 1
+    return testing.fake_clock(7)
+}
+fn testing_fake_clock_writeback_view() -> String {
+    clock := testing.fake_clock(5)
+    borrowed :: drive(&clock)
+    holder := ClockHolder.{ clock: testing.fake_clock(5) }
+    field_tick :: holder.clock.tick(2)
+    field_now :: holder.clock.now()
+    receiver_hits := 0
+    counted_now :: counted_clock(&receiver_hits).now()
+    return "{borrowed}|{clock.now()};{field_tick}|{field_now}|{counted_now}|{receiver_hits}"
+}"#;
+const TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED: &str = "6|10|12|12|12;7|7|7|1";
 const BIT_SET_DECLS: &str = r#"fn add_bit(values: &BitSet, bit: Int) -> Bool {
     return values.add(bit)
 }
@@ -536,6 +559,19 @@ fn public_transcript_covers_testing_fake_clock_exactly() {
     assert_eq!(
         values,
         [format!("\"{TESTING_FAKE_CLOCK_EXPECTED}\" : String")]
+    );
+}
+
+#[test]
+fn public_transcript_covers_testing_fake_clock_writeback_exactly() {
+    let values = exact_values(&[
+        "use core.testing as testing",
+        TESTING_FAKE_CLOCK_WRITEBACK_DECLS,
+        "testing_fake_clock_writeback_view()",
+    ]);
+    assert_eq!(
+        values,
+        [format!("\"{TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED}\" : String")]
     );
 }
 
@@ -975,6 +1011,24 @@ fn rustc_backed_testing_fake_clock_matches_aot_comptime_forced_interpreter_and_d
         "testing-fake-clock",
         &source,
         TESTING_FAKE_CLOCK_EXPECTED,
+        true,
+    );
+}
+
+#[test]
+fn rustc_backed_testing_fake_clock_writeback_matches_all_tiers_exactly() {
+    let declarations = format!(
+        "use core.testing as testing\n{TESTING_FAKE_CLOCK_WRITEBACK_DECLS}"
+    );
+    let source = parity_source("testing_fake_clock_writeback_view()", &declarations);
+    assert_eq!(
+        check_aot_comptime("testing/fake-clock-writeback", &source),
+        TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED
+    );
+    check_dev_tiers_with_boundary(
+        "testing-fake-clock-writeback",
+        &source,
+        TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED,
         true,
     );
 }
