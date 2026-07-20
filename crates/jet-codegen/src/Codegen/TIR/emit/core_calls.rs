@@ -1337,6 +1337,15 @@ pub(crate) fn emit_tir_core_call(
         ("core.crypto.expert", "aes256gcm_seal") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_aes256gcm_seal_impl"), arg(0), arg(1), arg(2), arg(3)),
         ("core.crypto.expert", "aes256gcm_open") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_aes256gcm_open_impl"), arg(0), arg(1), arg(2), arg(3)),
         ("core.crypto.expert", "open_v1") => format!("{}(&({}), &({}))", regex_fn("jet_crypto_expert_open_v1_impl"), arg(0), arg(1)),
+        ("core.crypto.expert", "migrate_v1") => format!(
+            "{}(&({}), &({}.inner.to_string_lossy().into_owned()), {}, &({}.inner.to_string_lossy().into_owned()), {}jet_scheduler_task_cancelled)",
+            regex_fn("jet_crypto_expert_migrate_v1_impl"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3),
+            cx.root_prefix,
+        ),
         ("core.crypto.expert", "ed25519_sign") => format!("{}(&({}), &({}))", regex_fn("jet_crypto_expert_ed25519_sign_impl"), arg(0), arg(1)),
         ("core.crypto.expert", "ed25519_verify_strict") => format!("{}(&({}), &({}), &({}))", regex_fn("jet_crypto_expert_ed25519_verify_strict_impl"), arg(0), arg(1), arg(2)),
         ("core.crypto.expert", "x25519") => {

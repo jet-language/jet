@@ -510,6 +510,7 @@ fn run() {
 | `seal(recipients, bytes, aad)` / `open(&identity, box, aad)` | `Sealed ? CryptoError` / `[U8] ? CryptoError` | Canonical recipient-based JETV value envelope with internal key and nonce handling |
 | `file_seal(recipients, source, destination)` / `file_open(&identity, source, destination)` | `() ? FileCryptoError` | Recipient-based JETC v2 files with bounded 1 MiB authenticated chunks and atomic no-overwrite publication |
 | `expert.open_v1(key, envelope)` | `[U8] ? CryptoError` | Audited `@Unsafe`-only reader for canonical historical JETC v1 ChaCha20-Poly1305 or AES-256-GCM bytes; every failure is `OpenFailed` |
+| `expert.migrate_v1(key, source, recipients, destination)` | `() ? FileCryptoError` | Audited `@Unsafe`-only migration from canonical historical JETC v1 to recipient JETC v2; preserves the source and reopen-verifies v2 before atomic publication |
 | `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature ? CryptoError` / `Bool ? CryptoError` | Ed25519 signing and verification with nominal key and signature types |
 | `x25519(secret_key, public_key)` | `SharedSecret ? CryptoError` | X25519 key agreement with nominal key and shared-secret types |
 | `hkdf_sha256(ikm, salt, info, len)` | `Secret ? CryptoError` | HKDF-SHA256 expand without exposing derived secret bytes |
@@ -526,7 +527,7 @@ Card 302 audit state:
 | Password hashing | Shipped: Argon2id PHC hash/verify, random salt default, deterministic salted vector helper |
 | KDF / key agreement | Shipped: HKDF-SHA256 and X25519 with RFC vectors |
 | Hashes / comparison | Shipped: SHA-256, SHA-512, BLAKE3, constant-time equality |
-| File envelope | JETC v2 recipient streaming is shipped on Linux; exact expert JETC v1 open is shipped for migration. `migrate_v1`, hardened held-parent publication, non-Linux filesystem backends, and wider fault injection remain open on #302 |
+| File envelope | JETC v2 recipient streaming plus exact expert JETC v1 open/migrate are shipped on Linux. Hardened held-parent publication, non-Linux filesystem backends, and wider fault injection remain open on #302 |
 | Entropy | Shipped: one D-CRYPTO-RNG1 provider shared by `random.bytes`, envelope nonces, Ed25519 key generation, Argon2id salts, and file envelopes; Linux glibc uses `getrandom`, macOS uses `SecRandomCopyBytes`, Windows MSVC uses `BCryptGenRandom`, WASI preview 1 uses `random_get`; unsupported targets fail closed with no fallback. D-CRYPTO-WASI-ALLOC2: every interrupted WASI call's exact-count zeroed `Vec` is volatile-zeroized and dropped before a new ownership generation; allocator address reuse is allowed; no failed bytes escape; at most seventeen calls occur. Package key generation maps provider failure through a closed helper status to E1292, never raw provider/helper text |
 | Secret display types | Shipped: `Secret` is a nominal runtime type used by secret-taking APIs; display, debug, print, serialization, reflection, comparison, hashing, and cloning are rejected |
 | PQ hybrid agility | Tracked by #71, not duplicated here |

@@ -1,0 +1,9 @@
+// D-CRYPTO-ENVELOPE2=A: historical file migration remains expert-only.
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+fn run() {
+    key: [U8] :: []
+    recipient :: crypto.X25519SecretKey.generate() ?? return
+    _ :: expert.migrate_v1(key, Path.from("old.jetc"), [recipient.public_key()], Path.from("new.jetc"))
+}

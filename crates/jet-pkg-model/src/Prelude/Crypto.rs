@@ -804,20 +804,27 @@ fn publish_temp(mut temp: JetcTemp, destination: &std::path::Path) -> Result<(),
     Ok(())
 }
 
-pub fn jet_crypto_file_seal_impl(
+fn canonical_jetc_v2_recipients(
     mut recipients: Vec<JetX25519PublicKey>,
-    source: &String,
-    destination: &String,
-    cancelled: fn() -> bool,
-) -> Result<(), JetFileCryptoError> {
-    use std::io::{Read, Seek, SeekFrom, Write};
+) -> Result<Vec<JetX25519PublicKey>, JetFileCryptoError> {
     if recipients.is_empty() || recipients.len() > 256 { return Err(JetFileCryptoError::SealFailed(JetCryptoError::InvalidLength { operation: "file_seal", parameter: "recipients", expected: "1..=256", actual: recipients.len() })); }
     recipients.sort_by_key(|key| (recipient_id(&key.0), key.0));
     if recipients.windows(2).any(|pair| pair[0].0 == pair[1].0) { return Err(JetFileCryptoError::SealFailed(JetCryptoError::InvalidEncoding { operation: "file_seal", value_kind: "duplicate recipient" })); }
+    Ok(recipients)
+}
+
+fn seal_jetc_v2_from_snapshot(
+    recipients: Vec<JetX25519PublicKey>,
+    mut stage: std::fs::File,
+    plain_len: u64,
+    destination: &String,
+    cancelled: fn() -> bool,
+    verify_output: bool,
+) -> Result<(), JetFileCryptoError> {
+    use std::io::{Read, Seek, SeekFrom, Write};
     let destination = std::path::Path::new(destination);
     let dir = destination.parent().ok_or(JetFileCryptoError::DestinationIo)?;
     let parent_before = std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)?;
-    let (mut stage, plain_len) = snapshot_source(std::path::Path::new(source), dir, cancelled)?;
     let body_len = jetc_v2_body_len(plain_len).ok_or(JetFileCryptoError::SourceIo)?;
     let header_len = JETC_V2_HEADER_BASE.checked_add(recipients.len() * JETC_V2_STANZA).and_then(|n| n.checked_add(JETC_V2_HEADER_TAG)).ok_or(JetFileCryptoError::DestinationIo)?;
     let mut fixed = Vec::with_capacity(20);
@@ -884,16 +891,80 @@ pub fn jet_crypto_file_seal_impl(
     let encrypted = XChaCha20Poly1305::new_from_slice(file_key.bytes()).map_err(|_| JetFileCryptoError::SealFailed(JetCryptoError::Internal { incident_id: "jetc2-final-key" }))?
         .encrypt(XNonce::from_slice(&nonce24(&*nonce_prefix, index)), Payload { msg: &buffer[..remaining as usize], aad: &aad }).map_err(|_| JetFileCryptoError::SealFailed(JetCryptoError::Internal { incident_id: "jetc2-final" }))?;
     out.write_all(&length.to_le_bytes()).and_then(|_| out.write_all(&[flags])).and_then(|_| out.write_all(&encrypted)).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    if verify_output {
+        out.sync_all().map_err(|_| JetFileCryptoError::DestinationIo)?;
+        let staged_output = output.path.to_string_lossy().into_owned();
+        open_jetc_v2(None, Some((file_key.bytes(), &*ephemeral_secret)), &staged_output, None, cancelled)
+            .map_err(|error| match error {
+                JetFileCryptoError::Cancelled => JetFileCryptoError::Cancelled,
+                _ => JetFileCryptoError::DestinationIo,
+            })?;
+    }
     let parent_after = std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)?;
     if !same_parent_identity(&parent_before, &parent_after) { return Err(JetFileCryptoError::DestinationIo); }
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     publish_temp(output, destination)
 }
 
-pub fn jet_crypto_file_open_impl(
-    recipient: &JetX25519SecretKey,
+fn seal_jetc_v2(
+    recipients: Vec<JetX25519PublicKey>,
     source: &String,
     destination: &String,
+    cancelled: fn() -> bool,
+    verify_output: bool,
+) -> Result<(), JetFileCryptoError> {
+    let recipients = canonical_jetc_v2_recipients(recipients)?;
+    let destination_path = std::path::Path::new(destination);
+    let dir = destination_path.parent().ok_or(JetFileCryptoError::DestinationIo)?;
+    let (stage, plain_len) = snapshot_source(std::path::Path::new(source), dir, cancelled)?;
+    seal_jetc_v2_from_snapshot(recipients, stage, plain_len, destination, cancelled, verify_output)
+}
+
+pub fn jet_crypto_file_seal_impl(
+    recipients: Vec<JetX25519PublicKey>,
+    source: &String,
+    destination: &String,
+    cancelled: fn() -> bool,
+) -> Result<(), JetFileCryptoError> {
+    seal_jetc_v2(recipients, source, destination, cancelled, false)
+}
+
+fn unwrap_jetc_v2_stanza(
+    private: [u8; 32],
+    peer: [u8; 32],
+    file_id: &[u8; 16],
+    ephemeral_public: &[u8; 32],
+    recipient_public: &[u8; 32],
+    fixed: &[u8],
+    header_base: &[u8],
+    stanza: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, JetFileCryptoError> {
+    let shared = Zeroizing(x25519_checked(private, peer).map_err(|_| JetFileCryptoError::OpenFailed)?);
+    let mut key_info = b"JETC2 wrap key".to_vec();
+    key_info.extend_from_slice(ephemeral_public);
+    key_info.extend_from_slice(recipient_public);
+    let mut nonce_info = b"JETC2 wrap nonce".to_vec();
+    nonce_info.extend_from_slice(ephemeral_public);
+    nonce_info.extend_from_slice(recipient_public);
+    let kek = Zeroizing(hkdf32(shared.bytes(), file_id, &key_info).map_err(|_| JetFileCryptoError::OpenFailed)?);
+    let wrap_nonce = Zeroizing(hkdf24(shared.bytes(), file_id, &nonce_info).map_err(|_| JetFileCryptoError::OpenFailed)?);
+    let mut aad = b"JETC2 wrap aad".to_vec();
+    aad.extend_from_slice(fixed);
+    aad.extend_from_slice(header_base);
+    aad.extend_from_slice(&stanza[..48]);
+    Ok(Zeroizing(
+        XChaCha20Poly1305::new_from_slice(kek.bytes())
+            .map_err(|_| JetFileCryptoError::OpenFailed)?
+            .decrypt(XNonce::from_slice(wrap_nonce.bytes()), Payload { msg: &stanza[48..96], aad: &aad })
+            .map_err(|_| JetFileCryptoError::OpenFailed)?,
+    ))
+}
+
+fn open_jetc_v2(
+    recipient: Option<&JetX25519SecretKey>,
+    known_writer_secrets: Option<(&[u8], &[u8; 32])>,
+    source: &String,
+    destination: Option<&String>,
     cancelled: fn() -> bool,
 ) -> Result<(), JetFileCryptoError> {
     use std::io::{Read, Write};
@@ -922,37 +993,71 @@ pub fn jet_crypto_file_open_impl(
         if id != recipient_id(&public) || bool::from(public.ct_eq(&[0; 32])) || previous.is_some_and(|p| p >= (id, public)) { return Err(JetFileCryptoError::OpenFailed); }
         previous = Some((id, public));
     }
-    let mut secret = Zeroizing([0u8; 32]); secret.copy_from_slice(&recipient.0);
-    let own_public = x25519_dalek::x25519(*secret, x25519_dalek::X25519_BASEPOINT_BYTES);
-    let selected = (0..count).find(|index| {
-        let start = JETC_V2_HEADER_BASE + index * JETC_V2_STANZA;
-        bool::from(header[start+16..start+48].ct_eq(&own_public))
-    }).unwrap_or(0);
-    let start = JETC_V2_HEADER_BASE + selected * JETC_V2_STANZA;
-    let stanza_public: [u8; 32] = header[start+16..start+48].try_into().map_err(|_| JetFileCryptoError::OpenFailed)?;
-    let matched = bool::from(stanza_public.ct_eq(&own_public));
-    let shared = Zeroizing(x25519_checked(*secret, ephemeral).map_err(|_| JetFileCryptoError::OpenFailed)?);
-    let mut key_info = b"JETC2 wrap key".to_vec(); key_info.extend_from_slice(&ephemeral); key_info.extend_from_slice(&stanza_public);
-    let mut nonce_info = b"JETC2 wrap nonce".to_vec(); nonce_info.extend_from_slice(&ephemeral); nonce_info.extend_from_slice(&stanza_public);
-    let kek = Zeroizing(hkdf32(shared.bytes(), &file_id, &key_info).map_err(|_| JetFileCryptoError::OpenFailed)?);
-    let wrap_nonce = Zeroizing(hkdf24(shared.bytes(), &file_id, &nonce_info).map_err(|_| JetFileCryptoError::OpenFailed)?);
-    let mut aad = b"JETC2 wrap aad".to_vec(); aad.extend_from_slice(&fixed); aad.extend_from_slice(&header[..JETC_V2_HEADER_BASE]); aad.extend_from_slice(&header[start..start+48]);
-    let file_key = Zeroizing(XChaCha20Poly1305::new_from_slice(kek.bytes()).map_err(|_| JetFileCryptoError::OpenFailed)?
-        .decrypt(XNonce::from_slice(wrap_nonce.bytes()), Payload { msg: &header[start+48..start+96], aad: &aad }).map_err(|_| JetFileCryptoError::OpenFailed)?);
-    if !matched { return Err(JetFileCryptoError::OpenFailed); }
+    let file_key = if let Some((known, ephemeral_secret)) = known_writer_secrets {
+        if known.len() != 32 { return Err(JetFileCryptoError::OpenFailed); }
+        if !bool::from(x25519_dalek::x25519(*ephemeral_secret, x25519_dalek::X25519_BASEPOINT_BYTES).ct_eq(&ephemeral)) {
+            return Err(JetFileCryptoError::OpenFailed);
+        }
+        for index in 0..count {
+            let start = JETC_V2_HEADER_BASE + index * JETC_V2_STANZA;
+            let public: [u8; 32] = header[start+16..start+48].try_into().map_err(|_| JetFileCryptoError::OpenFailed)?;
+            let unwrapped = unwrap_jetc_v2_stanza(
+                *ephemeral_secret,
+                public,
+                &file_id,
+                &ephemeral,
+                &public,
+                &fixed,
+                &header[..JETC_V2_HEADER_BASE],
+                &header[start..start+JETC_V2_STANZA],
+            )?;
+            if !bool::from(unwrapped.bytes().ct_eq(known)) { return Err(JetFileCryptoError::OpenFailed); }
+        }
+        Zeroizing(known.to_vec())
+    } else {
+        let recipient = recipient.ok_or(JetFileCryptoError::OpenFailed)?;
+        let mut secret = Zeroizing([0u8; 32]); secret.copy_from_slice(&recipient.0);
+        let own_public = x25519_dalek::x25519(*secret, x25519_dalek::X25519_BASEPOINT_BYTES);
+        let selected = (0..count).find(|index| {
+            let start = JETC_V2_HEADER_BASE + index * JETC_V2_STANZA;
+            bool::from(header[start+16..start+48].ct_eq(&own_public))
+        }).unwrap_or(0);
+        let start = JETC_V2_HEADER_BASE + selected * JETC_V2_STANZA;
+        let stanza_public: [u8; 32] = header[start+16..start+48].try_into().map_err(|_| JetFileCryptoError::OpenFailed)?;
+        let matched = bool::from(stanza_public.ct_eq(&own_public));
+        let unwrapped = unwrap_jetc_v2_stanza(
+            *secret,
+            ephemeral,
+            &file_id,
+            &ephemeral,
+            &stanza_public,
+            &fixed,
+            &header[..JETC_V2_HEADER_BASE],
+            &header[start..start+JETC_V2_STANZA],
+        )?;
+        if !matched { return Err(JetFileCryptoError::OpenFailed); }
+        unwrapped
+    };
     let tag_start = header_len - 16;
     let mut header_aad = b"JETC2 header".to_vec(); header_aad.extend_from_slice(&fixed); header_aad.extend_from_slice(&header[..tag_start]);
     XChaCha20Poly1305::new_from_slice(file_key.bytes()).map_err(|_| JetFileCryptoError::OpenFailed)?
         .decrypt(XNonce::from_slice(&nonce24(&nonce_prefix, 0)), Payload { msg: &header[tag_start..], aad: &header_aad }).map_err(|_| JetFileCryptoError::OpenFailed)?;
     let mut header_hash_input = fixed.to_vec(); header_hash_input.extend_from_slice(&header);
     let header_hash: [u8; 32] = Sha256::digest(&header_hash_input).into();
-    let destination = std::path::Path::new(destination); let dir = destination.parent().ok_or(JetFileCryptoError::DestinationIo)?;
-    let parent_before = std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)?;
-    let mut output = create_temp_in(dir, "jetc-open").map_err(|error| match error {
-        JetFileCryptoError::SealFailed(_) => JetFileCryptoError::DestinationIo,
-        other => other,
-    })?;
-    let out = output.file.as_mut().ok_or(JetFileCryptoError::DestinationIo)?;
+    let destination = destination.map(std::path::Path::new);
+    let parent_before = destination.map(|path| {
+        let dir = path.parent().ok_or(JetFileCryptoError::DestinationIo)?;
+        std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)
+    }).transpose()?;
+    let mut output = destination.map(|path| {
+        create_temp_in(path.parent().ok_or(JetFileCryptoError::DestinationIo)?, "jetc-open")
+    }).transpose()?;
+    let mut discard = std::io::sink();
+    let out: &mut dyn Write = if let Some(temp) = output.as_mut() {
+        temp.file.as_mut().ok_or(JetFileCryptoError::DestinationIo)?
+    } else {
+        &mut discard
+    };
     let mut consumed = 0u64; let mut index = 1u64; let mut saw_final = false; let mut plaintext = Zeroizing(vec![0u8; JETC_V2_CHUNK]);
     while consumed < body_len {
         if cancelled() { return Err(JetFileCryptoError::Cancelled); }
@@ -971,10 +1076,74 @@ pub fn jet_crypto_file_open_impl(
         saw_final = flags == 1; index += 1;
     }
     if !saw_final || consumed != body_len { return Err(JetFileCryptoError::OpenFailed); }
-    let parent_after = std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)?;
-    if !same_parent_identity(&parent_before, &parent_after) { return Err(JetFileCryptoError::DestinationIo); }
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
-    publish_temp(output, destination)
+    if let Some(destination) = destination {
+        let dir = destination.parent().ok_or(JetFileCryptoError::DestinationIo)?;
+        let parent_after = std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)?;
+        if !same_parent_identity(parent_before.as_ref().ok_or(JetFileCryptoError::DestinationIo)?, &parent_after) { return Err(JetFileCryptoError::DestinationIo); }
+        publish_temp(output.ok_or(JetFileCryptoError::DestinationIo)?, destination)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn jet_crypto_file_open_impl(
+    recipient: &JetX25519SecretKey,
+    source: &String,
+    destination: &String,
+    cancelled: fn() -> bool,
+) -> Result<(), JetFileCryptoError> {
+    open_jetc_v2(Some(recipient), None, source, Some(destination), cancelled)
+}
+
+/// D-CRYPTO-ENVELOPE2=A: authenticate the sole canonical v1 grammar, reseal
+/// through the canonical v2 writer, and reopen-verify before atomic publish.
+pub fn jet_crypto_expert_migrate_v1_impl(
+    key: &Vec<u8>,
+    source: &String,
+    recipients: Vec<JetX25519PublicKey>,
+    destination: &String,
+    cancelled: fn() -> bool,
+) -> Result<(), JetFileCryptoError> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let source_path = std::path::Path::new(source);
+    let destination_path = std::path::Path::new(destination);
+    if source_path == destination_path { return Err(JetFileCryptoError::DestinationExists); }
+    let mut input = open_source_nofollow(source_path)?;
+    let total = input.metadata().map_err(|_| JetFileCryptoError::SourceIo)?.len();
+    if total > JETC_V1_MAX_LEN as u64 { return Err(JetFileCryptoError::OpenFailed); }
+    let mut envelope = Zeroizing(Vec::with_capacity(total as usize));
+    let mut buffer = Zeroizing(vec![0u8; JETC_V2_CHUNK]);
+    loop {
+        if cancelled() { return Err(JetFileCryptoError::Cancelled); }
+        let read = input.read(&mut buffer).map_err(|_| JetFileCryptoError::SourceIo)?;
+        if read == 0 { break; }
+        if envelope.len().checked_add(read).is_none_or(|length| length > JETC_V1_MAX_LEN) {
+            return Err(JetFileCryptoError::OpenFailed);
+        }
+        envelope.extend_from_slice(&buffer[..read]);
+    }
+    let plaintext = Zeroizing(
+        jet_crypto_expert_open_v1_impl(key, &envelope)
+            .map_err(|_| JetFileCryptoError::OpenFailed)?,
+    );
+    let recipients = canonical_jetc_v2_recipients(recipients)?;
+    let dir = destination_path.parent().ok_or(JetFileCryptoError::DestinationIo)?;
+    let mut clear = create_stage_in(dir)?;
+    std::fs::remove_file(&clear.path).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    clear.path = std::path::PathBuf::new();
+    let mut clear_file = clear.file.take().ok_or(JetFileCryptoError::DestinationIo)?;
+    clear_file.write_all(plaintext.bytes()).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    clear_file.sync_all().map_err(|_| JetFileCryptoError::DestinationIo)?;
+    clear_file.seek(SeekFrom::Start(0)).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    seal_jetc_v2_from_snapshot(
+        recipients,
+        clear_file,
+        plaintext.len() as u64,
+        destination,
+        cancelled,
+        true,
+    )
 }
 
 fn bytes32(bytes: &[u8], label: &str) -> Result<[u8; 32], String> {

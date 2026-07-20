@@ -444,6 +444,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "aes256gcm_seal",
             "aes256gcm_open",
             "open_v1",
+            "migrate_v1",
             "ed25519_sign",
             "ed25519_verify_strict",
             "x25519",

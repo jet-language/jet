@@ -987,6 +987,15 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
         )),
+        ("core.crypto.expert", "migrate_v1") => Some((
+            vec![
+                (read, Type::List(Box::new(u8_ty()))),
+                (read, Type::Named("Path".into())),
+                (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))),
+                (read, Type::Named("Path".into())),
+            ],
+            Some(result_ty(Type::Named("Unit".into()), Type::Named("FileCryptoError".into()))),
+        )),
         ("core.crypto.expert", "ed25519_sign") => Some((
             vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::Named("Signature".into()), Type::Named("CryptoError".into()))),

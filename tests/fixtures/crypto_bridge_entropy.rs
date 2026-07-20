@@ -263,6 +263,107 @@ mod tests {
     }
 
     #[test]
+    fn jetc_v1_migration_reseals_to_verified_v2_without_touching_source() {
+        let root = test_dir("migration");
+        let key = (0u8..32).collect::<Vec<_>>();
+        let nonce = (0u8..12).collect::<Vec<_>>();
+        let plaintext = b"historical migration payload".to_vec();
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let recipients = vec![jet_crypto_x25519_public_typed_impl(&recipient)];
+
+        for (algorithm, ciphertext) in [
+            (1u8, ChaCha20Poly1305::new_from_slice(&key).unwrap().encrypt(ChaNonce::from_slice(&nonce), plaintext.as_slice()).map_err(|_| JetCryptoError::OpenFailed)),
+            (2u8, jet_crypto_expert_aes256gcm_seal_impl(&key, &nonce, &plaintext, &vec![])),
+        ] {
+            let mut v1 = b"JETC".to_vec();
+            v1.extend_from_slice(&[1, algorithm]);
+            v1.extend_from_slice(&nonce);
+            v1.extend_from_slice(&ciphertext.unwrap());
+            let source = root.join(format!("source-{algorithm}.jetc"));
+            let migrated = root.join(format!("migrated-{algorithm}.jetc"));
+            let restored = root.join(format!("restored-{algorithm}.bin"));
+            std::fs::write(&source, &v1).unwrap();
+
+            jet_crypto_expert_migrate_v1_impl(
+                &key,
+                &source.to_string_lossy().into_owned(),
+                recipients.clone(),
+                &migrated.to_string_lossy().into_owned(),
+                never_cancelled,
+            ).unwrap();
+            assert_eq!(std::fs::read(&source).unwrap(), v1);
+            assert_eq!(&std::fs::read(&migrated).unwrap()[..8], b"JETC\x02\x01\x01\x00");
+            jet_crypto_file_open_impl(
+                &recipient,
+                &migrated.to_string_lossy().into_owned(),
+                &restored.to_string_lossy().into_owned(),
+                never_cancelled,
+            ).unwrap();
+            assert_eq!(std::fs::read(restored).unwrap(), plaintext);
+        }
+
+        let source = root.join("source-1.jetc");
+        let original = std::fs::read(&source).unwrap();
+        let existing = root.join("existing.jetc");
+        std::fs::write(&existing, b"keep").unwrap();
+        assert_eq!(
+            jet_crypto_expert_migrate_v1_impl(
+                &key,
+                &source.to_string_lossy().into_owned(),
+                recipients.clone(),
+                &existing.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::DestinationExists)
+        );
+        assert_eq!(std::fs::read(&existing).unwrap(), b"keep");
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+        assert_eq!(
+            jet_crypto_expert_migrate_v1_impl(
+                &key,
+                &source.to_string_lossy().into_owned(),
+                recipients.clone(),
+                &source.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::DestinationExists)
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+
+        let wrong_key_output = root.join("wrong-key.jetc");
+        assert_eq!(
+            jet_crypto_expert_migrate_v1_impl(
+                &vec![9; 32],
+                &source.to_string_lossy().into_owned(),
+                recipients.clone(),
+                &wrong_key_output.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::OpenFailed)
+        );
+        assert!(!wrong_key_output.exists());
+
+        let hostile = root.join("hostile.jetc");
+        let absent = root.join("absent.jetc");
+        std::fs::write(&hostile, b"JETC\x01\x01bad").unwrap();
+        assert_eq!(
+            jet_crypto_expert_migrate_v1_impl(
+                &key,
+                &hostile.to_string_lossy().into_owned(),
+                recipients,
+                &absent.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::OpenFailed)
+        );
+        assert!(!absent.exists());
+        assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+        }));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn bech32m_recipient_parser_rejects_hostile_noncanonical_text() {
         let key = JetX25519PublicKey([0; 32]);
         let canonical = jet_crypto_x25519_public_text_impl(&key);

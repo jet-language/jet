@@ -1,10 +1,12 @@
 // D-CRYPTO-API1=A: raw interoperability stays explicit and @Unsafe-gated.
+use core.crypto as crypto
 use core.crypto.expert as expert
+use core.files as fs
 
 fn run() {
     key: [U8] :: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f]
     nonce: [U8] :: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b]
-    msg: [U8] :: [1, 2, 3]
+    msg: [U8] :: [0x61, 0x62, 0x63]
     box: [U8] := []
     plain: [U8] := []
     historical: [U8] := []
@@ -12,6 +14,16 @@ fn run() {
     bob: [U8] :: [0xde, 0x9e, 0xdb, 0x7d, 0x7b, 0x7d, 0xc1, 0xb4, 0xd3, 0x5b, 0x61, 0xc2, 0xec, 0xe4, 0x35, 0x37, 0x3f, 0x83, 0x43, 0xc8, 0x5b, 0x78, 0x67, 0x4d, 0xad, 0xfc, 0x7e, 0x14, 0x6f, 0x88, 0x2b, 0x4f]
     shared_default: [U8] := []
     shared_override: [U8] := []
+    recipient :: crypto.X25519SecretKey.generate() ?? panic("recipient")
+    source_text :: "/tmp/jet_crypto_migration_v1.jetc"
+    migrated_text :: "/tmp/jet_crypto_migration_v2.jetc"
+    restored_text :: "/tmp/jet_crypto_migration_restored"
+    if fs.exists(source_text) { fs.remove(source_text) ?? panic("migration cleanup") }
+    if fs.exists(migrated_text) { fs.remove(migrated_text) ?? panic("migration cleanup") }
+    if fs.exists(restored_text) { fs.remove(restored_text) ?? panic("migration cleanup") }
+    source :: Path.from(source_text)
+    migrated :: Path.from(migrated_text)
+    restored :: Path.from(restored_text)
     @Unsafe("AES-256-GCM protocol interoperability") {
         box = expert.aes256gcm_seal(key, nonce, msg, []) ?? panic("seal failed")
         plain = expert.aes256gcm_open(key, nonce, box, []) ?? panic("open failed")
@@ -19,6 +31,8 @@ fn run() {
         loop byte; nonce { v1.push(byte) }
         loop byte; box { v1.push(byte) }
         historical = expert.open_v1(key, v1) ?? panic("v1 open failed")
+        source.write_atomic(v1) ?? panic("v1 fixture")
+        expert.migrate_v1(key, source, [recipient.public_key()], migrated) ?? panic("v1 migration failed")
         default_secret := expert.x25519(alice, bob) ?? panic("X25519 failed")
         override_secret := expert.x25519(alice, bob, true) ?? panic("X25519 failed")
         shared_default = expert.secret_bytes(default_secret)
@@ -26,5 +40,11 @@ fn run() {
     }
     print("expert AES ok: {plain == msg}")
     print("expert JETC v1 ok: {historical == msg}")
+    crypto.file_open(&recipient, migrated, restored) ?? panic("migrated v2 open failed")
+    restored_ok :: (fs.read(restored_text) ?? panic("restored read")) == "abc"
+    print("expert JETC v1 migrated: {restored_ok}")
     print("expert X25519 default ok: {shared_default == shared_override}")
+    fs.remove(source_text) ?? panic("migration cleanup")
+    fs.remove(migrated_text) ?? panic("migration cleanup")
+    fs.remove(restored_text) ?? panic("migration cleanup")
 }
