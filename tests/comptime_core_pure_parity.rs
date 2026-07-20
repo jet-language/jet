@@ -138,6 +138,41 @@ fn bit_set_view() -> String {
     return "{empty_before}|{negative_added}|{added_four}|{added_one}|{duplicate_four}|{param_added}|{before_remove}|{count_before}|{len_before}|{has_four}|{after_remove}|{bits.is_empty()}|{bits.count()}|{bits.len()}|{bits.to_list()}"
 }"#;
 const BIT_SET_EXPECTED: &str = "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]";
+const PRIORITY_QUEUE_DECLS: &str = r#"fn push_priority(values: &PriorityQueue<Int>, value: Int) {
+    values.push(value)
+}
+fn counted_priority(hits: &Int) -> PriorityQueue<Int> {
+    hits += 1
+    return PriorityQueue.from([2, 6])
+}
+fn priority_queue_view() -> String {
+    values: PriorityQueue<Int> := PriorityQueue.from([4, 1, 7, 3, 7])
+    initial_len :: values.len()
+    initial_empty :: values.is_empty()
+    initial_peek :: values.peek() ?? -1
+    initial_sorted :: values.to_sorted_list()
+    values.push(5)
+    push_priority(&values, 9)
+    after_push :: values.to_sorted_list()
+    after_push_len :: values.len()
+    popped_nine :: values.pop() ?? -1
+    popped_seven :: values.pop() ?? -1
+    after_pop :: values.to_sorted_list()
+    words: PriorityQueue<String> := PriorityQueue.from(["a", "z", "m"])
+    empty: PriorityQueue<Int> := PriorityQueue.new()
+    receiver_hits := 0
+    counted_values := counted_priority(&receiver_hits)
+    counted_peek :: counted_values.peek() ?? -1
+    counted_values.push(8)
+    values.clear()
+    return "{initial_len}|{initial_empty}|{initial_peek}|{initial_sorted}|{after_push}|{after_push_len}|{popped_nine}|{popped_seven}|{after_pop}|{words.peek() ?? "none"}|{words.to_sorted_list()}|{values.is_empty()}|{values.len()}|{values.peek() ?? -1}|{empty.pop() ?? -1}|{counted_peek}|{counted_values.to_sorted_list()}|{receiver_hits}"
+}"#;
+const PRIORITY_QUEUE_EXPECTED: &str = "5|false|7|[7, 7, 4, 3, 1]|[9, 7, 7, 5, 4, 3, 1]|7|9|7|[7, 5, 4, 3, 1]|z|[z, m, a]|true|0|-1|-1|6|[8, 6, 2]|1";
+const PRIORITY_QUEUE_CALL_RECEIVER_DECLS: &str = r#"fn priority_queue_call_receiver_view() -> String {
+    receiver_hits := 0
+    value :: counted_priority(&receiver_hits).peek() ?? -1
+    return "{value}|{receiver_hits}"
+}"#;
 const SORTED_SET_DECLS: &str = r#"fn add_through_param(values: &SortedSet<Int>, value: Int) -> Bool {
     return values.add(value)
 }
@@ -289,6 +324,27 @@ fn public_transcript_covers_deque_methods_exactly() {
 fn public_transcript_covers_bit_set_methods_exactly() {
     let values = exact_values(&[BIT_SET_DECLS, "bit_set_view()"]);
     assert_eq!(values, [format!("\"{BIT_SET_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_covers_priority_queue_methods_exactly() {
+    let values = exact_values(&[PRIORITY_QUEUE_DECLS, "priority_queue_view()"]);
+    assert_eq!(
+        values,
+        [format!("\"{PRIORITY_QUEUE_EXPECTED}\" : String")]
+    );
+}
+
+#[test]
+fn public_transcript_comptime_only_evaluates_priority_queue_call_receiver_once() {
+    // The public comptime/REPL evaluator supports this read-only call receiver
+    // exactly once. TIR/AOT currently rejects the same nested receiver shape.
+    let values = exact_values(&[
+        PRIORITY_QUEUE_DECLS,
+        PRIORITY_QUEUE_CALL_RECEIVER_DECLS,
+        "priority_queue_call_receiver_view()",
+    ]);
+    assert_eq!(values, ["\"6|1\" : String"]);
 }
 
 #[test]
@@ -552,6 +608,24 @@ fn rustc_backed_bit_set_matches_aot_comptime_forced_interpreter_and_default_dev_
         BIT_SET_EXPECTED
     );
     check_dev_tiers_with_boundary("bit-set", &source, BIT_SET_EXPECTED, true);
+}
+
+#[test]
+fn rustc_backed_priority_queue_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+    // TIR currently rejects a nested call receiver before rustc. Materializing
+    // that producer once into a named place proves the supported evaluation,
+    // mutation, and caller-visible writeback path without hiding the boundary.
+    let source = parity_source("priority_queue_view()", PRIORITY_QUEUE_DECLS);
+    assert_eq!(
+        check_aot_comptime("priority-queue/all-methods", &source),
+        PRIORITY_QUEUE_EXPECTED
+    );
+    check_dev_tiers_with_boundary(
+        "priority-queue",
+        &source,
+        PRIORITY_QUEUE_EXPECTED,
+        true,
+    );
 }
 
 #[test]

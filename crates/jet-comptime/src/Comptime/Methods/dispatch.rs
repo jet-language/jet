@@ -61,6 +61,21 @@ fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Di
     Ok(items)
 }
 
+fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
+    let mut sort_error = None;
+    items.sort_by(|left, right| match cmp(right.clone(), left.clone(), span) {
+        Ok(order) => order,
+        Err(error) => {
+            sort_error.get_or_insert(error);
+            std::cmp::Ordering::Equal
+        }
+    });
+    match sort_error {
+        Some(error) => Err(error),
+        None => Ok(items),
+    }
+}
+
 fn apply_seeded_rng_method(
     state: &mut u64,
     method: &str,
@@ -1364,6 +1379,22 @@ impl<'a> Interp<'a> {
                     fields: vec![("bits".to_string(), CtValue::List(Vec::new()))],
                 });
             }
+            if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE
+                && matches!(method, "new" | "from")
+            {
+                let items = if method == "new" {
+                    Vec::new()
+                } else {
+                    match self.eval(&args[0].expr, scope)? {
+                        CtValue::List(items) => sorted_descending(items, span)?,
+                        _ => return Err(unsupported("PriorityQueue.from with a non-list", span)),
+                    }
+                };
+                return Ok(CtValue::Struct {
+                    type_name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+                    fields: vec![("items".to_string(), CtValue::List(items))],
+                });
+            }
             if type_name == crate::Syntax::TYPE_SORTED_SET
                 && matches!(method, "new" | "from")
             {
@@ -1995,6 +2026,10 @@ impl<'a> Interp<'a> {
                 | "len"
                 | "is_empty"
                 | "clear"
+                | "push"
+                | "pop"
+                | "peek"
+                | "to_sorted_list"
                 | "push_front"
                 | "push_back"
                 | "pop_front"
@@ -2009,6 +2044,72 @@ impl<'a> Interp<'a> {
         ) {
             let peek = self.eval(receiver, scope)?;
             match (&peek, method) {
+                (
+                    CtValue::Struct { type_name, fields },
+                    method @ ("push"
+                        | "pop"
+                        | "peek"
+                        | "to_sorted_list"
+                        | "len"
+                        | "is_empty"
+                        | "clear"),
+                ) if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE => {
+                    let mut items = fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("items", CtValue::List(items)) => Some(items.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut argv = Vec::with_capacity(args.len());
+                    for arg in args {
+                        argv.push(self.eval(&arg.expr, scope)?);
+                    }
+                    let option_none = || {
+                        CtValue::None(match resolved_ret {
+                            Some(Type::Option(inner)) => (**inner).clone(),
+                            _ => Type::Int,
+                        })
+                    };
+                    let mut changed = false;
+                    let result = match method {
+                        "len" => CtValue::Int(items.len() as i64),
+                        "is_empty" => CtValue::Bool(items.is_empty()),
+                        "peek" => items
+                            .first()
+                            .cloned()
+                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                        "to_sorted_list" => CtValue::List(items.clone()),
+                        "push" => {
+                            items.push(argv[0].clone());
+                            items = sorted_descending(items, span)?;
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        "pop" if items.is_empty() => option_none(),
+                        "pop" => {
+                            changed = true;
+                            CtValue::Some(Box::new(items.remove(0)))
+                        }
+                        "clear" => {
+                            items.clear();
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        _ => unreachable!("PriorityQueue method set is closed"),
+                    };
+                    if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                        self.write_back(
+                            receiver,
+                            CtValue::Struct {
+                                type_name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
+                                fields: vec![("items".to_string(), CtValue::List(items))],
+                            },
+                            scope,
+                        )?;
+                    }
+                    return Ok(result);
+                }
                 (
                     CtValue::Struct { type_name, fields },
                     method @ ("add"
