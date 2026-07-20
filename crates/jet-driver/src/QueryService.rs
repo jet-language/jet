@@ -32,6 +32,7 @@ pub struct CompilerQueries {
     engine: QueryEngine,
     sema: HashMap<PathBuf, crate::Sema::IncrementalSemaCache>,
     external_files: HashMap<PathBuf, Vec<PathBuf>>,
+    overlays: HashMap<PathBuf, String>,
     volatile_roots: HashSet<PathBuf>,
 }
 
@@ -42,6 +43,7 @@ impl CompilerQueries {
 
     pub fn check_text(&mut self, path: &str, text: &str, is_lsp: bool) -> CheckedQuery {
         let root = canonical_path(Path::new(path));
+        self.set_document_path(root.clone(), text);
         let path = root.to_string_lossy().into_owned();
         let file = FileKey::new(path.clone());
         let external = external_input(&root);
@@ -50,9 +52,18 @@ impl CompilerQueries {
             .or_insert_with(|| default_external_files(&root));
         self.engine.set_input(
             external.clone(),
-            external_fingerprint(&root, self.external_files.get(&root)),
+            external_fingerprint(
+                &root,
+                self.external_files.get(&root),
+                &self.overlays,
+            ),
         );
-        self.set_file_input(file.clone(), text);
+        let mut overlays = self
+            .overlays
+            .iter()
+            .map(|(path, text)| (path.clone(), text.clone()))
+            .collect::<Vec<_>>();
+        overlays.sort_by(|left, right| left.0.cmp(&right.0));
         let query = QueryKey::for_file(
             if is_lsp { "checked.lsp" } else { "checked" },
             file.clone(),
@@ -68,10 +79,17 @@ impl CompilerQueries {
                     .input_text(&InputKey::file(file.clone()))
                     .unwrap_or_default();
                 let _ = queries.input_text(&external);
+                if let Some((_, source)) = overlays.iter_mut().find(|(path, _)| path == &root) {
+                    *source = text;
+                }
+                let overlay_refs = overlays
+                    .iter()
+                    .map(|(path, text)| (path.as_path(), text.as_str()))
+                    .collect::<Vec<_>>();
                 let (diagnostics, bundle, facts) =
-                    crate::Driver::check_file_with_effect_facts_incremental(
+                    crate::Driver::check_file_with_effect_facts_incremental_overlays(
                         &path,
-                        Some((&root, &text)),
+                        &overlay_refs,
                         is_lsp,
                         sema,
                     );
@@ -105,8 +123,9 @@ impl CompilerQueries {
     }
 
     pub fn lex_text(&mut self, path: &str, text: &str) -> Arc<Vec<crate::Lexer::Token>> {
-        let file = FileKey::new(canonical_path(Path::new(path)).to_string_lossy());
-        self.set_file_input(file.clone(), text);
+        let root = canonical_path(Path::new(path));
+        self.set_document_path(root.clone(), text);
+        let file = FileKey::new(root.to_string_lossy());
         self.engine
             .query(QueryKey::for_file("tokens", file.clone()), |queries| {
                 let text = queries
@@ -118,6 +137,7 @@ impl CompilerQueries {
 
     pub fn remove_document(&mut self, path: &str) {
         let root = canonical_path(Path::new(path));
+        self.overlays.remove(&root);
         let file = FileKey::new(root.to_string_lossy());
         if self
             .engine
@@ -161,9 +181,14 @@ impl CompilerQueries {
         self.engine.recompute_count(key)
     }
 
-    fn set_file_input(&mut self, file: FileKey, text: &str) {
+    pub fn set_document(&mut self, path: &str, text: &str) {
+        self.set_document_path(canonical_path(Path::new(path)), text);
+    }
+
+    fn set_document_path(&mut self, path: PathBuf, text: &str) {
+        self.overlays.insert(path.clone(), text.to_string());
         self.engine
-            .set_input(InputKey::file(file), text.to_string());
+            .set_input(InputKey::file(FileKey::new(path.to_string_lossy())), text.to_string());
     }
 
     fn invalidate_file(&mut self, file: &FileKey) {
@@ -175,8 +200,6 @@ impl CompilerQueries {
 
     fn update_external_state(&mut self, root: &Path, checked: &CheckedQuery) {
         let Some(bundle) = checked.bundle.as_deref() else {
-            self.external_files.remove(root);
-            self.volatile_roots.remove(root);
             return;
         };
         let mut files = bundle
@@ -205,7 +228,7 @@ impl CompilerQueries {
         } else {
             self.volatile_roots.remove(root);
         }
-        let fingerprint = external_fingerprint(root, self.external_files.get(root));
+        let fingerprint = external_fingerprint(root, self.external_files.get(root), &self.overlays);
         self.engine.set_input(external_input(root), fingerprint);
     }
 }
@@ -221,14 +244,22 @@ fn default_external_files(root: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn external_fingerprint(root: &Path, files: Option<&Vec<PathBuf>>) -> String {
+fn external_fingerprint(
+    root: &Path,
+    files: Option<&Vec<PathBuf>>,
+    overlays: &HashMap<PathBuf, String>,
+) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
     for path in files.into_iter().flatten() {
         path.hash(&mut hasher);
-        match std::fs::read(path) {
-            Ok(bytes) => bytes.hash(&mut hasher),
-            Err(error) => error.kind().hash(&mut hasher),
+        if let Some(text) = overlays.get(path) {
+            text.hash(&mut hasher);
+        } else {
+            match std::fs::read(path) {
+                Ok(bytes) => bytes.hash(&mut hasher),
+                Err(error) => error.kind().hash(&mut hasher),
+            }
         }
     }
     format!("{:016x}", hasher.finish())
@@ -435,6 +466,55 @@ mod tests {
             .diagnostics
             .is_empty());
         assert_eq!(service.recompute_count(&checked_key(&main)), 2);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn repaired_import_invalidates_cached_load_failure() {
+        let root = std::env::temp_dir().join(format!("jet-query-repair-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let dependency = root.join("b.jet");
+        let source = "module b;\nfn run() -> Int { return b.value() }\n";
+        let dependency_source = "pub fn value() -> Int { return 1 }\n";
+        std::fs::write(&dependency, dependency_source).unwrap();
+        let mut service = CompilerQueries::new();
+        assert!(service
+            .check_text(&main.to_string_lossy(), source, true)
+            .diagnostics
+            .is_empty());
+
+        std::fs::write(
+            &dependency,
+            "pub fn value() -> Int { return 1 }\n::\n",
+        )
+        .unwrap();
+        let broken = service.check_text(&main.to_string_lossy(), source, true);
+        assert!(broken
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0003"));
+        let recomputes = service.recompute_count(&checked_key(&main));
+        let broken_again = service.check_text(&main.to_string_lossy(), source, true);
+        assert_eq!(
+            diagnostic_summary(&broken.diagnostics),
+            diagnostic_summary(&broken_again.diagnostics)
+        );
+        assert_eq!(service.recompute_count(&checked_key(&main)), recomputes);
+
+        std::fs::write(&dependency, dependency_source).unwrap();
+        let repaired = service.check_text(&main.to_string_lossy(), source, true);
+        let fresh = CompilerQueries::new().check_text(&main.to_string_lossy(), source, true);
+        assert_eq!(
+            diagnostic_summary(&repaired.diagnostics),
+            diagnostic_summary(&fresh.diagnostics)
+        );
+        assert!(!repaired
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0003"));
+        assert!(repaired.diagnostics.is_empty(), "{:#?}", repaired.diagnostics);
         let _ = std::fs::remove_dir_all(root);
     }
 

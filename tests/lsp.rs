@@ -2873,49 +2873,12 @@ fn c40_is_keyword_real_keywords_recognized() {
 }
 
 #[test]
-fn c40_is_keyword_value_is_not_a_keyword() {
+fn c40_value_literal_is_not_a_keyword() {
     // `Val` is LIT_VALUE (a literal, like `true`/`false`/`None`), not a keyword
-    // (D-OPT-SPELL1: renamed from `value`). Rename to "Val" should NOT be
-    // rejected as a keyword.
-    // (It may or may not succeed for other reasons, but not because it's a keyword.)
-    let jet = jet_bin();
-    if !jet.exists() {
-        return;
-    }
-    let source = "fn greet() {}\nfn run() {\n    greet();\n}\n";
-    let uri = "file:///tmp/c40_rename_value.jet";
-
-    run_transcript(
-        source,
-        &[
-            TranscriptStep::Send {
-                msg:
-                    r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
-                        .to_string(),
-                expect_contains: Some(vec!["renameProvider".to_string()]),
-            },
-            TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#.to_string(),
-                expect_contains: None,
-            },
-            TranscriptStep::Open {
-                uri: uri.to_string(),
-                expect_notification: true,
-            },
-            TranscriptStep::Send {
-                msg: format!(
-                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}},"newName":"Val"}}}}"#,
-                    uri
-                ),
-                // Must NOT say "Val is a keyword" — Val is a literal, not a keyword
-                expect_contains: Some(vec!["result".to_string()]),
-            },
-            TranscriptStep::Send {
-                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
-                expect_contains: Some(vec!["result".to_string()]),
-            },
-        ],
-    );
+    // (D-OPT-SPELL1: renamed from `value`). Check the canonical table directly;
+    // using it as a value-like rename target would correctly fail casing first.
+    assert_eq!(jet::Syntax::LIT_VALUE, "Val");
+    assert!(!jet::Syntax::JET_KEYWORD_LIST.contains(&jet::Syntax::LIT_VALUE));
 }
 
 #[test]

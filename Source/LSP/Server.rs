@@ -98,10 +98,11 @@ impl Server {
     }
 
     fn check_with_bundle(&self, doc: &Document) -> CheckedBundle {
-        let checked = self
-            .queries
-            .borrow_mut()
-            .check_text(&doc.path, &doc.text, true);
+        let mut queries = self.queries.borrow_mut();
+        for open in self.docs.values() {
+            queries.set_document(&open.path, &open.text);
+        }
+        let checked = queries.check_text(&doc.path, &doc.text, true);
         CheckedBundle {
             diags: checked.diagnostics.as_ref().clone(),
             bundle: checked.bundle,
@@ -2285,7 +2286,7 @@ mod project_part_tests {
     }
 
     #[test]
-    fn shared_queries_report_hits_and_conservative_invalidation() {
+    fn shared_queries_preserve_unrelated_roots() {
         let root = std::env::temp_dir().join(format!("jet-lsp-queries-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
@@ -2304,9 +2305,9 @@ mod project_part_tests {
 
         let queries = server.queries.borrow();
         let stats = queries.stats();
-        assert_eq!(stats.hits, 1);
-        assert_eq!(stats.recomputes, 4);
-        assert_eq!(stats.live_inputs, 2);
+        assert_eq!(stats.hits, 2);
+        assert_eq!(stats.recomputes, 3);
+        assert_eq!(stats.live_inputs, 4);
         assert_eq!(stats.live_memos, 2);
         assert_eq!(stats.live_query_counters, 2);
         assert_eq!(
@@ -2314,10 +2315,55 @@ mod project_part_tests {
                 "checked.lsp",
                 FileKey::new(b_path)
             )),
-            2,
-            "conservatively invalidated roots recompute on demand"
+            1,
+            "an unrelated root must remain warm"
         );
         drop(queries);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn open_dependency_overlay_invalidates_importer() {
+        let root = std::env::temp_dir().join(format!("jet-lsp-overlay-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main_path = root.join("main.jet");
+        let dependency_path = root.join("b.jet");
+        let main_source = "module b;\nfn run() -> Int { return b.value() }\n";
+        std::fs::write(&dependency_path, "pub fn value() -> Int { return 1 }\n").unwrap();
+        let main_uri = path_to_uri(&main_path.to_string_lossy());
+        let dependency_uri = path_to_uri(&dependency_path.to_string_lossy());
+        let mut server = Server::new();
+        server.docs.insert(
+            main_uri.clone(),
+            Document::new(main_path.to_string_lossy().into_owned(), main_source.into(), 1),
+        );
+        server.docs.insert(
+            dependency_uri.clone(),
+            Document::new(
+                dependency_path.to_string_lossy().into_owned(),
+                "pub fn value() -> String { return \"unsaved\" }\n".into(),
+                1,
+            ),
+        );
+
+        let broken = server.check(server.docs.get(&main_uri).unwrap());
+        assert!(!broken.is_empty(), "the importer must see the unsaved dependency");
+        server
+            .docs
+            .get_mut(&dependency_uri)
+            .unwrap()
+            .replace_text("pub fn value() -> Int { return 2 }\n".into());
+        let repaired = server.check(server.docs.get(&main_uri).unwrap());
+
+        assert!(repaired.is_empty(), "{repaired:#?}");
+        assert_eq!(
+            server.queries.borrow().recompute_count(&QueryKey::for_file(
+                "checked.lsp",
+                FileKey::new(main_path.to_string_lossy())
+            )),
+            2
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 
