@@ -2394,6 +2394,43 @@ fn run() {
 }
 
 #[test]
+fn forced_interpreter_preserves_f32_width_like_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping F32 dev differential");
+        return;
+    }
+    let source = r#"fn pass(value: F32) -> F32 { return value }
+fn run() {
+    value: F32 :: 16777217.0
+    one: F32 :: 1.0
+    mutable: F32 := value
+    mutable += one
+    print(pass(value))
+    print(mutable)
+    print([value, mutable])
+}"#;
+    let dir = common::unique_tmp("jet_dev_f32_width");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("f32_width.jet");
+    fs::write(&path, source).unwrap();
+    let file = path.to_string_lossy();
+    let expected = compiled_binary_output(&dir, "f32_width", 0, "f32-width", &file);
+    let actual = match dev_iteration(&file, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("forced F32 interpreter failed: {diags:?}"),
+    };
+    assert_eq!(actual, expected);
+    assert_eq!(
+        actual.stdout,
+        "16777216.0\n16777216.0\n[16777216.0, 16777216.0]\n"
+    );
+}
+
+#[test]
 fn resident_jit_checked_numeric_and_distinct_conversion_matrix_is_native() {
     if skip_if_cranelift_host_unsupported() {
         return;

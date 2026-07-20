@@ -69,6 +69,52 @@ const CASES: &[&str] = &[
     "BigInt(3).neg().to_string()",
 ];
 
+const F32_VALUE_FLOW: &str = r#"
+fn pass_f32(value: F32) -> F32 {
+    return value
+}
+
+fn apply_f32(transform: fn(F32) -> F32, value: F32) -> F32 {
+    return transform(value)
+}
+
+fn f32_value_flow() -> String {
+    literal: F32 :: 16777217.0
+    one: F32 :: 1.0
+    two: F32 :: 2.0
+    three: F32 :: 3.0
+    threshold: F32 :: 16777215.0
+    immutable: F32 :: literal + one
+    mutable: F32 := literal
+    mutable += one
+    mutable -= two
+    mutable *= three
+    mutable /= two
+    transform: fn(F32) -> F32 :: (value: F32) => value + one
+    same :: pass_f32(literal)
+    wide :: Float.from_f32(literal)
+    narrowed :: F32.from_float(wide) ?? one
+    nested :: [["values": [literal, apply_f32(transform, literal), narrowed]]]
+    option_left :: [[[literal].get(0)]]
+    option_right :: [[[same].get(0)]]
+    result_left :: [[F32.from_float(wide)]]
+    result_right :: [[F32.from_float(Float.from_f32(same))]]
+    negative: F32 :: -literal
+    difference: F32 :: literal - one
+    product: F32 :: literal * two
+    quotient: F32 :: literal / two
+    return "{literal}|{immutable}|{mutable}|{negative}|{difference}|{product}|{quotient}|{literal == same}|{literal > threshold}|{nested[0]["values"]}|{option_left == option_right}|{result_left == result_right}"
+}
+
+comptime expected = f32_value_flow()
+
+fn run() {
+    actual :: f32_value_flow()
+    print("{expected}")
+    print("{actual}")
+}
+"#;
+
 /// card #392: the `use core.X as alias; alias.method(...)` module-call form
 /// needs its own program per case (an inline expression alone can't `use`),
 /// so it gets a dedicated differential loop rather than reusing `CASES`.
@@ -225,6 +271,15 @@ fn comptime_matches_runtime() {
     if !failures.is_empty() {
         panic!("{}", failures.join("\n\n"));
     }
+}
+
+#[test]
+fn comptime_f32_width_survives_value_flow_and_matches_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping F32 differential battery");
+        return;
+    }
+    check_comptime_src(32_000, "F32 value-flow width", F32_VALUE_FLOW);
 }
 
 #[test]
