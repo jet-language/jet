@@ -1,7 +1,15 @@
-Error [E2805]: invalid HTTP route `/assets/*`
-  --> tests/ui/http_route_invalid_literal.jet:9:16
+Error [E2805]: invalid HTTP route `/users/{id}`: brace interpolation is not allowed in route patterns; it is indistinguishable from the retired `{name}` parameter spelling
+  --> tests/ui/http_route_invalid_literal.jet:10:16
     |
-  9 |     router.get("/assets/*", handle)
-    |                ^^^^^^^^^^^
- Why: write a named catch-all such as `*wildcard`
- Fix: use `:name` for one segment and a final `*name` for the remainder; percent-encode a literal leading marker
+ 10 |     router.get("/users/{id}", handle)
+    |                ^^^^^^^^^^^^^
+ Why: route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`
+
+Error [E2805]: invalid HTTP route `/teams/{name}`: use `:name` or final `*name`; braces are not route markers
+  --> tests/ui/http_route_invalid_literal.jet:12:16
+    |
+ 12 |     router.get(doubled, handle)
+    |                ^^^^^^^
+ Why: route patterns use one canonical grammar; ambiguous escapes, traversal, duplicate names, and retired markers would make routing and audit metadata disagree
+ Fix: use `:name` for one segment or final `*name` for a catch-all; percent-encode a literal leading `:` or `*`, and never encode `/`

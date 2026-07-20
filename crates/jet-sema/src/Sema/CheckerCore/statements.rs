@@ -1287,6 +1287,7 @@ impl<'a> Checker<'a> {
                                     sendable: true,
                                     task_lint_span: None,
                                     single_use_span: None,
+                                    constant_value: None,
                                 },
                             );
                             self.memory_control_multiplier = loop_multiplier;
@@ -1643,6 +1644,7 @@ impl<'a> Checker<'a> {
                             sendable: true,
                             task_lint_span: None,
                             single_use_span: None,
+                            constant_value: None,
                         },
                     );
                     self.taskgroup_stack.push(TaskGroupCtx::new(name.clone()));
@@ -1684,6 +1686,7 @@ impl<'a> Checker<'a> {
                             sendable: true,
                             task_lint_span: None,
                             single_use_span: None,
+                            constant_value: None,
                         },
                     );
                     self.push_scope();

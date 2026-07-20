@@ -803,7 +803,7 @@ fn handle(req: HttpRequest) -> HttpResponse {
 }
 fn run() {
     router :: http.router()
-    marker :: \"*\"
+    marker :: http.parse(\"GET * HTTP/1.1\\nHost: localhost\").path()
     pattern :: \"/assets/{marker}\"
     router.get(pattern, handle)
 }

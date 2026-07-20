@@ -636,6 +636,9 @@ pub(crate) struct LocalInfo {
     /// for `view`/`&` borrows (which never own). When still in scope and not in
     /// `moved` at scope end, E0140 fires.
     single_use_span: Option<Span>,
+    /// Pure compile-time value for immutable-local diagnostics and folding.
+    /// This does not make an ordinary local available to `comptime` code.
+    constant_value: Option<crate::Comptime::CtValue>,
 }
 
 /// D-MEM1 S9 / #649: one source-level fact graph for every borrowed window.

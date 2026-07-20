@@ -25,6 +25,7 @@ impl<'a> Checker<'a> {
                     sendable,
                     task_lint_span,
                     single_use_span,
+                    constant_value: None,
                 },
             );
         }

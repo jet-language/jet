@@ -42,6 +42,28 @@ impl<'a> Checker<'a> {
             }
             globals
         }
+
+        pub(crate) fn evaluate_constant(&self, expr: &crate::AST::Expr) -> Option<crate::Comptime::CtValue> {
+            let mut globals = self.current_ct_globals();
+            for scope in &self.scopes {
+                for (name, info) in scope {
+                    if let Some(value) = &info.constant_value {
+                        globals.insert(name.clone(), value.clone());
+                    }
+                }
+            }
+            crate::Comptime::evaluate_owned_with_imports_opts(
+                expr,
+                self.ct_funcs,
+                self.ct_externs,
+                self.ct_base_dir,
+                &globals,
+                self.core_imports,
+                false,
+                0,
+            )
+            .ok()
+        }
     
         pub(crate) fn lookup(&self, name: &str) -> Option<&LocalInfo> {
             self.scopes.iter().rev().find_map(|s| s.get(name))
@@ -114,6 +136,7 @@ impl<'a> Checker<'a> {
                         sendable: true,
                         task_lint_span: None,
                         single_use_span: None,
+                        constant_value: None,
                     },
                 );
             }

@@ -190,6 +190,7 @@ impl<'a> Checker<'a> {
                     sendable: true,
                     task_lint_span: None,
                     single_use_span: None,
+                    constant_value: None,
                 },
             );
             self.uninit.insert(b.name.clone(), b.name_span);
@@ -553,6 +554,9 @@ impl<'a> Checker<'a> {
             let concrete_unit_value = (!b.mutable)
                 .then(|| self.concrete_unit_value(&b.init))
                 .flatten();
+            let constant_value = (!b.mutable)
+                .then(|| self.evaluate_constant(&b.init))
+                .flatten();
             self.declare(
                 &b.name,
                 b.name_span,
@@ -565,6 +569,7 @@ impl<'a> Checker<'a> {
                     sendable: binding_sendable,
                     task_lint_span,
                     single_use_span,
+                    constant_value,
                 },
             );
             if let Some(value) = concrete_unit_value {

@@ -190,6 +190,7 @@ impl<'a> Checker<'a> {
                             sendable: true,
                             task_lint_span: None,
                             single_use_span: None,
+                            constant_value: None,
                         },
                     );
                 }
@@ -235,6 +236,7 @@ impl<'a> Checker<'a> {
                         sendable: true,
                         task_lint_span: None,
                         single_use_span: None,
+                        constant_value: None,
                     },
                 );
             }
@@ -311,6 +313,7 @@ impl<'a> Checker<'a> {
                     sendable: true,
                     task_lint_span: None,
                     single_use_span: None,
+                    constant_value: None,
                 },
             );
             for clause in &mut f.post {
