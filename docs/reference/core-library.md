@@ -520,7 +520,7 @@ fn run() {
 | `expert.migrate_v1(key, source, recipients, destination)` | `() ? FileCryptoError` | Audited `@Unsafe`-only migration from canonical historical JETC v1 to recipient JETC v2; preserves the source and reopen-verifies v2 before atomic publication |
 | `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature ? CryptoError` / `Bool ? CryptoError` | Ed25519 signing and verification with nominal key and signature types |
 | `x25519(secret_key, public_key)` | `SharedSecret ? CryptoError` | X25519 key agreement with nominal key and shared-secret types |
-| `hkdf_sha256(ikm, salt, info, len)` | `Secret ? CryptoError` | HKDF-SHA256 expand without exposing derived secret bytes |
+| `hkdf_sha256(ikm, salt, info, len)` | `Secret ? CryptoError` | HKDF-SHA256 expand with a 0–8160-byte output bound, without exposing derived secret bytes |
 | `password_hash(password)` | `PasswordHash ? CryptoError` | Argon2id password hash with generated salt and safe defaults; accepts a nominal `Secret` |
 | `password_verify(password, stored)` | `Bool ? CryptoError` | Verify a nominal `Secret` against a validated `PasswordHash` |
 | `constant_time_equal(a, b)` | `Bool` | Constant-time comparison of nominal `Secret` values |

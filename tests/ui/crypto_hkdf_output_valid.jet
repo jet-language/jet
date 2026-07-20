@@ -1,0 +1,19 @@
+// D-CRYPTO-DIAG1=A: HKDF boundary literals and dynamic lengths remain valid.
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+fn derive_dynamic(length: Int) {
+    @Unsafe("protocol-selected output length") {
+        dynamic :: expert.hkdf_sha256([1], [], [], length)
+    }
+}
+
+fn run() {
+    safe_min :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 0)
+    safe_max :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 8160)
+    @Unsafe("fixed interop vectors") {
+        expert_min :: expert.hkdf_sha256([1], [], [], 0)
+        expert_max :: expert.hkdf_sha256([1], [], [], 8160)
+    }
+    derive_dynamic(8161)
+}

@@ -35,10 +35,37 @@ fn literal_list_len(expr: &crate::AST::Expr) -> Option<usize> {
     }
 }
 
-fn crypto_expert_nonce_diagnostic(
+fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
+    match expr {
+        crate::AST::Expr::Int(value, ..) => Some(*value),
+        crate::AST::Expr::Paren(inner, _) => literal_int(inner),
+        crate::AST::Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+            literal_int(inner)?.checked_neg()
+        }
+        _ => None,
+    }
+}
+
+fn crypto_misuse_diagnostic(
+    module: &str,
     name: &str,
     args: &[crate::AST::CallArg],
 ) -> Option<Diagnostic> {
+    if matches!(module, "jet.crypto" | "core.crypto" | "core.crypto.expert")
+        && name == "hkdf_sha256"
+    {
+        let length = args.get(3)?;
+        let actual = literal_int(&length.expr)?;
+        if !(0..=8160).contains(&actual) {
+            return Some(Diagnostic::error(
+                "E2702",
+                "crypto API misuse".to_string(),
+                format!("HKDF-SHA256 output length is {actual} bytes; this operation requires 0..8160"),
+                "pass an output length from 0 through 8160 bytes".to_string(),
+                Some(length.expr.span()),
+            ));
+        }
+    }
     let (operation, expected) = match name {
         "xchacha20poly1305_seal" | "xchacha20poly1305_open" =>
             ("XChaCha20-Poly1305", 24),
@@ -2835,7 +2862,7 @@ impl<'a> Checker<'a> {
                 && args.len() == params.len()
                 && self.diags.len() == validation_diag_start
             {
-                if let Some(diagnostic) = crypto_expert_nonce_diagnostic(name, args) {
+                if let Some(diagnostic) = crypto_misuse_diagnostic(module, name, args) {
                     self.fx_pending_diagnostics.push(diagnostic);
                 }
             }
