@@ -64,20 +64,44 @@ fn close_unread_bridge_body(_handle: i64) {
 }
 
 #[test]
-fn lazy_bridge_body_closes_once_when_its_last_owner_drops_unread() {
+fn lazy_bridge_body_closes_once_after_concurrent_final_drops() {
     HTTP_BODY_CLOSES.store(0, std::sync::atomic::Ordering::SeqCst);
-    let body = JetHttpBody::bridge(
-        7,
-        Some(1),
-        unread_bridge_body,
-        close_unread_bridge_body,
-    );
-    let clone = body.clone();
+    for round in 0..64 {
+        let body = JetHttpBody::bridge(
+            round,
+            Some(1),
+            unread_bridge_body,
+            close_unread_bridge_body,
+        );
+        let owners = (0..8).map(|_| body.clone()).collect::<Vec<_>>();
+        drop(body);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(owners.len() + 1));
+        let threads = owners
+            .into_iter()
+            .map(|owner| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    drop(owner);
+                })
+            })
+            .collect::<Vec<_>>();
 
-    drop(body);
-    assert_eq!(HTTP_BODY_CLOSES.load(std::sync::atomic::Ordering::SeqCst), 0);
-    drop(clone);
-    assert_eq!(HTTP_BODY_CLOSES.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            HTTP_BODY_CLOSES.load(std::sync::atomic::Ordering::SeqCst),
+            round as usize,
+            "body closed before its final owners were released",
+        );
+        barrier.wait();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(
+            HTTP_BODY_CLOSES.load(std::sync::atomic::Ordering::SeqCst),
+            round as usize + 1,
+            "concurrent final drops must close exactly once",
+        );
+    }
 }
 
 fn read_response(stream: &mut std::net::TcpStream) -> String {

@@ -166,24 +166,17 @@ struct JetHttpBodyState {
     drained: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-#[derive(Clone)]
-struct JetHttpBody {
-    state: std::sync::Arc<std::sync::Mutex<JetHttpBodyState>>,
-}
-
-impl Drop for JetHttpBody {
+impl Drop for JetHttpBodyState {
     fn drop(&mut self) {
-        if std::sync::Arc::strong_count(&self.state) != 1 {
-            return;
-        }
-        let mut state = match self.state.lock() {
-            Ok(state) => state,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        if let Some(JetHttpBodySource::Bridge { handle, close, .. }) = state.source.take() {
+        if let Some(JetHttpBodySource::Bridge { handle, close, .. }) = self.source.take() {
             close(handle);
         }
     }
+}
+
+#[derive(Clone)]
+struct JetHttpBody {
+    state: std::sync::Arc<std::sync::Mutex<JetHttpBodyState>>,
 }
 
 impl JetHttpBody {
