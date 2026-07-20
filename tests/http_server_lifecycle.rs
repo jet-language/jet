@@ -16,13 +16,40 @@ include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
 
+fn read_response(stream: &mut std::net::TcpStream) -> String {
+    use std::io::Read;
+
+    let mut response = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        let read = stream.read(&mut chunk).expect("response read");
+        if read == 0 {
+            break;
+        }
+        response.extend_from_slice(&chunk[..read]);
+        let Some(header_end) = jet_http_header_end(&response) else { continue };
+        let header = std::str::from_utf8(&response[..header_end]).expect("response header UTF-8");
+        let content_length = header
+            .split("\r\n")
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().expect("response Content-Length"))
+            })
+            .expect("response Content-Length");
+        if response.len() >= header_end + 4 + content_length {
+            response.truncate(header_end + 4 + content_length);
+            break;
+        }
+    }
+    String::from_utf8(response).expect("response UTF-8")
+}
+
 fn request(addr: std::net::SocketAddr, text: &'static [u8]) -> String {
-    use std::io::{Read, Write};
+    use std::io::Write;
     let mut stream = std::net::TcpStream::connect(addr).expect("connect");
     stream.write_all(text).expect("request write");
-    let mut response = String::new();
-    stream.read_to_string(&mut response).expect("response read");
-    response
+    read_response(&mut stream)
 }
 
 #[test]
@@ -155,6 +182,17 @@ fn parser_and_framing_share_validated_headers() {
     assert!(wire.contains("Connection: close\r\n"), "{wire}");
     assert!(!wire.to_ascii_lowercase().contains("transfer-encoding:"), "{wire}");
     assert!(!wire.to_ascii_lowercase().contains("x-smuggle:"), "{wire}");
+
+    for status in [100, 199, 204, 304] {
+        let forbidden = jet_http_srv_format_connection(
+            &jet_http_srv_response(status, &"must-not-publish".to_string()),
+            "HTTP/1.1",
+            false,
+        );
+        let (headers, body) = forbidden.split_once("\r\n\r\n").expect("response framing");
+        assert!(!headers.to_ascii_lowercase().contains("content-length:"), "{forbidden}");
+        assert!(body.is_empty(), "status {status} published a body: {forbidden}");
+    }
 }
 
 #[test]
@@ -184,6 +222,151 @@ fn serve_once_accept_has_a_deadline() {
     .expect_err("accept should time out");
     assert!(error.contains("timed out"), "{error}");
     assert!(started.elapsed() < std::time::Duration::from_millis(250));
+}
+
+#[test]
+fn plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries() {
+    use std::io::{Read, Write};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream
+            .shutdown(std::net::Shutdown::Write)
+            .expect("finish request write");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("response read");
+        response
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+    let mux = jet_http_mux_new();
+    jet_http_mux_add(&mux, "POST", "/one", |req| jet_http_srv_response(200, &req.body));
+    jet_http_mux_add(&mux, "GET", "/two", |_| jet_http_srv_response(200, &"two".to_string()));
+    jet_http_mux_add(&mux, "GET", "/empty", |_| jet_http_srv_response(204, &"forbidden".to_string()));
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 5;
+    options.read_header_timeout = std::time::Duration::from_millis(40);
+    options.read_idle_timeout = std::time::Duration::from_millis(40);
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    let pipelined = exchange(
+        addr,
+        b"POST /one HTTP/1.1\r\nHost: local\r\nContent-Length: 3\r\n\r\noneGET /two HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    let one = pipelined.find("\r\n\r\none").expect("first response");
+    let two = pipelined.find("\r\n\r\ntwo").expect("second response");
+    assert!(one < two, "pipelined responses reordered: {pipelined}");
+    assert_eq!(pipelined.matches("HTTP/1.1 200 OK").count(), 2, "{pipelined}");
+    assert_eq!(pipelined.matches("Connection: close").count(), 1, "{pipelined}");
+
+    let http10 = exchange(
+        addr,
+        b"GET /two HTTP/1.0\r\nHost: local\r\n\r\nGET /two HTTP/1.0\r\nHost: local\r\n\r\n",
+    );
+    assert_eq!(http10.matches("HTTP/1.0 200 OK").count(), 1, "{http10}");
+    assert_eq!(http10.matches("Connection: close").count(), 1, "{http10}");
+
+    let http10_keepalive = exchange(
+        addr,
+        b"GET /two HTTP/1.0\r\nHost: local\r\nConnection: keep-alive\r\n\r\nGET /two HTTP/1.0\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(http10_keepalive.matches("HTTP/1.0 200 OK").count(), 2, "{http10_keepalive}");
+    assert_eq!(http10_keepalive.matches("Connection: close").count(), 1, "{http10_keepalive}");
+
+    let capped_request = "GET /two HTTP/1.1\r\nHost: local\r\n\r\n".repeat(1001);
+    let capped = exchange(addr, capped_request.as_bytes());
+    assert_eq!(capped.matches("HTTP/1.1 200 OK").count(), 1000, "{capped}");
+    assert_eq!(capped.matches("Connection: close").count(), 1, "{capped}");
+
+    let mut partial = std::net::TcpStream::connect(addr).expect("partial connect");
+    partial
+        .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+        .expect("partial read timeout");
+    partial
+        .write_all(b"GET /two HTTP/1.1\r\nHost: local\r\n\r\nGET /two HTTP/1.1\r\nHost:")
+        .expect("partial pipeline write");
+    let mut partial_response = String::new();
+    partial.read_to_string(&mut partial_response).expect("partial pipeline response");
+    assert_eq!(partial_response.matches("HTTP/1.1 200 OK").count(), 1, "{partial_response}");
+    assert_eq!(partial_response.matches("HTTP/1.1 408 Request Timeout").count(), 1, "{partial_response}");
+    assert!(partial_response.ends_with("Connection: close\r\n\r\n"), "{partial_response}");
+
+    let body_forbidden = exchange(
+        addr,
+        b"GET /empty HTTP/1.1\r\nHost: local\r\n\r\nGET /two HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    let next = body_forbidden.find("HTTP/1.1 200 OK").expect("response after 204");
+    let no_content = &body_forbidden[..next];
+    assert!(no_content.starts_with("HTTP/1.1 204 No Content\r\n"), "{body_forbidden}");
+    assert!(!no_content.to_ascii_lowercase().contains("content-length:"), "{body_forbidden}");
+    assert!(!body_forbidden.contains("forbidden"), "{body_forbidden}");
+    assert!(body_forbidden.ends_with("\r\n\r\ntwo"), "{body_forbidden}");
+
+    for version in ["HTTP/2.0", "garbage"] {
+        let invalid = exchange(
+            addr,
+            format!("GET /two {version}\r\nHost: local\r\n\r\nGET /two HTTP/1.1\r\nHost: local\r\n\r\n").as_bytes(),
+        );
+        assert_eq!(invalid.matches("HTTP/1.1 505 HTTP Version Not Supported").count(), 1, "{invalid}");
+        assert!(!invalid.contains("200 OK"), "unsupported version persisted: {invalid}");
+        assert!(invalid.ends_with("Connection: close\r\n\r\n"), "{invalid}");
+    }
+
+    shutdown.store(true, std::sync::atomic::Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 8);
+    assert_eq!(report.user_completed, 8);
+    assert_eq!(JET_HTTP_KEEPALIVE_IDLE_TIMEOUT, std::time::Duration::from_secs(60));
+    assert_eq!(JET_HTTP_MAX_REQUESTS_PER_CONNECTION, 1000);
+}
+
+#[test]
+fn shutdown_closes_idle_keepalive_and_starts_no_new_request() {
+    use std::io::Write;
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("local addr");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/", move |_| {
+        handler_calls.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        jet_http_srv_response(200, &"ok".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 2;
+    options.admission_queue = 2;
+    options.shutdown_grace = std::time::Duration::from_millis(500);
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    let mut active = std::net::TcpStream::connect(addr).expect("active connect");
+    let mut idle = std::net::TcpStream::connect(addr).expect("idle connect");
+    active.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n").expect("active first request");
+    idle.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n").expect("idle first request");
+    assert!(read_response(&mut active).ends_with("\r\n\r\nok"));
+    assert!(read_response(&mut idle).ends_with("\r\n\r\nok"));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::Acquire), 2);
+    std::thread::sleep(std::time::Duration::from_millis(40));
+
+    let started = std::time::Instant::now();
+    shutdown.store(true, std::sync::atomic::Ordering::Release);
+    let _ = active.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+    let report = server.join().expect("server join");
+    assert!(started.elapsed() < std::time::Duration::from_millis(250), "idle keepalive consumed grace");
+    assert_eq!(calls.load(std::sync::atomic::Ordering::Acquire), 2, "shutdown started a keepalive request");
+    assert_eq!(report.user_accepted, 2);
+    assert_eq!(report.user_completed, 2);
 }
 
 #[test]
@@ -299,7 +482,7 @@ fn shutdown_grace_cancels_straggler_socket_and_returns_bounded_report() {
 
 #[test]
 fn server_handle_binds_serves_and_rejects_second_shutdown() {
-    use std::io::{Read, Write};
+    use std::io::Write;
     let mux = jet_http_mux_new();
     jet_http_mux_add(&mux, "GET", "/", |_| jet_http_srv_response(200, &"handle".to_string()));
     let server = jet_http_server_bind(&"127.0.0.1:0".to_string(), mux).expect("bind");
@@ -308,8 +491,7 @@ fn server_handle_binds_serves_and_rejects_second_shutdown() {
     let serve_thread = std::thread::spawn(move || jet_http_server_serve(&serving).expect("serve"));
     let mut client = std::net::TcpStream::connect(addr).expect("connect");
     client.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n").expect("write");
-    let mut response = String::new();
-    client.read_to_string(&mut response).expect("read");
+    let response = read_response(&mut client);
     assert!(response.contains("handle"));
     let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 100 }).expect("shutdown");
     assert_eq!(report.user_completed, 1);

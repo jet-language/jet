@@ -472,6 +472,8 @@ Card 301 audit state:
 | Router params and wildcard routes | Shipped: `:name` params plus final `*` wildcard (`param("wildcard")`) |
 | SSE, static files, Range, access log, request body limits | Shipped: server helpers above |
 | Bounded hostile request parsing | Partial: HTTP/1.1 rejects headers over 32 KiB, more than 100 headers, request lines over 8 KiB, bodies over 1 MiB, ambiguous Content-Length, Content-Length with Transfer-Encoding, folded headers, and malformed framing before dispatch |
+| Persistent connections | Partial: the dependency-free plain HTTP/1.x server preserves pipelined request boundaries, responds sequentially in wire order, idles for at most 60 seconds, stops keep-alive reuse promptly during shutdown, and closes after 1,000 requests; TLS persistence and HTTP/2 remain open |
+| HTTP/1 response framing | Partial: only HTTP/1.0 and HTTP/1.1 requests reach handlers; unsupported versions close with 505, and 1xx/204/304 responses publish neither body bytes nor Content-Length; streaming, trailers, and HTTP/2 remain open |
 | Bounded streaming bodies | Not shipped: request and response bodies are still buffered `String` values rather than D-HTTP-CORE2 streaming byte bodies with backpressure |
 | Transparent Content-Encoding decoding | Not shipped: gzip and other content-coding support remains open under D-DEP-HTTP2=B; the compatibility text cap applies only after HTTP transfer framing is decoded |
 | Graceful shutdown | Not shipped: `serve_once*` is a deterministic test entrypoint, not the D-HTTP-SERVER2 drain/cancel/report lifecycle |

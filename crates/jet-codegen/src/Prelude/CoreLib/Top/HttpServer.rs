@@ -2,6 +2,9 @@
 // Plain HTTP is pure std. D-TLSSERVE1=A routes server TLS through the hidden
 // rustls bridge only when the named `tls:` option is used.
 
+const JET_HTTP_KEEPALIVE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const JET_HTTP_MAX_REQUESTS_PER_CONNECTION: usize = 1000;
+
 #[derive(Clone)]
 struct JetHttpSrvResp {
     status: i64,
@@ -254,6 +257,7 @@ fn jet_http_server_run_listener(
         let worker_active = active.clone();
         let worker_completed = completed.clone();
         let worker_force_cancel = force_cancel.clone();
+        let worker_shutdown = shutdown.clone();
         workers.push(std::thread::spawn(move || loop {
             let received = worker_rx.lock().unwrap().recv();
             let Ok(mut stream) = received else { break };
@@ -262,7 +266,7 @@ fn jet_http_server_run_listener(
                 continue;
             }
             if let Ok(tracked) = stream.try_clone() { worker_active.lock().unwrap().push(tracked); }
-            jet_http_server_handle_stream(&mut stream, &worker_mux, &worker_options);
+            jet_http_server_handle_stream(&mut stream, &worker_mux, &worker_options, &worker_shutdown);
             worker_completed.fetch_add(1, Ordering::Relaxed);
             worker_active.lock().unwrap().retain(|tracked| tracked.peer_addr().ok() != stream.peer_addr().ok());
         }));
@@ -313,21 +317,59 @@ fn jet_http_server_run_listener(
     Ok(report)
 }
 
-fn jet_http_server_handle_stream(stream: &mut std::net::TcpStream, mux: &JetHttpMux, options: &JetHttpServerOptions) {
+fn jet_http_server_handle_stream(
+    stream: &mut std::net::TcpStream,
+    mux: &JetHttpMux,
+    options: &JetHttpServerOptions,
+    shutdown: &std::sync::atomic::AtomicBool,
+) {
     use std::io::Write;
-    let raw = match jet_http_srv_read_with_limits(stream, options) {
-        Ok(raw) => raw,
-        Err(error) => { let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes()); return; }
-    };
-    let request = match jet_http_srv_parse(&raw) {
-        Ok(request) => request,
-        Err(error) => {
-            let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes());
+    use std::sync::atomic::Ordering;
+
+    let mut pending = Vec::new();
+    for request_index in 0..JET_HTTP_MAX_REQUESTS_PER_CONNECTION {
+        if request_index > 0 && shutdown.load(Ordering::Acquire) {
             return;
         }
-    };
-    let response = jet_http_mux_dispatch(mux, request);
-    let _ = stream.write_all(jet_http_srv_format(&response).as_bytes());
+        let raw = match jet_http_srv_read_buffered(
+            stream,
+            options,
+            &mut pending,
+            request_index > 0,
+            (request_index > 0).then_some(shutdown),
+        ) {
+            Ok(Some(raw)) => raw,
+            Ok(None) => return,
+            Err(error) => {
+                let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes());
+                return;
+            }
+        };
+        if request_index > 0 && shutdown.load(Ordering::Acquire) {
+            return;
+        }
+        let request = match jet_http_srv_parse(&raw) {
+            Ok(request) => request,
+            Err(error) => {
+                let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes());
+                return;
+            }
+        };
+        let request_version = jet_http_srv_request_version(&raw);
+        let close = !jet_http_srv_request_keep_alive(request_version, &request.headers)
+            || request_index + 1 == JET_HTTP_MAX_REQUESTS_PER_CONNECTION;
+        if request_index > 0 && shutdown.load(Ordering::Acquire) {
+            return;
+        }
+        let response = jet_http_mux_dispatch(mux, request);
+        if stream
+            .write_all(jet_http_srv_format_connection(&response, request_version, close).as_bytes())
+            .is_err()
+            || close
+        {
+            return;
+        }
+    }
 }
 
 fn jet_http_mux_serve_once(addr: &String, mux: JetHttpMux) -> Result<(), String> {
@@ -393,55 +435,135 @@ fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<String, JetHttp
 }
 
 fn jet_http_srv_read_with_limits(stream: &mut std::net::TcpStream, options: &JetHttpServerOptions) -> Result<String, JetHttpReadError> {
+    let mut pending = Vec::new();
+    jet_http_srv_read_buffered(stream, options, &mut pending, false, None)?.ok_or(JetHttpReadError {
+        status: 400,
+        message: "request ended before its declared framing was complete",
+    })
+}
+
+fn jet_http_srv_read_buffered(
+    stream: &mut std::net::TcpStream,
+    options: &JetHttpServerOptions,
+    pending: &mut Vec<u8>,
+    keep_alive: bool,
+    shutdown: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<Option<String>, JetHttpReadError> {
     use std::io::Read;
+    use std::sync::atomic::Ordering;
     const MAX_HEADER_BYTES: usize = 32 * 1024;
     const MAX_BODY_BYTES: usize = 1024 * 1024;
-    let mut raw = Vec::new();
+    const SHUTDOWN_POLL: std::time::Duration = std::time::Duration::from_millis(20);
     let mut buf = [0u8; 8192];
-    let mut complete = false;
-    let header_deadline = std::time::Instant::now() + options.read_header_timeout;
     let mut reading_body = false;
-    loop {
-        let timeout = if reading_body {
-            options.read_body_timeout.min(options.read_idle_timeout)
+    let started = std::time::Instant::now();
+    let mut header_deadline = (!keep_alive || !pending.is_empty()).then(|| started + options.read_header_timeout);
+    let mut idle_deadline = started
+        + if header_deadline.is_some() {
+            options.read_idle_timeout
         } else {
-            header_deadline.saturating_duration_since(std::time::Instant::now()).min(options.read_idle_timeout)
+            JET_HTTP_KEEPALIVE_IDLE_TIMEOUT
         };
-        if timeout.is_zero() { return Err(JetHttpReadError { status: 408, message: "request timed out" }); }
-        stream.set_read_timeout(Some(timeout)).map_err(|_| JetHttpReadError { status: 400, message: "request read failed" })?;
-        let n = stream
-            .read(&mut buf)
-            .map_err(|error| if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) { JetHttpReadError { status: 408, message: "request timed out" } } else { JetHttpReadError { status: 400, message: "request read failed" } })?;
-        if n == 0 {
-            break;
-        }
-        raw.extend_from_slice(&buf[..n]);
-        if let Some(header_end) = jet_http_header_end(&raw) {
+    loop {
+        if let Some(header_end) = jet_http_header_end(pending) {
             if header_end > MAX_HEADER_BYTES {
                 return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
             }
-            let content_len = jet_http_validate_headers(&raw[..header_end])?;
+            let content_len = jet_http_validate_headers(&pending[..header_end])?;
             if content_len > MAX_BODY_BYTES {
                 return Err(JetHttpReadError { status: 413, message: "request body is too large" });
             }
-            let body_start = header_end + 4;
-            reading_body = true;
-            if raw.len().saturating_sub(body_start) >= content_len {
-                raw.truncate(body_start + content_len);
-                complete = true;
-                break;
+            let request_end = header_end + 4 + content_len;
+            if !reading_body {
+                reading_body = true;
+                idle_deadline = std::time::Instant::now()
+                    + options.read_body_timeout.min(options.read_idle_timeout);
             }
-        } else if raw.len() > MAX_HEADER_BYTES {
+            if pending.len() >= request_end {
+                let request = pending.drain(..request_end).collect::<Vec<_>>();
+                return String::from_utf8(request)
+                    .map(Some)
+                    .map_err(|_| JetHttpReadError { status: 400, message: "request is not valid UTF-8" });
+            }
+        } else if pending.len() > MAX_HEADER_BYTES {
             return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
         }
+
+        let deadline = if reading_body {
+            idle_deadline
+        } else if let Some(deadline) = header_deadline {
+            deadline.min(idle_deadline)
+        } else {
+            idle_deadline
+        };
+        let timeout = deadline.saturating_duration_since(std::time::Instant::now());
+        if timeout.is_zero() {
+            let between_requests = keep_alive && pending.is_empty() && header_deadline.is_none();
+            if between_requests {
+                return Ok(None);
+            }
+            return Err(JetHttpReadError { status: 408, message: "request timed out" });
+        }
+        let socket_timeout = if shutdown.is_some() { timeout.min(SHUTDOWN_POLL) } else { timeout };
+        stream.set_read_timeout(Some(socket_timeout)).map_err(|_| JetHttpReadError { status: 400, message: "request read failed" })?;
+        let n = match stream.read(&mut buf) {
+            Ok(n) => n,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                let between_requests = keep_alive && pending.is_empty() && header_deadline.is_none();
+                if between_requests && shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+                    return Ok(None);
+                }
+                if std::time::Instant::now() < deadline {
+                    continue;
+                }
+                if between_requests {
+                    return Ok(None);
+                }
+                return Err(JetHttpReadError { status: 408, message: "request timed out" });
+            }
+            Err(_) => return Err(JetHttpReadError { status: 400, message: "request read failed" }),
+        };
+        if n == 0 {
+            if pending.is_empty() {
+                return Ok(None);
+            }
+            return Err(JetHttpReadError {
+                status: 400,
+                message: "request ended before its declared framing was complete",
+            });
+        }
+        pending.extend_from_slice(&buf[..n]);
+        let now = std::time::Instant::now();
+        if header_deadline.is_none() {
+            header_deadline = Some(now + options.read_header_timeout);
+        }
+        idle_deadline = now
+            + if reading_body {
+                options.read_body_timeout.min(options.read_idle_timeout)
+            } else {
+                options.read_idle_timeout
+            };
     }
-    if !complete {
-        return Err(JetHttpReadError {
-            status: 400,
-            message: "request ended before its declared framing was complete",
-        });
+}
+
+fn jet_http_srv_request_version(raw: &str) -> &str {
+    raw
+        .split_once("\r\n")
+        .and_then(|(line, _)| line.split_whitespace().nth(2))
+        .filter(|version| matches!(*version, "HTTP/1.0" | "HTTP/1.1"))
+        .unwrap_or("HTTP/1.1")
+}
+
+fn jet_http_srv_request_keep_alive(version: &str, headers: &JetHttpHeaders) -> bool {
+    let mut close = false;
+    let mut keep_alive = false;
+    for value in headers.all("connection") {
+        for token in value.split(',').map(str::trim) {
+            close |= token.eq_ignore_ascii_case("close");
+            keep_alive |= token.eq_ignore_ascii_case("keep-alive");
+        }
     }
-    String::from_utf8(raw).map_err(|_| JetHttpReadError { status: 400, message: "request is not valid UTF-8" })
+    !close && (version == "HTTP/1.1" || (version == "HTTP/1.0" && keep_alive))
 }
 
 fn jet_http_header_end(raw: &[u8]) -> Option<usize> {
@@ -453,8 +575,16 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<usize, JetHttpReadError> {
         .map_err(|_| JetHttpReadError { status: 400, message: "request headers are not valid UTF-8" })?;
     let mut lines = text.split("\r\n");
     let request_line = lines.next().unwrap_or("");
-    if request_line.len() > 8 * 1024 || request_line.split(' ').count() != 3 {
+    let mut request_parts = request_line.split(' ');
+    let request_shape = (request_parts.next(), request_parts.next(), request_parts.next(), request_parts.next());
+    let (Some(method), Some(target), Some(version), None) = request_shape else {
         return Err(JetHttpReadError { status: 400, message: "request line is malformed" });
+    };
+    if request_line.len() > 8 * 1024 || method.is_empty() || target.is_empty() {
+        return Err(JetHttpReadError { status: 400, message: "request line is malformed" });
+    }
+    if !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
+        return Err(JetHttpReadError { status: 505, message: "HTTP version is not supported" });
     }
     let mut count = 0usize;
     let mut content_length = None;
@@ -500,6 +630,7 @@ fn jet_http_srv_read_error_response(error: &JetHttpReadError) -> String {
         431 => "Request Header Fields Too Large",
         408 => "Request Timeout",
         503 => "Service Unavailable",
+        505 => "HTTP Version Not Supported",
         _ => "Bad Request",
     };
     format!(
@@ -688,13 +819,20 @@ fn jet_http_mux_validate(mux: &JetHttpMux) -> Result<(), String> {
 }
 
 fn jet_http_srv_format(resp: &JetHttpSrvResp) -> String {
+    jet_http_srv_format_connection(resp, "HTTP/1.1", true)
+}
+
+fn jet_http_srv_format_connection(resp: &JetHttpSrvResp, version: &str, close: bool) -> String {
     let reason = match resp.status {
+        100 => "Continue",
+        101 => "Switching Protocols",
         200 => "OK",
         201 => "Created",
         204 => "No Content",
         206 => "Partial Content",
         301 => "Moved Permanently",
         302 => "Found",
+        304 => "Not Modified",
         400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
@@ -702,14 +840,15 @@ fn jet_http_srv_format(resp: &JetHttpSrvResp) -> String {
         405 => "Method Not Allowed",
         416 => "Range Not Satisfiable",
         500 => "Internal Server Error",
+        505 => "HTTP Version Not Supported",
         _ => "OK",
     };
-    let mut out = format!(
-        "HTTP/1.1 {} {}\r\nContent-Length: {}\r\nConnection: close\r\n",
-        resp.status,
-        reason,
-        resp.body.len()
-    );
+    let body_forbidden = (100..200).contains(&resp.status) || matches!(resp.status, 204 | 304);
+    let mut out = format!("{} {} {}\r\n", version, resp.status, reason);
+    if !body_forbidden {
+        out.push_str(&format!("Content-Length: {}\r\n", resp.body.len()));
+    }
+    out.push_str(&format!("Connection: {}\r\n", if close { "close" } else { "keep-alive" }));
     let connection_headers = resp
         .headers
         .all("connection")
@@ -730,7 +869,9 @@ fn jet_http_srv_format(resp: &JetHttpSrvResp) -> String {
         }
     }
     out.push_str("\r\n");
-    out.push_str(&resp.body);
+    if !body_forbidden {
+        out.push_str(&resp.body);
+    }
     out
 }
 
