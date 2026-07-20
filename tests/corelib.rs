@@ -5457,12 +5457,28 @@ fn core_http_client_rejects_invalid_redirect_limits_before_transport() {
                         .and_then(|line| line.split_ascii_whitespace().nth(1))
                         .unwrap();
                     server_requests.lock().unwrap().push(target.to_string());
-                    let response: &[u8] = match target {
-                        "/redirect" => b"HTTP/1.1 302 Found\r\nLocation: /target\r\nContent-Length: 8\r\nConnection: close\r\n\r\nredirect",
-                        "/target" => b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
-                        _ => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    let response = match target {
+                        "/redirect" => "HTTP/1.1 302 Found\r\nLocation: /target\r\nContent-Length: 8\r\nConnection: close\r\n\r\nredirect".to_string(),
+                        "/target" => "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_string(),
+                        _ => {
+                            let (chain, step) = target.rsplit_once('/').unwrap();
+                            let step = step.parse::<usize>().unwrap();
+                            let final_step = match chain {
+                                "/within" => 10,
+                                "/over" => 11,
+                                _ => panic!("unexpected target {target}"),
+                            };
+                            if step == final_step {
+                                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_string()
+                            } else {
+                                format!(
+                                    "HTTP/1.1 302 Found\r\nLocation: {chain}/{}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                                    step + 1
+                                )
+                            }
+                        }
                     };
-                    stream.write_all(response).unwrap();
+                    stream.write_all(response.as_bytes()).unwrap();
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(std::time::Duration::from_millis(1));
@@ -5489,7 +5505,8 @@ fn core_http_client_rejects_invalid_redirect_limits_before_transport() {
         &harness,
         r#"
 fn main() {
-    let url = std::env::args().nth(1).unwrap();
+    let base = std::env::args().nth(1).unwrap();
+    let url = format!("{base}/redirect");
     let errors = [-1, i64::from(u32::MAX) + 1].into_iter().map(|redirects| {
         bridge::jet_http_client_send_impl(
             "GET", &url, &[], None, None, None, None, None, Some(redirects), None,
@@ -5510,6 +5527,21 @@ fn main() {
         Some(i64::from(u32::MAX)), None, &[], &[], &[],
     ).unwrap();
     assert_eq!((followed.0, followed.1.as_str()), (200, "ok"));
+    let explicit = bridge::jet_http_client_send_impl(
+        "GET", &url, &[], None, None, None, None, None, Some(1), None,
+        &[], &[], &[],
+    ).unwrap_err();
+    assert_eq!(explicit, "HTTP redirect limit 1 exceeded");
+    let within = bridge::jet_http_client_send_impl(
+        "GET", &format!("{base}/within/0"), &[], None, None, None, None, None,
+        None, None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!((within.0, within.1.as_str()), (200, "ok"));
+    let over = bridge::jet_http_client_send_impl(
+        "GET", &format!("{base}/over/0"), &[], None, None, None, None, None,
+        None, None, &[], &[], &[],
+    ).unwrap_err();
+    assert_eq!(over, "HTTP redirect limit 10 exceeded");
 }
 "#,
     )
@@ -5537,7 +5569,7 @@ fn main() {
         String::from_utf8_lossy(&built.stderr)
     );
     let output = Command::new(&bin)
-        .arg(format!("http://{addr}/redirect"))
+        .arg(format!("http://{addr}"))
         .output()
         .unwrap();
     stop.store(true, Ordering::Release);
@@ -5549,12 +5581,18 @@ fn main() {
     );
     assert_eq!(
         accepted.load(Ordering::Acquire),
-        3,
+        26,
         "invalid redirect limit reached transport or redirect boundary behavior changed"
     );
+    let expected = ["/redirect", "/redirect", "/target", "/redirect"]
+        .into_iter()
+        .map(str::to_string)
+        .chain((0..=10).map(|step| format!("/within/{step}")))
+        .chain((0..=10).map(|step| format!("/over/{step}")))
+        .collect::<Vec<_>>();
     assert_eq!(
         *requests.lock().unwrap(),
-        vec!["/redirect", "/redirect", "/target"],
+        expected,
         "redirect boundaries sent an unexpected request sequence"
     );
     let _ = fs::remove_dir_all(&dir);

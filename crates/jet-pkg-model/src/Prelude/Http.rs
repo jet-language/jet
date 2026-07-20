@@ -11,6 +11,7 @@ use std::time::Duration;
 
 const HTTP_CLIENT_TEXT_LIMIT: usize = 8 * 1024 * 1024;
 const HTTP_CLIENT_READ_CHUNK: usize = 64 * 1024;
+const HTTP_CLIENT_DEFAULT_REDIRECTS: u32 = 10;
 
 fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, String> {
     let milliseconds = u64::try_from(milliseconds)
@@ -82,16 +83,17 @@ pub fn jet_http_client_send_impl(
             })
         })
         .transpose()?;
+    let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
+    let backend_redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS + 1);
     let mut builder = ureq::AgentBuilder::new()
         .timeout_connect(connect_timeout)
         .timeout_read(read_timeout)
         .timeout_write(default_timeout)
-        .try_proxy_from_env(true);
+        .try_proxy_from_env(true)
+        // ureq errors when its count reaches this value, so Jet's ten follows need eleven.
+        .redirects(backend_redirect_limit);
     if let Some(timeout) = total_timeout {
         builder = builder.timeout(timeout);
-    }
-    if let Some(n) = redirects {
-        builder = builder.redirects(n);
     }
     if let Some(p) = proxy {
         builder = builder.proxy(ureq::Proxy::new(p).map_err(|e| e.to_string())?);
@@ -145,6 +147,11 @@ pub fn jet_http_client_send_impl(
             let flat = flatten_response_headers(&resp);
             let body = read_response_text(resp)?;
             Ok((code as i64, body, flat))
+        }
+        Err(ureq::Error::Transport(error))
+            if error.kind() == ureq::ErrorKind::TooManyRedirects =>
+        {
+            Err(format!("HTTP redirect limit {redirect_limit} exceeded"))
         }
         Err(e) => Err(e.to_string()),
     }
