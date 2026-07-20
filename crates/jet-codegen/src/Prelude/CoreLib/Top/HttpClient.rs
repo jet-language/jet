@@ -8,7 +8,8 @@
 struct JetHttpClientReq {
     method: String,
     url: String,
-    headers: Vec<String>, // alternating key, value pairs
+    headers: JetHttpHeaders,
+    header_error: Option<String>,
     body: Option<String>,
     timeout_ms: Option<i64>,
     connect_timeout_ms: Option<i64>,
@@ -25,14 +26,15 @@ struct JetHttpClientReq {
 struct JetHttpClientResp {
     status: i64,
     body: String,
-    headers: Vec<String>, // alternating key, value pairs
+    headers: JetHttpHeaders,
 }
 
 fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpClientReq {
     JetHttpClientReq {
         method: method.clone(),
         url: url.clone(),
-        headers: Vec::new(),
+        headers: JetHttpHeaders::new(),
+        header_error: None,
         body: None,
         timeout_ms: None,
         connect_timeout_ms: None,
@@ -51,8 +53,9 @@ fn jet_http_client_request_header(
     name: &String,
     value: &String,
 ) -> JetHttpClientReq {
-    req.headers.push(name.clone());
-    req.headers.push(value.clone());
+    if let Err(error) = req.headers.append(name, value) {
+        req.header_error = Some(error);
+    }
     req
 }
 
@@ -131,22 +134,13 @@ fn jet_http_client_response_body(resp: &JetHttpClientResp) -> String {
     resp.body.clone()
 }
 fn jet_http_client_response_header(resp: &JetHttpClientResp, name: &String) -> Option<String> {
-    let name_lc = name.to_lowercase();
-    let mut i = 0;
-    while i + 1 < resp.headers.len() {
-        if resp.headers[i].to_lowercase() == name_lc {
-            return Some(resp.headers[i + 1].clone());
-        }
-        i += 2;
-    }
-    None
+    resp.headers.get(name).cloned()
 }
 
 fn jet_http_client_response_cookies(resp: &JetHttpClientResp) -> Vec<String> {
     resp.headers
-        .chunks(2)
-        .filter(|chunk| chunk.len() == 2 && chunk[0].to_lowercase() == "set-cookie")
-        .map(|chunk| chunk[1].clone())
+        .all("set-cookie")
+        .into_iter()
+        .map(str::to_string)
         .collect()
 }
-

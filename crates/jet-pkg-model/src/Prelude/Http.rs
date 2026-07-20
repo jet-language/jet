@@ -116,38 +116,28 @@ pub fn jet_http_client_send_impl(
     match result {
         Ok(resp) => {
             let status = resp.status() as i64;
-            let known = [
-                "content-type",
-                "content-length",
-                "location",
-                "server",
-                "date",
-                "cache-control",
-                "etag",
-                "last-modified",
-                "set-cookie",
-                "vary",
-                "access-control-allow-origin",
-                "x-request-id",
-                "authorization",
-                "content-encoding",
-            ];
-            let mut flat: Vec<String> = Vec::new();
-            for name in &known {
-                if let Some(v) = resp.header(name) {
-                    flat.push(name.to_string());
-                    flat.push(v.to_string());
-                }
-            }
+            let flat = flatten_response_headers(&resp);
             let body = resp.into_string().unwrap_or_default();
             Ok((status, body, flat))
         }
         Err(ureq::Error::Status(code, resp)) => {
+            let flat = flatten_response_headers(&resp);
             let body = resp.into_string().unwrap_or_default();
-            Ok((code as i64, body, vec![]))
+            Ok((code as i64, body, flat))
         }
         Err(e) => Err(e.to_string()),
     }
+}
+
+fn flatten_response_headers(response: &ureq::Response) -> Vec<String> {
+    let mut flat = Vec::new();
+    for name in response.headers_names() {
+        for value in response.all(&name) {
+            flat.push(name.clone());
+            flat.push(value.to_string());
+        }
+    }
+    flat
 }
 
 fn encode_component(s: &str) -> String {

@@ -6,7 +6,7 @@
 struct JetHttpSrvResp {
     status: i64,
     body: String,
-    headers: std::collections::BTreeMap<String, String>,
+    headers: JetHttpHeaders,
 }
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ struct JetHttpSrvReq {
     path: String,
     params: std::collections::BTreeMap<String, String>,
     body: String,
-    headers: std::collections::BTreeMap<String, String>,
+    headers: JetHttpHeaders,
     route_template: Option<String>,
 }
 
@@ -156,7 +156,7 @@ fn jet_http_srv_response(status: i64, body: &String) -> JetHttpSrvResp {
     JetHttpSrvResp {
         status,
         body: body.clone(),
-        headers: std::collections::BTreeMap::new(),
+        headers: JetHttpHeaders::new(),
     }
 }
 
@@ -165,7 +165,11 @@ fn jet_http_srv_response_header(
     name: &String,
     value: &String,
 ) -> JetHttpSrvResp {
-    resp.headers.insert(name.clone(), value.clone());
+    if resp.headers.set(name, value).is_err() {
+        resp.status = 500;
+        resp.body = "500 Internal Server Error".to_string();
+        resp.headers = JetHttpHeaders::new();
+    }
     resp
 }
 fn jet_http_srv_response_status(resp: &JetHttpSrvResp) -> i64 { resp.status }
@@ -449,8 +453,11 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<usize, JetHttpReadError> {
         }
         let (name, value) = line.split_once(':')
             .ok_or(JetHttpReadError { status: 400, message: "request header is malformed" })?;
-        if name.is_empty() || name.ends_with(' ') || name.ends_with('\t') {
+        if !JetHttpHeaders::valid_name(name) {
             return Err(JetHttpReadError { status: 400, message: "request header name is malformed" });
+        }
+        if !JetHttpHeaders::valid_value(value) {
+            return Err(JetHttpReadError { status: 400, message: "request header value is malformed" });
         }
         if name.eq_ignore_ascii_case("content-length") {
             let parsed = value.trim().parse::<usize>()
@@ -546,10 +553,10 @@ fn jet_http_srv_parse(raw: &str) -> JetHttpSrvReq {
     let mut parts = req_line.splitn(3, ' ');
     let method = parts.next().unwrap_or("GET").to_string();
     let path = parts.next().unwrap_or("/").to_string();
-    let mut headers = std::collections::BTreeMap::new();
+    let mut headers = JetHttpHeaders::new();
     for line in lines {
         if let Some((k, v)) = line.split_once(": ") {
-            headers.insert(k.to_lowercase(), v.to_string());
+            headers.append_unchecked(k.to_string(), v.to_string());
         }
     }
     JetHttpSrvReq {
@@ -568,7 +575,7 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
         Err(_) => return JetHttpSrvResp {
             status: 400,
             body: "400 Bad Request".to_string(),
-            headers: std::collections::BTreeMap::new(),
+            headers: JetHttpHeaders::new(),
         },
     };
     // Route lookup is a short snapshot operation. Never retain the registry
@@ -610,7 +617,7 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
             Err(_) => JetHttpSrvResp {
                 status: 500,
                 body: "500 Internal Server Error".to_string(),
-                headers: std::collections::BTreeMap::new(),
+                headers: JetHttpHeaders::new(),
             },
         };
         if requested_method == "HEAD" { response.body.clear(); }
@@ -626,7 +633,7 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
     JetHttpSrvResp {
         status: 404,
         body: "404 Not Found".to_string(),
-        headers: std::collections::BTreeMap::new(),
+        headers: JetHttpHeaders::new(),
     }
 }
 
@@ -695,7 +702,7 @@ fn jet_http_srv_req_body(req: &JetHttpSrvReq) -> String {
     req.body.clone()
 }
 fn jet_http_srv_req_header(req: &JetHttpSrvReq, name: &String) -> Option<String> {
-    req.headers.get(&name.to_lowercase()).cloned()
+    req.headers.get(name).cloned()
 }
 
 fn jet_http_srv_req_body_len(req: &JetHttpSrvReq) -> i64 {

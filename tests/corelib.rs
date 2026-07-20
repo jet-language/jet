@@ -5257,6 +5257,58 @@ fn run() {
 }
 
 #[test]
+fn core_http_client_preserves_repeated_headers_over_a_socket() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut bytes = [0; 4096];
+        let read = stream.read(&mut bytes).unwrap();
+        let request = String::from_utf8_lossy(&bytes[..read]);
+        let first = request.find("X-Trace: one\r\n").expect("first request header");
+        let second = request.find("x-trace: two\r\n").expect("second request header");
+        assert!(first < second, "repeated request headers changed: {request}");
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nSet-Cookie: a=1\r\nset-cookie: b=2\r\nX-Custom: visible\r\nConnection: close\r\n\r\nok",
+            )
+            .unwrap();
+    });
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_http_headers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.http.client as http
+
+fn run() {
+    response :: http.request("GET", "http://__ADDR__/")
+        .header("X-Trace", "one")
+        .header("x-trace", "two")
+        .send() ?? panic("request failed")
+    cookies :: response.cookies()
+    print(cookies[0])
+    print(cookies[1])
+    print(response.header("x-custom") ?? "missing")
+}
+"#
+    .replace("__ADDR__", &addr.to_string());
+    let (code, stdout, stderr) = build_and_run(&dir, "http_headers", &src, &[], None);
+    server.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "a=1\nb=2\nvisible\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_data_typed_csv_group_stats_status_and_plot() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

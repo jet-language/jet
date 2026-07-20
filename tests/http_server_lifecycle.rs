@@ -11,7 +11,9 @@ mod jet_std {
     }
 }
 
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpMessage.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
 
 fn request(addr: std::net::SocketAddr, text: &'static [u8]) -> String {
@@ -21,6 +23,91 @@ fn request(addr: std::net::SocketAddr, text: &'static [u8]) -> String {
     let mut response = String::new();
     stream.read_to_string(&mut response).expect("response read");
     response
+}
+
+#[test]
+fn shared_headers_preserve_repeats_validate_and_redact() {
+    let mut headers = JetHttpHeaders::new();
+    headers.append("X-Trace", "one").unwrap();
+    headers.append("x-trace", "two").unwrap();
+    headers.append("Authorization", "Bearer secret").unwrap();
+    assert_eq!(headers.first("X-TRACE"), Some("one"));
+    assert_eq!(headers.all("x-trace"), vec!["one", "two"]);
+    assert!(headers.append("bad name", "x").is_err());
+    assert!(headers.append("x-safe", "bad\r\nvalue").is_err());
+    assert_eq!(
+        jet_http_validate_headers(b"GET / HTTP/1.1\r\nBad Name: value")
+            .unwrap_err()
+            .status,
+        400
+    );
+    assert_eq!(
+        jet_http_validate_headers(b"GET / HTTP/1.1\r\nX-Safe: bad\0value")
+            .unwrap_err()
+            .status,
+        400
+    );
+    let shown = format!("{headers:?}");
+    assert!(!shown.contains("Bearer secret"), "secret header leaked: {shown}");
+}
+
+#[test]
+fn client_request_and_response_use_the_shared_headers() {
+    let req = jet_http_client_request_header(
+        jet_http_client_request_header(
+            jet_http_client_request_new(&"GET".to_string(), &"http://local/".to_string()),
+            &"X-Trace".to_string(),
+            &"one".to_string(),
+        ),
+        &"x-trace".to_string(),
+        &"two".to_string(),
+    );
+    assert_eq!(req.headers.all("X-TRACE"), vec!["one", "two"]);
+    let invalid = jet_http_client_request_header(
+        req,
+        &"bad name".to_string(),
+        &"value".to_string(),
+    );
+    assert!(invalid.header_error.is_some());
+
+    let headers = JetHttpHeaders::from_flat(vec![
+        "Set-Cookie".to_string(), "a=1".to_string(),
+        "set-cookie".to_string(), "b=2".to_string(),
+    ]).unwrap();
+    let response = JetHttpClientResp { status: 200, body: String::new(), headers };
+    assert_eq!(jet_http_client_response_cookies(&response), vec!["a=1", "b=2"]);
+
+    let invalid_response = jet_http_srv_response_header(
+        jet_http_srv_response(200, &"secret".to_string()),
+        &"bad name".to_string(),
+        &"value".to_string(),
+    );
+    assert_eq!(invalid_response.status, 500);
+    assert_eq!(invalid_response.body, "500 Internal Server Error");
+    assert!(invalid_response.headers.to_flat().is_empty());
+}
+
+#[test]
+fn live_server_round_trips_repeated_headers_in_order() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    jet_http_mux_add(&mux, "GET", "/headers", |req| {
+        assert_eq!(req.headers.all("x-tag"), vec!["one", "two"]);
+        let mut headers = JetHttpHeaders::new();
+        headers.append("Set-Cookie", "a=1").unwrap();
+        headers.append("set-cookie", "b=2").unwrap();
+        JetHttpSrvResp { status: 200, body: "ok".to_string(), headers }
+    });
+    let client = std::thread::spawn(move || {
+        request(addr, b"GET /headers HTTP/1.1\r\nHost: local\r\nX-Tag: one\r\nx-tag: two\r\n\r\n")
+    });
+    jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux).expect("serve once");
+    let response = client.join().expect("client");
+    let first = response.find("Set-Cookie: a=1\r\n").expect("first repeated header");
+    let second = response.find("set-cookie: b=2\r\n").expect("second repeated header");
+    assert!(first < second, "repeated header order changed: {response}");
 }
 
 #[test]

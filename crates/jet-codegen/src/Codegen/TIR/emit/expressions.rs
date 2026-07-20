@@ -2159,7 +2159,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             "send" => {
                                 // call bridge with req fields; assemble JetHttpClientResp
                                 format!(
-                                    "{{ let _r = &({}); {}::jet_http_client_send_impl(&_r.method, &_r.url, &_r.headers, _r.body.as_deref(), _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart).map(|(s,b,h)| JetHttpClientResp{{status:s,body:b,headers:h}}) }}",
+                                    "{{ let _r = &({}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {}::jet_http_client_send_impl(&_r.method, &_r.url, &_r.headers.to_flat(), _r.body.as_deref(), _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart).and_then(|(s,b,h)| Ok(JetHttpClientResp{{status:s,body:b,headers:JetHttpHeaders::from_flat(h)?}})) }} }}",
                                     recv, ffi
                                 )
                             }

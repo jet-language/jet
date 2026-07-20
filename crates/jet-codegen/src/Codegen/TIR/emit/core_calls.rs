@@ -2239,7 +2239,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             };
             format!(
-                "{}(&({})).map(|(s,b,h)| JetHttpClientResp{{status:s,body:b,headers:h}})",
+                "{}(&({})).and_then(|(s,b,h)| Ok(JetHttpClientResp{{status:s,body:b,headers:JetHttpHeaders::from_flat(h)?}}))",
                 regex_fn("jet_http_client_get_impl"),
                 u
             )
@@ -2251,7 +2251,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             };
             format!(
-                "{}(&({}), &({})).map(|(s,b,h)| JetHttpClientResp{{status:s,body:b,headers:h}})",
+                "{}(&({}), &({})).and_then(|(s,b,h)| Ok(JetHttpClientResp{{status:s,body:b,headers:JetHttpHeaders::from_flat(h)?}}))",
                 regex_fn("jet_http_client_post_impl"),
                 u,
                 arg(1)
