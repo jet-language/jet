@@ -66,6 +66,89 @@ fn crypto_misuse_diagnostic(
             ));
         }
     }
+    if module == "core.crypto.expert" && name == "argon2id" {
+        let salt = args.get(1)?;
+        if let Some(actual) = literal_list_len(&salt.expr) {
+            if !(8..=64).contains(&actual) {
+                let unit = if actual == 1 { "byte" } else { "bytes" };
+                return Some(Diagnostic::error(
+                    "E2702",
+                    "crypto API misuse".to_string(),
+                    format!("Argon2id salt has {actual} {unit}; this operation requires 8..64"),
+                    "pass an explicit salt from 8 through 64 bytes".to_string(),
+                    Some(salt.expr.span()),
+                ));
+            }
+        }
+
+        let memory = args.get(2)?;
+        let memory_kib = literal_int(&memory.expr);
+        if let Some(actual) = memory_kib {
+            if !(8_192..=262_144).contains(&actual) {
+                return Some(Diagnostic::error(
+                    "E2702",
+                    "crypto API misuse".to_string(),
+                    format!("Argon2id memory cost is {actual} KiB; this operation requires 8192..262144"),
+                    "pass a memory cost from 8192 through 262144 KiB".to_string(),
+                    Some(memory.expr.span()),
+                ));
+            }
+        }
+
+        let iterations = args.get(3)?;
+        let iteration_count = literal_int(&iterations.expr);
+        if let Some(actual) = iteration_count {
+            if !(1..=10).contains(&actual) {
+                return Some(Diagnostic::error(
+                    "E2702",
+                    "crypto API misuse".to_string(),
+                    format!("Argon2id iteration count is {actual}; this operation requires 1..10"),
+                    "pass an iteration count from 1 through 10".to_string(),
+                    Some(iterations.expr.span()),
+                ));
+            }
+        }
+
+        let lanes = args.get(4)?;
+        if let Some(actual) = literal_int(&lanes.expr) {
+            if !(1..=8).contains(&actual) {
+                return Some(Diagnostic::error(
+                    "E2702",
+                    "crypto API misuse".to_string(),
+                    format!("Argon2id lane count is {actual}; this operation requires 1..8"),
+                    "pass a lane count from 1 through 8".to_string(),
+                    Some(lanes.expr.span()),
+                ));
+            }
+        }
+
+        let output = args.get(5)?;
+        if let Some(actual) = literal_int(&output.expr) {
+            if !(16..=64).contains(&actual) {
+                return Some(Diagnostic::error(
+                    "E2702",
+                    "crypto API misuse".to_string(),
+                    format!("Argon2id output length is {actual} bytes; this operation requires 16..64"),
+                    "pass an output length from 16 through 64 bytes".to_string(),
+                    Some(output.expr.span()),
+                ));
+            }
+        }
+
+        if let (Some(memory_kib), Some(iteration_count)) = (memory_kib, iteration_count) {
+            if let Some(actual) = memory_kib.checked_mul(iteration_count) {
+                if actual > 1_048_576 {
+                    return Some(Diagnostic::error(
+                        "E2702",
+                        "crypto API misuse".to_string(),
+                        format!("Argon2id memory-time cost is {actual} KiB-rounds; this operation permits at most 1048576"),
+                        "reduce memory or iterations so their product is at most 1048576 KiB-rounds".to_string(),
+                        Some(Span::new(memory.expr.span().start, iterations.expr.span().end)),
+                    ));
+                }
+            }
+        }
+    }
     let (operation, expected) = match name {
         "xchacha20poly1305_seal" | "xchacha20poly1305_open" =>
             ("XChaCha20-Poly1305", 24),

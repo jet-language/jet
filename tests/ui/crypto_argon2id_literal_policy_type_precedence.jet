@@ -1,0 +1,10 @@
+// D-CRYPTO-DIAG1=A: ordinary type checking suppresses Argon2id E2702.
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+fn run() {
+    password :: crypto.Secret.from_bytes([1])
+    @Unsafe("fixed password-hash vector") {
+        _ :: expert.argon2id(password, true, 8191, 0, 0, 15)
+    }
+}

@@ -1,0 +1,87 @@
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:8:49
+    |
+  8 |         salt_short :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0], 8192, 1, 1, 16)
+    |                                                 ^^^^^^^^^^^^^^^^^^^^^
+ Why: Argon2id salt has 7 bytes; this operation requires 8..64
+ Fix: pass an explicit salt from 8 through 64 bytes
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:9:48
+    |
+  9 |         salt_long :: expert.argon2id(password, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64], 8192, 1, 1, 16)
+    |                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: Argon2id salt has 65 bytes; this operation requires 8..64
+ Fix: pass an explicit salt from 8 through 64 bytes
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:10:75
+    |
+ 10 |         memory_low :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8191, 1, 1, 16)
+    |                                                                           ^^^^
+ Why: Argon2id memory cost is 8191 KiB; this operation requires 8192..262144
+ Fix: pass a memory cost from 8192 through 262144 KiB
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:11:76
+    |
+ 11 |         memory_high :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 262145, 1, 1, 16)
+    |                                                                            ^^^^^^
+ Why: Argon2id memory cost is 262145 KiB; this operation requires 8192..262144
+ Fix: pass a memory cost from 8192 through 262144 KiB
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:12:85
+    |
+ 12 |         iterations_low :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 0, 1, 16)
+    |                                                                                     ^
+ Why: Argon2id iteration count is 0; this operation requires 1..10
+ Fix: pass an iteration count from 1 through 10
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:13:86
+    |
+ 13 |         iterations_high :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 11, 1, 16)
+    |                                                                                      ^^
+ Why: Argon2id iteration count is 11; this operation requires 1..10
+ Fix: pass an iteration count from 1 through 10
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:14:83
+    |
+ 14 |         lanes_low :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 0, 16)
+    |                                                                                   ^
+ Why: Argon2id lane count is 0; this operation requires 1..8
+ Fix: pass a lane count from 1 through 8
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:15:84
+    |
+ 15 |         lanes_high :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 9, 16)
+    |                                                                                    ^
+ Why: Argon2id lane count is 9; this operation requires 1..8
+ Fix: pass a lane count from 1 through 8
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:16:89
+    |
+ 16 |         output_short :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 1, 15)
+    |                                                                                         ^^
+ Why: Argon2id output length is 15 bytes; this operation requires 16..64
+ Fix: pass an output length from 16 through 64 bytes
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:17:88
+    |
+ 17 |         output_long :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 8192, 1, 1, 65)
+    |                                                                                        ^^
+ Why: Argon2id output length is 65 bytes; this operation requires 16..64
+ Fix: pass an output length from 16 through 64 bytes
+
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_argon2id_literal_policy.jet:18:74
+    |
+ 18 |         work_high :: expert.argon2id(password, [0, 0, 0, 0, 0, 0, 0, 0], 262144, 5, 1, 16)
+    |                                                                          ^^^^^^^^^
+ Why: Argon2id memory-time cost is 1310720 KiB-rounds; this operation permits at most 1048576
+ Fix: reduce memory or iterations so their product is at most 1048576 KiB-rounds

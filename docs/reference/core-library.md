@@ -523,6 +523,7 @@ fn run() {
 | `hkdf_sha256(ikm, salt, info, len)` | `Secret ? CryptoError` | HKDF-SHA256 expand with a 0–8160-byte output bound, without exposing derived secret bytes |
 | `password_hash(password)` | `PasswordHash ? CryptoError` | Argon2id password hash with generated salt and safe defaults; accepts a nominal `Secret` |
 | `password_verify(password, stored)` | `Bool ? CryptoError` | Verify a nominal `Secret` against a validated `PasswordHash` |
+| `expert.argon2id(password, salt, memory_kib, iterations, lanes, output_len)` | `Secret ? CryptoError` | Audited deterministic Argon2id with the ratified hard bounds; compiler-known violations are E2702 |
 | `constant_time_equal(a, b)` | `Bool` | Constant-time comparison of nominal `Secret` values |
 
 Card 302 audit state:
