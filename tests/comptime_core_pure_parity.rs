@@ -173,6 +173,20 @@ const TESTING_FAKE_RNG_FN: &str = r#"fn testing_fake_rng_view() -> String {
     return "{first.int(1, 100)}|{second.int(1, 100)}|{first.float()}|{second.float()}"
 }"#;
 const TESTING_FAKE_RNG_EXPECTED: &str = "4|4|0.0316577610861849|0.0316577610861849";
+const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() -> String {
+    clock := testing.fake_clock(42)
+    canonical := time.clock(42)
+    initial :: clock.now()
+    ticked :: clock.tick(8)
+    after_tick :: clock.now()
+    advanced :: clock.advance(100)
+    after_advance :: clock.now()
+    duration :: Duration.milliseconds(25) ?? panic("duration")
+    waited :: clock.wait(duration)
+    canonical_ticked :: canonical.tick(8)
+    return "{initial}|{ticked}|{after_tick}|{advanced}|{after_advance}|{waited}|{clock.now()}|{canonical_ticked}|{canonical.now()}"
+}"#;
+const TESTING_FAKE_CLOCK_EXPECTED: &str = "42|50|50|100|100|125|125|50|50";
 const BIT_SET_DECLS: &str = r#"fn add_bit(values: &BitSet, bit: Int) -> Bool {
     return values.add(bit)
 }
@@ -508,6 +522,20 @@ fn public_transcript_covers_testing_fake_rng_exactly() {
     assert_eq!(
         values,
         [format!("\"{TESTING_FAKE_RNG_EXPECTED}\" : String")]
+    );
+}
+
+#[test]
+fn public_transcript_covers_testing_fake_clock_exactly() {
+    let values = exact_values(&[
+        "use core.testing as testing",
+        "use core.time as time",
+        TESTING_FAKE_CLOCK_FN,
+        "testing_fake_clock_view()",
+    ]);
+    assert_eq!(
+        values,
+        [format!("\"{TESTING_FAKE_CLOCK_EXPECTED}\" : String")]
     );
 }
 
@@ -926,6 +954,27 @@ fn rustc_backed_testing_fake_rng_matches_aot_comptime_forced_interpreter_and_def
         "testing-fake-rng",
         &source,
         TESTING_FAKE_RNG_EXPECTED,
+        true,
+    );
+}
+
+#[test]
+fn rustc_backed_testing_fake_clock_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+) {
+    let declarations = format!(
+        "use core.testing as testing\nuse core.time as time\n{TESTING_FAKE_CLOCK_FN}"
+    );
+    let source = parity_source("testing_fake_clock_view()", &declarations);
+    assert_eq!(
+        check_aot_comptime("testing/fake-clock", &source),
+        TESTING_FAKE_CLOCK_EXPECTED
+    );
+    // Clock mutation remains outside the resident JIT subset: force the
+    // interpreter, then prove default dev's ordinary AOT fallback.
+    check_dev_tiers_with_boundary(
+        "testing-fake-clock",
+        &source,
+        TESTING_FAKE_CLOCK_EXPECTED,
         true,
     );
 }

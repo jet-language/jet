@@ -2892,6 +2892,53 @@ impl<'a> Interp<'a> {
             }
         }
         match (&recv, method) {
+            (CtValue::Struct { type_name, fields }, method @ ("tick" | "advance" | "wait"))
+                if type_name == crate::Syntax::CLOCK_TYPE =>
+            {
+                if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                    return Err(unsupported("Clock method on a temporary value", span));
+                }
+                let mut argv = Vec::with_capacity(args.len());
+                for arg in args {
+                    argv.push(self.eval(&arg.expr, scope)?);
+                }
+                let now = fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("now", CtValue::Int(now)) => Some(*now),
+                        _ => None,
+                    })
+                    .unwrap_or(0);
+                let next = match method {
+                    "tick" => now.wrapping_add(as_int(&argv[0], span)?),
+                    "advance" => as_int(&argv[0], span)?,
+                    "wait" => match &argv[0] {
+                        CtValue::Struct { type_name, fields }
+                            if type_name == crate::Syntax::DURATION_TYPE =>
+                        {
+                            let millis = fields
+                                .iter()
+                                .find_map(|(name, value)| match (name.as_str(), value) {
+                                    ("ms", CtValue::Int(millis)) => Some(*millis),
+                                    _ => None,
+                                })
+                                .unwrap_or(0);
+                            now.wrapping_add(millis)
+                        }
+                        _ => return Err(unsupported("Clock.wait expects a Duration", span)),
+                    },
+                    _ => unreachable!("Clock mutation set is closed"),
+                };
+                self.write_back(
+                    receiver,
+                    CtValue::Struct {
+                        type_name: crate::Syntax::CLOCK_TYPE.to_string(),
+                        fields: vec![("now".to_string(), CtValue::Int(next))],
+                    },
+                    scope,
+                )?;
+                return Ok(CtValue::Int(next));
+            }
             (
                 CtValue::Struct { type_name, fields },
                 method @ ("len"

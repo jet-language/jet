@@ -710,42 +710,6 @@ pub(super) fn apply_method(
                 .map(|(_, v)| v.clone())
                 .unwrap_or(CtValue::Int(0)))
         }
-        (CtValue::Struct { type_name, fields }, "tick" | "advance" | "wait")
-            if type_name == crate::Syntax::CLOCK_TYPE =>
-        {
-            let mut now = fields
-                .iter()
-                .find(|(n, _)| n == "now")
-                .and_then(|(_, v)| match v {
-                    CtValue::Int(n) => Some(*n),
-                    _ => None,
-                })
-                .unwrap_or(0);
-            if method == "wait" {
-                if let Some(CtValue::Struct {
-                    type_name: dur_ty,
-                    fields: dur_fields,
-                }) = args.first()
-                {
-                    if dur_ty == crate::Syntax::DURATION_TYPE {
-                        if let Some(CtValue::Int(ms)) =
-                            dur_fields.iter().find(|(n, _)| n == "ms").map(|(_, v)| v)
-                        {
-                            now += ms;
-                        }
-                    }
-                }
-            } else if let Some(ms) = args.first().and_then(|v| match v {
-                CtValue::Int(n) => Some(*n),
-                _ => None,
-            }) {
-                now = if method == "advance" { ms } else { now + ms };
-            }
-            Ok(CtValue::Struct {
-                type_name: crate::Syntax::CLOCK_TYPE.to_string(),
-                fields: vec![("now".to_string(), CtValue::Int(now))],
-            })
-        }
         (CtValue::Struct { type_name, fields }, "in")
             if type_name == crate::Syntax::DURATION_TYPE =>
         {
