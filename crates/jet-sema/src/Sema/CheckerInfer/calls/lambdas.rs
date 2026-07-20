@@ -334,6 +334,8 @@ impl<'a> Checker<'a> {
             let saved_expected = self.expected_type.clone();
             self.expected_type = exp_ret.map(|ret| (**ret).clone());
             let saved_in_lambda_body = self.in_lambda_body;
+            let saved_inferred_mut_captures =
+                std::mem::take(&mut self.inferred_lambda_mut_captures);
             self.in_lambda_body = true;
             let body_ret = match &mut lam.body {
                 LambdaBody::Expr(e) => {
@@ -361,6 +363,26 @@ impl<'a> Checker<'a> {
                     last_ret
                 }
             };
+
+            let inferred_mut_caps = std::mem::replace(
+                &mut self.inferred_lambda_mut_captures,
+                saved_inferred_mut_captures,
+            )
+            .into_iter()
+            .filter(|name| read_caps.contains(name) || mut_caps.contains(name))
+            .collect::<HashSet<_>>();
+            // The builtin table is the authority for mutating receivers. Fold
+            // its inferred roots into the same metadata explicit assignments
+            // use, so `xs.push(x)` is FnMut just like `xs += [x]`.
+            if !escapes {
+                mut_caps.extend(inferred_mut_caps);
+                lam.meta.needs_fn_mut = !mut_caps.is_empty();
+                lam.meta.mut_captures = mut_caps
+                    .iter()
+                    .filter(|name| !take_set.contains(*name) && !param_names.contains(*name))
+                    .cloned()
+                    .collect();
+            }
             self.in_lambda_body = saved_in_lambda_body;
             self.expected_type = saved_expected;
             self.txn_depth = saved_txn_depth;

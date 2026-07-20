@@ -948,6 +948,26 @@ impl<'a> Interp<'a> {
         args: Vec<CtValue>,
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
+        self.call_closure_inner(f, args, span, None)
+    }
+
+    fn call_closure_with_writeback(
+        &mut self,
+        f: &CtValue,
+        args: Vec<CtValue>,
+        span: Span,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        self.call_closure_inner(f, args, span, Some(scope))
+    }
+
+    fn call_closure_inner(
+        &mut self,
+        f: &CtValue,
+        args: Vec<CtValue>,
+        span: Span,
+        mut writeback_scope: Option<&mut HashMap<String, CtValue>>,
+    ) -> Result<CtValue, Diagnostic> {
         let CtValue::Closure(data) = f else {
             return Err(unsupported(
                 "calling this value (it isn't a function)",
@@ -961,6 +981,17 @@ impl<'a> Interp<'a> {
             ));
         }
         let mut frame = data.captured.clone();
+        if let Some(scope) = writeback_scope.as_deref() {
+            // The public REPL evaluates its retained source AST, while sema's
+            // capture metadata lives on the checked clone. Closures already
+            // over-capture that source scope, so the explicit writeback path
+            // synchronizes only bindings that still exist in the caller.
+            for name in data.captured.keys() {
+                if let Some(value) = scope.get(name) {
+                    frame.insert(name.clone(), value.clone());
+                }
+            }
+        }
         let previous_types = self.binding_types.clone();
         for (p, a) in data.lambda.params.iter().zip(args) {
             if let Some(ty) = &p.ty {
@@ -976,6 +1007,18 @@ impl<'a> Interp<'a> {
             },
         })();
         self.binding_types = previous_types;
+        if result.is_ok() {
+            if let Some(scope) = writeback_scope.as_deref_mut() {
+                for name in data.captured.keys() {
+                    let shadowed = data.lambda.params.iter().any(|param| param.name == *name);
+                    let taken = data.lambda.take_names.iter().any(|(taken, _)| taken == name);
+                    if !shadowed && !taken && scope.contains_key(name) {
+                        let value = frame.get(name).expect("captured binding stays in frame");
+                        scope.insert(name.clone(), value.clone());
+                    }
+                }
+            }
+        }
         result
     }
 
@@ -1974,6 +2017,18 @@ impl<'a> Interp<'a> {
                     }
                     return Ok(CtValue::Unit);
                 }
+                (CtValue::Map(entries), "each") => {
+                    let f = self.eval(&args[0].expr, scope)?;
+                    for (key, value) in entries {
+                        self.call_closure_with_writeback(
+                            &f,
+                            vec![key.to_value(), value.clone()],
+                            span,
+                            scope,
+                        )?;
+                    }
+                    return Ok(CtValue::Unit);
+                }
                 (CtValue::List(xs), "find") => {
                     let f = self.eval(&args[0].expr, scope)?;
                     for x in xs {
@@ -2736,7 +2791,8 @@ impl<'a> Interp<'a> {
 
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
-            "push", "pop", "insert", "remove", "clear", "reverse", "sort",
+            "push", "pop", "insert", "add", "add_new", "remove", "clear", "reverse",
+            "sort",
         ];
         if MUTATING.contains(&method) && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
             let mut argv = Vec::new();

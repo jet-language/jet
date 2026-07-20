@@ -246,18 +246,38 @@ pub(super) fn apply_mutating(
             }
             Ok(xs.remove(i as usize))
         }
-        (CtValue::Map(m), "insert") => {
+        (CtValue::Map(m), "add") => {
             let mut it = args.into_iter();
             let k = CtKey::from_value(it.next().unwrap_or(CtValue::Unit))
                 .ok_or_else(|| unsupported("this map key type", span))?;
             let v = it.next().unwrap_or(CtValue::Unit);
-            m.insert(k, v);
-            Ok(CtValue::Unit)
+            Ok(match m.insert(k, v) {
+                Some(old) => CtValue::Some(Box::new(old)),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        (CtValue::Map(m), "add_new") => {
+            let mut it = args.into_iter();
+            let k = CtKey::from_value(it.next().unwrap_or(CtValue::Unit))
+                .ok_or_else(|| unsupported("this map key type", span))?;
+            let v = it.next().unwrap_or(CtValue::Unit);
+            if m.contains_key(&k) {
+                Ok(CtValue::Bool(false))
+            } else {
+                m.insert(k, v);
+                Ok(CtValue::Bool(true))
+            }
         }
         (CtValue::Map(m), "remove") => {
             let k = CtKey::from_value(args.into_iter().next().unwrap_or(CtValue::Unit))
                 .ok_or_else(|| unsupported("this map key type", span))?;
-            m.remove(&k);
+            Ok(match m.remove(&k) {
+                Some(old) => CtValue::Some(Box::new(old)),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        (CtValue::Map(m), "clear") => {
+            m.clear();
             Ok(CtValue::Unit)
         }
         _ => Err(unsupported(
@@ -482,7 +502,7 @@ pub(super) fn apply_method(
         // Map
         (CtValue::Map(m), "len") => Ok(CtValue::Int(m.len() as i64)),
         (CtValue::Map(m), "is_empty") => Ok(CtValue::Bool(m.is_empty())),
-        (CtValue::Map(m), "contains_key") => {
+        (CtValue::Map(m), "has_key") => {
             let k = CtKey::from_value(args.into_iter().next().unwrap_or(CtValue::Unit))
                 .ok_or_else(|| unsupported("this map key type", span))?;
             Ok(CtValue::Bool(m.contains_key(&k)))

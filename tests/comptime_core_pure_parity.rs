@@ -92,6 +92,41 @@ const LRU_DECLS: &str = r#"fn lru_view() -> String {
     return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"
 }"#;
 const LRU_EXPECTED: &str = "true|2|-1|true|false|1|1|-1|false|[c, a]|10|-1|1|true|0|-1|false|0";
+const MAP_DECLS: &str = r#"fn add_map(values: &[String: Int], key: String, value: Int) -> Int {
+    return values.add(key, value) ?? -1
+}
+fn counted_map(hits: &Int) -> [String: Int] {
+    hits += 1
+    return ["a": 1]
+}
+fn map_view() -> String {
+    values: [String: Int] := ["b": 2, "a": 1]
+    empty_before :: values.is_empty()
+    fresh_c :: values.add("c", 3) ?? -1
+    displaced_b :: add_map(&values, "b", 20)
+    added_d :: values.add_new("d", 4)
+    duplicate_a :: values.add_new("a", 99)
+    seen: [String] := []
+    values.each((key, value) => {
+        require((key == "a" && value == 1) || (key == "b" && value == 20) || (key == "c" && value == 3) || (key == "d" && value == 4), "Map.each pair")
+        seen.push(key)
+    })
+    keys :: values.keys()
+    entries :: values.values()
+    got_a :: values.get("a") ?? -1
+    has_a :: values.has_key("a")
+    has_z :: values.has_key("z")
+    removed_c :: values.remove("c") ?? -1
+    length :: values.len()
+    values.clear()
+    return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
+}"#;
+const MAP_EXPECTED: &str = "false|-1|2|true|false|[a, b, c, d]|[a, b, c, d]|[1, 20, 3, 4]|1|true|false|3|3|true|0";
+const MAP_CALL_RECEIVER_DECLS: &str = r#"fn map_call_receiver_view() -> String {
+    receiver_hits := 0
+    found :: counted_map(&receiver_hits).has_key("a")
+    return "{found}|{receiver_hits}"
+}"#;
 const RNG_DECLS: &str = r#"use core.random as random
 fn rng_view() -> String {
     rng := random.rng(99)
@@ -402,6 +437,22 @@ fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
 fn public_transcript_covers_lru_methods_exactly() {
     let values = exact_values(&[LRU_DECLS, "lru_view()"]);
     assert_eq!(values, [format!("\"{LRU_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_covers_map_methods_exactly() {
+    let values = exact_values(&[MAP_DECLS, "map_view()"]);
+    assert_eq!(values, [format!("\"{MAP_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_comptime_only_evaluates_map_call_receiver_once() {
+    let values = exact_values(&[
+        MAP_DECLS,
+        MAP_CALL_RECEIVER_DECLS,
+        "map_call_receiver_view()",
+    ]);
+    assert_eq!(values, ["\"true|1\" : String"]);
 }
 
 #[test]
@@ -717,6 +768,15 @@ fn rustc_backed_lru_matches_all_execution_tiers_exactly() {
     let source = parity_source("lru_view()", LRU_DECLS);
     assert_eq!(check_aot_comptime("lru/all-methods", &source), LRU_EXPECTED);
     check_dev_tiers("lru", &source, LRU_EXPECTED);
+}
+
+#[test]
+fn rustc_backed_map_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+    let source = parity_source("map_view()", MAP_DECLS);
+    assert_eq!(check_aot_comptime("map/all-methods", &source), MAP_EXPECTED);
+    // Map remains outside the resident JIT subset: forced interpreter proves
+    // its comptime execution, while default dev proves the normal AOT fallback.
+    check_dev_tiers_with_boundary("map", &source, MAP_EXPECTED, true);
 }
 
 #[test]

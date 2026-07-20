@@ -19,6 +19,9 @@ impl<'a> Checker<'a> {
             if Collections::builtin_needs_mut_receiver(recv_ty, method) {
                 if let Some(root) = expr_root_ident(receiver) {
                     let root = root.to_string();
+                    if self.in_lambda_body {
+                        self.inferred_lambda_mut_captures.insert(root.clone());
+                    }
                     let rspan = receiver.span();
                     self.check_owner_change(
                         &root,

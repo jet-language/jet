@@ -1978,9 +1978,9 @@ where
 {
     xs.iter().fold(init, |acc, x| f(&acc, x))
 }
-fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, f: F)
+fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, mut f: F)
 where
-    F: Fn(&K, &V),
+    F: FnMut(&K, &V),
 {
     for (k, v) in &m {
         f(k, v);

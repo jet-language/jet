@@ -1194,6 +1194,10 @@ pub(crate) struct Checker<'a> {
     /// True only while checking a lambda body. Distinguishes an escaping lambda
     /// from the checker's ordinary top-level default escape policy.
     in_lambda_body: bool,
+    /// Builtin mutating receivers discovered while inferring the current
+    /// lambda body. The builtin table supplies the mutation fact; inline
+    /// callbacks fold these roots into `LambdaMeta::mut_captures`.
+    inferred_lambda_mut_captures: HashSet<String>,
     /// M11: when true, lambda is being passed to tasks.spawn — stricter capture rules (E1101).
     is_task_spawn: bool,
     /// D-MEM1 S6 (D-SHARED-API1=A): true only while binding `Shared<T>.edit(f)`'s

@@ -1961,6 +1961,7 @@ pub(crate) fn check_func_body_bundle(
         allow_string_view_read: false,
         lambda_escapes: true,
         in_lambda_body: false,
+        inferred_lambda_mut_captures: HashSet::new(),
         is_task_spawn: false,
         lambda_param_mutable: false,
         view_capture_tasks: HashSet::new(),
