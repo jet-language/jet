@@ -171,6 +171,9 @@ pub fn jet_http_client_send_impl(
         {
             Err("HTTP connection failed".to_string())
         }
+        Err(ureq::Error::Transport(error)) if error.kind() == ureq::ErrorKind::Io => {
+            Err("HTTP transport I/O failed".to_string())
+        }
         Err(ureq::Error::Transport(error))
             if matches!(
                 error.kind(),

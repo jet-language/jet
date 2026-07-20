@@ -440,7 +440,7 @@ Client surface:
 | `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or a redirect limit from 0 through 4,294,967,295; unset follows at most 10, and out-of-range limits fail before transport |
 | `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` | `HttpClientReq` | Set nonnegative global/per-phase deadlines; negative milliseconds fail before transport |
 | `req.proxy(url)` | `HttpClientReq` | Use an explicit proxy; malformed URLs, refused tunnels, and rejected proxy authentication return stable Jet errors; env proxies are honored by default |
-| `req.send()` | `HttpClientResp ? String` | Execute the request; connection failures and malformed response status or header framing return stable Jet errors |
+| `req.send()` | `HttpClientResp ? String` | Execute the request; connection, pre-response I/O, and malformed response framing failures return stable Jet errors |
 | `resp.status()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, text body, headers, and Set-Cookie values |
 
 The compatibility text response path accepts at most 8 MiB of transfer-decoded

@@ -5523,12 +5523,14 @@ fn core_http_client_owns_pre_response_errors() {
                     let mut request = [0; 4096];
                     let read = stream.read(&mut request).unwrap();
                     server_captured.lock().unwrap().push(request[..read].to_vec());
-                    let response: &[u8] = if request_index == 0 {
-                        b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                    } else {
-                        b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"jet\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    let response: Option<&[u8]> = match request_index {
+                        0 => Some(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                        1 => Some(b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"jet\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                        _ => None,
                     };
-                    stream.write_all(response).unwrap();
+                    if let Some(response) = response {
+                        stream.write_all(response).unwrap();
+                    }
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(std::time::Duration::from_millis(1));
@@ -5607,6 +5609,11 @@ fn main() {
         &[], &[], &[],
     ).unwrap_err();
     assert_eq!(proxy_auth_error, "HTTP proxy authentication failed");
+    let io_error = bridge::jet_http_client_send_impl(
+        "GET", &format!("{url}io"), &[], None, None, None, None, None, None, None,
+        &[], &[], &[],
+    ).unwrap_err();
+    assert_eq!(io_error, "HTTP transport I/O failed");
 }
 "#,
     )
@@ -5623,13 +5630,14 @@ fn main() {
     stop.store(true, Ordering::Release);
     server.join().unwrap();
     assert!(output.status.success(), "bridge harness failed:\n{}", String::from_utf8_lossy(&output.stderr));
-    assert_eq!(accepted.load(Ordering::Acquire), 2, "pre-response transport count changed");
-    let proxy_requests = captured.lock().unwrap();
+    assert_eq!(accepted.load(Ordering::Acquire), 3, "pre-response transport count changed");
+    let requests = captured.lock().unwrap();
     assert!(
-        proxy_requests[0].starts_with(b"CONNECT example.invalid:443 HTTP/1.1\r\n")
-            && proxy_requests[1].starts_with(b"CONNECT auth.invalid:443 HTTP/1.1\r\n"),
-        "unexpected proxy requests: {:?}",
-        proxy_requests
+        requests[0].starts_with(b"CONNECT example.invalid:443 HTTP/1.1\r\n")
+            && requests[1].starts_with(b"CONNECT auth.invalid:443 HTTP/1.1\r\n")
+            && requests[2].starts_with(b"GET /io HTTP/1.1\r\n"),
+        "unexpected requests: {:?}",
+        requests
     );
     let _ = fs::remove_dir_all(&dir);
 }
