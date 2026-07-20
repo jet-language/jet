@@ -16,6 +16,7 @@ mod tests {
         SwapParent { at: &'static str, parent: std::path::PathBuf, moved: std::path::PathBuf },
         CreateDestination { at: &'static str, destination: std::path::PathBuf },
         ReplaceCandidate { at: &'static str, parent: std::path::PathBuf, prefix: &'static str },
+        AppendFile { at: &'static str, path: std::path::PathBuf },
     }
 
     #[cfg(target_os = "linux")]
@@ -33,7 +34,8 @@ mod tests {
             let ready = match slot.as_ref() {
                 Some(PublishRace::SwapParent { at, .. }
                     | PublishRace::CreateDestination { at, .. }
-                    | PublishRace::ReplaceCandidate { at, .. }) => *at == created,
+                    | PublishRace::ReplaceCandidate { at, .. }
+                    | PublishRace::AppendFile { at, .. }) => *at == created,
                 None => false,
             };
             if !ready { return; }
@@ -54,6 +56,11 @@ mod tests {
                     std::fs::write(&candidate, b"attacker-original").unwrap();
                     std::fs::rename(&candidate, &moved).unwrap();
                     std::fs::write(&candidate, b"attacker-replacement").unwrap();
+                }
+                PublishRace::AppendFile { path, .. } => {
+                    use std::io::Write;
+                    std::fs::OpenOptions::new().append(true).open(path).unwrap()
+                        .write_all(b"trailing byte").unwrap();
                 }
             }
         })
@@ -838,6 +845,41 @@ mod tests {
             Err(JetFileCryptoError::Cancelled)
         );
         assert!(!cancelled.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn jetc_v2_rejects_bytes_appended_after_the_initial_length_check() {
+        let root = test_dir("concurrent-append");
+        let source = root.join("source.bin");
+        let envelope = root.join("sealed.jetc");
+        let output = root.join("restored.bin");
+        std::fs::write(&source, b"authenticated file").unwrap();
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        jet_crypto_file_seal_impl(
+            vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+            &source.to_string_lossy().into_owned(),
+            &envelope.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+
+        arm_publish_race(PublishRace::AppendFile {
+            at: "open-record",
+            path: envelope.clone(),
+        });
+        assert_eq!(
+            jet_crypto_file_open_impl(
+                &recipient,
+                &envelope.to_string_lossy().into_owned(),
+                &output.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::OpenFailed),
+        );
+        PUBLISH_RACE.with(|slot| assert!(slot.borrow().is_none()));
+        jet_crypto_clear_file_boundary_test_observer();
+        assert!(!output.exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 

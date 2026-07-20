@@ -1437,7 +1437,7 @@ fn open_jetc_v2_file(
     } else {
         &mut discard
     };
-    let mut consumed = 0u64; let mut index = 1u64; let mut saw_final = false; let mut plaintext = Zeroizing(vec![0u8; JETC_V2_CHUNK]);
+    let mut consumed = 0u64; let mut index = 1u64; let mut saw_final = false;
     while consumed < body_len {
         #[cfg(test)]
         observe_jetc_boundary(if known_writer_secrets.is_some() { "migrate-verify-record" } else { "open-record" });
@@ -1453,12 +1453,14 @@ fn open_jetc_v2_file(
         let mut chunk_aad = b"JETC2 chunk".to_vec(); chunk_aad.extend_from_slice(&header_hash); chunk_aad.extend_from_slice(&index.to_le_bytes()); chunk_aad.extend_from_slice(&(length as u32).to_le_bytes()); chunk_aad.push(flags);
         let clear = Zeroizing(XChaCha20Poly1305::new_from_slice(file_key.bytes()).map_err(|_| JetFileCryptoError::OpenFailed)?
             .decrypt(XNonce::from_slice(&nonce24(&nonce_prefix, index)), Payload { msg: &encrypted, aad: &chunk_aad }).map_err(|_| JetFileCryptoError::OpenFailed)?);
-        plaintext[..length].copy_from_slice(clear.bytes());
-        jetc_write_all(out, &plaintext[..length], "open-output-write").map_err(|_| JetFileCryptoError::DestinationIo)?;
-        zeroize(&mut plaintext[..length]);
+        jetc_write_all(out, clear.bytes(), "open-output-write").map_err(|_| JetFileCryptoError::DestinationIo)?;
         saw_final = flags == 1; index += 1;
     }
     if !saw_final || consumed != body_len { return Err(JetFileCryptoError::OpenFailed); }
+    let mut trailing = [0u8; 1];
+    if jetc_read(&mut input, &mut trailing, input_read).map_err(|_| JetFileCryptoError::OpenFailed)? != 0 {
+        return Err(JetFileCryptoError::OpenFailed);
+    }
     #[cfg(test)]
     if destination.is_some() { observe_jetc_boundary("open-before-publish"); }
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
