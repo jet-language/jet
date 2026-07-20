@@ -201,7 +201,8 @@ pub(crate) fn is_covered_expanded_collection_ty(ty: &Type, cx: &Cx) -> bool {
         }
         Type::Apply { name, args }
             if name == crate::Syntax::TYPE_SORTED_SET
-                || name == crate::Syntax::TYPE_PRIORITY_QUEUE =>
+                || name == crate::Syntax::TYPE_PRIORITY_QUEUE
+                || name == "Bag" =>
         {
             args.len() == 1 && is_subset_param_ty(&args[0], cx)
         }

@@ -2033,6 +2033,8 @@ pub enum TClosureOp {
     Find,
     /// `any` — `jet_list_any((recv).clone(), f)`.
     Any,
+    /// `any` on `Bag<T>` — `(recv).keys().any(f)`.
+    BagAny,
     /// `all` — `jet_list_all((recv).clone(), f)`.
     All,
     /// `sort_by` — `{ jet_list_sort_by(&mut recv, f); }`.

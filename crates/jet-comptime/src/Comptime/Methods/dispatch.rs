@@ -1391,6 +1391,15 @@ impl<'a> Interp<'a> {
                     fields: vec![("bits".to_string(), CtValue::List(Vec::new()))],
                 });
             }
+            if type_name == "Bag" && method == "new" {
+                return Ok(CtValue::Struct {
+                    type_name: "Bag".to_string(),
+                    fields: vec![
+                        ("items".to_string(), CtValue::List(Vec::new())),
+                        ("counts".to_string(), CtValue::List(Vec::new())),
+                    ],
+                });
+            }
             if type_name == crate::Syntax::TYPE_SET && method == "from" {
                 let items = match self.eval(&args[0].expr, scope)? {
                     CtValue::List(items) => unique_values(items),
@@ -2063,9 +2072,112 @@ impl<'a> Interp<'a> {
                 | "last"
                 | "union"
                 | "to_list"
+                | "any"
         ) {
             let peek = self.eval(receiver, scope)?;
             match (&peek, method) {
+                (
+                    CtValue::Struct { type_name, fields },
+                    method @ ("add" | "remove" | "has" | "count" | "len" | "is_empty" | "any"),
+                ) if type_name == "Bag" => {
+                    // ponytail: comptime bags are small; parallel equality-only
+                    // vectors support every CtValue without a second hash model.
+                    let mut items = fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("items", CtValue::List(items)) => Some(items.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut counts = fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("counts", CtValue::List(counts)) => Some(counts.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| vec![CtValue::Int(1); items.len()]);
+                    let mut argv = Vec::with_capacity(args.len());
+                    for arg in args {
+                        argv.push(self.eval(&arg.expr, scope)?);
+                    }
+                    let mut changed = false;
+                    let result = match method {
+                        "len" => CtValue::Int(
+                            counts
+                                .iter()
+                                .filter_map(|count| match count {
+                                    CtValue::Int(count) => Some(*count),
+                                    _ => None,
+                                })
+                                .sum(),
+                        ),
+                        "is_empty" => CtValue::Bool(items.is_empty()),
+                        "has" => CtValue::Bool(items.contains(&argv[0])),
+                        "count" => CtValue::Int(
+                            items
+                                .iter()
+                                .position(|item| item == &argv[0])
+                                .and_then(|index| match counts.get(index) {
+                                    Some(CtValue::Int(count)) => Some(*count),
+                                    _ => None,
+                                })
+                                .unwrap_or(0),
+                        ),
+                        "any" => {
+                            let mut found = false;
+                            for item in &items {
+                                if as_bool(
+                                    &self.call_closure(&argv[0], vec![item.clone()], span)?,
+                                    span,
+                                )? {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            CtValue::Bool(found)
+                        }
+                        "add" => {
+                            if let Some(index) = items.iter().position(|item| item == &argv[0]) {
+                                if let Some(CtValue::Int(count)) = counts.get_mut(index) {
+                                    *count += 1;
+                                }
+                            } else {
+                                items.push(argv[0].clone());
+                                counts.push(CtValue::Int(1));
+                            }
+                            changed = true;
+                            CtValue::Bool(true)
+                        }
+                        "remove" => {
+                            if let Some(index) = items.iter().position(|item| item == &argv[0]) {
+                                let last = matches!(counts.get(index), Some(CtValue::Int(1)));
+                                if last {
+                                    items.remove(index);
+                                    counts.remove(index);
+                                } else if let Some(CtValue::Int(count)) = counts.get_mut(index) {
+                                    *count -= 1;
+                                }
+                                changed = true;
+                            }
+                            CtValue::Unit
+                        }
+                        _ => unreachable!("Bag method set is closed"),
+                    };
+                    if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                        self.write_back(
+                            receiver,
+                            CtValue::Struct {
+                                type_name: "Bag".to_string(),
+                                fields: vec![
+                                    ("items".to_string(), CtValue::List(items)),
+                                    ("counts".to_string(), CtValue::List(counts)),
+                                ],
+                            },
+                            scope,
+                        )?;
+                    }
+                    return Ok(result);
+                }
                 (
                     CtValue::Struct { type_name, fields },
                     method @ ("add"

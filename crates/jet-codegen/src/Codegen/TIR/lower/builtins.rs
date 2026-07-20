@@ -422,6 +422,9 @@ pub(crate) fn resolve_closure_op(
             }
         }
         "find" => TClosureOp::Find,
+        "any" if matches!(recv_ty, Type::Apply { name, .. } if name == "Bag") => {
+            TClosureOp::BagAny
+        }
         "any" => TClosureOp::Any,
         "all" => TClosureOp::All,
         "sort_by" => TClosureOp::SortBy,

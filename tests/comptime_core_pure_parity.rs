@@ -219,6 +219,50 @@ fn set_call_receiver_view() -> String {
     value :: counted_set(&receiver_hits).has(6)
     return "{added}|{values.has(8)}|{value}|{receiver_hits}"
 }"#;
+const BAG_DECLS: &str = r#"enum BagToken {
+    Red
+    Blue
+}
+fn add_bag(values: &Bag<Int>, value: Int) -> Bool {
+    return values.add(value)
+}
+fn counted_bag(hits: &Int) -> Bag<Int> {
+    hits += 1
+    values: Bag<Int> := Bag.new()
+    values.add(6)
+    return values
+}
+fn bag_view() -> String {
+    values: Bag<Int> := Bag.new()
+    empty_before :: values.is_empty()
+    added_four :: values.add(4)
+    duplicate_four :: values.add(4)
+    added_two :: add_bag(&values, 2)
+    length_before :: values.len()
+    count_four_before :: values.count(4)
+    has_two :: values.has(2)
+    any_large :: values.any((value) => value > 3)
+    any_negative :: values.any((value) => value < 0)
+    values.remove(4)
+    count_four_after_one :: values.count(4)
+    values.remove(4)
+    values.remove(99)
+    words: Bag<String> := Bag.new()
+    words.add("a")
+    words.add("z")
+    words.add("a")
+    tokens: Bag<BagToken> := Bag.new()
+    tokens.add(BagToken.Red)
+    tokens.add(BagToken.Red)
+    empty: Bag<Int> := Bag.new()
+    return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) => value == "z")}|{tokens.count(BagToken.Red)}|{tokens.has(BagToken.Blue)}|{empty.any((value) => value == 0)}"
+}"#;
+const BAG_EXPECTED: &str = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
+const BAG_CALL_RECEIVER_DECLS: &str = r#"fn bag_call_receiver_view() -> String {
+    receiver_hits := 0
+    count :: counted_bag(&receiver_hits).count(6)
+    return "{count}|{receiver_hits}"
+}"#;
 const SORTED_SET_DECLS: &str = r#"fn add_through_param(values: &SortedSet<Int>, value: Int) -> Bool {
     return values.add(value)
 }
@@ -409,6 +453,24 @@ fn public_transcript_comptime_only_evaluates_set_call_receiver_once() {
         "set_call_receiver_view()",
     ]);
     assert_eq!(values, ["\"true|true|true|1\" : String"]);
+}
+
+#[test]
+fn public_transcript_covers_bag_methods_exactly() {
+    let values = exact_values(&[BAG_DECLS, "bag_view()"]);
+    assert_eq!(values, [format!("\"{BAG_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_comptime_only_evaluates_bag_call_receiver_once() {
+    // The public comptime/REPL path supports this direct call receiver. TIR/AOT
+    // retains the existing nested-receiver boundary in method_calls.rs.
+    let values = exact_values(&[
+        BAG_DECLS,
+        BAG_CALL_RECEIVER_DECLS,
+        "bag_call_receiver_view()",
+    ]);
+    assert_eq!(values, ["\"1|1\" : String"]);
 }
 
 #[test]
@@ -700,6 +762,13 @@ fn rustc_backed_set_matches_aot_comptime_forced_interpreter_and_default_dev_fall
     let source = parity_source("set_view()", SET_DECLS);
     assert_eq!(check_aot_comptime("set/all-methods", &source), SET_EXPECTED);
     check_dev_tiers_with_boundary("set", &source, SET_EXPECTED, true);
+}
+
+#[test]
+fn rustc_backed_bag_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+    let source = parity_source("bag_view()", BAG_DECLS);
+    assert_eq!(check_aot_comptime("bag/all-methods", &source), BAG_EXPECTED);
+    check_dev_tiers_with_boundary("bag", &source, BAG_EXPECTED, true);
 }
 
 #[test]

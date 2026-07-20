@@ -1306,6 +1306,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::EachMap => format!("jet_map_each(({}).clone(), {})", recv, a(0)),
                 TClosureOp::Find => format!("jet_list_find(({}).clone(), {})", recv, a(0)),
                 TClosureOp::Any => format!("jet_list_any(({}).clone(), {})", recv, a(0)),
+                TClosureOp::BagAny => format!("({}).keys().any({})", recv, a(0)),
                 TClosureOp::All => format!("jet_list_all(({}).clone(), {})", recv, a(0)),
                 TClosureOp::SortBy => format!("{{ jet_list_sort_by(&mut {}, {}); }}", recv, a(0)),
                 TClosureOp::Reduce => {
