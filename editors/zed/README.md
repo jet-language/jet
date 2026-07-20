@@ -6,6 +6,19 @@ for diagnostics, completion, hover, go-to-definition, rename, semantic tokens
 links, code lenses, folding, selection ranges, call hierarchy, and type
 hierarchy.
 
+## Language-server capabilities
+
+| Area | Jet LSP 3.17 behavior |
+|---|---|
+| Documents | Incremental UTF-16 range sync, stale-version rejection, diagnostics, full/range formatting, quick fixes |
+| Completion | Context-aware items, snippets, auto-import edits, signature help |
+| Navigation | Hover, definition, references, prepare-rename/rename, document and workspace symbols across workspace folders |
+| Structure | Folding, occurrence highlights, selection ranges, document links, run/test code lenses |
+| Semantics | Semantic tokens full/range/delta, inlay hints, call hierarchy, trait/type hierarchy |
+| Workspace | Multiple roots with folder add/remove notifications; `jet.impact` and `jet.budgetReports` commands |
+
+Every advertised capability maps to a named non-vacuous test in `tests/lsp.rs`.
+
 ## Setup
 
 From the repo root:
@@ -60,7 +73,12 @@ Rebuild with `cargo build` and reload Zed to pick up server changes.
 ```bash
 nix develop -c jet self lsp doctor
 nix develop -c cargo test --test lsp
+nix develop -c jet self lsp --bench
 ```
+
+`--bench` reports cold, warm-hit, and warm-edit latency plus deterministic
+query-cache memory counters. Timings are measurements, not flaky wall-clock
+pass/fail assertions.
 
 In Zed, open a file with `x :: 1` and expect a clean parse.
 

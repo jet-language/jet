@@ -224,11 +224,17 @@ become dependencies of the compiler workspace crates.
 
 D-LSP1 makes editor tooling a client of the front end, not a second checker.
 `crates/jet-queries` is a std-only demand cache for file inputs and derived
-queries. The LSP stores open-buffer text as query inputs, memoizes lexing,
-diagnostics, checked bundles, and fix data through that cache, and invalidates
-only dependencies whose input revision changed. D-LSP2 requires every
-advertised LSP capability to have named coverage in `tests/lsp.rs`; the server
-must not advertise speculative features.
+queries. The LSP stores open-buffer text as query inputs and memoizes lexing,
+diagnostics, checked bundles, and fix data through that cache. A changed root is
+reloaded through the canonical parser; sema then reuses span-exact checked
+function bodies while their signature/import/global environment is unchanged.
+Signature and dependency changes invalidate that item cache, and disk import
+checks conservatively revalidate their module closure. Warm-session timings are
+reported as observations; deterministic query/item counters and retained-byte
+totals are the regression gates. The server records cancellation concurrently
+with request execution and replaces a cancelled in-flight result with JSON-RPC
+`-32800`. D-LSP2 requires every advertised LSP capability to have named coverage
+in `tests/lsp.rs`; the server must not advertise speculative features.
 
 ## Rules
 

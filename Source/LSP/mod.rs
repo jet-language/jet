@@ -15,7 +15,7 @@ mod SymbolDB;
 // Public entry points (preserve `jet::LSP::<item>` paths).
 pub use Check::{
     apply_all, apply_edit, build_graph_json, check_document, check_document_with_bundle,
-    collect_fixes, run_bench, run_doctor, Fix,
+    collect_fixes, measure_bench, run_bench, run_doctor, BenchReport, Fix,
 };
 pub use Position::{byte_offset_to_lsp, lsp_pos_to_offset, LspPos};
 pub use Server::run_stdio;

@@ -26,6 +26,142 @@ use Validation::{
     apply_helper_layer_inference, qualified_effect_facts, taint_check_item,
 };
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct IncrementalSemaStats {
+    pub hits: u64,
+    pub recomputes: u64,
+    pub live_items: usize,
+    pub live_item_bytes: usize,
+}
+
+#[derive(Clone)]
+pub(super) struct CachedFunctionBody {
+    pub input: Vec<u8>,
+    pub function: Func,
+    pub diagnostics: Vec<Diagnostic>,
+    pub summaries: HashMap<String, EffectSummary>,
+    pub comptime_inputs: Vec<crate::AST::ComptimeInput>,
+    pub address_taken: HashSet<String>,
+    pub anchors: HashMap<(String, usize, usize), DefinitionAnchorFact>,
+}
+
+#[derive(Default)]
+pub struct IncrementalSemaCache {
+    environment: Vec<u8>,
+    functions: HashMap<String, CachedFunctionBody>,
+    hits: u64,
+    recomputes: u64,
+}
+
+impl IncrementalSemaCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn stats(&self) -> IncrementalSemaStats {
+        IncrementalSemaStats {
+            hits: self.hits,
+            recomputes: self.recomputes,
+            live_items: self.functions.len(),
+            live_item_bytes: self.environment.len()
+                + self.functions.values().map(|entry| entry.input.len()).sum::<usize>(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.environment.clear();
+        self.functions.clear();
+    }
+
+    fn begin_bundle(&mut self, bundle: &ProgramBundle) {
+        let environment = incremental_environment(bundle);
+        if self.environment != environment {
+            self.environment = environment;
+            self.functions.clear();
+        }
+    }
+
+    pub(super) fn get(&mut self, key: &str, input: &[u8]) -> Option<CachedFunctionBody> {
+        let hit = self
+            .functions
+            .get(key)
+            .filter(|entry| entry.input == input)
+            .cloned();
+        if hit.is_some() {
+            self.hits += 1;
+        }
+        hit
+    }
+
+    pub(super) fn store(&mut self, key: String, entry: CachedFunctionBody) {
+        self.recomputes += 1;
+        self.functions.insert(key, entry);
+    }
+}
+
+fn incremental_environment(bundle: &ProgramBundle) -> Vec<u8> {
+    let mut out = crate::CanonicalAST::canonical_fragment(&(
+        bundle.entry,
+        bundle.active_os,
+        bundle.layer_ceiling,
+    ));
+    for module in &bundle.modules {
+        let metadata = (
+            &module.display,
+            &module.alias,
+            &module.imports,
+            module.web_target_ceiling,
+            module.pub_file,
+            module.no_prelude,
+            &module.html_path,
+            &module.policy_declarations,
+        );
+        out.extend(crate::CanonicalAST::canonical_fragment(&metadata));
+        out.extend(format!("{metadata:?}").into_bytes());
+        for item in &module.items {
+            let mut item = item.clone();
+            clear_callable_bodies(&mut item);
+            out.extend(crate::CanonicalAST::canonical_fragment(&item));
+            // Canonical AST deliberately omits locations. The exact signature
+            // locations are part of IDE facts, so include the body-free Debug
+            // form as a conservative span fingerprint.
+            out.extend(format!("{item:?}").into_bytes());
+        }
+    }
+    out
+}
+
+fn clear_callable_bodies(item: &mut Item) {
+    let clear = |function: &mut Func| {
+        function.body.clear();
+        // The declaration end includes the body. Normalize it so an edit in a
+        // trailing function does not invalidate unrelated earlier functions.
+        function.span = function.name_span;
+    };
+    match item {
+        Item::Func(function) => clear(function),
+        Item::Struct(definition) => {
+            definition.methods.iter_mut().for_each(clear);
+            for implementation in &mut definition.trait_impls {
+                implementation.methods.iter_mut().for_each(clear);
+            }
+        }
+        Item::Enum(definition) => {
+            definition.methods.iter_mut().for_each(clear);
+            for implementation in &mut definition.trait_impls {
+                implementation.methods.iter_mut().for_each(clear);
+            }
+        }
+        Item::Impl(implementation) => implementation.methods.iter_mut().for_each(clear),
+        Item::CodeModule(module) => {
+            if let Some(body) = &mut module.body {
+                body.iter_mut().for_each(clear_callable_bodies);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn builtin_type_registry() -> TypeRegistry {
     let zero = Span::new(0, 0);
     let variants = ["Less", "Equal", "Greater"].into_iter().map(|name| {
@@ -865,7 +1001,7 @@ pub(crate) fn rewrite_inline_calls_expr(
 }
 
 pub fn check_bundle(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    check_bundle_opts(bundle, mode, false, false).0
+    check_bundle_opts_for_output(bundle, mode, false, false, None, None).0
 }
 
 /// Check one explicitly addressed runnable Output. Sema marks that resolved
@@ -875,7 +1011,7 @@ pub fn check_bundle_for_output(
     mode: CompileMode,
     output: &str,
 ) -> Vec<Diagnostic> {
-    check_bundle_opts_for_output(bundle, mode, false, false, Some(output)).0
+    check_bundle_opts_for_output(bundle, mode, false, false, Some(output), None).0
 }
 
 pub fn check_bundle_for_output_opts(
@@ -891,6 +1027,7 @@ pub fn check_bundle_for_output_opts(
         freestanding,
         allow_impure,
         Some(output),
+        None,
     )
     .0
 }
@@ -900,26 +1037,25 @@ pub fn check_bundle_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-    check_bundle_opts(bundle, mode, false, false)
+    check_bundle_opts_for_output(bundle, mode, false, false, None, None)
+}
+
+pub fn check_bundle_with_effect_facts_incremental(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    cache: &mut IncrementalSemaCache,
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+    check_bundle_opts_for_output(bundle, mode, false, false, None, Some(cache))
 }
 
 /// Like `check_bundle` but with extra build options (E2-M15).
 pub fn check_bundle_freestanding(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    check_bundle_opts(bundle, mode, true, false).0
+    check_bundle_opts_for_output(bundle, mode, true, false, None, None).0
 }
 
 /// Like `check_bundle` but with D-CTEFFECT1 `--allow-impure` flag.
 pub fn check_bundle_allow_impure(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<Diagnostic> {
-    check_bundle_opts(bundle, mode, false, true).0
-}
-
-pub(crate) fn check_bundle_opts(
-    bundle: &mut ProgramBundle,
-    mode: CompileMode,
-    freestanding: bool,
-    allow_impure: bool,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-    check_bundle_opts_for_output(bundle, mode, freestanding, allow_impure, None)
+    check_bundle_opts_for_output(bundle, mode, false, true, None, None).0
 }
 
 fn check_bundle_opts_for_output(
@@ -928,6 +1064,7 @@ fn check_bundle_opts_for_output(
     freestanding: bool,
     allow_impure: bool,
     explicit_output: Option<&str>,
+    mut incremental: Option<&mut IncrementalSemaCache>,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = super::BudgetSpecs::validate_bundle(bundle);
     diags.extend(super::Casing::validate_bundle(bundle));
@@ -2149,6 +2286,13 @@ fn check_bundle_opts_for_output(
     // whole-program fixpoint and enforce each `#(…)` bound once.
     // D-CTEFFECT1 Tier-1: accumulate embed inputs from all module checks.
     // Use a temporary to avoid simultaneous &mut borrows of `bundle`.
+    if mode == CompileMode::Check {
+        if let Some(cache) = incremental.as_deref_mut() {
+            cache.begin_bundle(bundle);
+        }
+    } else {
+        incremental = None;
+    }
     let mut embed_inputs = std::mem::take(&mut bundle.comptime_inputs);
     let mut effect_summaries: HashMap<String, EffectSummary> = HashMap::new();
     let mut reference_anchors = HashMap::new();
@@ -2171,6 +2315,7 @@ fn check_bundle_opts_for_output(
             &mut embed_inputs,
             &mut global_addr_taken,
             &mut reference_anchors,
+            incremental.as_deref_mut(),
         ));
         seed_trait_dispatch_effects(&module.items, &mut local_summaries);
         apply_effect_via(&module.items, &mut local_summaries, &mut Vec::new());

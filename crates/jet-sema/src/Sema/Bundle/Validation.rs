@@ -934,6 +934,104 @@ pub(crate) fn collect_core_expr(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn check_func_body_incremental(
+    key: String,
+    function: &mut Func,
+    module_idx: usize,
+    states: &[ModuleState],
+    owner_type: Option<&str>,
+    ct_funcs: &HashMap<String, Func>,
+    ct_externs: &HashSet<String>,
+    ct_base_dir: &std::path::Path,
+    ct_globals: &HashMap<String, crate::Comptime::CtValue>,
+    freestanding: bool,
+    allow_impure: bool,
+    summaries: &mut HashMap<String, EffectSummary>,
+    embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
+    global_addr_taken: &mut HashSet<String>,
+    no_alloc: bool,
+    no_prelude: bool,
+    reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    cache: Option<&mut IncrementalSemaCache>,
+    cache_allowed: bool,
+) -> Vec<Diagnostic> {
+    // The checked function contains source spans used by diagnostics and IDE
+    // facts. Include them in the cache input so whitespace-only edits cannot
+    // reuse stale positions even when the canonical AST is unchanged.
+    let debug = format!("{function:?}");
+    let cache_allowed = cache_allowed && !debug.contains("Comptime");
+    let input = debug.into_bytes();
+    let Some(cache) = cache.filter(|_| cache_allowed) else {
+        return check_func_body_bundle(
+            function,
+            module_idx,
+            states,
+            owner_type,
+            ct_funcs,
+            ct_externs,
+            ct_base_dir,
+            ct_globals,
+            freestanding,
+            allow_impure,
+            summaries,
+            embed_inputs_out,
+            global_addr_taken,
+            no_alloc,
+            no_prelude,
+            reference_anchors,
+        );
+    };
+    if let Some(hit) = cache.get(&key, &input) {
+        *function = hit.function;
+        summaries.extend(hit.summaries);
+        embed_inputs_out.extend(hit.comptime_inputs);
+        global_addr_taken.extend(hit.address_taken);
+        reference_anchors.extend(hit.anchors);
+        return hit.diagnostics;
+    }
+
+    let mut local_summaries = HashMap::new();
+    let mut local_inputs = Vec::new();
+    let mut local_address_taken = HashSet::new();
+    let mut local_anchors = HashMap::new();
+    let diagnostics = check_func_body_bundle(
+        function,
+        module_idx,
+        states,
+        owner_type,
+        ct_funcs,
+        ct_externs,
+        ct_base_dir,
+        ct_globals,
+        freestanding,
+        allow_impure,
+        &mut local_summaries,
+        &mut local_inputs,
+        &mut local_address_taken,
+        no_alloc,
+        no_prelude,
+        &mut local_anchors,
+    );
+    summaries.extend(local_summaries.clone());
+    embed_inputs_out.extend(local_inputs.clone());
+    global_addr_taken.extend(local_address_taken.clone());
+    reference_anchors.extend(local_anchors.clone());
+    cache.store(
+        key,
+        CachedFunctionBody {
+            input,
+            function: function.clone(),
+            diagnostics: diagnostics.clone(),
+            summaries: local_summaries,
+            comptime_inputs: local_inputs,
+            address_taken: local_address_taken,
+            anchors: local_anchors,
+        },
+    );
+    diagnostics
+}
+
 pub(crate) fn check_module_bodies(
     module: &mut crate::AST::LoadedModule,
     module_idx: usize,
@@ -945,6 +1043,7 @@ pub(crate) fn check_module_bodies(
     embed_inputs_out: &mut Vec<crate::AST::ComptimeInput>,
     global_addr_taken: &mut HashSet<String>,
     reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    mut incremental: Option<&mut IncrementalSemaCache>,
 ) -> Vec<Diagnostic> {
     let st = &states[module_idx];
     let mut diags = Vec::new();
@@ -1166,10 +1265,13 @@ pub(crate) fn check_module_bodies(
             }
         }
     }
+    let cache_allowed = view_jobs.is_empty();
+    let module_key = module.display.clone();
     for item in &mut module.items {
         match item {
             Item::Func(f) => {
-                diags.extend(check_func_body_bundle(
+                diags.extend(check_func_body_incremental(
+                    format!("{module_key}::fn:{}", f.name),
                     f,
                     module_idx,
                     states,
@@ -1184,8 +1286,10 @@ pub(crate) fn check_module_bodies(
                     embed_inputs_out,
                     global_addr_taken,
                     no_alloc,
-                no_prelude,
-                reference_anchors,
+                    no_prelude,
+                    reference_anchors,
+                    incremental.as_deref_mut(),
+                    cache_allowed,
                 ));
             }
             Item::Struct(s) => {
@@ -1194,7 +1298,8 @@ pub(crate) fn check_module_bodies(
                     if own_params.is_empty() {
                         m.type_params = s.type_params.clone();
                     }
-                    diags.extend(check_func_body_bundle(
+                    diags.extend(check_func_body_incremental(
+                        format!("{module_key}::struct:{}::method:{}", s.name, m.name),
                         m,
                         module_idx,
                         states,
@@ -1211,6 +1316,8 @@ pub(crate) fn check_module_bodies(
                         no_alloc,
                         no_prelude,
                         reference_anchors,
+                        incremental.as_deref_mut(),
+                        cache_allowed,
                     ));
                     m.type_params = own_params;
                 }
@@ -1227,7 +1334,11 @@ pub(crate) fn check_module_bodies(
                         } else {
                             own_params.clone()
                         };
-                        diags.extend(check_func_body_bundle(
+                        diags.extend(check_func_body_incremental(
+                            format!(
+                                "{module_key}::struct:{}::trait:{}::method:{}",
+                                s.name, block.trait_name, m.name
+                            ),
                             m,
                             module_idx,
                             states,
@@ -1244,6 +1355,8 @@ pub(crate) fn check_module_bodies(
                             no_alloc,
                             no_prelude,
                             reference_anchors,
+                            incremental.as_deref_mut(),
+                            cache_allowed,
                         ));
                         // Generated serde methods temporarily carry inherited,
                         // inferred bounds solely for sema. Their Rust generics
@@ -1262,7 +1375,8 @@ pub(crate) fn check_module_bodies(
                     if own_params.is_empty() {
                         m.type_params = e.type_params.clone();
                     }
-                    diags.extend(check_func_body_bundle(
+                    diags.extend(check_func_body_incremental(
+                        format!("{module_key}::enum:{}::method:{}", e.name, m.name),
                         m,
                         module_idx,
                         states,
@@ -1279,20 +1393,51 @@ pub(crate) fn check_module_bodies(
                         no_alloc,
                         no_prelude,
                         reference_anchors,
+                        incremental.as_deref_mut(),
+                        cache_allowed,
                     ));
                     m.type_params = own_params;
                 }
                 for block in &mut e.trait_impls {
                     for m in &mut block.methods {
                         let own_params = std::mem::take(&mut m.type_params);
-                        m.type_params = if own_params.is_empty() { e.type_params.clone() } else { own_params.clone() };
-                        diags.extend(check_func_body_bundle(
-                            m, module_idx, states, Some(&e.name), &ct_funcs, &ct_externs,
-                            &ct_base_dir, &ct_globals, freestanding, allow_impure, summaries,
-                            embed_inputs_out, global_addr_taken, no_alloc, no_prelude,
+                        m.type_params = if own_params.is_empty() {
+                            e.type_params.clone()
+                        } else {
+                            own_params.clone()
+                        };
+                        diags.extend(check_func_body_incremental(
+                            format!(
+                                "{module_key}::enum:{}::trait:{}::method:{}",
+                                e.name, block.trait_name, m.name
+                            ),
+                            m,
+                            module_idx,
+                            states,
+                            Some(&e.name),
+                            &ct_funcs,
+                            &ct_externs,
+                            &ct_base_dir,
+                            &ct_globals,
+                            freestanding,
+                            allow_impure,
+                            summaries,
+                            embed_inputs_out,
+                            global_addr_taken,
+                            no_alloc,
+                            no_prelude,
                             reference_anchors,
+                            incremental.as_deref_mut(),
+                            cache_allowed,
                         ));
-                        m.type_params = if matches!(block.trait_name.as_str(), crate::Generics::ENCODE | crate::Generics::DECODE) { Vec::new() } else { own_params };
+                        m.type_params = if matches!(
+                            block.trait_name.as_str(),
+                            crate::Generics::ENCODE | crate::Generics::DECODE
+                        ) {
+                            Vec::new()
+                        } else {
+                            own_params
+                        };
                     }
                 }
             }
@@ -1316,7 +1461,13 @@ pub(crate) fn check_module_bodies(
                     } else {
                         m.type_params = own_params.clone();
                     }
-                    diags.extend(check_func_body_bundle(
+                    diags.extend(check_func_body_incremental(
+                        format!(
+                            "{module_key}::impl:{}::{}::method:{}",
+                            i.type_name,
+                            i.trait_name.as_deref().unwrap_or("inherent"),
+                            m.name
+                        ),
                         m,
                         module_idx,
                         states,
@@ -1333,6 +1484,8 @@ pub(crate) fn check_module_bodies(
                         no_alloc,
                         no_prelude,
                         reference_anchors,
+                        incremental.as_deref_mut(),
+                        cache_allowed,
                     ));
                     m.type_params = own_params;
                 }
@@ -1489,7 +1642,8 @@ pub(crate) fn check_module_bodies(
                             // same-name summary while the shared body checker
                             // emits this function's local summary.
                             let previous = summaries.remove(&f.name);
-                            diags.extend(check_func_body_bundle(
+                            diags.extend(check_func_body_incremental(
+                                format!("{module_key}::module:{}::fn:{}", cm.name, f.name),
                                 f,
                                 module_idx,
                                 states,
@@ -1504,8 +1658,10 @@ pub(crate) fn check_module_bodies(
                                 embed_inputs_out,
                                 global_addr_taken,
                                 no_alloc,
-                            no_prelude,
-                            reference_anchors,
+                                no_prelude,
+                                reference_anchors,
+                                incremental.as_deref_mut(),
+                                cache_allowed,
                             ));
                             if let Some(summary) = summaries.remove(&f.name) {
                                 summaries.insert(format!("{}__{}", cm.name, f.name), summary);

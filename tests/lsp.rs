@@ -2196,6 +2196,49 @@ fn lsp_hover_returns_signature() {
 }
 
 #[test]
+fn lsp_late_cancel_does_not_poison_a_reused_request_id() {
+    let source = "fn add(a: Int, b: Int) -> Int { return a + b; }\n";
+    let uri = "file:///tmp/lsp_cancel_test.jet";
+    run_transcript(
+        source,
+        &[
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}"#
+                    .to_string(),
+                expect_contains: Some(vec!["hoverProvider".to_string()]),
+            },
+            TranscriptStep::Open {
+                uri: uri.to_string(),
+                expect_notification: true,
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","method":"$/cancelRequest","params":{"id":2}}"#
+                    .to_string(),
+                expect_contains: None,
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec!["add".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: format!(
+                    r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}}}}}}"#,
+                    uri
+                ),
+                expect_contains: Some(vec!["add".to_string()]),
+            },
+            TranscriptStep::Send {
+                msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
+                expect_contains: Some(vec!["result".to_string()]),
+            },
+        ],
+    );
+}
+
+#[test]
 fn lsp_accepts_hidden_generic_constructor_arguments() {
     let source = "struct Box<T> {\n    value: T\n}\nimpl Box {\n    fn new(value: ^T) -> Box<T> { return Box<T>.{ value: value } }\n}\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n}\n";
     let uri = "file:///tmp/lsp_generic_constructor_infer.jet";
@@ -3189,26 +3232,19 @@ fn c44_prelude_idents_canonical() {
     );
 }
 
-// ── Latency bench (jet self lsp --bench gate) ─────────────────────────────────────
+// ── Warm-session latency/memory measurement ──────────────────────────────────
 
 #[test]
-fn lsp_bench_under_budget() {
-    // Run the bench in-process: 10 rounds on the wordcount example, budget 200ms/round.
-    // This mirrors what `jet self lsp --bench` does in CI.
+fn lsp_bench_reports_deterministic_cache_and_memory() {
     let src = include_str!("../examples/features/collections/wordcount.jet");
-    let budget_ms = 200u128;
-    let rounds = 10usize;
-
-    let start = std::time::Instant::now();
-    for _ in 0..rounds {
-        let _ = jet::check_document("bench.jet", src);
-    }
-    let elapsed = start.elapsed();
-    let per_round_ms = elapsed.as_millis() / rounds as u128;
-    assert!(
-        per_round_ms <= budget_ms,
-        "latency regression: {}ms/round > budget {}ms/round",
-        per_round_ms,
-        budget_ms
-    );
+    let report = jet::LSP::measure_bench(src, 10);
+    assert_eq!(report.hits, 1, "unchanged warm request must hit once");
+    assert_eq!(report.recomputes, 11, "cold check plus ten changed revisions");
+    assert_eq!(report.live_inputs, 1);
+    assert_eq!(report.live_input_bytes, src.len() + "\n// lsp-bench-edit:1\n".len());
+    assert_eq!(report.live_memos, 1, "only current checked revision stays live");
+    assert_eq!(report.item_hits, 10, "comment edits must reuse the checked item");
+    assert_eq!(report.item_recomputes, 1, "only the cold item check may recompute");
+    assert!(report.live_items > 0);
+    assert!(report.live_item_bytes > 0);
 }

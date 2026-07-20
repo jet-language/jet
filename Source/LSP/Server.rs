@@ -8,7 +8,7 @@ use jet_driver::QueryService::CompilerQueries;
 use jet_queries::{FileKey, QueryKey};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::Check::{fixes_from_diagnostics, Fix};
 use super::Completion::compute_completions;
@@ -123,15 +123,38 @@ impl Server {
 // ── JSON-RPC main loop ────────────────────────────────────────────────────────
 
 pub fn run_stdio() -> io::Result<()> {
-    let mut stdin = io::stdin().lock();
+    let (messages, incoming) = std::sync::mpsc::channel();
+    let cancelled = Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let reader_cancelled = Arc::clone(&cancelled);
+    std::thread::spawn(move || {
+        let stdin = io::stdin();
+        let mut stdin = stdin.lock();
+        loop {
+            let body = match read_message(&mut stdin) {
+                Ok(Some(body)) => body,
+                Ok(None) => break,
+                Err(error) => {
+                    let _ = messages.send(Err(error));
+                    break;
+                }
+            };
+            if let Ok(message) = parse_rpc_message(&body) {
+                if json_get(&message, "method").and_then(json_str) == Some("$/cancelRequest") {
+                    if let Some(key) = cancellation_key(json_get(&message, "params")) {
+                        lock_cancelled(&reader_cancelled).insert(key);
+                    }
+                }
+            }
+            if messages.send(Ok(body)).is_err() {
+                break;
+            }
+        }
+    });
     let mut stdout = io::stdout();
     let mut server = Server::new();
 
-    loop {
-        let body = match read_message(&mut stdin)? {
-            Some(b) => b,
-            None => break,
-        };
+    while let Ok(body) = incoming.recv() {
+        let body = body?;
         let msg = match parse_rpc_message(&body) {
             Ok(v) => v,
             Err((code, message)) => {
@@ -150,16 +173,30 @@ pub fn run_stdio() -> io::Result<()> {
             if id.is_some() {
                 // D-LSP3: flush any buffered dirty-document diagnostics before serving requests.
                 let _ = flush_dirty(&mut server, &mut stdout);
-                let resp = catch_handler(std::panic::AssertUnwindSafe(|| {
-                    handle_request(&mut server, method, params, id.as_ref().unwrap())
-                }));
+                let id = id.as_ref().unwrap();
+                let key = serialize_id(id);
+                let resp = cancellable_response(&cancelled, &key, id, || {
+                    catch_handler(std::panic::AssertUnwindSafe(|| {
+                        handle_request(&mut server, method, params, id)
+                    }))
+                });
                 if let Some(resp) = resp {
                     write_message(&mut stdout, &resp)?;
                 }
             } else {
-                catch_notification(|| {
+                let cancel_key = (method == "$/cancelRequest")
+                    .then(|| cancellation_key(params))
+                    .flatten();
+                let result = catch_notification(|| {
                     handle_notification(&mut server, method, params, &mut stdout)
-                })?;
+                });
+                if let Some(key) = cancel_key {
+                    // This queued notification can only be observed after the
+                    // state-owning loop finished the matching request. Drop a
+                    // late ID so a future reused JSON-RPC ID is not cancelled.
+                    lock_cancelled(&cancelled).remove(&key);
+                }
+                result?;
             }
         }
 
@@ -168,6 +205,39 @@ pub fn run_stdio() -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn lock_cancelled(
+    cancelled: &Mutex<std::collections::HashSet<String>>,
+) -> std::sync::MutexGuard<'_, std::collections::HashSet<String>> {
+    cancelled
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn cancellation_key(params: Option<&JsonValue>) -> Option<String> {
+    let id = params.and_then(|params| json_get(params, "id"))?;
+    matches!(id, JsonValue::Number(_) | JsonValue::String(_)).then(|| serialize_id(id))
+}
+
+fn cancellable_response<F>(
+    cancelled: &Mutex<std::collections::HashSet<String>>,
+    key: &str,
+    id: &JsonValue,
+    run: F,
+) -> Option<String>
+where
+    F: FnOnce() -> Option<String>,
+{
+    if lock_cancelled(cancelled).remove(key) {
+        return Some(error_response(id, -32800, "Request cancelled"));
+    }
+    let response = run();
+    if lock_cancelled(cancelled).remove(key) {
+        Some(error_response(id, -32800, "Request cancelled"))
+    } else {
+        response
+    }
 }
 
 fn parse_rpc_message(body: &str) -> Result<JsonValue, (i64, &'static str)> {
@@ -410,6 +480,11 @@ fn handle_notification(
 ) -> io::Result<()> {
     match method {
         "initialized" => Ok(()),
+        "$/cancelRequest" => {
+            // The reader thread records this before the queued notification
+            // reaches the state-owning loop.
+            Ok(())
+        }
         "exit" => {
             server.shutdown = true;
             Ok(())
@@ -1979,6 +2054,30 @@ fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 #[cfg(test)]
 mod project_part_tests {
     use super::*;
+
+    #[test]
+    fn cancellation_suppresses_an_in_flight_success_response() {
+        let cancelled = Arc::new(Mutex::new(std::collections::HashSet::new()));
+        let rendezvous = Arc::new(std::sync::Barrier::new(2));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let worker_rendezvous = Arc::clone(&rendezvous);
+        let canceller = std::thread::spawn(move || {
+            worker_rendezvous.wait();
+            lock_cancelled(&worker_cancelled).insert("7".to_string());
+            worker_rendezvous.wait();
+        });
+
+        let response = cancellable_response(&cancelled, "7", &JsonValue::Number(7), || {
+            rendezvous.wait();
+            rendezvous.wait();
+            Some(response(&JsonValue::Number(7), "true"))
+        })
+        .expect("cancel response");
+        canceller.join().unwrap();
+
+        assert!(response.contains(r#""code":-32800"#), "{response}");
+        assert!(!response.contains(r#""result":true"#), "{response}");
+    }
 
     #[cfg(unix)]
     #[derive(Debug)]

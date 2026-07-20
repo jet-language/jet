@@ -186,29 +186,77 @@ pub fn run_doctor() {
 
 // ── Bench ─────────────────────────────────────────────────────────────────────
 
-/// Replay a simple session to measure diagnostic latency.
-/// Runs `rounds` iterations of parse+sema over `src` and checks budget_ms.
-pub fn run_bench(src: &str, rounds: usize, budget_ms: u128) {
-    let label = format!("{}B input, {} rounds", src.len(), rounds);
-    let start = std::time::Instant::now();
-    for _ in 0..rounds {
-        let _ = check_document("bench.jet", src);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BenchReport {
+    pub cold_us: u128,
+    pub warm_hit_us: u128,
+    pub warm_edit_us: u128,
+    pub hits: u64,
+    pub recomputes: u64,
+    pub live_inputs: usize,
+    pub live_input_bytes: usize,
+    pub live_memos: usize,
+    pub item_hits: u64,
+    pub item_recomputes: u64,
+    pub live_items: usize,
+    pub live_item_bytes: usize,
+}
+
+/// Measure one cold check, one unchanged warm hit, and repeated warm edits.
+/// Timings are observations, never pass/fail assertions; deterministic cache
+/// counters and retained-byte totals own regression tests.
+pub fn measure_bench(src: &str, rounds: usize) -> BenchReport {
+    let rounds = rounds.max(1);
+    let mut queries = jet_driver::QueryService::CompilerQueries::new();
+    let cold = std::time::Instant::now();
+    let _ = queries.check_text("bench.jet", src, true);
+    let cold_us = cold.elapsed().as_micros();
+
+    let warm_hit = std::time::Instant::now();
+    let _ = queries.check_text("bench.jet", src, true);
+    let warm_hit_us = warm_hit.elapsed().as_micros();
+
+    let edits = std::time::Instant::now();
+    for round in 0..rounds {
+        let edited = format!("{src}\n// lsp-bench-edit:{}\n", round % 2);
+        let _ = queries.check_text("bench.jet", &edited, true);
     }
-    let elapsed = start.elapsed();
-    let per_round_ms = elapsed.as_millis() / rounds.max(1) as u128;
+    let warm_edit_us = edits.elapsed().as_micros() / rounds as u128;
+    let stats = queries.stats();
+    BenchReport {
+        cold_us,
+        warm_hit_us,
+        warm_edit_us,
+        hits: stats.hits,
+        recomputes: stats.recomputes,
+        live_inputs: stats.live_inputs,
+        live_input_bytes: stats.live_input_bytes,
+        live_memos: stats.live_memos,
+        item_hits: stats.item_hits,
+        item_recomputes: stats.item_recomputes,
+        live_items: stats.live_items,
+        live_item_bytes: stats.live_item_bytes,
+    }
+}
+
+pub fn run_bench(src: &str, rounds: usize, reference_budget_ms: u128) {
+    let report = measure_bench(src, rounds);
     println!(
-        "bench [{}]: {}ms/round ({} total) — budget {}ms — {}",
-        label,
-        per_round_ms,
-        elapsed.as_millis(),
-        budget_ms,
-        if per_round_ms <= budget_ms {
-            "PASS"
-        } else {
-            "FAIL"
-        }
+        "bench [{}B, {} edits]: cold={}us warm-hit={}us warm-edit={}us reference={}ms hits={} recomputes={} live-inputs={} live-input-bytes={} live-memos={} item-hits={} item-recomputes={} live-items={} live-item-bytes={}",
+        src.len(),
+        rounds.max(1),
+        report.cold_us,
+        report.warm_hit_us,
+        report.warm_edit_us,
+        reference_budget_ms,
+        report.hits,
+        report.recomputes,
+        report.live_inputs,
+        report.live_input_bytes,
+        report.live_memos,
+        report.item_hits,
+        report.item_recomputes,
+        report.live_items,
+        report.live_item_bytes,
     );
-    if per_round_ms > budget_ms {
-        std::process::exit(1);
-    }
 }

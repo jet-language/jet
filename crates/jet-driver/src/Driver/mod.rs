@@ -1906,13 +1906,46 @@ pub fn check_file_with_effect_facts(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
+    check_file_with_effect_facts_impl(file, overlay, is_lsp, None)
+}
+
+pub fn check_file_with_effect_facts_incremental(
+    file: &str,
+    overlay: Option<(&Path, &str)>,
+    is_lsp: bool,
+    cache: &mut crate::Sema::IncrementalSemaCache,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
+    check_file_with_effect_facts_impl(file, overlay, is_lsp, Some(cache))
+}
+
+fn check_file_with_effect_facts_impl(
+    file: &str,
+    overlay: Option<(&Path, &str)>,
+    is_lsp: bool,
+    incremental: Option<&mut crate::Sema::IncrementalSemaCache>,
+) -> (
+    Vec<Diagnostic>,
+    Option<crate::AST::ProgramBundle>,
+    crate::Sema::SemIndexEffectFacts,
+) {
     match crate::Loader::load_entry_with_overlay(file, overlay, is_lsp) {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
-            let (check_diags, facts) = crate::Sema::check_bundle_with_effect_facts(
-                &mut bundle,
-                crate::Sema::CompileMode::Check,
-            );
+            let (check_diags, facts) = match incremental {
+                Some(cache) => crate::Sema::check_bundle_with_effect_facts_incremental(
+                    &mut bundle,
+                    crate::Sema::CompileMode::Check,
+                    cache,
+                ),
+                None => crate::Sema::check_bundle_with_effect_facts(
+                    &mut bundle,
+                    crate::Sema::CompileMode::Check,
+                ),
+            };
             diags.extend(check_diags);
             if let Some(crate::AST::Item::Func(build)) = bundle.modules[bundle.entry]
                 .items
