@@ -58,6 +58,12 @@ enum JetHttpRequestFraming {
     Chunked,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct JetHttpRequestHead {
+    framing: JetHttpRequestFraming,
+    expect_continue: bool,
+}
+
 #[derive(Clone, Copy)]
 enum JetHttpChunkPhase {
     Size,
@@ -576,12 +582,13 @@ fn jet_http_srv_read_buffered(
     keep_alive: bool,
     shutdown: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<Option<Vec<u8>>, JetHttpReadError> {
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::sync::atomic::Ordering;
     const MAX_HEADER_BYTES: usize = 32 * 1024;
     const SHUTDOWN_POLL: std::time::Duration = std::time::Duration::from_millis(20);
     let mut buf = [0u8; 8192];
     let mut reading_body = false;
+    let mut continue_sent = false;
     let mut chunked = JetHttpChunkState::new();
     let started = std::time::Instant::now();
     let mut header_deadline = (!keep_alive || !pending.is_empty()).then(|| started + options.read_header_timeout);
@@ -596,14 +603,14 @@ fn jet_http_srv_read_buffered(
             if header_end > MAX_HEADER_BYTES {
                 return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
             }
-            let framing = jet_http_validate_headers(&pending[..header_end])?;
+            let head = jet_http_validate_headers(&pending[..header_end])?;
             if !reading_body {
                 reading_body = true;
                 idle_deadline = std::time::Instant::now()
                     + options.read_body_timeout.min(options.read_idle_timeout);
             }
             let body_start = header_end + 4;
-            let request_end = match framing {
+            let request_end = match head.framing {
                 JetHttpRequestFraming::ContentLength(content_len) => {
                     if content_len > JET_HTTP_MAX_BODY_BYTES {
                         return Err(JetHttpReadError { status: 413, message: "request body is too large" });
@@ -617,6 +624,15 @@ fn jet_http_srv_read_buffered(
             };
             if let Some(request_end) = request_end {
                 return Ok(Some(pending.drain(..request_end).collect()));
+            }
+            if head.expect_continue && !continue_sent {
+                stream
+                    .write_all(b"HTTP/1.1 100 Continue\r\n\r\n")
+                    .map_err(|_| JetHttpReadError {
+                        status: 400,
+                        message: "continue response write failed",
+                    })?;
+                continue_sent = true;
             }
         } else if pending.len() > MAX_HEADER_BYTES {
             return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
@@ -824,7 +840,7 @@ fn jet_http_decode_chunked_body(body: &[u8]) -> Result<String, JetHttpReadError>
     })
 }
 
-fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestFraming, JetHttpReadError> {
+fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHttpReadError> {
     let text = std::str::from_utf8(header)
         .map_err(|_| JetHttpReadError { status: 400, message: "request headers are not valid UTF-8" })?;
     let mut lines = text.split("\r\n");
@@ -843,6 +859,7 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestFraming, Jet
     let mut count = 0usize;
     let mut content_length = None;
     let mut transfer_encoding = None;
+    let mut expectation = None;
     for line in lines {
         count += 1;
         if count > 100 {
@@ -872,23 +889,43 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestFraming, Jet
                     message: "multiple transfer-encoding headers are not allowed",
                 });
             }
+        } else if name.eq_ignore_ascii_case("expect") {
+            if expectation.replace(jet_http_trim_ows(value)).is_some() {
+                return Err(JetHttpReadError {
+                    status: 417,
+                    message: "multiple expect headers are not supported",
+                });
+            }
         }
     }
     if transfer_encoding.is_some() && content_length.is_some() {
         return Err(JetHttpReadError { status: 400, message: "content-length and transfer-encoding cannot be combined" });
     }
-    if let Some(encoding) = transfer_encoding {
+    let framing = if let Some(encoding) = transfer_encoding {
         if version != "HTTP/1.1" || !encoding.eq_ignore_ascii_case("chunked") {
             return Err(JetHttpReadError { status: 400, message: "transfer-encoding is not supported" });
         }
-        return Ok(JetHttpRequestFraming::Chunked);
-    }
-    Ok(JetHttpRequestFraming::ContentLength(content_length.unwrap_or(0)))
+        JetHttpRequestFraming::Chunked
+    } else {
+        JetHttpRequestFraming::ContentLength(content_length.unwrap_or(0))
+    };
+    let expect_continue = match expectation {
+        None => false,
+        Some(value) if version == "HTTP/1.1" && value.eq_ignore_ascii_case("100-continue") => true,
+        Some(_) => {
+            return Err(JetHttpReadError {
+                status: 417,
+                message: "request expectation is not supported",
+            });
+        }
+    };
+    Ok(JetHttpRequestHead { framing, expect_continue })
 }
 
 fn jet_http_srv_read_error_response(error: &JetHttpReadError) -> String {
     let reason = match error.status {
         413 => "Payload Too Large",
+        417 => "Expectation Failed",
         431 => "Request Header Fields Too Large",
         408 => "Request Timeout",
         503 => "Service Unavailable",
@@ -956,9 +993,9 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpSrvReq, JetHttpReadError> {
         message: "request headers are incomplete",
     })?;
     let header_part = &raw[..sep];
-    let framing = jet_http_validate_headers(header_part)?;
+    let head = jet_http_validate_headers(header_part)?;
     let encoded_body = &raw[sep + 4..];
-    let body = match framing {
+    let body = match head.framing {
         JetHttpRequestFraming::ContentLength(content_length) => {
             if encoded_body.len() != content_length {
                 return Err(JetHttpReadError {
@@ -1114,6 +1151,7 @@ fn jet_http_srv_format_connection(resp: &JetHttpSrvResp, version: &str, close: b
         404 => "Not Found",
         405 => "Method Not Allowed",
         416 => "Range Not Satisfiable",
+        417 => "Expectation Failed",
         500 => "Internal Server Error",
         505 => "HTTP Version Not Supported",
         _ => "OK",

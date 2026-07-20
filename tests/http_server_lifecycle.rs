@@ -457,6 +457,134 @@ fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
 }
 
 #[test]
+fn expect_continue_is_ordered_bounded_and_rejects_before_dispatch() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn read_rest(stream: &mut std::net::TcpStream) -> String {
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => response.extend_from_slice(&buf[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(error) => panic!("response read: {error}"),
+            }
+        }
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        read_rest(&mut stream)
+    }
+
+    fn continue_exchange(addr: std::net::SocketAddr, head: &[u8], body_and_tail: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(1))).expect("timeout");
+        stream.write_all(head).expect("request head");
+        let expected = b"HTTP/1.1 100 Continue\r\n\r\n";
+        let mut interim = vec![0u8; expected.len()];
+        stream.read_exact(&mut interim).expect("100 Continue");
+        assert_eq!(interim, expected);
+        stream.write_all(body_and_tail).expect("request body");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let response = read_rest(&mut stream);
+        assert!(!response.contains("100 Continue"), "server sent a second interim response: {response}");
+        response
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mut arrived_content_length = std::net::TcpStream::connect(addr).expect("pre-arrived CL connect");
+    arrived_content_length
+        .write_all(b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\nExpect: 100-continue\r\nConnection: close\r\n\r\nearly")
+        .expect("pre-arrived CL write");
+    arrived_content_length.shutdown(std::net::Shutdown::Write).expect("pre-arrived CL finish");
+    let mut arrived_chunked = std::net::TcpStream::connect(addr).expect("pre-arrived chunked connect");
+    arrived_chunked
+        .write_all(b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nExpect: 100-continue\r\n\r\n5\r\nearly\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+        .expect("pre-arrived chunked write");
+    arrived_chunked.shutdown(std::net::Shutdown::Write).expect("pre-arrived chunked finish");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let post_calls = calls.clone();
+    jet_http_mux_add(&mux, "POST", "/echo", move |req| {
+        post_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &req.body)
+    });
+    let get_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/next", move |_| {
+        get_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"next".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 8;
+    options.read_header_timeout = std::time::Duration::from_millis(200);
+    options.read_idle_timeout = std::time::Duration::from_millis(200);
+    options.read_body_timeout = std::time::Duration::from_millis(200);
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    let arrived_content_length = read_rest(&mut arrived_content_length);
+    assert_eq!(arrived_content_length.matches("HTTP/1.1 200 OK").count(), 1, "{arrived_content_length}");
+    assert!(!arrived_content_length.contains("100 Continue"), "fully arrived CL received interim: {arrived_content_length}");
+    assert!(arrived_content_length.ends_with("\r\n\r\nearly"), "{arrived_content_length}");
+    let arrived_chunked = read_rest(&mut arrived_chunked);
+    assert_eq!(arrived_chunked.matches("HTTP/1.1 200 OK").count(), 2, "{arrived_chunked}");
+    assert!(!arrived_chunked.contains("100 Continue"), "fully arrived chunked request received interim: {arrived_chunked}");
+    assert!(arrived_chunked.find("\r\n\r\nearly").unwrap() < arrived_chunked.rfind("\r\n\r\nnext").unwrap());
+
+    let content_length = continue_exchange(
+        addr,
+        b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 5\r\nExpect: 100-continue\r\n\r\n",
+        b"helloGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(content_length.matches("HTTP/1.1 200 OK").count(), 2, "{content_length}");
+    assert!(content_length.find("\r\n\r\nhello").unwrap() < content_length.rfind("\r\n\r\nnext").unwrap());
+
+    let chunked = continue_exchange(
+        addr,
+        b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nExpect: 100-continue\r\n\r\n",
+        b"5\r\nworld\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(chunked.matches("HTTP/1.1 200 OK").count(), 2, "{chunked}");
+    assert!(chunked.find("\r\n\r\nworld").unwrap() < chunked.rfind("\r\n\r\nnext").unwrap());
+
+    let oversized = exchange(
+        addr,
+        b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1048577\r\nExpect: 100-continue\r\n\r\n",
+    );
+    assert!(oversized.starts_with("HTTP/1.1 413 Payload Too Large"), "{oversized}");
+    assert!(!oversized.contains("100 Continue"), "oversized body was invited: {oversized}");
+
+    for invalid in [
+        "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: fancy\r\n\r\nxGET /next HTTP/1.1\r\nHost: local\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\nExpect: 100-continue\r\n\r\nxGET /next HTTP/1.1\r\nHost: local\r\n\r\n",
+        "POST /echo HTTP/1.0\r\nHost: local\r\nContent-Length: 1\r\nExpect: 100-continue\r\n\r\nxGET /next HTTP/1.1\r\nHost: local\r\n\r\n",
+    ] {
+        let response = exchange(addr, invalid.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 417 Expectation Failed"), "{response}");
+        assert!(!response.contains("100 Continue"), "invalid expectation was invited: {response}");
+        assert!(!response.contains("200 OK"), "invalid expectation dispatched or reused: {response}");
+        assert!(response.ends_with("Connection: close\r\n\r\n"), "{response}");
+    }
+
+    assert_eq!(calls.load(Ordering::Acquire), 7, "rejected expectation reached a handler");
+    shutdown.store(true, std::sync::atomic::Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 8);
+    assert_eq!(report.user_completed, 8);
+}
+
+#[test]
 fn shutdown_closes_idle_keepalive_and_starts_no_new_request() {
     use std::io::Write;
 
