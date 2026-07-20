@@ -5501,7 +5501,7 @@ fn main() {
 }
 
 #[test]
-fn core_http_client_rejects_invalid_options_before_transport() {
+fn core_http_client_owns_pre_response_errors() {
     use std::io::{Read, Write};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -5549,6 +5549,8 @@ fn core_http_client_rejects_invalid_options_before_transport() {
         &harness,
         r#"
 fn main() {
+    std::env::set_var("NO_PROXY", "127.0.0.1");
+    std::env::set_var("no_proxy", "127.0.0.1");
     let url = std::env::args().nth(1).unwrap();
     let cases = [
         (Some(-1), None, None, None),
@@ -5576,6 +5578,12 @@ fn main() {
         ).unwrap_err()
     });
     assert_eq!(url_errors, ["HTTP URL is invalid", "HTTP URL is invalid"]);
+    let refused_url = "http://127.0.0.1:0/".to_string();
+    let connection_error = bridge::jet_http_client_send_impl(
+        "GET", &refused_url, &[], None, None, None, None, None, None, None,
+        &[], &[], &[],
+    ).unwrap_err();
+    assert_eq!(connection_error, "HTTP connection failed");
     let proxy_error = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None, None, Some("ftp://proxy.invalid"),
         &[], &[], &[],
