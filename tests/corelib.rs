@@ -5401,8 +5401,10 @@ fn main() {
     let candidates = (0u64..300)
         .map(|suffix| format!("jet-http-boundary-{suffix:016x}"))
         .collect::<String>();
+    let line_break_name =
+        format!("safe\"\r\nX-Extra: yes\r\n{long_candidate}{candidates}");
     let multipart = vec![
-        format!("{long_candidate}{candidates}"),
+        line_break_name,
         format!("before\r\n--{long_candidate}\r\n{candidates}\r\nafter"),
     ];
     let response = bridge::jet_http_client_send_impl(
@@ -5451,17 +5453,43 @@ fn main() {
         .lines()
         .find_map(|line| line.strip_prefix("content-type: multipart/form-data; boundary="))
         .unwrap();
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().unwrap())
+        })
+        .unwrap();
     let long_candidate = format!("jet-http-boundary{}", "-".repeat(53));
     let candidates = (0u64..300)
         .map(|suffix| format!("jet-http-boundary-{suffix:016x}"))
         .collect::<String>();
-    let field_name = format!("{long_candidate}{candidates}");
+    let raw_field_name = format!("safe\"\r\nX-Extra: yes\r\n{long_candidate}{candidates}");
+    let field_name = format!(
+        "safe%22%0D%0AX-Extra: yes%0D%0A{long_candidate}{candidates}"
+    );
     let field_value = format!("before\r\n--{long_candidate}\r\n{candidates}\r\nafter");
     assert!((1..=70).contains(&boundary.len()), "invalid boundary length: {boundary}");
     assert!(boundary.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'));
     assert_eq!(boundary, "jet-http-boundary-000000000000012c");
-    assert!(!field_name.contains(boundary), "multipart name collided");
+    assert!(!raw_field_name.contains(boundary), "multipart name collided");
     assert!(!field_value.contains(boundary), "multipart value collided");
+    let (part_headers, _) = body
+        .strip_prefix(&format!("--{boundary}\r\n"))
+        .unwrap()
+        .split_once("\r\n\r\n")
+        .unwrap();
+    assert_eq!(
+        part_headers,
+        format!("Content-Disposition: form-data; name=\"{field_name}\"")
+    );
+    assert_eq!(
+        part_headers.lines().count(),
+        1,
+        "multipart field name produced extra header lines"
+    );
+    assert_eq!(content_length, body.len());
     assert_eq!(
         body,
         format!(

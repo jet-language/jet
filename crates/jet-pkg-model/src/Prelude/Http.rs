@@ -278,7 +278,12 @@ fn encode_multipart(fields: &[String], boundary: &str) -> String {
         out.push_str("--");
         out.push_str(boundary);
         out.push_str("\r\nContent-Disposition: form-data; name=\"");
-        out.push_str(&fields[i].replace('"', "%22"));
+        out.push_str(
+            &fields[i]
+                .replace('"', "%22")
+                .replace('\r', "%0D")
+                .replace('\n', "%0A"),
+        );
         out.push_str("\"\r\n\r\n");
         out.push_str(&fields[i + 1]);
         out.push_str("\r\n");
