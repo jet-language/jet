@@ -129,6 +129,14 @@ pub(crate) fn resolve_builtin_op(
     let is_bit_set = matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BIT_SET);
     let is_byte_buffer =
         matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BYTE_BUFFER);
+    let is_float_sequence = matches!(
+        &rty,
+        Some(Type::List(elem) | Type::FixedList { elem, .. })
+            if matches!(elem.as_ref(), Type::Float | Type::Float32)
+    ) || matches!(
+        resolved_ret,
+        Some(Type::Option(elem)) if matches!(elem.as_ref(), Type::Float | Type::Float32)
+    );
     // D-HOLE1: `.zip` on `T?` (vs. `[T].zip`).
     let is_option = matches!(rty, Some(Type::Option(_)));
     Some(match (method, args.len()) {
@@ -192,8 +200,12 @@ pub(crate) fn resolve_builtin_op(
         ("product", 0) => TBuiltinOp::Product {
             float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
         },
-        ("min", 0) => TBuiltinOp::Min,
-        ("max", 0) => TBuiltinOp::Max,
+        ("min", 0) => TBuiltinOp::Min {
+            float: is_float_sequence,
+        },
+        ("max", 0) => TBuiltinOp::Max {
+            float: is_float_sequence,
+        },
         ("flatten", 0) => TBuiltinOp::Flatten,
         ("intersperse", 1) => TBuiltinOp::Intersperse,
         ("clear", 0) => TBuiltinOp::Clear,

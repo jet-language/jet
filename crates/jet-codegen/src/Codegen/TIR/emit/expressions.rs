@@ -454,8 +454,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Product { float: false } => {
                     format!("jet_list_product(({}).clone())", recv)
                 }
-                TBuiltinOp::Min => format!("({}).iter().cloned().min()", recv),
-                TBuiltinOp::Max => format!("({}).iter().cloned().max()", recv),
+                TBuiltinOp::Min { float: true } => {
+                    format!("({}).iter().cloned().reduce(|a, b| a.min(b))", recv)
+                }
+                TBuiltinOp::Max { float: true } => {
+                    format!("({}).iter().cloned().reduce(|a, b| a.max(b))", recv)
+                }
+                TBuiltinOp::Min { float: false } => format!("({}).iter().cloned().min()", recv),
+                TBuiltinOp::Max { float: false } => format!("({}).iter().cloned().max()", recv),
                 TBuiltinOp::Flatten => format!("jet_list_flatten(({}).clone())", recv),
                 TBuiltinOp::Intersperse => {
                     format!("jet_list_intersperse(({}).clone(), {})", recv, a(0))

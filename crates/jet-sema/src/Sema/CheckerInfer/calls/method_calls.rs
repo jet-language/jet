@@ -2798,7 +2798,7 @@ impl<'a> Checker<'a> {
                     if refinement_capable
                         || result != declared_ret
                         || contains_tuple_type(ty)
-                        || matches!(method, "sum" | "product")
+                        || matches!(method, "sum" | "product" | "min" | "max")
                     {
                         *resolved_ret_out = Some(ty.clone());
                     }

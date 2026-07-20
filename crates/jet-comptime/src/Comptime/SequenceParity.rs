@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{CtKey, CtValue, Type};
+use crate::AST::{BinOp, CtFloat, CtKey, CtValue, Type};
 
 use super::super::super::Builtins::{as_bool, as_int, cmp};
 use super::super::super::Diagnostics::{index_oob, overflow, unsupported};
@@ -461,8 +461,9 @@ fn aggregate(
 ) -> Result<CtValue, Diagnostic> {
     let Some(first) = xs.first() else {
         return Ok(match resolved_ret {
-            Some(Type::Float | Type::Float32) => {
-                CtValue::Float(if product { 1.0 } else { 0.0 })
+            Some(Type::Float) => CtValue::Float(CtFloat::f64(if product { 1.0 } else { 0.0 })),
+            Some(Type::Float32) => {
+                CtValue::Float(CtFloat::f32(if product { 1.0 } else { 0.0 }))
             }
             Some(Type::Named(name)) if name == crate::Syntax::TYPE_BIGINT => {
                 CtValue::BigInt(crate::Numeric::CtBigInt::from_int(if product { 1 } else { 0 }))
@@ -485,13 +486,18 @@ fn aggregate(
             }
             Ok(CtValue::Int(acc))
         }
-        CtValue::Float(_) => {
-            let mut acc = if product { 1.0 } else { 0.0 };
+        CtValue::Float(first) => {
+            let mut acc = match first {
+                CtFloat::F32(_) => CtFloat::f32(if product { 1.0 } else { 0.0 }),
+                CtFloat::F64(_) => CtFloat::f64(if product { 1.0 } else { 0.0 }),
+            };
             for x in xs {
                 let CtValue::Float(value) = x else {
                     return Err(unsupported("sum/product on mixed numeric types", span));
                 };
-                acc = if product { acc * value } else { acc + value };
+                acc = acc
+                    .binop(if product { BinOp::Mul } else { BinOp::Add }, *value)
+                    .ok_or_else(|| unsupported("sum/product on mixed float widths", span))?;
             }
             Ok(CtValue::Float(acc))
         }

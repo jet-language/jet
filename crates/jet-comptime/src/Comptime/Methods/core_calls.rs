@@ -3,7 +3,7 @@
 use std::cell::Cell;
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::Type;
+use crate::AST::{CtFloat, Type};
 use super::super::Builtins::as_int;
 use super::super::Diagnostics::unsupported;
 use super::super::Value::CtValue;
@@ -52,10 +52,20 @@ thread_local! {
 
 pub(in super::super) fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
     match v {
-        CtValue::Float(f) => Ok(*f),
+        CtValue::Float(value) => Ok(value.as_f64()),
         CtValue::Int(n) => Ok(*n as f64),
         _ => Err(unsupported(
             "non-numeric argument to comptime math call",
+            span,
+        )),
+    }
+}
+
+fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
+    match v {
+        CtValue::Float(value) => Ok(*value),
+        _ => Err(unsupported(
+            "non-float argument to comptime math call",
             span,
         )),
     }
@@ -635,12 +645,12 @@ pub(super) fn apply_core_call(
         }),
         // D-FIDELITY-API1=A: explicit runtime-global signal. Interpreter owns
         // same f32-backed range and validation contract as AOT/JIT.
-        ("core.perf", "fidelity") => Ok(CtValue::Float(
+        ("core.perf", "fidelity") => Ok(CtValue::Float(CtFloat::f64(
             f32::from_bits(PERF_FIDELITY.with(Cell::get)) as f64,
-        )),
-        ("core.perf", "default_fidelity") => Ok(CtValue::Float(
+        ))),
+        ("core.perf", "default_fidelity") => Ok(CtValue::Float(CtFloat::f64(
             f32::from_bits(PERF_DEFAULT_FIDELITY_BITS) as f64,
-        )),
+        ))),
         ("core.perf", "override_fidelity") => {
             let value = as_float(one(0)?, span)?;
             if !value.is_finite() || !(0.0..=1.0).contains(&value) {
@@ -657,85 +667,94 @@ pub(super) fn apply_core_call(
             Ok(CtValue::Unit)
         }
         // --- core.math whitelist ---
-        ("core.math", "sqrt") => Ok(CtValue::Float(as_float(one(0)?, span)?.sqrt())),
-        ("core.math", "floor") => Ok(CtValue::Float(as_float(one(0)?, span)?.floor())),
-        ("core.math", "ceil") => Ok(CtValue::Float(as_float(one(0)?, span)?.ceil())),
-        ("core.math", "round") => Ok(CtValue::Int(as_float(one(0)?, span)?.round() as i64)),
+        ("core.math", "sqrt") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sqrt())),
+        ("core.math", "floor") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.floor())),
+        ("core.math", "ceil") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ceil())),
+        ("core.math", "round") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.round_i64())),
         ("core.math", "abs") => match one(0)? {
             CtValue::Int(n) => Ok(CtValue::Int(n.abs())),
             CtValue::Float(f) => Ok(CtValue::Float(f.abs())),
             _ => Err(unsupported("core.math.abs: non-numeric argument", span)),
         },
         ("core.math", "pow") => {
-            let a = as_float(one(0)?, span)?;
-            let b = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(a.powf(b)))
+            let a = as_ct_float(one(0)?, span)?;
+            let b = as_ct_float(one(1)?, span)?;
+            Ok(CtValue::Float(
+                a.powf(b).ok_or_else(|| unsupported("mixing float widths", span))?,
+            ))
         }
         ("core.math", "min") => {
-            let a = as_float(one(0)?, span)?;
-            let b = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(a.min(b)))
+            let a = as_ct_float(one(0)?, span)?;
+            let b = as_ct_float(one(1)?, span)?;
+            Ok(CtValue::Float(
+                a.min(b).ok_or_else(|| unsupported("mixing float widths", span))?,
+            ))
         }
         ("core.math", "max") => {
-            let a = as_float(one(0)?, span)?;
-            let b = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(a.max(b)))
+            let a = as_ct_float(one(0)?, span)?;
+            let b = as_ct_float(one(1)?, span)?;
+            Ok(CtValue::Float(
+                a.max(b).ok_or_else(|| unsupported("mixing float widths", span))?,
+            ))
         }
         ("core.math", "clamp") => {
-            let v = as_float(one(0)?, span)?;
-            let lo = as_float(one(1)?, span)?;
-            let hi = as_float(one(2)?, span)?;
-            Ok(CtValue::Float(v.clamp(lo, hi)))
+            let value = as_ct_float(one(0)?, span)?;
+            let low = as_ct_float(one(1)?, span)?;
+            let high = as_ct_float(one(2)?, span)?;
+            Ok(CtValue::Float(value.clamp(low, high).ok_or_else(|| {
+                unsupported("mixing float widths", span)
+            })?))
         }
-        ("core.math", "log2") => Ok(CtValue::Float(as_float(one(0)?, span)?.log2())),
-        ("core.math", "log10") => Ok(CtValue::Float(as_float(one(0)?, span)?.log10())),
+        ("core.math", "log2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log2())),
+        ("core.math", "log10") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.log10())),
         // card #392 gap fix: the rest of `core.math` — mechanical ports of
         // the same one-line Rust std calls AOT's codegen emits
         // (`Codegen/TIR/emit/core_calls.rs`), so results match exactly.
-        ("core.math", "sin") => Ok(CtValue::Float(as_float(one(0)?, span)?.sin())),
-        ("core.math", "cos") => Ok(CtValue::Float(as_float(one(0)?, span)?.cos())),
-        ("core.math", "tan") => Ok(CtValue::Float(as_float(one(0)?, span)?.tan())),
-        ("core.math", "asin") => Ok(CtValue::Float(as_float(one(0)?, span)?.asin())),
-        ("core.math", "acos") => Ok(CtValue::Float(as_float(one(0)?, span)?.acos())),
-        ("core.math", "atan") => Ok(CtValue::Float(as_float(one(0)?, span)?.atan())),
-        ("core.math", "sinh") => Ok(CtValue::Float(as_float(one(0)?, span)?.sinh())),
-        ("core.math", "cosh") => Ok(CtValue::Float(as_float(one(0)?, span)?.cosh())),
-        ("core.math", "tanh") => Ok(CtValue::Float(as_float(one(0)?, span)?.tanh())),
-        ("core.math", "exp") => Ok(CtValue::Float(as_float(one(0)?, span)?.exp())),
-        ("core.math", "ln") => Ok(CtValue::Float(as_float(one(0)?, span)?.ln())),
-        ("core.math", "trunc") => Ok(CtValue::Float(as_float(one(0)?, span)?.trunc())),
-        ("core.math", "fract") => Ok(CtValue::Float(as_float(one(0)?, span)?.fract())),
-        ("core.math", "degrees") => Ok(CtValue::Float(as_float(one(0)?, span)?.to_degrees())),
-        ("core.math", "radians") => Ok(CtValue::Float(as_float(one(0)?, span)?.to_radians())),
-        ("core.math", "atan2") => Ok(CtValue::Float(
-            as_float(one(0)?, span)?.atan2(as_float(one(1)?, span)?),
-        )),
-        ("core.math", "hypot") => Ok(CtValue::Float(
-            as_float(one(0)?, span)?.hypot(as_float(one(1)?, span)?),
-        )),
+        ("core.math", "sin") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sin())),
+        ("core.math", "cos") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.cos())),
+        ("core.math", "tan") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.tan())),
+        ("core.math", "asin") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.asin())),
+        ("core.math", "acos") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.acos())),
+        ("core.math", "atan") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.atan())),
+        ("core.math", "sinh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sinh())),
+        ("core.math", "cosh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.cosh())),
+        ("core.math", "tanh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.tanh())),
+        ("core.math", "exp") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp())),
+        ("core.math", "ln") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ln())),
+        ("core.math", "trunc") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.trunc())),
+        ("core.math", "fract") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.fract())),
+        ("core.math", "degrees") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.to_degrees())),
+        ("core.math", "radians") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.to_radians())),
+        ("core.math", "atan2") => {
+            let left = as_ct_float(one(0)?, span)?;
+            let right = as_ct_float(one(1)?, span)?;
+            Ok(CtValue::Float(left.atan2(right).ok_or_else(|| {
+                unsupported("mixing float widths", span)
+            })?))
+        }
+        ("core.math", "hypot") => {
+            let left = as_ct_float(one(0)?, span)?;
+            let right = as_ct_float(one(1)?, span)?;
+            Ok(CtValue::Float(left.hypot(right).ok_or_else(|| {
+                unsupported("mixing float widths", span)
+            })?))
+        }
         ("core.math", "lerp") => {
-            let a = as_float(one(0)?, span)?;
-            let b = as_float(one(1)?, span)?;
-            let t = as_float(one(2)?, span)?;
-            Ok(CtValue::Float(a + (b - a) * t))
+            let left = as_ct_float(one(0)?, span)?;
+            let right = as_ct_float(one(1)?, span)?;
+            let t = as_ct_float(one(2)?, span)?;
+            Ok(CtValue::Float(left.lerp(right, t).ok_or_else(|| {
+                unsupported("mixing float widths", span)
+            })?))
         }
-        ("core.math", "is_nan") => Ok(CtValue::Bool(as_float(one(0)?, span)?.is_nan())),
-        ("core.math", "is_inf") => Ok(CtValue::Bool(as_float(one(0)?, span)?.is_infinite())),
-        ("core.math", "is_finite") => Ok(CtValue::Bool(as_float(one(0)?, span)?.is_finite())),
-        ("core.math", "sign") => {
-            let x = as_float(one(0)?, span)?;
-            Ok(CtValue::Int(if x > 0.0 {
-                1
-            } else if x < 0.0 {
-                -1
-            } else {
-                0
-            }))
-        }
-        ("core.math", "to_bits") => Ok(CtValue::Int(as_float(one(0)?, span)?.to_bits() as i64)),
-        ("core.math", "from_bits") => Ok(CtValue::Float(f64::from_bits(
+        ("core.math", "is_nan") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_nan())),
+        ("core.math", "is_inf") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_infinite())),
+        ("core.math", "is_finite") => Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.is_finite())),
+        ("core.math", "sign") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.sign())),
+        ("core.math", "to_bits") => Ok(CtValue::Int(as_ct_float(one(0)?, span)?.to_bits_i64())),
+        ("core.math", "from_bits") => Ok(CtValue::Float(CtFloat::f64(f64::from_bits(
             as_int(one(0)?, span)? as u64,
-        ))),
+        )))),
         ("core.math", "checked_add") => {
             let a = as_int(one(0)?, span)?;
             let b = as_int(one(1)?, span)?;
@@ -1213,7 +1232,9 @@ pub(super) fn apply_core_call(
                 random_int(st, low, high)
             })))
         }
-        ("core.random", "float") => Ok(CtValue::Float(with_ambient_rng(|st| random_float(st)))),
+        ("core.random", "float") => Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
+            random_float(st)
+        })))),
         // D-DET1: testing.fake_rng is the test-facing spelling of the same
         // caller-seeded deterministic Rng capability as random.rng.
         ("core.random", "rng") | ("core.testing", "fake_rng") => {
@@ -1247,9 +1268,9 @@ pub(super) fn apply_core_call(
         ("core.random", "float_range") => {
             let low = as_float(one(0)?, span)?;
             let high = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(with_ambient_rng(|st| {
+            Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
                 random_float_range(st, low, high)
-            })))
+            }))))
         }
         ("core.random", "bool") => {
             let p = as_float(one(0)?, span)?;
@@ -1258,15 +1279,15 @@ pub(super) fn apply_core_call(
         ("core.random", "normal") => {
             let mean = as_float(one(0)?, span)?;
             let stddev = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(with_ambient_rng(|st| {
+            Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
                 random_normal(st, mean, stddev)
-            })))
+            }))))
         }
         ("core.random", "exponential") => {
             let lambda = as_float(one(0)?, span)?;
-            Ok(CtValue::Float(with_ambient_rng(|st| {
+            Ok(CtValue::Float(CtFloat::f64(with_ambient_rng(|st| {
                 random_exponential(st, lambda)
-            })))
+            }))))
         }
         ("core.random", "bytes") => {
             let n = match one(0)? {
@@ -1592,37 +1613,33 @@ pub(super) fn apply_core_call(
         // `jet_data_*` — see `DataLite.rs`). The generic call-site-typed
         // table/lazy-pipeline half of `core.data` is a separate, larger
         // design pass (see `DataLite.rs`'s doc comment) and isn't here.
-        ("core.data", "sum") => Ok(CtValue::Float(super::super::DataLite::sum(&as_float_list(
-            one(0)?,
-            span,
-        )?))),
-        ("core.data", "mean") => Ok(CtValue::Float(super::super::DataLite::mean(&as_float_list(
-            one(0)?,
-            span,
-        )?))),
-        ("core.data", "min") => Ok(CtValue::Float(super::super::DataLite::min(&as_float_list(
-            one(0)?,
-            span,
-        )?))),
-        ("core.data", "max") => Ok(CtValue::Float(super::super::DataLite::max(&as_float_list(
-            one(0)?,
-            span,
-        )?))),
-        ("core.data", "median") => Ok(CtValue::Float(super::super::DataLite::median(&as_float_list(
-            one(0)?,
-            span,
-        )?))),
-        ("core.data", "variance") => Ok(CtValue::Float(super::super::DataLite::variance(
+        ("core.data", "sum") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::sum(
             &as_float_list(one(0)?, span)?,
-        ))),
-        ("core.data", "stddev") => Ok(CtValue::Float(super::super::DataLite::stddev(&as_float_list(
-            one(0)?,
-            span,
-        )?))),
+        )))),
+        ("core.data", "mean") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::mean(
+            &as_float_list(one(0)?, span)?,
+        )))),
+        ("core.data", "min") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::min(
+            &as_float_list(one(0)?, span)?,
+        )))),
+        ("core.data", "max") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::max(
+            &as_float_list(one(0)?, span)?,
+        )))),
+        ("core.data", "median") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::median(
+            &as_float_list(one(0)?, span)?,
+        )))),
+        ("core.data", "variance") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::variance(
+            &as_float_list(one(0)?, span)?,
+        )))),
+        ("core.data", "stddev") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::stddev(
+            &as_float_list(one(0)?, span)?,
+        )))),
         ("core.data", "quantile") => {
             let values = as_float_list(one(0)?, span)?;
             let q = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(super::super::DataLite::quantile(&values, q)))
+            Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::quantile(
+                &values, q,
+            ))))
         }
         ("core.data", "rolling_mean") => {
             let values = as_float_list(one(0)?, span)?;
@@ -1630,7 +1647,7 @@ pub(super) fn apply_core_call(
             Ok(CtValue::List(
                 super::super::DataLite::rolling_mean(&values, width)
                     .into_iter()
-                    .map(CtValue::Float)
+                    .map(|value| CtValue::Float(CtFloat::f64(value)))
                     .collect(),
             ))
         }
@@ -1643,21 +1660,21 @@ pub(super) fn apply_core_call(
                         "count".to_string(),
                         CtValue::Int(values.len() as i64),
                     ),
-                    ("sum".to_string(), CtValue::Float(super::super::DataLite::sum(&values))),
-                    ("mean".to_string(), CtValue::Float(super::super::DataLite::mean(&values))),
-                    ("min".to_string(), CtValue::Float(super::super::DataLite::min(&values))),
-                    ("max".to_string(), CtValue::Float(super::super::DataLite::max(&values))),
+                    ("sum".to_string(), CtValue::Float(CtFloat::f64(super::super::DataLite::sum(&values)))),
+                    ("mean".to_string(), CtValue::Float(CtFloat::f64(super::super::DataLite::mean(&values)))),
+                    ("min".to_string(), CtValue::Float(CtFloat::f64(super::super::DataLite::min(&values)))),
+                    ("max".to_string(), CtValue::Float(CtFloat::f64(super::super::DataLite::max(&values)))),
                     (
                         "median".to_string(),
-                        CtValue::Float(super::super::DataLite::median(&values)),
+                        CtValue::Float(CtFloat::f64(super::super::DataLite::median(&values))),
                     ),
                     (
                         "variance".to_string(),
-                        CtValue::Float(super::super::DataLite::variance(&values)),
+                        CtValue::Float(CtFloat::f64(super::super::DataLite::variance(&values))),
                     ),
                     (
                         "stddev".to_string(),
-                        CtValue::Float(super::super::DataLite::stddev(&values)),
+                        CtValue::Float(CtFloat::f64(super::super::DataLite::stddev(&values))),
                     ),
                 ],
             })

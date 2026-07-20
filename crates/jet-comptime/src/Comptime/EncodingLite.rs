@@ -28,7 +28,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::AST::{CtKey, CtValue, StructDef, Type};
+use crate::AST::{CtFloat, CtKey, CtValue, StructDef, Type};
 
 use super::JsonInterp::{json_payload, json_variant};
 
@@ -364,7 +364,9 @@ fn toml_value_to_json(v: TomlValue) -> CtValue {
     match v {
         TomlValue::String(s) => json_variant("Text", Some(CtValue::Str(s))),
         TomlValue::Integer(n) => json_variant("Int", Some(CtValue::Int(n))),
-        TomlValue::Float(f) => json_variant("Float", Some(CtValue::Float(f))),
+        TomlValue::Float(value) => {
+            json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
+        }
         TomlValue::Boolean(b) => json_variant("Bool", Some(CtValue::Bool(b))),
         TomlValue::Datetime(s) => json_variant("Text", Some(CtValue::Str(s))),
         TomlValue::Array(xs) => json_array(xs.into_iter().map(toml_value_to_json).collect()),
@@ -1463,10 +1465,14 @@ fn yaml_scalar_value(s: &str) -> CtValue {
         "true" | "True" | "TRUE" => return json_variant("Bool", Some(CtValue::Bool(true))),
         "false" | "False" | "FALSE" => return json_variant("Bool", Some(CtValue::Bool(false))),
         ".inf" | ".Inf" | ".INF" => {
-            return json_variant("Float", Some(CtValue::Float(f64::INFINITY)))
+            return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f64::INFINITY))))
         }
-        "-.inf" | "-.Inf" => return json_variant("Float", Some(CtValue::Float(f64::NEG_INFINITY))),
-        ".nan" | ".NaN" | ".NAN" => return json_variant("Float", Some(CtValue::Float(f64::NAN))),
+        "-.inf" | "-.Inf" => {
+            return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f64::NEG_INFINITY))))
+        }
+        ".nan" | ".NaN" | ".NAN" => {
+            return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f64::NAN))))
+        }
         _ => {}
     }
     if let Ok(n) = s.parse::<i64>() {
@@ -1477,7 +1483,7 @@ fn yaml_scalar_value(s: &str) -> CtValue {
             .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
     {
         if let Ok(f) = s.parse::<f64>() {
-            return json_variant("Float", Some(CtValue::Float(f)));
+            return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f))));
         }
     }
     json_variant("Text", Some(CtValue::Str(s.to_string())))
@@ -1890,7 +1896,7 @@ fn cbor_encode_val(v: &CtValue, out: &mut Vec<u8>, canonical: bool) {
         CtValue::Bool(true) => out.push(0xf5),
         CtValue::Int(n) if *n >= 0 => cbor_push_len(out, 0, *n as u64),
         CtValue::Int(n) => cbor_push_len(out, 1, (-1 - *n) as u64),
-        CtValue::Float(f) => cbor_push_preferred_float(out, *f),
+        CtValue::Float(value) => cbor_push_preferred_float(out, value.as_f64()),
         CtValue::Char(c) => {
             let text = c.to_string();
             cbor_push_len(out, 3, text.len() as u64);
@@ -1935,8 +1941,8 @@ fn cbor_encode_val(v: &CtValue, out: &mut Vec<u8>, canonical: bool) {
             ("Bool", Some((_, CtValue::Bool(true)))) => out.push(0xf5),
             ("Int", Some((_, CtValue::Int(n)))) if *n >= 0 => cbor_push_len(out, 0, *n as u64),
             ("Int", Some((_, CtValue::Int(n)))) => cbor_push_len(out, 1, (-1 - *n) as u64),
-            ("Float", Some((_, CtValue::Float(f)))) => {
-                cbor_push_preferred_float(out, *f);
+            ("Float", Some((_, CtValue::Float(value)))) => {
+                cbor_push_preferred_float(out, value.as_f64());
             }
             ("Text", Some((_, CtValue::Str(s)))) => {
                 cbor_push_len(out, 3, s.len() as u64);
@@ -2049,7 +2055,7 @@ fn cbor_codable_value(
             variant,
             args,
         } if type_name == "Float" && variant == "NAN" && args.is_empty() => {
-            Ok(CtValue::Float(f64::NAN))
+            Ok(CtValue::Float(CtFloat::f64(f64::NAN)))
         }
         CtValue::Enum { type_name, .. } if type_name != "Json" => Err(format!(
             "CBOR comptime encoder does not own the Codable schema for enum `{type_name}`"
@@ -2900,7 +2906,7 @@ fn cbor_decode_val(
                 }
                 Ok(json_variant(
                     "Float",
-                    Some(CtValue::Float(cbor_half_to_f64(bits))),
+                    Some(CtValue::Float(CtFloat::f64(cbor_half_to_f64(bits)))),
                 ))
             }
             26 => {
@@ -2925,7 +2931,10 @@ fn cbor_decode_val(
                         "CBOR Float does not use its preferred shortest encoding",
                     ));
                 }
-                Ok(json_variant("Float", Some(CtValue::Float(value))))
+                Ok(json_variant(
+                    "Float",
+                    Some(CtValue::Float(CtFloat::f64(value))),
+                ))
             }
             27 => {
                 if *i + 8 > input.len() {
@@ -2952,7 +2961,10 @@ fn cbor_decode_val(
                         "CBOR Float does not use its preferred shortest encoding",
                     ));
                 }
-                Ok(json_variant("Float", Some(CtValue::Float(value))))
+                Ok(json_variant(
+                    "Float",
+                    Some(CtValue::Float(CtFloat::f64(value))),
+                ))
             }
             31 => Err(CborError::new(
                 "Syntax",

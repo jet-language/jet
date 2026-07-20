@@ -505,7 +505,10 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "is_nan") => format!("({}).is_nan()", arg(0)),
         ("core.math", "is_inf") => format!("({}).is_infinite()", arg(0)),
         ("core.math", "is_finite") => format!("({}).is_finite()", arg(0)),
-        ("core.math", "sign") => format!("{}({})", helper("jet_std_math_sign"), arg(0)),
+        ("core.math", "sign") => format!(
+            "if ({0}) > 0.0 {{ 1i64 }} else if ({0}) < 0.0 {{ -1i64 }} else {{ 0i64 }}",
+            arg(0)
+        ),
         ("core.math", "to_bits") => format!("(({}).to_bits() as i64)", arg(0)),
         ("core.math", "from_bits") => format!("f64::from_bits(({}) as u64)", arg(0)),
         ("core.math", "checked_add") => format!("({}).checked_add({})", arg(0), arg(1)),

@@ -2229,8 +2229,8 @@ pub enum TBuiltinOp {
     JoinSep,
     Sum { float: bool },
     Product { float: bool },
-    Min,
-    Max,
+    Min { float: bool },
+    Max { float: bool },
     Flatten,
     Intersperse,
     Unzip {

@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::AST::Type;
+use crate::AST::{CtFloat, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Diagnostics::unsupported;
@@ -274,8 +274,8 @@ impl<'a> Interp<'a> {
                             vec![
                                 ("key", CtValue::Str(key)),
                                 ("count", CtValue::Int(count)),
-                                ("sum", CtValue::Float(sum)),
-                                ("mean", CtValue::Float(mean)),
+                                ("sum", CtValue::Float(CtFloat::f64(sum))),
+                                ("mean", CtValue::Float(CtFloat::f64(mean))),
                             ],
                         )
                     })

@@ -2,7 +2,7 @@
 //! coercions shared by the interpreter spine.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{BinOp, Type};
+use crate::AST::{BinOp, CtFloat, Type};
 
 use super::Diagnostics::{comptime_panic, divide_by_zero, index_oob, overflow, unsupported};
 use super::Value::{CtKey, CtValue};
@@ -63,10 +63,10 @@ pub(super) fn eval_binop(
         (BinOp::Shr, Int(_), Int(b)) if !(0..64).contains(&b) => Err(overflow("shift right", span)),
         (BinOp::Shl, Int(a), Int(b)) => Ok(Int(a << (b as u32))),
         (BinOp::Shr, Int(a), Int(b)) => Ok(Int(a >> (b as u32))),
-        (BinOp::Add, Float(a), Float(b)) => Ok(Float(a + b)),
-        (BinOp::Sub, Float(a), Float(b)) => Ok(Float(a - b)),
-        (BinOp::Mul, Float(a), Float(b)) => Ok(Float(a * b)),
-        (BinOp::Div, Float(a), Float(b)) => Ok(Float(a / b)),
+        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div), Float(a), Float(b)) => a
+            .binop(op, b)
+            .map(Float)
+            .ok_or_else(|| unsupported("mixing float widths", span)),
         // D-BIGINT1: arbitrary-precision arithmetic never overflows (that's
         // the whole point), so no `checked_*`/`overflow()` path here.
         (BinOp::Add, BigInt(a), BigInt(b)) => Ok(BigInt(a.add(&b))),
@@ -87,7 +87,7 @@ pub(super) fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Orderi
     match (a, b) {
         (Int(a), Int(b)) => Ok(a.cmp(&b)),
         (Float(a), Float(b)) => a
-            .partial_cmp(&b)
+            .partial_cmp(b)
             .ok_or_else(|| unsupported("comparing NaN", span)),
         (Bool(a), Bool(b)) => Ok(a.cmp(&b)),
         (Char(a), Char(b)) => Ok(a.cmp(&b)),
@@ -118,7 +118,7 @@ pub(super) fn apply_static_type_method(
             _ => None,
         };
         if matches!(source, Type::Float) && matches!(target, Type::Float32) {
-            let CtValue::Float(n) = value else {
+            let CtValue::Float(CtFloat::F64(n)) = value else {
                 return Some(Err(unsupported(
                     "numeric conversion with the wrong source type",
                     span,
@@ -126,7 +126,7 @@ pub(super) fn apply_static_type_method(
             };
             let fits = n.is_finite() && n >= -(f32::MAX as f64) && n <= f32::MAX as f64;
             return Some(Ok(if fits {
-                CtValue::ResOk(Box::new(CtValue::Float((n as f32) as f64)))
+                CtValue::ResOk(Box::new(CtValue::Float(CtFloat::f32(n as f32))))
             } else {
                 CtValue::ResErr(Box::new(CtValue::Str(format!(
                     "value doesn't fit in {type_name}"
@@ -135,7 +135,8 @@ pub(super) fn apply_static_type_method(
         }
         if let (CtValue::Float(n), Some((signed, bits))) = (&value, int_kind(&target)) {
             let (lo, hi) = crate::AST::int_range(signed, bits);
-            let in_range = n.is_finite() && *n >= lo as f64 && *n < (hi + 1) as f64;
+            let n = n.as_f64();
+            let in_range = n.is_finite() && n >= lo as f64 && n < (hi + 1) as f64;
             return Some(Ok(if in_range {
                 CtValue::ResOk(Box::new(CtValue::Int(n.trunc() as i64)))
             } else {
@@ -145,11 +146,14 @@ pub(super) fn apply_static_type_method(
             }));
         }
         let converted = match (value, &target) {
-            (CtValue::Int(n), Type::Float) => CtValue::Float(n as f64),
-            (CtValue::Int(n), Type::Float32) => CtValue::Float((n as f32) as f64),
+            (CtValue::Int(n), Type::Float) => CtValue::Float(CtFloat::f64(n as f64)),
+            (CtValue::Int(n), Type::Float32) => CtValue::Float(CtFloat::f32(n as f32)),
+            (CtValue::Float(CtFloat::F32(n)), Type::Float) => {
+                CtValue::Float(CtFloat::f64(n as f64))
+            }
             (CtValue::Float(n), Type::Float) => CtValue::Float(n),
-            (CtValue::Float(n), Type::Float32) => CtValue::Float((n as f32) as f64),
-            (CtValue::Float(n), _) => CtValue::Int(n as i64),
+            (CtValue::Float(n), Type::Float32) => CtValue::Float(CtFloat::f32(n.as_f32())),
+            (CtValue::Float(n), _) => CtValue::Int(n.trunc_i64()),
             (CtValue::Int(n), _) => CtValue::Int(n),
             _ => return Some(Err(unsupported("numeric conversion with the wrong source type", span))),
         };
@@ -200,7 +204,7 @@ pub(super) fn apply_static_type_method(
                 }
             };
             Some(Ok(match s.trim().parse::<f64>() {
-                Ok(f) => CtValue::ResOk(Box::new(CtValue::Float(f))),
+                Ok(f) => CtValue::ResOk(Box::new(CtValue::Float(CtFloat::f64(f)))),
                 Err(_) => CtValue::ResErr(Box::new(CtValue::Str(format!(
                     "cannot parse `{}` as a float",
                     s
@@ -294,7 +298,7 @@ pub(super) fn apply_mutating(
 fn ctvalue_type_name(v: &CtValue) -> String {
     match v {
         CtValue::Int(_) => "Int".to_string(),
-        CtValue::Float(_) => "Float".to_string(),
+        CtValue::Float(value) => value.jet_type().show(),
         CtValue::Bool(_) => "Bool".to_string(),
         CtValue::Char(_) => "Char".to_string(),
         CtValue::Str(_) => "String".to_string(),

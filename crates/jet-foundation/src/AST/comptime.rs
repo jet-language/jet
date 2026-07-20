@@ -1,5 +1,6 @@
-use super::{AccessConvention, Expr, Lambda, Type};
+use super::{AccessConvention, BinOp, Expr, Lambda, Type};
 use std::collections::BTreeMap;
+use std::fmt;
 
 /// D-MEM-VIEWRET1=B: compiler-inferred public owner of a returned/stored view.
 /// Parameter positions are stable across renames and generic instantiation.
@@ -119,11 +120,264 @@ pub struct FuncSig {
 
 // ── CtValue / CtKey ──────────────────────────────────────────────────────────
 
+/// Width-preserving compile-time float. Every operation stays in its native
+/// Rust width so tier-0 never computes in f64 and casts afterward (D-FLOATW1).
+#[derive(Clone, Copy, PartialEq)]
+pub enum CtFloat {
+    F32(f32),
+    F64(f64),
+}
+
+impl fmt::Debug for CtFloat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::F32(value) => value.fmt(f),
+            Self::F64(value) => value.fmt(f),
+        }
+    }
+}
+
+macro_rules! unary_math {
+    ($value:expr, $method:ident) => {
+        match $value {
+            CtFloat::F32(value) => CtFloat::F32(value.$method()),
+            CtFloat::F64(value) => CtFloat::F64(value.$method()),
+        }
+    };
+}
+
+macro_rules! binary_math {
+    ($left:expr, $right:expr, $method:ident) => {
+        match ($left, $right) {
+            (CtFloat::F32(left), CtFloat::F32(right)) => Some(CtFloat::F32(left.$method(right))),
+            (CtFloat::F64(left), CtFloat::F64(right)) => Some(CtFloat::F64(left.$method(right))),
+            _ => None,
+        }
+    };
+}
+
+impl CtFloat {
+    pub fn literal(value: f64, is_f32: bool) -> Self {
+        if is_f32 {
+            Self::F32(value as f32)
+        } else {
+            Self::F64(value)
+        }
+    }
+
+    pub fn f32(value: f32) -> Self {
+        Self::F32(value)
+    }
+
+    pub fn f64(value: f64) -> Self {
+        Self::F64(value)
+    }
+
+    pub fn jet_type(self) -> Type {
+        match self {
+            Self::F32(_) => Type::Float32,
+            Self::F64(_) => Type::Float,
+        }
+    }
+
+    pub fn render(self) -> String {
+        format!("{self:?}")
+    }
+
+    pub fn to_json(self) -> String {
+        let rendered = self.render();
+        if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
+            rendered
+        } else {
+            format!("{rendered}.0")
+        }
+    }
+
+    pub fn serialize(self) -> String {
+        match self {
+            Self::F32(value) => serialize_float(value, "f32", "f32"),
+            Self::F64(value) => serialize_float(value, "f64", "f64"),
+        }
+    }
+
+    pub fn as_f64(self) -> f64 {
+        match self {
+            Self::F32(value) => value as f64,
+            Self::F64(value) => value,
+        }
+    }
+
+    pub fn as_f32(self) -> f32 {
+        match self {
+            Self::F32(value) => value,
+            Self::F64(value) => value as f32,
+        }
+    }
+
+    pub fn neg(self) -> Self {
+        match self {
+            Self::F32(value) => Self::F32(-value),
+            Self::F64(value) => Self::F64(-value),
+        }
+    }
+
+    pub fn binop(self, op: BinOp, other: Self) -> Option<Self> {
+        match (self, other) {
+            (Self::F32(left), Self::F32(right)) => Some(Self::F32(match op {
+                BinOp::Add => left + right,
+                BinOp::Sub => left - right,
+                BinOp::Mul => left * right,
+                BinOp::Div => left / right,
+                _ => return None,
+            })),
+            (Self::F64(left), Self::F64(right)) => Some(Self::F64(match op {
+                BinOp::Add => left + right,
+                BinOp::Sub => left - right,
+                BinOp::Mul => left * right,
+                BinOp::Div => left / right,
+                _ => return None,
+            })),
+            _ => None,
+        }
+    }
+
+    pub fn partial_cmp(self, other: Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Self::F32(left), Self::F32(right)) => left.partial_cmp(&right),
+            (Self::F64(left), Self::F64(right)) => left.partial_cmp(&right),
+            _ => None,
+        }
+    }
+
+    pub fn abs(self) -> Self {
+        match self {
+            Self::F32(value) => Self::F32(value.abs()),
+            Self::F64(value) => Self::F64(value.abs()),
+        }
+    }
+
+    pub fn is_nan(self) -> bool {
+        match self {
+            Self::F32(value) => value.is_nan(),
+            Self::F64(value) => value.is_nan(),
+        }
+    }
+
+    pub fn is_infinite(self) -> bool {
+        match self {
+            Self::F32(value) => value.is_infinite(),
+            Self::F64(value) => value.is_infinite(),
+        }
+    }
+
+    pub fn is_finite(self) -> bool {
+        match self {
+            Self::F32(value) => value.is_finite(),
+            Self::F64(value) => value.is_finite(),
+        }
+    }
+
+    pub fn round_i64(self) -> i64 {
+        match self {
+            Self::F32(value) => value.round() as i64,
+            Self::F64(value) => value.round() as i64,
+        }
+    }
+
+    pub fn trunc_i64(self) -> i64 {
+        match self {
+            Self::F32(value) => value.trunc() as i64,
+            Self::F64(value) => value.trunc() as i64,
+        }
+    }
+
+    pub fn sign(self) -> i64 {
+        match self {
+            Self::F32(value) => i64::from(value > 0.0) - i64::from(value < 0.0),
+            Self::F64(value) => i64::from(value > 0.0) - i64::from(value < 0.0),
+        }
+    }
+
+    pub fn to_bits_i64(self) -> i64 {
+        match self {
+            Self::F32(value) => value.to_bits() as i64,
+            Self::F64(value) => value.to_bits() as i64,
+        }
+    }
+
+    pub fn sqrt(self) -> Self { unary_math!(self, sqrt) }
+    pub fn floor(self) -> Self { unary_math!(self, floor) }
+    pub fn ceil(self) -> Self { unary_math!(self, ceil) }
+    pub fn log2(self) -> Self { unary_math!(self, log2) }
+    pub fn log10(self) -> Self { unary_math!(self, log10) }
+    pub fn sin(self) -> Self { unary_math!(self, sin) }
+    pub fn cos(self) -> Self { unary_math!(self, cos) }
+    pub fn tan(self) -> Self { unary_math!(self, tan) }
+    pub fn asin(self) -> Self { unary_math!(self, asin) }
+    pub fn acos(self) -> Self { unary_math!(self, acos) }
+    pub fn atan(self) -> Self { unary_math!(self, atan) }
+    pub fn sinh(self) -> Self { unary_math!(self, sinh) }
+    pub fn cosh(self) -> Self { unary_math!(self, cosh) }
+    pub fn tanh(self) -> Self { unary_math!(self, tanh) }
+    pub fn exp(self) -> Self { unary_math!(self, exp) }
+    pub fn ln(self) -> Self { unary_math!(self, ln) }
+    pub fn trunc(self) -> Self { unary_math!(self, trunc) }
+    pub fn fract(self) -> Self { unary_math!(self, fract) }
+    pub fn to_degrees(self) -> Self { unary_math!(self, to_degrees) }
+    pub fn to_radians(self) -> Self { unary_math!(self, to_radians) }
+
+    pub fn powf(self, other: Self) -> Option<Self> { binary_math!(self, other, powf) }
+    pub fn min(self, other: Self) -> Option<Self> { binary_math!(self, other, min) }
+    pub fn max(self, other: Self) -> Option<Self> { binary_math!(self, other, max) }
+    pub fn atan2(self, other: Self) -> Option<Self> { binary_math!(self, other, atan2) }
+    pub fn hypot(self, other: Self) -> Option<Self> { binary_math!(self, other, hypot) }
+
+    pub fn clamp(self, low: Self, high: Self) -> Option<Self> {
+        match (self, low, high) {
+            (Self::F32(value), Self::F32(low), Self::F32(high)) => {
+                Some(Self::F32(value.clamp(low, high)))
+            }
+            (Self::F64(value), Self::F64(low), Self::F64(high)) => {
+                Some(Self::F64(value.clamp(low, high)))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn lerp(self, other: Self, t: Self) -> Option<Self> {
+        match (self, other, t) {
+            (Self::F32(left), Self::F32(right), Self::F32(t)) => {
+                Some(Self::F32(left + (right - left) * t))
+            }
+            (Self::F64(left), Self::F64(right), Self::F64(t)) => {
+                Some(Self::F64(left + (right - left) * t))
+            }
+            _ => None,
+        }
+    }
+}
+
+fn serialize_float<T: fmt::Debug + PartialOrd + Copy>(value: T, suffix: &str, module: &str) -> String
+where
+    f64: From<T>,
+{
+    let widened = f64::from(value);
+    if widened.is_nan() {
+        format!("{module}::NAN")
+    } else if widened == f64::INFINITY {
+        format!("{module}::INFINITY")
+    } else if widened == f64::NEG_INFINITY {
+        format!("{module}::NEG_INFINITY")
+    } else {
+        format!("{value:?}{suffix}")
+    }
+}
+
 /// A fully-evaluated compile-time value.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CtValue {
     Int(i64),
-    Float(f64),
+    Float(CtFloat),
     Bool(bool),
     Char(char),
     Str(String),
@@ -169,6 +423,10 @@ pub enum CtValue {
 pub struct ClosureData {
     pub lambda: Lambda,
     pub captured: std::collections::HashMap<String, CtValue>,
+    /// Contextual return type retained by tier-0 when a lambda is bound as a
+    /// typed function value. Parsed comptime bodies run before full sema body
+    /// elaboration, so the value boundary is the width authority here.
+    pub return_type: Option<Type>,
 }
 
 impl PartialEq for ClosureData {
@@ -221,7 +479,7 @@ impl CtValue {
     pub fn jet_type(&self) -> Type {
         match self {
             CtValue::Int(_) => Type::Int,
-            CtValue::Float(_) => Type::Float,
+            CtValue::Float(value) => value.jet_type(),
             CtValue::Bool(_) => Type::Bool,
             CtValue::Char(_) => Type::Char,
             CtValue::Str(_) => Type::String,
@@ -276,7 +534,7 @@ impl CtValue {
     pub fn jet_show(&self) -> String {
         match self {
             CtValue::Int(n) => n.to_string(),
-            CtValue::Float(f) => format!("{:?}", f),
+            CtValue::Float(value) => value.render(),
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => c.to_string(),
             CtValue::Str(s) => s.clone(),
@@ -355,7 +613,7 @@ impl CtValue {
     pub fn debug_rust(&self) -> String {
         match self {
             CtValue::Int(n) => n.to_string(),
-            CtValue::Float(f) => format!("{:?}", f),
+            CtValue::Float(value) => value.render(),
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => format!("{:?}", c),
             CtValue::Str(s) => format!("{:?}", s),
@@ -432,7 +690,7 @@ impl CtValue {
         let inner_indent = "  ".repeat(depth + 1);
         match self {
             CtValue::Int(n) => out.push_str(&n.to_string()),
-            CtValue::Float(f) => out.push_str(&format!("{:?}", f)),
+            CtValue::Float(value) => out.push_str(&value.render()),
             CtValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
             CtValue::Char(c) => {
                 out.push('\'');
@@ -551,14 +809,7 @@ impl CtValue {
     pub fn to_json(&self) -> String {
         match self {
             CtValue::Int(n) => n.to_string(),
-            CtValue::Float(f) => {
-                let s = format!("{:?}", f);
-                if s.contains('.') || s.contains('e') || s.contains('E') {
-                    s
-                } else {
-                    format!("{}.0", s)
-                }
-            }
+            CtValue::Float(value) => value.to_json(),
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => format!("\"{}\"", c),
             CtValue::Str(s) => {
@@ -638,7 +889,7 @@ impl CtValue {
     pub fn serialize(&self) -> String {
         match self {
             CtValue::Int(n) => format!("{}i64", n),
-            CtValue::Float(f) => format!("{:?}f64", f),
+            CtValue::Float(value) => value.serialize(),
             CtValue::Bool(b) => b.to_string(),
             CtValue::Char(c) => format!("{:?}", c),
             CtValue::Str(s) => format!("{:?}.to_string()", s),
@@ -743,7 +994,37 @@ fn ct_mangle(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::CtValue;
+    use super::{CtFloat, CtValue};
+    use crate::AST::{BinOp, Type};
+
+    #[test]
+    fn ct_float_preserves_width_native_equality_and_rounding() {
+        let rounded = CtFloat::f32(16_777_217.0);
+        let wide = CtFloat::f64(16_777_217.0);
+
+        assert_eq!(rounded.jet_type(), Type::Float32);
+        assert_eq!(wide.jet_type(), Type::Float);
+        assert_ne!(rounded, wide);
+        assert_eq!(rounded.render(), "16777216.0");
+        assert_eq!(rounded.binop(BinOp::Add, CtFloat::f32(1.0)), Some(rounded));
+        assert_eq!(CtFloat::f32(0.0), CtFloat::f32(-0.0));
+        assert_ne!(CtFloat::f32(f32::NAN), CtFloat::f32(f32::NAN));
+    }
+
+    #[test]
+    fn ct_float_render_json_and_rust_serialization_are_width_native() {
+        let nested = CtValue::List(vec![
+            CtValue::Float(CtFloat::f32(16_777_217.0)),
+            CtValue::Float(CtFloat::f64(16_777_217.0)),
+        ]);
+
+        assert_eq!(format!("{:?}", CtFloat::f32(-0.0)), "-0.0");
+        assert_eq!(CtValue::Float(CtFloat::f32(1.0)).to_json(), "1.0");
+        assert_eq!(nested.to_json(), "[16777216.0,16777217.0]");
+        assert_eq!(nested.serialize(), "vec![16777216.0f32, 16777217.0f64]");
+        assert_eq!(CtFloat::f32(f32::NAN).serialize(), "f32::NAN");
+        assert_eq!(CtFloat::f64(f64::NEG_INFINITY).serialize(), "f64::NEG_INFINITY");
+    }
 
     #[test]
     fn loadable_uses_aot_debug_inside_user_enum_payload() {

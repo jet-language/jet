@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::AST::{CtKey, CtValue};
+use crate::AST::{CtFloat, CtKey, CtValue};
 
 #[derive(Clone, Debug)]
 pub(super) struct JsonError {
@@ -168,7 +168,7 @@ impl Parser {
         let s: String = self.chars[start..self.pos].iter().collect();
         if s.contains('.') || s.contains('e') || s.contains('E') {
             s.parse::<f64>()
-                .map(|f| json_variant("Float", Some(CtValue::Float(f))))
+                .map(|value| json_variant("Float", Some(CtValue::Float(CtFloat::f64(value)))))
                 .map_err(|_| self.err("bad number"))
         } else {
             s.parse::<i64>()

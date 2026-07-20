@@ -9,7 +9,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{AccessConvention, CallArg, Expr, Func, LambdaBody, StrPart, Type, UnOp};
+use crate::AST::{
+    AccessConvention, CallArg, CtFloat, Expr, Func, LambdaBody, StrPart, Type, UnOp,
+};
 
 use super::super::Builtins::{
     apply_method, apply_mutating, apply_static_type_method, as_bool, as_int, cmp,
@@ -109,15 +111,11 @@ fn apply_seeded_rng_method(
             as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?,
             as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?,
         ))),
-        "float" => Ok(CtValue::Float(seeded_rng_float(state))),
+        "float" => Ok(CtValue::Float(CtFloat::f64(seeded_rng_float(state)))),
         "float_range" => {
             let low = float(0)?;
             let high = float(1)?;
-            Ok(CtValue::Float(if high > low {
-                low + (high - low) * seeded_rng_float(state)
-            } else {
-                low
-            }))
+            Ok(CtValue::Float(CtFloat::f64(if high > low { low + (high - low) * seeded_rng_float(state) } else { low })))
         }
         "bool" if args.is_empty() => Ok(CtValue::Bool((seeded_rng_next(state) & 1) == 1)),
         "bool" => {
@@ -137,15 +135,11 @@ fn apply_seeded_rng_method(
             let second = seeded_rng_float(state);
             let normal = (-2.0 * first.ln()).sqrt()
                 * (std::f64::consts::TAU * second).cos();
-            Ok(CtValue::Float(mean + normal * stddev.max(0.0)))
+            Ok(CtValue::Float(CtFloat::f64(mean + normal * stddev.max(0.0))))
         }
         "exponential" => {
             let lambda = float(0)?;
-            Ok(CtValue::Float(if lambda <= 0.0 || lambda.is_nan() {
-                0.0
-            } else {
-                -seeded_rng_float(state).max(f64::MIN_POSITIVE).ln() / lambda
-            }))
+            Ok(CtValue::Float(CtFloat::f64(if lambda <= 0.0 || lambda.is_nan() { 0.0 } else { -seeded_rng_float(state).max(f64::MIN_POSITIVE).ln() / lambda })))
         }
         "bytes" => {
             let count = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
@@ -717,7 +711,10 @@ impl<'a> Interp<'a> {
                     self.bind_fixed_call_args(fixed, &args[..fixed.len()], scope)?;
                 let mut rest = Vec::with_capacity(args.len() - fixed.len());
                 for a in &args[fixed.len()..] {
-                    rest.push(self.eval(&a.expr, scope)?);
+                    let value = self.eval(&a.expr, scope)?;
+                    rest.push(super::super::Interpreter::coerce_value_to_type(
+                        value, &last.ty,
+                    ));
                 }
                 frame.insert(last.name.clone(), CtValue::List(rest));
                 return self.call_func_with_writebacks(name, func, frame, writebacks, scope);
@@ -742,7 +739,11 @@ impl<'a> Interp<'a> {
         let mut frame = HashMap::new();
         let mut writebacks = Vec::new();
         for (p, a) in params.iter().zip(args) {
-            frame.insert(p.name.clone(), self.eval(&a.expr, scope)?);
+            let value = self.eval(&a.expr, scope)?;
+            frame.insert(
+                p.name.clone(),
+                super::super::Interpreter::coerce_value_to_type(value, &p.ty),
+            );
             if p.convention == AccessConvention::Write {
                 if let Expr::Ident(caller_name, _) = &a.expr {
                     writebacks.push((p.name.clone(), caller_name.clone()));
@@ -827,6 +828,9 @@ impl<'a> Interp<'a> {
             }
             Err(e) => Err(e),
         }?;
+        let value = func.return_type.as_ref().map_or(value.clone(), |ty| {
+            super::super::Interpreter::coerce_value_to_type(value, ty)
+        });
         Ok((value, frame))
     }
 
@@ -1010,8 +1014,13 @@ impl<'a> Interp<'a> {
         for (p, a) in data.lambda.params.iter().zip(args) {
             if let Some(ty) = &p.ty {
                 self.binding_types.insert(p.name.clone(), ty.clone());
+                frame.insert(
+                    p.name.clone(),
+                    super::super::Interpreter::coerce_value_to_type(a, ty),
+                );
+            } else {
+                frame.insert(p.name.clone(), a);
             }
-            frame.insert(p.name.clone(), a);
         }
         let result = (|| match &data.lambda.body {
             LambdaBody::Expr(e) => self.eval(e, &mut frame),
@@ -1033,7 +1042,11 @@ impl<'a> Interp<'a> {
                 }
             }
         }
-        result
+        result.map(|value| {
+            data.return_type.as_ref().map_or(value.clone(), |ty| {
+                super::super::Interpreter::coerce_value_to_type(value, ty)
+            })
+        })
     }
 
     /// c139: `Name(expr)` — the distinct-type / `@UnitFamily` constructor.
@@ -1544,7 +1557,7 @@ impl<'a> Interp<'a> {
                 let ms = match value {
                     CtValue::Int(n) => n.checked_mul(scale),
                     CtValue::Float(n) => {
-                        let scaled = n * scale as f64;
+                        let scaled = n.as_f64() * scale as f64;
                         (scaled.is_finite()
                             && scaled >= i64::MIN as f64
                             && scaled < 9_223_372_036_854_775_808.0)

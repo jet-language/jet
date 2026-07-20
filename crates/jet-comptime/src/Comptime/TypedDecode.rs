@@ -16,7 +16,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::AST::{CtKey, Field, Marker, MigrationDecl, MigrationOp, StructDef, Type};
+use crate::AST::{CtFloat, CtKey, Field, Marker, MigrationDecl, MigrationOp, StructDef, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Diagnostics::unsupported;
@@ -229,7 +229,10 @@ fn text_cell(cell: String) -> CtValue {
 fn encode_ct_value(v: &CtValue, structs: &std::collections::HashMap<String, &StructDef>) -> CtValue {
     match v {
         CtValue::Int(n) => json_variant("Int", Some(CtValue::Int(*n))),
-        CtValue::Float(f) => json_variant("Float", Some(CtValue::Float(*f))),
+        CtValue::Float(value) => json_variant(
+            "Float",
+            Some(CtValue::Float(CtFloat::f64(value.as_f64()))),
+        ),
         CtValue::Bool(b) => json_variant("Bool", Some(CtValue::Bool(*b))),
         CtValue::Str(s) => json_variant("Text", Some(CtValue::Str(s.clone()))),
         CtValue::Char(c) => json_variant("Text", Some(CtValue::Str(c.to_string()))),
@@ -265,7 +268,9 @@ fn encode_ct_value(v: &CtValue, structs: &std::collections::HashMap<String, &Str
 fn decode_int(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
         Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Int(*n)),
-        Some(("Float", Some(CtValue::Float(f)))) if f.fract() == 0.0 => Ok(CtValue::Int(*f as i64)),
+        Some(("Float", Some(CtValue::Float(value)))) if value.as_f64().fract() == 0.0 => {
+            Ok(CtValue::Int(value.as_f64() as i64))
+        }
         Some(("Text", Some(CtValue::Str(s)))) => s
             .trim()
             .parse::<i64>()
@@ -276,12 +281,14 @@ fn decode_int(tree: &CtValue) -> Result<CtValue, CtValue> {
 }
 fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
-        Some(("Float", Some(CtValue::Float(f)))) => Ok(CtValue::Float(*f)),
-        Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Float(*n as f64)),
+        Some(("Float", Some(CtValue::Float(value)))) => {
+            Ok(CtValue::Float(CtFloat::f64(value.as_f64())))
+        }
+        Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Float(CtFloat::f64(*n as f64))),
         Some(("Text", Some(CtValue::Str(s)))) => s
             .trim()
             .parse::<f64>()
-            .map(CtValue::Float)
+            .map(|value| CtValue::Float(CtFloat::f64(value)))
             .map_err(|_| decode_error(format!("expected Float, found text {:?}", s))),
         _ => Err(decode_error(format!("expected Float, found {}", datatree_kind(tree)))),
     }
@@ -320,7 +327,7 @@ fn decode_char(tree: &CtValue) -> Result<CtValue, CtValue> {
 fn zero_value(ty: &Type) -> CtValue {
     match ty {
         Type::Int => CtValue::Int(0),
-        Type::Float => CtValue::Float(0.0),
+        Type::Float => CtValue::Float(CtFloat::f64(0.0)),
         Type::Bool => CtValue::Bool(false),
         Type::String => CtValue::Str(String::new()),
         Type::Char => CtValue::Char('\0'),

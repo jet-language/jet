@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::AST::Type;
+use crate::AST::{CtFloat, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 
 use crate::Comptime::Builtins::as_int;
@@ -858,10 +858,10 @@ fn measurement(args: &[CtValue], span: Span) -> EvalResult {
     Ok(structure(
         "Measurement",
         vec![
-            ("value", CtValue::Float(float_arg(args, 0, span)?)),
+            ("value", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
             (
                 "uncertainty",
-                CtValue::Float(float_arg(args, 1, span)?),
+                CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
             ),
         ],
     ))
@@ -874,19 +874,19 @@ fn measurement_arithmetic(
     span: Span,
 ) -> EvalResult {
     let left_value = match field(left, "Measurement", "value") {
-        Some(CtValue::Float(value)) => *value,
+        Some(CtValue::Float(value)) => value.as_f64(),
         _ => return Err(unsupported("malformed Measurement.value value", span)),
     };
     let left_uncertainty = match field(left, "Measurement", "uncertainty") {
-        Some(CtValue::Float(value)) => *value,
+        Some(CtValue::Float(value)) => value.as_f64(),
         _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
     };
     let right_value = match field(right, "Measurement", "value") {
-        Some(CtValue::Float(value)) => *value,
+        Some(CtValue::Float(value)) => value.as_f64(),
         _ => return Err(unsupported("malformed Measurement.value value", span)),
     };
     let right_uncertainty = match field(right, "Measurement", "uncertainty") {
-        Some(CtValue::Float(value)) => *value,
+        Some(CtValue::Float(value)) => value.as_f64(),
         _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
     };
     let (value, uncertainty) = match method {
@@ -915,8 +915,8 @@ fn measurement_arithmetic(
     Ok(structure(
         "Measurement",
         vec![
-            ("value", CtValue::Float(value)),
-            ("uncertainty", CtValue::Float(uncertainty)),
+            ("value", CtValue::Float(CtFloat::f64(value))),
+            ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
         ],
     ))
 }
@@ -1047,14 +1047,14 @@ impl<'a> crate::Comptime::Interpreter::Interp<'a> {
                         vec![
                             ("key", CtValue::Str(key)),
                             ("count", CtValue::Int(count)),
-                            ("sum", CtValue::Float(sum)),
+                            ("sum", CtValue::Float(CtFloat::f64(sum))),
                             (
                                 "mean",
-                                CtValue::Float(if count == 0 {
+                                CtValue::Float(CtFloat::f64(if count == 0 {
                                     0.0
                                 } else {
                                     sum / count as f64
-                                }),
+                                })),
                             ),
                         ],
                     )

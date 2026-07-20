@@ -7,8 +7,8 @@ use std::path::Path;
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
-    BinOp, BindPattern, EnumLitArg, Expr, Func, IncDecOp, OrFallback as FallbackKind, PatSlot,
-    Pattern, Stmt, StrFormat, StrPart, Type, UnOp,
+    BinOp, BindPattern, CtFloat, EnumLitArg, Expr, Func, IncDecOp,
+    OrFallback as FallbackKind, PatSlot, Pattern, Stmt, StrFormat, StrPart, Type, UnOp,
 };
 
 use super::Builtins::{as_bool, as_int, eval_binop};
@@ -265,6 +265,74 @@ pub(super) struct Interp<'a> {
     pub(super) migrations: &'a HashMap<String, Vec<&'a crate::AST::MigrationDecl>>,
 }
 
+fn numeric_float_constant(type_name: &str, member: &str) -> Option<CtFloat> {
+    match (crate::AST::numeric_type_from_name(type_name)?, member) {
+        (Type::Float32, "MIN") => Some(CtFloat::f32(f32::MIN)),
+        (Type::Float32, "MAX") => Some(CtFloat::f32(f32::MAX)),
+        (Type::Float32, "INFINITY") => Some(CtFloat::f32(f32::INFINITY)),
+        (Type::Float32, "NEG_INFINITY") => Some(CtFloat::f32(f32::NEG_INFINITY)),
+        (Type::Float32, "NAN") => Some(CtFloat::f32(f32::NAN)),
+        (Type::Float32, "EPSILON") => Some(CtFloat::f32(f32::EPSILON)),
+        (Type::Float, "MIN") => Some(CtFloat::f64(f64::MIN)),
+        (Type::Float, "MAX") => Some(CtFloat::f64(f64::MAX)),
+        (Type::Float, "INFINITY") => Some(CtFloat::f64(f64::INFINITY)),
+        (Type::Float, "NEG_INFINITY") => Some(CtFloat::f64(f64::NEG_INFINITY)),
+        (Type::Float, "NAN") => Some(CtFloat::f64(f64::NAN)),
+        (Type::Float, "EPSILON") => Some(CtFloat::f64(f64::EPSILON)),
+        _ => None,
+    }
+}
+
+pub(super) fn coerce_value_to_type(value: CtValue, ty: &Type) -> CtValue {
+    match (value, ty) {
+        (CtValue::Float(value), Type::Float32) => CtValue::Float(CtFloat::f32(value.as_f32())),
+        (CtValue::Float(value), Type::Float) => CtValue::Float(CtFloat::f64(value.as_f64())),
+        (CtValue::List(values), Type::List(elem) | Type::FixedList { elem, .. }) => CtValue::List(
+            values
+                .into_iter()
+                .map(|value| coerce_value_to_type(value, elem))
+                .collect(),
+        ),
+        (CtValue::Map(values), Type::Map { value, .. }) => CtValue::Map(
+            values
+                .into_iter()
+                .map(|(key, item)| (key, coerce_value_to_type(item, value)))
+                .collect(),
+        ),
+        (CtValue::Some(value), Type::Option(inner)) => {
+            CtValue::Some(Box::new(coerce_value_to_type(*value, inner)))
+        }
+        (CtValue::ResOk(value), Type::Result { ok, .. }) => {
+            CtValue::ResOk(Box::new(coerce_value_to_type(*value, ok)))
+        }
+        (CtValue::ResErr(value), Type::Result { err, .. }) => {
+            CtValue::ResErr(Box::new(coerce_value_to_type(*value, err)))
+        }
+        (CtValue::Struct { type_name, fields }, Type::Tuple(types)) => CtValue::Struct {
+            type_name,
+            fields: fields
+                .into_iter()
+                .map(|(name, value)| {
+                    let value = types
+                        .iter()
+                        .find(|(field, _)| field == &name)
+                        .map_or(value.clone(), |(_, ty)| coerce_value_to_type(value, ty));
+                    (name, value)
+                })
+                .collect(),
+        },
+        (CtValue::Closure(data), Type::Fn { ret, .. }) => {
+            let mut data = (*data).clone();
+            data.return_type = ret.as_deref().cloned();
+            CtValue::Closure(std::sync::Arc::new(data))
+        }
+        (value, Type::Shared(inner) | Type::Tagged { inner, .. }) => {
+            coerce_value_to_type(value, inner)
+        }
+        (value, _) => value,
+    }
+}
+
 impl<'a> Interp<'a> {
     pub(super) fn poll_repl_interrupt(&self) {
         if self.repl_interruptible && super::repl_interrupt_count() > 0 {
@@ -422,12 +490,13 @@ impl<'a> Interp<'a> {
                 Ok(Flow::Normal)
             }
             Stmt::Val(b) => {
-                let v = self.eval(&b.init, scope)?;
+                let mut v = self.eval(&b.init, scope)?;
                 // S74: a destructuring target binds each field/element.
                 if let Some(pat) = &b.pattern {
                     self.bind_pattern(pat, v, scope)?;
                 } else {
                     if let Some(ty) = &b.ty {
+                        v = coerce_value_to_type(v, ty);
                         self.binding_types.insert(b.name.clone(), ty.clone());
                     }
                     scope.insert(b.name.clone(), v);
@@ -893,7 +962,7 @@ impl<'a> Interp<'a> {
         let rhs = self.eval(value, scope)?;
         match target {
             crate::AST::LValue::Local { name, name_span } => {
-                let new = match op {
+                let mut new = match op {
                     None => rhs,
                     Some(op) => {
                         let cur = scope
@@ -903,6 +972,9 @@ impl<'a> Interp<'a> {
                         eval_binop(op, cur, rhs, op_span)?
                     }
                 };
+                if let Some(ty) = self.binding_types.get(name) {
+                    new = coerce_value_to_type(new, ty);
+                }
                 scope.insert(name.clone(), new);
                 Ok(())
             }
@@ -918,16 +990,24 @@ impl<'a> Interp<'a> {
                     .get(bname)
                     .cloned()
                     .ok_or_else(|| unsupported("this indexed assignment", *span))?;
+                let value_type = self.binding_types.get(bname).and_then(|ty| match ty {
+                    Type::List(elem) | Type::FixedList { elem, .. } => Some((**elem).clone()),
+                    Type::Map { value, .. } => Some((**value).clone()),
+                    _ => None,
+                });
                 match &mut container {
                     CtValue::List(xs) => {
                         let i = as_int(&key, index.span())?;
-                        let new = match op {
+                        let mut new = match op {
                             None => rhs,
                             Some(op) => {
                                 let cur = list_get(xs, i, *span)?;
                                 eval_binop(op, cur, rhs, op_span)?
                             }
                         };
+                        if let Some(ty) = &value_type {
+                            new = coerce_value_to_type(new, ty);
+                        }
                         if i < 0 || i as usize >= xs.len() {
                             return Err(index_oob(xs.len(), i, *span));
                         }
@@ -936,13 +1016,16 @@ impl<'a> Interp<'a> {
                     CtValue::Map(m) => {
                         let k = CtKey::from_value(key)
                             .ok_or_else(|| unsupported("this map key type", index.span()))?;
-                        let new = match op {
+                        let mut new = match op {
                             None => rhs,
                             Some(op) => {
                                 let cur = m.get(&k).cloned().unwrap_or(CtValue::Int(0));
                                 eval_binop(op, cur, rhs, op_span)?
                             }
                         };
+                        if let Some(ty) = &value_type {
+                            new = coerce_value_to_type(new, ty);
+                        }
                         m.insert(k, new);
                     }
                     _ => return Err(unsupported("this indexed assignment", *span)),
@@ -967,7 +1050,9 @@ impl<'a> Interp<'a> {
         self.burn(e.span())?;
         match e {
             Expr::Int(n, _, _, _) => Ok(CtValue::Int(*n)),
-            Expr::Float(f, _, _) => Ok(CtValue::Float(*f)),
+            Expr::Float(value, _, is_f32) => {
+                Ok(CtValue::Float(CtFloat::literal(*value, *is_f32)))
+            }
             Expr::Bool(b, _) => Ok(CtValue::Bool(*b)),
             Expr::Char(c, _) => Ok(CtValue::Char(*c)),
             Expr::Str(parts, _) => {
@@ -1028,7 +1113,7 @@ impl<'a> Interp<'a> {
                         .checked_neg()
                         .map(CtValue::Int)
                         .ok_or_else(|| overflow("negate", *span)),
-                    (UnOp::Neg, CtValue::Float(f)) => Ok(CtValue::Float(-f)),
+                    (UnOp::Neg, CtValue::Float(value)) => Ok(CtValue::Float(value.neg())),
                     (UnOp::Neg, CtValue::BigInt(b)) => Ok(CtValue::BigInt(b.neg())),
                     (UnOp::Not, CtValue::Bool(b)) => Ok(CtValue::Bool(!b)),
                     _ => Err(unsupported("this operation", *span)),
@@ -1079,6 +1164,9 @@ impl<'a> Interp<'a> {
             }
             Expr::Field(inner, member, span) => {
                 if let Expr::Ident(type_name, _) = inner.as_ref() {
+                    if let Some(value) = numeric_float_constant(type_name, member) {
+                        return Ok(CtValue::Float(value));
+                    }
                     // If the name is in scope as a variable, do field access on
                     // the value (e.g. TypeInfo struct from a derive body).
                     // Otherwise it is an enum-variant literal (Color.Red).
@@ -1118,7 +1206,16 @@ impl<'a> Interp<'a> {
             } => {
                 let mut out = Vec::with_capacity(fields.len());
                 for (name, _, expr) in fields {
-                    out.push((name.clone(), self.eval(expr, scope)?));
+                    let mut value = self.eval(expr, scope)?;
+                    if let Some(ty) = self.structs.get(type_name).and_then(|def| {
+                        def.fields
+                            .iter()
+                            .find(|field| field.name == *name)
+                            .map(|field| &field.ty)
+                    }) {
+                        value = coerce_value_to_type(value, ty);
+                    }
+                    out.push((name.clone(), value));
                 }
                 Ok(CtValue::Struct {
                     type_name: type_name.clone(),
@@ -1157,6 +1254,11 @@ impl<'a> Interp<'a> {
                 args,
                 ..
             } => {
+                if args.is_empty() {
+                    if let Some(value) = numeric_float_constant(type_name, variant) {
+                        return Ok(CtValue::Float(value));
+                    }
+                }
                 let mut out = Vec::with_capacity(args.len());
                 for arg in args {
                     match arg {
@@ -1400,6 +1502,7 @@ impl<'a> Interp<'a> {
                 crate::AST::ClosureData {
                     lambda: l.clone(),
                     captured: scope.clone(),
+                    return_type: None,
                 },
             ))),
             other => Err(unsupported_expr(other)),
@@ -1622,7 +1725,7 @@ impl<'a> Interp<'a> {
                                         Err(_) => return Ok(false),
                                     },
                                     Some(Type::Float) => match captured.parse::<f64>() {
-                                        Ok(f) => CtValue::Float(f),
+                                        Ok(value) => CtValue::Float(CtFloat::f64(value)),
                                         Err(_) => return Ok(false),
                                     },
                                     Some(_) => {
@@ -1824,6 +1927,7 @@ fn fn_value(name: &str, func: &Func, span: Span) -> CtValue {
     CtValue::Closure(std::sync::Arc::new(crate::AST::ClosureData {
         lambda,
         captured: HashMap::new(),
+        return_type: func.return_type.clone(),
     }))
 }
 
