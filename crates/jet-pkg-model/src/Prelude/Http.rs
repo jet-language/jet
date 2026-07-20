@@ -159,6 +159,14 @@ pub fn jet_http_client_send_impl(
             Err("HTTP URL is invalid".to_string())
         }
         Err(ureq::Error::Transport(error))
+            if matches!(
+                error.kind(),
+                ureq::ErrorKind::BadStatus | ureq::ErrorKind::BadHeader
+            ) =>
+        {
+            Err("HTTP response framing is invalid".to_string())
+        }
+        Err(ureq::Error::Transport(error))
             if error.kind() == ureq::ErrorKind::TooManyRedirects =>
         {
             Err(format!("HTTP redirect limit {redirect_limit} exceeded"))

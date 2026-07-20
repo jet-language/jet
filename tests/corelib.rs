@@ -5822,6 +5822,15 @@ fn core_http_client_bounds_and_strictly_decodes_response_bodies() {
                 stream.write_all(&body).unwrap();
             }
         }
+        for response in [
+            "NOT HTTP\r\nConnection: close\r\n\r\n".to_string(),
+            format!("HTTP/1.1 200 OK\r\n{}\r\n", "X: y\r\n".repeat(102)),
+        ] {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).unwrap();
+            stream.write_all(response.as_bytes()).unwrap();
+        }
     });
 
     let dir = std::env::temp_dir().join(format!(
@@ -5874,6 +5883,16 @@ fn run() {
         Ok(response) -> { print("unexpected partial chunked success: {response.status()}:{response.body()}") }
         Err(error) -> { print(error) }
     }
+    ninth :: client.get("http://__ADDR__/")
+    if ninth == {
+        Ok(response) -> { print("unexpected malformed status success: {response.status()}") }
+        Err(error) -> { print(error) }
+    }
+    tenth :: client.get("http://__ADDR__/")
+    if tenth == {
+        Ok(response) -> { print("unexpected malformed header success: {response.status()}") }
+        Err(error) -> { print(error) }
+    }
 }
 "#
     .replace("__ADDR__", &addr.to_string());
@@ -5882,7 +5901,7 @@ fn run() {
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(
         stdout,
-        "8388608\nHTTP response body is not valid UTF-8\n404:missing\nHTTP response body exceeds 8388608-byte limit\n8388608\nHTTP response body exceeds 8388608-byte limit\nHTTP response body read failed\nHTTP response body read failed\n"
+        "8388608\nHTTP response body is not valid UTF-8\n404:missing\nHTTP response body exceeds 8388608-byte limit\n8388608\nHTTP response body exceeds 8388608-byte limit\nHTTP response body read failed\nHTTP response body read failed\nHTTP response framing is invalid\nHTTP response framing is invalid\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
