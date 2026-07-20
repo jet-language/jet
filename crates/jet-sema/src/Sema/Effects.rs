@@ -530,7 +530,12 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         // U13 (D-JPK-SECRETCRYPTO1): only `core.vault.get` reads the encrypted
         // store. D-CORE-SECRETS1=A also places pure in-memory lifecycle helpers
         // in this module; those do not acquire the ambient Secret effect.
-        "core.vault" if method == "get" => Effect::Secret,
+        "core.vault" if matches!(method,
+            "get" | "current" | "versions" | "load" | "status"
+            | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
+            | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
+        ) => Effect::Secret,
+        "core.vault.expert" => Effect::Secret,
         _ => return None,
     })
 }

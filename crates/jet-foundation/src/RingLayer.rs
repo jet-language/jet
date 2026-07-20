@@ -83,6 +83,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "core.solve"
         | "core.time.expiring"
         | "core.vault"
+        | "core.vault.expert"
         | "jet.reactive"
         | "core.sketch.hll"
         | "core.sketch.tdigest"

@@ -238,6 +238,8 @@ fn is_cloneable_rec(
             visiting.remove(name);
             result
         }
+        Type::Apply { name, .. } if matches!(name.as_str(), "MutationPlan" | "VaultWrite") => false,
+        Type::Apply { name, .. } if matches!(name.as_str(), "KeyRef" | "Rotation") => true,
         Type::Apply { args, .. } => args
             .iter()
             .all(|a| is_cloneable_rec(a, registry, visiting)),
@@ -343,6 +345,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
             true
         }
         Type::Apply { name, .. } if name == "Id" => false,
+        Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             args.iter()
                 .any(|a| type_owns_heap_rec(a, registry, visiting))
@@ -642,6 +645,7 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::List(inner) => is_printable(inner, registry),
         Type::Map { value, .. } => is_printable(value, registry),
         Type::Named(n) => registry.contains(n) || core_type_known(n),
+        Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             (name == "View"
                 && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
@@ -684,6 +688,7 @@ pub(crate) fn is_displayable(
                         | Syntax::TYPE_CHAR
                 )
         }
+        Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             (name == "View"
                 && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
@@ -775,6 +780,7 @@ pub(crate) fn is_debuggable(
                 || core_type_known(n)
                 || trait_reg.implements_trait(n, Generics::DEBUG)
         }
+        Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { args, .. } => args.iter().all(|a| is_debuggable(a, type_reg, trait_reg)),
         Type::Tuple(fields) => fields
             .iter()
@@ -799,6 +805,8 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::List(inner) => types_comparable(inner, registry),
         Type::Named(name) if name == "U8" => true,
         Type::Named(name) => registry.contains(name) && incomparable_field(ty, registry).is_none(),
+        Type::Apply { name, .. } if name == "KeyRef" => true,
+        Type::Apply { name, .. } if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") => false,
         Type::Apply { args, .. } => args.iter().all(|a| types_comparable(a, registry)),
         Type::Tuple(fields) => fields.iter().all(|(_, t)| types_comparable(t, registry)),
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,

@@ -1040,6 +1040,13 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
             ));
         }
     }
+    if uses("core.vault") {
+        if let Some(ffi) = &cx.ffi_crate {
+            out.push_str(&format!(
+                "impl<T> JetDisplay for {ffi}::JetVaultKeyRef<T> {{ fn jet_display(&self) -> String {{ self.to_string() }} }}\nimpl<T> JetDebug for {ffi}::JetVaultKeyRef<T> {{ fn jet_debug(&self) -> String {{ format!(\"{{self:?}}\") }} }}\n"
+            ));
+        }
+    }
     out.push('\n');
 }
 

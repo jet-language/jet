@@ -686,7 +686,13 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.
         // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
-        "core.vault" => &["get", "rotting_new"],
+        "core.vault" => &[
+            "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "KeyStatus", "VaultError",
+            "get", "rotting_new", "current", "versions", "load", "status",
+            "prepare_generate", "prepare_store", "prepare_rotate", "prepare_retire", "prepare_revoke",
+            "authorize_write", "commit_generate", "commit_store", "commit_rotate", "commit_retire", "commit_revoke",
+        ],
+        "core.vault.expert" => &["prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519"],
         // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: strict HS256 JWT and v4.public
         // PASETO verification with required expected audience.
         "core.auth" => &["verify_jwt", "verify_paseto"],
@@ -706,6 +712,7 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
             | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
         // D-AUTH-TOKENPOLICY1=A: typed verifier result and error records.
         | ("core.auth", "Claims" | "AuthError")
+        | ("core.vault", "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "KeyStatus" | "VaultError")
         | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TlsVersion")
     )
 }

@@ -71,8 +71,10 @@ fn default_keys_dir() -> PathBuf {
 /// call is an instant cache hit — same shape as `Source/Publish/Sign.rs`'s
 /// `ensure_bridge_helper`.
 pub fn ensure_bridge_helper() -> Result<PathBuf, String> {
-    // needs_secrets = true, everything else off, no extern entries.
-    let link = crate::FFI::build_bridge(&[], false, false, false, false, false, false, false, true)
+    // Typed vault rows share the same emitted module, so the bridge also carries
+    // the already-ratified crypto runtime even though this helper invokes only
+    // the historical age keygen/encrypt/decrypt entrypoints.
+    let link = crate::FFI::build_bridge(&[], false, false, false, false, true, false, false, true)
         .map_err(|mut ds| {
             ds.drain(..)
                 .next()
@@ -288,7 +290,13 @@ fn read_store_unlocked(project_dir: &Path) -> Result<Vec<(String, String)>, Stri
     let cmd = format!("decrypt {} {}", identity.trim(), hex_encode(&ciphertext));
     let plaintext_hex = run_helper(&helper, &cmd)?;
     let plaintext = hex_decode(&plaintext_hex)?;
-    decode_pairs(&plaintext).ok_or_else(|| "the decrypted store is corrupt".to_string())
+    let pairs_bytes = if plaintext.starts_with(b"JVLT") {
+        let encoded = run_helper(&helper, &format!("strings {}", hex_encode(&plaintext)))?;
+        hex_decode(&encoded)?
+    } else {
+        plaintext
+    };
+    decode_pairs(&pairs_bytes).ok_or_else(|| "the decrypted store is corrupt".to_string())
 }
 
 /// Encrypt + write the whole store to every recipient in
@@ -313,6 +321,25 @@ fn write_store_unlocked(project_dir: &Path, pairs: &[(String, String)]) -> Resul
     }
     let helper = ensure_bridge_helper()?;
     let plaintext = encode_pairs(pairs);
+    let path = store_path(project_dir);
+    if path.is_file() {
+        let identity = std::fs::read_to_string(identity_path())
+            .map_err(|e| format!("couldn't read the secrets identity: {e}"))?;
+        let ciphertext = std::fs::read(&path)
+            .map_err(|e| format!("couldn't read `{}`: {e}", path.display()))?;
+        let decrypted = run_helper(
+            &helper,
+            &format!("decrypt {} {}", identity.trim(), hex_encode(&ciphertext)),
+        )?;
+        if hex_decode(&decrypted)?.starts_with(b"JVLT") {
+            run_helper_in(
+                &helper,
+                &format!("replace-strings {}", hex_encode(&plaintext)),
+                project_dir,
+            )?;
+            return Ok(());
+        }
+    }
     let cmd = format!(
         "encrypt {} {}",
         recipients.join(","),
@@ -320,7 +347,6 @@ fn write_store_unlocked(project_dir: &Path, pairs: &[(String, String)]) -> Resul
     );
     let ciphertext_hex = run_helper(&helper, &cmd)?;
     let ciphertext = hex_decode(&ciphertext_hex)?;
-    let path = store_path(project_dir);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("couldn't create `.jet`: {e}"))?;
     }
@@ -366,8 +392,28 @@ fn run_helper(helper: &Path, command: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+fn run_helper_in(helper: &Path, command: &str, directory: &Path) -> Result<String, String> {
+    let out = spawn_helper_in(helper, command, directory)?;
+    if !out.status.success() {
+        return Err(format!(
+            "the secrets helper failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
 fn spawn_helper(helper: &Path, command: &str) -> Result<std::process::Output, String> {
+    spawn_helper_command(helper, command, None)
+}
+
+fn spawn_helper_in(helper: &Path, command: &str, directory: &Path) -> Result<std::process::Output, String> {
+    spawn_helper_command(helper, command, Some(directory))
+}
+
+fn spawn_helper_command(helper: &Path, command: &str, directory: Option<&Path>) -> Result<std::process::Output, String> {
     let mut child = Command::new(helper)
+        .current_dir(directory.unwrap_or_else(|| Path::new(".")))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

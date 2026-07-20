@@ -544,6 +544,50 @@ Examples: `examples/features/crypto/crypto_suite.jet`,
 `examples/features/crypto/crypto_envelope.jet`, and
 `examples/features/crypto/crypto_sign.jet`.
 
+### `core.vault` — repository secrets and typed key generations
+
+`core.vault` keeps the existing `get(name) -> String?` API and adds persistent
+typed `SigningKey` and `X25519SecretKey` generations. Every call below requires
+the `Secret` effect. `KeyRef<T>` is safe to clone, compare, hash, display, and
+persist; it contains public identity metadata, never key bytes.
+
+```jet
+use core.crypto as crypto
+use core.vault as vault
+
+fn provision() -> Void ? vault.VaultError #(Secret) {
+    plan :: vault.prepare_generate<crypto.SigningKey>("release")?
+    write :: vault.authorize_write(&plan, reason: "create release signer")?
+    key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))?
+    print(key_ref) // repo:release@v1
+}
+```
+
+| API | Result |
+|-----|--------|
+| `current<T>(name)` | active `KeyRef<T>?`; absent or no active generation is `None` |
+| `versions<T>(name)` | all refs, newest first |
+| `load<T>(&ref)` / `status<T>(&ref)` | exact key or `KeyStatus`; revoked loads fail |
+| `prepare_generate<T>` / `prepare_store<T>` / `prepare_rotate<T>` | move-only five-minute `MutationPlan<T>` |
+| `prepare_retire<T>` / `prepare_revoke<T>` | plan bound to an exact ref and reason |
+| `authorize_write<T>(&plan, reason:)` | one-use `VaultWrite<T>` after native approval |
+| `commit_generate/store/rotate/retire/revoke<T>(take(write), take(plan))` | atomic compare-and-swap mutation |
+
+The store uses the existing `.jet/secrets-recipients` age recipient set and
+canonical `JVLT` v2 bytes. Historical String-only stores migrate on the first
+authorized typed mutation. Interactive authorization uses the native preview;
+a headless process needs the exact reviewed grant
+`jet trust grant vault.write:<repository_uuid>`. Source, workspace settings,
+environment variables, DAP, and stdin cannot approve a write. Linux uses
+`openat2`, `pidfd`, `renameat2(RENAME_EXCHANGE)`, file/directory fsync, and
+same-directory recovery; unsupported providers fail closed. `VaultError`
+redacts paths, identities, recipients, backend text, and key/store bytes. Safe
+portable backup is intentionally absent. Expert raw imports are prepared and
+committed only through `core.vault.expert` inside `@Unsafe`; raw export remains
+the existing `core.crypto.expert` operation.
+
+Example: `examples/features/crypto/vault_keys.jet`.
+
 ### `core.auth` — strict JWT and PASETO verification
 
 `core.auth` exports two standalone verifiers:

@@ -915,6 +915,11 @@ impl Cx {
                 };
                 format!("{ffi}::{rust}")
             }
+            Type::Named(name) if matches!(name.as_str(), "KeyStatus" | "VaultError") => {
+                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                let rust = if name == "KeyStatus" { "JetVaultKeyStatus" } else { "JetVaultError" };
+                format!("{ffi}::{rust}")
+            }
             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
             Type::Named(name) if name == "Unknown" => "_".to_string(),
             // D-APPROX1=A: sketch types → opaque Rust structs.
@@ -1209,6 +1214,17 @@ impl Cx {
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
+            }
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation")
+                    && args.len() == 1 =>
+            {
+                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                let rust = match name.as_str() {
+                    "KeyRef" => "JetVaultKeyRef", "MutationPlan" => "JetVaultMutationPlan",
+                    "VaultWrite" => "JetVaultWrite", _ => "JetVaultRotation",
+                };
+                format!("{ffi}::{rust}<{}>", self.rust_type(&args[0]))
             }
             Type::Apply { name, args } if name == "Receiver" && !args.is_empty() => {
                 format!(

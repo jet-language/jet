@@ -2656,6 +2656,16 @@ registry (ordinary unknown-module error). Generic TTL wrapping stays in
 `core.time.expiring`; `core.crypto` stays primitives and envelopes. The
 teachable rule: crypto moves bytes, vault keeps secrets.
 
+**D-CRYPTO-VAULT1=A — typed persistent key lifecycle** *(ratified by owner
+2026-07-11, card #302)*: `core.vault` stores sealed `SigningKey` and
+`X25519SecretKey` generations in the existing recipient-encrypted repository
+vault. Immutable `KeyRef<T>` values identify exact versions. Mutation requires
+prepared plans, exact-preview one-use authority, and consuming commits;
+rotation, retirement, and logical revocation never retarget an old ref. The
+canonical `JVLT` v2 payload, redacted closed `VaultError`, and native atomic
+durability law are part of the API contract. Portable backup remains solely
+owned by D-CRYPTO-KEYWRAP1 and is absent here.
+
 **D-CORENS2=A — core namespace admission law** *(ratified by owner
 2026-07-12, card #509)*: a new top-level `core.<name>` requires a
 domain — a coherent problem area with a plausible member family —

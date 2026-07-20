@@ -23,6 +23,20 @@ fn is_string_literal_expr(expr: &crate::AST::Expr) -> bool {
     }
 }
 
+fn vault_key_arg(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation") =>
+        {
+            args.first().cloned()
+        }
+        Type::Named(name) if matches!(name.as_str(), "SigningKey" | "X25519SecretKey") => Some(ty.clone()),
+        Type::Tagged { inner, .. }
+            if matches!(inner.as_ref(), Type::Named(name) if matches!(name.as_str(), "SigningKey" | "X25519SecretKey")) => Some(ty.clone()),
+        _ => None,
+    }
+}
+
 fn literal_list_len(expr: &crate::AST::Expr) -> Option<usize> {
     match expr {
         crate::AST::Expr::ListLit(items, _)
@@ -410,6 +424,68 @@ impl<'a> Checker<'a> {
                 resolved_core_fixed_sig(module, name)
             };
             match (module, name) {
+                ("core.vault", "current" | "versions" | "load" | "status"
+                    | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
+                    | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke") => {
+                    let inferred_from = match name {
+                        "prepare_store" => 1,
+                        "load" | "status" | "prepare_retire" | "prepare_revoke" | "authorize_write"
+                        | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" => 0,
+                        _ => usize::MAX,
+                    };
+                    let inferred_key = if type_args.is_empty() && inferred_from < args.len() {
+                        self.infer(&mut args[inferred_from].expr).and_then(|ty| vault_key_arg(&ty))
+                    } else { None };
+                    if type_args.len() > 1 || (type_args.is_empty() && inferred_key.is_none()) {
+                        self.diags.push(Diagnostic::error(
+                            "E0904",
+                            format!("`vault.{name}` needs one vault key type"),
+                            "typed vault operations are restricted to SigningKey and X25519SecretKey".to_string(),
+                            format!("call it with an explicit type argument: `vault.{name}<crypto.SigningKey>(...)`"),
+                            Some(span),
+                        ));
+                        for arg in args.iter_mut() { self.infer(&mut arg.expr); }
+                        return None;
+                    }
+                    let key_ty = self.resolve_type(type_args.first().cloned().or(inferred_key).unwrap());
+                    let key_leaf = match &key_ty {
+                        Type::Named(leaf) => Some(leaf.as_str()),
+                        Type::Tagged { inner, .. } => match inner.as_ref() { Type::Named(leaf) => Some(leaf.as_str()), _ => None },
+                        _ => None,
+                    };
+                    if !key_leaf.is_some_and(|leaf| matches!(leaf, "SigningKey" | "X25519SecretKey")) {
+                        self.diags.push(Diagnostic::error(
+                            "E0905",
+                            format!("`{}` is not a persistent vault key type", key_ty.show()),
+                            "VaultKey is sealed and implemented only by SigningKey and X25519SecretKey".to_string(),
+                            "use `crypto.SigningKey` or `crypto.X25519SecretKey`".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    let apply = |name: &str| Type::Apply { name: name.to_string(), args: vec![key_ty.clone()] };
+                    let (params, ok): (Vec<(AccessConvention, Type)>, Type) = match name {
+                        "current" => (vec![(AccessConvention::Read, Type::String)], Type::Option(Box::new(apply("KeyRef")))),
+                        "versions" => (vec![(AccessConvention::Read, Type::String)], Type::List(Box::new(apply("KeyRef")))),
+                        "load" => (vec![(AccessConvention::Read, apply("KeyRef"))], key_ty.clone()),
+                        "status" => (vec![(AccessConvention::Read, apply("KeyRef"))], Type::Named("KeyStatus".into())),
+                        "prepare_generate" | "prepare_rotate" => (vec![(AccessConvention::Read, Type::String)], apply("MutationPlan")),
+                        "prepare_store" => (vec![(AccessConvention::Read, Type::String), (AccessConvention::Move, key_ty.clone())], apply("MutationPlan")),
+                        "prepare_retire" | "prepare_revoke" => (vec![(AccessConvention::Read, apply("KeyRef")), (AccessConvention::Read, Type::String)], apply("MutationPlan")),
+                        "authorize_write" => (vec![(AccessConvention::Read, apply("MutationPlan")), (AccessConvention::Read, Type::String)], apply("VaultWrite")),
+                        "commit_generate" | "commit_store" => (vec![(AccessConvention::Move, apply("VaultWrite")), (AccessConvention::Move, apply("MutationPlan"))], apply("KeyRef")),
+                        "commit_rotate" => (vec![(AccessConvention::Move, apply("VaultWrite")), (AccessConvention::Move, apply("MutationPlan"))], apply("Rotation")),
+                        _ => (vec![(AccessConvention::Move, apply("VaultWrite")), (AccessConvention::Move, apply("MutationPlan"))], Type::Named("Unit".into())),
+                    };
+                    if args.len() != params.len() { self.diags.push(wrong_core_arity(name, params.len(), args.len(), span)); }
+                    for (i, ((convention, ty), arg)) in params.iter().zip(args.iter_mut()).enumerate() {
+                        if *convention == AccessConvention::Move {
+                            if arg.convention != AccessConvention::Move { self.diags.push(Diagnostic::error("E0201", format!("argument {} to `{name}` transfers ownership (`^`)", i + 1), "this vault operation consumes its single-use authority value".to_string(), format!("write `{}value` for this argument", Syntax::SIGIL_MOVE), Some(arg.span))); }
+                            self.expect_core_arg_moving(name, i, ty, arg);
+                        } else { self.expect_core_arg(name, i, ty, arg); }
+                    }
+                    for arg in args.iter_mut().skip(params.len()) { self.infer(&mut arg.expr); }
+                    return Some(result_ty(ok, Type::Named("VaultError".into())));
+                }
                 ("core.encoding.cbor", "parse") => {
                     if !(1..=2).contains(&args.len()) {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
@@ -2447,25 +2523,51 @@ impl<'a> Checker<'a> {
                     });
                 }
                 // D-CRYPTOENV1=A: expert-only raw crypto — requires import + @Unsafe gate.
-                ("core.crypto.expert", _) => {
+                ("core.crypto.expert" | "core.vault.expert", _) => {
                     let has_import = self
                         .core_imports
                         .values()
-                        .any(|m| m == "core.crypto.expert");
+                        .any(|imported| imported == module);
                     if !has_import {
+                        let (what, why, fix) = if module == "core.crypto.expert" {
+                            (
+                                format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
+                                "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
+                                "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `@Unsafe(\"reason\")` region".to_string(),
+                            )
+                        } else {
+                            (
+                                format!("`{module}.{name}` is an expert-only key material operation"),
+                                "raw key material operations bypass the misuse-resistant typed surface".to_string(),
+                                format!("import `{module}` and call it inside an audited `@Unsafe(\"reason\")` region"),
+                            )
+                        };
                         self.diags.push(Diagnostic::error(
                             "E0510",
-                            format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
-                            "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
-                            "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `@Unsafe(\"reason\")` region".to_string(),
+                            what,
+                            why,
+                            fix,
                             Some(span),
                         ));
                     } else if !self.in_unsafe {
+                        let (what, why, fix) = if module == "core.crypto.expert" {
+                            (
+                                format!("`core.crypto.expert.{name}` requires an audited `@Unsafe` region"),
+                                "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
+                                "wrap the call in `@Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
+                            )
+                        } else {
+                            (
+                                format!("`{module}.{name}` requires an audited `@Unsafe` region"),
+                                "raw key import may only run inside an explicit expert-tier gate (I1)".to_string(),
+                                "wrap the call in `@Unsafe(\"vault key import: …\") { … }`".to_string(),
+                            )
+                        };
                         self.diags.push(Diagnostic::error(
                             "E0510",
-                            format!("`core.crypto.expert.{name}` requires an audited `@Unsafe` region"),
-                            "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
-                            "wrap the call in `@Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
+                            what,
+                            why,
+                            fix,
                             Some(span),
                         ));
                     }

@@ -212,6 +212,10 @@ pub fn prepare_for_target(
             || u.starts_with("core.auth::")
             || u == "core.email"
             || u.starts_with("core.email::")
+            || u == "core.vault"
+            || u.starts_with("core.vault::")
+            || u == "core.vault.expert"
+            || u.starts_with("core.vault.expert::")
     });
     // D-DEP-WASM1=A (c81): `core.plugin` — the sandboxed WASM Component Model
     // plugin loader (`Plugin.load`/`.call`).
@@ -224,7 +228,7 @@ pub fn prepare_for_target(
     let needs_secrets = bundle
         .used_core
         .iter()
-        .any(|u| u == "core.vault" || u.starts_with("core.vault::"));
+        .any(|u| u == "core.vault" || u.starts_with("core.vault::") || u == "core.vault.expert" || u.starts_with("core.vault.expert::"));
     if entries.is_empty()
         && !needs_regex
         && !needs_archive
@@ -1014,6 +1018,9 @@ pub const AGE_CRATE_SPEC: (&str, &str) = ("age", "0.10");
 /// `core.vault` is used (U13). This is the only place the `age` crate is
 /// touched.
 const SECRETS_RUNTIME: &str = include_str!("Prelude/SecretsCrypto.rs");
+const VAULT_NFC_RUNTIME: &str = include_str!("Prelude/VaultNfc.rs");
+const UNICODE_TABLES_RUNTIME: &str =
+    include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
 
 /// The `flate2` crate version that backs canonical `core.compress.gzip`
 /// (D-CORE-COMPRESS1=A / D-CODECS1). Lives only here — never in the compiler's
@@ -1617,6 +1624,8 @@ fn main() {{
 ///   `keygen`                                       → stdout `<identity> <recipient>`
 ///   `encrypt <recipients_csv> <plaintext_hex>`      → stdout `<ciphertext_hex>` (exit 0) / exit 1 error
 ///   `decrypt <identity> <ciphertext_hex>`           → stdout `<plaintext_hex>`  (exit 0) / exit 1 error
+///   `strings <plaintext_hex>`                       → stdout historical pair bytes as hex
+///   `replace-strings <pairs_hex>`                   → atomically updates only v2 String rows
 fn emit_secrets_helper_bin(crate_name: &str) -> String {
     format!(
         r#"// Auto-generated age-style secrets helper (U13) — do not edit.
@@ -1683,6 +1692,23 @@ fn main() {{
             match {crate_name}::jet_vault_decrypt_impl(&identity, &ciphertext) {{
                 Ok(plaintext) => println!("{{}}", hex_encode(&plaintext)),
                 Err(e) => fail(&e),
+            }}
+        }}
+        "strings" => {{
+            let plaintext_hex = parts.next().unwrap_or_else(|| fail("strings: missing plaintext"));
+            let plaintext = hex_decode(plaintext_hex).unwrap_or_else(|e| fail(&e));
+            match {crate_name}::jet_vault_strings_from_plaintext(&plaintext) {{
+                Ok(pairs) => println!("{{}}", hex_encode(&{crate_name}::jet_vault_encode_pairs(&pairs))),
+                Err(e) => fail(&e.to_string()),
+            }}
+        }}
+        "replace-strings" => {{
+            let pairs_hex = parts.next().unwrap_or_else(|| fail("replace-strings: missing pairs"));
+            let bytes = hex_decode(pairs_hex).unwrap_or_else(|e| fail(&e));
+            let pairs = {crate_name}::jet_vault_decode_pairs(&bytes).unwrap_or_else(|| fail("replace-strings: invalid pairs"));
+            match {crate_name}::jet_vault_replace_strings_impl(pairs) {{
+                Ok(()) => println!("ok"),
+                Err(e) => fail(&e.to_string()),
             }}
         }}
         other => fail(&format!("unknown command `{{}}`", other)),
@@ -1840,6 +1866,8 @@ fn cache_key_full(
     }
     if needs_secrets {
         needs_secrets.hash(&mut h);
+        UNICODE_TABLES_RUNTIME.hash(&mut h);
+        VAULT_NFC_RUNTIME.hash(&mut h);
         SECRETS_RUNTIME.hash(&mut h);
     }
     for (k, v) in deps {
@@ -2125,6 +2153,10 @@ fn emit_wrapper_lib(
     if needs_secrets {
         // U13 (D-JPK-SECRETCRYPTO1): the secrets runtime is the only place the
         // `age` crate is touched.
+        out.push_str(UNICODE_TABLES_RUNTIME);
+        out.push('\n');
+        out.push_str(VAULT_NFC_RUNTIME);
+        out.push('\n');
         out.push_str(SECRETS_RUNTIME);
         out.push('\n');
     }

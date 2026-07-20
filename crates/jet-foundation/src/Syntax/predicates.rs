@@ -187,6 +187,7 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // via an age-style crypto FFI bridge. D-CORE-SECRETS1=A also places
     // secret lifecycle (`Rotting<T>`) here; generic TTL remains core.time.expiring.
     "core.vault",
+    "core.vault.expert",
     // D-AUTH-TOKENPOLICY1=A (ratified 2026-07-18): strict standalone JWT/PASETO
     // verification. Callers name key and audience; exp+aud are required, and
     // unknown algorithms, versions, and purposes fail closed.

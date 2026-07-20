@@ -91,6 +91,9 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                     | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect" | "plan"
                     | "filter" | "sort_by" | "group_count" | "group_sum" | "group_mean",
             )
+            | ("core.vault", "current" | "versions" | "load" | "status"
+                | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
+                | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke")
     )
 }
 
@@ -1020,6 +1023,34 @@ pub fn core_fixed_sig(
         ("core.crypto.expert", "signing_key_bytes") => Some((vec![(read, Type::Named("SigningKey".into()))], Some(Type::List(Box::new(u8_ty()))))),
         ("core.crypto.expert", "x25519_secret_bytes") => Some((vec![(read, Type::Named("X25519SecretKey".into()))], Some(Type::List(Box::new(u8_ty()))))),
         ("core.crypto.expert", "shared_secret_bytes") => Some((vec![(read, Type::Named("SharedSecret".into()))], Some(Type::List(Box::new(u8_ty()))))),
+        ("core.vault.expert", "prepare_import_signing") => Some((
+            vec![(read, Type::String), (moved, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(
+                Type::Apply { name: "MutationPlan".into(), args: vec![Type::Named("SigningKey".into())] },
+                Type::Named("VaultError".into()),
+            )),
+        )),
+        ("core.vault.expert", "prepare_import_x25519") => Some((
+            vec![(read, Type::String), (moved, Type::List(Box::new(u8_ty())))],
+            Some(result_ty(
+                Type::Apply { name: "MutationPlan".into(), args: vec![Type::Named("X25519SecretKey".into())] },
+                Type::Named("VaultError".into()),
+            )),
+        )),
+        ("core.vault.expert", "commit_import_signing") => Some((
+            vec![
+                (moved, Type::Apply { name: "VaultWrite".into(), args: vec![Type::Named("SigningKey".into())] }),
+                (moved, Type::Apply { name: "MutationPlan".into(), args: vec![Type::Named("SigningKey".into())] }),
+            ],
+            Some(result_ty(Type::Apply { name: "KeyRef".into(), args: vec![Type::Named("SigningKey".into())] }, Type::Named("VaultError".into()))),
+        )),
+        ("core.vault.expert", "commit_import_x25519") => Some((
+            vec![
+                (moved, Type::Apply { name: "VaultWrite".into(), args: vec![Type::Named("X25519SecretKey".into())] }),
+                (moved, Type::Apply { name: "MutationPlan".into(), args: vec![Type::Named("X25519SecretKey".into())] }),
+            ],
+            Some(result_ty(Type::Apply { name: "KeyRef".into(), args: vec![Type::Named("X25519SecretKey".into())] }, Type::Named("VaultError".into()))),
+        )),
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
         ("core.net", "tcp_listen") => Some((
             vec![(read, Type::String)],

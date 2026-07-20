@@ -62,6 +62,12 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         {
             return Some(member.to_string());
         }
+        if name == "Rotation"
+            && !cx.type_names.contains(name)
+            && matches!(member, "previous" | "current")
+        {
+            return Some(member.to_string());
+        }
         return None;
     }
     let Type::Named(type_name) = recv_ty else {

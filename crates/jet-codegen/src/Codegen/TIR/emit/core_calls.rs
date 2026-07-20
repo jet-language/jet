@@ -52,6 +52,21 @@ pub(crate) fn emit_tir_core_call(
     let normalized_module =
         crate::Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     let module = normalized_module.as_str();
+    fn vault_key_type(ty: &Type) -> Option<&str> {
+        match ty {
+            Type::Named(name) if matches!(name.as_str(), "SigningKey" | "X25519SecretKey") => Some(name),
+            Type::Tagged { inner, .. } => vault_key_type(inner),
+            Type::Apply { args, .. } => args.iter().find_map(vault_key_type),
+            Type::Option(inner) | Type::List(inner) => vault_key_type(inner),
+            Type::Result { ok, .. } => vault_key_type(ok),
+            _ => None,
+        }
+    }
+    let vault_rust = || match vault_key_type(ret_ty) {
+        Some("SigningKey") => format!("{}::JetSigningKey", cx.ffi_crate.as_deref().unwrap_or("jet_ffi")),
+        Some("X25519SecretKey") => format!("{}::JetX25519SecretKey", cx.ffi_crate.as_deref().unwrap_or("jet_ffi")),
+        _ => "_".to_string(),
+    };
     match (module, method) {
         // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
         // `emit_core_call`. `address_of` is an inert address cast (no `unsafe`);
@@ -1401,6 +1416,26 @@ pub(crate) fn emit_tir_core_call(
         ("core.vault", "get") => {
             format!("{}(&({}))", regex_fn("jet_vault_get_impl"), arg(0))
         }
+        ("core.vault", "current" | "versions" | "prepare_generate" | "prepare_rotate") =>
+            format!("{}::<{}>(&({}))", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0)),
+        ("core.vault", "load" | "status") =>
+            format!("{}::<{}>(&({}))", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0)),
+        ("core.vault", "prepare_store") =>
+            format!("{}::<{}>(&({}), {})", regex_fn("jet_vault_prepare_store_impl"), vault_rust(), arg(0), arg(1)),
+        ("core.vault", "prepare_retire" | "prepare_revoke") =>
+            format!("{}::<{}>(&({}), &({}))", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0), arg(1)),
+        ("core.vault", "authorize_write") =>
+            format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_authorize_write_impl"), vault_rust(), arg(0), arg(1)),
+        ("core.vault", "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke") =>
+            format!("{}::<{}>({}, {})", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0), arg(1)),
+        ("core.vault.expert", "prepare_import_signing") =>
+            format!("{}(&({}), {})", regex_fn("jet_vault_expert_prepare_import_signing_impl"), arg(0), arg(1)),
+        ("core.vault.expert", "prepare_import_x25519") =>
+            format!("{}(&({}), {})", regex_fn("jet_vault_expert_prepare_import_x25519_impl"), arg(0), arg(1)),
+        ("core.vault.expert", "commit_import_signing") =>
+            format!("{}({}, {})", regex_fn("jet_vault_expert_commit_import_signing_impl"), arg(0), arg(1)),
+        ("core.vault.expert", "commit_import_x25519") =>
+            format!("{}({}, {})", regex_fn("jet_vault_expert_commit_import_x25519_impl"), arg(0), arg(1)),
         // D-TTLVAL1=A: Expiring<T> / Rotting<T> constructors.
         ("core.time.expiring", "new") => format!(
             "{}jet_expiring_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",

@@ -2175,6 +2175,22 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
   gated by the `Secret` effect (**E1264** if ungranted) and unconditionally
   denied at build/comptime time (**E1265**, no `@Impure` escape hatch).
   `jetpack secrets get <name>` on a name absent from the store is **E1263**.
+- **Typed vault keys (D-CRYPTO-VAULT1=A):** `core.vault` persists only
+  `SigningKey` and `X25519SecretKey` behind immutable `KeyRef<T>` handles.
+  Reads, preparation, authorization, and commits all require `Secret`.
+  Mutation is a three-step compare-and-swap: prepare a five-minute move-only
+  `MutationPlan<T>`, authorize its exact native preview into a one-use
+  `VaultWrite<T>`, then consume write and plan in that order. Rotation creates
+  the next generation and retires the prior active generation; exact retired
+  refs still load, while revoked refs fail before key bytes are copied.
+  String secrets and typed keys share the age-encrypted `.jet/secrets.age`
+  artifact but occupy disjoint namespaces. Its authenticated plaintext is the
+  canonical bounded `JVLT` version-2 format; the first authorized mutation
+  migrates historical String rows without inferring keys from them. There is
+  no safe portable key export or import. Raw 32-byte import is available only
+  through `core.vault.expert` inside an audited `@Unsafe` region. Headless
+  mutation requires `jet trust grant vault.write:<repository_uuid>`; source,
+  workspace, environment, DAP, and stdin are never write authority.
 
 ### jetos Runtime Slice
 

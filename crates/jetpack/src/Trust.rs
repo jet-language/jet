@@ -35,6 +35,7 @@ const AUTH_SERVICE: &str = "service";
 const AUTH_IMAGE: &str = "image";
 const AUTH_FLEET: &str = "fleet";
 const AUTH_JETOS: &str = "jetos";
+const AUTH_VAULT_WRITE: &str = "vault.write";
 
 const AUTHORITY_KINDS: &[&str] = &[
     AUTH_PACKAGE,
@@ -44,6 +45,7 @@ const AUTHORITY_KINDS: &[&str] = &[
     AUTH_IMAGE,
     AUTH_FLEET,
     AUTH_JETOS,
+    AUTH_VAULT_WRITE,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -860,6 +862,19 @@ mod tests {
             &["db_password".to_string()]
         ));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn vault_write_grant_keeps_its_exact_authority_and_repository_uuid() {
+        let uuid = "00112233445566778899aabbccddeeff";
+        let grant = parse_grant_selector(
+            &format!("vault.write:{uuid}"),
+            Syntax::TRUST_SCOPE_USER,
+        )
+        .unwrap();
+        assert_eq!(grant.authority, AUTH_VAULT_WRITE);
+        assert_eq!(grant.subject, uuid);
+        assert_eq!(grant.line(), format!("grant:user:vault.write:{uuid}"));
     }
 
     #[test]

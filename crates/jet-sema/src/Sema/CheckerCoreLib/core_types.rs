@@ -169,6 +169,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey"
         | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash"
         | "Digest256" | "Digest512" | "CryptoError"
+        | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "KeyStatus" | "VaultError"
         // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
         | "Arena" | "Bump" | "Pool" | "Fixed"
         // D-ARGS1 (ratified 2026-06-22): declarative CLI arg parsing types.
@@ -556,6 +557,15 @@ pub(crate) fn core_generic_struct_field(
         return match field {
             "left" => Some(args[0].clone()),
             "right" => Some(args[1].clone()),
+            _ => None,
+        };
+    }
+    if type_name == "Rotation" && args.len() == 1 {
+        return match field {
+            "previous" | "current" => Some(Type::Apply {
+                name: "KeyRef".to_string(),
+                args: vec![args[0].clone()],
+            }),
             _ => None,
         };
     }
