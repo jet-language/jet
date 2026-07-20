@@ -199,8 +199,11 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                     if let Ok(value) = std::fs::read_to_string(std::path::Path::new(&entry.out).join(file)) {
                         let value = value.trim();
                         if !value.is_empty() {
-                            let value = resolve_provider_paths(&entry.out, file, value);
-                            provider_vars.entry(variable.to_string()).or_default().push(value);
+                            if let Some(value) = resolve_provider_paths(&entry.out, file, value) {
+                                provider_vars.entry(variable.to_string()).or_default().push(value);
+                            } else {
+                                failed = true;
+                            }
                         }
                     }
                 }
@@ -260,7 +263,7 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
     })
 }
 
-fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> String {
+fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> Option<String> {
     if !matches!(
         file,
         "lua-path"
@@ -271,22 +274,35 @@ fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> String {
             | "perl5lib"
             | "composer-autoload"
     ) {
-        return value.to_string();
+        return Some(value.to_string());
     }
+    let separator = if matches!(file, "lua-path" | "lua-cpath") {
+        ';'
+    } else {
+        crate::Platform::path_separator()
+    };
     value
-        .split(crate::Platform::path_separator())
+        .split(separator)
         .map(|path| {
-            let path = std::path::Path::new(path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                std::path::Path::new(entry_out).join(path)
+            let relative = std::path::Path::new(path);
+            if relative.is_absolute() {
+                return Some(path.to_string());
             }
-            .to_string_lossy()
-            .into_owned()
+            let mut components = relative.components();
+            if components.clone().next().is_none()
+                || !components.all(|component| matches!(component, std::path::Component::Normal(_)))
+            {
+                return None;
+            }
+            Some(
+                std::path::Path::new(entry_out)
+                    .join(relative)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         })
-        .collect::<Vec<_>>()
-        .join(&crate::Platform::path_separator().to_string())
+        .collect::<Option<Vec<_>>>()
+        .map(|paths| paths.join(&separator.to_string()))
 }
 
 #[cfg(test)]
@@ -295,13 +311,33 @@ mod tests {
 
     #[test]
     fn lua_metadata_paths_resolve_inside_realized_output() {
-        let separator = crate::Platform::path_separator();
-        let value = format!("share/lua/5.4/?.lua{separator}share/lua/5.4/?/init.lua");
         assert_eq!(
-            resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", &value),
-            format!(
-                "/hangar/objects/sha256-output/share/lua/5.4/?.lua{separator}/hangar/objects/sha256-output/share/lua/5.4/?/init.lua"
-            )
+            resolve_provider_paths(
+                "/hangar/objects/sha256-output",
+                "lua-path",
+                "share/lua/5.4/?.lua;share/lua/5.4/?/init.lua",
+            ),
+            Some("/hangar/objects/sha256-output/share/lua/5.4/?.lua;/hangar/objects/sha256-output/share/lua/5.4/?/init.lua".into())
+        );
+    }
+
+    #[test]
+    fn relative_provider_metadata_rejects_parent_escape() {
+        assert_eq!(
+            resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", "../outside"),
+            None
+        );
+    }
+
+    #[test]
+    fn absolute_legacy_provider_metadata_is_preserved() {
+        assert_eq!(
+            resolve_provider_paths(
+                "/hangar/objects/sha256-output",
+                "lua-path",
+                "/legacy/a/?.lua;/legacy/b/?/init.lua",
+            ),
+            Some("/legacy/a/?.lua;/legacy/b/?/init.lua".into())
         );
     }
 }
