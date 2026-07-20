@@ -121,22 +121,19 @@ fn jet_http_route_path(path: &str) -> Result<Vec<String>, String> {
 fn jet_http_route_match(
     pattern: &JetHttpRoutePattern,
     path: &[String],
-) -> Option<(std::collections::BTreeMap<String, String>, (usize, usize, usize))> {
+) -> Option<std::collections::BTreeMap<String, String>> {
     let has_catch_all = matches!(pattern.segments.last(), Some(JetHttpRouteSegment::CatchAll(_)));
     let required = pattern.segments.len() - usize::from(has_catch_all);
     if path.len() < required || !has_catch_all && path.len() != required {
         return None;
     }
     let mut params = std::collections::BTreeMap::new();
-    let mut literals = 0;
-    let mut singles = 0;
     for (index, segment) in pattern.segments.iter().enumerate() {
         match segment {
-            JetHttpRouteSegment::Static(expected) if path.get(index) == Some(expected) => literals += 1,
+            JetHttpRouteSegment::Static(expected) if path.get(index) == Some(expected) => {}
             JetHttpRouteSegment::Static(_) => return None,
             JetHttpRouteSegment::Param(name) => {
                 params.insert(name.clone(), path[index].clone());
-                singles += 1;
             }
             JetHttpRouteSegment::CatchAll(name) => {
                 params.insert(name.clone(), path[index..].join("/"));
@@ -144,7 +141,34 @@ fn jet_http_route_match(
             }
         }
     }
-    Some((params, (literals, usize::from(!has_catch_all), usize::MAX - singles)))
+    Some(params)
+}
+
+fn jet_http_route_rank(segment: &JetHttpRouteSegment) -> u8 {
+    match segment {
+        JetHttpRouteSegment::Static(_) => 2,
+        JetHttpRouteSegment::Param(_) => 1,
+        JetHttpRouteSegment::CatchAll(_) => 0,
+    }
+}
+
+fn jet_http_route_selection_cmp(
+    left: &JetHttpRoutePattern,
+    left_order: usize,
+    right: &JetHttpRoutePattern,
+    right_order: usize,
+) -> std::cmp::Ordering {
+    for (left, right) in left.segments.iter().zip(&right.segments) {
+        let order = jet_http_route_rank(left).cmp(&jet_http_route_rank(right));
+        if order != std::cmp::Ordering::Equal {
+            return order;
+        }
+    }
+    // If both matched and one pattern ends first, it is the exact route while
+    // the longer pattern can only add an empty catch-all. Exact wins.
+    right.segments.len().cmp(&left.segments.len())
+        // Equivalent shapes use first registration, identically in both routers.
+        .then_with(|| right_order.cmp(&left_order))
 }
 
 fn jet_http_route_shape(pattern: &JetHttpRoutePattern) -> String {

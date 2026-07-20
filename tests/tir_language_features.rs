@@ -756,19 +756,39 @@ fn asset(req: HttpRequest) -> HttpResponse {
 fn literal(req: HttpRequest) -> HttpResponse {
     return HttpResponse.{status: \"200 OK\", body: \"literal\", headers: []}
 }
+fn catch(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: \"200 OK\", body: \"catch\", headers: []}
+}
+fn param_catch(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: \"200 OK\", body: \"param-catch\", headers: []}
+}
+fn param_first(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: \"200 OK\", body: \"param-first\", headers: []}
+}
+fn static_first(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: \"200 OK\", body: \"static-first\", headers: []}
+}
 fn run() {
     router :: http.router()
     router.get(\"/assets/*path\", asset)
     router.get(\"/literal/%3Aadmin/%2Astar\", literal)
+    router.get(\"/a/*rest\", catch)
+    router.get(\"/a/:id/*rest\", param_catch)
+    router.get(\"/tie/:first/static\", param_first)
+    router.get(\"/tie/static/:last\", static_first)
     first :: http.dispatch(router, http.parse(\"GET /assets/css/site.css HTTP/1.1\\nHost: localhost\"))
     second :: http.dispatch(router, http.parse(\"GET /literal/%3Aadmin/%2Astar HTTP/1.1\\nHost: localhost\"))
+    third :: http.dispatch(router, http.parse(\"GET /a/x/y HTTP/1.1\\nHost: localhost\"))
+    fourth :: http.dispatch(router, http.parse(\"GET /tie/static/static HTTP/1.1\\nHost: localhost\"))
     print(first.body())
     print(second.body())
+    print(third.body())
+    print(fourth.body())
 }
 ";
     let (code, stdout) = build_and_run("tir_http_route_syntax", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "css/site.css\nliteral\n");
+    assert_eq!(stdout, "css/site.css\nliteral\nparam-catch\nstatic-first\n");
 }
 
 #[test]
@@ -783,7 +803,9 @@ fn handle(req: HttpRequest) -> HttpResponse {
 }
 fn run() {
     router :: http.router()
-    router.get(\"/assets/*\", handle)
+    marker :: \"*\"
+    pattern :: \"/assets/{marker}\"
+    router.get(pattern, handle)
 }
 ";
     let (code, _stdout, stderr) =
@@ -794,7 +816,7 @@ fn run() {
         "missing Jet-owned E2805 runtime text:\n{stderr}"
     );
     assert!(
-        stderr.contains("tir_http_retired_catchall.jet:7"),
+        stderr.contains("tir_http_retired_catchall.jet:9"),
         "missing source location:\n{stderr}"
     );
     assert!(

@@ -16,6 +16,7 @@ struct JetHttpSrvReq {
     params: std::collections::BTreeMap<String, String>,
     body: String,
     headers: std::collections::BTreeMap<String, String>,
+    route_template: Option<String>,
 }
 
 type JetHttpMuxHandlerFn = std::sync::Arc<dyn Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync>;
@@ -318,6 +319,7 @@ fn jet_http_server_handle_stream(stream: &mut std::net::TcpStream, mux: &JetHttp
 }
 
 fn jet_http_mux_serve_once(addr: &String, mux: JetHttpMux) -> Result<(), String> {
+    jet_http_mux_validate(&mux)?;
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
     jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux)
@@ -329,15 +331,7 @@ fn jet_http_mux_serve_once_listener(
 ) -> Result<(), String> {
     use std::io::Write;
     jet_http_mux_validate(mux)?;
-    let (mut stream, _peer) = loop {
-        match listener.inner.accept() {
-            Ok(connection) => break connection,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-            Err(error) => return Err(format!("accept failed: {error}")),
-        }
-    };
+    let (mut stream, _peer) = jet_http_accept_once(listener, std::time::Duration::from_secs(5))?;
     let raw = match jet_http_srv_read(&mut stream) {
         Ok(raw) => raw,
         Err(error) => {
@@ -353,6 +347,25 @@ fn jet_http_mux_serve_once_listener(
     stream
         .write_all(text.as_bytes())
         .map_err(|e| format!("http write failed: {}", e))
+}
+
+fn jet_http_accept_once(
+    listener: &JetTcpListener,
+    timeout: std::time::Duration,
+) -> Result<(std::net::TcpStream, std::net::SocketAddr), String> {
+    let started = std::time::Instant::now();
+    loop {
+        match listener.inner.accept() {
+            Ok(connection) => return Ok(connection),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if started.elapsed() >= timeout {
+                    return Err("HTTP serve_once accept timed out".to_string());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(error) => return Err(format!("accept failed: {error}")),
+        }
+    }
 }
 
 fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<String, JetHttpReadError> {
@@ -545,6 +558,7 @@ fn jet_http_srv_parse(raw: &str) -> JetHttpSrvReq {
         params: std::collections::BTreeMap::new(),
         body,
         headers,
+        route_template: None,
     }
 }
 
@@ -560,30 +574,34 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
     // Route lookup is a short snapshot operation. Never retain the registry
     // lock while composing middleware or running user code: handlers may
     // overlap and may register another route on this same mux.
-    let path_matches: Vec<(JetHttpMuxRoute, std::collections::BTreeMap<String, String>, (usize, usize, usize))> = {
+    let path_matches: Vec<(usize, JetHttpMuxRoute, std::collections::BTreeMap<String, String>, JetHttpRoutePattern)> = {
         let routes = mux.0.lock().unwrap();
         routes
             .iter()
-            .filter_map(|route| {
+            .enumerate()
+            .filter_map(|(order, route)| {
                 let pattern = jet_http_route_parse(&route.pattern).ok()?;
-                jet_http_route_match(&pattern, &path).map(|(params, score)| (route.clone(), params, score))
+                jet_http_route_match(&pattern, &path).map(|params| (order, route.clone(), params, pattern))
             })
             .collect()
     };
     let requested_method = req.method.to_uppercase();
     let effective_method = if requested_method == "HEAD"
-        && !path_matches.iter().any(|(route, _, _)| route.method == "HEAD")
+        && !path_matches.iter().any(|(_, route, _, _)| route.method == "HEAD")
     { "GET" } else { requested_method.as_str() };
-    if requested_method == "OPTIONS" && !path_matches.iter().any(|(route, _, _)| route.method == "OPTIONS") {
+    if requested_method == "OPTIONS" && !path_matches.iter().any(|(_, route, _, _)| route.method == "OPTIONS") {
         let allow = jet_http_allowed_methods(&path_matches);
         return JetHttpSrvResp { status: 204, body: String::new(), headers: [("Allow".to_string(), allow)].into_iter().collect() };
     }
-    if let Some((route, params, _)) = path_matches.iter()
-        .filter(|(route, _, _)| route.method == effective_method)
-        .max_by_key(|(_, _, score)| *score)
+    if let Some((_, route, params, _)) = path_matches.iter()
+        .filter(|(_, route, _, _)| route.method == effective_method)
+        .max_by(|(left_order, _, _, left), (right_order, _, _, right)| {
+            jet_http_route_selection_cmp(left, *left_order, right, *right_order)
+        })
     {
         let mut r2 = req.clone();
         r2.params = params.clone();
+        r2.route_template = Some(route.pattern.clone());
         let middlewares = mux.1.lock().unwrap().clone();
         let mut handler = route.handler.clone();
         for middleware in middlewares.iter().rev() { handler = middleware(handler); }
@@ -613,10 +631,10 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
 }
 
 fn jet_http_allowed_methods(
-    matches: &[(JetHttpMuxRoute, std::collections::BTreeMap<String, String>, (usize, usize, usize))],
+    matches: &[(usize, JetHttpMuxRoute, std::collections::BTreeMap<String, String>, JetHttpRoutePattern)],
 ) -> String {
     let mut methods = std::collections::BTreeSet::new();
-    for (route, _, _) in matches { methods.insert(route.method.clone()); }
+    for (_, route, _, _) in matches { methods.insert(route.method.clone()); }
     if methods.contains("GET") { methods.insert("HEAD".to_string()); }
     methods.insert("OPTIONS".to_string());
     methods.into_iter().collect::<Vec<_>>().join(", ")
@@ -752,5 +770,6 @@ fn jet_http_srv_static_file_range(
 }
 
 fn jet_http_srv_access_log(req: &JetHttpSrvReq, status: i64) -> String {
-    format!("{} {} {}", req.method, req.path, status)
+    let route = req.route_template.as_deref().unwrap_or_else(|| req.path.split('?').next().unwrap_or(&req.path));
+    format!("{} {} {}", req.method, route, status)
 }

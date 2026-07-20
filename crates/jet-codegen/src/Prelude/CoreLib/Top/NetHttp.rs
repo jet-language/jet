@@ -400,6 +400,7 @@ pub struct JetHttpRequest {
     pub body: String,
     pub headers: std::collections::BTreeMap<String, String>,
     pub params: std::collections::BTreeMap<String, String>,
+    pub route_template: Option<String>,
 }
 
 #[derive(Clone)]
@@ -416,6 +417,7 @@ type JetHttpHandler = Box<dyn Fn(JetHttpRequest) -> JetHttpResponse + Send + Syn
 
 struct JetHttpRoute {
     method: String,
+    template: String,
     segments: Vec<RouteSegment>,
     handler: JetHttpHandler,
 }
@@ -3027,6 +3029,7 @@ fn jet_http_parse_request(raw: &str) -> JetHttpRequest {
         body,
         headers,
         params: std::collections::BTreeMap::new(),
+        route_template: None,
     }
 }
 
@@ -3090,6 +3093,7 @@ fn jet_http_router_register(
     }
     router.routes.push(JetHttpRoute {
         method,
+        template: pattern,
         segments: segs,
         handler,
     });
@@ -3104,11 +3108,11 @@ fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetH
             headers: std::collections::BTreeMap::new(),
         },
     };
-    let mut candidates: Vec<(usize, std::collections::BTreeMap<String, String>, (usize, usize, usize))> = Vec::new();
+    let mut candidates: Vec<(usize, std::collections::BTreeMap<String, String>)> = Vec::new();
     for (i, route) in router.routes.iter().enumerate() {
         let pattern = JetHttpRoutePattern { segments: route.segments.clone() };
-        if let Some((params, score)) = jet_http_route_match(&pattern, &path_segs) {
-            candidates.push((i, params, score));
+        if let Some(params) = jet_http_route_match(&pattern, &path_segs) {
+            candidates.push((i, params));
         }
     }
     if candidates.is_empty() {
@@ -3118,12 +3122,15 @@ fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetH
             headers: std::collections::BTreeMap::new(),
         };
     }
-    // Pick highest static-count match with the right method; otherwise 405.
-    candidates.sort_by(|a, b| b.2.cmp(&a.2));
     let method_match = candidates
         .iter()
-        .find(|(i, _, _)| router.routes[*i].method == req.method);
-    let Some((route_idx, params, _)) = method_match else {
+        .filter(|(i, _)| router.routes[*i].method == req.method)
+        .max_by(|(left, _), (right, _)| {
+            let left_pattern = JetHttpRoutePattern { segments: router.routes[*left].segments.clone() };
+            let right_pattern = JetHttpRoutePattern { segments: router.routes[*right].segments.clone() };
+            jet_http_route_selection_cmp(&left_pattern, *left, &right_pattern, *right)
+        });
+    let Some((route_idx, params)) = method_match else {
         return JetHttpResponse {
             status: "405 Method Not Allowed".to_string(),
             body: "405 method not allowed".to_string(),
@@ -3133,6 +3140,7 @@ fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetH
     let route = &router.routes[*route_idx];
     let mut req2 = req;
     req2.params = params.clone();
+    req2.route_template = Some(route.template.clone());
     (route.handler)(req2)
 }
 

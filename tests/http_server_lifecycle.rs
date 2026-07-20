@@ -39,6 +39,20 @@ fn serve_once_waits_for_nonblocking_listener_readiness() {
 }
 
 #[test]
+fn serve_once_accept_has_a_deadline() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let started = std::time::Instant::now();
+    let error = jet_http_accept_once(
+        &JetTcpListener { inner: listener },
+        std::time::Duration::from_millis(20),
+    )
+    .expect_err("accept should time out");
+    assert!(error.contains("timed out"), "{error}");
+    assert!(started.elapsed() < std::time::Duration::from_millis(250));
+}
+
+#[test]
 fn bounded_admission_returns_503_and_shutdown_drains_accepted_work() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("local addr");
@@ -186,7 +200,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
 
     let request = |method: &str, path: &str| JetHttpSrvReq {
         method: method.to_string(), path: path.to_string(), params: Default::default(),
-        body: String::new(), headers: Default::default(),
+        body: String::new(), headers: Default::default(), route_template: None,
     };
     assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/static")).body, "static");
     assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/42")).body, "param:42");
@@ -218,16 +232,46 @@ fn canonical_router_precedence_methods_and_conflicts() {
     assert!(jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &bare_once)
         .err().expect("serve-once validation").contains("`*wildcard`"));
 
+    let invalid_before_bind = jet_http_mux_new();
+    jet_http_mux_add(&invalid_before_bind, "GET", "/files/*", |_| jet_http_srv_response(200, &String::new()));
+    assert!(jet_http_mux_serve_once(&"not a socket address".to_string(), invalid_before_bind)
+        .expect_err("route validation must precede bind")
+        .contains("E2805"));
+
     let encoded = jet_http_mux_new();
     jet_http_mux_add(&encoded, "GET", "/literal/%3Aadmin/%2Astar", |_| jet_http_srv_response(200, &"encoded".to_string()));
+    jet_http_mux_add(&encoded, "GET", "/once/%252F", |_| jet_http_srv_response(200, &"once".to_string()));
     assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%3Aadmin/%2Astar")).body, "encoded");
+    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/once/%252F")).body, "once");
     assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%2F/admin")).status, 400);
+    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%FF")).status, 400);
 
-    for invalid in ["/x/*rest/more", "/x/:1bad", "/x/:id/:id", "/x/%2F", "/x/%2e%2e", "/x/%ZZ"] {
+    for invalid in ["/x/*rest/more", "/x/:1bad", "/x/:id/:id", "/x/%2F", "/x/%2e%2e", "/x/%ZZ", "/x/%FF"] {
         let invalid_mux = jet_http_mux_new();
         jet_http_mux_add(&invalid_mux, "GET", invalid, |_| jet_http_srv_response(200, &String::new()));
         assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), invalid_mux).is_err(), "accepted {invalid}");
     }
+
+    let precedence = jet_http_mux_new();
+    jet_http_mux_add(&precedence, "GET", "/a/*rest", |_| jet_http_srv_response(200, &"catch".to_string()));
+    jet_http_mux_add(&precedence, "GET", "/a/:id/*rest", |_| jet_http_srv_response(200, &"param".to_string()));
+    jet_http_mux_add(&precedence, "GET", "/tie/:first/static", |_| jet_http_srv_response(200, &"param-first".to_string()));
+    jet_http_mux_add(&precedence, "GET", "/tie/static/:last", |_| jet_http_srv_response(200, &"static-first".to_string()));
+    assert_eq!(jet_http_mux_dispatch(&precedence, request("GET", "/a/x/y")).body, "param");
+    assert_eq!(jet_http_mux_dispatch(&precedence, request("GET", "/tie/static/static")).body, "static-first");
+
+    let first = jet_http_route_parse("/same/:first").unwrap();
+    let second = jet_http_route_parse("/same/:second").unwrap();
+    assert!(jet_http_route_selection_cmp(&first, 0, &second, 1).is_gt());
+
+    let logs = jet_http_mux_new();
+    jet_http_mux_add(&logs, "GET", "/logs/:id/*rest", |req| {
+        jet_http_srv_response(200, &jet_http_srv_access_log(&req, 200))
+    });
+    assert_eq!(
+        jet_http_mux_dispatch(&logs, request("GET", "/logs/42/a/b?secret=x")).body,
+        "GET /logs/:id/*rest 200"
+    );
 }
 
 #[test]
@@ -253,7 +297,7 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     jet_http_mux_add(&mux, "GET", "/panic", |_| panic!("private failure detail"));
     let request = |path: &str| JetHttpSrvReq {
         method: "GET".to_string(), path: path.to_string(), params: Default::default(),
-        body: String::new(), headers: Default::default(),
+        body: String::new(), headers: Default::default(), route_template: None,
     };
     assert_eq!(jet_http_mux_dispatch(&mux, request("/ok/one")).body, "one");
     assert_eq!(&*events.lock().unwrap(), &[
@@ -279,7 +323,7 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     for id in 0..16 {
         let mux = mux.clone();
         threads.push(std::thread::spawn(move || {
-            let req = JetHttpSrvReq { method: "GET".to_string(), path: format!("/ok/{id}"), params: Default::default(), body: String::new(), headers: Default::default() };
+            let req = JetHttpSrvReq { method: "GET".to_string(), path: format!("/ok/{id}"), params: Default::default(), body: String::new(), headers: Default::default(), route_template: None };
             assert_eq!(jet_http_mux_dispatch(&mux, req).body, id.to_string());
         }));
     }
@@ -290,7 +334,7 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
 fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
     let request = |path: &str| JetHttpSrvReq {
         method: "GET".to_string(), path: path.to_string(), params: Default::default(),
-        body: String::new(), headers: Default::default(),
+        body: String::new(), headers: Default::default(), route_template: None,
     };
 
     // Two requests must enter the same handler concurrently. Holding the route

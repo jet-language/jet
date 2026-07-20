@@ -721,9 +721,9 @@ fn run() {
         "HttpResponse construction not byte-exact:\n{}",
         out.rust
     );
-    // HttpRequest: prelude head, plain fields, injected `params` field appended verbatim.
+    // HttpRequest: prelude head, plain fields, injected route metadata appended verbatim.
     assert!(
-        out.rust.contains("JetHttpRequest { method: \"GET\".to_string(), path: \"/\".to_string(), body: \"\".to_string(), headers: std::collections::BTreeMap::new(), params: std::collections::BTreeMap::new() }"),
+        out.rust.contains("JetHttpRequest { method: \"GET\".to_string(), path: \"/\".to_string(), body: \"\".to_string(), headers: std::collections::BTreeMap::new(), params: std::collections::BTreeMap::new(), route_template: None }"),
         "HttpRequest construction not byte-exact:\n{}",
         out.rust
     );

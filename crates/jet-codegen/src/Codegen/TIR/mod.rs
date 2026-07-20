@@ -1427,7 +1427,7 @@ pub enum TExprKind {
         /// flag is resolved at lowering (a total fact), never re-derived in emit.
         fields: Vec<(String, TExpr, bool)>,
         /// c109 Phase 17: an extra raw field line appended verbatim after the user fields
-        /// (e.g. HttpRequest's injected `params: std::collections::BTreeMap::new()`).
+        /// (e.g. HttpRequest's injected route metadata fields).
         /// `None` for a plain user struct.
         extra: Option<String>,
         /// c109 Phase 30: a TRAIT-OBJECT coercion (`Circle {…}` in a `[Shape]` list, S48).

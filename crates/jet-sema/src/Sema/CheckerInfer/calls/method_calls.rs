@@ -26,6 +26,40 @@ use crate::Sema::Diagnostics::{
 };
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
+
+fn check_http_route_literal(
+    type_name: &str,
+    method: &str,
+    args: &[crate::AST::CallArg],
+    diags: &mut Vec<Diagnostic>,
+) {
+    let registration = match type_name {
+        "HttpRouter" => matches!(method, "get" | "post" | "put" | "delete"),
+        "HttpMux" => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options"),
+        _ => false,
+    };
+    if !registration {
+        return;
+    }
+    let Some(arg) = args.first() else { return; };
+    let Expr::Str(parts, _) = &arg.expr else { return; };
+    let mut pattern = String::new();
+    for part in parts {
+        let StrPart::Lit(text) = part else { return; };
+        pattern.push_str(text);
+    }
+    if let Err(reason) = Syntax::validate_http_route_pattern(&pattern) {
+        diags.push(Diagnostic::error(
+            "E2805",
+            format!("invalid HTTP route `{pattern}`"),
+            reason,
+            "use `:name` for one segment and a final `*name` for the remainder; percent-encode a literal leading marker"
+                .to_string(),
+            Some(arg.span),
+        ));
+    }
+}
+
 impl<'a> Checker<'a> {
         pub(crate) fn infer_method_call(
             &mut self,
@@ -1519,6 +1553,7 @@ impl<'a> Checker<'a> {
                 if let Some(ret) =
                     net_method_return(handle_ty, method, args.len(), span, &mut self.diags)
                 {
+                    check_http_route_literal(handle_ty, method, args, &mut self.diags);
                     require_net_method_labels(handle_ty, method, args, span, &mut self.diags);
                     if handle_ty == "TlsClientConfig" && method == "with_alpn" {
                         if let Some(arg) = args.first_mut() {
@@ -1768,6 +1803,9 @@ impl<'a> Checker<'a> {
             }
             // D-NETDEP1=A / D-HTTPLIB1=A: method calls on HTTP types.
             if let Some(ret) = http_type_method_return(&recv_ty, method, args) {
+                if let Type::Named(name) = &recv_ty {
+                    check_http_route_literal(name, method, args, &mut self.diags);
+                }
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }

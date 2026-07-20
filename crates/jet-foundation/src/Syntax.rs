@@ -54,6 +54,91 @@
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 
+/// Validate a source-literal HTTP route before code generation. Runtime route
+/// parsing repeats this check for computed Strings.
+pub fn validate_http_route_pattern(pattern: &str) -> Result<(), String> {
+    fn valid_name(name: &str) -> bool {
+        let mut chars = name.chars();
+        matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
+            && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    }
+
+    fn decode_static(segment: &str) -> Result<(), String> {
+        let bytes = segment.as_bytes();
+        let mut decoded = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] != b'%' {
+                decoded.push(bytes[index]);
+                index += 1;
+                continue;
+            }
+            let hex = |byte: u8| match byte {
+                b'0'..=b'9' => Some(byte - b'0'),
+                b'a'..=b'f' => Some(byte - b'a' + 10),
+                b'A'..=b'F' => Some(byte - b'A' + 10),
+                _ => None,
+            };
+            let Some(high) = bytes.get(index + 1).and_then(|byte| hex(*byte)) else {
+                return Err("invalid percent escape".to_string());
+            };
+            let Some(low) = bytes.get(index + 2).and_then(|byte| hex(*byte)) else {
+                return Err("invalid percent escape".to_string());
+            };
+            let byte = high * 16 + low;
+            if byte == b'/' {
+                return Err("encoded slash is ambiguous".to_string());
+            }
+            decoded.push(byte);
+            index += 3;
+        }
+        let decoded = String::from_utf8(decoded)
+            .map_err(|_| "route segment is not valid UTF-8".to_string())?;
+        if decoded == "." || decoded == ".." {
+            return Err("dot traversal segment is not allowed".to_string());
+        }
+        Ok(())
+    }
+
+    if !pattern.starts_with('/') {
+        return Err("routes must start with `/`".to_string());
+    }
+    let raw_segments: Vec<&str> = pattern.split('/').skip(1).collect();
+    let mut names = std::collections::BTreeSet::new();
+    for (index, segment) in raw_segments.iter().enumerate() {
+        if segment.is_empty() {
+            if raw_segments.len() == 1 {
+                continue;
+            }
+            return Err("empty path segments are not allowed".to_string());
+        }
+        if segment.contains('{') || segment.contains('}') {
+            return Err("use `:name` or final `*name`; braces are not route markers".to_string());
+        }
+        if *segment == "*" {
+            return Err("write a named catch-all such as `*wildcard`".to_string());
+        }
+        let name = segment.strip_prefix(':').or_else(|| segment.strip_prefix('*'));
+        if let Some(name) = name {
+            if segment.starts_with('*') && index + 1 != raw_segments.len() {
+                return Err("`*name` catch-all must be final".to_string());
+            }
+            if !valid_name(name) {
+                return Err(format!(
+                    "{} names must match `[A-Za-z_][A-Za-z0-9_]*`",
+                    if segment.starts_with('*') { "catch-all" } else { "parameter" }
+                ));
+            }
+            if !names.insert(name) {
+                return Err(format!("duplicate parameter `{name}`"));
+            }
+        } else {
+            decode_static(segment)?;
+        }
+    }
+    Ok(())
+}
+
 /// Compiler-owned numeric source names for D-SHAPE-CONVERT1=A.
 pub const NUMERIC_CONVERSION_SOURCES: &[(&str, &str)] = &[
     ("from_i8", "I8"),

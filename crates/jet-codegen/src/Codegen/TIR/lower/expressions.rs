@@ -1193,7 +1193,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse) uses the
             // `is_prelude_struct` branch of `emit_struct_lit`: a `<root>Jet…` Rust head,
             // PLAIN (unmangled) field names, and — for HttpRequest — an injected
-            // `params: std::collections::BTreeMap::new()` field. Reproduce it byte-for-byte.
+            // route metadata fields. Reproduce them byte-for-byte.
             if let Some(rust) = net_handle_rust_type(type_name) {
                 // A prelude struct has no boxed (recursive) edges.
                 let mut tfields: Vec<(String, TExpr, bool)> = fields
@@ -1201,7 +1201,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
                     .collect();
                 let extra = if type_name == "HttpRequest" {
-                    Some("params: std::collections::BTreeMap::new()".to_string())
+                    Some("params: std::collections::BTreeMap::new(), route_template: None".to_string())
                 } else {
                     None
                 };
