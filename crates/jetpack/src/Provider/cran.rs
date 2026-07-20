@@ -156,7 +156,7 @@ impl Provider for CranProvider {
             super::fetch::validate_tar_archive(&target, true).map_err(ProviderError::Cran)?;
             install(&target, &library)?;
         }
-        write_runtime_wrapper(&out_dir, &library)?;
+        write_runtime_wrapper(&out_dir)?;
         let provenance = render_provenance(&repository, &fetch_authority, &source_hash, &artifacts);
         std::fs::write(out_dir.join("cran.provenance"), &provenance)
             .map_err(|e| ProviderError::Cran(format!("could not write CRAN provenance: {e}")))?;
@@ -489,7 +489,7 @@ fn install(source: &Path, library: &Path) -> Result<(), ProviderError> {
     }
 }
 
-fn write_runtime_wrapper(out: &Path, library: &Path) -> Result<(), ProviderError> {
+fn write_runtime_wrapper(out: &Path) -> Result<(), ProviderError> {
     let rscript = which("Rscript")
         .ok_or_else(|| ProviderError::Cran("provisioned Rscript was not found".into()))?;
     let bin = out.join("bin");
@@ -500,8 +500,7 @@ fn write_runtime_wrapper(out: &Path, library: &Path) -> Result<(), ProviderError
     std::fs::write(
         &wrapper,
         format!(
-            "#!/bin/sh\nR_LIBS_USER='{}' exec '{}' \"$@\"\n",
-            quote(library),
+            "#!/bin/sh\nroot=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd) || exit 1\nR_LIBS_USER=\"$root/library\" exec '{}' \"$@\"\n",
             quote(&rscript)
         ),
     )
@@ -664,13 +663,13 @@ mod tests {
         *TEST_REPOSITORY.write().unwrap() = Some(repository);
 
         let project = base.join("project");
-        let store = base.join("store");
         fs::create_dir_all(&project).unwrap();
-        fs::create_dir_all(&store).unwrap();
         let roots = Store::Roots {
-            root: base.join("hangar"),
+            root: base.clone(),
             dev_mode: true,
         };
+        let store = roots.hangar_dir();
+        fs::create_dir_all(&store).unwrap();
         let table = SourceTable::empty();
         let spec = crate::RefSpec::classify_in("cran:jetapp#version=2.0", &table).unwrap();
         let online = Ctx {
@@ -688,7 +687,7 @@ mod tests {
             },
         )
         .unwrap();
-        let bin = Path::new(&realized.metadata().bin).join("Rscript");
+        let bin = realized.original_output().join("bin/Rscript");
         let output = Command::new(&bin)
             .args(["--vanilla", "-e", "library(jetapp); cat(app_value())"])
             .output()

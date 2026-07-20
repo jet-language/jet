@@ -178,7 +178,7 @@ impl Provider for LuaRocksProvider {
         for artifact in &artifacts {
             preserve_and_install(artifact, &sources, &lua_dir, &scratch)?;
         }
-        write_runtime_files(&out_dir, &lua_dir, &c_dir)?;
+        write_runtime_files(&out_dir)?;
         std::fs::write(
             out_dir.join("luarocks.provenance"),
             render_provenance(&repository, &fetch_authority, &source_hash, &artifacts),
@@ -585,9 +585,9 @@ fn archive_root(unpack: &Path) -> Result<PathBuf, ProviderError> {
     }
 }
 
-fn write_runtime_files(out: &Path, lua_dir: &Path, c_dir: &Path) -> Result<(), ProviderError> {
-    let lua_path = format!("{}/?.lua;{}/?/init.lua", lua_dir.display(), lua_dir.display());
-    let lua_cpath = format!("{}/?.so", c_dir.display());
+fn write_runtime_files(out: &Path) -> Result<(), ProviderError> {
+    let lua_path = "share/lua/5.4/?.lua;share/lua/5.4/?/init.lua";
+    let lua_cpath = "lib/lua/5.4/?.so";
     std::fs::write(out.join("lua-path"), format!("{lua_path}\n"))
         .and_then(|_| std::fs::write(out.join("lua-cpath"), format!("{lua_cpath}\n")))
         .map_err(|e| error(format!("could not write Lua module search paths: {e}")))?;
@@ -599,8 +599,8 @@ fn write_runtime_files(out: &Path, lua_dir: &Path, c_dir: &Path) -> Result<(), P
     std::fs::write(
         &wrapper,
         format!(
-            "#!/bin/sh\nLUA_PATH='{};;' LUA_CPATH='{};;' exec '{}' \"$@\"\n",
-            shell_quote(&lua_path), shell_quote(&lua_cpath), shell_quote(&lua.to_string_lossy())
+            "#!/bin/sh\nroot=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd) || exit 1\nLUA_PATH=\"$root/share/lua/5.4/?.lua;$root/share/lua/5.4/?/init.lua;;\" LUA_CPATH=\"$root/lib/lua/5.4/?.so;;\" exec '{}' \"$@\"\n",
+            shell_quote(&lua.to_string_lossy())
         ),
     )
     .map_err(|e| error(format!("could not write Lua runtime wrapper: {e}")))?;
@@ -924,19 +924,19 @@ mod tests {
         *TEST_REPOSITORY.write().unwrap() = Some(format!("file://{}", repo.display()));
 
         let project = base.join("project");
-        let store = base.join("store");
         fs::create_dir_all(&project).unwrap();
+        let roots = Store::Roots { root: base.clone(), dev_mode: true };
+        let store = roots.hangar_dir();
         fs::create_dir_all(&store).unwrap();
-        let roots = Store::Roots { root: base.join("hangar"), dev_mode: true };
         let table = SourceTable::empty();
         let spec = crate::RefSpec::classify_in("luarocks:jetapp#version=2.0-1", &table).unwrap();
         let online = Ctx { fixtures: None, store_dir: &store, offline: false, project_dir: Some(&project) };
         let realized = Store::realize_verified(&roots, &online, Store::RealizeRequest::Package { spec: &spec, table: &table }).unwrap();
-        let wrapper = Path::new(&realized.metadata().bin).join("lua-with-rocks");
+        let output_root = realized.original_output().to_path_buf();
+        let wrapper = output_root.join("bin/lua-with-rocks");
         let output = Command::new(&wrapper).args(["-e", "io.write(require(\"jetapp\").value())"]).output().unwrap();
         assert!(output.status.success(), "installed Lua closure failed: {}", String::from_utf8_lossy(&output.stderr));
         assert_eq!(String::from_utf8_lossy(&output.stdout), "42");
-        let output_root = realized.original_output().to_path_buf();
         let provenance = fs::read_to_string(output_root.join("luarocks.provenance")).unwrap();
         assert!(provenance.contains("package=jetdep:1.0-1:"));
         assert!(provenance.contains("package=jetapp:2.0-1:"));

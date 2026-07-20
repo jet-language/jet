@@ -21,6 +21,12 @@ pub enum BindError {
     Io(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BoundFunction {
+    perl: String,
+    jet: String,
+}
+
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -68,9 +74,10 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
 
     let abi = format!("jet_perl_{lib}");
     let mut wrappers = String::new();
-    for name in &functions {
+    for function in &functions {
         wrappers.push_str(&format!(
-            "const char* {abi}_invoke_{name}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{name}\",input,deadline);}}\n"
+            "const char* {abi}_invoke_{}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{}\",input,deadline);}}\n",
+            function.jet, function.perl
         ));
     }
     let bridge = crate::PowerShellBind::render_supervisor_c(
@@ -107,7 +114,7 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     identity.extend_from_slice(worker_source.as_bytes());
     let result = BindResult {
         source: render_jet(lib, &functions),
-        bound: functions.clone(),
+        bound: functions.iter().map(|function| function.jet.clone()).collect(),
         archive,
         provenance: format!(
             "schema=jet-perl-bind-v1\nsha256={}\nperl={}\nscript={}\nworker={}\n",
@@ -139,7 +146,7 @@ CHECK {
 1;
 "#;
 
-fn parse_function_names(bytes: &[u8]) -> Result<Vec<String>, BindError> {
+fn parse_function_names(bytes: &[u8]) -> Result<Vec<BoundFunction>, BindError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| BindError::Source("Perl returned non-UTF-8 function metadata".into()))?;
     let mut out = Vec::new();
@@ -147,13 +154,14 @@ fn parse_function_names(bytes: &[u8]) -> Result<Vec<String>, BindError> {
         if !ident(name) {
             return Err(BindError::Source(format!("Perl function `{name}` cannot be projected as a Jet identifier")));
         }
-        if reserved(name) {
-            return Err(BindError::Source(format!("Perl function `{name}` uses a reserved generated binding name")));
+        let jet = snake(name);
+        if reserved(&jet) {
+            return Err(BindError::Source(format!("Perl function `{name}` projects to reserved Jet name `{jet}`")));
         }
-        if out.iter().any(|v| v == name) {
-            return Err(BindError::Source(format!("Perl function `{name}` is declared more than once")));
+        if out.iter().any(|function: &BoundFunction| function.jet == jet) {
+            return Err(BindError::Source(format!("Perl function `{name}` collides with another generated Jet function `{jet}`")));
         }
-        out.push(name.to_string());
+        out.push(BoundFunction { perl: name.to_string(), jet });
     }
     if out.is_empty() {
         return Err(BindError::Source("no top-level named Perl functions were found".into()));
@@ -161,10 +169,10 @@ fn parse_function_names(bytes: &[u8]) -> Result<Vec<String>, BindError> {
     Ok(out)
 }
 
-fn render_worker(functions: &[String]) -> String {
+fn render_worker(functions: &[BoundFunction]) -> String {
     let allowed = functions
         .iter()
-        .map(|v| format!("    '{}' => 1", v.replace('\'', "\\'")))
+        .map(|function| format!("    '{}' => 1", function.perl.replace('\'', "\\'")))
         .collect::<Vec<_>>()
         .join(",\n");
     format!(r#"use strict;
@@ -227,14 +235,16 @@ while (1) {{
 "#)
 }
 
-fn render_jet(lib: &str, functions: &[String]) -> String {
+fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
     let abi = format!("jet_perl_{lib}");
     let mut out = format!("@Extern module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
-    for name in functions {
+    for function in functions {
+        let name = &function.jet;
         out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn open() -> Session ? PerlError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session.{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\n"));
-    for name in functions {
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) {{ abi.close(session.value) }}\n\npub fn open() -> Session ? PerlError {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session.{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\n"));
+    for function in functions {
+        let name = &function.jet;
         out.push_str(&format!("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree ? PerlError {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    if code == 1 {{ return Err(PerlError.NotRunning) }}\n    if code == 2 {{ return Err(PerlError.Timeout) }}\n    if code == 3 {{ return Err(PerlError.Cancelled) }}\n    if code == 5 {{ return Err(PerlError.Limit) }}\n    if code != 0 {{ return Err(PerlError.Protocol) }}\n    response := json.parse(raw) ?? return Err(PerlError.Protocol)\n    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false\n    if !succeeded {{ return Err(PerlError.CommandFailed) }}\n    return Ok(response.field(\"value\") ?? DataTree.Null)\n}}\n\n"));
     }
     out
@@ -330,6 +340,17 @@ fn ident(value: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+fn snake(value: &str) -> String {
+    let mut out = String::new();
+    for (index, ch) in value.chars().enumerate() {
+        if ch.is_ascii_uppercase() && index > 0 {
+            out.push('_');
+        }
+        out.push(ch.to_ascii_lowercase());
+    }
+    out
+}
+
 fn reserved(value: &str) -> bool {
     matches!(value, "open" | "cancel" | "close" | "Session" | "PerlError")
         || crate::Syntax::JET_KEYWORD_LIST.contains(&value)
@@ -345,8 +366,15 @@ fn require_supported_host(unix: bool) -> Result<(), BindError> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn parses_compiler_discovered_function_names() {
-        assert_eq!(super::parse_function_names(b"Fail\nTransform\n").unwrap(), vec!["Fail", "Transform"]);
+    fn projects_perl_names_to_jet_casing_without_changing_foreign_lookup() {
+        let functions = super::parse_function_names(b"Fail\nSleep\nTransform\n").unwrap();
+        let jet = super::render_jet("ops", &functions);
+        let worker = super::render_worker(&functions);
+        for (foreign, projected) in [("Fail", "fail"), ("Sleep", "sleep"), ("Transform", "transform")] {
+            assert!(jet.contains(&format!("pub fn {projected}(")));
+            assert!(!jet.contains(&format!("pub fn {foreign}(")));
+            assert!(worker.contains(&format!("'{foreign}' => 1")));
+        }
     }
 
     #[test]

@@ -4,13 +4,13 @@ use core.encoding.json as json
 fn run() --[Perl, Io]-> {
     session :: ops.open() ?? panic("Perl open failed")
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
-    first :: ops.Transform(session, ~input, 5000) ?? panic("first call failed")
-    second :: ops.Transform(session, ~input, 5000) ?? panic("second call failed")
+    first :: ops.transform(session, ~input, 5000) ?? panic("first call failed")
+    second :: ops.transform(session, ~input, 5000) ?? panic("second call failed")
     print(json.canonical(first))
     print(json.canonical(second))
-    failed :: ops.Fail(session, DataTree.Null, 5000) ?? DataTree.Text("failed")
+    failed :: ops.fail(session, DataTree.Null, 5000) ?? DataTree.Text("failed")
     print(json.canonical(failed))
-    timed :: ops.Sleep(session, DataTree.Int(1), 100) ?? DataTree.Text("timeout")
+    timed :: ops.sleep(session, DataTree.Int(1), 100) ?? DataTree.Text("timeout")
     print(json.canonical(timed))
     ops.close(^session)
 }

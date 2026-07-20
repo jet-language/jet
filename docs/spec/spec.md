@@ -1302,7 +1302,9 @@ identities, worker protocol, and binder schema.
 `jet inspect bind perl <script.pl> --pkg <lib>` validates the script with the
 provisioned Perl compiler, discovers named main-package `sub` declarations from
 compiler metadata without running the top-level runtime body, and writes a
-typed `perl.<lib>` cache. Perl's normal compile-time blocks still obey `perl -c`.
+typed `perl.<lib>` cache. Foreign function names project to Jet `snake_case`
+while the worker retains and invokes the exact Perl name. Perl's normal
+compile-time blocks still obey `perl -c`.
 `open()` starts one supervised Perl process, loads the script once, and retains
 its lexical and package state across calls. Generated entrypoints carry fixed
 function identities; the worker rejects names outside the binder-generated

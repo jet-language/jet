@@ -199,20 +199,7 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                     if let Ok(value) = std::fs::read_to_string(std::path::Path::new(&entry.out).join(file)) {
                         let value = value.trim();
                         if !value.is_empty() {
-                            let value = if matches!(file, "gem-home" | "gem-path" | "ruby-lib" | "perl5lib" | "composer-autoload") {
-                                value
-                                    .split(crate::Platform::path_separator())
-                                    .map(|path| {
-                                        let path = std::path::Path::new(path);
-                                        if path.is_absolute() { path.to_path_buf() } else { std::path::Path::new(&entry.out).join(path) }
-                                            .to_string_lossy()
-                                            .into_owned()
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(&crate::Platform::path_separator().to_string())
-                            } else {
-                                value.to_string()
-                            };
+                            let value = resolve_provider_paths(&entry.out, file, value);
                             provider_vars.entry(variable.to_string()).or_default().push(value);
                         }
                     }
@@ -271,6 +258,52 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
         prompt_strip: plan.prompt_strip,
         cache_leases,
     })
+}
+
+fn resolve_provider_paths(entry_out: &str, file: &str, value: &str) -> String {
+    if !matches!(
+        file,
+        "lua-path"
+            | "lua-cpath"
+            | "gem-home"
+            | "gem-path"
+            | "ruby-lib"
+            | "perl5lib"
+            | "composer-autoload"
+    ) {
+        return value.to_string();
+    }
+    value
+        .split(crate::Platform::path_separator())
+        .map(|path| {
+            let path = std::path::Path::new(path);
+            if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                std::path::Path::new(entry_out).join(path)
+            }
+            .to_string_lossy()
+            .into_owned()
+        })
+        .collect::<Vec<_>>()
+        .join(&crate::Platform::path_separator().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_provider_paths;
+
+    #[test]
+    fn lua_metadata_paths_resolve_inside_realized_output() {
+        let separator = crate::Platform::path_separator();
+        let value = format!("share/lua/5.4/?.lua{separator}share/lua/5.4/?/init.lua");
+        assert_eq!(
+            resolve_provider_paths("/hangar/objects/sha256-output", "lua-path", &value),
+            format!(
+                "/hangar/objects/sha256-output/share/lua/5.4/?.lua{separator}/hangar/objects/sha256-output/share/lua/5.4/?/init.lua"
+            )
+        );
+    }
 }
 
 #[cfg(test)]
