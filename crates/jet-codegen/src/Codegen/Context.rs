@@ -186,6 +186,10 @@ pub(crate) struct Cx {
     pub(crate) current_type_params: std::cell::RefCell<HashSet<String>>,
     /// c139 M4: spawn lambda bodies collected during TIR lowering (JIT order).
     pub(crate) jit_spawn_lambdas: std::cell::RefCell<Vec<crate::Codegen::TIR::TJitSpawnLambda>>,
+    /// Concrete generic owner methods reached while lowering executable TIR.
+    /// The key is `Owner<Args>::method`, keeping discovery deterministic.
+    pub(crate) jit_method_calls:
+        std::cell::RefCell<std::collections::BTreeMap<String, (Type, String)>>,
     /// D-DBG3 step 2 (dap-debugger): when true, `lower_stmts` interleaves a
     /// `TStmt::LineMarker` before every lowered statement, and emission turns each
     /// into a `// jet:line N` comment. Set ONLY by the native `jet debug` build path
@@ -1960,6 +1964,7 @@ pub(crate) fn build_cx_items(
         struct_type_param_order: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),
         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
+        jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         variadic_bound_fns: HashMap::new(),
         needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         active_os: crate::Syntax::OsTarget::host(),

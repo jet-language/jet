@@ -47,6 +47,11 @@ pub(crate) use subset::*;
 
 use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp};
 
+thread_local! {
+    static LAST_JIT_LOWER_FAILURE: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// c139 M4: lowered spawn-lambda body for Cranelift JIT (captures as explicit params).
 pub struct TJitSpawnLambda {
     pub params: Vec<(String, Type)>,
@@ -131,9 +136,72 @@ pub fn local_place(name: &str) -> String {
     super::mangle(name)
 }
 
+fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc>) -> Option<()> {
+    let mut pending = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
+    let mut processed = std::collections::BTreeSet::new();
+    while let Some((key, (owner_ty, method_name))) = pending.pop_first() {
+        if !processed.insert(key) {
+            continue;
+        }
+        if let Some(chain) = crate::Generics::generic_depth_exceeded(&owner_ty) {
+            LAST_JIT_LOWER_FAILURE.with(|failure| {
+                *failure.borrow_mut() = Some(format!(
+                    "E0909: generic instantiation goes too deep; simplify the types involved: {chain}"
+                ));
+            });
+            return None;
+        }
+        let Type::Apply { name, args } = &owner_ty else {
+            continue;
+        };
+        let Some(params) = items.iter().find_map(|item| match item {
+            Item::Struct(def) if def.name == *name => Some(def.type_params.as_slice()),
+            Item::Enum(def) if def.name == *name => Some(def.type_params.as_slice()),
+            _ => None,
+        }) else {
+            continue;
+        };
+        let subst = params
+            .iter()
+            .zip(args)
+            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+            .collect();
+        for item in items {
+            let method = match item {
+                Item::Struct(def) if def.name == *name => {
+                    def.methods.iter().find(|method| method.name == method_name)
+                }
+                Item::Impl(imp) if imp.type_name == *name && imp.trait_name.is_none() => {
+                    imp.methods.iter().find(|method| method.name == method_name)
+                }
+                _ => None,
+            };
+            let Some(method) = method else {
+                continue;
+            };
+            let specialized = crate::Sema::specialize_function_types(method.clone(), &subst);
+            if !specialized.type_params.is_empty()
+                || !tir_covers_method(&specialized, name, cx)
+            {
+                continue;
+            }
+            let mut lowered = lower_method_for_owner(&specialized, name, owner_ty.clone(), cx);
+            lowered.name = format!("{}::{}", owner_ty.name(), method.name);
+            funcs.push(lowered);
+        }
+        for (key, call) in std::mem::take(&mut *cx.jit_method_calls.borrow_mut()) {
+            if !processed.contains(&key) {
+                pending.entry(key).or_insert(call);
+            }
+        }
+    }
+    Some(())
+}
+
 /// c139 M3: lower every `tir_covers` top-level function in the entry module so the
 /// JIT can compile multi-function programs (calls between covered helpers).
 pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
+    LAST_JIT_LOWER_FAILURE.with(|failure| *failure.borrow_mut() = None);
     let module = bundle.modules.get(bundle.entry)?;
     let extern_funcs = bundle_extern_funcs(bundle);
     let mut cx = build_cx_items(
@@ -165,6 +233,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => None,
         }))?;
     cx.jit_spawn_lambdas.borrow_mut().clear();
+    cx.jit_method_calls.borrow_mut().clear();
     for item in &module.items {
         match item {
             Item::Func(f) => {
@@ -184,36 +253,6 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         lowered.name = format!("{}::{}", s.name, m.name);
                         funcs.push(lowered);
                     }
-                } else {
-                    for owner_ty in type_shapes.concrete_apps(&s.name) {
-                        let Type::Apply { args, .. } = &owner_ty else {
-                            continue;
-                        };
-                        let subst = s
-                            .type_params
-                            .iter()
-                            .zip(args)
-                            .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                            .collect();
-                        for m in &s.methods {
-                            let specialized =
-                                crate::Sema::specialize_function_types(m.clone(), &subst);
-                            if !specialized.type_params.is_empty() {
-                                continue;
-                            }
-                            if !tir_covers_method(&specialized, &s.name, &cx) {
-                                continue;
-                            }
-                            let mut lowered = lower_method_for_owner(
-                                &specialized,
-                                &s.name,
-                                owner_ty.clone(),
-                                &cx,
-                            );
-                            lowered.name = format!("{}::{}", owner_ty.name(), m.name);
-                            funcs.push(lowered);
-                        }
-                    }
                 }
             }
             Item::Impl(imp) => {
@@ -229,7 +268,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     })
                     .unwrap_or(&[]);
                 let owners = if imp.trait_name.is_none() && !owner_params.is_empty() {
-                    type_shapes.concrete_apps(&imp.type_name)
+                    Vec::new()
                 } else {
                     vec![Type::Named(imp.type_name.clone())]
                 };
@@ -337,6 +376,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
+    lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
     if !funcs.iter().any(|function| function.name == entry_name) {
         return None;
     }
@@ -491,6 +531,9 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
 /// Test hook: why `lower_jit_program` returned `None`.
 #[doc(hidden)]
 pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
+    if let Some(reason) = LAST_JIT_LOWER_FAILURE.with(|failure| failure.borrow_mut().take()) {
+        return reason;
+    }
     let Some(module) = bundle.modules.get(bundle.entry) else {
         return "missing entry module".to_string();
     };

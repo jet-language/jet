@@ -2818,19 +2818,26 @@ pub(crate) fn lower_method_call(
                 .map(|t| resolve_self_ty(&t, &type_name))
                 .unwrap_or_else(unit_type)
         });
+        let owner_type = if type_args.is_empty() {
+            Type::Named(type_name.clone())
+        } else {
+            Type::Apply {
+                name: type_name.clone(),
+                args: type_args.to_vec(),
+            }
+        };
+        if matches!(&owner_type, Type::Apply { .. }) {
+            cx.jit_method_calls.borrow_mut().insert(
+                format!("{}::{method}", owner_type.name()),
+                (owner_type.clone(), method.to_string()),
+            );
+        }
         return TExpr {
             ty: ret_ty,
             kind: TExprKind::StaticCall {
                 // The AST path uses `cx.type_prefix(type_name)` = `user_<T>`.
                 type_prefix: cx.type_prefix(&type_name),
-                owner_type: Some(if type_args.is_empty() {
-                    Type::Named(type_name.clone())
-                } else {
-                    Type::Apply {
-                        name: type_name.clone(),
-                        args: type_args.to_vec(),
-                    }
-                }),
+                owner_type: Some(owner_type),
                 method_rust: mangle(method),
                 args: targs,
             },
@@ -2885,6 +2892,12 @@ pub(crate) fn lower_method_call(
     } else {
         lower_expr(receiver, cx, env)
     };
+    if matches!(&recv.ty, Type::Apply { .. }) {
+        cx.jit_method_calls.borrow_mut().insert(
+            format!("{}::{method}", recv.ty.name()),
+            (recv.ty.clone(), method.to_string()),
+        );
+    }
     let targs = lower_method_args(args, &sig, env, cx);
     // S62: a trait-impl method is called by its bare name (the trait impl owns it);
     // a plain user method is `user_<method>`. This mirrors `emit_method_call`'s

@@ -8,42 +8,7 @@ use std::hash::{Hash, Hasher};
 
 pub(crate) struct CollectedTypeShapes {
     pub(crate) tuples: BTreeMap<String, Vec<(String, Type)>>,
-    pub(crate) generic_apps: BTreeMap<String, Type>,
     abstract_params: Vec<String>,
-}
-
-impl CollectedTypeShapes {
-    pub(crate) fn concrete_apps(&self, type_name: &str) -> Vec<Type> {
-        self.generic_apps
-            .values()
-            .filter(|ty| matches!(ty, Type::Apply { name, .. } if name == type_name))
-            .cloned()
-            .collect()
-    }
-}
-
-fn type_mentions_params(ty: &Type, params: &[String]) -> bool {
-    match ty {
-        Type::Named(name) => params.contains(name),
-        Type::List(inner) | Type::Shared(inner) | Type::Option(inner) => {
-            type_mentions_params(inner, params)
-        }
-        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-            type_mentions_params(key, params) || type_mentions_params(value, params)
-        }
-        Type::Fn { params: inputs, ret, .. } => {
-            inputs.iter().any(|ty| type_mentions_params(ty, params))
-                || ret.as_deref().is_some_and(|ty| type_mentions_params(ty, params))
-        }
-        Type::Apply { args, .. } => args.iter().any(|ty| type_mentions_params(ty, params)),
-        Type::Tuple(fields) => fields
-            .iter()
-            .any(|(_, ty)| type_mentions_params(ty, params)),
-        Type::FixedList { elem, .. } | Type::Tagged { inner: elem, .. } => {
-            type_mentions_params(elem, params)
-        }
-        _ => false,
-    }
 }
 
 fn with_type_params(
@@ -106,14 +71,7 @@ fn collect_tuple_shapes_from_type(ty: &Type, out: &mut CollectedTypeShapes) {
                 collect_tuple_shapes_from_type(r, out);
             }
         }
-        Type::Apply { name, args } => {
-            let applied = Type::Apply {
-                name: name.clone(),
-                args: args.clone(),
-            };
-            if !type_mentions_params(&applied, &out.abstract_params) {
-                out.generic_apps.insert(applied.name(), applied);
-            }
+        Type::Apply { args, .. } => {
             for a in args {
                 collect_tuple_shapes_from_type(a, out);
             }
@@ -481,65 +439,6 @@ fn collect_func_shapes(f: &Func, inherited: &[String], out: &mut CollectedTypeSh
     });
 }
 
-fn collect_func_body_shapes(f: &Func, out: &mut CollectedTypeShapes) {
-    let params = f
-        .type_params
-        .iter()
-        .map(|param| param.name.clone())
-        .collect();
-    with_type_params(out, params, |out| {
-        for stmt in &f.body {
-            collect_tuple_shapes_from_stmt(stmt, out);
-        }
-    });
-}
-
-/// Close only applications demanded by specialized executable bodies. A field or
-/// unused signature may validly name an expanding family such as `Grow<[T]>`.
-fn close_concrete_generic_apps(
-    items: &[Item],
-    owner_params: &BTreeMap<String, Vec<String>>,
-    out: &mut CollectedTypeShapes,
-) {
-    let mut processed = std::collections::BTreeSet::new();
-    loop {
-        let next = out
-            .generic_apps
-            .iter()
-            .find(|(key, _)| !processed.contains(*key))
-            .map(|(key, ty)| (key.clone(), ty.clone()));
-        let Some((key, Type::Apply { name, args })) = next else {
-            break;
-        };
-        processed.insert(key);
-        let Some(params) = owner_params.get(&name) else {
-            continue;
-        };
-        let subst = params
-            .iter()
-            .zip(args)
-            .map(|(param, arg)| (param.clone(), arg))
-            .collect();
-        for item in items {
-            match item {
-                Item::Struct(def) if def.name == name => {
-                    for method in &def.methods {
-                        let method = crate::Sema::specialize_function_types(method.clone(), &subst);
-                        collect_func_body_shapes(&method, out);
-                    }
-                }
-                Item::Impl(imp) if imp.type_name == name && imp.trait_name.is_none() => {
-                    for method in &imp.methods {
-                        let method = crate::Sema::specialize_function_types(method.clone(), &subst);
-                        collect_func_body_shapes(&method, out);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
 pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
     let owner_params: BTreeMap<String, Vec<String>> = items
         .iter()
@@ -557,7 +456,6 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
         .collect();
     let mut out = CollectedTypeShapes {
         tuples: BTreeMap::new(),
-        generic_apps: BTreeMap::new(),
         abstract_params: Vec::new(),
     };
     for item in items {
@@ -620,7 +518,6 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
             | Item::ModuleAlias(_) => {} // D-GENMOD2=A: alias — erases after expansion
         }
     }
-    close_concrete_generic_apps(items, &owner_params, &mut out);
     out
 }
 

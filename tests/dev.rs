@@ -2797,7 +2797,7 @@ fn run() {
 }
 
 #[test]
-fn unused_expanding_generic_signature_does_not_expand_jit_worklist() {
+fn unused_expanding_generic_body_does_not_expand_jit_worklist() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
@@ -2806,7 +2806,10 @@ struct Grow<T: Printable> {
     value: T
 
     fn read(self) -> T { return ~self.value }
-    fn unused(self, next: Grow<[T]>) -> Int { return 0 }
+    fn unused(self) -> Int {
+        nested := Grow<[T]>.{ value: [~self.value] }
+        return nested.unused()
+    }
 }
 
 fn run() {
@@ -2814,8 +2817,15 @@ fn run() {
     print(value.read())
 }
 "#;
-    let output = run_cranelift_without_fallback(src, "unused_expanding_generic_signature");
+    let output = run_cranelift_without_fallback(src, "unused_expanding_generic_body");
     assert_eq!(output, ProgramOutput::ran("7\n".into(), "".into(), 0));
+
+    let reachable = src.replace("print(value.read())", "print(value.unused())");
+    let file = std::env::temp_dir().join("reachable_expanding_generic_method.jet");
+    fs::write(&file, reachable).unwrap();
+    let bundle = checked_bundle_from_path(file.to_str().unwrap());
+    let error = jet_jit::try_compile_bundle(&bundle).unwrap_err();
+    assert!(error.contains("E0909: generic instantiation goes too deep"), "{error}");
 }
 
 #[test]
