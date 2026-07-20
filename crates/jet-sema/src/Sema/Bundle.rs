@@ -47,7 +47,7 @@ pub(super) struct CachedFunctionBody {
     pub pending_diagnostics: Vec<PendingFunctionDiagnostic>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct PendingFunctionDiagnostic {
     pub function_key: String,
     pub function_span: Span,
@@ -105,6 +105,7 @@ impl IncrementalSemaCache {
                             + format!("{:?}", entry.comptime_inputs).len()
                             + format!("{:?}", entry.address_taken).len()
                             + format!("{:?}", entry.anchors).len()
+                            + format!("{:?}", entry.pending_diagnostics).len()
                     })
                     .sum::<usize>(),
         }

@@ -417,6 +417,86 @@ mod tests {
     }
 
     #[test]
+    fn cached_nonce_diagnostic_tracks_callee_effect_precedence() {
+        let source = |next_body: &str, marker: u8| {
+            format!(
+                r#"use core.crypto.expert as expert
+
+fn protect() --[]-> {{
+    @Unsafe("fixed interop vector") {{
+        _ :: expert.xchacha20poly1305_seal(
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [next_byte()],
+            [],
+            []
+        )
+    }}
+}}
+
+fn next_byte() -> U8 {{
+    {next_body}
+    return 0
+}}
+
+fn marker() -> Int {{ return {marker} }}
+fn run() {{}}
+"#
+            )
+        };
+        let pure_body = "               ";
+        let codes = |checked: &CheckedQuery| {
+            checked
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.code.clone())
+                .collect::<Vec<_>>()
+        };
+        let mut incremental = CompilerQueries::new();
+
+        let cold_source = source(pure_body, 0);
+        let cold = incremental.check_text("crypto-cache.jet", &cold_source, true);
+        assert_eq!(codes(&cold), ["E2702".to_string()]);
+        let cold_stats = incremental.stats();
+
+        let warm_source = source(pure_body, 1);
+        let warm = incremental.check_text("crypto-cache.jet", &warm_source, true);
+        let warm_fresh = CompilerQueries::new().check_text("crypto-cache.jet", &warm_source, true);
+        assert_eq!(
+            diagnostic_summary(&warm.diagnostics),
+            diagnostic_summary(&warm_fresh.diagnostics)
+        );
+        assert_eq!(codes(&warm), ["E2702".to_string()]);
+        let warm_stats = incremental.stats();
+        assert_eq!(warm_stats.item_hits - cold_stats.item_hits, 3);
+
+        let impure_source = source("print(\"effect\")", 1);
+        let impure = incremental.check_text("crypto-cache.jet", &impure_source, true);
+        let impure_fresh =
+            CompilerQueries::new().check_text("crypto-cache.jet", &impure_source, true);
+        assert_eq!(
+            diagnostic_summary(&impure.diagnostics),
+            diagnostic_summary(&impure_fresh.diagnostics)
+        );
+        assert_eq!(codes(&impure), ["E3401".to_string()]);
+        let impure_stats = incremental.stats();
+        assert_eq!(impure_stats.item_hits - warm_stats.item_hits, 3);
+
+        let restored_source = source(pure_body, 2);
+        let restored = incremental.check_text("crypto-cache.jet", &restored_source, true);
+        let restored_fresh =
+            CompilerQueries::new().check_text("crypto-cache.jet", &restored_source, true);
+        assert_eq!(
+            diagnostic_summary(&restored.diagnostics),
+            diagnostic_summary(&restored_fresh.diagnostics)
+        );
+        assert_eq!(codes(&restored), ["E2702".to_string()]);
+        let restored_stats = incremental.stats();
+        assert_eq!(restored_stats.item_hits - impure_stats.item_hits, 2);
+        assert_eq!(restored_stats.live_items, 4);
+        assert!(restored_stats.live_item_bytes >= restored_source.len());
+    }
+
+    #[test]
     fn whitespace_edit_recomputes_span_bearing_diagnostics() {
         let before = "fn beta() -> Int { return \"x\" }\n";
         let after = "fn beta() -> Int {  return \"x\" }\n";
