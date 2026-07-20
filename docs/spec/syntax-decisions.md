@@ -2521,14 +2521,13 @@ index, not a substitute for that law.
   are implicit; Jet does not maintain a have/have-not ledger of unbuilt or
   declined stdlib domains.
 
-**Framework-lessons Core wave (ratified by owner 2026-07-12, card
-#506; D-VALIDATE1 still open):**
+**Framework-lessons Core wave (ratified by owner 2026-07-12, card #506):**
 
 - **D-AUTH1=A**: `core.auth` batteries — sessions (signed rotating
   cookies; httponly/secure/samesite defaults), password login (argon2id
   via the crypto suite), OAuth/OIDC client, email magic links, JWT/PASETO
   verification. `app.auth(users: db)` is the magic default; every knob
-  expert-overridable; secrets carry the `.Credential` taint kind; policy
+  expert-overridable; secrets carry `@Tainted(Credential)`; policy
   may require stronger factors.
 - **D-AUTH2=A / D-AUTH-TOKENPOLICY1=A** *(ratified 2026-07-18)*: token
   verification ships as strict standalone typed `core.auth` functions before
