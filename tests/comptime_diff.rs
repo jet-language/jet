@@ -233,11 +233,24 @@ fn comptime_bigint_matches_runtime() {
         eprintln!("note: rustc not found; skipping BigInt differential battery");
         return;
     }
-    for (i, expr) in CASES
+    let cases = CASES
         .iter()
         .enumerate()
         .filter(|(_, expr)| expr.contains("BigInt"))
-    {
+        .collect::<Vec<_>>();
+    assert_eq!(
+        cases.iter().map(|(_, expr)| **expr).collect::<Vec<_>>(),
+        [
+            "(BigInt(9223372036854775807) + BigInt(1)).to_string()",
+            "(BigInt(\"999999999999999999999999999999\") + BigInt(\"999999999999999999999999999999\")).to_string()",
+            "(BigInt(100) - BigInt(1)).to_string()",
+            "(BigInt(7) * BigInt(6)).to_string()",
+            "BigInt(5).sub(BigInt(3)).to_string()",
+            "BigInt(3).neg().to_string()",
+        ],
+        "BigInt differential cases must stay exact"
+    );
+    for (i, expr) in cases {
         check_comptime_case(i, expr);
     }
 }

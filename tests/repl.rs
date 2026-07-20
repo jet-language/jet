@@ -382,6 +382,14 @@ fn parse_transcript(txt: &str) -> (Vec<String>, Vec<String>) {
 }
 
 fn run_transcript_file(txt: &str) {
+    run_transcript_file_with_trailing_policy(txt, true);
+}
+
+fn run_transcript_file_strict(txt: &str) {
+    run_transcript_file_with_trailing_policy(txt, false);
+}
+
+fn run_transcript_file_with_trailing_policy(txt: &str, allow_trailing: bool) {
     let (inputs, expected_lines) = parse_transcript(txt);
     let input_refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
     let actual = run_transcript(&input_refs, None);
@@ -408,6 +416,15 @@ fn run_transcript_file(txt: &str) {
             actual
         );
         ai += 1;
+    }
+    if !allow_trailing {
+        assert_eq!(
+            ai,
+            actual_lines.len(),
+            "unexpected trailing transcript output: {:?}\nfull actual output:\n{}",
+            &actual_lines[ai..],
+            actual
+        );
     }
 }
 
@@ -629,7 +646,15 @@ fn repl_basics_transcript() {
 
 #[test]
 fn repl_bigint_exact_transcript() {
-    run_transcript_file(include_str!("repl/bigint.txt"));
+    run_transcript_file_strict(include_str!("repl/bigint.txt"));
+}
+
+#[test]
+fn strict_transcript_rejects_unexpected_trailing_output() {
+    assert!(
+        std::panic::catch_unwind(|| run_transcript_file_strict("> 1 + 1")).is_err(),
+        "strict transcripts must fail when an input emits an unasserted line"
+    );
 }
 
 // ── D-REPL8=A: move semantics across inputs ───────────────────────────────
