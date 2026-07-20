@@ -10,6 +10,8 @@ use super::super::Value::CtValue;
 
 use super::repl_process::run_repl_process;
 
+#[path = "../CorePureParity.rs"]
+mod core_pure_parity;
 
 const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // D-FIDELITY-API1=A: this signal must behave like the AOT binary's
@@ -601,6 +603,10 @@ pub(super) fn apply_core_call(
             unsupported(&format!("{}.{}(): missing arg {}", module, method, i), span)
         })
     };
+
+    if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
+        return result;
+    }
 
     match (module, method) {
         // D-PENDING1=B: the same four enum variants AOT lowers to JetLoadable.

@@ -1,0 +1,1914 @@
+//! Remaining deterministic Core calls for #392.
+//!
+//! Algorithms and value layouts mirror the AOT prelude. This module owns one
+//! evaluator used by comptime and the REPL; callers never synthesize schemas or
+//! fall back after a recognized call fails.
+
+use std::collections::BTreeMap;
+
+use crate::AST::Type;
+use crate::Diagnostics::{Diagnostic, Span};
+
+use crate::Comptime::Builtins::as_int;
+use crate::Comptime::Diagnostics::unsupported;
+use crate::Comptime::Methods::as_float;
+use crate::Comptime::Value::CtValue;
+
+type EvalResult = Result<CtValue, Diagnostic>;
+
+pub(super) fn evaluate(
+    module: &str,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<EvalResult> {
+    let result = match (module, method) {
+        ("core.mime", "parse") => mime_parse(args, span),
+        ("core.mime", "from_extension") => mime_from_extension(args, span),
+        ("core.mime", "extension") => mime_extension(args, span),
+        ("core.email", "address") => email_address(args, span),
+        ("core.email", "attachment") => email_attachment(args, span),
+        ("core.email", "message") => email_message(args, span),
+        ("core.email", "envelope") => email_envelope(args, span),
+        ("core.email", "serialize") => email_serialize(args, span),
+        ("core.encoding.csv", "to_string_pretty") => {
+            string_rows(args, 0, span).map(|rows| {
+                CtValue::Str(crate::Comptime::EncodingLite::csv_render(&rows))
+            })
+        }
+        ("core.encoding.toml", "to_string_pretty") => one(args, 0, module, method, span)
+            .map(|value| CtValue::Str(crate::Comptime::EncodingLite::toml_render(value))),
+        ("core.encoding.yaml", "to_string_pretty") => one(args, 0, module, method, span)
+            .map(|value| CtValue::Str(crate::Comptime::EncodingLite::yaml_render(value))),
+        ("core.encoding.xml", "canonical") => xml_canonical(args, span),
+        ("core.time", "period") => period(args, span),
+        ("core.time", "period_days") => period_unit(args, span, 2),
+        ("core.time", "period_months") => period_unit(args, span, 1),
+        ("core.time", "period_years") => period_unit(args, span, 0),
+        ("core.time", "from_unix_ms") => datetime_from_unix_ms(args, span),
+        ("core.time", "parse_rfc3339") => datetime_parse(args, span),
+        ("core.time", "parse_time") => local_time_parse(args, span),
+        ("core.science.measurement", "from") => measurement(args, span),
+        ("core.sketch.hll", "new") => Ok(sketch_hll()),
+        ("core.sketch.tdigest", "new") => Ok(sketch_tdigest()),
+        ("core.sketch.cms", "new") => Ok(sketch_cms()),
+        ("core.sketch.reservoir", "new") => sketch_reservoir(args, span),
+        ("core.time.date", "new") => date_new_call(args, span),
+        ("core.time.date", "parse") => date_parse_call(args, span),
+        ("core.time.datetime", "from_timestamp") => datetime_from_timestamp(args, span),
+        _ => return None,
+    };
+    Some(result)
+}
+
+fn one<'a>(
+    args: &'a [CtValue],
+    index: usize,
+    module: &str,
+    method: &str,
+    span: Span,
+) -> Result<&'a CtValue, Diagnostic> {
+    args.get(index).ok_or_else(|| {
+        unsupported(
+            &format!("{module}.{method}(): missing arg {index}"),
+            span,
+        )
+    })
+}
+
+fn string_arg<'a>(args: &'a [CtValue], index: usize, span: Span) -> Result<&'a str, Diagnostic> {
+    match args.get(index) {
+        Some(CtValue::Str(value)) => Ok(value),
+        _ => Err(unsupported("Core call expected a String argument", span)),
+    }
+}
+
+fn int_arg(args: &[CtValue], index: usize, span: Span) -> Result<i64, Diagnostic> {
+    let value = args
+        .get(index)
+        .ok_or_else(|| unsupported("Core call is missing an Int argument", span))?;
+    as_int(value, span)
+}
+
+fn float_arg(args: &[CtValue], index: usize, span: Span) -> Result<f64, Diagnostic> {
+    let value = args
+        .get(index)
+        .ok_or_else(|| unsupported("Core call is missing a Float argument", span))?;
+    as_float(value, span)
+}
+
+fn structure(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: fields
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect(),
+    }
+}
+
+fn field<'a>(value: &'a CtValue, type_name: &str, name: &str) -> Option<&'a CtValue> {
+    match value {
+        CtValue::Struct {
+            type_name: actual,
+            fields,
+        } if actual == type_name => fields
+            .iter()
+            .find(|(field_name, _)| field_name == name)
+            .map(|(_, value)| value),
+        _ => None,
+    }
+}
+
+fn string_rows(args: &[CtValue], index: usize, span: Span) -> Result<Vec<Vec<String>>, Diagnostic> {
+    let Some(CtValue::List(rows)) = args.get(index) else {
+        return Err(unsupported("encoding call expected [[String]]", span));
+    };
+    rows.iter()
+        .map(|row| {
+            let CtValue::List(columns) = row else {
+                return Err(unsupported("encoding call expected [[String]]", span));
+            };
+            columns
+                .iter()
+                .map(|column| match column {
+                    CtValue::Str(value) => Ok(value.clone()),
+                    _ => Err(unsupported("encoding call expected [[String]]", span)),
+                })
+                .collect()
+        })
+        .collect()
+}
+
+// ── MIME ───────────────────────────────────────────────────────────────────
+
+fn mime_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#' | b'$' | b'&' | b'-' | b'^' | b'_' | b'.' | b'+'
+                )
+        })
+}
+
+fn parse_mime(input: &str) -> Result<CtValue, String> {
+    let mut parts = input.split(';');
+    let essence = parts.next().unwrap_or("").trim();
+    let Some((top, sub)) = essence.split_once('/') else {
+        return Err("MIME type needs `type/subtype`".to_string());
+    };
+    let top = top.trim().to_ascii_lowercase();
+    let sub = sub.trim().to_ascii_lowercase();
+    if !mime_token(&top) || !mime_token(&sub) {
+        return Err(format!("invalid MIME type `{essence}`"));
+    }
+    let mut params = Vec::new();
+    for parameter in parts {
+        let parameter = parameter.trim();
+        if parameter.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = parameter.split_once('=') else {
+            return Err(format!("invalid MIME parameter `{parameter}`"));
+        };
+        let key = key.trim().to_ascii_lowercase();
+        if !mime_token(&key) {
+            return Err(format!("invalid MIME parameter `{}`", key.trim()));
+        }
+        params.push(CtValue::List(vec![
+            CtValue::Str(key),
+            CtValue::Str(value.trim().trim_matches('"').to_string()),
+        ]));
+    }
+    Ok(structure(
+        "Mime",
+        vec![
+            ("top", CtValue::Str(top)),
+            ("sub", CtValue::Str(sub)),
+            ("params", CtValue::List(params)),
+        ],
+    ))
+}
+
+fn mime_parse(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(match parse_mime(string_arg(args, 0, span)?) {
+        Ok(value) => CtValue::ResOk(Box::new(value)),
+        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+    })
+}
+
+fn mime_from_extension(args: &[CtValue], span: Span) -> EvalResult {
+    let extension = string_arg(args, 0, span)?
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    let value = match extension.as_str() {
+        "html" | "htm" => Some("text/html"),
+        "css" => Some("text/css"),
+        "csv" => Some("text/csv"),
+        "txt" | "text" => Some("text/plain"),
+        "md" => Some("text/markdown"),
+        "json" => Some("application/json"),
+        "js" | "mjs" => Some("text/javascript"),
+        "wasm" => Some("application/wasm"),
+        "pdf" => Some("application/pdf"),
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "svg" => Some("image/svg+xml"),
+        "webp" => Some("image/webp"),
+        "ico" => Some("image/x-icon"),
+        "mp3" => Some("audio/mpeg"),
+        "mp4" => Some("video/mp4"),
+        "xml" => Some("application/xml"),
+        "zip" => Some("application/zip"),
+        "gz" => Some("application/gzip"),
+        "tar" => Some("application/x-tar"),
+        _ => None,
+    };
+    Ok(option_string(value))
+}
+
+fn mime_extension(args: &[CtValue], span: Span) -> EvalResult {
+    let lowered = string_arg(args, 0, span)?.to_ascii_lowercase();
+    let mime = lowered.split(';').next().unwrap_or("").trim();
+    let value = match mime {
+        "text/html" => Some("html"),
+        "text/css" => Some("css"),
+        "text/csv" => Some("csv"),
+        "text/plain" => Some("txt"),
+        "text/markdown" => Some("md"),
+        "application/json" => Some("json"),
+        "text/javascript" | "application/javascript" => Some("js"),
+        "application/wasm" => Some("wasm"),
+        "application/pdf" => Some("pdf"),
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/gif" => Some("gif"),
+        "image/svg+xml" => Some("svg"),
+        "image/webp" => Some("webp"),
+        "image/x-icon" => Some("ico"),
+        "audio/mpeg" => Some("mp3"),
+        "video/mp4" => Some("mp4"),
+        "application/xml" | "text/xml" => Some("xml"),
+        "application/zip" => Some("zip"),
+        "application/gzip" => Some("gz"),
+        "application/x-tar" => Some("tar"),
+        _ => None,
+    };
+    Ok(option_string(value))
+}
+
+fn option_string(value: Option<&str>) -> CtValue {
+    value.map_or(CtValue::None(Type::String), |value| {
+        CtValue::Some(Box::new(CtValue::Str(value.to_string())))
+    })
+}
+
+// ── Civil time ─────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct Date {
+    year: i64,
+    month: i64,
+    day: i64,
+}
+
+impl Date {
+    fn is_leap(year: i64) -> bool {
+        (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    }
+
+    fn days_in_month(year: i64, month: i64) -> i64 {
+        match month {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 if Self::is_leap(year) => 29,
+            2 => 28,
+            _ => 30,
+        }
+    }
+
+    fn new(year: i64, month: i64, day: i64) -> Self {
+        let month = month.clamp(1, 12);
+        let day = day.clamp(1, Self::days_in_month(year, month));
+        Self { year, month, day }
+    }
+
+    fn parse(value: &str) -> Result<Self, String> {
+        let parts = value.splitn(3, '-').collect::<Vec<_>>();
+        if parts.len() != 3 {
+            return Err(format!("invalid date: {value}"));
+        }
+        let year = parts[0]
+            .parse::<i64>()
+            .map_err(|_| format!("bad year: {}", parts[0]))?;
+        let month = parts[1]
+            .parse::<i64>()
+            .map_err(|_| format!("bad month: {}", parts[1]))?;
+        let day = parts[2]
+            .parse::<i64>()
+            .map_err(|_| format!("bad day: {}", parts[2]))?;
+        if !(1..=12).contains(&month)
+            || day < 1
+            || day > Self::days_in_month(year, month)
+        {
+            return Err(format!("date out of range: {value}"));
+        }
+        Ok(Self::new(year, month, day))
+    }
+
+    fn day_number(self) -> i64 {
+        let year = self.year - 1;
+        365 * year + year / 4 - year / 100
+            + year / 400
+            + [0_i64, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+                [(self.month - 1) as usize]
+            + i64::from(self.month > 2 && Self::is_leap(self.year))
+            + self.day
+            - 1
+    }
+
+    fn value(self) -> CtValue {
+        structure(
+            "LocalDate",
+            vec![
+                ("year", CtValue::Int(self.year)),
+                ("month", CtValue::Int(self.month)),
+                ("day", CtValue::Int(self.day)),
+            ],
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LocalTime {
+    hour: i64,
+    minute: i64,
+    second: i64,
+}
+
+impl LocalTime {
+    fn parse(value: &str) -> Result<Self, String> {
+        let parts = value.splitn(3, ':').collect::<Vec<_>>();
+        if parts.len() != 3 {
+            return Err(format!("invalid time: {value}"));
+        }
+        let hour = parts[0]
+            .parse::<i64>()
+            .map_err(|_| format!("bad hour: {}", parts[0]))?;
+        let minute = parts[1]
+            .parse::<i64>()
+            .map_err(|_| format!("bad minute: {}", parts[1]))?;
+        let second = parts[2]
+            .parse::<i64>()
+            .map_err(|_| format!("bad second: {}", parts[2]))?;
+        if !(0..=23).contains(&hour)
+            || !(0..=59).contains(&minute)
+            || !(0..=59).contains(&second)
+        {
+            return Err(format!("time out of range: {value}"));
+        }
+        Ok(Self {
+            hour,
+            minute,
+            second,
+        })
+    }
+
+    fn seconds(self) -> i64 {
+        self.hour * 3600 + self.minute * 60 + self.second
+    }
+
+    fn value(self) -> CtValue {
+        structure(
+            "LocalTime",
+            vec![
+                ("hour", CtValue::Int(self.hour)),
+                ("minute", CtValue::Int(self.minute)),
+                ("second", CtValue::Int(self.second)),
+            ],
+        )
+    }
+}
+
+fn date_value(year: i64, month: i64, day: i64) -> CtValue {
+    Date::new(year, month, day).value()
+}
+
+fn date_new_call(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(date_value(
+        int_arg(args, 0, span)?,
+        int_arg(args, 1, span)?,
+        int_arg(args, 2, span)?,
+    ))
+}
+
+fn date_parse_call(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(match Date::parse(string_arg(args, 0, span)?) {
+        Ok(date) => CtValue::ResOk(Box::new(date.value())),
+        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+    })
+}
+
+fn period_value(years: i64, months: i64, days: i64) -> CtValue {
+    structure(
+        "Period",
+        vec![
+            ("years", CtValue::Int(years)),
+            ("months", CtValue::Int(months)),
+            ("days", CtValue::Int(days)),
+        ],
+    )
+}
+
+fn period(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(period_value(
+        int_arg(args, 0, span)?,
+        int_arg(args, 1, span)?,
+        int_arg(args, 2, span)?,
+    ))
+}
+
+fn period_unit(args: &[CtValue], span: Span, field_index: usize) -> EvalResult {
+    let mut fields = [0_i64; 3];
+    fields[field_index] = int_arg(args, 0, span)?;
+    Ok(period_value(fields[0], fields[1], fields[2]))
+}
+
+fn datetime_value(seconds: i64) -> CtValue {
+    structure("DateTime", vec![("secs", CtValue::Int(seconds))])
+}
+
+fn datetime_from_timestamp(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(datetime_value(int_arg(args, 0, span)?))
+}
+
+fn datetime_from_unix_ms(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(datetime_value(int_arg(args, 0, span)?.div_euclid(1000)))
+}
+
+fn utc_seconds(date: Date, time: LocalTime) -> i64 {
+    let epoch = Date::new(1970, 1, 1).day_number();
+    (date.day_number() - epoch)
+        .saturating_mul(86_400)
+        .saturating_add(time.seconds())
+}
+
+fn parse_datetime(value: &str) -> Result<i64, String> {
+    let (date_part, rest) = value
+        .split_once('T')
+        .ok_or_else(|| format!("invalid RFC3339 datetime: {value}"))?;
+    let date = Date::parse(date_part)?;
+    let zone_pos = rest
+        .find('Z')
+        .or_else(|| rest.rfind('+'))
+        .or_else(|| rest.get(1..).and_then(|tail| tail.rfind('-').map(|i| i + 1)))
+        .ok_or_else(|| format!("RFC3339 datetime needs Z or an offset: {value}"))?;
+    let (time_part, zone_part) = rest.split_at(zone_pos);
+    let time = LocalTime::parse(time_part.split('.').next().unwrap_or(time_part))?;
+    let offset = if zone_part == "Z" {
+        0
+    } else {
+        let sign = if zone_part.starts_with('-') { -1 } else { 1 };
+        let (hours, minutes) = zone_part[1..]
+            .split_once(':')
+            .ok_or_else(|| format!("bad RFC3339 offset: {zone_part}"))?;
+        let hours = hours
+            .parse::<i64>()
+            .map_err(|_| format!("bad RFC3339 offset hour: {hours}"))?;
+        let minutes = minutes
+            .parse::<i64>()
+            .map_err(|_| format!("bad RFC3339 offset minute: {minutes}"))?;
+        sign * (hours * 3600 + minutes * 60)
+    };
+    Ok(utc_seconds(date, time) - offset)
+}
+
+fn datetime_parse(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(match parse_datetime(string_arg(args, 0, span)?) {
+        Ok(seconds) => CtValue::ResOk(Box::new(datetime_value(seconds))),
+        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+    })
+}
+
+fn local_time_parse(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(match LocalTime::parse(string_arg(args, 0, span)?) {
+        Ok(time) => CtValue::ResOk(Box::new(time.value())),
+        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+    })
+}
+
+fn measurement(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(structure(
+        "Measurement",
+        vec![
+            ("value", CtValue::Float(float_arg(args, 0, span)?)),
+            (
+                "uncertainty",
+                CtValue::Float(float_arg(args, 1, span)?),
+            ),
+        ],
+    ))
+}
+
+// ── Sketch constructors ────────────────────────────────────────────────────
+
+fn sketch_hll() -> CtValue {
+    structure(
+        "HyperLogLog",
+        vec![("registers", CtValue::Bytes(vec![0; 256]))],
+    )
+}
+
+fn sketch_tdigest() -> CtValue {
+    structure("TDigest", vec![("centroids", CtValue::List(Vec::new()))])
+}
+
+fn sketch_cms() -> CtValue {
+    structure(
+        "CountMinSketch",
+        vec![(
+            "rows",
+            CtValue::List(
+                (0..4)
+                    .map(|_| CtValue::List(vec![CtValue::Int(0); 256]))
+                    .collect(),
+            ),
+        )],
+    )
+}
+
+fn sketch_reservoir(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(structure(
+        "ReservoirSampler",
+        vec![
+            ("capacity", CtValue::Int(int_arg(args, 0, span)?.max(1))),
+            ("reservoir", CtValue::List(Vec::new())),
+            ("count", CtValue::Int(0)),
+            ("rng", CtValue::Int(0x5ead_beef_cafe_babe)),
+        ],
+    ))
+}
+
+// ── XML canonicalization ───────────────────────────────────────────────────
+
+fn xml_canonical(args: &[CtValue], span: Span) -> EvalResult {
+    let tree = one(args, 0, "core.encoding.xml", "canonical", span)?;
+    let options = one(args, 1, "core.encoding.xml", "canonical", span)?;
+    let rendered = crate::Comptime::EncodingLite::xml_render(tree);
+    if rendered.is_empty() {
+        return Ok(CtValue::ResErr(Box::new(xml_shape_error(
+            "XML tree contains a non-DataTree value",
+        ))));
+    }
+    let value = match jet_foundation::XmlPull::parse_document(&rendered) {
+        Ok(value) => value,
+        Err(error) => {
+            return Ok(CtValue::ResErr(Box::new(
+                crate::Comptime::EncodingLite::xml_error_value(error),
+            )))
+        }
+    };
+    let (mode, comments, inclusive_prefixes) = xml_canonical_options(options, span)?;
+    let canonical = jet_foundation::XmlPull::canonical_document(
+        &value,
+        &jet_foundation::XmlPull::CanonicalOptions {
+            mode,
+            comments,
+            inclusive_prefixes,
+        },
+    );
+    Ok(match canonical {
+        Ok(value) => CtValue::ResOk(Box::new(CtValue::Str(value))),
+        Err(error) => CtValue::ResErr(Box::new(
+            crate::Comptime::EncodingLite::xml_error_value(error),
+        )),
+    })
+}
+
+fn xml_canonical_options(
+    value: &CtValue,
+    span: Span,
+) -> Result<(jet_foundation::XmlPull::CanonicalMode, bool, Vec<String>), Diagnostic> {
+    let mode = match field(value, "XMLCanonical", "mode") {
+        Some(CtValue::Enum { variant, .. }) if variant == "Inclusive11" => {
+            jet_foundation::XmlPull::CanonicalMode::Inclusive11
+        }
+        Some(CtValue::Enum { variant, .. }) if variant == "Exclusive10" => {
+            jet_foundation::XmlPull::CanonicalMode::Exclusive10
+        }
+        _ => return Err(unsupported("XML canonical mode is invalid", span)),
+    };
+    let comments = match field(value, "XMLCanonical", "comments") {
+        Some(CtValue::Bool(value)) => *value,
+        _ => return Err(unsupported("XML canonical comments flag is invalid", span)),
+    };
+    let inclusive_prefixes = match field(value, "XMLCanonical", "inclusive_prefixes") {
+        Some(CtValue::List(values)) => values
+            .iter()
+            .map(|value| match value {
+                CtValue::Str(value) => Ok(value.clone()),
+                _ => Err(unsupported("XML canonical prefix must be String", span)),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err(unsupported("XML canonical prefixes are invalid", span)),
+    };
+    Ok((mode, comments, inclusive_prefixes))
+}
+
+fn xml_shape_error(reason: &str) -> CtValue {
+    structure(
+        "XMLError",
+        vec![
+            (
+                "kind",
+                CtValue::Enum {
+                    type_name: "XMLReason".to_string(),
+                    variant: "Shape".to_string(),
+                    args: Vec::new(),
+                },
+            ),
+            ("byte_offset", CtValue::None(Type::Int)),
+            ("line", CtValue::None(Type::Int)),
+            ("column", CtValue::None(Type::Int)),
+            ("path", CtValue::Str(String::new())),
+            ("reason", CtValue::Str(reason.to_string())),
+        ],
+    )
+}
+
+// ── core.data.pivot_sum ────────────────────────────────────────────────────
+
+impl<'a> crate::Comptime::Interpreter::Interp<'a> {
+    #[allow(dead_code)]
+    pub(in crate::Comptime) fn eval_pivot_sum(
+        &mut self,
+        args: Vec<CtValue>,
+        span: Span,
+    ) -> EvalResult {
+        let Some(CtValue::List(rows)) = args.first() else {
+            return Err(unsupported("`data.pivot_sum()` needs a row list", span));
+        };
+        let row_key = args
+            .get(1)
+            .ok_or_else(|| unsupported("`data.pivot_sum()` needs a row-key closure", span))?;
+        let column_key = args
+            .get(2)
+            .ok_or_else(|| unsupported("`data.pivot_sum()` needs a column-key closure", span))?;
+        let value = args
+            .get(3)
+            .ok_or_else(|| unsupported("`data.pivot_sum()` needs a value closure", span))?;
+        let mut groups = BTreeMap::<String, (i64, f64)>::new();
+        for row in rows {
+            let left = self.call_closure(row_key, vec![row.clone()], span)?;
+            let right = self.call_closure(column_key, vec![row.clone()], span)?;
+            let key = format!(
+                "{}|{}",
+                crate::Comptime::Methods::as_string(&left, span)?,
+                crate::Comptime::Methods::as_string(&right, span)?
+            );
+            let amount = self.call_closure(value, vec![row.clone()], span)?;
+            let amount = as_float(&amount, span)?;
+            let entry = groups.entry(key).or_insert((0, 0.0));
+            entry.0 += 1;
+            entry.1 += amount;
+        }
+        Ok(CtValue::List(
+            groups
+                .into_iter()
+                .map(|(key, (count, sum))| {
+                    structure(
+                        "DataGroup",
+                        vec![
+                            ("key", CtValue::Str(key)),
+                            ("count", CtValue::Int(count)),
+                            ("sum", CtValue::Float(sum)),
+                            (
+                                "mean",
+                                CtValue::Float(if count == 0 {
+                                    0.0
+                                } else {
+                                    sum / count as f64
+                                }),
+                            ),
+                        ],
+                    )
+                })
+                .collect(),
+        ))
+    }
+}
+
+// Email evaluator follows below; kept in this module so all Packet B calls
+// share the same recognized-call/no-fallback contract.
+
+const MAX_RECIPIENTS: usize = 100;
+const MAX_ATTACHMENTS: usize = 64;
+const MAX_HEADER_BYTES: usize = 998;
+const MAX_HEADER_VALUE_BYTES: usize = 64 * 1024;
+const MAX_BODY_BYTES: usize = 1024 * 1024;
+const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+const MAX_MESSAGE_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Clone)]
+struct Address {
+    display: Option<String>,
+    mailbox: String,
+}
+
+#[derive(Clone)]
+struct Attachment {
+    filename: String,
+    mime: String,
+    bytes: Vec<u8>,
+}
+
+#[derive(Clone)]
+struct Envelope {
+    from: Address,
+    recipients: Vec<Address>,
+}
+
+#[derive(Clone)]
+struct Message {
+    from: Address,
+    to: Vec<Address>,
+    bcc: Vec<Address>,
+    subject: String,
+    text: String,
+    html: String,
+    attachments: Vec<Attachment>,
+    envelope: Envelope,
+    wire_upper: usize,
+}
+
+#[derive(Clone)]
+struct EmailError {
+    operation: String,
+    reason: String,
+}
+
+fn email_error(operation: &str, reason: impl Into<String>) -> EmailError {
+    EmailError {
+        operation: operation.to_string(),
+        reason: reason.into(),
+    }
+}
+
+fn email_error_value(error: EmailError) -> CtValue {
+    CtValue::Enum {
+        type_name: "EmailError".to_string(),
+        variant: "Configuration".to_string(),
+        args: vec![
+            (
+                Some("operation".to_string()),
+                CtValue::Str(error.operation),
+            ),
+            (
+                Some("server".to_string()),
+                CtValue::None(Type::String),
+            ),
+            (Some("code".to_string()), CtValue::None(Type::Int)),
+            (Some("reason".to_string()), CtValue::Str(error.reason)),
+        ],
+    }
+}
+
+fn email_result(result: Result<CtValue, EmailError>) -> CtValue {
+    match result {
+        Ok(value) => CtValue::ResOk(Box::new(value)),
+        Err(error) => CtValue::ResErr(Box::new(email_error_value(error))),
+    }
+}
+
+fn address_value(address: &Address) -> CtValue {
+    structure(
+        "Address",
+        vec![
+            (
+                "display",
+                address.display.as_ref().map_or(
+                    CtValue::None(Type::String),
+                    |display| CtValue::Some(Box::new(CtValue::Str(display.clone()))),
+                ),
+            ),
+            ("mailbox", CtValue::Str(address.mailbox.clone())),
+        ],
+    )
+}
+
+fn address_from_value(value: &CtValue, span: Span) -> Result<Address, Diagnostic> {
+    let mailbox = match field(value, "Address", "mailbox") {
+        Some(CtValue::Str(value)) => value.clone(),
+        _ => return Err(unsupported("email call expected Address", span)),
+    };
+    let display = match field(value, "Address", "display") {
+        Some(CtValue::Some(value)) => match value.as_ref() {
+            CtValue::Str(value) => Some(value.clone()),
+            _ => return Err(unsupported("email Address display is invalid", span)),
+        },
+        Some(CtValue::None(_)) => None,
+        _ => return Err(unsupported("email Address display is invalid", span)),
+    };
+    Ok(Address { display, mailbox })
+}
+
+fn attachment_value(attachment: &Attachment) -> CtValue {
+    structure(
+        "Attachment",
+        vec![
+            ("filename", CtValue::Str(attachment.filename.clone())),
+            ("mime", CtValue::Str(attachment.mime.clone())),
+            ("bytes", CtValue::Bytes(attachment.bytes.clone())),
+        ],
+    )
+}
+
+fn attachment_from_value(value: &CtValue, span: Span) -> Result<Attachment, Diagnostic> {
+    let filename = match field(value, "Attachment", "filename") {
+        Some(CtValue::Str(value)) => value.clone(),
+        _ => return Err(unsupported("email call expected Attachment", span)),
+    };
+    let mime = match field(value, "Attachment", "mime") {
+        Some(CtValue::Str(value)) => value.clone(),
+        _ => return Err(unsupported("email Attachment content type is invalid", span)),
+    };
+    let bytes = match field(value, "Attachment", "bytes") {
+        Some(value) => bytes_value(value, span)?,
+        None => return Err(unsupported("email Attachment bytes are missing", span)),
+    };
+    Ok(Attachment {
+        filename,
+        mime,
+        bytes,
+    })
+}
+
+fn envelope_value(envelope: &Envelope) -> CtValue {
+    structure(
+        "Envelope",
+        vec![
+            ("from", address_value(&envelope.from)),
+            (
+                "recipients",
+                CtValue::List(envelope.recipients.iter().map(address_value).collect()),
+            ),
+        ],
+    )
+}
+
+fn message_value(message: &Message) -> CtValue {
+    structure(
+        "Message",
+        vec![
+            ("from", address_value(&message.from)),
+            (
+                "to",
+                CtValue::List(message.to.iter().map(address_value).collect()),
+            ),
+            (
+                "bcc",
+                CtValue::List(message.bcc.iter().map(address_value).collect()),
+            ),
+            ("subject", CtValue::Str(message.subject.clone())),
+            ("text", CtValue::Str(message.text.clone())),
+            ("html", CtValue::Str(message.html.clone())),
+            (
+                "attachments",
+                CtValue::List(message.attachments.iter().map(attachment_value).collect()),
+            ),
+            ("envelope", envelope_value(&message.envelope)),
+            ("wire_upper", CtValue::Int(message.wire_upper as i64)),
+        ],
+    )
+}
+
+fn message_from_value(value: &CtValue, span: Span) -> Result<Message, Diagnostic> {
+    let address = |name| {
+        field(value, "Message", name)
+            .ok_or_else(|| unsupported("email Message field is missing", span))
+            .and_then(|value| address_from_value(value, span))
+    };
+    let addresses = |name| {
+        let Some(CtValue::List(values)) = field(value, "Message", name) else {
+            return Err(unsupported("email Message address list is invalid", span));
+        };
+        values
+            .iter()
+            .map(|value| address_from_value(value, span))
+            .collect::<Result<Vec<_>, _>>()
+    };
+    let text = |name| match field(value, "Message", name) {
+        Some(CtValue::Str(value)) => Ok(value.clone()),
+        _ => Err(unsupported("email Message text field is invalid", span)),
+    };
+    let attachments = match field(value, "Message", "attachments") {
+        Some(CtValue::List(values)) => values
+            .iter()
+            .map(|value| attachment_from_value(value, span))
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err(unsupported("email Message attachments are invalid", span)),
+    };
+    let from = address("from")?;
+    let to = addresses("to")?;
+    let bcc = addresses("bcc")?;
+    let envelope = default_envelope(&from, &to, &bcc).map_err(|error| {
+        unsupported(&format!("email Message envelope is invalid: {}", error.reason), span)
+    })?;
+    let wire_upper = match field(value, "Message", "wire_upper") {
+        Some(CtValue::Int(value)) => usize::try_from(*value)
+            .map_err(|_| unsupported("email Message wire bound is invalid", span))?,
+        _ => return Err(unsupported("email Message wire bound is invalid", span)),
+    };
+    Ok(Message {
+        from,
+        to,
+        bcc,
+        subject: text("subject")?,
+        text: text("text")?,
+        html: text("html")?,
+        attachments,
+        envelope,
+        wire_upper,
+    })
+}
+
+fn bytes_value(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    match value {
+        CtValue::Bytes(bytes) => Ok(bytes.clone()),
+        CtValue::List(values) => values
+            .iter()
+            .map(|value| match value {
+                CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
+                _ => Err(unsupported("email bytes must be a [U8] value", span)),
+            })
+            .collect(),
+        _ => Err(unsupported("email bytes must be a [U8] value", span)),
+    }
+}
+
+fn address_list(value: &CtValue, span: Span) -> Result<Vec<Address>, Diagnostic> {
+    let CtValue::List(values) = value else {
+        return Err(unsupported("email call expected [Address]", span));
+    };
+    values
+        .iter()
+        .map(|value| address_from_value(value, span))
+        .collect()
+}
+
+fn attachment_list(value: &CtValue, span: Span) -> Result<Vec<Attachment>, Diagnostic> {
+    let CtValue::List(values) = value else {
+        return Err(unsupported("email call expected [Attachment]", span));
+    };
+    values
+        .iter()
+        .map(|value| attachment_from_value(value, span))
+        .collect()
+}
+
+fn reject_controls(value: &str, what: &str) -> Result<(), EmailError> {
+    if value.chars().any(char::is_control) {
+        Err(email_error(
+            "InvalidHeader",
+            format!("{what} contains a forbidden control character"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn parse_address(input: &str) -> Result<Address, EmailError> {
+    reject_controls(input, "email address")?;
+    let value = input.trim();
+    if value.is_empty() || value.len() > 512 {
+        return Err(email_error(
+            "InvalidAddress",
+            "email address must contain 1 to 512 bytes",
+        ));
+    }
+    let opens = value.bytes().filter(|byte| *byte == b'<').count();
+    let closes = value.bytes().filter(|byte| *byte == b'>').count();
+    let (display, mailbox) = match (opens, closes) {
+        (0, 0) => (None, value),
+        (1, 1) if value.ends_with('>') => {
+            let open = value.rfind('<').unwrap();
+            let shown = value[..open].trim();
+            if shown.is_empty() {
+                return Err(email_error("InvalidAddress", "display name cannot be empty"));
+            }
+            (
+                Some(parse_display(shown)?),
+                value[open + 1..value.len() - 1].trim(),
+            )
+        }
+        _ => {
+            return Err(email_error(
+                "InvalidAddress",
+                "display address must have one final `<mailbox>`",
+            ))
+        }
+    };
+    validate_mailbox(mailbox)?;
+    Ok(Address {
+        display,
+        mailbox: mailbox.to_string(),
+    })
+}
+
+fn parse_display(value: &str) -> Result<String, EmailError> {
+    if !value.starts_with('"') {
+        if value.contains('"') || value.contains('<') || value.contains('>') {
+            return Err(email_error(
+                "InvalidAddress",
+                "display name has an unmatched quote or angle bracket",
+            ));
+        }
+        return Ok(value.to_string());
+    }
+    if value.len() < 2 || !value.ends_with('"') {
+        return Err(email_error(
+            "InvalidAddress",
+            "quoted display name needs a closing quote",
+        ));
+    }
+    let mut output = String::new();
+    let mut escaped = false;
+    for character in value[1..value.len() - 1].chars() {
+        if escaped {
+            if character != '"' && character != '\\' {
+                return Err(email_error(
+                    "InvalidAddress",
+                    "quoted display name may escape only quote or backslash",
+                ));
+            }
+            output.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character == '"' {
+            return Err(email_error(
+                "InvalidAddress",
+                "quoted display name contains an unescaped quote",
+            ));
+        } else {
+            output.push(character);
+        }
+    }
+    if escaped || output.is_empty() {
+        return Err(email_error(
+            "InvalidAddress",
+            "quoted display name is empty or ends with an escape",
+        ));
+    }
+    Ok(output)
+}
+
+fn validate_mailbox(mailbox: &str) -> Result<(), EmailError> {
+    if mailbox.is_empty() || !mailbox.is_ascii() || mailbox.len() > 254 {
+        return Err(email_error(
+            "InvalidAddress",
+            "mailbox must be 1 to 254 ASCII bytes",
+        ));
+    }
+    let separator = mailbox_separator(mailbox)?;
+    let local = &mailbox[..separator];
+    let domain = &mailbox[separator + 1..];
+    if local.is_empty() || domain.is_empty() || local.len() > 64 || domain.len() > 253 {
+        return Err(email_error(
+            "InvalidAddress",
+            "mailbox local part or domain has an invalid length",
+        ));
+    }
+    if local.starts_with('"') {
+        validate_quoted_local(local)?;
+    } else if local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
+        || !local.bytes().all(is_atext)
+    {
+        return Err(email_error(
+            "InvalidAddress",
+            "mailbox local part is not dot-atom or quoted-string",
+        ));
+    }
+    if domain.starts_with('.')
+        || domain.ends_with('.')
+        || domain.contains("..")
+        || domain.split('.').any(|label| {
+            label.is_empty()
+                || label.starts_with('-')
+                || label.ends_with('-')
+                || !label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+    {
+        return Err(email_error(
+            "InvalidAddress",
+            "mailbox domain has an invalid label",
+        ));
+    }
+    Ok(())
+}
+
+fn mailbox_separator(mailbox: &str) -> Result<usize, EmailError> {
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut separator = None;
+    for (index, byte) in mailbox.bytes().enumerate() {
+        if escaped {
+            escaped = false;
+        } else if quoted && byte == b'\\' {
+            escaped = true;
+        } else if byte == b'"' {
+            quoted = !quoted;
+        } else if byte == b'@' && !quoted && separator.replace(index).is_some() {
+            return Err(email_error(
+                "InvalidAddress",
+                "mailbox needs exactly one unquoted `@`",
+            ));
+        }
+    }
+    if quoted || escaped {
+        return Err(email_error(
+            "InvalidAddress",
+            "mailbox has an unterminated quoted local part",
+        ));
+    }
+    separator.ok_or_else(|| {
+        email_error(
+            "InvalidAddress",
+            "mailbox needs one unquoted `@`",
+        )
+    })
+}
+
+fn validate_quoted_local(local: &str) -> Result<(), EmailError> {
+    if local.len() < 2 || !local.ends_with('"') {
+        return Err(email_error(
+            "InvalidAddress",
+            "quoted mailbox local part needs a closing quote",
+        ));
+    }
+    let mut escaped = false;
+    for byte in local[1..local.len() - 1].bytes() {
+        if escaped {
+            if !(33..=126).contains(&byte) {
+                return Err(email_error(
+                    "InvalidAddress",
+                    "quoted mailbox escape is not printable ASCII",
+                ));
+            }
+            escaped = false;
+        } else if byte == b'\\' {
+            escaped = true;
+        } else if byte == b'"' || !(32..=126).contains(&byte) {
+            return Err(email_error(
+                "InvalidAddress",
+                "quoted mailbox local part contains an invalid byte",
+            ));
+        }
+    }
+    if escaped {
+        return Err(email_error(
+            "InvalidAddress",
+            "quoted mailbox local part ends with an escape",
+        ));
+    }
+    Ok(())
+}
+
+fn is_atext(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'/'
+                | b'='
+                | b'?'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'{'
+                | b'|'
+                | b'}'
+                | b'~'
+                | b'.'
+        )
+}
+
+fn email_address(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(email_result(
+        parse_address(string_arg(args, 0, span)?).map(|address| address_value(&address)),
+    ))
+}
+
+fn make_attachment(
+    filename: &str,
+    mime: &str,
+    bytes: Vec<u8>,
+) -> Result<Attachment, EmailError> {
+    reject_controls(filename, "attachment filename")?;
+    reject_controls(mime, "attachment content type")?;
+    if filename.trim().is_empty() || filename.contains('/') || filename.contains('\\') {
+        return Err(email_error(
+            "InvalidAttachment",
+            "attachment filename must be a plain non-empty name",
+        ));
+    }
+    if !valid_mime(mime) {
+        return Err(email_error(
+            "InvalidAttachment",
+            "attachment content type must be `type/subtype`",
+        ));
+    }
+    ensure_physical_header_len("Content-Type", mime.len())?;
+    let disposition_len = "attachment; filename*=UTF-8''"
+        .len()
+        .checked_add(percent_encoded_len(filename)?)
+        .ok_or_else(|| {
+            email_error(
+                "LimitExceeded",
+                "attachment header length overflow",
+            )
+        })?;
+    ensure_physical_header_len("Content-Disposition", disposition_len)?;
+    if bytes.len() > MAX_ATTACHMENT_BYTES {
+        return Err(email_error(
+            "LimitExceeded",
+            format!("attachment exceeds {MAX_ATTACHMENT_BYTES} bytes"),
+        ));
+    }
+    Ok(Attachment {
+        filename: filename.to_string(),
+        mime: mime.to_ascii_lowercase(),
+        bytes,
+    })
+}
+
+fn email_attachment(args: &[CtValue], span: Span) -> EvalResult {
+    let filename = string_arg(args, 0, span)?;
+    let mime = string_arg(args, 1, span)?;
+    let bytes = args
+        .get(2)
+        .ok_or_else(|| unsupported("email.attachment(): missing bytes", span))?;
+    let bytes = bytes_value(bytes, span)?;
+    Ok(email_result(
+        make_attachment(filename, mime, bytes)
+            .map(|attachment| attachment_value(&attachment)),
+    ))
+}
+
+fn make_envelope(
+    from: &Address,
+    recipients: &[Address],
+) -> Result<Envelope, EmailError> {
+    if recipients.is_empty() {
+        return Err(email_error(
+            "envelope",
+            "email envelope needs at least one recipient",
+        ));
+    }
+    if recipients.len() > MAX_RECIPIENTS {
+        return Err(email_error(
+            "envelope",
+            format!("email envelope exceeds {MAX_RECIPIENTS} recipients"),
+        ));
+    }
+    Ok(Envelope {
+        from: from.clone(),
+        recipients: recipients.to_vec(),
+    })
+}
+
+fn default_envelope(
+    from: &Address,
+    to: &[Address],
+    bcc: &[Address],
+) -> Result<Envelope, EmailError> {
+    let mut recipients = Vec::with_capacity(to.len().saturating_add(bcc.len()));
+    recipients.extend_from_slice(to);
+    recipients.extend_from_slice(bcc);
+    make_envelope(from, &recipients)
+}
+
+fn email_envelope(args: &[CtValue], span: Span) -> EvalResult {
+    let from = address_from_value(
+        args.get(0)
+            .ok_or_else(|| unsupported("email.envelope(): missing sender", span))?,
+        span,
+    )?;
+    let recipients = address_list(
+        args.get(1)
+            .ok_or_else(|| unsupported("email.envelope(): missing recipients", span))?,
+        span,
+    )?;
+    Ok(email_result(
+        make_envelope(&from, &recipients).map(|envelope| envelope_value(&envelope)),
+    ))
+}
+
+fn make_message(
+    from: Address,
+    to: Vec<Address>,
+    bcc: Vec<Address>,
+    subject: String,
+    text: String,
+    html: String,
+    attachments: Vec<Attachment>,
+) -> Result<Message, EmailError> {
+    reject_controls(&subject, "subject")?;
+    if subject.len() > MAX_HEADER_VALUE_BYTES {
+        return Err(email_error(
+            "LimitExceeded",
+            format!("subject exceeds {MAX_HEADER_VALUE_BYTES} bytes"),
+        ));
+    }
+    if to.is_empty() {
+        return Err(email_error(
+            "InvalidMessage",
+            "message needs at least one visible recipient",
+        ));
+    }
+    let recipients = to
+        .len()
+        .checked_add(bcc.len())
+        .ok_or_else(|| email_error("LimitExceeded", "recipient count overflow"))?;
+    if recipients > MAX_RECIPIENTS {
+        return Err(email_error(
+            "LimitExceeded",
+            format!("message exceeds {MAX_RECIPIENTS} recipients"),
+        ));
+    }
+    if attachments.len() > MAX_ATTACHMENTS {
+        return Err(email_error(
+            "LimitExceeded",
+            format!("message exceeds {MAX_ATTACHMENTS} attachments"),
+        ));
+    }
+    if text.is_empty() && html.is_empty() {
+        return Err(email_error(
+            "InvalidMessage",
+            "message needs text or HTML content",
+        ));
+    }
+    if text.len() > MAX_BODY_BYTES || html.len() > MAX_BODY_BYTES {
+        return Err(email_error(
+            "LimitExceeded",
+            format!("each message body is limited to {MAX_BODY_BYTES} bytes"),
+        ));
+    }
+    let wire_upper = prospective_wire_upper(
+        &from,
+        &to,
+        &subject,
+        &text,
+        &html,
+        &attachments,
+    )?;
+    if wire_upper > MAX_MESSAGE_BYTES {
+        return Err(email_error(
+            "LimitExceeded",
+            format!("serialized message exceeds {MAX_MESSAGE_BYTES} bytes"),
+        ));
+    }
+    ensure_rendered_address_header("From", std::slice::from_ref(&from))?;
+    ensure_rendered_address_header("To", &to)?;
+    ensure_encoded_header_lines("Subject", &subject)?;
+    let envelope = default_envelope(&from, &to, &bcc)?;
+    Ok(Message {
+        from,
+        to,
+        bcc,
+        subject,
+        text,
+        html,
+        attachments,
+        envelope,
+        wire_upper,
+    })
+}
+
+fn email_message(args: &[CtValue], span: Span) -> EvalResult {
+    let from = address_from_value(
+        args.get(0)
+            .ok_or_else(|| unsupported("email.message(): missing sender", span))?,
+        span,
+    )?;
+    let to = address_list(
+        args.get(1)
+            .ok_or_else(|| unsupported("email.message(): missing recipients", span))?,
+        span,
+    )?;
+    let bcc = address_list(
+        args.get(2)
+            .ok_or_else(|| unsupported("email.message(): missing bcc", span))?,
+        span,
+    )?;
+    let subject = string_arg(args, 3, span)?.to_string();
+    let text = string_arg(args, 4, span)?.to_string();
+    let html = string_arg(args, 5, span)?.to_string();
+    let attachments = attachment_list(
+        args.get(6)
+            .ok_or_else(|| unsupported("email.message(): missing attachments", span))?,
+        span,
+    )?;
+    Ok(email_result(
+        make_message(from, to, bcc, subject, text, html, attachments)
+            .map(|message| message_value(&message)),
+    ))
+}
+
+fn prospective_wire_upper(
+    from: &Address,
+    to: &[Address],
+    subject: &str,
+    text: &str,
+    html: &str,
+    attachments: &[Attachment],
+) -> Result<usize, EmailError> {
+    let mut total = 4096_usize;
+    checked_add(&mut total, rendered_address_len(from))?;
+    for address in to {
+        checked_add(
+            &mut total,
+            rendered_address_len(address).saturating_add(4),
+        )?;
+    }
+    checked_add(
+        &mut total,
+        encoded_header_len(subject).saturating_add(32),
+    )?;
+    checked_add(
+        &mut total,
+        base64_lines_len(text.len()).saturating_add(256),
+    )?;
+    checked_add(
+        &mut total,
+        base64_lines_len(html.len()).saturating_add(256),
+    )?;
+    for attachment in attachments {
+        checked_add(&mut total, base64_lines_len(attachment.bytes.len()))?;
+        checked_add(&mut total, attachment.mime.len())?;
+        checked_add(&mut total, percent_encoded_len(&attachment.filename)?)?;
+        checked_add(&mut total, 512)?;
+    }
+    checked_add(
+        &mut total,
+        attachments.len().saturating_mul(256),
+    )?;
+    Ok(total)
+}
+
+fn checked_add(total: &mut usize, amount: usize) -> Result<(), EmailError> {
+    *total = total
+        .checked_add(amount)
+        .ok_or_else(|| email_error("LimitExceeded", "message size overflow"))?;
+    Ok(())
+}
+
+fn serialize_message(message: &Message) -> Result<Vec<u8>, EmailError> {
+    let mixed = boundary(message, "mixed");
+    let alternative = boundary(message, "alternative");
+    let mut output = String::with_capacity(message.wire_upper.min(MAX_MESSAGE_BYTES));
+    push_header(&mut output, "From", &render_address(&message.from))?;
+    push_header(&mut output, "To", &render_addresses(&message.to, "To"))?;
+    push_header(&mut output, "Subject", &encode_header(&message.subject))?;
+    push_header(&mut output, "MIME-Version", "1.0")?;
+    if message.attachments.is_empty() {
+        render_body(&mut output, message, &alternative)?;
+    } else {
+        push_header(
+            &mut output,
+            "Content-Type",
+            &format!("multipart/mixed; boundary=\"{mixed}\""),
+        )?;
+        output.push_str("\r\n");
+        output.push_str(&format!("--{mixed}\r\n"));
+        render_body(&mut output, message, &alternative)?;
+        for attachment in &message.attachments {
+            output.push_str(&format!("\r\n--{mixed}\r\n"));
+            push_header(&mut output, "Content-Type", &attachment.mime)?;
+            push_header(&mut output, "Content-Transfer-Encoding", "base64")?;
+            push_header(
+                &mut output,
+                "Content-Disposition",
+                &format!(
+                    "attachment; filename*=UTF-8''{}",
+                    percent_encode(&attachment.filename)?
+                ),
+            )?;
+            output.push_str("\r\n");
+            output.push_str(&base64_lines(&attachment.bytes));
+        }
+        output.push_str(&format!("\r\n--{mixed}--\r\n"));
+    }
+    if output.len() > message.wire_upper || output.len() > MAX_MESSAGE_BYTES {
+        return Err(email_error(
+            "LimitExceeded",
+            "serialized message exceeded its checked wire bound",
+        ));
+    }
+    Ok(output.into_bytes())
+}
+
+fn email_serialize(args: &[CtValue], span: Span) -> EvalResult {
+    let message = message_from_value(
+        args.first()
+            .ok_or_else(|| unsupported("email.serialize(): missing message", span))?,
+        span,
+    )?;
+    Ok(email_result(
+        serialize_message(&message).map(CtValue::Bytes),
+    ))
+}
+
+fn render_body(
+    output: &mut String,
+    message: &Message,
+    alternative: &str,
+) -> Result<(), EmailError> {
+    if message.html.is_empty() {
+        text_part(output, "text/plain", &message.text)?;
+    } else if message.text.is_empty() {
+        text_part(output, "text/html", &message.html)?;
+    } else {
+        push_header(
+            output,
+            "Content-Type",
+            &format!("multipart/alternative; boundary=\"{alternative}\""),
+        )?;
+        output.push_str("\r\n");
+        output.push_str(&format!("--{alternative}\r\n"));
+        text_part(output, "text/plain", &message.text)?;
+        output.push_str(&format!("\r\n--{alternative}\r\n"));
+        text_part(output, "text/html", &message.html)?;
+        output.push_str(&format!("\r\n--{alternative}--\r\n"));
+    }
+    Ok(())
+}
+
+fn text_part(output: &mut String, mime: &str, body: &str) -> Result<(), EmailError> {
+    push_header(output, "Content-Type", &format!("{mime}; charset=utf-8"))?;
+    push_header(output, "Content-Transfer-Encoding", "base64")?;
+    output.push_str("\r\n");
+    output.push_str(&base64_lines(body.as_bytes()));
+    Ok(())
+}
+
+fn push_header(output: &mut String, name: &str, value: &str) -> Result<(), EmailError> {
+    validate_folded_header(name, value)?;
+    output.push_str(name);
+    output.push_str(": ");
+    output.push_str(value);
+    output.push_str("\r\n");
+    Ok(())
+}
+
+fn validate_folded_header(name: &str, value: &str) -> Result<(), EmailError> {
+    let bytes = value.as_bytes();
+    for index in 0..bytes.len() {
+        if bytes[index] == b'\r'
+            && (bytes.get(index + 1) != Some(&b'\n')
+                || !matches!(bytes.get(index + 2), Some(b' ' | b'\t')))
+        {
+            return Err(email_error(
+                "InvalidHeader",
+                format!("{name} contains an invalid fold"),
+            ));
+        }
+        if bytes[index] == b'\n' && (index == 0 || bytes[index - 1] != b'\r') {
+            return Err(email_error(
+                "InvalidHeader",
+                format!("{name} contains a bare newline"),
+            ));
+        }
+        if bytes[index] < 32 && !matches!(bytes[index], b'\r' | b'\n' | b'\t') {
+            return Err(email_error(
+                "InvalidHeader",
+                format!("{name} contains a control byte"),
+            ));
+        }
+    }
+    for (index, line) in value.split("\r\n").enumerate() {
+        let prefix = if index == 0 { name.len() + 2 } else { 0 };
+        if prefix.saturating_add(line.len()).saturating_add(2) > MAX_HEADER_BYTES {
+            return Err(email_error(
+                "LimitExceeded",
+                format!("{name} physical header line exceeds {MAX_HEADER_BYTES} bytes"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_physical_header_len(name: &str, value_len: usize) -> Result<(), EmailError> {
+    if name
+        .len()
+        .saturating_add(2)
+        .saturating_add(value_len)
+        .saturating_add(2)
+        > MAX_HEADER_BYTES
+    {
+        Err(email_error(
+            "LimitExceeded",
+            format!("{name} physical header line exceeds {MAX_HEADER_BYTES} bytes"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_encoded_header_lines(name: &str, value: &str) -> Result<(), EmailError> {
+    if value.is_ascii() {
+        ensure_physical_header_len(name, value.len())
+    } else if name.len() + 2 + 72 + 2 > MAX_HEADER_BYTES {
+        Err(email_error(
+            "LimitExceeded",
+            format!("{name} physical header line exceeds {MAX_HEADER_BYTES} bytes"),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_rendered_address_header(
+    name: &str,
+    addresses: &[Address],
+) -> Result<(), EmailError> {
+    validate_folded_header(name, &render_addresses(addresses, name))
+}
+
+fn render_addresses(addresses: &[Address], name: &str) -> String {
+    let mut output = String::new();
+    let mut physical = name.len() + 2;
+    for (index, address) in addresses.iter().enumerate() {
+        let rendered = render_address(address);
+        let separator = if index == 0 { "" } else { ", " };
+        if index > 0
+            && physical
+                + separator.len()
+                + rendered.lines().next().unwrap_or("").len()
+                + 2
+                > MAX_HEADER_BYTES
+        {
+            output.push_str(",\r\n ");
+            physical = 1;
+        } else {
+            output.push_str(separator);
+            physical += separator.len();
+        }
+        output.push_str(&rendered);
+        physical = rendered.rsplit("\r\n").next().unwrap_or("").len()
+            + if rendered.contains("\r\n") {
+                0
+            } else {
+                physical
+            };
+    }
+    output
+}
+
+fn render_address(address: &Address) -> String {
+    match &address.display {
+        Some(display) if display.is_ascii() => {
+            format!(
+                "{} <{}>",
+                render_ascii_display(display),
+                address.mailbox
+            )
+        }
+        Some(display) => format!("{} <{}>", encode_header(display), address.mailbox),
+        None => address.mailbox.clone(),
+    }
+}
+
+fn render_ascii_display(display: &str) -> String {
+    let phrase_safe = display
+        .split(' ')
+        .all(|word| !word.is_empty() && word.bytes().all(is_atext));
+    if phrase_safe {
+        display.to_string()
+    } else {
+        format!("\"{}\"", display.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+}
+
+fn rendered_address_len(address: &Address) -> usize {
+    match &address.display {
+        Some(display) if display.is_ascii() => {
+            let safe = display
+                .split(' ')
+                .all(|word| !word.is_empty() && word.bytes().all(is_atext));
+            let shown = if safe {
+                display.len()
+            } else {
+                2 + display
+                    .bytes()
+                    .filter(|byte| matches!(byte, b'\\' | b'"'))
+                    .count()
+                    + display.len()
+            };
+            shown
+                .saturating_add(address.mailbox.len())
+                .saturating_add(3)
+        }
+        Some(display) => encoded_header_len(display)
+            .saturating_add(address.mailbox.len())
+            .saturating_add(3),
+        None => address.mailbox.len(),
+    }
+}
+
+fn encode_header(value: &str) -> String {
+    if value.is_ascii() {
+        return value.to_string();
+    }
+    let mut output = String::with_capacity(encoded_header_len(value));
+    let mut start = 0_usize;
+    for (index, character) in value.char_indices() {
+        if index > start && index + character.len_utf8() - start > 45 {
+            if !output.is_empty() {
+                output.push_str("\r\n ");
+            }
+            output.push_str("=?UTF-8?B?");
+            output.push_str(&base64(&value.as_bytes()[start..index]));
+            output.push_str("?=");
+            start = index;
+        }
+    }
+    if start < value.len() {
+        if !output.is_empty() {
+            output.push_str("\r\n ");
+        }
+        output.push_str("=?UTF-8?B?");
+        output.push_str(&base64(&value.as_bytes()[start..]));
+        output.push_str("?=");
+    }
+    output
+}
+
+fn encoded_header_len(value: &str) -> usize {
+    if value.is_ascii() {
+        return value.len();
+    }
+    let mut total = 0_usize;
+    let mut start = 0_usize;
+    let mut chunks = 0_usize;
+    for (index, character) in value.char_indices() {
+        if index > start && index + character.len_utf8() - start > 45 {
+            total = total
+                .saturating_add(12)
+                .saturating_add(base64_len(index - start));
+            start = index;
+            chunks += 1;
+        }
+    }
+    if start < value.len() {
+        total = total
+            .saturating_add(12)
+            .saturating_add(base64_len(value.len() - start));
+        chunks += 1;
+    }
+    total.saturating_add(chunks.saturating_sub(1).saturating_mul(3))
+}
+
+fn valid_mime(value: &str) -> bool {
+    let mut parts = value.split('/');
+    let top = parts.next().unwrap_or("");
+    let sub = parts.next().unwrap_or("");
+    !top.is_empty()
+        && !sub.is_empty()
+        && parts.next().is_none()
+        && top.bytes().chain(sub.bytes()).all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#' | b'$' | b'&' | b'-' | b'^' | b'_' | b'.' | b'+'
+                )
+        })
+}
+
+fn boundary(message: &Message, label: &str) -> String {
+    let mut state = crate::SHA256::sha256(label.as_bytes());
+    let mut index = 1_u8;
+    let mut absorb = |bytes: &[u8]| {
+        let digest = crate::SHA256::sha256(bytes);
+        for slot in 0..32 {
+            state[slot] = state[slot]
+                .wrapping_add(digest[(slot + index as usize) % 32])
+                .rotate_left((index % 7) as u32)
+                ^ index;
+        }
+        index = index.wrapping_add(1);
+    };
+    absorb(message.subject.as_bytes());
+    absorb(message.text.as_bytes());
+    absorb(message.html.as_bytes());
+    absorb(message.from.mailbox.as_bytes());
+    for address in &message.to {
+        absorb(address.mailbox.as_bytes());
+    }
+    for address in &message.bcc {
+        absorb(address.mailbox.as_bytes());
+    }
+    for attachment in &message.attachments {
+        absorb(&attachment.bytes);
+    }
+    let digest = crate::SHA256::sha256(&state);
+    let suffix = digest[..24]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("jet-{label}-{suffix}")
+}
+
+fn base64_lines_len(bytes: usize) -> usize {
+    let encoded = base64_len(bytes);
+    if encoded == 0 {
+        0
+    } else {
+        encoded.saturating_add(((encoded + 75) / 76).saturating_sub(1).saturating_mul(2))
+    }
+}
+
+fn base64_len(bytes: usize) -> usize {
+    bytes.saturating_add(2) / 3 * 4
+}
+
+fn base64_lines(bytes: &[u8]) -> String {
+    let encoded = base64(bytes);
+    encoded
+        .as_bytes()
+        .chunks(76)
+        .map(|line| std::str::from_utf8(line).unwrap())
+        .collect::<Vec<_>>()
+        .join("\r\n")
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut output = String::with_capacity(base64_len(bytes.len()));
+    for chunk in bytes.chunks(3) {
+        let bits = ((chunk[0] as u32) << 16)
+            | ((chunk.get(1).copied().unwrap_or(0) as u32) << 8)
+            | chunk.get(2).copied().unwrap_or(0) as u32;
+        output.push(TABLE[(bits >> 18) as usize] as char);
+        output.push(TABLE[((bits >> 12) & 63) as usize] as char);
+        output.push(if chunk.len() > 1 {
+            TABLE[((bits >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        output.push(if chunk.len() > 2 {
+            TABLE[(bits & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    output
+}
+
+fn percent_encoded_len(value: &str) -> Result<usize, EmailError> {
+    value.bytes().try_fold(0_usize, |total, byte| {
+        total
+            .checked_add(
+                if byte.is_ascii_alphanumeric()
+                    || matches!(byte, b'-' | b'_' | b'.' | b'~')
+                {
+                    1
+                } else {
+                    3
+                },
+            )
+            .ok_or_else(|| {
+                email_error(
+                    "LimitExceeded",
+                    "attachment filename encoding length overflow",
+                )
+            })
+    })
+}
+
+fn percent_encode(value: &str) -> Result<String, EmailError> {
+    let mut output = String::with_capacity(percent_encoded_len(value)?);
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            output.push(byte as char);
+        } else {
+            output.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    Ok(output)
+}
