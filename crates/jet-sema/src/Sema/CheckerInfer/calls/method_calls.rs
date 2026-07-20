@@ -309,9 +309,80 @@ impl<'a> Checker<'a> {
                             ));
                         }
                         if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
-                            let type_name = leaf.clone();
+                            let type_name = if matches!(ns.as_str(), "jet.http" | "core.http.client" | "core.http.server") {
+                                match leaf.as_str() {
+                                    "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
+                                    | "Headers" | "Request" | "Response" | "Body" | "Handler" | "Error" => {
+                                        format!("Http{leaf}")
+                                    }
+                                    "HttpError" => "HttpError".to_string(),
+                                    _ => leaf.clone(),
+                                }
+                            } else {
+                                leaf.clone()
+                            };
                             **receiver = Expr::Ident(type_name.clone(), span);
                             let ty = Type::Named(type_name.clone());
+                            let http_error = || Type::Named("HttpError".to_string());
+                            let http_result = |ok: Type| Type::Result {
+                                ok: Box::new(ok),
+                                err: Box::new(http_error()),
+                            };
+                            let http_static = match (type_name.as_str(), method, args.len()) {
+                                ("HttpMethod", "custom", 1) => {
+                                    self.expect_core_arg("Method.custom", 0, &Type::String, &mut args[0]);
+                                    Some(http_result(ty.clone()))
+                                }
+                                ("HttpMethod", "get" | "head" | "post" | "put" | "delete"
+                                    | "connect" | "options" | "trace" | "patch", 0) => Some(ty.clone()),
+                                ("HttpStatus", "new", 1) => {
+                                    self.expect_core_arg("Status.new", 0, &Type::Int, &mut args[0]);
+                                    Some(http_result(ty.clone()))
+                                }
+                                ("HttpVersion", "http_1_0" | "http_1_1" | "http_2", 0) => Some(ty.clone()),
+                                ("HttpHeaderName", "new", 1) | ("HttpHeaderValue", "new", 1) => {
+                                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                                    Some(http_result(ty.clone()))
+                                }
+                                ("HttpHeaders", "new", 0) | ("HttpBody", "empty", 0) => Some(ty.clone()),
+                                ("HttpBody", "bytes", 1) => {
+                                    self.expect_core_arg("Body.bytes", 0, &Type::List(Box::new(u8_ty())), &mut args[0]);
+                                    Some(ty.clone())
+                                }
+                                ("HttpBody", "text", 1 | 2) => {
+                                    self.expect_core_arg("Body.text", 0, &Type::String, &mut args[0]);
+                                    if args.len() == 2 {
+                                        self.expect_core_arg("Body.text", 1, &Type::Named("Mime".to_string()), &mut args[1]);
+                                    }
+                                    Some(ty.clone())
+                                }
+                                ("HttpBody", "json", 1) => {
+                                    self.infer(&mut args[0].expr);
+                                    Some(ty.clone())
+                                }
+                                ("HttpBody", "form" | "multipart", 1) => {
+                                    self.expect_core_arg(
+                                        method,
+                                        0,
+                                        &Type::Map { key: Box::new(Type::String), key_span: None, value: Box::new(Type::String) },
+                                        &mut args[0],
+                                    );
+                                    Some(ty.clone())
+                                }
+                                ("HttpBody", "reader", 1 | 2) => {
+                                    self.expect_core_arg_moving("Body.reader", 0, &Type::Named("FileReader".to_string()), &mut args[0]);
+                                    args[0].convention = AccessConvention::Move;
+                                    if args.len() == 2 {
+                                        self.expect_core_arg("Body.reader", 1, &Type::Int, &mut args[1]);
+                                    }
+                                    Some(http_result(ty.clone()))
+                                }
+                                _ => None,
+                            };
+                            if let Some(ret) = http_static {
+                                *resolved_ret_out = Some(ret.clone());
+                                return Some(ret);
+                            }
                             if let Some(ret) = Collections::builtin_method_return(&ty, method, args.len(), true) {
                                 let ret = self.finish_builtin_method(receiver, method, &ty, args, span, ret);
                                 let ret = if matches!(ns.as_str(), "jet.crypto" | "core.crypto") {
@@ -1839,16 +1910,87 @@ impl<'a> Checker<'a> {
                 return ret;
             }
             // D-NETDEP1=A / D-HTTPLIB1=A: method calls on HTTP types.
+            if matches!(&recv_ty, Type::Named(name) if name == "HttpBody") {
+                let error = Type::Named("HttpError".to_string());
+                let result = |ok| Type::Result { ok: Box::new(ok), err: Box::new(error.clone()) };
+                let special = match (method, args.len()) {
+                    ("json", 1) => {
+                        self.expect_core_arg("Body.json", 0, &Type::Int, &mut args[0]);
+                        let target = type_args.first().cloned().or_else(|| {
+                            match &self.expected_type {
+                                Some(Type::Result { ok, .. }) => Some((**ok).clone()),
+                                _ => None,
+                            }
+                        });
+                        match target {
+                            Some(target) => Some(result(target)),
+                            None => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0901",
+                                    "`Body.json` needs a decode type".to_string(),
+                                    "JSON bytes can decode to many types, so the target must be explicit".to_string(),
+                                    "write `body.json<Type>(limit)`".to_string(),
+                                    Some(span),
+                                ));
+                                Some(result(Type::Named("Unknown".to_string())))
+                            }
+                        }
+                    }
+                    ("copy_to", 2) => {
+                        self.expect_core_arg_moving("Body.copy_to", 0, &Type::Named("FileWriter".to_string()), &mut args[0]);
+                        args[0].convention = AccessConvention::Move;
+                        self.expect_core_arg("Body.copy_to", 1, &Type::Int, &mut args[1]);
+                        Some(result(Type::Int))
+                    }
+                    ("bytes" | "text", 1) => {
+                        self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
+                        None
+                    }
+                    ("chunks", 0) => {
+                        *recv_type_out = Some("HttpBody".to_string());
+                        return Some(Type::Named("HttpBodyChunks".to_string()));
+                    }
+                    ("chunks", 1) => {
+                        self.expect_core_arg("Body.chunks", 0, &Type::Int, &mut args[0]);
+                        None
+                    }
+                    _ => None,
+                };
+                if let Some(ret) = special {
+                    *recv_type_out = Some("HttpBody".to_string());
+                    return Some(ret);
+                }
+            }
             if let Some(ret) = http_type_method_return(&recv_ty, method, args) {
                 if let Type::Named(name) = &recv_ty {
                     self.check_http_route_constant(name, method, args);
                 }
-                for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
+                if matches!(&recv_ty, Type::Named(name) if name == "HttpMux")
+                    && matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options")
+                    && args.len() == 2
+                {
+                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(
+                        method,
+                        1,
+                        &Type::Fn {
+                            params: vec![Type::Named("HttpRequest".to_string())],
+                            ret: Some(Box::new(Type::Result {
+                                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                                err: Box::new(Type::Named("HttpError".to_string())),
+                            })),
+                            effect_bound: None,
+                        },
+                        &mut args[1],
+                    );
+                } else {
+                    for a in args.iter_mut() {
+                        self.infer(&mut a.expr);
+                    }
                 }
                 *recv_type_out = Some(match &recv_ty {
                     Type::Named(n) => n.clone(),
-                    _ => "HttpClientReq".to_string(),
+                    _ => "HttpRequest".to_string(),
                 });
                 return ret;
             }

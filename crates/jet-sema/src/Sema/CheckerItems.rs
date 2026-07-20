@@ -917,6 +917,30 @@ impl<'a> Checker<'a> {
         fields: &mut [(String, Span, Expr)],
         span: Span,
     ) -> Type {
+        // D-HTTP-CORE2=A: shared HTTP messages enforce typed headers and a
+        // single-use byte Body. The old public-field literals cannot preserve
+        // those invariants and ended at this core API break.
+        if matches!(type_name, "HttpRequest" | "HttpResponse") {
+            let (what, fix) = if type_name == "HttpResponse" {
+                (
+                    "`HttpResponse.{ ... }` was replaced by the shared HTTP response constructor",
+                    "use `server.response(status, text)`, then add headers with `.header(...)`",
+                )
+            } else {
+                (
+                    "`HttpRequest.{ ... }` was replaced by the shared HTTP request constructor",
+                    "use `client.request(method, url)`, then configure it with request methods",
+                )
+            };
+            self.diags.push(Diagnostic::error(
+                "E2002",
+                what.to_string(),
+                "HTTP messages now contain validated typed fields and a byte-native, single-use Body; public-field literals cannot preserve those invariants".to_string(),
+                fix.to_string(),
+                Some(span),
+            ));
+            return Type::Named(type_name.to_string());
+        }
         // E2-M10: compiler-known constructable struct types (HttpRequest, HttpResponse).
         // These have no user-module owner but are valid in struct literals.
         if let Some(core_fields) = core_constructable_fields(type_name) {

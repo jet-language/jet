@@ -714,5 +714,8 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         | ("core.auth", "Claims" | "AuthError")
         | ("core.vault", "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "KeyStatus" | "VaultError")
         | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TlsVersion")
+        | ("jet.http" | "core.http.client" | "core.http.server",
+            "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
+            | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HttpError")
     )
 }

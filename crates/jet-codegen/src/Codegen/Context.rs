@@ -971,18 +971,24 @@ impl Cx {
                 format!("{}jet_email::{}", self.root_prefix, name)
             }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
-            Type::Named(name) if name == "HttpClientReq" => "JetHttpClientReq".to_string(),
-            Type::Named(name) if name == "HttpClientResp" => "JetHttpClientResp".to_string(),
+            Type::Named(name) if name == "HttpRequest" => "JetHttpRequest".to_string(),
+            Type::Named(name) if name == "HttpResponse" => "JetHttpResponse".to_string(),
+            Type::Named(name) if name == "HttpMethod" => "JetHttpMethod".to_string(),
+            Type::Named(name) if name == "HttpStatus" => "JetHttpStatus".to_string(),
+            Type::Named(name) if name == "HttpVersion" => "JetHttpVersion".to_string(),
+            Type::Named(name) if name == "HttpHeaderName" => "JetHttpHeaderName".to_string(),
+            Type::Named(name) if name == "HttpHeaderValue" => "JetHttpHeaderValue".to_string(),
             Type::Named(name) if name == "HttpBody" => "JetHttpBody".to_string(),
+            Type::Named(name) if name == "HttpBodyChunks" => "JetHttpBodyChunks".to_string(),
             Type::Named(name) if name == "HttpError" => "JetHttpError".to_string(),
             Type::Named(name) if name == "HttpOperation" => "JetHttpOperation".to_string(),
             Type::Named(name) if name == "HttpHeaders" => "JetHttpHeaders".to_string(),
             Type::Named(name) if name == "HttpMux" => "JetHttpMux".to_string(),
-            Type::Named(name) if name == "HttpHandler" => "JetHttpMuxHandlerFn".to_string(),
+            Type::Named(name) if name == "HttpHandler" => "JetHttpHandler".to_string(),
             Type::Named(name) if name == "HttpServer" => "JetHttpServer".to_string(),
             Type::Named(name) if name == "HttpShutdownReport" => "JetHttpShutdownReport".to_string(),
-            Type::Named(name) if name == "HttpSrvReq" => "JetHttpSrvReq".to_string(),
-            Type::Named(name) if name == "HttpSrvResp" => "JetHttpSrvResp".to_string(),
+            Type::Named(name) if name == "HttpRequest" => "JetHttpRequest".to_string(),
+            Type::Named(name) if name == "HttpResponse" => "JetHttpResponse".to_string(),
             Type::Named(name) if name == "HttpServerTls" => "JetHttpServerTls".to_string(),
             // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`)
             // erases to a plain message — never user-constructed.
@@ -1532,18 +1538,24 @@ impl Cx {
         ret: Option<&Type>,
         mut_capture: bool,
     ) -> String {
+        let thread_safe = params.len() == 1
+            && matches!(&params[0], Type::Named(name) if name == "HttpHandler")
+            && matches!(ret, Some(Type::Named(name)) if name == "HttpHandler");
         let ps = params
             .iter()
-            .map(|p| rust_param_type(self, AccessConvention::Read, p))
+            .map(|p| {
+                if thread_safe {
+                    self.rust_type(p)
+                } else {
+                    rust_param_type(self, AccessConvention::Read, p)
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ");
         let r = ret
             .map(|t| self.rust_type(t))
             .unwrap_or_else(|| "()".to_string());
         let trait_name = if mut_capture { "FnMut" } else { "Fn" };
-        let thread_safe = params.len() == 1
-            && matches!(&params[0], Type::Named(name) if name == "HttpHandler")
-            && matches!(ret, Some(Type::Named(name)) if name == "HttpHandler");
         if thread_safe {
             format!("Box<dyn {}({}) -> {} + Send + Sync>", trait_name, ps, r)
         } else {

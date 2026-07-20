@@ -1069,7 +1069,10 @@ impl<'a> Checker<'a> {
                                     (Type::Named(name), Type::Fn { params, ret: Some(ret), .. })
                                         if name == "HttpHandler"
                                             && params == &vec![Type::Named("HttpRequest".to_string())]
-                                            && ret.as_ref() == &Type::Named("HttpResponse".to_string())
+                                            && ret.as_ref() == &Type::Result {
+                                                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                                                err: Box::new(Type::Named("HttpError".to_string())),
+                                            }
                                 );
                                 let string_view_compatible = string_view_return && et == Type::String;
                                 if et != rt && !http_handler_lambda && !string_view_compatible {
@@ -1355,6 +1358,18 @@ impl<'a> Checker<'a> {
                                 // `child.stderr.lines()` — streaming subprocess output.
                                 Some(Type::Named(n)) if n == "ProcessLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
+                                }
+                                Some(Type::Named(n)) if n == "HttpBodyChunks" => {
+                                    self.declare_loop_var(
+                                        var.clone(),
+                                        *var_span,
+                                        &Type::Result {
+                                            ok: Box::new(Type::List(Box::new(Type::Named(
+                                                "U8".to_string(),
+                                            )))),
+                                            err: Box::new(Type::Named("HttpError".to_string())),
+                                        },
+                                    );
                                 }
                                 Some(Type::Named(n))
                                     if self.trait_reg.iterable_items.contains_key(n) =>

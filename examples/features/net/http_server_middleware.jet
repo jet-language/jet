@@ -4,19 +4,26 @@ use core.http.server as http_server
 use core.tasks as tasks
 use core.time as time
 
-fn outer(next: ^HttpHandler) -> HttpHandler {
-    return (req: HttpSrvReq) => {
-        response :: next.handle(req)
-        http_server.response(response.status(), "outer>{response.body()}<outer")
+fn outer(next: HttpHandler) -> HttpHandler {
+    owned :: ~next
+    return take(owned) (req: HttpRequest) => {
+        if owned.handle(req) == {
+            Ok(response) -> { return Ok(http_server.response(response.status(), "outer>{response.body().text(1048576) ?? "invalid body"}<outer")) }
+            Err(error) -> { return Err(error) }
+        }
     }
 }
 
-fn inner(next: ^HttpHandler) -> HttpHandler {
-    return (req: HttpSrvReq) => if req.path() == "/blocked" {
-        http_server.response(403, "blocked")
-    } else {
-        response :: next.handle(req)
-        http_server.response(response.status(), "inner>{response.body()}<inner")
+fn inner(next: HttpHandler) -> HttpHandler {
+    owned :: ~next
+    return take(owned) (req: HttpRequest) => {
+        if req.path() == "/blocked" {
+            return Ok(http_server.response(403, "blocked"))
+        }
+        if owned.handle(req) == {
+            Ok(response) -> { return Ok(http_server.response(response.status(), "inner>{response.body().text(1048576) ?? "invalid body"}<inner")) }
+            Err(error) -> { return Err(error) }
+        }
     }
 }
 
@@ -24,8 +31,8 @@ fn run() {
     mux :: http_server.mux()
     mux.middleware(outer)
     mux.middleware(inner)
-    mux.get("/ok", (req: HttpSrvReq) => http_server.response(200, "handler"))
-    mux.get("/blocked", (req: HttpSrvReq) => http_server.response(200, "must not run"))
+    mux.get("/ok", (req: HttpRequest) => Ok(http_server.response(200, "handler")))
+    mux.get("/blocked", (req: HttpRequest) => Ok(http_server.response(200, "must not run")))
 
     server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
     addr :: server.local_addr() ?? panic("address")
@@ -33,10 +40,10 @@ fn run() {
     time.sleep(20)
     success :: http_client.get("http://{addr}/ok") ?? panic("ok")
     print(success.status())
-    print(success.body())
+    print(success.body().text(1048576) ?? panic("success body"))
     blocked :: http_client.get("http://{addr}/blocked") ?? panic("blocked")
     print(blocked.status())
-    print(blocked.body())
+    print(blocked.body().text(1048576) ?? panic("blocked body"))
     grace :: Duration.milliseconds(100) ?? panic("duration")
     server.shutdown(grace) ?? panic("shutdown")
     serving.join()

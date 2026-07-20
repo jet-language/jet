@@ -2734,12 +2734,12 @@ pub enum THandleOp {
         kind: String,
         method: String,
     },
-    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP client type (HttpClientReq/HttpClientResp).
+    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP client type (HttpRequest/HttpResponse).
     HttpClientMethod {
         kind: String,
         method: String,
     },
-    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP server type (HttpMux/HttpSrvReq/HttpSrvResp).
+    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP server type (HttpMux/HttpRequest/HttpResponse).
     HttpServerMethod {
         kind: String,
         method: String,

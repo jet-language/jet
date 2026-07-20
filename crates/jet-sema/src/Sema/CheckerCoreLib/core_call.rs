@@ -1926,7 +1926,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
                     return Some(Type::Named("HttpRequest".to_string()));
                 }
-                // D-ROUTE1=A: http.dispatch(router, req) → HttpResponse.
+                // D-HTTP-CORE2=A: the router's sole Handler propagates HttpError.
                 ("jet.http", "dispatch") => {
                     if args.len() != 2 {
                         self.diags
@@ -1970,7 +1970,10 @@ impl<'a> Checker<'a> {
                             _ => {}
                         }
                     }
-                    return Some(Type::Named("HttpResponse".to_string()));
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("HttpResponse".to_string())),
+                        err: Box::new(Type::Named("HttpError".to_string())),
+                    });
                 }
                 // E2-M10: jet.http.serve(addr, handler) — blocking accept loop.
                 // handler: fn(HttpRequest) -> HttpResponse (lambda) or HttpRouter.

@@ -217,16 +217,12 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
     matches!(
         recv_type,
         Some(
-            "HttpClientReq"
-                | "HttpClientResp"
-                | "HttpRequest"
+            "HttpRequest"
                 | "HttpResponse"
                 | "HttpHeaders"
                 | "HttpBody"
                 | "HttpMux"
                 | "HttpHandler"
-                | "HttpSrvReq"
-                | "HttpSrvResp"
                 | "HttpServer"
                 | "HttpServerTls",
         )
@@ -236,22 +232,6 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
 /// D-NETDEP1=A / D-HTTPLIB1=A: is `method` valid for this HTTP type?
 pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool {
     match recv_type {
-        Some("HttpClientReq") => matches!(
-            method,
-            "header"
-                | "body"
-                | "timeout"
-                | "connect_timeout"
-                | "read_timeout"
-                | "total_timeout"
-                | "redirects"
-                | "proxy"
-                | "cookie"
-                | "form"
-                | "multipart_text"
-                | "send"
-        ),
-        Some("HttpClientResp") => matches!(method, "status" | "body" | "header" | "cookies"),
         Some("HttpRequest") => matches!(
             method,
             "method" | "path" | "param" | "body_len" | "under_limit" | "header" | "body"
@@ -260,14 +240,9 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         ),
         Some("HttpResponse") => matches!(method, "status" | "body" | "header" | "cookies"),
         Some("HttpHeaders") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
-        Some("HttpBody") => matches!(method, "bytes" | "text" | "chunks"),
+        Some("HttpBody") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
         Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"),
         Some("HttpHandler") => method == "handle",
-        Some("HttpSrvReq") => matches!(
-            method,
-            "method" | "path" | "body" | "param" | "header" | "body_len" | "under_limit"
-        ),
-        Some("HttpSrvResp") => matches!(method, "header" | "status" | "body"),
         Some("HttpServer") => matches!(method, "local_addr" | "serve" | "shutdown"),
         _ => false,
     }

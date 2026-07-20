@@ -396,8 +396,6 @@ pub struct JetTlsPeerIdentity {
 // D-HTTP-ROUTE-SYNTAX2=A: both HTTP front doors use the shared route grammar.
 type RouteSegment = JetHttpRouteSegment;
 
-type JetHttpHandler = Box<dyn Fn(JetHttpRequest) -> JetHttpResponse + Send + Sync>;
-
 struct JetHttpRoute {
     method: String,
     template: String,
@@ -2889,7 +2887,14 @@ where
 }
 
 fn jet_http_parse_request(raw: &str) -> JetHttpRequest {
-    jet_http_srv_parse(raw.as_bytes()).unwrap_or_else(|_| {
+    let normalized;
+    let bytes = if jet_http_header_end(raw.as_bytes()).is_some() {
+        raw.as_bytes()
+    } else {
+        normalized = format!("{}\r\n\r\n", raw.replace('\n', "\r\n"));
+        normalized.as_bytes()
+    };
+    jet_http_srv_parse(bytes).unwrap_or_else(|_| {
         JetHttpRequest::server("GET", "/".to_string(), Vec::new(), JetHttpHeaders::new())
     })
 }
@@ -2950,10 +2955,13 @@ fn jet_http_router_register(
     });
 }
 
-fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetHttpResponse {
+fn jet_http_router_dispatch(
+    router: &JetHttpRouter,
+    req: JetHttpRequest,
+) -> Result<JetHttpResponse, JetHttpError> {
     let path_segs = match jet_http_route_path(&req.path) {
         Ok(path) => path,
-        Err(_) => return jet_http_srv_response(400, &"400 bad request".to_string()),
+        Err(_) => return Ok(jet_http_srv_response(400, &"400 bad request".to_string())),
     };
     let mut candidates: Vec<(usize, std::collections::BTreeMap<String, String>)> = Vec::new();
     for (i, route) in router.routes.iter().enumerate() {
@@ -2963,7 +2971,7 @@ fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetH
         }
     }
     if candidates.is_empty() {
-        return jet_http_srv_response(404, &"404 not found".to_string());
+        return Ok(jet_http_srv_response(404, &"404 not found".to_string()));
     }
     let method_match = candidates
         .iter()
@@ -2974,7 +2982,7 @@ fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetH
             jet_http_route_selection_cmp(&left_pattern, *left, &right_pattern, *right)
         });
     let Some((route_idx, params)) = method_match else {
-        return jet_http_srv_response(405, &"405 method not allowed".to_string());
+        return Ok(jet_http_srv_response(405, &"405 method not allowed".to_string()));
     };
     let route = &router.routes[*route_idx];
     let mut req2 = req;
@@ -2985,7 +2993,10 @@ fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetH
 
 fn jet_http_serve_router(addr: &String, router: JetHttpRouter) {
     let router = std::sync::Arc::new(router);
-    jet_http_serve(addr, move |request| jet_http_router_dispatch(&router, request))
+    jet_http_serve(addr, move |request| {
+        jet_http_router_dispatch(&router, request)
+            .unwrap_or_else(|_| jet_http_srv_response(500, &"500 Internal Server Error".to_string()))
+    })
 }
 
 fn jet_http_request_param(req: &JetHttpRequest, name: &String) -> Option<String> {

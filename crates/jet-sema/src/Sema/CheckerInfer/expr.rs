@@ -1476,7 +1476,17 @@ impl<'a> Checker<'a> {
                 is_option,
             } => self.infer_or_fallback(value, fallback, *span, is_option),
             Expr::Lambda(lam) => {
-                let expected = self.expected_type.clone();
+                let expected = match self.expected_type.as_ref() {
+                    Some(Type::Named(name)) if name == "HttpHandler" => Some(Type::Fn {
+                        params: vec![Type::Named("HttpRequest".to_string())],
+                        ret: Some(Box::new(Type::Result {
+                            ok: Box::new(Type::Named("HttpResponse".to_string())),
+                            err: Box::new(Type::Named("HttpError".to_string())),
+                        })),
+                        effect_bound: None,
+                    }),
+                    _ => self.expected_type.clone(),
+                };
                 self.check_lambda(lam, expected.as_ref())
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),

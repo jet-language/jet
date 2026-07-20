@@ -7,21 +7,89 @@
 // JetHttpClientReq / JetHttpClientResp are defined in CoreLib.rs (embedded in the
 // generated program) and never appear here.
 
+use std::io::Read;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-const HTTP_CLIENT_TEXT_LIMIT: usize = 8 * 1024 * 1024;
-const HTTP_CLIENT_READ_CHUNK: usize = 64 * 1024;
 const HTTP_CLIENT_DEFAULT_REDIRECTS: u32 = 10;
 
-fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, String> {
+/// Private, typed transport failures. Generated code exhaustively projects these
+/// to the public closed HttpError without carrying backend prose across the seam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetHttpBridgeError {
+    InvalidUrl,
+    InvalidHeader,
+    InvalidFraming,
+    Resolve,
+    Connect,
+    Tls,
+    Timeout,
+    Proxy,
+    Redirect,
+    Protocol,
+    Io,
+    ResourceUnavailable,
+    Cancelled,
+    Internal,
+}
+
+type BodyReader = Arc<Mutex<Box<dyn Read + Send>>>;
+
+fn body_readers() -> &'static Mutex<std::collections::HashMap<i64, BodyReader>> {
+    static READERS: OnceLock<Mutex<std::collections::HashMap<i64, BodyReader>>> = OnceLock::new();
+    READERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn register_body(reader: Box<dyn Read + Send>) -> i64 {
+    static NEXT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+    let handle = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    body_readers()
+        .lock()
+        .expect("HTTP body registry lock")
+        .insert(handle, Arc::new(Mutex::new(reader)));
+    handle
+}
+
+pub fn jet_http_client_body_read_impl(
+    handle: i64,
+    max_chunk: usize,
+) -> Result<Option<Vec<u8>>, JetHttpBridgeError> {
+    let reader = body_readers()
+        .lock()
+        .map_err(|_| JetHttpBridgeError::Internal)?
+        .get(&handle)
+        .cloned()
+        .ok_or(JetHttpBridgeError::Internal)?;
+    let mut chunk = vec![0; max_chunk];
+    let read = reader
+        .lock()
+        .map_err(|_| JetHttpBridgeError::Internal)?
+        .read(&mut chunk)
+        .map_err(|_| JetHttpBridgeError::Io)?;
+    if read == 0 {
+        let _ = body_readers().lock().map(|mut readers| readers.remove(&handle));
+        return Ok(None);
+    }
+    chunk.truncate(read);
+    Ok(Some(chunk))
+}
+
+pub fn jet_http_client_body_close_impl(handle: i64) {
+    let _ = body_readers().lock().map(|mut readers| readers.remove(&handle));
+}
+
+fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, JetHttpBridgeError> {
     let milliseconds = u64::try_from(milliseconds)
-        .map_err(|_| format!("HTTP {name} must be non-negative"))?;
+        .map_err(|_| {
+            let _ = name;
+            JetHttpBridgeError::Timeout
+        })?;
     Ok(Duration::from_millis(milliseconds))
 }
 
 /// Perform an HTTP GET. Returns (status_code, body, headers_flat) where headers_flat
 /// is alternating [key, value, key, value, ...].
-pub fn jet_http_client_get_impl(url: &String) -> Result<(i64, Vec<u8>, Vec<String>), String> {
+pub fn jet_http_client_get_impl(url: &String) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
     jet_http_client_send_impl("GET", url, &[], None, None, None, None, None, None, None, &[], &[], &[])
 }
 
@@ -29,7 +97,7 @@ pub fn jet_http_client_get_impl(url: &String) -> Result<(i64, Vec<u8>, Vec<Strin
 pub fn jet_http_client_post_impl(
     url: &String,
     body: &String,
-) -> Result<(i64, Vec<u8>, Vec<String>), String> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
     jet_http_client_send_impl(
         "POST",
         url,
@@ -63,7 +131,7 @@ pub fn jet_http_client_send_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, Vec<u8>, Vec<String>), String> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
     let default_timeout = validated_timeout("timeout", timeout_ms.unwrap_or(30_000))?;
     let connect_timeout = connect_timeout_ms
         .map(|milliseconds| validated_timeout("connect timeout", milliseconds))
@@ -78,9 +146,7 @@ pub fn jet_http_client_send_impl(
         .transpose()?;
     let redirects = redirects
         .map(|limit| {
-            u32::try_from(limit).map_err(|_| {
-                "HTTP redirect limit must be between 0 and 4294967295".to_string()
-            })
+            u32::try_from(limit).map_err(|_| JetHttpBridgeError::Redirect)
         })
         .transpose()?;
     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
@@ -97,7 +163,7 @@ pub fn jet_http_client_send_impl(
     }
     if let Some(p) = proxy {
         builder = builder.proxy(
-            ureq::Proxy::new(p).map_err(|_| "HTTP proxy URL is invalid".to_string())?,
+            ureq::Proxy::new(p).map_err(|_| JetHttpBridgeError::Proxy)?,
         );
     }
     let agent = builder.build();
@@ -142,13 +208,11 @@ pub fn jet_http_client_send_impl(
         Ok(resp) => {
             let status = resp.status() as i64;
             let flat = flatten_response_headers(&resp);
-            let body = read_response_bytes(resp)?;
-            Ok((status, body, flat))
+            Ok(response_parts(status, resp, flat))
         }
         Err(ureq::Error::Status(code, resp)) => {
             let flat = flatten_response_headers(&resp);
-            let body = read_response_bytes(resp)?;
-            Ok((code as i64, body, flat))
+            Ok(response_parts(code as i64, resp, flat))
         }
         Err(ureq::Error::Transport(error))
             if matches!(
@@ -156,23 +220,23 @@ pub fn jet_http_client_send_impl(
                 ureq::ErrorKind::InvalidUrl | ureq::ErrorKind::UnknownScheme
             ) =>
         {
-            Err("HTTP URL is invalid".to_string())
+            Err(JetHttpBridgeError::InvalidUrl)
         }
         Err(ureq::Error::Transport(error)) if error.kind() == ureq::ErrorKind::ProxyConnect => {
-            Err("HTTP proxy connection failed".to_string())
+            Err(JetHttpBridgeError::Proxy)
         }
         Err(ureq::Error::Transport(error))
             if error.kind() == ureq::ErrorKind::ProxyUnauthorized =>
         {
-            Err("HTTP proxy authentication failed".to_string())
+            Err(JetHttpBridgeError::Proxy)
         }
         Err(ureq::Error::Transport(error))
             if error.kind() == ureq::ErrorKind::ConnectionFailed =>
         {
-            Err("HTTP connection failed".to_string())
+            Err(JetHttpBridgeError::Connect)
         }
         Err(ureq::Error::Transport(error)) if error.kind() == ureq::ErrorKind::Io => {
-            Err("HTTP transport I/O failed".to_string())
+            Err(JetHttpBridgeError::Io)
         }
         Err(ureq::Error::Transport(error))
             if matches!(
@@ -180,38 +244,47 @@ pub fn jet_http_client_send_impl(
                 ureq::ErrorKind::BadStatus | ureq::ErrorKind::BadHeader
             ) =>
         {
-            Err("HTTP response framing is invalid".to_string())
+            Err(if error.kind() == ureq::ErrorKind::BadHeader {
+                JetHttpBridgeError::InvalidHeader
+            } else {
+                JetHttpBridgeError::InvalidFraming
+            })
         }
         Err(ureq::Error::Transport(error))
             if error.kind() == ureq::ErrorKind::TooManyRedirects =>
         {
-            Err(format!("HTTP redirect limit {redirect_limit} exceeded"))
+            let _ = redirect_limit;
+            Err(JetHttpBridgeError::Redirect)
         }
-        Err(e) => Err(e.to_string()),
+        Err(ureq::Error::Transport(error)) => Err(match error.kind() {
+            ureq::ErrorKind::Dns => JetHttpBridgeError::Resolve,
+            ureq::ErrorKind::ConnectionFailed => JetHttpBridgeError::Connect,
+            ureq::ErrorKind::Io => JetHttpBridgeError::Io,
+            ureq::ErrorKind::InvalidUrl | ureq::ErrorKind::UnknownScheme => {
+                JetHttpBridgeError::InvalidUrl
+            }
+            ureq::ErrorKind::ProxyConnect | ureq::ErrorKind::ProxyUnauthorized => {
+                JetHttpBridgeError::Proxy
+            }
+            ureq::ErrorKind::TooManyRedirects => JetHttpBridgeError::Redirect,
+            ureq::ErrorKind::BadStatus => JetHttpBridgeError::InvalidFraming,
+            ureq::ErrorKind::BadHeader => JetHttpBridgeError::InvalidHeader,
+            _ => JetHttpBridgeError::Internal,
+        }),
+        Err(ureq::Error::Status(_, _)) => unreachable!("status responses are handled above"),
     }
 }
 
-fn read_response_bytes(response: ureq::Response) -> Result<Vec<u8>, String> {
-    use std::io::Read;
-
-    let mut reader = response.into_reader();
-    let mut bytes = Vec::new();
-    let mut chunk = [0u8; HTTP_CLIENT_READ_CHUNK];
-    loop {
-        let read = reader
-            .read(&mut chunk)
-            .map_err(|_| "HTTP response body read failed".to_string())?;
-        if read == 0 {
-            break;
-        }
-        if bytes.len() + read > HTTP_CLIENT_TEXT_LIMIT {
-            return Err(format!(
-                "HTTP response body exceeds {HTTP_CLIENT_TEXT_LIMIT}-byte limit"
-            ));
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    }
-    Ok(bytes)
+fn response_parts(
+    status: i64,
+    response: ureq::Response,
+    headers: Vec<String>,
+) -> (i64, i64, Option<i64>, Vec<String>) {
+    let length = response
+        .header("content-length")
+        .and_then(|value| value.parse::<i64>().ok());
+    let handle = register_body(response.into_reader());
+    (status, handle, length, headers)
 }
 
 fn flatten_response_headers(response: &ureq::Response) -> Vec<String> {

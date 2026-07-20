@@ -687,20 +687,21 @@ fn http_router_dispatch() {
     }
     let src = "\
 use core.http as http
-fn handle_root(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: \"welcome\", headers: []}
+use core.http.server as server
+fn handle_root(req: HttpRequest) -> HttpResponse ? HttpError {
+    return Ok(server.response(200, \"welcome\"))
 }
-fn handle_user(req: HttpRequest) -> HttpResponse {
+fn handle_user(req: HttpRequest) -> HttpResponse ? HttpError {
     id :: req.param(\"id\") ?? \"unknown\"
-    return HttpResponse.{status: \"200 OK\", body: \"user={id}\", headers: []}
+    return Ok(server.response(200, \"user={id}\"))
 }
 fn run() {
     router :: http.router()
     router.get(\"/\", handle_root)
     router.get(\"/users/:id\", handle_user)
     req :: http.parse(\"GET / HTTP/1.1\\nHost: localhost\")
-    resp :: http.dispatch(router, req)
-    print(resp.body())
+    resp :: http.dispatch(router, req) ?? panic(\"dispatch\")
+    print(resp.body().text(1024) ?? panic(\"body\"))
 }
 ";
     let (code, stdout) = build_and_run("tir_http_router", src);
@@ -717,8 +718,9 @@ fn http_router_duplicate_route_is_jet_runtime_error() {
     }
     let src = "\
 use core.http as http
-fn handle(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: \"ok\", headers: []}
+use core.http.server as server
+fn handle(req: HttpRequest) -> HttpResponse ? HttpError {
+    return Ok(server.response(200, \"ok\"))
 }
 fn run() {
     router :: http.router()
@@ -734,7 +736,7 @@ fn run() {
         "missing Jet-owned E2804 runtime text:\n{stderr}"
     );
     assert!(
-        stderr.contains("tir_http_duplicate_route.jet:8"),
+        stderr.contains("tir_http_duplicate_route.jet:9"),
         "missing Jet source location:\n{stderr}"
     );
     assert!(
@@ -750,23 +752,24 @@ fn http_router_named_catchall_and_encoded_marker_literals() {
     }
     let src = "\
 use core.http as http
-fn asset(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: req.param(\"path\") ?? \"missing\", headers: []}
+use core.http.server as server
+fn asset(req: HttpRequest) -> HttpResponse ? HttpError {
+    return Ok(server.response(200, req.param(\"path\") ?? \"missing\"))
 }
-fn literal(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: \"literal\", headers: []}
+fn literal(req: HttpRequest) -> HttpResponse ? HttpError {
+    return Ok(server.response(200, \"literal\"))
 }
-fn catch(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: \"catch\", headers: []}
+fn catch(req: HttpRequest) -> HttpResponse ? HttpError {
+    return Ok(server.response(200, \"catch\"))
 }
-fn param_catch(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: \"param-catch\", headers: []}
+fn param_catch(req: HttpRequest) -> HttpResponse ? HttpError {
+    return Ok(server.response(200, \"param-catch\"))
 }
-fn param_first(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: \"param-first\", headers: []}
+fn param_first(req: HttpRequest) -> HttpResponse ? HttpError {
+    return Ok(server.response(200, \"param-first\"))
 }
-fn static_first(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: \"static-first\", headers: []}
+fn static_first(req: HttpRequest) -> HttpResponse ? HttpError {
+    return Ok(server.response(200, \"static-first\"))
 }
 fn run() {
     router :: http.router()
@@ -776,14 +779,14 @@ fn run() {
     router.get(\"/a/:id/*rest\", param_catch)
     router.get(\"/tie/:first/static\", param_first)
     router.get(\"/tie/static/:last\", static_first)
-    first :: http.dispatch(router, http.parse(\"GET /assets/css/site.css HTTP/1.1\\nHost: localhost\"))
-    second :: http.dispatch(router, http.parse(\"GET /literal/%3Aadmin/%2Astar HTTP/1.1\\nHost: localhost\"))
-    third :: http.dispatch(router, http.parse(\"GET /a/x/y HTTP/1.1\\nHost: localhost\"))
-    fourth :: http.dispatch(router, http.parse(\"GET /tie/static/static HTTP/1.1\\nHost: localhost\"))
-    print(first.body())
-    print(second.body())
-    print(third.body())
-    print(fourth.body())
+    first :: http.dispatch(router, http.parse(\"GET /assets/css/site.css HTTP/1.1\\nHost: localhost\")) ?? panic(\"dispatch\")
+    second :: http.dispatch(router, http.parse(\"GET /literal/%3Aadmin/%2Astar HTTP/1.1\\nHost: localhost\")) ?? panic(\"dispatch\")
+    third :: http.dispatch(router, http.parse(\"GET /a/x/y HTTP/1.1\\nHost: localhost\")) ?? panic(\"dispatch\")
+    fourth :: http.dispatch(router, http.parse(\"GET /tie/static/static HTTP/1.1\\nHost: localhost\")) ?? panic(\"dispatch\")
+    print(first.body().text(1024) ?? panic(\"body\"))
+    print(second.body().text(1024) ?? panic(\"body\"))
+    print(third.body().text(1024) ?? panic(\"body\"))
+    print(fourth.body().text(1024) ?? panic(\"body\"))
 }
 ";
     let (code, stdout) = build_and_run("tir_http_route_syntax", src);
@@ -798,13 +801,15 @@ fn http_router_retired_bare_catchall_is_jet_runtime_error() {
     }
     let src = "\
 use core.http as http
-fn handle(req: HttpRequest) -> HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: \"ok\", headers: []}
+use core.http.server as server
+use core.env as env
+fn handle(req: HttpRequest) -> HttpResponse ? HttpError {
+    return Ok(server.response(200, \"ok\"))
 }
 fn run() {
     router :: http.router()
-    marker :: http.parse(\"GET * HTTP/1.1\\nHost: localhost\").path()
-    pattern :: \"/assets/{marker}\"
+    dynamic :: env.get(\"JET_HTTP_TEST_MARKER\") ?? \"*\"
+    pattern :: \"/assets/{dynamic}\"
     router.get(pattern, handle)
 }
 ";
@@ -816,7 +821,7 @@ fn run() {
         "missing Jet-owned E2805 runtime text:\n{stderr}"
     );
     assert!(
-        stderr.contains("tir_http_retired_catchall.jet:9"),
+        stderr.contains("tir_http_retired_catchall.jet:11"),
         "missing source location:\n{stderr}"
     );
     assert!(

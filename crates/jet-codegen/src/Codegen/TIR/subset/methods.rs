@@ -425,6 +425,23 @@ pub(crate) fn method_call_in_subset(
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                     }
+                    // D-HTTP-CORE2=A: exact nominal HTTP constructors exported
+                    // as `http.Type.method(...)` and rewritten by sema to their
+                    // internal `Http*` type names.
+                    ("HttpMethod", "custom", 1)
+                    | ("HttpMethod", "get" | "head" | "post" | "put" | "delete"
+                        | "connect" | "options" | "trace" | "patch", 0)
+                    | ("HttpStatus", "new", 1)
+                    | ("HttpVersion", "http_1_0" | "http_1_1" | "http_2", 0)
+                    | ("HttpHeaderName" | "HttpHeaderValue", "new", 1)
+                    | ("HttpHeaders", "new", 0)
+                    | ("HttpBody", "empty", 0)
+                    | ("HttpBody", "bytes" | "json" | "form" | "multipart", 1)
+                    | ("HttpBody", "text" | "reader", 1 | 2) => {
+                        return args.iter().all(|argument| {
+                            argument.label.is_none() && expr_in_subset(&argument.expr, cx, locals)
+                        });
+                    }
                     // D-HOLE1: `Option.lift2(f, a, b)` — static combinator, not a
                     // user type. `f` is a plain in-subset lambda arg (no closure-arg
                     // gate needed here — `expr_in_subset`'s `Expr::Lambda` arm already

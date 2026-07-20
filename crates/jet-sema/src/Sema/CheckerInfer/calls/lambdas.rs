@@ -333,6 +333,13 @@ impl<'a> Checker<'a> {
             self.txn_depth = 0;
             let saved_expected = self.expected_type.clone();
             self.expected_type = exp_ret.map(|ret| (**ret).clone());
+            // A block-bodied lambda's `return` belongs to the lambda, not to the
+            // enclosing named function. Give statement checking the expected
+            // callback result while the lambda body is active.
+            let saved_ret = self.ret.clone();
+            if let Some(ret) = exp_ret {
+                self.ret = Some((**ret).clone());
+            }
             let saved_in_lambda_body = self.in_lambda_body;
             let saved_inferred_mut_captures =
                 std::mem::take(&mut self.inferred_lambda_mut_captures);
@@ -384,6 +391,7 @@ impl<'a> Checker<'a> {
                     .collect();
             }
             self.in_lambda_body = saved_in_lambda_body;
+            self.ret = saved_ret;
             self.expected_type = saved_expected;
             self.txn_depth = saved_txn_depth;
     

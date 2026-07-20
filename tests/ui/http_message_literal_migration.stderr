@@ -1,0 +1,15 @@
+Error [E2002]: `HttpResponse.{ ... }` was replaced by the shared HTTP response constructor
+  --> tests/ui/http_message_literal_migration.jet:2:17
+    |
+  2 |     response :: HttpResponse.{status: "200 OK", body: "old", headers: []}
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: HTTP messages now contain validated typed fields and a byte-native, single-use Body; public-field literals cannot preserve those invariants
+ Fix: use `server.response(status, text)`, then add headers with `.header(...)`
+
+Error [E2002]: `HttpRequest.{ ... }` was replaced by the shared HTTP request constructor
+  --> tests/ui/http_message_literal_migration.jet:3:16
+    |
+  3 |     request :: HttpRequest.{method: "GET", path: "/", body: "", headers: []}
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: HTTP messages now contain validated typed fields and a byte-native, single-use Body; public-field literals cannot preserve those invariants
+ Fix: use `client.request(method, url)`, then configure it with request methods

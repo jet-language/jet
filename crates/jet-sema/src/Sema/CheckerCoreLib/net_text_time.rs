@@ -342,21 +342,27 @@ pub fn http_type_method_return(
     let mk_int = || Some(Some(Type::Int));
     let mk_opt_str = || Some(Some(Type::Option(Box::new(Type::String))));
     match ty {
-        Type::Named(n) if n == "HttpClientReq" => match method {
-            "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
+        Type::Named(n) if n == "HttpRequest" => match method {
+            "method" | "path" => mk_str(),
+            "body" if _args.is_empty() => mk("HttpBody"),
+            "param" | "header" if _args.len() == 1 => mk_opt_str(),
+            "body" | "header" | "timeout" | "connect_timeout" | "read_timeout"
             | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" => {
-                mk("HttpClientReq")
+                mk("HttpRequest")
             }
+            "body_len" => mk_int(),
+            "under_limit" => Some(Some(Type::Bool)),
             "send" => Some(Some(Type::Result {
-                ok: Box::new(Type::Named("HttpClientResp".to_string())),
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
                 err: Box::new(Type::Named("HttpError".to_string())),
             })),
             _ => None,
         },
-        Type::Named(n) if n == "HttpClientResp" => match method {
+        Type::Named(n) if n == "HttpResponse" => match method {
             "status" => mk_int(),
             "body" => mk("HttpBody"),
-            "header" => mk_opt_str(),
+            "header" if _args.len() == 1 => mk_opt_str(),
+            "header" => mk("HttpResponse"),
             "cookies" => Some(Some(Type::List(Box::new(Type::String)))),
             _ => None,
         },
@@ -365,21 +371,10 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "HttpHandler" => match method {
-            "handle" => mk("HttpSrvResp"),
-            _ => None,
-        },
-        Type::Named(n) if n == "HttpSrvReq" => match method {
-            "method" | "path" => mk_str(),
-            "body" => mk("HttpBody"),
-            "param" | "header" => mk_opt_str(),
-            "body_len" => mk_int(),
-            "under_limit" => Some(Some(Type::Bool)),
-            _ => None,
-        },
-        Type::Named(n) if n == "HttpSrvResp" => match method {
-            "header" => mk("HttpSrvResp"),
-            "status" => mk_int(),
-            "body" => mk("HttpBody"),
+            "handle" => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            })),
             _ => None,
         },
         Type::Named(n) if n == "HttpBody" => match method {
@@ -391,8 +386,13 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::String),
                 err: Box::new(Type::Named("HttpError".to_string())),
             })),
-            "chunks" => Some(Some(Type::Result {
-                ok: Box::new(Type::List(Box::new(Type::List(Box::new(u8_ty()))))),
+            "json" => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("Unknown".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            })),
+            "chunks" => mk("HttpBodyChunks"),
+            "copy_to" => Some(Some(Type::Result {
+                ok: Box::new(Type::Int),
                 err: Box::new(Type::Named("HttpError".to_string())),
             })),
             _ => None,

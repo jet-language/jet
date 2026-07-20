@@ -1052,6 +1052,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     Type::Apply { name, args } if name == "Stream" && args.len() == 1 => {
                         Some(args[0].clone())
                     }
+                    Type::Named(name) if name == "HttpBodyChunks" => Some(Type::Result {
+                        ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
+                        err: Box::new(Type::Named("HttpError".to_string())),
+                    }),
                     // D-DYNARRAY1: `loop x; window` — a `View<T>`'s element type.
                     Type::Apply { name, args }
                         if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 => {
@@ -1059,8 +1063,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     }
                     _ => None,
                 };
-                let by_value =
-                    matches!(&lowered_coll.ty, Type::Apply { name, .. } if name == "Stream");
+                let by_value = matches!(&lowered_coll.ty,
+                    Type::Apply { name, .. } if name == "Stream"
+                ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HttpBodyChunks");
                 if method_kind.is_none() {
                     if let Type::Named(n) = &lowered_coll.ty {
                         if let Some(hook) = cx.iterable_hooks.get(n) {

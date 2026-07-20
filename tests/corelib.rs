@@ -5307,11 +5307,15 @@ fn main() {
         "Warning".to_string(), "one".to_string(),
         "Warning".to_string(), "two".to_string(),
     ];
-    let (_, body, headers) = bridge::jet_http_client_send_impl(
+    let (_, body, _, headers) = bridge::jet_http_client_send_impl(
         "GET", &url, &request_headers, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap();
-    assert_eq!(body, vec![255, 0]);
+    assert_eq!(
+        bridge::jet_http_client_body_read_impl(body, 8).unwrap(),
+        Some(vec![255, 0]),
+    );
+    assert_eq!(bridge::jet_http_client_body_read_impl(body, 8).unwrap(), None);
     let selected = headers.chunks_exact(2)
         .filter(|pair| matches!(pair[0].as_str(), "x-a" | "x-b" | "set-cookie"))
         .flat_map(|pair| [pair[0].clone(), pair[1].clone()])
@@ -5394,6 +5398,54 @@ fn run() {{
 }
 
 #[test]
+fn core_http_nominal_message_and_body_surface_is_executable() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_http_nominal_surface_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("input");
+    let output = dir.join("output");
+    fs::write(&input, b"reader").unwrap();
+    let source = format!(
+        r#"
+use core.http as http
+use core.mime as mime
+use core.files as files
+
+fn run() {{
+    print(http.Method.custom("PURGE") ?? panic("method"))
+    print(http.Status.new(299) ?? panic("status"))
+    print(http.Version.http_1_1())
+    print(http.HeaderName.new("X-Test") ?? panic("name"))
+    print(http.HeaderValue.new("ok") ?? panic("value"))
+    print(http.Body.empty().bytes(1) ?? panic("empty"))
+    print(http.Body.bytes([0, 255]).bytes(2) ?? panic("bytes"))
+    print(http.Body.text("hello").text(5) ?? panic("text"))
+    print(http.Body.text("hello", mime.parse("text/custom") ?? panic("mime")).text(5) ?? panic("custom"))
+    print(http.Body.form(["a": "b"]).text(16) ?? panic("form"))
+    print(http.Body.json(42).json<Int>(16) ?? panic("json"))
+    input :: files.open("{input}") ?? panic("open")
+    body :: http.Body.reader(^input, 6) ?? panic("reader")
+    output :: files.create("{output}") ?? panic("create")
+    print(body.copy_to(^output, 6) ?? panic("copy"))
+}}
+"#,
+        input = jet_string_path(&input),
+        output = jet_string_path(&output),
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "http_nominal_surface", &source, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "PURGE\n299\nHTTP/1.1\nX-Test\nok\n[]\n[0, 255]\nhello\nhello\na=b\n42\n6\n"
+    );
+    assert_eq!(fs::read(output).unwrap(), b"reader");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_http_client_multipart_boundary_does_not_collide_with_fields() {
     use std::io::{Read, Write};
 
@@ -5467,7 +5519,8 @@ fn main() {
         "POST", &url, &[], None, None, None, None, None, None, None,
         &[], &[], &multipart,
     ).unwrap();
-    assert_eq!((response.0, response.1.as_slice()), (200, b"ok".as_slice()));
+    let body = bridge::jet_http_client_body_read_impl(response.1, 8).unwrap().unwrap();
+    assert_eq!((response.0, body.as_slice()), (200, b"ok".as_slice()));
 }
 "#,
     )
@@ -5628,12 +5681,7 @@ fn main() {
             &[], &[], &[],
         ).err()
     }).collect::<Vec<_>>();
-    assert_eq!(errors, vec![
-        Some("HTTP timeout must be non-negative".to_string()),
-        Some("HTTP connect timeout must be non-negative".to_string()),
-        Some("HTTP read timeout must be non-negative".to_string()),
-        Some("HTTP total timeout must be non-negative".to_string()),
-    ]);
+    assert!(errors.into_iter().all(|error| matches!(error, Some(bridge::JetHttpBridgeError::Timeout))));
     let unsupported_url = url.replacen("http://", "ftp://", 1);
     let url_errors = ["http://[".to_string(), unsupported_url].map(|url| {
         bridge::jet_http_client_send_impl(
@@ -5641,35 +5689,35 @@ fn main() {
             &[], &[], &[],
         ).unwrap_err()
     });
-    assert_eq!(url_errors, ["HTTP URL is invalid", "HTTP URL is invalid"]);
+    assert!(url_errors.into_iter().all(|error| matches!(error, bridge::JetHttpBridgeError::InvalidUrl)));
     let refused_url = "http://127.0.0.1:0/".to_string();
     let connection_error = bridge::jet_http_client_send_impl(
         "GET", &refused_url, &[], None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap_err();
-    assert_eq!(connection_error, "HTTP connection failed");
+    assert!(matches!(connection_error, bridge::JetHttpBridgeError::Connect));
     let proxy_error = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None, None, Some("ftp://proxy.invalid"),
         &[], &[], &[],
     ).unwrap_err();
-    assert_eq!(proxy_error, "HTTP proxy URL is invalid");
+    assert!(matches!(proxy_error, bridge::JetHttpBridgeError::Proxy));
     let proxy_connection_error = bridge::jet_http_client_send_impl(
         "GET", &"https://example.invalid/".to_string(), &[], None, None, None, None, None, None,
         Some(url.as_str()),
         &[], &[], &[],
     ).unwrap_err();
-    assert_eq!(proxy_connection_error, "HTTP proxy connection failed");
+    assert!(matches!(proxy_connection_error, bridge::JetHttpBridgeError::Proxy));
     let proxy_auth_error = bridge::jet_http_client_send_impl(
         "GET", &"https://auth.invalid/".to_string(), &[], None, None, None, None, None, None,
         Some(url.as_str()),
         &[], &[], &[],
     ).unwrap_err();
-    assert_eq!(proxy_auth_error, "HTTP proxy authentication failed");
+    assert!(matches!(proxy_auth_error, bridge::JetHttpBridgeError::Proxy));
     let io_error = bridge::jet_http_client_send_impl(
         "GET", &format!("{url}io"), &[], None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap_err();
-    assert_eq!(io_error, "HTTP transport I/O failed");
+    assert!(matches!(io_error, bridge::JetHttpBridgeError::Io));
 }
 "#,
     )
@@ -5786,35 +5834,35 @@ fn main() {
             &[], &[], &[],
         ).err()
     }).collect::<Vec<_>>();
-    assert_eq!(errors, vec![
-        Some("HTTP redirect limit must be between 0 and 4294967295".to_string()),
-        Some("HTTP redirect limit must be between 0 and 4294967295".to_string()),
-    ]);
+    assert!(errors.into_iter().all(|error| matches!(error, Some(bridge::JetHttpBridgeError::Redirect))));
     let stopped = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None, Some(0), None,
         &[], &[], &[],
     ).unwrap();
-    assert_eq!((stopped.0, stopped.1.as_slice()), (302, b"redirect".as_slice()));
+    let stopped_body = bridge::jet_http_client_body_read_impl(stopped.1, 16).unwrap().unwrap();
+    assert_eq!((stopped.0, stopped_body.as_slice()), (302, b"redirect".as_slice()));
     let followed = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None,
         Some(i64::from(u32::MAX)), None, &[], &[], &[],
     ).unwrap();
-    assert_eq!((followed.0, followed.1.as_slice()), (200, b"ok".as_slice()));
+    let followed_body = bridge::jet_http_client_body_read_impl(followed.1, 8).unwrap().unwrap();
+    assert_eq!((followed.0, followed_body.as_slice()), (200, b"ok".as_slice()));
     let explicit = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None, Some(1), None,
         &[], &[], &[],
     ).unwrap_err();
-    assert_eq!(explicit, "HTTP redirect limit 1 exceeded");
+    assert!(matches!(explicit, bridge::JetHttpBridgeError::Redirect));
     let within = bridge::jet_http_client_send_impl(
         "GET", &format!("{base}/within/0"), &[], None, None, None, None, None,
         None, None, &[], &[], &[],
     ).unwrap();
-    assert_eq!((within.0, within.1.as_slice()), (200, b"ok".as_slice()));
+    let within_body = bridge::jet_http_client_body_read_impl(within.1, 8).unwrap().unwrap();
+    assert_eq!((within.0, within_body.as_slice()), (200, b"ok".as_slice()));
     let over = bridge::jet_http_client_send_impl(
         "GET", &format!("{base}/over/0"), &[], None, None, None, None, None,
         None, None, &[], &[], &[],
     ).unwrap_err();
-    assert_eq!(over, "HTTP redirect limit 10 exceeded");
+    assert!(matches!(over, bridge::JetHttpBridgeError::Redirect));
 }
 "#,
     )
@@ -5903,11 +5951,11 @@ fn core_http_client_bounds_and_strictly_decodes_response_bodies() {
                     claimed_len.unwrap_or(body.len())
                 )
                 .unwrap();
-                stream.write_all(&body).unwrap();
+                let _ = stream.write_all(&body);
                 if claimed_len.is_none() {
-                    stream.write_all(b"\r\n0\r\n\r\n").unwrap();
+                    let _ = stream.write_all(b"\r\n0\r\n\r\n");
                 } else {
-                    stream.write_all(b"\r\n").unwrap();
+                    let _ = stream.write_all(b"\r\n");
                 }
             } else {
                 write!(
@@ -5916,7 +5964,7 @@ fn core_http_client_bounds_and_strictly_decodes_response_bodies() {
                     claimed_len.unwrap_or(body.len())
                 )
                 .unwrap();
-                stream.write_all(&body).unwrap();
+                let _ = stream.write_all(&body);
             }
         }
         for response in [
@@ -5942,42 +5990,82 @@ use core.http.client as client
 fn run() {
     first :: client.get("http://__ADDR__/")
     if first == {
-        Ok(response) -> { print(response.body().len()) }
+        Ok(response) -> {
+            if response.body().bytes(8388608) == {
+                Ok(bytes) -> { print(bytes.len()) }
+                Err(error) -> { print(error) }
+            }
+        }
         Err(error) -> { print(error) }
     }
     second :: client.get("http://__ADDR__/")
     if second == {
-        Ok(response) -> { print("unexpected utf8 success: {response.body().len()}") }
+        Ok(response) -> {
+            if response.body().text(8388608) == {
+                Ok(text) -> { print("unexpected utf8 success: {text}") }
+                Err(error) -> { print(error) }
+            }
+        }
         Err(error) -> { print(error) }
     }
     third :: client.get("http://__ADDR__/")
     if third == {
-        Ok(response) -> { print("{response.status()}:{response.body()}") }
+        Ok(response) -> {
+            if response.body().text(8388608) == {
+                Ok(text) -> { print("{response.status()}:{text}") }
+                Err(error) -> { print(error) }
+            }
+        }
         Err(error) -> { print(error) }
     }
     fourth :: client.get("http://__ADDR__/")
     if fourth == {
-        Ok(response) -> { print("unexpected oversized success: {response.body().len()}") }
+        Ok(response) -> {
+            if response.body().bytes(8388608) == {
+                Ok(bytes) -> { print("unexpected oversized success: {bytes.len()}") }
+                Err(error) -> { print(error) }
+            }
+        }
         Err(error) -> { print(error) }
     }
     fifth :: client.get("http://__ADDR__/")
     if fifth == {
-        Ok(response) -> { print(response.body().len()) }
+        Ok(response) -> {
+            if response.body().bytes(8388608) == {
+                Ok(bytes) -> { print(bytes.len()) }
+                Err(error) -> { print(error) }
+            }
+        }
         Err(error) -> { print(error) }
     }
     sixth :: client.get("http://__ADDR__/")
     if sixth == {
-        Ok(response) -> { print("unexpected chunked oversized success: {response.body().len()}") }
+        Ok(response) -> {
+            if response.body().bytes(8388608) == {
+                Ok(bytes) -> { print("unexpected chunked oversized success: {bytes.len()}") }
+                Err(error) -> { print(error) }
+            }
+        }
         Err(error) -> { print(error) }
     }
     seventh :: client.get("http://__ADDR__/")
     if seventh == {
-        Ok(response) -> { print("unexpected partial content-length success: {response.body()}") }
+        Ok(response) -> {
+            if response.body().text(8388608) == {
+                Ok(text) -> { print("unexpected partial content-length success: {text}") }
+                Err(error) -> { print(error) }
+            }
+        }
         Err(error) -> { print(error) }
     }
     eighth :: client.get("http://__ADDR__/")
     if eighth == {
-        Ok(response) -> { print("unexpected partial chunked success: {response.status()}:{response.body()}") }
+        Ok(response) -> {
+            if response.body().text(8388608) == {
+                Ok(text) -> { print("unexpected partial chunked success: {response.status()}:{text}") }
+                Err(error) -> { print(error) }
+            }
+        }
         Err(error) -> { print(error) }
     }
     ninth :: client.get("http://__ADDR__/")
@@ -5998,7 +6086,7 @@ fn run() {
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(
         stdout,
-        "8388608\nHTTP response body is not valid UTF-8\n404:missing\nHTTP response body exceeds 8388608-byte limit\n8388608\nHTTP response body exceeds 8388608-byte limit\nHTTP response body read failed\nHTTP response body read failed\nHTTP response framing is invalid\nHTTP response framing is invalid\n"
+        "8388608\nunsupported HTTP body encoding\n404:missing\nHTTP body exceeds 8388608-byte limit\n8388608\nHTTP body exceeds 8388608-byte limit\nHTTP I/O failed during transport\nHTTP I/O failed during transport\ninvalid HTTP framing\ninvalid HTTP header\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -6022,9 +6110,9 @@ fn run() {
     addr :: listener.local_addr() ?? panic("address")
     mux :: server.mux()
     mux.get("/", (req: HttpRequest) =>
-        server.response(200, "ok")
+        Ok(server.response(200, "ok")
             .header("Set-Cookie", "a=1")
-            .header("Set-Cookie", "b=2")
+            .header("Set-Cookie", "b=2"))
     )
     serving :: tasks.spawn(take(listener, mux) () =>
         server.serve_once_listener(listener, mux) ?? panic("serve")

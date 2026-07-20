@@ -1,13 +1,46 @@
-#![allow(dead_code)]
+#![allow(dead_code, non_camel_case_types)]
 
 struct JetTcpListener {
     inner: std::net::TcpListener,
+}
+
+trait JetShow {
+    fn jet_show(&self) -> String;
+}
+
+trait user_Encode {}
+impl<T> user_Encode for T {}
+
+trait user_Decode: Sized {}
+
+fn jet_enc_json_to_string<T: user_Encode>(_value: &T) -> String {
+    String::new()
+}
+
+fn jet_enc_json_decode<T: user_Decode>(_text: &str) -> Result<T, String> {
+    Err("unused test decoder".to_string())
+}
+
+struct JetFileReader {
+    inner: Box<dyn std::io::Read + Send>,
+}
+
+struct JetFileWriter {
+    inner: Box<dyn std::io::Write + Send>,
 }
 
 mod jet_std {
     #[derive(Clone, Copy)]
     pub struct Duration {
         pub ms: i64,
+    }
+
+    pub struct JetMime(pub String);
+
+    impl JetMime {
+        pub fn to_string_value(&self) -> String {
+            self.0.clone()
+        }
     }
 }
 
@@ -118,6 +151,25 @@ fn shared_http_body_streams_bytes_once_and_uses_closed_errors() {
 }
 
 #[test]
+fn shared_http_body_multipart_boundary_is_bounded_and_collision_free() {
+    let values = std::collections::BTreeMap::from([
+        (
+            "jet-http-boundary-0000000000000001\r\nname".to_string(),
+            "jet-http-boundary-0000000000000000".to_string(),
+        ),
+    ]);
+    let body = JetHttpBody::from_multipart(values);
+    assert_eq!(
+        body.content_type().as_deref(),
+        Some("multipart/form-data; boundary=jet-http-boundary-0000000000000002"),
+    );
+    let encoded = body.text(1024).unwrap();
+    assert!(encoded.starts_with("--jet-http-boundary-0000000000000002\r\n"));
+    assert!(encoded.contains("name=\"jet-http-boundary-0000000000000001%0D%0Aname\""));
+    assert!(encoded.contains("jet-http-boundary-0000000000000000"));
+}
+
+#[test]
 fn client_request_and_response_use_the_shared_headers() {
     let req = jet_http_client_request_header(
         jet_http_client_request_header(
@@ -141,7 +193,7 @@ fn client_request_and_response_use_the_shared_headers() {
         "set-cookie".to_string(), "b=2".to_string(),
     ]).unwrap();
     let response = jet_http_srv_response_with_headers(200, "", headers);
-    assert_eq!(jet_http_client_response_cookies(&response), vec!["a=1", "b=2"]);
+    assert_eq!(jet_http_response_cookies(&response), vec!["a=1", "b=2"]);
 
     let invalid_response = jet_http_srv_response_header(
         jet_http_srv_response(200, &"secret".to_string()),
@@ -232,6 +284,52 @@ fn live_shared_messages_round_trip_binary_and_stream_unknown_length() {
     let second = headers.find("x-repeat: beta").unwrap_or_else(|| panic!("{headers}"));
     assert!(first < second, "{headers}");
     assert_eq!(&response[header_end + 4..], b"3\r\n\xff\0\x01\r\n0\r\n\r\n");
+}
+
+#[test]
+fn live_server_body_starts_before_the_large_slow_upload_finishes() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mux = jet_http_mux_new();
+    let (first_chunk_tx, first_chunk_rx) = std::sync::mpsc::channel();
+    jet_http_mux_add(&mux, "POST", "/slow", move |req| {
+        let mut chunks = req.body.chunks(4096).unwrap();
+        let first = chunks.next().unwrap().unwrap();
+        first_chunk_tx.send(first.len()).unwrap();
+        let mut total = first.len();
+        for chunk in chunks {
+            total += chunk.unwrap().len();
+        }
+        jet_http_srv_response(200, &total.to_string())
+    });
+    let server = std::thread::spawn(move || {
+        jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux).unwrap();
+    });
+
+    let length = 2 * 1024 * 1024;
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    write!(
+        stream,
+        "POST /slow HTTP/1.1\r\nHost: local\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    stream.write_all(&vec![7; 4096]).unwrap();
+    assert_eq!(
+        first_chunk_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("handler must pull before the upload finishes"),
+        4096,
+    );
+    for _ in 1..length / 4096 {
+        stream.write_all(&vec![7; 4096]).unwrap();
+    }
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    server.join().unwrap();
+    assert!(response.ends_with(&length.to_string()), "{response}");
 }
 
 #[test]
@@ -715,13 +813,13 @@ fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
     let mux = jet_http_mux_new();
     let post_calls = std::sync::Arc::new(AtomicUsize::new(0));
     let handler_calls = post_calls.clone();
-    jet_http_mux_add(&mux, "POST", "/echo", move |req| {
+    jet_http_mux_add_handler(&mux, "POST", "/echo", std::sync::Arc::new(move |req| {
+        let body = req.body.text(1024 * 1024)?;
         handler_calls.fetch_add(1, Ordering::AcqRel);
-        let length = req.body.len();
-        let body = req.body.text(1024 * 1024).unwrap();
+        let length = body.len();
         let preview = (length <= 32).then_some(body.as_str()).unwrap_or("");
-        jet_http_srv_response(200, &format!("{length}:{preview}"))
-    });
+        Ok(jet_http_srv_response(200, &format!("{length}:{preview}")))
+    }));
     jet_http_mux_add(&mux, "GET", "/next", |_| {
         jet_http_srv_response(200, &"next".to_string())
     });
@@ -763,10 +861,11 @@ fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
     let exact = exchange(addr, exact_request.as_bytes());
     assert!(exact.ends_with(&format!("\r\n\r\n{limit}:")), "exact limit failed: {exact}");
 
-    let over_limit = exchange(
-        addr,
-        b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n100001\r\n",
+    let over_limit_request = format!(
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n100001\r\n{}\r\n0\r\n\r\n",
+        "x".repeat(1024 * 1024 + 1),
     );
+    let over_limit = exchange(addr, over_limit_request.as_bytes());
     assert!(over_limit.starts_with("HTTP/1.1 413 Payload Too Large"), "{over_limit}");
 
     for invalid in [
@@ -872,10 +971,11 @@ fn expect_continue_is_ordered_bounded_and_rejects_before_dispatch() {
     let mux = jet_http_mux_new();
     let calls = std::sync::Arc::new(AtomicUsize::new(0));
     let post_calls = calls.clone();
-    jet_http_mux_add(&mux, "POST", "/echo", move |req| {
+    jet_http_mux_add_handler(&mux, "POST", "/echo", std::sync::Arc::new(move |req| {
+        let body = req.body.text(1024 * 1024)?;
         post_calls.fetch_add(1, Ordering::AcqRel);
-        jet_http_srv_response(200, &req.body.text(1024 * 1024).unwrap())
-    });
+        Ok(jet_http_srv_response(200, &body))
+    }));
     let get_calls = calls.clone();
     jet_http_mux_add(&mux, "GET", "/next", move |_| {
         get_calls.fetch_add(1, Ordering::AcqRel);
@@ -920,7 +1020,7 @@ fn expect_continue_is_ordered_bounded_and_rejects_before_dispatch() {
 
     let oversized = exchange(
         addr,
-        b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1048577\r\nExpect: 100-continue\r\n\r\n",
+        b"POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1048577\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n",
     );
     assert!(oversized.starts_with("HTTP/1.1 413 Payload Too Large"), "{oversized}");
     assert!(!oversized.contains("100 Continue"), "oversized body was invited: {oversized}");
@@ -1341,17 +1441,19 @@ fn options_asterisk_reports_server_methods_without_dispatch() {
         std::sync::Arc::new(move |req| {
             calls.fetch_add(1, Ordering::AcqRel);
             events.lock().unwrap().push(format!("{}:{}", req.method, req.path));
-            jet_http_srv_response_header(
-                next(req),
-                &"X-Middleware".to_string(),
-                &"observed".to_string(),
-            )
+            next(req).map(|response| {
+                jet_http_srv_response_header(
+                    response,
+                    &"X-Middleware".to_string(),
+                    &"observed".to_string(),
+                )
+            })
         })
     });
     jet_http_mux_middleware(&mux, move |next| {
         std::sync::Arc::new(move |req| {
             if jet_http_srv_req_header(&req, &"X-Block".to_string()).is_some() {
-                jet_http_srv_response(403, &"blocked".to_string())
+                Ok(jet_http_srv_response(403, &"blocked".to_string()))
             } else {
                 next(req)
             }
@@ -1793,17 +1895,17 @@ fn canonical_router_precedence_methods_and_conflicts() {
     jet_http_mux_add(&mux, "POST", "/files/:id", |_| jet_http_srv_response(201, &"posted".to_string()));
 
     let request = |method: &str, path: &str| {
-        JetHttpSrvReq::server(method, path.to_string(), Vec::new(), Default::default())
+        JetHttpRequest::server(method, path.to_string(), Vec::new(), Default::default())
     };
-    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/static")).body, "static");
-    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/42")).body, "param:42");
-    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/a/b")).body, "wild:a/b");
-    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files")).body, "wild:");
-    let head = jet_http_mux_dispatch(&mux, request("HEAD", "/files/static"));
+    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/static")).unwrap().body, "static");
+    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/42")).unwrap().body, "param:42");
+    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/a/b")).unwrap().body, "wild:a/b");
+    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files")).unwrap().body, "wild:");
+    let head = jet_http_mux_dispatch(&mux, request("HEAD", "/files/static")).unwrap();
     assert_eq!(head.status, 200);
     assert!(head.body.is_empty());
-    assert_eq!(jet_http_mux_dispatch(&mux, request("DELETE", "/files/42")).status, 405);
-    let options = jet_http_mux_dispatch(&mux, request("OPTIONS", "/files/42"));
+    assert_eq!(jet_http_mux_dispatch(&mux, request("DELETE", "/files/42")).unwrap().status, 405);
+    let options = jet_http_mux_dispatch(&mux, request("OPTIONS", "/files/42")).unwrap();
     assert_eq!(options.status, 204);
     assert_eq!(options.headers.get("Allow").unwrap(), "GET, HEAD, OPTIONS, POST");
 
@@ -1834,10 +1936,10 @@ fn canonical_router_precedence_methods_and_conflicts() {
     let encoded = jet_http_mux_new();
     jet_http_mux_add(&encoded, "GET", "/literal/%3Aadmin/%2Astar", |_| jet_http_srv_response(200, &"encoded".to_string()));
     jet_http_mux_add(&encoded, "GET", "/once/%252F", |_| jet_http_srv_response(200, &"once".to_string()));
-    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%3Aadmin/%2Astar")).body, "encoded");
-    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/once/%252F")).body, "once");
-    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%2F/admin")).status, 400);
-    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%FF")).status, 400);
+    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%3Aadmin/%2Astar")).unwrap().body, "encoded");
+    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/once/%252F")).unwrap().body, "once");
+    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%2F/admin")).unwrap().status, 400);
+    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%FF")).unwrap().status, 400);
 
     for invalid in ["/x/*rest/more", "/x/:1bad", "/x/:id/:id", "/x/%2F", "/x/%2e%2e", "/x/%ZZ", "/x/%FF"] {
         let invalid_mux = jet_http_mux_new();
@@ -1850,8 +1952,8 @@ fn canonical_router_precedence_methods_and_conflicts() {
     jet_http_mux_add(&precedence, "GET", "/a/:id/*rest", |_| jet_http_srv_response(200, &"param".to_string()));
     jet_http_mux_add(&precedence, "GET", "/tie/:first/static", |_| jet_http_srv_response(200, &"param-first".to_string()));
     jet_http_mux_add(&precedence, "GET", "/tie/static/:last", |_| jet_http_srv_response(200, &"static-first".to_string()));
-    assert_eq!(jet_http_mux_dispatch(&precedence, request("GET", "/a/x/y")).body, "param");
-    assert_eq!(jet_http_mux_dispatch(&precedence, request("GET", "/tie/static/static")).body, "static-first");
+    assert_eq!(jet_http_mux_dispatch(&precedence, request("GET", "/a/x/y")).unwrap().body, "param");
+    assert_eq!(jet_http_mux_dispatch(&precedence, request("GET", "/tie/static/static")).unwrap().body, "static-first");
 
     let first = jet_http_route_parse("/same/:first").unwrap();
     let second = jet_http_route_parse("/same/:second").unwrap();
@@ -1862,7 +1964,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
         jet_http_srv_response(200, &jet_http_srv_access_log(&req, 200))
     });
     assert_eq!(
-        jet_http_mux_dispatch(&logs, request("GET", "/logs/42/a/b?secret=x")).body,
+        jet_http_mux_dispatch(&logs, request("GET", "/logs/42/a/b?secret=x")).unwrap().body,
         "GET /logs/:id/*rest 200"
     );
 }
@@ -1889,39 +1991,40 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     });
     jet_http_mux_add(&mux, "GET", "/panic", |_| panic!("private failure detail"));
     let request = |path: &str| {
-        JetHttpSrvReq::server("GET", path.to_string(), Vec::new(), Default::default())
+        JetHttpRequest::server("GET", path.to_string(), Vec::new(), Default::default())
     };
-    assert_eq!(jet_http_mux_dispatch(&mux, request("/ok/one")).body, "one");
+    assert_eq!(jet_http_mux_dispatch(&mux, request("/ok/one")).unwrap().body, "one");
     assert_eq!(&*events.lock().unwrap(), &[
         "outer:before:/ok/one", "inner:before:/ok/one",
         "inner:after:/ok/one", "outer:after:/ok/one",
     ]);
-    let panic_response = jet_http_mux_dispatch(&mux, request("/panic"));
-    assert_eq!(panic_response.status, 500);
-    assert_eq!(panic_response.body, "500 Internal Server Error");
+    assert!(matches!(
+        jet_http_mux_dispatch(&mux, request("/panic")),
+        Err(JetHttpError::Internal { .. })
+    ));
 
     let short = jet_http_mux_new();
     let handler_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    jet_http_mux_middleware(&short, |_| std::sync::Arc::new(|_| jet_http_srv_response(403, &"blocked".to_string())));
+    jet_http_mux_middleware(&short, |_| std::sync::Arc::new(|_| Ok(jet_http_srv_response(403, &"blocked".to_string()))));
     let calls = handler_calls.clone();
     jet_http_mux_add(&short, "GET", "/", move |_| {
         calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         jet_http_srv_response(200, &"wrong".to_string())
     });
-    assert_eq!(jet_http_mux_dispatch(&short, request("/")).status, 403);
+    assert_eq!(jet_http_mux_dispatch(&short, request("/")).unwrap().status, 403);
     assert_eq!(handler_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
 
     let mut threads = Vec::new();
     for id in 0..16 {
         let mux = mux.clone();
         threads.push(std::thread::spawn(move || {
-            let req = JetHttpSrvReq::server(
+            let req = JetHttpRequest::server(
                 "GET",
                 format!("/ok/{id}"),
                 Vec::new(),
                 Default::default(),
             );
-            assert_eq!(jet_http_mux_dispatch(&mux, req).body, id.to_string());
+            assert_eq!(jet_http_mux_dispatch(&mux, req).unwrap().body, id.to_string());
         }));
     }
     for thread in threads { thread.join().unwrap(); }
@@ -1930,7 +2033,7 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
 #[test]
 fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
     let request = |path: &str| {
-        JetHttpSrvReq::server("GET", path.to_string(), Vec::new(), Default::default())
+        JetHttpRequest::server("GET", path.to_string(), Vec::new(), Default::default())
     };
 
     // Two requests must enter the same handler concurrently. Holding the route
@@ -1947,7 +2050,7 @@ fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
         let mux = overlap.clone();
         let done = done_tx.clone();
         std::thread::spawn(move || {
-            done.send(jet_http_mux_dispatch(&mux, request("/overlap")).status).unwrap();
+            done.send(jet_http_mux_dispatch(&mux, request("/overlap")).unwrap().status).unwrap();
         });
     }
     for _ in 0..2 {
@@ -1967,6 +2070,6 @@ fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
     std::thread::spawn(move || {
         reply_tx.send(jet_http_mux_dispatch(&dispatch_mux, request("/register"))).unwrap();
     });
-    assert_eq!(reply_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("route registration deadlocked").status, 200);
-    assert_eq!(jet_http_mux_dispatch(&reentrant, request("/added")).status, 201);
+    assert_eq!(reply_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("route registration deadlocked").unwrap().status, 200);
+    assert_eq!(jet_http_mux_dispatch(&reentrant, request("/added")).unwrap().status, 201);
 }

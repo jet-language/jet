@@ -87,6 +87,13 @@ fn lower_lambda_expecting_with_host_borrow(
     host_borrow: Option<bool>,
     by_value: bool,
 ) -> TLambda {
+    // Http handlers cross the server boundary as owned requests. Their public
+    // callback type is `Fn(HttpRequest)`, never Jet's ordinary read-borrowed
+    // function convention.
+    let by_value = by_value
+        || (lam.meta.escapes
+            && lam.params.len() == 1
+            && matches!(lam.params[0].ty.as_ref(), Some(Type::Named(name)) if name == "HttpRequest"));
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
     // does not leak its own bindings into the enclosing function.
@@ -441,31 +448,30 @@ pub(crate) fn render_lambda_str_expecting_value(
 
 /// c109 Phase 25: render the router handler (arg 1) exactly as `emit_router_handler`
 /// (Source/Codegen/Expression.rs) does, at lowering. A bare top-level fn name (not a
-/// local) becomes the `Box::new(move |__req: …| user_<fn>(&__req)) as Box<dyn Fn(…) -> …
-/// + Send + Sync>` wrapper; a lambda becomes `Box::new(<lambda>) as Box<…>`.
+/// local) becomes the canonical shared `JetHttpHandler`; a lambda does the same.
 pub(crate) fn render_router_handler(
     args: &[crate::AST::CallArg],
     cx: &Cx,
     env: &LowerEnv,
 ) -> String {
     let root = &cx.root_prefix;
-    let boxed_dyn = format!(
-        "as Box<dyn Fn({}JetHttpRequest) -> {}JetHttpResponse + Send + Sync>",
-        root, root
+    let handler_dyn = format!(
+        "as std::sync::Arc<dyn Fn({0}JetHttpRequest) -> Result<{0}JetHttpResponse, {0}JetHttpError> + Send + Sync>",
+        root
     );
     match &args[1].expr {
         Expr::Ident(name, _) if !env.locals.contains_key(name) => {
             let rust_name = mangle(name);
             format!(
-                "Box::new(move |__req: {}JetHttpRequest| {}(&__req)) {}",
-                root, rust_name, boxed_dyn
+                "std::sync::Arc::new(move |__req: {}JetHttpRequest| {}(&__req)) {}",
+                root, rust_name, handler_dyn
             )
         }
         Expr::Lambda(lam) => {
             format!(
-                "Box::new({}) {}",
+                "std::sync::Arc::new({}) {}",
                 render_lambda_str(lam, cx, env),
-                boxed_dyn
+                handler_dyn
             )
         }
         // The gate (`router_register_in_subset`) proved arg 1 is one of the two above.

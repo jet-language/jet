@@ -186,7 +186,19 @@ pub fn prepare_for_target(
     let needs_http_client = bundle
         .used_core
         .iter()
-        .any(|u| u == "core.http.client" || u.starts_with("core.http.client::"));
+        .any(|u| {
+            u == "core.http.client"
+                || u.starts_with("core.http.client::")
+                || matches!(
+                    u.as_str(),
+                    "core.http::get"
+                        | "core.http::post"
+                        | "core.http::request"
+                        | "jet.http::get"
+                        | "jet.http::post"
+                        | "jet.http::request"
+                )
+        });
     // D-TLSSERVE1=A: server-side TLS uses rustls through the hidden bridge
     // only when the named `tls:` option is constructed.
     let needs_http_server_tls = bundle

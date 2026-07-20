@@ -11,6 +11,37 @@ use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::enc_target_rust_traced;
 use crate::Codegen::TIR::TExpr;
 
+pub(crate) fn emit_http_bridge_error(ffi: &str, error: &str) -> String {
+    format!(
+        "match {error} {{ \
+         {ffi}::JetHttpBridgeError::InvalidUrl => JetHttpError::InvalidUrl, \
+         {ffi}::JetHttpBridgeError::InvalidHeader => JetHttpError::InvalidHeader, \
+         {ffi}::JetHttpBridgeError::InvalidFraming => JetHttpError::InvalidFraming, \
+         {ffi}::JetHttpBridgeError::Resolve => JetHttpError::Resolve {{ host: \"<redacted>\".to_string() }}, \
+         {ffi}::JetHttpBridgeError::Connect => JetHttpError::Connect {{ address: \"<redacted>\".to_string() }}, \
+         {ffi}::JetHttpBridgeError::Tls => JetHttpError::Tls {{ stage: \"handshake\".to_string() }}, \
+         {ffi}::JetHttpBridgeError::Timeout => JetHttpError::Timeout {{ phase: \"transport\".to_string() }}, \
+         {ffi}::JetHttpBridgeError::Proxy => JetHttpError::Proxy {{ stage: \"transport\".to_string() }}, \
+         {ffi}::JetHttpBridgeError::Redirect => JetHttpError::Redirect {{ reason: \"limit\".to_string() }}, \
+         {ffi}::JetHttpBridgeError::Protocol => JetHttpError::Protocol {{ version: \"unsupported\".to_string() }}, \
+         {ffi}::JetHttpBridgeError::Io => JetHttpError::Io {{ operation: \"transport\".to_string() }}, \
+         {ffi}::JetHttpBridgeError::ResourceUnavailable => JetHttpError::ResourceUnavailable {{ resource: \"transport\".to_string() }}, \
+         {ffi}::JetHttpBridgeError::Cancelled => JetHttpError::Cancelled, \
+         {ffi}::JetHttpBridgeError::Internal => JetHttpError::Internal {{ incident_id: \"http-transport\".to_string() }} }}"
+    )
+}
+
+pub(crate) fn emit_http_response_from_bridge(call: String, ffi: &str) -> String {
+    let error = emit_http_bridge_error(ffi, "error");
+    let read_error = emit_http_bridge_error(ffi, "error");
+    format!(
+        "({call}).map_err(|error| {error}).and_then(|(status, handle, length, headers)| \
+         jet_http_client_response_new(status, handle, length, headers, \
+         |handle, max_chunk| {ffi}::jet_http_client_body_read_impl(handle, max_chunk).map_err(|error| {read_error}), \
+         {ffi}::jet_http_client_body_close_impl))"
+    )
+}
+
 pub(crate) fn emit_tir_core_call(
     module: &str,
     method: &str,
@@ -1802,17 +1833,14 @@ pub(crate) fn emit_tir_core_call(
             helper("jet_net_tls_close"), arg(0)
         ),
         // E2-M10: jet.http — HTTP client.
-        ("jet.http", "get") => format!(
-            "{}(&({})).map_err(JetHttpError::from_bridge).and_then(|(s,b,h)| jet_http_client_response_new(s,b,h))",
-            regex_fn("jet_http_client_get_impl"),
-            arg(0)
+        ("jet.http", "get") => emit_http_response_from_bridge(
+            format!("{}(&({}))", regex_fn("jet_http_client_get_impl"), arg(0)),
+            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
         ),
         ("jet.http", "post") => {
-            format!(
-                "{}(&({}), &({})).map_err(JetHttpError::from_bridge).and_then(|(s,b,h)| jet_http_client_response_new(s,b,h))",
-                regex_fn("jet_http_client_post_impl"),
-                arg(0),
-                arg(1)
+            emit_http_response_from_bridge(
+                format!("{}(&({}), &({}))", regex_fn("jet_http_client_post_impl"), arg(0), arg(1)),
+                cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
             )
         }
         // c109 Phase 25: HttpRouter producer + parse/dispatch (D-ROUTE1=A), byte-for-byte
@@ -2301,10 +2329,9 @@ pub(crate) fn emit_tir_core_call(
             } else {
                 arg(0)
             };
-            format!(
-                "{}(&({})).map_err(JetHttpError::from_bridge).and_then(|(s,b,h)| jet_http_client_response_new(s,b,h))",
-                regex_fn("jet_http_client_get_impl"),
-                u
+            emit_http_response_from_bridge(
+                format!("{}(&({}))", regex_fn("jet_http_client_get_impl"), u),
+                cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
             )
         }
         ("core.http.client", "post") => {
@@ -2313,11 +2340,9 @@ pub(crate) fn emit_tir_core_call(
             } else {
                 arg(0)
             };
-            format!(
-                "{}(&({}), &({})).map_err(JetHttpError::from_bridge).and_then(|(s,b,h)| jet_http_client_response_new(s,b,h))",
-                regex_fn("jet_http_client_post_impl"),
-                u,
-                arg(1)
+            emit_http_response_from_bridge(
+                format!("{}(&({}), &({}))", regex_fn("jet_http_client_post_impl"), u, arg(1)),
+                cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
             )
         }
         ("core.http.client", "request") => {
@@ -2329,24 +2354,24 @@ pub(crate) fn emit_tir_core_call(
             format!("jet_http_client_request_new(&({}), &({}))", arg(0), u)
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
-        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(JetHttpError::from_bridge)", arg(0), arg(1)),
+        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHttpError::Io {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
         ("core.http.server", "serve") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
-                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, handler| {ffi}::jet_http_server_tls_handle_impl(cert, key, stream, handler)).map_err(JetHttpError::from_bridge)",
+                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, handler| {ffi}::jet_http_server_tls_handle_impl(cert, key, stream, handler)).map_err(|_| JetHttpError::Io {{ operation: \"serve TLS\".to_string() }})",
                 arg(0),
                 arg(1),
                 arg(2)
             )
         }
-        ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {}).map_err(JetHttpError::from_bridge)", arg(0), arg(1)),
+        ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {}).map_err(|_| JetHttpError::Io {{ operation: \"serve\".to_string() }})", arg(0), arg(1)),
         ("core.http.server", "serve_once") => {
-            format!("jet_http_mux_serve_once(&({}), {}).map_err(JetHttpError::from_bridge)", arg(0), arg(1))
+            format!("jet_http_mux_serve_once(&({}), {}).map_err(|_| JetHttpError::Io {{ operation: \"serve once\".to_string() }})", arg(0), arg(1))
         }
         ("core.http.server", "serve_once_listener") => {
             format!(
-                "jet_http_mux_serve_once_listener(&({}), &({})).map_err(JetHttpError::from_bridge)",
+                "jet_http_mux_serve_once_listener(&({}), &({})).map_err(|_| JetHttpError::Io {{ operation: \"serve listener\".to_string() }})",
                 arg(0),
                 arg(1)
             )
@@ -2357,10 +2382,10 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "tls") => format!("jet_http_srv_tls(&({}), &({}))", arg(0), arg(1)),
         ("core.http.server", "sse") => format!("jet_http_srv_sse(&({}))", arg(0)),
         ("core.http.server", "static_file") => {
-            format!("jet_http_srv_static_file(&({}), &({})).map_err(JetHttpError::from_bridge)", arg(0), arg(1))
+            format!("jet_http_srv_static_file(&({}), &({})).map_err(|_| JetHttpError::Io {{ operation: \"read static file\".to_string() }})", arg(0), arg(1))
         }
         ("core.http.server", "static_file_range") => format!(
-            "jet_http_srv_static_file_range(&({}), &({}), &({})).map_err(JetHttpError::from_bridge)",
+            "jet_http_srv_static_file_range(&({}), &({}), &({})).map_err(|_| JetHttpError::Io {{ operation: \"read static file\".to_string() }})",
             arg(0),
             arg(1),
             arg(2)

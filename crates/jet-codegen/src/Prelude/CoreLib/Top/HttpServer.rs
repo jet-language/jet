@@ -4,23 +4,22 @@
 
 const JET_HTTP_KEEPALIVE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const JET_HTTP_MAX_REQUESTS_PER_CONNECTION: usize = 1000;
-const JET_HTTP_MAX_BODY_BYTES: usize = 1024 * 1024;
+const JET_HTTP_MAX_BODY_BYTES: usize = 1024 * 1024 * 1024;
 const JET_HTTP_MAX_CHUNK_FRAMING_BYTES: usize = 32 * 1024;
 
-type JetHttpMuxHandlerFn = std::sync::Arc<dyn Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync>;
-type JetHttpMuxMiddlewareFn = std::sync::Arc<dyn Fn(JetHttpMuxHandlerFn) -> JetHttpMuxHandlerFn + Send + Sync>;
+type JetHttpMiddleware = std::sync::Arc<dyn Fn(JetHttpHandler) -> JetHttpHandler + Send + Sync>;
 
 #[derive(Clone)]
 struct JetHttpMuxRoute {
     method: String,
     pattern: String,
-    handler: JetHttpMuxHandlerFn,
+    handler: JetHttpHandler,
 }
 
 #[derive(Clone)]
 struct JetHttpMux(
     std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxRoute>>>,
-    std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxMiddlewareFn>>>,
+    std::sync::Arc<std::sync::Mutex<Vec<JetHttpMiddleware>>>,
 );
 
 #[derive(Clone)]
@@ -230,19 +229,27 @@ impl JetHttpMux {
     }
     fn add<F>(&self, method: &str, pattern: &str, f: F)
     where
-        F: Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync + 'static,
+        F: Fn(JetHttpRequest) -> Result<JetHttpResponse, JetHttpError> + Send + Sync + 'static,
     {
         self.0.lock().unwrap().push(JetHttpMuxRoute {
             method: method.to_string(),
             pattern: pattern.to_string(),
-            handler: std::sync::Arc::new(f) as JetHttpMuxHandlerFn,
+            handler: std::sync::Arc::new(f) as JetHttpHandler,
+        });
+    }
+
+    fn add_handler(&self, method: &str, pattern: &str, handler: JetHttpHandler) {
+        self.0.lock().unwrap().push(JetHttpMuxRoute {
+            method: method.to_string(),
+            pattern: pattern.to_string(),
+            handler,
         });
     }
 }
 
 fn jet_http_mux_middleware<F>(mux: &JetHttpMux, middleware: F)
 where
-    F: Fn(JetHttpMuxHandlerFn) -> JetHttpMuxHandlerFn + Send + Sync + 'static,
+    F: Fn(JetHttpHandler) -> JetHttpHandler + Send + Sync + 'static,
 {
     mux.1.lock().unwrap().push(std::sync::Arc::new(middleware));
 }
@@ -260,22 +267,18 @@ fn jet_http_srv_tls(cert_pem: &String, key_pem: &String) -> JetHttpServerTls {
 
 fn jet_http_mux_add<F>(mux: &JetHttpMux, method: &str, pattern: &str, f: F)
 where
-    F: Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync + 'static,
+    F: Fn(JetHttpRequest) -> JetHttpResponse + Send + Sync + 'static,
 {
-    mux.add(method, pattern, f);
+    mux.add(method, pattern, move |request| Ok(f(request)));
 }
 
-fn jet_http_mux_add_handler(mux: &JetHttpMux, method: &str, pattern: &str, handler: JetHttpMuxHandlerFn) {
-    mux.0.lock().unwrap().push(JetHttpMuxRoute {
-        method: method.to_string(),
-        pattern: pattern.to_string(),
-        handler,
-    });
+fn jet_http_mux_add_handler(mux: &JetHttpMux, method: &str, pattern: &str, handler: JetHttpHandler) {
+    mux.add_handler(method, pattern, handler);
 }
 
-fn jet_http_srv_response(status: i64, body: &String) -> JetHttpSrvResp {
+fn jet_http_srv_response(status: i64, body: &String) -> JetHttpResponse {
     if !(100..=599).contains(&status) {
-        return JetHttpSrvResp {
+        return JetHttpResponse {
             status: 500,
             version: "HTTP/1.1".to_string(),
             body: JetHttpBody::from_text("500 Internal Server Error".to_string()),
@@ -284,7 +287,7 @@ fn jet_http_srv_response(status: i64, body: &String) -> JetHttpSrvResp {
             head_content_length: None,
         };
     }
-    JetHttpSrvResp {
+    JetHttpResponse {
         status,
         version: "HTTP/1.1".to_string(),
         body: JetHttpBody::from_text(body.clone()),
@@ -298,17 +301,17 @@ fn jet_http_srv_response_with_headers(
     status: i64,
     body: &str,
     headers: JetHttpHeaders,
-) -> JetHttpSrvResp {
+) -> JetHttpResponse {
     let mut response = jet_http_srv_response(status, &body.to_string());
     response.headers = headers;
     response
 }
 
 fn jet_http_srv_response_header(
-    mut resp: JetHttpSrvResp,
+    mut resp: JetHttpResponse,
     name: &String,
     value: &String,
-) -> JetHttpSrvResp {
+) -> JetHttpResponse {
     if resp.headers.append(name, value).is_err() {
         resp.status = 500;
         resp.body = JetHttpBody::from_text("500 Internal Server Error".to_string());
@@ -316,8 +319,8 @@ fn jet_http_srv_response_header(
     }
     resp
 }
-fn jet_http_srv_response_status(resp: &JetHttpSrvResp) -> i64 { resp.status }
-fn jet_http_srv_response_body(resp: &JetHttpSrvResp) -> JetHttpBody {
+fn jet_http_srv_response_status(resp: &JetHttpResponse) -> i64 { resp.status }
+fn jet_http_srv_response_body(resp: &JetHttpResponse) -> JetHttpBody {
     resp.body.clone()
 }
 
@@ -468,46 +471,296 @@ fn jet_http_server_handle_stream(
     use std::io::Write;
     use std::sync::atomic::Ordering;
 
-    let mut pending = Vec::new();
     for request_index in 0..JET_HTTP_MAX_REQUESTS_PER_CONNECTION {
         if request_index > 0 && shutdown.load(Ordering::Acquire) {
             return;
         }
-        let raw = match jet_http_srv_read_buffered(
+        let (request, request_version) = match jet_http_srv_read_streaming(
             stream,
             options,
-            &mut pending,
             request_index > 0,
             (request_index > 0).then_some(shutdown),
         ) {
-            Ok(Some(raw)) => raw,
+            Ok(Some(request)) => request,
             Ok(None) => return,
             Err(error) => {
                 let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes());
+                jet_http_srv_finish_close(stream);
                 return;
             }
         };
         if request_index > 0 && shutdown.load(Ordering::Acquire) {
             return;
         }
-        let request = match jet_http_srv_parse(&raw) {
-            Ok(request) => request,
-            Err(error) => {
-                let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes());
-                return;
-            }
-        };
-        let request_version = jet_http_srv_request_version(&raw);
-        let close = !jet_http_srv_request_keep_alive(request_version, &request.headers)
+        let body = request.body.clone();
+        let close = !jet_http_srv_request_keep_alive(&request_version, &request.headers)
             || request_index + 1 == JET_HTTP_MAX_REQUESTS_PER_CONNECTION;
         if request_index > 0 && shutdown.load(Ordering::Acquire) {
             return;
         }
-        let response = jet_http_mux_dispatch(mux, request);
-        if jet_http_srv_write_response(stream, &response, request_version, close).is_err() || close {
+        let response = match jet_http_mux_dispatch(mux, request) {
+            Ok(response) => response,
+            Err(JetHttpError::BodyTooLarge { .. }) => jet_http_srv_empty_response(413),
+            Err(JetHttpError::InvalidFraming) => jet_http_srv_empty_response(400),
+            Err(JetHttpError::UnsupportedEncoding) => jet_http_srv_empty_response(415),
+            Err(_) => jet_http_srv_response(500, &"500 Internal Server Error".to_string()),
+        };
+        let close = close || !body.is_drained();
+        if jet_http_srv_write_response(stream, &response, &request_version, close).is_err() {
+            return;
+        }
+        if close {
+            jet_http_srv_finish_close(stream);
             return;
         }
     }
+}
+
+fn jet_http_srv_empty_response(status: i64) -> JetHttpResponse {
+    let mut response = jet_http_srv_response(status, &String::new());
+    response.body = JetHttpBody::empty();
+    response
+}
+
+fn jet_http_srv_finish_close(stream: &mut std::net::TcpStream) {
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(10)));
+    let mut discarded = 0usize;
+    let mut buffer = [0u8; 4096];
+    while discarded < 64 * 1024 {
+        match std::io::Read::read(stream, &mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => discarded += read,
+        }
+    }
+}
+
+struct JetHttpContinueReader<R> {
+    inner: R,
+    stream: Option<std::net::TcpStream>,
+}
+
+impl<R: std::io::Read> std::io::Read for JetHttpContinueReader<R> {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        if let Some(mut stream) = self.stream.take() {
+            std::io::Write::write_all(&mut stream, b"HTTP/1.1 100 Continue\r\n\r\n")?;
+            std::io::Write::flush(&mut stream)?;
+        }
+        std::io::Read::read(&mut self.inner, output)
+    }
+}
+
+struct JetHttpChunkedSocketReader {
+    stream: std::net::TcpStream,
+    remaining: usize,
+    need_crlf: bool,
+    done: bool,
+    framing: usize,
+}
+
+impl JetHttpChunkedSocketReader {
+    fn invalid(message: &'static str) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, message)
+    }
+
+    fn read_exact_framing(&mut self, bytes: &mut [u8]) -> std::io::Result<()> {
+        std::io::Read::read_exact(&mut self.stream, bytes)?;
+        self.framing = self.framing.saturating_add(bytes.len());
+        if self.framing > JET_HTTP_MAX_CHUNK_FRAMING_BYTES {
+            return Err(std::io::Error::new(std::io::ErrorKind::OutOfMemory, "chunk framing is too large"));
+        }
+        Ok(())
+    }
+
+    fn next_size(&mut self) -> std::io::Result<usize> {
+        let mut line = Vec::new();
+        loop {
+            let mut byte = [0u8; 1];
+            self.read_exact_framing(&mut byte)?;
+            line.push(byte[0]);
+            if line.ends_with(b"\r\n") {
+                line.truncate(line.len() - 2);
+                return jet_http_chunk_size(&line).map_err(|error| {
+                    if error.status == 413 {
+                        std::io::Error::new(std::io::ErrorKind::OutOfMemory, error.message)
+                    } else {
+                        Self::invalid("chunk size is malformed")
+                    }
+                });
+            }
+        }
+    }
+}
+
+impl std::io::Read for JetHttpChunkedSocketReader {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        if self.done || output.is_empty() {
+            return Ok(0);
+        }
+        if self.remaining == 0 {
+            if self.need_crlf {
+                let mut crlf = [0u8; 2];
+                self.read_exact_framing(&mut crlf)?;
+                if crlf != *b"\r\n" {
+                    return Err(Self::invalid("chunk data is not followed by CRLF"));
+                }
+                self.need_crlf = false;
+            }
+            self.remaining = self.next_size()?;
+            if self.remaining == 0 {
+                let mut final_crlf = [0u8; 2];
+                self.read_exact_framing(&mut final_crlf)?;
+                if final_crlf != *b"\r\n" {
+                    return Err(Self::invalid("request trailers are not supported"));
+                }
+                self.done = true;
+                return Ok(0);
+            }
+        }
+        let wanted = output.len().min(self.remaining);
+        let read = self.stream.read(&mut output[..wanted])?;
+        if read == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "chunk ended early",
+            ));
+        }
+        self.remaining -= read;
+        self.need_crlf = self.remaining == 0;
+        Ok(read)
+    }
+}
+
+fn jet_http_srv_read_streaming(
+    stream: &mut std::net::TcpStream,
+    options: &JetHttpServerOptions,
+    keep_alive: bool,
+    shutdown: Option<&std::sync::atomic::AtomicBool>,
+) -> Result<Option<(JetHttpRequest, String)>, JetHttpReadError> {
+    use std::io::Read;
+    use std::sync::atomic::Ordering;
+    const MAX_HEADER_BYTES: usize = 32 * 1024;
+    let started = std::time::Instant::now();
+    let timeout = if keep_alive {
+        JET_HTTP_KEEPALIVE_IDLE_TIMEOUT
+    } else {
+        options.read_header_timeout
+    };
+    let read_timeout = if keep_alive && shutdown.is_some() {
+        std::time::Duration::from_millis(20)
+    } else {
+        timeout
+    };
+    stream.set_read_timeout(Some(read_timeout)).map_err(|_| JetHttpReadError {
+        status: 400,
+        message: "request read failed",
+    })?;
+    let mut header = Vec::new();
+    while !header.ends_with(b"\r\n\r\n") {
+        if shutdown.is_some_and(|flag| flag.load(Ordering::Acquire)) {
+            return Ok(None);
+        }
+        let deadline = if keep_alive && !header.is_empty() {
+            options.read_idle_timeout
+        } else {
+            timeout
+        };
+        if started.elapsed() >= deadline {
+            return if keep_alive && header.is_empty() {
+                Ok(None)
+            } else {
+                Err(JetHttpReadError { status: 408, message: "request timed out" })
+            };
+        }
+        let mut byte = [0u8; 1];
+        match stream.read(&mut byte) {
+            Ok(0) if header.is_empty() => return Ok(None),
+            Ok(0) => return Err(JetHttpReadError {
+                status: 400,
+                message: "request headers ended early",
+            }),
+            Ok(_) => header.push(byte[0]),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Err(_) => return Err(JetHttpReadError { status: 400, message: "request read failed" }),
+        }
+        if header.len() > MAX_HEADER_BYTES {
+            return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
+        }
+    }
+    let header_end = header.len() - 4;
+    let head = jet_http_validate_headers(&header[..header_end])?;
+    let body_already_arrived = if head.expect_continue {
+        let _ = stream.set_nonblocking(true);
+        let mut byte = [0u8; 1];
+        let arrived = stream.peek(&mut byte).is_ok_and(|read| read > 0);
+        let _ = stream.set_nonblocking(false);
+        let _ = stream.set_read_timeout(Some(options.read_body_timeout));
+        arrived
+    } else {
+        false
+    };
+    let text = std::str::from_utf8(&header[..header_end]).map_err(|_| JetHttpReadError {
+        status: 400,
+        message: "request headers are not valid UTF-8",
+    })?;
+    let mut lines = text.lines();
+    let line = lines.next().unwrap_or("");
+    let mut parts = line.splitn(3, ' ');
+    let method = parts.next().unwrap_or("");
+    let _target = parts.next().unwrap_or("");
+    let version = parts.next().unwrap_or("HTTP/1.1").to_string();
+    let mut headers = JetHttpHeaders::new();
+    for line in lines {
+        let (name, value) = line.split_once(':').ok_or(JetHttpReadError {
+            status: 400,
+            message: "request header is malformed",
+        })?;
+        headers.append(name, jet_http_trim_ows_start(value)).map_err(|_| JetHttpReadError {
+            status: 400,
+            message: "request header is malformed",
+        })?;
+    }
+    stream.set_read_timeout(Some(options.read_body_timeout)).map_err(|_| JetHttpReadError {
+        status: 400,
+        message: "request read failed",
+    })?;
+    let body_stream = stream.try_clone().map_err(|_| JetHttpReadError {
+        status: 500,
+        message: "request stream could not be cloned",
+    })?;
+    let continue_stream = if head.expect_continue && !body_already_arrived {
+        Some(stream.try_clone().map_err(|_| JetHttpReadError {
+            status: 500,
+            message: "continue response stream could not be cloned",
+        })?)
+    } else {
+        None
+    };
+    let body = match head.framing {
+        JetHttpRequestFraming::ContentLength(length) => {
+            if length > JET_HTTP_MAX_BODY_BYTES {
+                return Err(JetHttpReadError { status: 413, message: "request body is too large" });
+            }
+            JetHttpBody::reader(JetHttpContinueReader { inner: body_stream.take(length as u64), stream: continue_stream }, Some(length))
+        }
+        JetHttpRequestFraming::Chunked => JetHttpBody::reader(
+            JetHttpContinueReader {
+                inner: JetHttpChunkedSocketReader {
+                    stream: body_stream,
+                    remaining: 0,
+                    need_crlf: false,
+                    done: false,
+                    framing: 0,
+                },
+                stream: continue_stream,
+            },
+            None,
+        ),
+    };
+    Ok(Some((
+        JetHttpRequest::server_body(method, head.target, body, headers),
+        version,
+    )))
 }
 
 fn jet_http_mux_serve_once(addr: &String, mux: JetHttpMux) -> Result<(), String> {
@@ -524,8 +777,14 @@ fn jet_http_mux_serve_once_listener(
     use std::io::Write;
     jet_http_mux_validate(mux)?;
     let (mut stream, _peer) = jet_http_accept_once(listener, std::time::Duration::from_secs(5))?;
-    let raw = match jet_http_srv_read(&mut stream) {
-        Ok(raw) => raw,
+    let (req, version) = match jet_http_srv_read_streaming(
+        &mut stream,
+        &JetHttpServerOptions::safe(),
+        false,
+        None,
+    ) {
+        Ok(Some(request)) => request,
+        Ok(None) => return Ok(()),
         Err(error) => {
             stream
                 .write_all(jet_http_srv_read_error_response(&error).as_bytes())
@@ -533,17 +792,9 @@ fn jet_http_mux_serve_once_listener(
             return Ok(());
         }
     };
-    let req = match jet_http_srv_parse(&raw) {
-        Ok(req) => req,
-        Err(error) => {
-            stream
-                .write_all(jet_http_srv_read_error_response(&error).as_bytes())
-                .map_err(|e| format!("http write failed: {}", e))?;
-            return Ok(());
-        }
-    };
-    let resp = jet_http_mux_dispatch(mux, req);
-    jet_http_srv_write_response(&mut stream, &resp, "HTTP/1.1", true)
+    let resp = jet_http_mux_dispatch(mux, req)
+        .unwrap_or_else(|_| jet_http_srv_response(500, &"500 Internal Server Error".to_string()));
+    jet_http_srv_write_response(&mut stream, &resp, &version, true)
         .map_err(|error| error.to_string())
 }
 
@@ -1226,7 +1477,13 @@ where
         std::thread::spawn(move || {
             let dispatch = Box::new(move |raw: String| {
                 match jet_http_srv_parse(raw.as_bytes()) {
-                    Ok(req) => jet_http_srv_format(&jet_http_mux_dispatch(&m, req)),
+                    Ok(req) => match jet_http_mux_dispatch(&m, req) {
+                        Ok(response) => jet_http_srv_format(&response),
+                        Err(_) => jet_http_srv_format(&jet_http_srv_response(
+                            500,
+                            &"500 Internal Server Error".to_string(),
+                        )),
+                    },
                     Err(error) => jet_http_srv_read_error_response(&error),
                 }
             });
@@ -1237,7 +1494,7 @@ where
     }
 }
 
-fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpSrvReq, JetHttpReadError> {
+fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpRequest, JetHttpReadError> {
     let sep = jet_http_header_end(raw).ok_or(JetHttpReadError {
         status: 400,
         message: "request headers are incomplete",
@@ -1278,34 +1535,37 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpSrvReq, JetHttpReadError> {
             message: "request header is malformed",
         })?;
     }
-    Ok(JetHttpSrvReq::server(&method, path, body, headers))
+    Ok(JetHttpRequest::server(&method, path, body, headers))
 }
 
-fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp {
+fn jet_http_mux_dispatch(
+    mux: &JetHttpMux,
+    req: JetHttpRequest,
+) -> Result<JetHttpResponse, JetHttpError> {
     let requested_method = req.method.as_str();
     let is_head = requested_method == "HEAD";
     if requested_method == "OPTIONS" && req.path == "*" {
         let routes = mux.0.clone();
-        let handler: JetHttpMuxHandlerFn = std::sync::Arc::new(move |_| {
+        let handler: JetHttpHandler = std::sync::Arc::new(move |_| {
             let allow = {
                 let routes = routes.lock().unwrap();
                 jet_http_allowed_methods(routes.iter().map(|route| route.method.as_str()))
             };
-            jet_http_srv_response_with_headers(
+            Ok(jet_http_srv_response_with_headers(
                 204,
                 "",
                 [("Allow".to_string(), allow)].into_iter().collect(),
-            )
+            ))
         });
         return jet_http_mux_run_handler(mux, req, handler);
     }
     let path = match jet_http_route_path(&req.path) {
         Ok(path) => path,
         Err(_) => {
-            return jet_http_srv_head_response(
+            return Ok(jet_http_srv_head_response(
                 jet_http_srv_response(400, &"400 Bad Request".to_string()),
                 is_head,
-            );
+            ));
         }
     };
     // Route lookup is a short snapshot operation. Never retain the registry
@@ -1327,12 +1587,12 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
     { "GET" } else { requested_method };
     if requested_method == "OPTIONS" && !path_matches.iter().any(|(_, route, _, _)| route.method == "OPTIONS") {
         let allow = jet_http_allowed_methods(path_matches.iter().map(|(_, route, _, _)| route.method.as_str()));
-        let handler: JetHttpMuxHandlerFn = std::sync::Arc::new(move |_| {
-            jet_http_srv_response_with_headers(
+        let handler: JetHttpHandler = std::sync::Arc::new(move |_| {
+            Ok(jet_http_srv_response_with_headers(
                 204,
                 "",
                 [("Allow".to_string(), allow.clone())].into_iter().collect(),
-            )
+            ))
         });
         return jet_http_mux_run_handler(mux, req, handler);
     }
@@ -1345,11 +1605,11 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
         let mut r2 = req.clone();
         r2.params = params.clone();
         r2.route_template = Some(route.pattern.clone());
-        let response = jet_http_mux_run_handler(mux, r2, route.handler.clone());
-        return jet_http_srv_head_response(response, is_head);
+        let response = jet_http_mux_run_handler(mux, r2, route.handler.clone())?;
+        return Ok(jet_http_srv_head_response(response, is_head));
     }
     if !path_matches.is_empty() {
-        return jet_http_srv_head_response(
+        return Ok(jet_http_srv_head_response(
             jet_http_srv_response_with_headers(
                 405,
                 "405 Method Not Allowed",
@@ -1358,28 +1618,30 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
                 ))].into_iter().collect(),
             ),
             is_head,
-        );
+        ));
     }
-    jet_http_srv_head_response(
+    Ok(jet_http_srv_head_response(
         jet_http_srv_response(404, &"404 Not Found".to_string()),
         is_head,
-    )
+    ))
 }
 
 fn jet_http_mux_run_handler(
     mux: &JetHttpMux,
-    req: JetHttpSrvReq,
-    mut handler: JetHttpMuxHandlerFn,
-) -> JetHttpSrvResp {
+    req: JetHttpRequest,
+    mut handler: JetHttpHandler,
+) -> Result<JetHttpResponse, JetHttpError> {
     let middlewares = mux.1.lock().unwrap().clone();
     for middleware in middlewares.iter().rev() { handler = middleware(handler); }
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
         Ok(response) => response,
-        Err(_) => jet_http_srv_response(500, &"500 Internal Server Error".to_string()),
+        Err(_) => Err(JetHttpError::Internal {
+            incident_id: "http-handler-panic".to_string(),
+        }),
     }
 }
 
-fn jet_http_srv_head_response(mut response: JetHttpSrvResp, is_head: bool) -> JetHttpSrvResp {
+fn jet_http_srv_head_response(mut response: JetHttpResponse, is_head: bool) -> JetHttpResponse {
     if is_head {
         response.head_content_length = response.body.length();
         response.body = JetHttpBody::empty();
@@ -1406,11 +1668,11 @@ fn jet_http_mux_validate(mux: &JetHttpMux) -> Result<(), String> {
     Ok(())
 }
 
-fn jet_http_srv_format(resp: &JetHttpSrvResp) -> String {
+fn jet_http_srv_format(resp: &JetHttpResponse) -> String {
     jet_http_srv_format_connection(resp, "HTTP/1.1", true)
 }
 
-fn jet_http_srv_format_connection(resp: &JetHttpSrvResp, version: &str, close: bool) -> String {
+fn jet_http_srv_format_connection(resp: &JetHttpResponse, version: &str, close: bool) -> String {
     let mut bytes = Vec::new();
     jet_http_srv_write_response(&mut bytes, resp, version, close)
         .expect("in-memory HTTP response formatting cannot fail");
@@ -1419,7 +1681,7 @@ fn jet_http_srv_format_connection(resp: &JetHttpSrvResp, version: &str, close: b
 
 fn jet_http_srv_write_response(
     writer: &mut impl std::io::Write,
-    resp: &JetHttpSrvResp,
+    resp: &JetHttpResponse,
     version: &str,
     close: bool,
 ) -> Result<(), JetHttpError> {
@@ -1439,6 +1701,8 @@ fn jet_http_srv_write_response(
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        413 => "Payload Too Large",
+        415 => "Unsupported Media Type",
         416 => "Range Not Satisfiable",
         417 => "Expectation Failed",
         500 => "Internal Server Error",
@@ -1512,31 +1776,31 @@ fn jet_http_srv_write_response(
     Ok(())
 }
 
-fn jet_http_srv_req_method(req: &JetHttpSrvReq) -> String {
+fn jet_http_srv_req_method(req: &JetHttpRequest) -> String {
     req.method.clone()
 }
-fn jet_http_srv_req_path(req: &JetHttpSrvReq) -> String {
+fn jet_http_srv_req_path(req: &JetHttpRequest) -> String {
     req.path.clone()
 }
-fn jet_http_srv_req_param(req: &JetHttpSrvReq, name: &String) -> Option<String> {
+fn jet_http_srv_req_param(req: &JetHttpRequest, name: &String) -> Option<String> {
     req.params.get(name).cloned()
 }
-fn jet_http_srv_req_body(req: &JetHttpSrvReq) -> JetHttpBody {
+fn jet_http_srv_req_body(req: &JetHttpRequest) -> JetHttpBody {
     req.body.clone()
 }
-fn jet_http_srv_req_header(req: &JetHttpSrvReq, name: &String) -> Option<String> {
+fn jet_http_srv_req_header(req: &JetHttpRequest, name: &String) -> Option<String> {
     req.headers.get(name).cloned()
 }
 
-fn jet_http_srv_req_body_len(req: &JetHttpSrvReq) -> i64 {
+fn jet_http_srv_req_body_len(req: &JetHttpRequest) -> i64 {
     req.body.length().unwrap_or(0) as i64
 }
 
-fn jet_http_srv_req_under_limit(req: &JetHttpSrvReq, max_bytes: i64) -> bool {
+fn jet_http_srv_req_under_limit(req: &JetHttpRequest, max_bytes: i64) -> bool {
     max_bytes >= 0 && req.body.length().is_some_and(|length| length as i64 <= max_bytes)
 }
 
-fn jet_http_srv_sse(data: &String) -> JetHttpSrvResp {
+fn jet_http_srv_sse(data: &String) -> JetHttpResponse {
     let resp = jet_http_srv_response(200, &format!("data: {}\n\n", data));
     let resp = jet_http_srv_response_header(
         resp,
@@ -1546,7 +1810,7 @@ fn jet_http_srv_sse(data: &String) -> JetHttpSrvResp {
     jet_http_srv_response_header(resp, &"cache-control".to_string(), &"no-cache".to_string())
 }
 
-fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHttpSrvResp, String> {
+fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHttpResponse, String> {
     std::fs::read_to_string(path)
         .map(|body| {
             jet_http_srv_response_header(
@@ -1559,10 +1823,10 @@ fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHttpSrvRe
 }
 
 fn jet_http_srv_static_file_range(
-    req: &JetHttpSrvReq,
+    req: &JetHttpRequest,
     path: &String,
     mime: &String,
-) -> Result<JetHttpSrvResp, String> {
+) -> Result<JetHttpResponse, String> {
     let body =
         std::fs::read_to_string(path).map_err(|e| format!("static file `{}` failed: {}", path, e))?;
     let Some(range) = jet_http_srv_req_header(req, &"range".to_string()) else {
@@ -1599,7 +1863,7 @@ fn jet_http_srv_static_file_range(
     ))
 }
 
-fn jet_http_srv_access_log(req: &JetHttpSrvReq, status: i64) -> String {
+fn jet_http_srv_access_log(req: &JetHttpRequest, status: i64) -> String {
     let route = req.route_template.as_deref().unwrap_or_else(|| req.path.split('?').next().unwrap_or(&req.path));
     format!("{} {} {}", req.method, route, status)
 }

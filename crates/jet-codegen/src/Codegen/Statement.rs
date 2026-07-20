@@ -322,6 +322,9 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
     let Type::Fn { params, ret, .. } = ft else {
         return rust_name;
     };
+    let middleware = params.len() == 1
+        && matches!(&params[0], Type::Named(name) if name == "HttpHandler")
+        && matches!(ret.as_deref(), Some(Type::Named(name)) if name == "HttpHandler");
     let arg_decls: Vec<String> = params
         .iter()
         .enumerate()
@@ -329,14 +332,24 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
             format!(
                 "__jet_a{}: {}",
                 i,
-                rust_param_type(cx, AccessConvention::Read, p)
+                if middleware {
+                    cx.rust_type(p)
+                } else {
+                    rust_param_type(cx, AccessConvention::Read, p)
+                }
             )
         })
         .collect();
     let arg_calls: Vec<String> = params
         .iter()
         .enumerate()
-        .map(|(i, _)| format!("__jet_a{i}"))
+        .map(|(i, _)| {
+            if middleware {
+                format!("&__jet_a{i}")
+            } else {
+                format!("__jet_a{i}")
+            }
+        })
         .collect();
     let _ = ret;
     format!(

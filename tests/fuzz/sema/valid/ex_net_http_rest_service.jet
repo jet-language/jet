@@ -11,11 +11,11 @@ fn run() {
     addr :: listener.local_addr() ?? panic("address")
 
     mux :: http_server.mux()
-    mux.post("/api/:name/*path", (req: HttpSrvReq) =>
+    mux.post("/api/:name/*path", (req: HttpRequest) =>
         http_server.response(200, "{req.param("name") ?? "missing"}|{req.param("path") ?? "missing"}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{req.body()}")
     )
-    mux.get("/events", (req: HttpSrvReq) => http_server.sse("ready"))
-    mux.get("/file", (req: HttpSrvReq) =>
+    mux.get("/events", (req: HttpRequest) => http_server.sse("ready"))
+    mux.get("/file", (req: HttpRequest) =>
         http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")
     )
 

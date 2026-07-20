@@ -421,17 +421,18 @@ fn http_request_response_accessors() {
     // single-line request keeps the lexer happy (Jet has no `\r` escape).
     let src = "\
 use core.http as http
+use core.http.server as server
 fn handle(req: HttpRequest) -> HttpResponse {
     m :: req.method()
     p :: req.path()
     h :: req.header(\"host\")
     q :: req.param(\"id\")
     body :: \"m={m} p={p}\"
-    return HttpResponse.{status: \"200 OK\", body: body, headers: []}
+    return server.response(200, body)
 }
 fn describe(resp: HttpResponse) -> String {
     s :: resp.status()
-    b :: resp.body()
+    b :: resp.body().text(1048576) ?? \"invalid body\"
     return \"{s}: {b}\"
 }
 fn run() {
@@ -442,7 +443,7 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_http_accessors", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "200 OK: m=GET p=/x\n");
+    assert_eq!(stdout, "200: m=GET p=/x\n");
 }
 
 /// c109 Phase 21: `tasks.spawn` + `Task<T>` value + `Task.join()` — the spawn/join
