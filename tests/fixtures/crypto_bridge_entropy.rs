@@ -93,6 +93,22 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    fn arm_short_io(boundary: &'static str) {
+        jet_crypto_set_file_io_test_fault(boundary, JetcIoTestFault::Short(7));
+    }
+
+    #[cfg(target_os = "linux")]
+    fn arm_io_error(boundary: &'static str, code: i32) {
+        jet_crypto_set_file_io_test_fault(boundary, JetcIoTestFault::Error(code));
+    }
+
+    #[cfg(target_os = "linux")]
+    fn clear_observed_io_fault() {
+        assert!(jet_crypto_file_io_test_hits() > 0);
+        jet_crypto_clear_file_io_test_fault();
+    }
+
+    #[cfg(target_os = "linux")]
     fn replace_candidate_at(at: &'static str, parent: &std::path::Path, prefix: &'static str) {
         arm_publish_race(PublishRace::ReplaceCandidate {
             at,
@@ -731,6 +747,218 @@ mod tests {
         }
 
         jet_crypto_clear_file_boundary_test_observer();
+        assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+        }));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn jetc_v2_short_io_and_faults_preserve_atomic_file_contract() {
+        let root = test_dir("io-faults");
+        let source = root.join("source.bin");
+        let plaintext = vec![0x6d; 4097];
+        std::fs::write(&source, &plaintext).unwrap();
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let public = jet_crypto_x25519_public_typed_impl(&recipient);
+
+        for boundary in ["seal-source-read", "seal-stage-write", "seal-stage-read", "seal-source-recheck-read", "seal-output-write"] {
+            let envelope = root.join(format!("short-{boundary}.jetc"));
+            arm_short_io(boundary);
+            jet_crypto_file_seal_impl(
+                vec![public.clone()],
+                &source.to_string_lossy().into_owned(),
+                &envelope.to_string_lossy().into_owned(),
+                never_cancelled,
+            ).unwrap();
+            clear_observed_io_fault();
+            let restored = root.join(format!("short-{boundary}.bin"));
+            jet_crypto_file_open_impl(
+                &recipient,
+                &envelope.to_string_lossy().into_owned(),
+                &restored.to_string_lossy().into_owned(),
+                never_cancelled,
+            ).unwrap();
+            assert_eq!(std::fs::read(restored).unwrap(), plaintext);
+        }
+
+        let stable = root.join("stable.jetc");
+        jet_crypto_file_seal_impl(
+            vec![public.clone()],
+            &source.to_string_lossy().into_owned(),
+            &stable.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        for boundary in ["open-input-read", "open-output-write"] {
+            let restored = root.join(format!("short-{boundary}.bin"));
+            arm_short_io(boundary);
+            jet_crypto_file_open_impl(
+                &recipient,
+                &stable.to_string_lossy().into_owned(),
+                &restored.to_string_lossy().into_owned(),
+                never_cancelled,
+            ).unwrap();
+            clear_observed_io_fault();
+            assert_eq!(std::fs::read(restored).unwrap(), plaintext);
+        }
+
+        let key = (0u8..32).collect::<Vec<_>>();
+        let nonce = (0u8..12).collect::<Vec<_>>();
+        let ciphertext = ChaCha20Poly1305::new_from_slice(&key).unwrap()
+            .encrypt(ChaNonce::from_slice(&nonce), plaintext.as_slice()).unwrap();
+        let mut v1 = b"JETC".to_vec();
+        v1.extend_from_slice(&[1, 1]);
+        v1.extend_from_slice(&nonce);
+        v1.extend_from_slice(&ciphertext);
+        let v1_source = root.join("historical.jetc");
+        std::fs::write(&v1_source, &v1).unwrap();
+        for boundary in ["migrate-v1-read-io", "migrate-stage-write", "migrate-stage-read", "migrate-output-write", "migrate-verify-read"] {
+            let migrated = root.join(format!("short-{boundary}.jetc"));
+            arm_short_io(boundary);
+            jet_crypto_expert_migrate_v1_impl(
+                &key,
+                &v1_source.to_string_lossy().into_owned(),
+                vec![public.clone()],
+                &migrated.to_string_lossy().into_owned(),
+                never_cancelled,
+            ).unwrap();
+            clear_observed_io_fault();
+            assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+            let restored = root.join(format!("short-{boundary}.bin"));
+            jet_crypto_file_open_impl(
+                &recipient,
+                &migrated.to_string_lossy().into_owned(),
+                &restored.to_string_lossy().into_owned(),
+                never_cancelled,
+            ).unwrap();
+            assert_eq!(std::fs::read(restored).unwrap(), plaintext);
+        }
+
+        for (boundary, expected) in [
+            ("seal-source-read", JetFileCryptoError::SourceIo),
+            ("seal-stage-write", JetFileCryptoError::DestinationIo),
+            ("seal-stage-fsync", JetFileCryptoError::DestinationIo),
+            ("seal-output-write", JetFileCryptoError::DestinationIo),
+            ("seal-output-fsync", JetFileCryptoError::DestinationIo),
+        ] {
+            let output = root.join(format!("fail-{boundary}.jetc"));
+            arm_io_error(boundary, 28);
+            assert_eq!(jet_crypto_file_seal_impl(
+                vec![public.clone()],
+                &source.to_string_lossy().into_owned(),
+                &output.to_string_lossy().into_owned(),
+                never_cancelled,
+            ), Err(expected));
+            clear_observed_io_fault();
+            assert!(!output.exists());
+        }
+
+        for (boundary, expected) in [
+            ("open-input-read", JetFileCryptoError::OpenFailed),
+            ("open-output-write", JetFileCryptoError::DestinationIo),
+            ("open-output-fsync", JetFileCryptoError::DestinationIo),
+        ] {
+            let output = root.join(format!("fail-{boundary}.bin"));
+            arm_io_error(boundary, 28);
+            assert_eq!(jet_crypto_file_open_impl(
+                &recipient,
+                &stable.to_string_lossy().into_owned(),
+                &output.to_string_lossy().into_owned(),
+                never_cancelled,
+            ), Err(expected));
+            clear_observed_io_fault();
+            assert!(!output.exists());
+        }
+
+        for boundary in [
+            "migrate-v1-read-io",
+            "migrate-stage-write",
+            "migrate-stage-fsync",
+            "migrate-output-write",
+            "migrate-verify-fsync",
+            "migrate-reopen-verify",
+            "migrate-verify-read",
+            "migrate-output-fsync",
+        ] {
+            let output = root.join(format!("fail-{boundary}.jetc"));
+            arm_io_error(boundary, 28);
+            let expected = if boundary == "migrate-v1-read-io" { JetFileCryptoError::SourceIo } else { JetFileCryptoError::DestinationIo };
+            assert_eq!(jet_crypto_expert_migrate_v1_impl(
+                &key,
+                &v1_source.to_string_lossy().into_owned(),
+                vec![public.clone()],
+                &output.to_string_lossy().into_owned(),
+                never_cancelled,
+            ), Err(expected));
+            clear_observed_io_fault();
+            assert!(!output.exists());
+            assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+        }
+
+        let seal_post = root.join("seal-post-install.jetc");
+        arm_io_error("seal-directory-fsync", 5);
+        assert_eq!(jet_crypto_file_seal_impl(
+            vec![public.clone()],
+            &source.to_string_lossy().into_owned(),
+            &seal_post.to_string_lossy().into_owned(),
+            never_cancelled,
+        ), Err(JetFileCryptoError::DestinationIo));
+        clear_observed_io_fault();
+        assert!(seal_post.exists());
+        let seal_post_restored = root.join("seal-post-install.bin");
+        jet_crypto_file_open_impl(
+            &recipient,
+            &seal_post.to_string_lossy().into_owned(),
+            &seal_post_restored.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        assert_eq!(std::fs::read(seal_post_restored).unwrap(), plaintext);
+
+        let open_post = root.join("open-post-install.bin");
+        arm_io_error("open-directory-fsync", 5);
+        assert_eq!(jet_crypto_file_open_impl(
+            &recipient,
+            &stable.to_string_lossy().into_owned(),
+            &open_post.to_string_lossy().into_owned(),
+            never_cancelled,
+        ), Err(JetFileCryptoError::DestinationIo));
+        clear_observed_io_fault();
+        assert_eq!(std::fs::read(&open_post).unwrap(), plaintext);
+
+        let migrate_post = root.join("migrate-post-install.jetc");
+        arm_io_error("migrate-directory-fsync", 5);
+        assert_eq!(jet_crypto_expert_migrate_v1_impl(
+            &key,
+            &v1_source.to_string_lossy().into_owned(),
+            vec![public.clone()],
+            &migrate_post.to_string_lossy().into_owned(),
+            never_cancelled,
+        ), Err(JetFileCryptoError::DestinationIo));
+        clear_observed_io_fault();
+        assert!(migrate_post.exists());
+        assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+        let migrate_post_restored = root.join("migrate-post-install.bin");
+        jet_crypto_file_open_impl(
+            &recipient,
+            &migrate_post.to_string_lossy().into_owned(),
+            &migrate_post_restored.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        assert_eq!(std::fs::read(migrate_post_restored).unwrap(), plaintext);
+
+        let winner = root.join("winner.jetc");
+        std::fs::write(&winner, b"winner").unwrap();
+        arm_io_error("seal-directory-fsync", 5);
+        assert_eq!(jet_crypto_file_seal_impl(
+            vec![public],
+            &source.to_string_lossy().into_owned(),
+            &winner.to_string_lossy().into_owned(),
+            never_cancelled,
+        ), Err(JetFileCryptoError::DestinationExists));
+        assert_eq!(jet_crypto_file_io_test_hits(), 0);
+        jet_crypto_clear_file_io_test_fault();
+        assert_eq!(std::fs::read(&winner).unwrap(), b"winner");
         assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
             !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
         }));
