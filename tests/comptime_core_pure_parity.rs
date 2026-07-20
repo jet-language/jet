@@ -53,6 +53,26 @@ const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() -> String {
     return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
 }"#;
 const BYTE_BUFFER_EXPECTED: &str = "true|31|[18, 86, 52, 120, 154, 4, 3, 2, 1, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1, 17, 18, 19, 20, 21, 22, 23, 24, 9, 10]|true|0|[255, 0]|2";
+const LRU_DECLS: &str = r#"fn lru_view() -> String {
+    cache: Lru<String, Int> := Lru.new(2)
+    empty_before :: cache.is_empty()
+    first :: cache.add("a", 1) ?? -1
+    added_b :: cache.add_new("b", 2)
+    duplicate_b :: cache.add_new("b", 99)
+    got_a :: cache.get("a") ?? -1
+    displaced_a :: cache.add("a", 10) ?? -1
+    evicted :: cache.add("c", 3) ?? -1
+    keys :: cache.keys()
+    removed_a :: cache.remove("a") ?? -1
+    missing :: cache.remove("missing") ?? -1
+    length :: cache.len()
+    cache.clear()
+    zero: Lru<String, Int> := Lru.new(-2)
+    zero_add :: zero.add("x", 7) ?? -1
+    zero_add_new :: zero.add_new("x", 7)
+    return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"
+}"#;
+const LRU_EXPECTED: &str = "true|2|-1|true|false|1|1|-1|false|[c, a]|10|-1|1|true|0|-1|false|0";
 const RNG_DECLS: &str = r#"use core.random as random
 fn rng_view() -> String {
     rng := random.rng(99)
@@ -175,6 +195,12 @@ fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
             "\"3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0\" : String",
         ]
     );
+}
+
+#[test]
+fn public_transcript_covers_lru_methods_exactly() {
+    let values = exact_values(&[LRU_DECLS, "lru_view()"]);
+    assert_eq!(values, [format!("\"{LRU_EXPECTED}\" : String")]);
 }
 
 fn parity_source(expression: &str, imports: &str) -> String {
@@ -397,6 +423,13 @@ fn rustc_backed_byte_buffer_matches_all_execution_tiers_exactly() {
         BYTE_BUFFER_EXPECTED
     );
     check_dev_tiers("byte-buffer", &source, BYTE_BUFFER_EXPECTED);
+}
+
+#[test]
+fn rustc_backed_lru_matches_all_execution_tiers_exactly() {
+    let source = parity_source("lru_view()", LRU_DECLS);
+    assert_eq!(check_aot_comptime("lru/all-methods", &source), LRU_EXPECTED);
+    check_dev_tiers("lru", &source, LRU_EXPECTED);
 }
 
 #[test]

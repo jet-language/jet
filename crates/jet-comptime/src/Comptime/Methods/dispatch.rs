@@ -1326,6 +1326,16 @@ impl<'a> Interp<'a> {
                     fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
                 });
             }
+            if type_name == crate::Syntax::TYPE_LRU && method == "new" {
+                let capacity = as_int(&self.eval(&args[0].expr, scope)?, span)?.max(0);
+                return Ok(CtValue::Struct {
+                    type_name: crate::Syntax::TYPE_LRU.to_string(),
+                    fields: vec![
+                        ("capacity".to_string(), CtValue::Int(capacity)),
+                        ("entries".to_string(), CtValue::List(Vec::new())),
+                    ],
+                });
+            }
         }
         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
@@ -1927,6 +1937,166 @@ impl<'a> Interp<'a> {
             }
         }
 
+        let mut evaluated_receiver = None;
+        if matches!(
+            method,
+            "add"
+                | "add_new"
+                | "get"
+                | "remove"
+                | "has_key"
+                | "keys"
+                | "capacity"
+                | "len"
+                | "is_empty"
+                | "clear"
+        ) {
+            let peek = self.eval(receiver, scope)?;
+            match (&peek, method) {
+                (
+                    CtValue::Struct { type_name, fields },
+                    method @ ("add"
+                        | "add_new"
+                        | "get"
+                        | "remove"
+                        | "has_key"
+                        | "keys"
+                        | "capacity"
+                        | "len"
+                        | "is_empty"
+                        | "clear"),
+                ) if type_name == crate::Syntax::TYPE_LRU => {
+                    let capacity = fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("capacity", CtValue::Int(capacity)) => Some(*capacity as usize),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    let mut entries = fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("entries", CtValue::List(entries)) => Some(entries.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut argv = Vec::with_capacity(args.len());
+                    for arg in args {
+                        argv.push(self.eval(&arg.expr, scope)?);
+                    }
+                    let option_none = || {
+                        CtValue::None(match resolved_ret {
+                            Some(Type::Option(inner)) => (**inner).clone(),
+                            _ => Type::Int,
+                        })
+                    };
+                    let key_position = |entries: &[CtValue], key: &CtValue| {
+                        entries.iter().position(|entry| {
+                            matches!(entry, CtValue::List(pair) if pair.first() == Some(key))
+                        })
+                    };
+                    let mut changed = false;
+                    let result = match method {
+                        "len" => CtValue::Int(entries.len() as i64),
+                        "is_empty" => CtValue::Bool(entries.is_empty()),
+                        "capacity" => CtValue::Int(capacity as i64),
+                        "has_key" => CtValue::Bool(key_position(&entries, &argv[0]).is_some()),
+                        "keys" => CtValue::List(
+                            entries
+                                .iter()
+                                .filter_map(|entry| match entry {
+                                    CtValue::List(pair) => pair.first().cloned(),
+                                    _ => None,
+                                })
+                                .collect(),
+                        ),
+                        "clear" => {
+                            entries.clear();
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        "add_new" => {
+                            let added = capacity > 0 && key_position(&entries, &argv[0]).is_none();
+                            if added {
+                                entries.insert(
+                                    0,
+                                    CtValue::List(vec![argv[0].clone(), argv[1].clone()]),
+                                );
+                                if entries.len() > capacity {
+                                    entries.pop();
+                                }
+                                changed = true;
+                            }
+                            CtValue::Bool(added)
+                        }
+                        "add" => {
+                            if capacity == 0 {
+                                option_none()
+                            } else {
+                                let displaced = key_position(&entries, &argv[0]).map(|index| {
+                                    let CtValue::List(pair) = entries.remove(index) else {
+                                        unreachable!("Lru entries are pairs")
+                                    };
+                                    pair[1].clone()
+                                });
+                                entries.insert(
+                                    0,
+                                    CtValue::List(vec![argv[0].clone(), argv[1].clone()]),
+                                );
+                                if entries.len() > capacity {
+                                    entries.pop();
+                                }
+                                changed = true;
+                                displaced.map_or_else(option_none, |value| {
+                                    CtValue::Some(Box::new(value))
+                                })
+                            }
+                        }
+                        "get" => match key_position(&entries, &argv[0]) {
+                            Some(index) => {
+                                let entry = entries.remove(index);
+                                let CtValue::List(pair) = &entry else {
+                                    unreachable!("Lru entries are pairs")
+                                };
+                                let value = pair[1].clone();
+                                entries.insert(0, entry);
+                                changed = true;
+                                CtValue::Some(Box::new(value))
+                            }
+                            None => option_none(),
+                        },
+                        "remove" => match key_position(&entries, &argv[0]) {
+                            Some(index) => {
+                                let CtValue::List(pair) = entries.remove(index) else {
+                                    unreachable!("Lru entries are pairs")
+                                };
+                                changed = true;
+                                CtValue::Some(Box::new(pair[1].clone()))
+                            }
+                            None => option_none(),
+                        },
+                        _ => unreachable!("Lru method set is closed"),
+                    };
+                    if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                        self.write_back(
+                            receiver,
+                            CtValue::Struct {
+                                type_name: crate::Syntax::TYPE_LRU.to_string(),
+                                fields: vec![
+                                    ("capacity".to_string(), CtValue::Int(capacity as i64)),
+                                    ("entries".to_string(), CtValue::List(entries)),
+                                ],
+                            },
+                            scope,
+                        )?;
+                    }
+                    return Ok(result);
+                }
+                _ => {}
+            }
+            evaluated_receiver = Some(peek);
+        }
+
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
             "push", "pop", "insert", "remove", "clear", "reverse", "sort",
@@ -1936,7 +2106,10 @@ impl<'a> Interp<'a> {
             for a in args {
                 argv.push(self.eval(&a.expr, scope)?);
             }
-            let mut container = self.eval(receiver, scope)?;
+            let mut container = match &evaluated_receiver {
+                Some(value) => value.clone(),
+                None => self.eval(receiver, scope)?,
+            };
             if !matches!(
                 &container,
                 CtValue::Struct { type_name, .. }
@@ -1963,7 +2136,10 @@ impl<'a> Interp<'a> {
                 return Ok(ret);
             }
         }
-        let recv = self.eval(receiver, scope)?;
+        let recv = match evaluated_receiver {
+            Some(value) => value,
+            None => self.eval(receiver, scope)?,
+        };
         // c139: an instance method the user wrote — `impl Type { fn … }` /
         // in-struct `fn`/`impl Trait { … }`. `recv`'s own `type_name` (not the
         // receiver expression's static type) picks the impl, so a value bound
