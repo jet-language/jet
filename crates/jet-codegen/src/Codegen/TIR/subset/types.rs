@@ -40,7 +40,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
         return true;
     }
-    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "KeyStatus" | "VaultError")) {
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError")) {
         return true;
     }
     if matches!(&ty, Type::Named(n) if n == "HttpHandler") {
@@ -77,7 +77,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
 
 fn is_covered_vault_ty(ty: &Type, cx: &Cx) -> bool {
     matches!(ty, Type::Apply { name, args }
-        if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation")
+        if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan")
             && args.len() == 1 && is_subset_param_ty(&args[0], cx))
 }
 

@@ -903,13 +903,15 @@ impl Cx {
             Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
                 format!("{}JetAuthError", self.root_prefix)
             }
-            Type::Named(name) if matches!(name.as_str(), "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError") => {
+            Type::Named(name) if matches!(name.as_str(), "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "KeyUnlock" | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError" | "KeyWrapError") => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 let rust = match name.as_str() {
                     "Secret" => "Secret", "SigningKey" => "JetSigningKey", "VerifyKey" => "JetVerifyKey",
                     "X25519SecretKey" => "JetX25519SecretKey", "X25519PublicKey" => "JetX25519PublicKey",
                     "SharedSecret" => "JetSharedSecret", "Signature" => "JetSignature", "Sealed" => "JetSealed",
                     "WrappedKey" => "JetWrappedKey", "PasswordHash" => "JetPasswordHash",
+                    "WrappedVaultKey" => "JetWrappedVaultKey", "KeyUnlock" => "JetVaultKeyUnlock<'_>",
+                    "KeyWrapError" => "JetVaultKeyWrapError",
                     "Digest256" => "JetDigest256", "Digest512" => "JetDigest512",
                     "FileCryptoError" => "JetFileCryptoError", _ => "JetCryptoError",
                 };
@@ -1226,13 +1228,14 @@ impl Cx {
                 )
             }
             Type::Apply { name, args }
-                if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation")
+                if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan")
                     && args.len() == 1 =>
             {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 let rust = match name.as_str() {
                     "KeyRef" => "JetVaultKeyRef", "MutationPlan" => "JetVaultMutationPlan",
-                    "VaultWrite" => "JetVaultWrite", _ => "JetVaultRotation",
+                    "VaultWrite" => "JetVaultWrite", "Rotation" => "JetVaultRotation",
+                    _ => "JetVaultWrappedImportPlan",
                 };
                 format!("{ffi}::{rust}<{}>", self.rust_type(&args[0]))
             }

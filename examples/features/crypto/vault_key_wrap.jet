@@ -1,0 +1,35 @@
+// D-CRYPTO-KEYWRAP1=A: portable vault backups remain type-bound and import
+// through the same prepare-authorize-commit authority flow as local mutation.
+use core.crypto as crypto
+use core.vault as vault
+
+fn recipient_surface() --[Secret]-> {
+    create :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
+    create_write :: vault.authorize_write(&create, "create release signer") ?? return
+    key_ref :: vault.commit_generate(^create_write, ^create) ?? return
+    identity :: crypto.X25519SecretKey.generate() ?? return
+    recipient :: identity.public_key()
+    wrapped :: vault.export_to_recipients(&key_ref, [recipient]) ?? return
+    bytes :: wrapped.bytes()
+    parsed :: vault.WrappedVaultKey.from_bytes(bytes) ?? return
+    unlock :: vault.KeyUnlock.Recipient(&identity)
+    plan :: vault.prepare_import_wrapped<crypto.SigningKey>("restored", parsed, unlock) ?? return
+    write :: vault.authorize_wrapped_import(&plan, "restore recipient backup") ?? return
+    _ :: vault.commit_import_wrapped(^write, ^plan) ?? return
+}
+
+fn passphrase_surface() --[Secret]-> {
+    create :: vault.prepare_generate<crypto.X25519SecretKey>("transport") ?? return
+    create_write :: vault.authorize_write(&create, "create transport key") ?? return
+    key_ref :: vault.commit_generate(^create_write, ^create) ?? return
+    passphrase :: crypto.Secret.from_text("a sixteen byte recovery phrase")
+    wrapped :: vault.export_to_passphrase(&key_ref, &passphrase) ?? return
+    unlock :: vault.KeyUnlock.Passphrase(&passphrase)
+    plan :: vault.prepare_import_wrapped<crypto.X25519SecretKey>("restored transport", wrapped, unlock) ?? return
+    write :: vault.authorize_wrapped_import(&plan, "restore passphrase backup") ?? return
+    _ :: vault.commit_import_wrapped(^write, ^plan) ?? return
+}
+
+fn run() {
+    print("vault key wrap surface ready")
+}

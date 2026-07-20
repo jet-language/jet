@@ -2662,9 +2662,20 @@ teachable rule: crypto moves bytes, vault keeps secrets.
 vault. Immutable `KeyRef<T>` values identify exact versions. Mutation requires
 prepared plans, exact-preview one-use authority, and consuming commits;
 rotation, retirement, and logical revocation never retarget an old ref. The
-canonical `JVLT` v2 payload, redacted closed `VaultError`, and native atomic
+  canonical `JVLT` v2 payload, redacted closed `VaultError`, and native atomic
 durability law are part of the API contract. Portable backup remains solely
 owned by D-CRYPTO-KEYWRAP1 and is absent here.
+
+**D-CRYPTO-KEYWRAP1=A — authenticated portable vault backup** *(ratified by
+owner 2026-07-20, card #302)*: `core.vault` exports type-distinct `SigningKey`
+and `X25519SecretKey` generations as canonical `JVKW` v1 envelopes, either to
+1–16 X25519 recipients or a fixed-policy Argon2id passphrase. The authenticated
+header binds repository, name, generation, opaque identity, record hash,
+public key, and concrete key type. Import is safe only through
+`prepare_import_wrapped<T>` → `authorize_wrapped_import<T>` →
+`commit_import_wrapped<T>`; same-origin exact imports are idempotent, revoked
+origins never reactivate, cross-repository copies receive a new identity, and
+secret-dependent unlock/tamper/type failures collapse to `OpenFailed`.
 
 **D-CORENS2=A — core namespace admission law** *(ratified by owner
 2026-07-12, card #509)*: a new top-level `core.<name>` requires a

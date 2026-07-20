@@ -26,7 +26,7 @@ fn is_string_literal_expr(expr: &crate::AST::Expr) -> bool {
 fn vault_key_arg(ty: &Type) -> Option<Type> {
     match ty {
         Type::Apply { name, args }
-            if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation") =>
+            if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan") =>
         {
             args.first().cloned()
         }
@@ -426,11 +426,15 @@ impl<'a> Checker<'a> {
             match (module, name) {
                 ("core.vault", "current" | "versions" | "load" | "status"
                     | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
-                    | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke") => {
+                    | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
+                    | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
+                    | "authorize_wrapped_import" | "commit_import_wrapped") => {
                     let inferred_from = match name {
                         "prepare_store" => 1,
+                        "export_to_recipients" | "export_to_passphrase" => 0,
                         "load" | "status" | "prepare_retire" | "prepare_revoke" | "authorize_write"
-                        | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" => 0,
+                        | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
+                        | "authorize_wrapped_import" | "commit_import_wrapped" => 0,
                         _ => usize::MAX,
                     };
                     let inferred_key = if type_args.is_empty() && inferred_from < args.len() {
@@ -472,6 +476,11 @@ impl<'a> Checker<'a> {
                         "prepare_store" => (vec![(AccessConvention::Read, Type::String), (AccessConvention::Move, key_ty.clone())], apply("MutationPlan")),
                         "prepare_retire" | "prepare_revoke" => (vec![(AccessConvention::Read, apply("KeyRef")), (AccessConvention::Read, Type::String)], apply("MutationPlan")),
                         "authorize_write" => (vec![(AccessConvention::Read, apply("MutationPlan")), (AccessConvention::Read, Type::String)], apply("VaultWrite")),
+                        "export_to_recipients" => (vec![(AccessConvention::Read, apply("KeyRef")), (AccessConvention::Read, Type::List(Box::new(Type::Named("X25519PublicKey".into()))))], Type::Named("WrappedVaultKey".into())),
+                        "export_to_passphrase" => (vec![(AccessConvention::Read, apply("KeyRef")), (AccessConvention::Read, crate::Sema::Diagnostics::core_crypto_nominal(Type::Named("Secret".into())))], Type::Named("WrappedVaultKey".into())),
+                        "prepare_import_wrapped" => (vec![(AccessConvention::Read, Type::String), (AccessConvention::Read, Type::Named("WrappedVaultKey".into())), (AccessConvention::Read, Type::Named("KeyUnlock".into()))], apply("WrappedImportPlan")),
+                        "authorize_wrapped_import" => (vec![(AccessConvention::Read, apply("WrappedImportPlan")), (AccessConvention::Read, Type::String)], apply("VaultWrite")),
+                        "commit_import_wrapped" => (vec![(AccessConvention::Move, apply("VaultWrite")), (AccessConvention::Move, apply("WrappedImportPlan"))], apply("KeyRef")),
                         "commit_generate" | "commit_store" => (vec![(AccessConvention::Move, apply("VaultWrite")), (AccessConvention::Move, apply("MutationPlan"))], apply("KeyRef")),
                         "commit_rotate" => (vec![(AccessConvention::Move, apply("VaultWrite")), (AccessConvention::Move, apply("MutationPlan"))], apply("Rotation")),
                         _ => (vec![(AccessConvention::Move, apply("VaultWrite")), (AccessConvention::Move, apply("MutationPlan"))], Type::Named("Unit".into())),
@@ -484,7 +493,12 @@ impl<'a> Checker<'a> {
                         } else { self.expect_core_arg(name, i, ty, arg); }
                     }
                     for arg in args.iter_mut().skip(params.len()) { self.infer(&mut arg.expr); }
-                    return Some(result_ty(ok, Type::Named("VaultError".into())));
+                    let err = if matches!(name, "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped" | "authorize_wrapped_import" | "commit_import_wrapped") {
+                        "KeyWrapError"
+                    } else {
+                        "VaultError"
+                    };
+                    return Some(result_ty(ok, Type::Named(err.into())));
                 }
                 ("core.encoding.cbor", "parse") => {
                     if !(1..=2).contains(&args.len()) {

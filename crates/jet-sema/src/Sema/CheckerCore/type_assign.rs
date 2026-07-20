@@ -233,7 +233,7 @@ impl<'a> Checker<'a> {
                             | "Table" | "Series" | "LazyFrame" | "DataJoin"
                             // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
                             | "Pool" | "Id"
-                            | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation"
+                            | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
                     );
                     let imported_owner = self.modules.and_then(|modules| {
                         self.imports.values().copied().find(|&idx| {

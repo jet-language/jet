@@ -233,7 +233,7 @@ pub fn builtin_method_return(
         }
         Type::Named(n) if n == "SigningKey" && method == "public_key" && arg_count == 0 => Some(Some(Type::Named("VerifyKey".into()))),
         Type::Named(n) if n == "X25519SecretKey" && method == "public_key" && arg_count == 0 => Some(Some(Type::Named("X25519PublicKey".into()))),
-        Type::Named(n) if matches!(n.as_str(), "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512") && method == "bytes" && arg_count == 0 => Some(Some(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))),
+        Type::Named(n) if matches!(n.as_str(), "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512") && method == "bytes" && arg_count == 0 => Some(Some(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))),
         Type::Named(n) if matches!(n.as_str(), "Digest256" | "Digest512") && method == "hex" && arg_count == 0 => Some(Some(Type::String)),
         Type::Named(n) if n == "X25519PublicKey" && method == "text" && arg_count == 0 => Some(Some(Type::String)),
         Type::Named(n) if n == "PasswordHash" && method == "text" && arg_count == 0 => Some(Some(Type::String)),
@@ -395,6 +395,9 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "from_bytes", 1) if n == "Secret" => Some(Some(Type::Named("Secret".into()))),
         (Type::Named(n), "generate", 0) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
         (Type::Named(n), "from_bytes", 1) if matches!(n.as_str(), "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey") => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
+        (Type::Named(n), "from_bytes", 1) if n == "WrappedVaultKey" => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("KeyWrapError".into())) })),
+        (Type::Named(n), "Recipient", 1) if n == "KeyUnlock" => Some(Some(Type::Named("KeyUnlock".into()))),
+        (Type::Named(n), "Passphrase", 1) if n == "KeyUnlock" => Some(Some(Type::Named("KeyUnlock".into()))),
         (Type::Named(n), "from_text", 1) if n == "X25519PublicKey" => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
         (Type::Named(n), "parse", 1) if n == "PasswordHash" => Some(Some(Type::Result { ok: Box::new(Type::Named("PasswordHash".into())), err: Box::new(Type::Named("CryptoError".into())) })),
         // D-SHAPE-CONVERT1=A: destination-owned numeric conversion.
@@ -1126,7 +1129,9 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
     }
     match recv_ty {
         Type::Named(n) if n == "Secret" && method == "from_text" => Some(vec![Type::String]),
-        Type::Named(n) if matches!(n.as_str(), "Secret" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey") && method == "from_bytes" => Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),
+        Type::Named(n) if matches!(n.as_str(), "Secret" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey") && method == "from_bytes" => Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),
+        Type::Named(n) if n == "KeyUnlock" && method == "Recipient" => Some(vec![Type::Named("X25519SecretKey".into())]),
+        Type::Named(n) if n == "KeyUnlock" && method == "Passphrase" => Some(vec![Type::Named("Secret".into())]),
         Type::Named(n) if n == "PasswordHash" && method == "parse" => Some(vec![Type::String]),
         Type::Named(n)
             if n == crate::Syntax::DURATION_TYPE
@@ -1138,7 +1143,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         }
         Type::Named(n) if n == "X25519PublicKey" && method == "from_text" => Some(vec![Type::String]),
         Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") && method == "generate" => Some(vec![]),
-        Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash") => Some(vec![]),
+        Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512" | "PasswordHash") => Some(vec![]),
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => match method {
             "generate" => Some(vec![Type::String, Type::String]),
             "find" | "embed" => Some(vec![Type::String]),

@@ -857,7 +857,7 @@ pub(crate) fn method_call_in_subset(
     if matches!(
         (recv_type.as_deref(), method, args.len()),
         (Some("SigningKey" | "X25519SecretKey"), "public_key", 0)
-            | (Some("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512"), "bytes", 0)
+            | (Some("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512"), "bytes", 0)
             | (Some("Digest256" | "Digest512"), "hex", 0)
             | (Some("PasswordHash"), "text", 0)
             | (Some("X25519PublicKey"), "text", 0)
@@ -1107,7 +1107,8 @@ pub(crate) fn static_method_call_in_subset(
         (type_name, method, args.len()),
         ("Secret", "from_text" | "from_bytes", 1)
             | ("SigningKey" | "X25519SecretKey", "generate", 0)
-            | ("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey", "from_bytes", 1)
+            | ("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey", "from_bytes", 1)
+            | ("KeyUnlock", "Recipient" | "Passphrase", 1)
             | ("X25519PublicKey", "from_text", 1)
             | ("PasswordHash", "parse", 1)
     ) {

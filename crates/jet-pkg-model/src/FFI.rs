@@ -1030,6 +1030,7 @@ pub const AGE_CRATE_SPEC: (&str, &str) = ("age", "0.10");
 /// `core.vault` is used (U13). This is the only place the `age` crate is
 /// touched.
 const SECRETS_RUNTIME: &str = include_str!("Prelude/SecretsCrypto.rs");
+const VAULT_KEY_WRAP_RUNTIME: &str = include_str!("Prelude/VaultKeyWrap.rs");
 const VAULT_NFC_RUNTIME: &str = include_str!("Prelude/VaultNfc.rs");
 const UNICODE_TABLES_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
@@ -1881,6 +1882,7 @@ fn cache_key_full(
         UNICODE_TABLES_RUNTIME.hash(&mut h);
         VAULT_NFC_RUNTIME.hash(&mut h);
         SECRETS_RUNTIME.hash(&mut h);
+        VAULT_KEY_WRAP_RUNTIME.hash(&mut h);
     }
     for (k, v) in deps {
         k.hash(&mut h);
@@ -2170,6 +2172,8 @@ fn emit_wrapper_lib(
         out.push_str(VAULT_NFC_RUNTIME);
         out.push('\n');
         out.push_str(SECRETS_RUNTIME);
+        out.push('\n');
+        out.push_str(VAULT_KEY_WRAP_RUNTIME);
         out.push('\n');
     }
     let mut names: HashSet<String> = HashSet::new();

@@ -299,6 +299,9 @@ pub(crate) fn lower_method_call(
             ("Signature", "from_bytes") => "__signature_from_bytes",
             ("Sealed", "from_bytes") => "__sealed_from_bytes",
             ("WrappedKey", "from_bytes") => "__wrapped_from_bytes",
+            ("WrappedVaultKey", "from_bytes") => "__vault_wrapped_from_bytes",
+            ("KeyUnlock", "Recipient") => "__vault_unlock_recipient",
+            ("KeyUnlock", "Passphrase") => "__vault_unlock_passphrase",
             ("PasswordHash", "parse") => "__password_parse",
             _ => return None,
         };
@@ -322,6 +325,7 @@ pub(crate) fn lower_method_call(
             ("Signature", "bytes") => Some("__signature_bytes"),
             ("Sealed", "bytes") => Some("__sealed_bytes"),
             ("WrappedKey", "bytes") => Some("__wrapped_bytes"),
+            ("WrappedVaultKey", "bytes") => Some("__vault_wrapped_bytes"),
             ("Digest256", "bytes") => Some("__digest256_bytes"),
             ("Digest512", "bytes") => Some("__digest512_bytes"),
             ("Digest256", "hex") => Some("__digest256_hex"),

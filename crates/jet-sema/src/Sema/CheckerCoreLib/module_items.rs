@@ -687,10 +687,13 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // crypto FFI bridge.
         // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
         "core.vault" => &[
-            "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "KeyStatus", "VaultError",
+            "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "WrappedImportPlan",
+            "KeyStatus", "VaultError", "WrappedVaultKey", "KeyUnlock", "KeyWrapError",
             "get", "rotting_new", "current", "versions", "load", "status",
             "prepare_generate", "prepare_store", "prepare_rotate", "prepare_retire", "prepare_revoke",
             "authorize_write", "commit_generate", "commit_store", "commit_rotate", "commit_retire", "commit_revoke",
+            "export_to_recipients", "export_to_passphrase", "prepare_import_wrapped",
+            "authorize_wrapped_import", "commit_import_wrapped",
         ],
         "core.vault.expert" => &["prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519"],
         // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: strict HS256 JWT and v4.public
@@ -712,7 +715,8 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
             | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
         // D-AUTH-TOKENPOLICY1=A: typed verifier result and error records.
         | ("core.auth", "Claims" | "AuthError")
-        | ("core.vault", "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "KeyStatus" | "VaultError")
+        | ("core.vault", "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
+            | "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError")
         | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TlsVersion")
         | ("jet.http" | "core.http.client" | "core.http.server",
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"

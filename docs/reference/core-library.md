@@ -582,12 +582,32 @@ environment variables, DAP, and stdin cannot approve a write. Linux uses
 `openat2`, `pidfd`, anonymous `O_TMPFILE` staging, inode-bound locks,
 `renameat2(RENAME_EXCHANGE)`, file/directory fsync, and authenticated
 next-open backup recovery; unsupported providers fail closed. `VaultError`
-redacts paths, identities, recipients, backend text, and key/store bytes. Safe
-portable backup is intentionally absent. Expert raw imports are prepared and
-committed only through `core.vault.expert` inside `@Unsafe`; raw export remains
-the existing `core.crypto.expert` operation.
+redacts paths, identities, recipients, backend text, and key/store bytes.
 
-Example: `examples/features/crypto/vault_keys.jet`.
+Portable backup uses `WrappedVaultKey` (`JVKW` v1). Recipient export accepts
+1–16 distinct X25519 public keys; passphrase export accepts a bounded `Secret`.
+Both authenticate the source identity and concrete key type. Parsing checks
+only public framing; unlock, tamper, type, and embedded-public-key failures all
+return redacted `KeyWrapError.OpenFailed`.
+
+| Backup API | Result |
+|------------|--------|
+| `export_to_recipients<T>(&ref, recipients)` | recipient-mode `WrappedVaultKey` |
+| `export_to_passphrase<T>(&ref, &passphrase)` | passphrase-mode `WrappedVaultKey` |
+| `prepare_import_wrapped<T>(name, wrapped, KeyUnlock.Recipient/Passphrase(...))` | bound `WrappedImportPlan<T>` |
+| `authorize_wrapped_import<T>(&plan, reason)` | exact-preview `VaultWrite<T>` |
+| `commit_import_wrapped<T>(take(write), take(plan))` | idempotent existing ref or atomic new generation |
+
+Same-repository exact-origin imports return the existing Active/Retired ref;
+revoked origins stay revoked. Cross-repository or renamed imports create the
+next local generation with a new identity and imported-origin audit metadata.
+Revocation is local bearer-copy state: already exported envelopes cannot be
+remotely erased. Expert raw imports are prepared and committed only through
+`core.vault.expert` inside `@Unsafe`; raw export remains the existing
+`core.crypto.expert` operation.
+
+Examples: `examples/features/crypto/vault_keys.jet` and
+`examples/features/crypto/vault_key_wrap.jet`.
 
 ### `core.auth` — strict JWT and PASETO verification
 

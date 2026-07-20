@@ -534,6 +534,8 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
             "get" | "current" | "versions" | "load" | "status"
             | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
             | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke"
+            | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped"
+            | "authorize_wrapped_import" | "commit_import_wrapped"
         ) => Effect::Secret,
         "core.vault.expert" => Effect::Secret,
         _ => return None,

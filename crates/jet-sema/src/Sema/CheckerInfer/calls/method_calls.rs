@@ -308,6 +308,30 @@ impl<'a> Checker<'a> {
                                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
                             ));
                         }
+                        if ns == "core.vault"
+                            && leaf == "KeyUnlock"
+                            && matches!(method, "Recipient" | "Passphrase")
+                        {
+                            if args.len() != 1 {
+                                self.diags.push(wrong_core_arity(
+                                    &format!("KeyUnlock.{method}"),
+                                    1,
+                                    args.len(),
+                                    span,
+                                ));
+                            }
+                            let expected = crate::Sema::Diagnostics::core_crypto_nominal(if method == "Recipient" {
+                                Type::Named("X25519SecretKey".to_string())
+                            } else {
+                                Type::Named("Secret".to_string())
+                            });
+                            if let Some(arg) = args.first_mut() {
+                                self.expect_core_arg(&format!("KeyUnlock.{method}"), 0, &expected, arg);
+                            }
+                            **receiver = Expr::Ident("KeyUnlock".to_string(), span);
+                            *resolved_ret_out = Some(Type::Named("KeyUnlock".to_string()));
+                            return Some(Type::Named("KeyUnlock".to_string()));
+                        }
                         if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
                             let type_name = if matches!(ns.as_str(), "jet.http" | "core.http.client" | "core.http.server") {
                                 match leaf.as_str() {
@@ -2899,7 +2923,7 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 if let Some(name) = nominal_recv {
-                    if matches!(name, "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash") {
+                    if matches!(name, "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512" | "PasswordHash") {
                         *recv_type_out = Some(name.to_string());
                     }
                 }

@@ -1457,6 +1457,16 @@ pub(crate) fn emit_tir_core_call(
             format!("{}::<{}>(&({}), &({}))", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0), arg(1)),
         ("core.vault", "authorize_write") =>
             format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_authorize_write_impl"), vault_rust(), arg(0), arg(1)),
+        ("core.vault", "export_to_recipients") =>
+            format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_export_to_recipients_impl"), vault_rust(), arg(0), arg(1)),
+        ("core.vault", "export_to_passphrase") =>
+            format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_export_to_passphrase_impl"), vault_rust(), arg(0), arg(1)),
+        ("core.vault", "prepare_import_wrapped") =>
+            format!("{}::<{}>(&({}), ({}).clone(), ({}).clone())", regex_fn("jet_vault_prepare_import_wrapped_impl"), vault_rust(), arg(0), arg(1), arg(2)),
+        ("core.vault", "authorize_wrapped_import") =>
+            format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_authorize_wrapped_import_impl"), vault_rust(), arg(0), arg(1)),
+        ("core.vault", "commit_import_wrapped") =>
+            format!("{}::<{}>({}, {})", regex_fn("jet_vault_commit_import_wrapped_impl"), vault_rust(), arg(0), arg(1)),
         ("core.vault", "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke") =>
             format!("{}::<{}>({}, {})", regex_fn(&format!("jet_vault_{method}_impl")), vault_rust(), arg(0), arg(1)),
         ("core.vault.expert", "prepare_import_signing") =>
@@ -1467,6 +1477,14 @@ pub(crate) fn emit_tir_core_call(
             format!("{}({}, {})", regex_fn("jet_vault_expert_commit_import_signing_impl"), arg(0), arg(1)),
         ("core.vault.expert", "commit_import_x25519") =>
             format!("{}({}, {})", regex_fn("jet_vault_expert_commit_import_x25519_impl"), arg(0), arg(1)),
+        ("jet.crypto", "__vault_wrapped_from_bytes") =>
+            format!("{}({})", regex_fn("jet_vault_wrapped_from_bytes_impl"), arg(0)),
+        ("jet.crypto", "__vault_wrapped_bytes") =>
+            format!("{}(&({}))", regex_fn("jet_vault_wrapped_bytes_impl"), arg(0)),
+        ("jet.crypto", "__vault_unlock_recipient") =>
+            format!("{}(&({}))", regex_fn("jet_vault_unlock_recipient_impl"), arg(0)),
+        ("jet.crypto", "__vault_unlock_passphrase") =>
+            format!("{}(&({}))", regex_fn("jet_vault_unlock_passphrase_impl"), arg(0)),
         // D-TTLVAL1=A: Expiring<T> / Rotting<T> constructors.
         ("core.time.expiring", "new") => format!(
             "{}jet_expiring_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",

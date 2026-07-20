@@ -2187,7 +2187,14 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
   artifact but occupy disjoint namespaces. Its authenticated plaintext is the
   canonical bounded `JVLT` version-2 format; the first authorized mutation
   migrates historical String rows without inferring keys from them. There is
-  no safe portable key export or import. Raw 32-byte import is available only
+  Safe portable backup uses the canonical `JVKW` v1 envelope: recipient mode
+  wraps an independent backup key for 1–16 sorted X25519 recipients, while
+  passphrase mode uses fixed Argon2id parameters. Both modes authenticate the
+  source repository/name/generation/record hash and the concrete key type.
+  Import decrypts into a short-lived `WrappedImportPlan<T>`, then reuses native
+  authorization and consuming compare-and-swap commit; same-origin imports are
+  idempotent and revoked origins never reactivate. All secret-dependent open
+  failures collapse to `KeyWrapError.OpenFailed`. Raw 32-byte import is available only
   through `core.vault.expert` inside an audited `@Unsafe` region. Headless
   mutation requires `jet trust grant vault.write:<repository_uuid>`; source,
   workspace, environment, DAP, and stdin are never write authority.
