@@ -121,6 +121,8 @@ fn run() {
     grouped := [1, 2].group_by((n: Int) => n % 2 == 0)
     counted := [1, 2].count_by((n: Int) => n % 2)
     parallel := [1, 2].par_fold(0.5, (a: Float, n: Int) => a + 0.5)
+    grouped_string_get := [1, 2].group_by((n: Int) => \"x\").get(\"x\")
+    counted_string_get := [1, 2].count_by((n: Int) => \"x\").get(\"x\")
 }
 ";
         let lowered = lower_after_sema(src, "run");
@@ -152,8 +154,36 @@ fn run() {
                     value: Box::new(Type::Int),
                 },
                 Type::Float,
+                Type::Option(Box::new(Type::List(Box::new(Type::Int)))),
+                Type::Option(Box::new(Type::Int)),
             ]
         );
+        assert!(matches!(
+            &lowered.body[9],
+            TStmt::Let {
+                init: TExpr {
+                    kind: TExprKind::BuiltinMethod {
+                        op: TBuiltinOp::GetMap,
+                        ..
+                    },
+                    ..
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &lowered.body[10],
+            TStmt::Let {
+                init: TExpr {
+                    kind: TExprKind::BuiltinMethod {
+                        op: TBuiltinOp::GetMap,
+                        ..
+                    },
+                    ..
+                },
+                ..
+            }
+        ));
     }
 
     /// c109 Phase 7: parse `src` and return whether the named method on `type_name`

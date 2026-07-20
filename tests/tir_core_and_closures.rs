@@ -138,13 +138,15 @@ fn run() {
     print(use_float([1, 2].flat_map((n: Int) => [1.5]).sum()))
     print([1, 2, 3].group_by((n: Int) => n % 2 == 0).has_key(true))
     print([1, 2, 3].count_by((n: Int) => n % 2).has_key(1))
+    print([1, 2, 3].group_by((n: Int) => \"x\").get(\"x\"))
+    print([1, 2, 3].count_by((n: Int) => \"x\").get(\"x\"))
 }
 ";
     let (code, stdout) = build_and_run("tir_refined_collection_types", src);
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "1.75\n1.75\n1.75\n2.75\n3.25\n4.25\n3.25\ntrue\ntrue\n"
+        "1.75\n1.75\n1.75\n2.75\n3.25\n4.25\n3.25\ntrue\ntrue\n[1, 2, 3]\n3\n"
     );
 }
 

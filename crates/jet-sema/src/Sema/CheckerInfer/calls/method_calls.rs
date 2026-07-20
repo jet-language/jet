@@ -2706,7 +2706,22 @@ impl<'a> Checker<'a> {
                 // callback/argument-refined results, tuple shapes, and numeric
                 // identities needed when a sequence is empty.
                 if let Some(ref ty) = result {
-                    if result != declared_ret
+                    let refinement_capable = matches!(
+                        method,
+                        "zip"
+                            | "map"
+                            | "reduce"
+                            | "flat_map"
+                            | "filter_map"
+                            | "scan"
+                            | "fold"
+                            | "group_by"
+                            | "count_by"
+                            | "par_map"
+                            | "par_fold"
+                    );
+                    if refinement_capable
+                        || result != declared_ret
                         || contains_tuple_type(ty)
                         || matches!(method, "sum" | "product")
                     {
