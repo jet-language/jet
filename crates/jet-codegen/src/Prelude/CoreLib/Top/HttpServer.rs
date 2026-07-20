@@ -4,6 +4,8 @@
 
 const JET_HTTP_KEEPALIVE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const JET_HTTP_MAX_REQUESTS_PER_CONNECTION: usize = 1000;
+const JET_HTTP_MAX_BODY_BYTES: usize = 1024 * 1024;
+const JET_HTTP_MAX_CHUNK_FRAMING_BYTES: usize = 32 * 1024;
 
 #[derive(Clone)]
 struct JetHttpSrvResp {
@@ -48,6 +50,131 @@ struct JetHttpServerTls {
 struct JetHttpReadError {
     status: i64,
     message: &'static str,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum JetHttpRequestFraming {
+    ContentLength(usize),
+    Chunked,
+}
+
+#[derive(Clone, Copy)]
+enum JetHttpChunkPhase {
+    Size,
+    Data(usize),
+    DataCrlf,
+    FinalCrlf,
+}
+
+struct JetHttpChunkState {
+    cursor: usize,
+    decoded_len: usize,
+    framing_len: usize,
+    chunks: Vec<(usize, usize)>,
+    phase: JetHttpChunkPhase,
+}
+
+impl JetHttpChunkState {
+    fn new() -> Self {
+        Self {
+            cursor: 0,
+            decoded_len: 0,
+            framing_len: 0,
+            chunks: Vec::new(),
+            phase: JetHttpChunkPhase::Size,
+        }
+    }
+
+    fn add_framing(&mut self, amount: usize) -> Result<(), JetHttpReadError> {
+        self.framing_len = self.framing_len.saturating_add(amount);
+        if self.framing_len > JET_HTTP_MAX_CHUNK_FRAMING_BYTES {
+            return Err(JetHttpReadError {
+                status: 413,
+                message: "chunked request framing is too large",
+            });
+        }
+        Ok(())
+    }
+
+    fn advance(&mut self, body: &[u8]) -> Result<Option<usize>, JetHttpReadError> {
+        loop {
+            match self.phase {
+                JetHttpChunkPhase::Size => {
+                    let Some(line_len) = body[self.cursor..]
+                        .windows(2)
+                        .position(|bytes| bytes == b"\r\n")
+                    else {
+                        if body.len().saturating_sub(self.cursor)
+                            > JET_HTTP_MAX_CHUNK_FRAMING_BYTES.saturating_sub(self.framing_len)
+                        {
+                            return Err(JetHttpReadError {
+                                status: 413,
+                                message: "chunked request framing is too large",
+                            });
+                        }
+                        return Ok(None);
+                    };
+                    let line_end = self.cursor + line_len;
+                    let size = jet_http_chunk_size(&body[self.cursor..line_end])?;
+                    self.add_framing(line_len + 2)?;
+                    self.cursor = line_end + 2;
+                    if size == 0 {
+                        self.phase = JetHttpChunkPhase::FinalCrlf;
+                    } else {
+                        self.decoded_len = self.decoded_len.checked_add(size).ok_or(JetHttpReadError {
+                            status: 413,
+                            message: "request body is too large",
+                        })?;
+                        if self.decoded_len > JET_HTTP_MAX_BODY_BYTES {
+                            return Err(JetHttpReadError {
+                                status: 413,
+                                message: "request body is too large",
+                            });
+                        }
+                        self.chunks.push((self.cursor, size));
+                        self.phase = JetHttpChunkPhase::Data(size);
+                    }
+                }
+                JetHttpChunkPhase::Data(remaining) => {
+                    let available = body.len().saturating_sub(self.cursor).min(remaining);
+                    self.cursor += available;
+                    if available < remaining {
+                        self.phase = JetHttpChunkPhase::Data(remaining - available);
+                        return Ok(None);
+                    }
+                    self.phase = JetHttpChunkPhase::DataCrlf;
+                }
+                JetHttpChunkPhase::DataCrlf => {
+                    if body.len().saturating_sub(self.cursor) < 2 {
+                        return Ok(None);
+                    }
+                    if &body[self.cursor..self.cursor + 2] != b"\r\n" {
+                        return Err(JetHttpReadError {
+                            status: 400,
+                            message: "chunk data is not followed by CRLF",
+                        });
+                    }
+                    self.cursor += 2;
+                    self.add_framing(2)?;
+                    self.phase = JetHttpChunkPhase::Size;
+                }
+                JetHttpChunkPhase::FinalCrlf => {
+                    if body.len().saturating_sub(self.cursor) < 2 {
+                        return Ok(None);
+                    }
+                    if &body[self.cursor..self.cursor + 2] != b"\r\n" {
+                        return Err(JetHttpReadError {
+                            status: 400,
+                            message: "request trailers are not supported",
+                        });
+                    }
+                    self.cursor += 2;
+                    self.add_framing(2)?;
+                    return Ok(Some(self.cursor));
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -430,11 +557,11 @@ fn jet_http_accept_once(
     }
 }
 
-fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<String, JetHttpReadError> {
+fn jet_http_srv_read(stream: &mut std::net::TcpStream) -> Result<Vec<u8>, JetHttpReadError> {
     jet_http_srv_read_with_limits(stream, &JetHttpServerOptions::safe())
 }
 
-fn jet_http_srv_read_with_limits(stream: &mut std::net::TcpStream, options: &JetHttpServerOptions) -> Result<String, JetHttpReadError> {
+fn jet_http_srv_read_with_limits(stream: &mut std::net::TcpStream, options: &JetHttpServerOptions) -> Result<Vec<u8>, JetHttpReadError> {
     let mut pending = Vec::new();
     jet_http_srv_read_buffered(stream, options, &mut pending, false, None)?.ok_or(JetHttpReadError {
         status: 400,
@@ -448,14 +575,14 @@ fn jet_http_srv_read_buffered(
     pending: &mut Vec<u8>,
     keep_alive: bool,
     shutdown: Option<&std::sync::atomic::AtomicBool>,
-) -> Result<Option<String>, JetHttpReadError> {
+) -> Result<Option<Vec<u8>>, JetHttpReadError> {
     use std::io::Read;
     use std::sync::atomic::Ordering;
     const MAX_HEADER_BYTES: usize = 32 * 1024;
-    const MAX_BODY_BYTES: usize = 1024 * 1024;
     const SHUTDOWN_POLL: std::time::Duration = std::time::Duration::from_millis(20);
     let mut buf = [0u8; 8192];
     let mut reading_body = false;
+    let mut chunked = JetHttpChunkState::new();
     let started = std::time::Instant::now();
     let mut header_deadline = (!keep_alive || !pending.is_empty()).then(|| started + options.read_header_timeout);
     let mut idle_deadline = started
@@ -469,21 +596,27 @@ fn jet_http_srv_read_buffered(
             if header_end > MAX_HEADER_BYTES {
                 return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
             }
-            let content_len = jet_http_validate_headers(&pending[..header_end])?;
-            if content_len > MAX_BODY_BYTES {
-                return Err(JetHttpReadError { status: 413, message: "request body is too large" });
-            }
-            let request_end = header_end + 4 + content_len;
+            let framing = jet_http_validate_headers(&pending[..header_end])?;
             if !reading_body {
                 reading_body = true;
                 idle_deadline = std::time::Instant::now()
                     + options.read_body_timeout.min(options.read_idle_timeout);
             }
-            if pending.len() >= request_end {
-                let request = pending.drain(..request_end).collect::<Vec<_>>();
-                return String::from_utf8(request)
-                    .map(Some)
-                    .map_err(|_| JetHttpReadError { status: 400, message: "request is not valid UTF-8" });
+            let body_start = header_end + 4;
+            let request_end = match framing {
+                JetHttpRequestFraming::ContentLength(content_len) => {
+                    if content_len > JET_HTTP_MAX_BODY_BYTES {
+                        return Err(JetHttpReadError { status: 413, message: "request body is too large" });
+                    }
+                    let request_end = body_start + content_len;
+                    (pending.len() >= request_end).then_some(request_end)
+                }
+                JetHttpRequestFraming::Chunked => chunked
+                    .advance(&pending[body_start..])?
+                    .map(|body_end| body_start + body_end),
+            };
+            if let Some(request_end) = request_end {
+                return Ok(Some(pending.drain(..request_end).collect()));
             }
         } else if pending.len() > MAX_HEADER_BYTES {
             return Err(JetHttpReadError { status: 431, message: "request headers are too large" });
@@ -546,10 +679,11 @@ fn jet_http_srv_read_buffered(
     }
 }
 
-fn jet_http_srv_request_version(raw: &str) -> &str {
-    raw
-        .split_once("\r\n")
-        .and_then(|(line, _)| line.split_whitespace().nth(2))
+fn jet_http_srv_request_version(raw: &[u8]) -> &str {
+    raw.windows(2)
+        .position(|bytes| bytes == b"\r\n")
+        .and_then(|end| std::str::from_utf8(&raw[..end]).ok())
+        .and_then(|line| line.split(' ').nth(2))
         .filter(|version| matches!(*version, "HTTP/1.0" | "HTTP/1.1"))
         .unwrap_or("HTTP/1.1")
 }
@@ -570,7 +704,127 @@ fn jet_http_header_end(raw: &[u8]) -> Option<usize> {
     raw.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
-fn jet_http_validate_headers(header: &[u8]) -> Result<usize, JetHttpReadError> {
+fn jet_http_trim_ows(value: &str) -> &str {
+    value.trim_matches(|character| matches!(character, ' ' | '\t'))
+}
+
+fn jet_http_trim_ows_start(value: &str) -> &str {
+    value.trim_start_matches(|character| matches!(character, ' ' | '\t'))
+}
+
+fn jet_http_chunk_token_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.'
+                | b'^' | b'_' | b'`' | b'|' | b'~'
+        )
+}
+
+fn jet_http_chunk_extensions_valid(mut input: &[u8]) -> bool {
+    while !input.is_empty() {
+        while input.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+            input = &input[1..];
+        }
+        if input.first() != Some(&b';') {
+            return false;
+        }
+        input = &input[1..];
+        while input.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+            input = &input[1..];
+        }
+        let name_len = input.iter().take_while(|byte| jet_http_chunk_token_byte(**byte)).count();
+        if name_len == 0 {
+            return false;
+        }
+        input = &input[name_len..];
+        while input.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+            input = &input[1..];
+        }
+        if input.first() != Some(&b'=') {
+            continue;
+        }
+        input = &input[1..];
+        while input.first().is_some_and(|byte| matches!(byte, b' ' | b'\t')) {
+            input = &input[1..];
+        }
+        if input.first() == Some(&b'"') {
+            input = &input[1..];
+            let mut closed = false;
+            while let Some((&byte, rest)) = input.split_first() {
+                input = rest;
+                if byte == b'"' {
+                    closed = true;
+                    break;
+                }
+                if byte == b'\\' {
+                    let Some((&escaped, rest)) = input.split_first() else { return false };
+                    if !(escaped == b'\t' || escaped == b' ' || escaped.is_ascii_graphic()) {
+                        return false;
+                    }
+                    input = rest;
+                } else if !(byte == b'\t' || byte == b' ' || matches!(byte, 0x21 | 0x23..=0x5b | 0x5d..=0x7e)) {
+                    return false;
+                }
+            }
+            if !closed {
+                return false;
+            }
+        } else {
+            let value_len = input.iter().take_while(|byte| jet_http_chunk_token_byte(**byte)).count();
+            if value_len == 0 {
+                return false;
+            }
+            input = &input[value_len..];
+        }
+    }
+    true
+}
+
+fn jet_http_chunk_size(line: &[u8]) -> Result<usize, JetHttpReadError> {
+    let digits = line.iter().take_while(|byte| byte.is_ascii_hexdigit()).count();
+    if digits == 0 || !jet_http_chunk_extensions_valid(&line[digits..]) {
+        return Err(JetHttpReadError {
+            status: 400,
+            message: "chunk size is malformed",
+        });
+    }
+    let mut size = 0usize;
+    for byte in &line[..digits] {
+        let digit = (*byte as char).to_digit(16).unwrap() as usize;
+        size = size.checked_mul(16).and_then(|value| value.checked_add(digit)).ok_or(
+            JetHttpReadError {
+                status: 413,
+                message: "request body is too large",
+            },
+        )?;
+    }
+    Ok(size)
+}
+
+fn jet_http_decode_chunked_body(body: &[u8]) -> Result<String, JetHttpReadError> {
+    let mut state = JetHttpChunkState::new();
+    let end = state.advance(body)?.ok_or(JetHttpReadError {
+        status: 400,
+        message: "request ended before its chunked framing was complete",
+    })?;
+    if end != body.len() {
+        return Err(JetHttpReadError {
+            status: 400,
+            message: "request body exceeds its chunked framing",
+        });
+    }
+    let mut decoded = Vec::with_capacity(state.decoded_len);
+    for (start, len) in state.chunks {
+        decoded.extend_from_slice(&body[start..start + len]);
+    }
+    String::from_utf8(decoded).map_err(|_| JetHttpReadError {
+        status: 400,
+        message: "request body is not valid UTF-8",
+    })
+}
+
+fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestFraming, JetHttpReadError> {
     let text = std::str::from_utf8(header)
         .map_err(|_| JetHttpReadError { status: 400, message: "request headers are not valid UTF-8" })?;
     let mut lines = text.split("\r\n");
@@ -588,7 +842,7 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<usize, JetHttpReadError> {
     }
     let mut count = 0usize;
     let mut content_length = None;
-    let mut has_transfer_encoding = false;
+    let mut transfer_encoding = None;
     for line in lines {
         count += 1;
         if count > 100 {
@@ -606,22 +860,30 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<usize, JetHttpReadError> {
             return Err(JetHttpReadError { status: 400, message: "request header value is malformed" });
         }
         if name.eq_ignore_ascii_case("content-length") {
-            let parsed = value.trim().parse::<usize>()
+            let parsed = jet_http_trim_ows(value).parse::<usize>()
                 .map_err(|_| JetHttpReadError { status: 400, message: "content-length is malformed" })?;
             if content_length.replace(parsed).is_some_and(|old| old != parsed) {
                 return Err(JetHttpReadError { status: 400, message: "conflicting content-length headers" });
             }
         } else if name.eq_ignore_ascii_case("transfer-encoding") {
-            has_transfer_encoding = true;
+            if transfer_encoding.replace(jet_http_trim_ows(value)).is_some() {
+                return Err(JetHttpReadError {
+                    status: 400,
+                    message: "multiple transfer-encoding headers are not allowed",
+                });
+            }
         }
     }
-    if has_transfer_encoding && content_length.is_some() {
+    if transfer_encoding.is_some() && content_length.is_some() {
         return Err(JetHttpReadError { status: 400, message: "content-length and transfer-encoding cannot be combined" });
     }
-    if has_transfer_encoding {
-        return Err(JetHttpReadError { status: 400, message: "transfer-encoding is not supported" });
+    if let Some(encoding) = transfer_encoding {
+        if version != "HTTP/1.1" || !encoding.eq_ignore_ascii_case("chunked") {
+            return Err(JetHttpReadError { status: 400, message: "transfer-encoding is not supported" });
+        }
+        return Ok(JetHttpRequestFraming::Chunked);
     }
-    Ok(content_length.unwrap_or(0))
+    Ok(JetHttpRequestFraming::ContentLength(content_length.unwrap_or(0)))
 }
 
 fn jet_http_srv_read_error_response(error: &JetHttpReadError) -> String {
@@ -676,7 +938,7 @@ where
         let handle_one = handle.clone();
         std::thread::spawn(move || {
             let dispatch = Box::new(move |raw: String| {
-                match jet_http_srv_parse(&raw) {
+                match jet_http_srv_parse(raw.as_bytes()) {
                     Ok(req) => jet_http_srv_format(&jet_http_mux_dispatch(&m, req)),
                     Err(error) => jet_http_srv_read_error_response(&error),
                 }
@@ -688,20 +950,33 @@ where
     }
 }
 
-fn jet_http_srv_parse(raw: &str) -> Result<JetHttpSrvReq, JetHttpReadError> {
-    let sep = raw.find("\r\n\r\n").ok_or(JetHttpReadError {
+fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpSrvReq, JetHttpReadError> {
+    let sep = jet_http_header_end(raw).ok_or(JetHttpReadError {
         status: 400,
         message: "request headers are incomplete",
     })?;
     let header_part = &raw[..sep];
-    let content_length = jet_http_validate_headers(header_part.as_bytes())?;
-    let body = &raw[sep + 4..];
-    if body.len() != content_length {
-        return Err(JetHttpReadError {
-            status: 400,
-            message: "request body does not match content-length",
-        });
-    }
+    let framing = jet_http_validate_headers(header_part)?;
+    let encoded_body = &raw[sep + 4..];
+    let body = match framing {
+        JetHttpRequestFraming::ContentLength(content_length) => {
+            if encoded_body.len() != content_length {
+                return Err(JetHttpReadError {
+                    status: 400,
+                    message: "request body does not match content-length",
+                });
+            }
+            String::from_utf8(encoded_body.to_vec()).map_err(|_| JetHttpReadError {
+                status: 400,
+                message: "request body is not valid UTF-8",
+            })?
+        }
+        JetHttpRequestFraming::Chunked => jet_http_decode_chunked_body(encoded_body)?,
+    };
+    let header_part = std::str::from_utf8(header_part).map_err(|_| JetHttpReadError {
+        status: 400,
+        message: "request headers are not valid UTF-8",
+    })?;
     let mut lines = header_part.lines();
     let req_line = lines.next().unwrap_or("");
     let mut parts = req_line.splitn(3, ' ');
@@ -713,7 +988,7 @@ fn jet_http_srv_parse(raw: &str) -> Result<JetHttpSrvReq, JetHttpReadError> {
             status: 400,
             message: "request header is malformed",
         })?;
-        let value = value.trim_start_matches(|character| character == ' ' || character == '\t');
+        let value = jet_http_trim_ows_start(value);
         headers.append(name, value).map_err(|_| JetHttpReadError {
             status: 400,
             message: "request header is malformed",
@@ -723,7 +998,7 @@ fn jet_http_srv_parse(raw: &str) -> Result<JetHttpSrvReq, JetHttpReadError> {
         method,
         path,
         params: std::collections::BTreeMap::new(),
-        body: body.to_string(),
+        body,
         headers,
         route_template: None,
     })

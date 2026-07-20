@@ -62,6 +62,9 @@ fn shared_headers_preserve_repeats_validate_and_redact() {
     assert_eq!(headers.all("x-trace"), vec!["one", "two"]);
     assert!(headers.append("bad name", "x").is_err());
     assert!(headers.append("x-safe", "bad\r\nvalue").is_err());
+    for invalid in ["vertical\u{000b}tab", "form\u{000c}feed", "nonbreaking\u{00a0}space", "delete\u{007f}"] {
+        assert!(headers.append("x-safe", invalid).is_err(), "accepted {invalid:?}");
+    }
     assert_eq!(
         jet_http_validate_headers(b"GET / HTTP/1.1\r\nBad Name: value")
             .unwrap_err()
@@ -139,19 +142,19 @@ fn live_server_round_trips_repeated_headers_in_order() {
 
 #[test]
 fn parser_and_framing_share_validated_headers() {
-    let request = jet_http_srv_parse("GET / HTTP/1.1\r\nHost:local\r\nX-Tag:\tvalue\r\n\r\n")
+    let request = jet_http_srv_parse(b"GET / HTTP/1.1\r\nHost:local\r\nX-Tag:\tvalue\r\n\r\n")
         .expect("optional header whitespace");
     assert_eq!(request.headers.first("host"), Some("local"));
     assert_eq!(request.headers.first("x-tag"), Some("value"));
     assert_eq!(
-        jet_http_srv_parse("GET / HTTP/1.1\r\nBad Name:value\r\n\r\n")
+        jet_http_srv_parse(b"GET / HTTP/1.1\r\nBad Name:value\r\n\r\n")
             .err()
             .expect("invalid header name")
             .status,
         400
     );
     assert_eq!(
-        jet_http_srv_parse("GET / HTTP/1.1\r\nX-Safe:bad\0value\r\n\r\n")
+        jet_http_srv_parse(b"GET / HTTP/1.1\r\nX-Safe:bad\0value\r\n\r\n")
             .err()
             .expect("invalid header value")
             .status,
@@ -325,6 +328,132 @@ fn plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries() {
     assert_eq!(report.user_completed, 8);
     assert_eq!(JET_HTTP_KEEPALIVE_IDLE_TIMEOUT, std::time::Duration::from_secs(60));
     assert_eq!(JET_HTTP_MAX_REQUESTS_PER_CONNECTION, 1000);
+}
+
+#[test]
+fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => response.extend_from_slice(&buf[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(error) => panic!("response read: {error}"),
+            }
+        }
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let post_calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_calls = post_calls.clone();
+    jet_http_mux_add(&mux, "POST", "/echo", move |req| {
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+        let preview = (req.body.len() <= 32).then_some(req.body.as_str()).unwrap_or("");
+        jet_http_srv_response(200, &format!("{}:{preview}", req.body.len()))
+    });
+    jet_http_mux_add(&mux, "GET", "/next", |_| {
+        jet_http_srv_response(200, &"next".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 16;
+    options.read_header_timeout = std::time::Duration::from_secs(1);
+    options.read_idle_timeout = std::time::Duration::from_secs(1);
+    options.read_body_timeout = std::time::Duration::from_secs(1);
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    let pipelined = exchange(
+        addr,
+        b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: ChUnKeD\r\n\r\n4;name=value\r\nWiki\r\n5;note=\"quoted value\"\r\npedia\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(pipelined.matches("HTTP/1.1 200 OK").count(), 2, "{pipelined}");
+    let echoed = pipelined.find("\r\n\r\n9:Wikipedia").expect("decoded chunked body");
+    let next = pipelined.rfind("\r\n\r\nnext").expect("pipelined next response");
+    assert!(echoed < next, "pipeline order changed: {pipelined}");
+
+    let split_codepoint = exchange(
+        addr,
+        b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\n\xc3\r\n1\r\n\xa9\r\n1\r\n!\r\n0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(split_codepoint.matches("HTTP/1.1 200 OK").count(), 2, "{split_codepoint}");
+    let split_body = split_codepoint.find("\r\n\r\n3:é!").expect("split UTF-8 codepoint");
+    let split_next = split_codepoint.rfind("\r\n\r\nnext").expect("split pipeline tail");
+    assert!(split_body < split_next, "split-codepoint pipeline order changed: {split_codepoint}");
+
+    let limit = 1024 * 1024;
+    let exact_request = format!(
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{limit:x}\r\n{}\r\n0\r\n\r\n",
+        "x".repeat(limit),
+    );
+    let exact = exchange(addr, exact_request.as_bytes());
+    assert!(exact.ends_with(&format!("\r\n\r\n{limit}:")), "exact limit failed: {exact}");
+
+    let over_limit = exchange(
+        addr,
+        b"POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n100001\r\n",
+    );
+    assert!(over_limit.starts_with("HTTP/1.1 413 Payload Too Large"), "{over_limit}");
+
+    for invalid in [
+        "POST /echo HTTP/1.0\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n+1\r\nx\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1;bad=\"unterminated\r\nx\r\n0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nxX0\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-Trailer: hidden\r\n\r\n",
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n",
+    ] {
+        let response = exchange(addr, invalid.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "{response}");
+        assert_eq!(response.matches("HTTP/1.1").count(), 1, "invalid framing persisted: {response}");
+        assert!(response.ends_with("Connection: close\r\n\r\n"), "{response}");
+    }
+
+    for invalid_whitespace in [
+        "Content-Length:\u{000b}0",
+        "Content-Length:\u{000c}0",
+        "Content-Length:\u{00a0}0",
+        "Transfer-Encoding:\u{00a0}chunked",
+        "X-Invalid:\u{007f}",
+    ] {
+        let request = format!(
+            "POST /echo HTTP/1.1\r\nHost: local\r\n{invalid_whitespace}\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        );
+        let response = exchange(addr, request.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "{response}");
+        assert_eq!(response.matches("HTTP/1.1").count(), 1, "invalid whitespace reused connection: {response}");
+        assert!(!response.contains("200 OK"), "invalid whitespace reached a handler: {response}");
+    }
+
+    let excessive_framing = format!(
+        "POST /echo HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n{}0\r\n\r\n",
+        "1\r\nx\r\n".repeat(7_000),
+    );
+    let excessive = exchange(addr, excessive_framing.as_bytes());
+    assert!(excessive.starts_with("HTTP/1.1 413 Payload Too Large"), "{excessive}");
+
+    assert_eq!(post_calls.load(Ordering::Acquire), 3, "invalid framing reached handler");
+    shutdown.store(true, std::sync::atomic::Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 19);
+    assert_eq!(report.user_completed, 19);
 }
 
 #[test]

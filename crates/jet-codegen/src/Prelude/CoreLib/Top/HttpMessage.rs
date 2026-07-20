@@ -24,7 +24,10 @@ impl JetHttpHeaders {
     }
 
     fn valid_value(value: &str) -> bool {
-        !value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | b'\0'))
+        value.chars().all(|character| {
+            (!character.is_control() || character == '\t')
+                && (!character.is_whitespace() || matches!(character, ' ' | '\t'))
+        })
     }
 
     fn append(&mut self, name: &str, value: &str) -> Result<(), String> {
