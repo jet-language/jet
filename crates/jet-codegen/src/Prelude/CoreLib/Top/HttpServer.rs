@@ -251,7 +251,7 @@ impl JetHttpMux {
         F: Fn(JetHttpSrvReq) -> JetHttpSrvResp + Send + Sync + 'static,
     {
         self.0.lock().unwrap().push(JetHttpMuxRoute {
-            method: method.to_uppercase(),
+            method: method.to_string(),
             pattern: pattern.to_string(),
             handler: std::sync::Arc::new(f) as JetHttpMuxHandlerFn,
         });
@@ -285,7 +285,7 @@ where
 
 fn jet_http_mux_add_handler(mux: &JetHttpMux, method: &str, pattern: &str, handler: JetHttpMuxHandlerFn) {
     mux.0.lock().unwrap().push(JetHttpMuxRoute {
-        method: method.to_uppercase(),
+        method: method.to_string(),
         pattern: pattern.to_string(),
         handler,
     });
@@ -1290,7 +1290,7 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpSrvReq, JetHttpReadError> {
 }
 
 fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp {
-    let requested_method = req.method.to_uppercase();
+    let requested_method = req.method.as_str();
     let is_head = requested_method == "HEAD";
     let path = match jet_http_route_path(&req.path) {
         Ok(path) => path,
@@ -1319,7 +1319,7 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
     };
     let effective_method = if requested_method == "HEAD"
         && !path_matches.iter().any(|(_, route, _, _)| route.method == "HEAD")
-    { "GET" } else { requested_method.as_str() };
+    { "GET" } else { requested_method };
     if requested_method == "OPTIONS" && !path_matches.iter().any(|(_, route, _, _)| route.method == "OPTIONS") {
         let allow = jet_http_allowed_methods(&path_matches);
         return JetHttpSrvResp {

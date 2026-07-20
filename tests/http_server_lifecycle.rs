@@ -975,6 +975,81 @@ fn request_method_is_one_http_token_before_body_or_dispatch() {
 }
 
 #[test]
+fn request_methods_are_case_sensitive_during_routing() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => response.extend_from_slice(&buf[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(error) => panic!("response read: {error}"),
+            }
+        }
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/resource", move |_| {
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"GET".to_string())
+    });
+    let handler_calls = calls.clone();
+    jet_http_mux_add(&mux, "get", "/resource", move |_| {
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"get".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 16;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    for method in ["GET", "get"] {
+        let response = exchange(
+            addr,
+            format!("{method} /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n").as_bytes(),
+        );
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "case-distinct route rejected: {response}");
+        assert!(response.ends_with(&format!("\r\n\r\n{method}")), "wrong case-distinct route dispatched: {response}");
+    }
+
+    for method in ["GeT", "head", "options"] {
+        let response = exchange(
+            addr,
+            format!(
+                "{method} /resource HTTP/1.1\r\nHost: local\r\n\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        assert!(response.starts_with("HTTP/1.1 405 Method Not Allowed"), "{method} matched uppercase semantics: {response}");
+        assert!(response.contains("Allow: GET, HEAD, OPTIONS, get\r\n"), "wrong exact Allow methods: {response}");
+        assert_eq!(response.matches("HTTP/1.1 200 OK").count(), 1, "valid unmatched method broke reuse: {response}");
+        assert!(response.ends_with("\r\n\r\nGET"), "uppercase successor did not dispatch: {response}");
+    }
+
+    assert_eq!(calls.load(Ordering::Acquire), 5, "method case changed before routing");
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 5);
+    assert_eq!(report.user_completed, 5);
+}
+
+#[test]
 fn connection_options_are_tokens_before_reuse_or_body_permission() {
     use std::io::{Read, Write};
     use std::sync::atomic::{AtomicUsize, Ordering};
