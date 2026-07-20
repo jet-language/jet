@@ -77,6 +77,7 @@ pub(super) fn evaluate_method(
         ("DateTime", "to_timestamp", 0) => value_field(recv, "DateTime", "secs", span),
         ("DateTime", "to_unix_ms", 0) => int_field(recv, "DateTime", "secs", span)
             .map(|seconds| CtValue::Int(seconds.saturating_mul(1_000))),
+        ("DateTime", "to_string", 0) => datetime_string(recv, span).map(CtValue::Str),
         ("Period", "to_string", 0) => period_string(recv, span).map(CtValue::Str),
         ("Measurement", "value" | "uncertainty", 0) => {
             value_field(recv, "Measurement", method, span)
@@ -84,6 +85,16 @@ pub(super) fn evaluate_method(
         _ => return None,
     };
     Some(result)
+}
+
+pub(super) fn display(value: &CtValue) -> Option<String> {
+    let CtValue::Float(measured) = field(value, "Measurement", "value")? else {
+        return None;
+    };
+    let CtValue::Float(uncertainty) = field(value, "Measurement", "uncertainty")? else {
+        return None;
+    };
+    Some(format!("{measured:?} ± {uncertainty:?}"))
 }
 
 fn one<'a>(
@@ -424,6 +435,25 @@ impl Date {
             - 1
     }
 
+    fn from_day_number(mut day: i64) -> Self {
+        let mut year = day / 365 + 1;
+        loop {
+            let start = Self::new(year, 1, 1).day_number();
+            let next = Self::new(year + 1, 1, 1).day_number();
+            if day >= start && day < next {
+                break;
+            }
+            year += if day < start { -1 } else { 1 };
+        }
+        day -= Self::new(year, 1, 1).day_number();
+        let mut month = 1;
+        while month < 12 && day >= Self::days_in_month(year, month) {
+            day -= Self::days_in_month(year, month);
+            month += 1;
+        }
+        Self::new(year, month, day + 1)
+    }
+
     fn to_string_fmt(self) -> String {
         format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
     }
@@ -517,6 +547,20 @@ fn period_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
         int_field(value, "Period", "years", span)?,
         int_field(value, "Period", "months", span)?,
         int_field(value, "Period", "days", span)?
+    ))
+}
+
+fn datetime_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
+    let seconds = int_field(value, "DateTime", "secs", span)?;
+    let epoch = Date::new(1970, 1, 1).day_number();
+    let date = Date::from_day_number(epoch + seconds.div_euclid(86_400));
+    let time = seconds.rem_euclid(86_400);
+    Ok(format!(
+        "{} {:02}:{:02}:{:02} UTC",
+        date.to_string_fmt(),
+        time / 3_600,
+        (time / 60) % 60,
+        time % 60
     ))
 }
 

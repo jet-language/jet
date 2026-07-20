@@ -22,6 +22,10 @@ pub(in super::super) fn apply_core_pure_method(
     core_pure_parity::evaluate_method(recv, method, args, span)
 }
 
+pub(super) fn display_core_pure_value(value: &CtValue) -> Option<String> {
+    core_pure_parity::display(value)
+}
+
 const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // D-FIDELITY-API1=A: this signal must behave like the AOT binary's
 // process-global static (fresh default per program run, persists across

@@ -18,7 +18,10 @@ use super::super::Diagnostics::{comptime_panic, unsupported};
 use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
 use super::super::Value::CtValue;
-use super::core_calls::{apply_core_call, apply_impure_core_call, as_bytes, shuffle_ct_list, with_ambient_rng};
+use super::core_calls::{
+    apply_core_call, apply_impure_core_call, as_bytes, display_core_pure_value, shuffle_ct_list,
+    with_ambient_rng,
+};
 use super::repl_process::{apply_repl_fs_call, pin_repl_command, repl_effect_request};
 
 /// D-CTIO1 (ratified 2026-06-22): a comptime embed path must be a string
@@ -634,6 +637,9 @@ impl<'a> Interp<'a> {
                     }
                 }
             }
+        }
+        if let Some(rendered) = display_core_pure_value(v) {
+            return Ok(rendered);
         }
         Ok(self.display_fallback_value(v))
     }

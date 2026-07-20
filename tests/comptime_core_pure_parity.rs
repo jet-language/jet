@@ -211,6 +211,27 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
 }
 
 #[test]
+fn rustc_backed_datetime_and_measurement_display_are_exact() {
+    assert_eq!(
+        check_aot_comptime(
+            "datetime/negative-unix-ms-display",
+            &parity_source(
+                "time.from_unix_ms(-1).to_string()",
+                "use core.time as time",
+            ),
+        ),
+        "1969-12-31 23:59:59 UTC"
+    );
+    assert_eq!(
+        check_aot_comptime(
+            "measurement/interpolation-display",
+            "use core.science.measurement as measurement\ncomptime value = measurement.from(12.5, 0.25)\ncomptime expected = \"{value}\"\n\nfn run() {\n    actual :: measurement.from(12.5, 0.25)\n    print(expected)\n    print(actual)\n}\n",
+        ),
+        "12.5 ± 0.25"
+    );
+}
+
+#[test]
 fn rustc_backed_pivot_sum_invokes_capturing_closures_exactly() {
     assert_eq!(
         check_aot_comptime(
