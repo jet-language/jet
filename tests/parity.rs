@@ -256,18 +256,54 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.uuid", "v7"),
 ];
 
-fn tuple_ranges(text: &str) -> Vec<(usize, usize)> {
-    let bytes = text.as_bytes();
-    let mut ranges = Vec::new();
-    let mut i = 0usize;
-    let mut starts = Vec::new();
+fn raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = match (bytes.get(start), bytes.get(start + 1)) {
+        (Some(b'r'), _) => start + 1,
+        (Some(b'b'), Some(b'r')) => start + 2,
+        _ => return None,
+    };
+    let hashes_start = i;
+    while bytes.get(i) == Some(&b'#') {
+        i += 1;
+    }
+    if bytes.get(i) != Some(&b'"') {
+        return None;
+    }
+    let hashes = i - hashes_start;
+    i += 1;
     while i < bytes.len() {
+        if bytes[i] == b'"'
+            && bytes
+                .get(i + 1..i + 1 + hashes)
+                .is_some_and(|closing| closing.iter().all(|byte| *byte == b'#'))
+        {
+            return Some(i + 1 + hashes);
+        }
+        i += 1;
+    }
+    Some(bytes.len())
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum RustSegment {
+    Code,
+    String,
+}
+
+fn rust_source_segments(text: &str) -> Vec<(RustSegment, usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut segments = Vec::new();
+    let mut i = 0usize;
+    let mut start = 0usize;
+    while i < bytes.len() {
+        let skipped_from = i;
+        let mut string = false;
+        let skipped;
         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
             i += 2;
             while i < bytes.len() && bytes[i] != b'\n' { i += 1; }
-            continue;
-        }
-        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            skipped = true;
+        } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
             i += 2;
             let mut comments = 1usize;
             while i < bytes.len() && comments > 0 {
@@ -281,32 +317,98 @@ fn tuple_ranges(text: &str) -> Vec<(usize, usize)> {
                     i += 1;
                 }
             }
-            continue;
-        }
-        if bytes[i] == b'"' {
+            skipped = true;
+        } else if let Some(end) = raw_string_end(bytes, i) {
+            i = end;
+            skipped = true;
+        } else if bytes[i] == b'"' {
             i += 1;
             while i < bytes.len() {
-                if bytes[i] == b'\\' { i += 2; }
+                if bytes[i] == b'\\' { i = (i + 2).min(bytes.len()); }
                 else if bytes[i] == b'"' { i += 1; break; }
                 else { i += 1; }
             }
-            continue;
-        }
-        if bytes[i] == b'\'' {
+            string = true;
+            skipped = true;
+        } else if bytes[i] == b'\'' {
             let end = if bytes.get(i + 1) == Some(&b'\\') { i + 3 } else { i + 2 };
             if bytes.get(end) == Some(&b'\'') {
                 i = end + 1;
-                continue;
+                skipped = true;
+            } else {
+                i += 1;
+                skipped = false;
+            }
+        } else {
+            i += 1;
+            skipped = false;
+        }
+        if skipped {
+            if start < skipped_from {
+                segments.push((RustSegment::Code, start, skipped_from));
+            }
+            if string {
+                segments.push((RustSegment::String, skipped_from, i));
+            }
+            start = i;
+        }
+    }
+    if start < bytes.len() {
+        segments.push((RustSegment::Code, start, bytes.len()));
+    }
+    segments
+}
+
+fn rust_code_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
+    rust_source_segments(text)
+        .into_iter()
+        .filter_map(|(kind, start, end)| (kind == RustSegment::Code).then_some((start, end)))
+}
+
+fn rust_code_occurrences(text: &str, needle: &str) -> Vec<usize> {
+    rust_code_ranges(text)
+        .into_iter()
+        .flat_map(|(start, end)| {
+            text[start..end]
+                .match_indices(needle)
+                .map(move |(at, _)| start + at)
+        })
+        .collect()
+}
+
+fn rust_header_before_block(text: &str) -> Option<String> {
+    let segments = rust_source_segments(text);
+    let brace = segments.iter().find_map(|(kind, start, end)| {
+        (*kind == RustSegment::Code)
+            .then(|| text.as_bytes()[*start..*end].iter().position(|byte| *byte == b'{'))
+            .flatten()
+            .map(|at| *start + at)
+    })?;
+    let mut header = vec![b' '; brace];
+    for (_, start, end) in segments {
+        if start >= brace {
+            break;
+        }
+        let end = end.min(brace);
+        header[start..end].copy_from_slice(&text.as_bytes()[start..end]);
+    }
+    String::from_utf8(header).ok()
+}
+
+fn tuple_ranges(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut ranges = Vec::new();
+    let mut starts = Vec::new();
+    for (start, end) in rust_code_ranges(text) {
+        for (i, byte) in bytes.iter().enumerate().take(end).skip(start) {
+            match byte {
+                b'(' => starts.push(i),
+                b')' => {
+                    if let Some(start) = starts.pop() { ranges.push((start, i + 1)); }
+                }
+                _ => {}
             }
         }
-        match bytes[i] {
-            b'(' => starts.push(i),
-            b')' => {
-                if let Some(start) = starts.pop() { ranges.push((start, i + 1)); }
-            }
-            _ => {}
-        }
-        i += 1;
     }
     ranges.sort_unstable();
     ranges
@@ -625,6 +727,22 @@ fn aot_collection_methods() -> BTreeSet<Entry> {
     entries
 }
 
+fn aot_special_collection_constructors() -> BTreeSet<Entry> {
+    let source = read("crates/jet-codegen/src/Codegen/TIR/subset/methods.rs");
+    extract_any_string_pairs(source_between(
+        &source,
+        "// Shape (d-coll-ctor)",
+        Some("// D-MEM1 S6"),
+    ))
+    .into_iter()
+    .map(|(owner, method)| Entry {
+        surface: Surface::DirectStatic,
+        owner,
+        method,
+    })
+    .collect()
+}
+
 fn aot_specialized_value_methods() -> BTreeSet<Entry> {
     fn add_arm(entries: &mut BTreeSet<Entry>, source: &str, owner: &str, marker: &str) {
         for method in method_candidates(source_between(source, marker, Some("_ => None,"))) {
@@ -742,6 +860,46 @@ fn ct_value_methods(text: &str) -> BTreeSet<(String, String)> {
     out
 }
 
+fn guarded_static_methods(text: &str) -> BTreeSet<(String, String)> {
+    let syntax = format!(
+        "{}\n{}",
+        read("crates/jet-foundation/src/Syntax.rs"),
+        read_rust_tree("crates/jet-foundation/src/Syntax")
+    );
+    let values = string_constant_values(&syntax, "");
+    let mut out = BTreeSet::new();
+    let needle = "if type_name == ";
+    for at in rust_code_occurrences(text, needle) {
+        let after = &text[at + needle.len()..];
+        let Some(header) = rust_header_before_block(after) else {
+            continue;
+        };
+        let owner = if let Some(quoted) = header.trim_start().strip_prefix('"') {
+            quoted.find('"').map(|end| quoted[..end].to_string())
+        } else {
+            let token = header
+                .trim_start()
+                .split_whitespace()
+                .next()
+                .unwrap_or_default();
+            token
+                .rsplit("::")
+                .next()
+                .and_then(|constant| values.get(constant).cloned())
+        };
+        if let Some(owner) = owner {
+            let mut methods = string_equalities(&header, "method");
+            if let Some(matches) = header.find("matches!(method,") {
+                methods.extend(extract_quoted(&header[matches..]));
+            }
+            for method in methods {
+                out.insert((owner.clone(), method));
+            }
+        }
+    }
+    out
+}
+
 fn ct_static_methods(text: &str) -> BTreeSet<(String, String)> {
     let mut out = BTreeSet::new();
     for (owner, method) in extract_any_string_pairs(text) {
@@ -759,6 +917,7 @@ fn ct_static_methods(text: &str) -> BTreeSet<(String, String)> {
             }
         }
     }
+    out.extend(guarded_static_methods(text));
     out
 }
 
@@ -912,6 +1071,7 @@ fn discover_inventory() -> BTreeSet<Entry> {
         entries.insert(Entry { surface: Surface::DirectStatic, owner: "direct".into(), method: name });
     }
     entries.extend(aot_collection_methods());
+    entries.extend(aot_special_collection_constructors());
     entries.extend(aot_specialized_value_methods());
     entries
 }
@@ -953,11 +1113,12 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                     .is_some_and(|ch| ch.is_ascii_uppercase())
             }),
     );
-    let ct_statics = ct_static_methods(source_between(
+    let mut ct_statics = ct_static_methods(source_between(
         &builtin_dispatch_src,
         "pub(super) fn apply_static_type_method(",
         Some("pub(super) fn apply_mutating("),
     ));
+    ct_statics.extend(guarded_static_methods(&dispatch_src));
     let ct_build_context = ct_build_context_methods();
     let sequence_methods = comptime_sequence_methods();
     let view_methods = [
@@ -1121,7 +1282,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (468, 138, 481, 49));
+    assert_eq!((fixed, direct_static, value, bespoke), (468, 149, 481, 49));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1130,6 +1291,24 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "loaded").class, Class::Covered);
     assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "failed").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Int", "parse").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "Set", "from").class, Class::Covered);
+    for (owner, method) in [
+        ("SortedSet", "from"),
+        ("SortedSet", "new"),
+        ("PriorityQueue", "from"),
+        ("PriorityQueue", "new"),
+        ("Lru", "new"),
+        ("Deque", "new"),
+        ("BitSet", "new"),
+        ("ByteBuffer", "from"),
+        ("ByteBuffer", "new"),
+    ] {
+        assert_eq!(
+            record(&records, Surface::DirectStatic, owner, method).class,
+            Class::Covered
+        );
+    }
+    assert_eq!(record(&records, Surface::DirectStatic, "Bag", "new").class, Class::PurePending);
     assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::PurePending);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "BigInt").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::PurePending);
@@ -1267,6 +1446,11 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             Class::Covered
         );
     }
+    for method in [
+        "add", "remove", "has", "union", "to_list", "len", "is_empty", "clear",
+    ] {
+        assert_eq!(record(&records, Surface::Value, "Set", method).class, Class::Covered);
+    }
     for method in ["media_type", "subtype", "essence", "to_string", "param", "params"] {
         assert_eq!(record(&records, Surface::Value, "Mime", method).class, Class::Covered);
     }
@@ -1333,14 +1517,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_136, 666, 130, 340));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_147, 684, 123, 340));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        9355898086358437726,
+        729237308069271083,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
@@ -1377,4 +1561,25 @@ fn inventory_validator_rejects_duplicate_stale_and_unclassified_entries() {
 
     let fake_core = "// (\"core.fake\", \"comment\")\nlet text = \"(\\\"core.fake\\\", \\\"string\\\")\";";
     assert!(extract_pairs(fake_core).is_empty(), "comment/string tuples must not prove dispatch coverage");
+
+    let fake_statics = r###"
+// if type_name == crate::Syntax::TYPE_SET && method == "from" {
+/* if type_name == crate::Syntax::TYPE_BIT_SET && method == "new" { */
+let example = r#"if type_name == crate::Syntax::TYPE_DEQUE && method == "new" {"#;
+"###;
+    assert!(
+        guarded_static_methods(fake_statics).is_empty(),
+        "comment/raw-string guards must not prove static dispatch coverage"
+    );
+
+    let commented_method = r#"
+if type_name == crate::Syntax::TYPE_SET // method == "from"
+{
+    disabled_example()
+}
+"#;
+    assert!(
+        guarded_static_methods(commented_method).is_empty(),
+        "a commented method must not complete an active type guard"
+    );
 }

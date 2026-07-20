@@ -173,6 +173,52 @@ const PRIORITY_QUEUE_CALL_RECEIVER_DECLS: &str = r#"fn priority_queue_call_recei
     value :: counted_priority(&receiver_hits).peek() ?? -1
     return "{value}|{receiver_hits}"
 }"#;
+const SET_DECLS: &str = r#"fn set_view() -> String {
+    values: Set<Int> := Set.from([3, 1, 2, 3])
+    initial := values.to_list()
+    initial.sort()
+    initial_len :: values.len()
+    initial_empty :: values.is_empty()
+    had_two :: values.has(2)
+    added_four :: values.add(4)
+    duplicate_two :: values.add(2)
+    values.remove(2)
+    has_two :: values.has(2)
+    current := values.to_list()
+    current.sort()
+    other: Set<Int> := Set.from([5, 4, 0])
+    combined_values :: values.union(other)
+    combined := combined_values.to_list()
+    combined.sort()
+    after_union := values.to_list()
+    after_union.sort()
+    words: Set<String> := Set.from(["z", "a", "m", "a"])
+    word_list := words.to_list()
+    word_list.sort()
+    additional: Set<Int> := Set.from([9, 7])
+    additional_added :: additional.add(8)
+    additional_list := additional.to_list()
+    additional_list.sort()
+    values.clear()
+    cleared_list := values.to_list()
+    cleared_list.sort()
+    return "{initial}|{initial_len}|{initial_empty}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{word_list}|{additional_added}|{additional_list}|{values.is_empty()}|{values.len()}|{cleared_list}"
+}"#;
+const SET_EXPECTED: &str = "[1, 2, 3]|3|false|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|[]";
+const SET_CALL_RECEIVER_DECLS: &str = r#"fn add_set(values: &Set<Int>, value: Int) -> Bool {
+    return values.add(value)
+}
+fn counted_set(hits: &Int) -> Set<Int> {
+    hits += 1
+    return Set.from([2, 6])
+}
+fn set_call_receiver_view() -> String {
+    values: Set<Int> := Set.from([9, 7])
+    added :: add_set(&values, 8)
+    receiver_hits := 0
+    value :: counted_set(&receiver_hits).has(6)
+    return "{added}|{values.has(8)}|{value}|{receiver_hits}"
+}"#;
 const SORTED_SET_DECLS: &str = r#"fn add_through_param(values: &SortedSet<Int>, value: Int) -> Bool {
     return values.add(value)
 }
@@ -345,6 +391,24 @@ fn public_transcript_comptime_only_evaluates_priority_queue_call_receiver_once()
         "priority_queue_call_receiver_view()",
     ]);
     assert_eq!(values, ["\"6|1\" : String"]);
+}
+
+#[test]
+fn public_transcript_covers_set_methods_exactly() {
+    let values = exact_values(&[SET_DECLS, "set_view()"]);
+    assert_eq!(values, [format!("\"{SET_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_comptime_only_evaluates_set_call_receiver_once() {
+    // Raw Set.to_list order is intentionally unspecified. This direct read-only
+    // call receiver instead proves exact public comptime evaluation count.
+    let values = exact_values(&[
+        SET_DECLS,
+        SET_CALL_RECEIVER_DECLS,
+        "set_call_receiver_view()",
+    ]);
+    assert_eq!(values, ["\"true|true|true|1\" : String"]);
 }
 
 #[test]
@@ -626,6 +690,16 @@ fn rustc_backed_priority_queue_matches_aot_comptime_forced_interpreter_and_defau
         PRIORITY_QUEUE_EXPECTED,
         true,
     );
+}
+
+#[test]
+fn rustc_backed_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+    // HashSet iteration order is unspecified, so the Jet source sorts lists
+    // after to_list on both sides. Set-typed helper functions and nested call
+    // receivers remain TIR boundaries and are covered by the transcript above.
+    let source = parity_source("set_view()", SET_DECLS);
+    assert_eq!(check_aot_comptime("set/all-methods", &source), SET_EXPECTED);
+    check_dev_tiers_with_boundary("set", &source, SET_EXPECTED, true);
 }
 
 #[test]

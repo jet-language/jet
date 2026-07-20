@@ -61,6 +61,18 @@ fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Di
     Ok(items)
 }
 
+fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
+    // ponytail: comptime sets are small; O(n²) equality dedup avoids a second
+    // hash representation. Revisit only with measured large-set evidence.
+    let mut unique = Vec::new();
+    for item in items {
+        if !unique.contains(&item) {
+            unique.push(item);
+        }
+    }
+    unique
+}
+
 fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
     items.sort_by(|left, right| match cmp(right.clone(), left.clone(), span) {
@@ -1379,6 +1391,16 @@ impl<'a> Interp<'a> {
                     fields: vec![("bits".to_string(), CtValue::List(Vec::new()))],
                 });
             }
+            if type_name == crate::Syntax::TYPE_SET && method == "from" {
+                let items = match self.eval(&args[0].expr, scope)? {
+                    CtValue::List(items) => unique_values(items),
+                    _ => return Err(unsupported("Set.from with a non-list", span)),
+                };
+                return Ok(CtValue::Struct {
+                    type_name: crate::Syntax::TYPE_SET.to_string(),
+                    fields: vec![("items".to_string(), CtValue::List(items))],
+                });
+            }
             if type_name == crate::Syntax::TYPE_PRIORITY_QUEUE
                 && matches!(method, "new" | "from")
             {
@@ -2044,6 +2066,94 @@ impl<'a> Interp<'a> {
         ) {
             let peek = self.eval(receiver, scope)?;
             match (&peek, method) {
+                (
+                    CtValue::Struct { type_name, fields },
+                    method @ ("add"
+                        | "remove"
+                        | "has"
+                        | "union"
+                        | "to_list"
+                        | "len"
+                        | "is_empty"
+                        | "clear"),
+                ) if type_name == crate::Syntax::TYPE_SET => {
+                    let mut items = fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("items", CtValue::List(items)) => Some(items.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut argv = Vec::with_capacity(args.len());
+                    for arg in args {
+                        argv.push(self.eval(&arg.expr, scope)?);
+                    }
+                    let mut changed = false;
+                    let result = match method {
+                        "len" => CtValue::Int(items.len() as i64),
+                        "is_empty" => CtValue::Bool(items.is_empty()),
+                        "has" => CtValue::Bool(items.contains(&argv[0])),
+                        "to_list" => CtValue::List(items.clone()),
+                        "add" => {
+                            let added = !items.contains(&argv[0]);
+                            if added {
+                                items.push(argv[0].clone());
+                                changed = true;
+                            }
+                            CtValue::Bool(added)
+                        }
+                        "remove" => {
+                            if let Some(index) = items.iter().position(|item| item == &argv[0]) {
+                                items.remove(index);
+                                changed = true;
+                            }
+                            CtValue::Unit
+                        }
+                        "union" => {
+                            let CtValue::Struct {
+                                type_name: other_type,
+                                fields: other_fields,
+                            } = &argv[0]
+                            else {
+                                return Err(unsupported("Set.union with a non-set", span));
+                            };
+                            if other_type != crate::Syntax::TYPE_SET {
+                                return Err(unsupported("Set.union with a non-set", span));
+                            }
+                            if let Some(CtValue::List(other)) = other_fields
+                                .iter()
+                                .find(|(name, _)| name == "items")
+                                .map(|(_, value)| value)
+                            {
+                                items.extend(other.iter().cloned());
+                            }
+                            CtValue::Struct {
+                                type_name: crate::Syntax::TYPE_SET.to_string(),
+                                fields: vec![(
+                                    "items".to_string(),
+                                    CtValue::List(unique_values(items.clone())),
+                                )],
+                            }
+                        }
+                        "clear" => {
+                            items.clear();
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        _ => unreachable!("Set method set is closed"),
+                    };
+                    if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                        self.write_back(
+                            receiver,
+                            CtValue::Struct {
+                                type_name: crate::Syntax::TYPE_SET.to_string(),
+                                fields: vec![("items".to_string(), CtValue::List(items))],
+                            },
+                            scope,
+                        )?;
+                    }
+                    return Ok(result);
+                }
                 (
                     CtValue::Struct { type_name, fields },
                     method @ ("push"
