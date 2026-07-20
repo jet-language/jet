@@ -38,6 +38,13 @@ const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130
 const INTEGER_BIT_QUERIES_DECLS: &str = r#"fn bit_byte(value: Int) -> U8 {
     return U8.from_int(value) ?? 0
 }
+fn bit_parameter(value: U8) -> Int {
+    return (value).leading_zeros()
+}
+fn bit_inferred_local() -> Int {
+    value := U8.from_int(13) ?? 0
+    return value.leading_zeros()
+}
 fn integer_bit_queries_view() -> String {
     int: Int :: -1
     i8: I8 :: -2
@@ -47,10 +54,10 @@ fn integer_bit_queries_view() -> String {
     u16: U16 :: 256
     u32: U32 :: 2147483648
     u64: U64 :: 255
-    return "{int.count_ones()}:{int.count_zeros()}:{int.leading_zeros()}:{int.trailing_zeros()}|{i8.count_ones()}:{i8.count_zeros()}:{i8.leading_zeros()}:{i8.trailing_zeros()}|{i16.count_ones()}:{i16.count_zeros()}:{i16.leading_zeros()}:{i16.trailing_zeros()}|{i32.count_ones()}:{i32.count_zeros()}:{i32.leading_zeros()}:{i32.trailing_zeros()}|{u8.count_ones()}:{u8.count_zeros()}:{u8.leading_zeros()}:{u8.trailing_zeros()}|{u16.count_ones()}:{u16.count_zeros()}:{u16.leading_zeros()}:{u16.trailing_zeros()}|{u32.count_ones()}:{u32.count_zeros()}:{u32.leading_zeros()}:{u32.trailing_zeros()}|{u64.count_ones()}:{u64.count_zeros()}:{u64.leading_zeros()}:{u64.trailing_zeros()}|{bit_byte(13).leading_zeros()}"
+    return "{int.count_ones()}:{int.count_zeros()}:{int.leading_zeros()}:{int.trailing_zeros()}|{i8.count_ones()}:{i8.count_zeros()}:{i8.leading_zeros()}:{i8.trailing_zeros()}|{i16.count_ones()}:{i16.count_zeros()}:{i16.leading_zeros()}:{i16.trailing_zeros()}|{i32.count_ones()}:{i32.count_zeros()}:{i32.leading_zeros()}:{i32.trailing_zeros()}|{u8.count_ones()}:{u8.count_zeros()}:{u8.leading_zeros()}:{u8.trailing_zeros()}|{u16.count_ones()}:{u16.count_zeros()}:{u16.leading_zeros()}:{u16.trailing_zeros()}|{u32.count_ones()}:{u32.count_zeros()}:{u32.leading_zeros()}:{u32.trailing_zeros()}|{u64.count_ones()}:{u64.count_zeros()}:{u64.leading_zeros()}:{u64.trailing_zeros()}|{bit_byte(13).leading_zeros()}|{bit_parameter(13)}|{bit_inferred_local()}"
 }"#;
 const INTEGER_BIT_QUERIES_EXPECTED: &str =
-    "64:0:0:0|7:1:0:1|1:15:0:15|0:32:32:32|3:5:4:0|1:15:7:8|1:31:0:31|8:56:56:0|4";
+    "64:0:0:0|7:1:0:1|1:15:0:15|0:32:32:32|3:5:4:0|1:15:7:8|1:31:0:31|8:56:56:0|4|4|4";
 const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() -> String {
     buffer := ByteBuffer.new()
     empty_before :: buffer.is_empty()
@@ -683,7 +690,7 @@ fn parity_source(expression: &str, imports: &str) -> String {
     )
 }
 
-fn check_aot_comptime(label: &str, source: &str) -> String {
+fn rustc_aot_stdout(label: &str, source: &str) -> String {
     assert!(common::have_rustc(), "{label} requires rustc");
     let compiled = jet::Driver::compile_generated_src(
         source,
@@ -726,8 +733,12 @@ fn check_aot_comptime(label: &str, source: &str) -> String {
     );
     let run = Command::new(binary).output().unwrap();
     assert!(run.status.success(), "{label} runtime failed");
-    let lines = String::from_utf8(run.stdout).unwrap();
-    let lines = lines.lines().collect::<Vec<_>>();
+    String::from_utf8(run.stdout).unwrap()
+}
+
+fn check_aot_comptime(label: &str, source: &str) -> String {
+    let output = rustc_aot_stdout(label, source);
+    let lines = output.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 2, "{label} emitted unexpected output: {lines:?}");
     assert_eq!(lines[0], lines[1], "{label} comptime/AOT divergence");
     lines[0].to_string()
@@ -738,6 +749,20 @@ fn check_dev_tiers(label: &str, source: &str, expected: &str) {
 }
 
 fn check_dev_tiers_with_boundary(
+    label: &str,
+    source: &str,
+    expected: &str,
+    force_interpreter: bool,
+) {
+    check_dev_tier_output(
+        label,
+        source,
+        &format!("{expected}\n{expected}\n"),
+        force_interpreter,
+    );
+}
+
+fn check_dev_tier_output(
     label: &str,
     source: &str,
     expected: &str,
@@ -754,11 +779,7 @@ fn check_dev_tiers_with_boundary(
             RunOutcome::Ran { stdout, stderr, exit_code } => {
                 assert_eq!(exit_code, 0, "{label} {tier} exit");
                 assert_eq!(stderr, "", "{label} {tier} stderr");
-                assert_eq!(
-                    stdout,
-                    format!("{expected}\n{expected}\n"),
-                    "{label} {tier} stdout"
-                );
+                assert_eq!(stdout, expected, "{label} {tier} stdout");
             }
             RunOutcome::Problems(diags) => panic!("{label} {tier} failed: {diags:?}"),
         }
@@ -829,12 +850,19 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
 
 #[test]
 fn rustc_backed_integer_bit_queries_match_all_execution_tiers_exactly() {
-    let source = parity_source("integer_bit_queries_view()", INTEGER_BIT_QUERIES_DECLS);
-    assert_eq!(
-        check_aot_comptime("integer-bit-queries", &source),
-        INTEGER_BIT_QUERIES_EXPECTED
+    let source = format!(
+        "{INTEGER_BIT_QUERIES_DECLS}\nfn run() {{\n    print(\"{{integer_bit_queries_view()}}\")\n}}\n"
     );
-    check_dev_tiers("integer-bit-queries", &source, INTEGER_BIT_QUERIES_EXPECTED);
+    assert_eq!(
+        rustc_aot_stdout("integer-bit-queries", &source),
+        format!("{INTEGER_BIT_QUERIES_EXPECTED}\n")
+    );
+    check_dev_tier_output(
+        "integer-bit-queries",
+        &source,
+        &format!("{INTEGER_BIT_QUERIES_EXPECTED}\n"),
+        false,
+    );
 }
 
 #[test]

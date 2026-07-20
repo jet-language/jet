@@ -1741,7 +1741,7 @@ fn restore_move_diagnostic(d: Diagnostic, moved_names: &HashSet<String>) -> Diag
 }
 
 /// Build a complete synthetic Jet source from accumulated declarations +
-/// new item, then run sema. Returns errors only.
+/// new item, then run sema. The successful rebuild retains this checked AST.
 fn type_check_item(session: &Session, new_item_src: &str) -> Vec<Diagnostic> {
     let prog_src = format!(
         "{}{}{}\n{}\n",
@@ -1750,61 +1750,57 @@ fn type_check_item(session: &Session, new_item_src: &str) -> Vec<Diagnostic> {
         session.accumulated_src(),
         new_item_src,
     );
-    run_sema(&prog_src)
+    checked_program(&prog_src).err().unwrap_or_default()
 }
 
-/// Parse + sema-check `src`, return errors only.
-/// Uses `Check` mode so E0101 (no `run`) is not fired — the REPL never has
-/// a `run` function in its synthetic programs (D-REPL: session is a library).
-fn run_sema(src: &str) -> Vec<Diagnostic> {
+fn checked_top_level_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, Func> {
+    bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(function) => Some((function.name.clone(), function.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Parse + sema-check `src`, returning the checked AST. Uses `Check` mode so
+/// E0101 (no `run`) is not fired — a REPL session is a library.
+fn checked_program(src: &str) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     if !lex_diags.is_empty() {
-        return lex_diags
+        return Err(lex_diags
             .into_iter()
             .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
-            .collect();
+            .collect());
     }
     let prog = match crate::Parser::parse(&toks) {
         Ok(p) => p,
-        Err(ds) => return ds,
+        Err(ds) => return Err(ds),
     };
     // File imports need Loader resolution. Import-free programs use the same
     // canonical one-module bundle checker as every other compile path.
-    if !prog.imports.is_empty() {
-        return run_sema_bundle(src);
-    }
-    let all = check_program(src, prog);
-    all.into_iter()
-        .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
-        .collect()
-}
-
-/// Sema-check a synthetic program that contains imports, via the Loader bundle
-/// path (the only path that registers core-module aliases). Writes `src` to a
-/// temp `.jet` file and runs `Check` mode so no `run` is required.
-fn run_sema_bundle(src: &str) -> Vec<Diagnostic> {
-    let tmp_path = std::env::temp_dir().join(unique_temp_name("check"));
-    if std::fs::write(&tmp_path, src).is_err() {
-        // Preserve a useful check when the temp file cannot be created.
-        let (toks, _) = crate::Lexer::lex(src);
-        if let Ok(prog) = crate::Parser::parse(&toks) {
-            return check_program(src, prog)
-                .into_iter()
-                .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
-                .collect();
+    let mut bundle = if prog.imports.is_empty() {
+        program_bundle(src, prog)
+    } else {
+        let tmp_path = std::env::temp_dir().join(unique_temp_name("check"));
+        if std::fs::write(&tmp_path, src).is_err() {
+            program_bundle(src, prog)
+        } else {
+            let loaded = crate::Loader::load_entry(&tmp_path.to_string_lossy());
+            let _ = std::fs::remove_file(&tmp_path);
+            loaded?
         }
-        return Vec::new();
-    }
-    let path_str = tmp_path.to_string_lossy().to_string();
-    let diags = match crate::Loader::load_entry(&path_str) {
-        Ok(mut bundle) => crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check),
-        Err(ds) => ds,
     };
-    let _ = std::fs::remove_file(&tmp_path);
-    diags
+    let errors: Vec<_> = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
         .into_iter()
         .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
-        .collect()
+        .collect();
+    if errors.is_empty() {
+        Ok(bundle)
+    } else {
+        Err(errors)
+    }
 }
 
 fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::ProgramBundle {
@@ -1843,15 +1839,14 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
     }
 }
 
-fn check_program(src: &str, prog: crate::AST::Program) -> Vec<Diagnostic> {
-    let mut bundle = program_bundle(src, prog);
-    crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check)
-}
-
 /// Rebuild the func_defs table from accumulated item sources.
 fn rebuild_funcs(session: &mut Session) {
-    session.func_defs.clear();
     let src = format!("{}{}", PRELOAD_SRC, session.accumulated_src());
+    if let Ok(bundle) = checked_program(&src) {
+        session.func_defs = checked_top_level_funcs(&bundle);
+        return;
+    }
+    session.func_defs.clear();
     let (toks, _) = crate::Lexer::lex(&src);
     if let Ok(prog) = crate::Parser::parse(&toks) {
         for item in prog.items {
@@ -2267,6 +2262,7 @@ pub(crate) fn execute_line(
                 );
                 return false;
             }
+            rebuild_funcs(session);
             // D-CTCORE1: register any core alias → module path so the
             // comptime interpreter can execute whitelisted pure Core calls.
             update_core_imports(&src, &mut session.core_imports);
@@ -2992,6 +2988,7 @@ pub fn run_transcript_with_flags(
                     );
                     continue;
                 }
+                rebuild_funcs(&mut session);
                 // D-CTCORE1: register any core alias → module path so the
                 // comptime interpreter can execute whitelisted pure Core calls.
                 update_core_imports(&src, &mut session.core_imports);
