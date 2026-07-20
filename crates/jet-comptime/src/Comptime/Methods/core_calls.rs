@@ -1205,10 +1205,19 @@ pub(super) fn apply_core_call(
             })))
         }
         ("core.random", "float") => Ok(CtValue::Float(with_ambient_rng(|st| random_float(st)))),
-        ("core.random", "rng") => {
+        // D-DET1: testing.fake_rng is the test-facing spelling of the same
+        // caller-seeded deterministic Rng capability as random.rng.
+        ("core.random", "rng") | ("core.testing", "fake_rng") => {
             let seed = match one(0)? {
                 CtValue::Int(n) => *n as u64,
-                _ => return Err(unsupported("random.rng expects an Int seed", span)),
+                _ => {
+                    let api = if method == "rng" {
+                        "random.rng"
+                    } else {
+                        "testing.fake_rng"
+                    };
+                    return Err(unsupported(&format!("{api} expects an Int seed"), span));
+                }
             };
             Ok(CtValue::Struct {
                 type_name: crate::Syntax::RNG_TYPE.to_string(),

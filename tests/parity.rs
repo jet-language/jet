@@ -230,7 +230,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.math", "decimal"),
     ("core.testing", "corpus"),
     ("core.testing", "fake_clock"),
-    ("core.testing", "fake_rng"),
     ("core.testing", "fixture"),
     ("core.testing", "golden"),
     ("core.testing", "snap"),
@@ -1512,6 +1511,10 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Bespoke, "core.data", "inner_join").class, Class::Covered);
     assert_eq!(record(&records, Surface::Bespoke, "core.data", "left_join").class, Class::Covered);
     assert_eq!(record(&records, Surface::Bespoke, "core.data", "pivot_sum").class, Class::Covered);
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.testing", "fake_rng").class,
+        Class::Covered
+    );
     assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class, Class::Boundary);
@@ -1523,14 +1526,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_147, 697, 110, 340));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_147, 698, 109, 340));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        8455045074095586186,
+        6816891640852888433,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

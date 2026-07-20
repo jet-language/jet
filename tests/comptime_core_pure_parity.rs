@@ -167,6 +167,12 @@ fn rng_view() -> String {
     return "{int_draw}|{float_draw}|{range_draw}|{coin}|{chance}|{normal}|{exponential}|{bytes}|{picked}|{weighted}|{sample}|{deck}|{child_draw}|{after_split}"
 }"#;
 const RNG_EXPECTED: &str = "4|0.0316577610861849|1.3390388981797772|true|true|-0.6237918784672982|0.21210139132324568|[62, 20, 83, 254]|b|c|[c, a]|[1, 2, 5, 3, 4]|71|87";
+const TESTING_FAKE_RNG_FN: &str = r#"fn testing_fake_rng_view() -> String {
+    first := testing.fake_rng(99)
+    second := testing.fake_rng(99)
+    return "{first.int(1, 100)}|{second.int(1, 100)}|{first.float()}|{second.float()}"
+}"#;
+const TESTING_FAKE_RNG_EXPECTED: &str = "4|4|0.0316577610861849|0.0316577610861849";
 const BIT_SET_DECLS: &str = r#"fn add_bit(values: &BitSet, bit: Int) -> Bool {
     return values.add(bit)
 }
@@ -490,6 +496,19 @@ fn public_transcript_covers_deque_methods_exactly() {
 fn public_transcript_covers_bit_set_methods_exactly() {
     let values = exact_values(&[BIT_SET_DECLS, "bit_set_view()"]);
     assert_eq!(values, [format!("\"{BIT_SET_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_covers_testing_fake_rng_exactly() {
+    let values = exact_values(&[
+        "use core.testing as testing",
+        TESTING_FAKE_RNG_FN,
+        "testing_fake_rng_view()",
+    ]);
+    assert_eq!(
+        values,
+        [format!("\"{TESTING_FAKE_RNG_EXPECTED}\" : String")]
+    );
 }
 
 #[test]
@@ -890,4 +909,23 @@ fn rustc_backed_seeded_rng_methods_match_all_execution_tiers_exactly() {
     // proves the seeded handle itself is interpreter-resident; default dev
     // proves its normal AOT fallback remains byte-identical.
     check_dev_tiers_with_boundary("rng", &source, RNG_EXPECTED, true);
+}
+
+#[test]
+fn rustc_backed_testing_fake_rng_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly(
+) {
+    let declarations = format!("use core.testing as testing\n{TESTING_FAKE_RNG_FN}");
+    let source = parity_source("testing_fake_rng_view()", &declarations);
+    assert_eq!(
+        check_aot_comptime("testing/fake-rng", &source),
+        TESTING_FAKE_RNG_EXPECTED
+    );
+    // Rng remains outside the resident JIT subset: force the interpreter,
+    // then prove default dev's ordinary AOT fallback.
+    check_dev_tiers_with_boundary(
+        "testing-fake-rng",
+        &source,
+        TESTING_FAKE_RNG_EXPECTED,
+        true,
+    );
 }
