@@ -64,7 +64,12 @@ fn make_tree_writable(path: &Path) {
     fs::set_permissions(path, permissions).unwrap();
 }
 
-fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
+fn write_runnable_fixture(
+    fixtures: &Path,
+    root: &Path,
+    staging_dir: &Path,
+    lua_path: Option<&str>,
+) -> PathBuf {
     fs::create_dir_all(fixtures).unwrap();
     let bin = staging_dir.join("bin");
     fs::create_dir_all(&bin).unwrap();
@@ -76,6 +81,9 @@ fn write_runnable_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> P
         fs::write(&greet, "#!/bin/sh\necho hello from offline cache\n").unwrap();
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    if let Some(lua_path) = lua_path {
+        fs::write(staging_dir.join("lua-path"), lua_path).unwrap();
     }
     jetpack::Store::seal_local_output(staging_dir).unwrap();
     let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
@@ -111,7 +119,7 @@ fn offline_build_and_run_use_hangar_cache_with_network_denied() {
     let root = Scratch::new("root");
     let fixtures = Scratch::new("fixtures");
     let out_dir = Scratch::new("out");
-    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
+    write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path, None);
 
     let first = jetpack()
         .args([
@@ -176,6 +184,64 @@ fn offline_build_and_run_use_hangar_cache_with_network_denied() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn selected_workspace_run_propagates_unsafe_metadata_failure_before_command() {
+    let project = Scratch::new("unsafe-metadata-project");
+    let root = Scratch::new("unsafe-metadata-root");
+    let fixtures = Scratch::new("unsafe-metadata-fixtures");
+    let out_dir = Scratch::new("unsafe-metadata-out");
+    write_runnable_fixture(
+        &fixtures.path,
+        &root.path,
+        &out_dir.path,
+        Some("../outside\n"),
+    );
+
+    let member = project.path.join("packages/hello");
+    fs::create_dir_all(&member).unwrap();
+    fs::write(
+        project.path.join("workspace.jet"),
+        "module workspace { members: find(\"./packages\") }\n",
+    )
+    .unwrap();
+    fs::write(
+        member.join("pkg.jet"),
+        "payload: { name: \"hello\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        member.join("hello.jet"),
+        "module hello { pub fn greeting() -> String { return \"hello\" } }\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path.join("env.jet"),
+        "module env.dev { packages: [nixpkgs.greet] }\n",
+    )
+    .unwrap();
+
+    let sentinel = project.path.join("command-ran");
+    let output = jetpack()
+        .args(["run", "-p", "hello", "--offline", "--fixtures"])
+        .arg(&fixtures.path)
+        .args(["--", "sh", "-c", "printf executed > \"$1\"", "jet-test"])
+        .arg(&sentinel)
+        .current_dir(&project.path)
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(!sentinel.exists(), "requested command ran after compose failure");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr.matches("couldn't compose package environment").count(),
+        1,
+        "stderr: {stderr}"
+    );
+}
+
 /// D-JPK-OFFLINE2=B tamper gate: after a first build records the locked
 /// identity + closure digest, corrupting the realized closure on disk must make
 /// the offline reuse refuse loudly (integrity), naming the artifact — never
@@ -186,7 +252,7 @@ fn offline_reuse_refuses_a_tampered_closure() {
     let root = Scratch::new("tamper-root");
     let fixtures = Scratch::new("tamper-fixtures");
     let out_dir = Scratch::new("tamper-out");
-    let seeded_out = write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
+    let seeded_out = write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path, None);
 
     let first = jetpack()
         .args([

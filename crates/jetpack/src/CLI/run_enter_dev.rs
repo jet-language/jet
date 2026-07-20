@@ -58,20 +58,20 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                         }
                         match &parsed.command {
                             Some(cmd) if !cmd.is_empty() => {
-                                if let Ok(mut plan) = load_project_plan(theme) {
-                                    if apply_locked_channels(theme, &project_dir, &mut plan.table)
-                                        .is_ok()
-                                    {
-                                        if let Ok(env) =
-                                            compose_env(theme, &roots, &parsed.flags, &plan)
-                                        {
-                                            return run_visible_command(
-                                                theme, &env, &plan.refs, cmd,
-                                            );
-                                        }
-                                    }
+                                let mut plan = match load_project_plan(theme) {
+                                    Ok(plan) => plan,
+                                    Err(code) => return code,
+                                };
+                                if let Err(code) =
+                                    apply_locked_channels(theme, &project_dir, &mut plan.table)
+                                {
+                                    return code;
                                 }
-                                0
+                                let env = match compose_env(theme, &roots, &parsed.flags, &plan) {
+                                    Ok(env) => env,
+                                    Err(code) => return code,
+                                };
+                                run_visible_command(theme, &env, &plan.refs, cmd)
                             }
                             _ => 0,
                         }

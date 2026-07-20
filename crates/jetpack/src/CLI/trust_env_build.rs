@@ -187,6 +187,7 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                 if !entry.bin.is_empty() {
                     bin_dirs.push(entry.bin);
                 }
+                let mut invalid_metadata = None;
                 for (file, variable) in [
                     ("lua-path", "LUA_PATH"),
                     ("lua-cpath", "LUA_CPATH"),
@@ -202,10 +203,21 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                             if let Some(value) = resolve_provider_paths(&entry.out, file, value) {
                                 provider_vars.entry(variable.to_string()).or_default().push(value);
                             } else {
-                                failed = true;
+                                invalid_metadata.get_or_insert(file);
                             }
                         }
                     }
+                }
+                if let Some(file) = invalid_metadata {
+                    theme.error(
+                        "couldn't compose package environment",
+                        &format!(
+                            "`{file}` for `{}` contains a relative path outside its verified package output.",
+                            entry.reference
+                        ),
+                        "reinstall the package; provider metadata paths must be absolute or contain only normal relative components.",
+                    );
+                    failed = true;
                 }
                 realized_refs.push(entry.reference);
                 cache_leases.push(lease);
