@@ -74,8 +74,21 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     Ok(BindResult { source: render_jet(&abi, &functions), bound: functions, archive, lib_dir, provenance })
 }
 
+const GENERATED_FIXED_FUNCTIONS: &[(&str, &str)] = &[
+    ("open", "() -> Int"),
+    ("take_error", "() -> Int"),
+    ("cancel", "(handle: Int)"),
+    ("close", "(handle: Int)"),
+    ("view_get_int", "(handle: Int, table: Int, key: String) -> Int"),
+    ("view_set_int", "(handle: Int, table: Int, key: String, value: Int)"),
+    ("view_release", "(handle: Int, table: Int)"),
+];
+
 fn render_jet(abi: &str, functions: &[String]) -> String {
-    let mut out = format!("@Extern module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n    fn view_get_int(handle: Int, table: Int, key: String) -> Int = \"{abi}_view_get_int\"\n    fn view_set_int(handle: Int, table: Int, key: String, value: Int) = \"{abi}_view_set_int\"\n    fn view_release(handle: Int, table: Int) = \"{abi}_view_release\"\n");
+    let mut out = format!("@Extern module c.{abi} {{\n");
+    for (name, signature) in GENERATED_FIXED_FUNCTIONS {
+        out.push_str(&format!("    fn {name}{signature} = \"{abi}_{name}\"\n"));
+    }
     for name in functions {
         out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n"));
         out.push_str(&format!("    fn {name}_view(handle: Int, deadline_ms: Int) -> Int = \"{abi}_view_{name}\"\n"));
@@ -86,8 +99,6 @@ fn render_jet(abi: &str, functions: &[String]) -> String {
     }
     out
 }
-
-const GENERATED_FIXED_FUNCTIONS: &[&str] = &["open", "take_error", "cancel", "close", "view_get_int", "view_set_int", "view_release"];
 
 fn render_c(abi: &str, source: &str, functions: &[String]) -> String {
     let wrappers = functions.iter().map(|name| format!("const char* {abi}_invoke_{name}(int64_t h,const char*input,int64_t deadline){{return invoke(h,\"{name}\",input,deadline);}}\nint64_t {abi}_view_{name}(int64_t h,int64_t deadline){{return view(h,\"{name}\",deadline);}}\n")).collect::<String>();
@@ -202,7 +213,7 @@ fn tool_root(tool: &Path) -> Option<PathBuf> { let exe=std::fs::canonicalize(too
 fn find_header_dir(root:&Path)->Option<PathBuf>{[root.join("include"),root.join("include/lua5.4")].into_iter().find(|p|p.join("lua.h").is_file())}
 fn find_library_dir(root:&Path)->Option<PathBuf>{[root.join("lib"),root.join("lib64")].into_iter().find(|p|p.join(lib_name()).is_file())}
 fn ident(v:&str)->bool{let mut c=v.chars();matches!(c.next(),Some(x)if x.is_ascii_alphabetic()||x=='_')&&c.all(|x|x.is_ascii_alphanumeric()||x=='_')}
-fn reserved(v:&str)->bool{GENERATED_FIXED_FUNCTIONS.contains(&v)||matches!(v,"Session"|"TableView"|"LuaError")||crate::Syntax::JET_KEYWORD_LIST.contains(&v)||crate::Syntax::JET_TYPE_LIST.contains(&v)}
+fn reserved(v:&str)->bool{GENERATED_FIXED_FUNCTIONS.iter().any(|(name,_)|*name==v)||matches!(v,"Session"|"TableView"|"LuaError")||crate::Syntax::JET_KEYWORD_LIST.contains(&v)||crate::Syntax::JET_TYPE_LIST.contains(&v)}
 fn c_escape(v:&str)->String{let mut o=String::new();for b in v.bytes(){match b{b'\\'=>o.push_str("\\\\"),b'"'=>o.push_str("\\\""),b'\n'=>o.push_str("\\n"),b'\r'=>o.push_str("\\r"),b'\t'=>o.push_str("\\t"),0x20..=0x7e=>o.push(b as char),_=>o.push_str(&format!("\\{:03o}",b))}}o}
 fn run(command:&mut Command,tool:&'static str)->Result<(),BindError>{const CAP:usize=64*1024;command.stdout(Stdio::null()).stderr(Stdio::piped());let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::Io(format!("could not start `{tool}`: {e}"))})?;let stderr=child.stderr.take().ok_or_else(||BindError::Io(format!("could not supervise `{tool}` stderr")))?;let err=std::thread::spawn(move||drain(stderr,CAP));let deadline=Instant::now()+Duration::from_secs(60);let status=loop{match child.try_wait().map_err(|e|BindError::Io(format!("could not supervise `{tool}`: {e}")))?{Some(v)=>break v,None if Instant::now()>=deadline=>{let _=child.kill();let _=child.wait();let _=err.join();return Err(BindError::ToolFailed(tool,"the tool exceeded the 60 second limit".into()))},None=>std::thread::sleep(Duration::from_millis(10))}};let stderr=err.join().map_err(|_|BindError::Io(format!("`{tool}` stderr reader failed")))??;if status.success(){Ok(())}else{Err(BindError::ToolFailed(tool,launder(&stderr)))}}
 fn drain(mut input:impl Read,limit:usize)->Result<Vec<u8>,BindError>{let mut out=Vec::new();let mut buf=[0u8;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::Io(format!("could not read foreign tool output: {e}")))?;if n==0{break}let keep=(limit-out.len()).min(n);out.extend_from_slice(&buf[..keep]);}Ok(out)}
@@ -215,7 +226,7 @@ fn launder(v:&[u8])->String{String::from_utf8_lossy(v).lines().map(str::trim).fi
 mod tests {
     #[test] fn discovers_only_top_level_named_functions(){let source="-- function fake(x)\nfunction transform(x) return x end\nlocal function hidden(x) return x end\n";assert_eq!(super::discover(source).unwrap(),vec!["transform"]);}
     #[test] fn rejects_wrong_arity(){assert!(super::discover("function bad(a,b) return a end").is_err());}
-    #[test] fn rejects_generated_fixed_function_names(){let jet=super::render_jet("jet_lua_test",&["probe".into()]);for name in super::GENERATED_FIXED_FUNCTIONS{assert!(jet.contains(&format!("fn {name}(")),"fixed helper `{name}` missing from generated source audit");let source=format!("function {name}(input) return input end");let error=super::discover(&source).unwrap_err();assert!(error.to_string().contains(&format!("`{name}` cannot be exported")));}}
+    #[test] fn fixed_function_descriptors_drive_emission_and_reservation(){let abi="jet_lua_test";let jet=super::render_jet(abi,&["probe".into()]);for (name,signature) in super::GENERATED_FIXED_FUNCTIONS{assert!(jet.contains(&format!("fn {name}{signature} = \"{abi}_{name}\"")),"fixed helper `{name}` descriptor not emitted");assert!(super::reserved(name),"fixed helper `{name}` descriptor not reserved");let source=format!("function {name}(input) return input end");let error=super::discover(&source).unwrap_err();assert!(error.to_string().contains(&format!("`{name}` cannot be exported")));}}
     #[test] fn codec_has_null_and_cycle_guards(){assert!(super::JSON_CODEC.contains("jet.null"));assert!(super::JSON_CODEC.contains("cycle"));}
     #[test] fn table_view_reads_live_lua_without_json(){let c=super::render_c("jet_lua_test","function values(input) return { count = 1 } end",&["values".into()]);let body=c.split("_view_get_int").nth(1).unwrap().split("_view_set_int").next().unwrap();assert!(body.contains("lua_rawget"));assert!(!body.contains("decode(")&&!body.contains("encode(")&&!body.contains("DataTree"));}
 }
