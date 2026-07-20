@@ -638,7 +638,7 @@ thread_local! {
 
 #[cfg(test)]
 #[derive(Clone, Copy)]
-enum JetcIoTestFault { Short(usize), Error(i32) }
+enum JetcIoTestFault { Short(usize), EofAfter(usize), Error(i32) }
 
 #[cfg(test)]
 fn jet_crypto_set_file_boundary_test_observer(observer: fn(&'static str)) {
@@ -692,12 +692,21 @@ fn jetc_io_error(_boundary: &'static str) -> Option<std::io::Error> {
 
 fn jetc_io_limit(_boundary: &'static str, requested: usize) -> usize {
     #[cfg(test)]
-    return JETC_IO_TEST_FAULT.with(|slot| match *slot.borrow() {
-        Some((boundary, JetcIoTestFault::Short(limit))) if boundary == _boundary => {
-            JETC_IO_TEST_HITS.with(|hits| hits.set(hits.get() + 1));
-            requested.min(limit.max(1))
+    return JETC_IO_TEST_FAULT.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        match slot.as_mut() {
+            Some((boundary, JetcIoTestFault::Short(limit))) if *boundary == _boundary => {
+                JETC_IO_TEST_HITS.with(|hits| hits.set(hits.get() + 1));
+                requested.min(*limit)
+            }
+            Some((boundary, JetcIoTestFault::EofAfter(remaining))) if *boundary == _boundary => {
+                JETC_IO_TEST_HITS.with(|hits| hits.set(hits.get() + 1));
+                let limit = requested.min(*remaining);
+                *remaining -= limit;
+                limit
+            }
+            _ => requested,
         }
-        _ => requested,
     });
     #[cfg(not(test))]
     requested
@@ -705,9 +714,17 @@ fn jetc_io_limit(_boundary: &'static str, requested: usize) -> usize {
 
 fn jetc_read(file: &mut std::fs::File, buffer: &mut [u8], boundary: &'static str) -> std::io::Result<usize> {
     use std::io::Read;
-    if let Some(error) = jetc_io_error(boundary) { return Err(error); }
-    let limit = jetc_io_limit(boundary, buffer.len());
-    file.read(&mut buffer[..limit])
+    loop {
+        if let Some(error) = jetc_io_error(boundary) {
+            if error.kind() == std::io::ErrorKind::Interrupted { continue; }
+            return Err(error);
+        }
+        let limit = jetc_io_limit(boundary, buffer.len());
+        match file.read(&mut buffer[..limit]) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => return result,
+        }
+    }
 }
 
 fn jetc_read_exact(file: &mut std::fs::File, buffer: &mut [u8], boundary: &'static str) -> std::io::Result<()> {
@@ -726,7 +743,10 @@ fn jetc_read_exact(file: &mut std::fs::File, buffer: &mut [u8], boundary: &'stat
 fn jetc_write_all<W: std::io::Write + ?Sized>(file: &mut W, bytes: &[u8], boundary: &'static str) -> std::io::Result<()> {
     let mut offset = 0;
     while offset < bytes.len() {
-        if let Some(error) = jetc_io_error(boundary) { return Err(error); }
+        if let Some(error) = jetc_io_error(boundary) {
+            if error.kind() == std::io::ErrorKind::Interrupted { continue; }
+            return Err(error);
+        }
         let limit = jetc_io_limit(boundary, bytes.len() - offset);
         let written = match file.write(&bytes[offset..offset + limit]) {
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -960,6 +980,7 @@ fn hash_stream(
     file: &mut std::fs::File,
     cancelled: fn() -> bool,
     boundary: &'static str,
+    expected_length: u64,
 ) -> Result<([u8; 32], u64), JetFileCryptoError> {
     let mut hash = Sha256::new();
     let mut buffer = Zeroizing(vec![0u8; JETC_V2_CHUNK]);
@@ -967,9 +988,14 @@ fn hash_stream(
     loop {
         if cancelled() { return Err(JetFileCryptoError::Cancelled); }
         let read = jetc_read(file, &mut buffer, boundary).map_err(|_| JetFileCryptoError::SourceIo)?;
-        if read == 0 { break; }
+        if read == 0 {
+            if length != expected_length { return Err(JetFileCryptoError::SourceIo); }
+            break;
+        }
         length = length.checked_add(read as u64).ok_or(JetFileCryptoError::SourceIo)?;
-        if length > JETC_V2_MAX_PLAINTEXT { return Err(JetFileCryptoError::SourceIo); }
+        if length > expected_length || length > JETC_V2_MAX_PLAINTEXT {
+            return Err(JetFileCryptoError::SourceIo);
+        }
         hash.update(&buffer[..read]);
     }
     Ok((hash.finalize().into(), length))
@@ -1000,15 +1026,21 @@ fn snapshot_source(
         source_hash.update(&buffer[..read]);
         jetc_write_all(&mut stage_file, &buffer[..read], "seal-stage-write").map_err(|_| JetFileCryptoError::DestinationIo)?;
     }
+    if length != source_meta.len() { return Err(JetFileCryptoError::SourceIo); }
     jetc_sync_all(&stage_file, "seal-stage-fsync").map_err(|_| JetFileCryptoError::DestinationIo)?;
     stage_file.seek(SeekFrom::Start(0)).map_err(|_| JetFileCryptoError::DestinationIo)?;
-    let (stage_hash, stage_len) = hash_stream(&mut stage_file, cancelled, "seal-stage-read")?;
+    let (stage_hash, stage_len) = hash_stream(&mut stage_file, cancelled, "seal-stage-read", length)?;
     let first_hash: [u8; 32] = source_hash.finalize().into();
     if stage_len != length || !bool::from(stage_hash.ct_eq(&first_hash)) { return Err(JetFileCryptoError::SourceIo); }
     let mut second = open_source_nofollow(source)?;
     let second_meta = second.metadata().map_err(|_| JetFileCryptoError::SourceIo)?;
     if !same_source_identity(&source_meta, &second_meta) { return Err(JetFileCryptoError::SourceIo); }
-    let (second_hash, second_len) = hash_stream(&mut second, cancelled, "seal-source-recheck-read")?;
+    let (second_hash, second_len) = hash_stream(
+        &mut second,
+        cancelled,
+        "seal-source-recheck-read",
+        source_meta.len(),
+    )?;
     if second_len != length || !bool::from(second_hash.ct_eq(&first_hash)) { return Err(JetFileCryptoError::SourceIo); }
     stage_file.seek(SeekFrom::Start(0)).map_err(|_| JetFileCryptoError::DestinationIo)?;
     Ok((stage_file, length))
@@ -1449,6 +1481,7 @@ pub fn jet_crypto_expert_migrate_v1_impl(
         }
         envelope.extend_from_slice(&buffer[..read]);
     }
+    if envelope.len() as u64 != total { return Err(JetFileCryptoError::SourceIo); }
     let plaintext = Zeroizing(
         jet_crypto_expert_open_v1_impl(key, &envelope)
             .map_err(|_| JetFileCryptoError::OpenFailed)?,
