@@ -585,6 +585,108 @@ fn expect_continue_is_ordered_bounded_and_rejects_before_dispatch() {
 }
 
 #[test]
+fn host_authority_is_single_valid_and_required_for_http11() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => response.extend_from_slice(&buf[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(error) => panic!("response read: {error}"),
+            }
+        }
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/", move |_| {
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"ok".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 24;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    for valid in [
+        "GET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: example.com:8080\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: 127.0.0.1:80\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: percent%2Dname.example\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: [::1]:443\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.1\r\nHost: [v1.fe80::a]:80\r\nConnection: close\r\n\r\n",
+        "GET / HTTP/1.0\r\nConnection: close\r\n\r\n",
+    ] {
+        let response = exchange(addr, valid.as_bytes());
+        assert!(response.contains("200 OK"), "valid authority rejected: {response}");
+    }
+
+    for invalid_host in [
+        "",
+        "Host:\r\n",
+        "Host: one\r\nHost: two\r\n",
+        "Host: one,two\r\n",
+        "Host: user@local\r\n",
+        "Host: local/path\r\n",
+        "Host: ::1\r\n",
+        "Host: [::1\r\n",
+        "Host: []\r\n",
+        "Host: [127.0.0.1]\r\n",
+        "Host: [v.fe]\r\n",
+        "Host: [v1.]\r\n",
+        "Host: local:abc\r\n",
+        "Host: local:65536\r\n",
+        "Host: bad host\r\n",
+        "Host: bad%ZZ\r\n",
+    ] {
+        let request = format!(
+            "GET / HTTP/1.1\r\n{invalid_host}\r\nGET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        );
+        let response = exchange(addr, request.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "accepted invalid Host {invalid_host:?}: {response}");
+        assert!(!response.contains("200 OK"), "invalid Host dispatched or reused: {response}");
+        assert_eq!(response.matches("HTTP/1.1").count(), 1, "invalid Host reused connection: {response}");
+        assert!(response.ends_with("Connection: close\r\n\r\n"), "{response}");
+    }
+
+    for invalid_host in [
+        "Host: bad host\r\n",
+        "Host: one\r\nHost: two\r\n",
+    ] {
+        let request = format!(
+            "GET / HTTP/1.0\r\n{invalid_host}\r\nGET / HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        );
+        let response = exchange(addr, request.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "HTTP/1.0 accepted invalid Host {invalid_host:?}: {response}");
+        assert!(!response.contains("200 OK"), "invalid HTTP/1.0 Host dispatched or reused: {response}");
+        assert_eq!(response.matches("HTTP/1.1").count(), 1, "invalid HTTP/1.0 Host reused connection: {response}");
+        assert!(response.ends_with("Connection: close\r\n\r\n"), "{response}");
+    }
+
+    assert_eq!(calls.load(Ordering::Acquire), 7, "invalid Host reached handler");
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 25);
+    assert_eq!(report.user_completed, 25);
+}
+
+#[test]
 fn shutdown_closes_idle_keepalive_and_starts_no_new_request() {
     use std::io::Write;
 

@@ -728,6 +728,69 @@ fn jet_http_trim_ows_start(value: &str) -> &str {
     value.trim_start_matches(|character| matches!(character, ' ' | '\t'))
 }
 
+fn jet_http_host_port_valid(port: &str) -> bool {
+    !port.is_empty()
+        && port.bytes().all(|byte| byte.is_ascii_digit())
+        && port.parse::<u16>().is_ok()
+}
+
+fn jet_http_reg_name_valid(host: &str) -> bool {
+    if host.is_empty() {
+        return false;
+    }
+    let bytes = host.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte.is_ascii_alphanumeric()
+            || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b';' | b'=')
+        {
+            index += 1;
+        } else if byte == b'%'
+            && bytes.get(index + 1).is_some_and(u8::is_ascii_hexdigit)
+            && bytes.get(index + 2).is_some_and(u8::is_ascii_hexdigit)
+        {
+            index += 3;
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn jet_http_ipv_future_valid(host: &str) -> bool {
+    let Some((version, address)) = host.get(1..).and_then(|rest| rest.split_once('.')) else {
+        return false;
+    };
+    (host.starts_with('v') || host.starts_with('V'))
+        && !version.is_empty()
+        && version.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && !address.is_empty()
+        && address.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' | b':')
+        })
+}
+
+fn jet_http_host_authority_valid(value: &str) -> bool {
+    let authority = jet_http_trim_ows(value);
+    if let Some(bracketed) = authority.strip_prefix('[') {
+        let Some((host, suffix)) = bracketed.split_once(']') else { return false };
+        if host.parse::<std::net::Ipv6Addr>().is_err() && !jet_http_ipv_future_valid(host) {
+            return false;
+        }
+        return suffix.is_empty()
+            || suffix.strip_prefix(':').is_some_and(jet_http_host_port_valid);
+    }
+    let mut parts = authority.split(':');
+    let host = parts.next().unwrap_or("");
+    let port = parts.next();
+    if parts.next().is_some() || !jet_http_reg_name_valid(host) {
+        return false;
+    }
+    port.is_none_or(jet_http_host_port_valid)
+}
+
 fn jet_http_chunk_token_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric()
         || matches!(
@@ -860,6 +923,7 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
     let mut content_length = None;
     let mut transfer_encoding = None;
     let mut expectation = None;
+    let mut host = None;
     for line in lines {
         count += 1;
         if count > 100 {
@@ -896,7 +960,29 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
                     message: "multiple expect headers are not supported",
                 });
             }
+        } else if name.eq_ignore_ascii_case("host") {
+            if host.replace(value).is_some() {
+                return Err(JetHttpReadError {
+                    status: 400,
+                    message: "multiple host headers are not allowed",
+                });
+            }
         }
+    }
+    match host {
+        Some(value) if !jet_http_host_authority_valid(value) => {
+            return Err(JetHttpReadError {
+                status: 400,
+                message: "host authority is malformed",
+            });
+        }
+        None if version == "HTTP/1.1" => {
+            return Err(JetHttpReadError {
+                status: 400,
+                message: "HTTP/1.1 requires one host header",
+            });
+        }
+        _ => {}
     }
     if transfer_encoding.is_some() && content_length.is_some() {
         return Err(JetHttpReadError { status: 400, message: "content-length and transfer-encoding cannot be combined" });
