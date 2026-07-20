@@ -1851,6 +1851,9 @@ impl LowerCtx<'_, '_> {
             TExprKind::Try { inner, convert, .. } => self.lower_try(inner, convert),
             TExprKind::OptField { .. } => Err("jit optional field chain unsupported".to_string()),
             TExprKind::Lambda(_) => Err("jit lambda unsupported".to_string()),
+            TExprKind::HostBorrowCallback { .. } => {
+                Err("jit borrowed callback adapter unsupported".to_string())
+            }
             TExprKind::PatternMatches { .. } => {
                 Err("jit pattern-matches expression unsupported".to_string())
             }

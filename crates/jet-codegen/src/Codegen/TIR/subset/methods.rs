@@ -1183,6 +1183,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "enumerate" | "zip"
         | "take_while" | "skip_while" | "flat_map" | "scan"
         | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "partition"
+        | "para_map" | "para_filter" | "para_partition" | "para_fold"
         // Numeric predicates / bit ops (D-NUMOPS1).
         | "is_nan" | "is_infinite" | "is_finite"
         | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
@@ -1220,16 +1221,21 @@ pub(crate) fn arg_conv_in_subset(_a: &crate::AST::CallArg) -> bool {
 /// c109 Phase 11: is `method` a closure-taking collection method the TIR lowers,
 /// with in-subset args? Covers `map`/`filter`/`each`/`find`/`any`/`all`/`sort_by`
 /// (1 arg: a lambda) and `reduce` (2 args: a seed value + a lambda). The closure-arg
-/// position MUST be a literal `Expr::Lambda` (the Fn-vs-FnMut emit branch reads its
-/// `needs_fn_mut` meta; a fn-value there defaults to the non-mut form on the AST
-/// side, but covering it needs the deferred fn-value emit). The seed (`reduce`) and
-/// the lambda body must be in-subset. No labels.
+/// position is normally a literal `Expr::Lambda` (the Fn-vs-FnMut emit branch reads
+/// its `needs_fn_mut` meta). D-PARCAPTURE1 also admits top-level function values;
+/// lowering wraps their inputs in the parallel helper's host-borrow convention.
+/// The seed (`reduce`) and every callback body must be in-subset. No labels.
 pub(crate) fn closure_method_in_subset(
     method: &str,
     args: &[crate::AST::CallArg],
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
+    let para_callback = |expr: &Expr| match expr {
+        Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
+        Expr::Ident(name, _) => cx.fn_types.contains_key(name),
+        _ => false,
+    };
     if !crate::Collections::is_closure_method(method) {
         return false;
     }
@@ -1237,14 +1243,22 @@ pub(crate) fn closure_method_in_subset(
         return false;
     }
     match method {
-        "reduce" | "scan" | "fold" | "par_fold" => {
+        "reduce" | "scan" | "fold" => {
             // (seed, lambda). The seed is any in-subset value; the lambda must be a
             // literal in-subset closure.
             args.len() == 2
                 && expr_in_subset(&args[0].expr, cx, locals)
                 && matches!(&args[1].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))
         }
-        // (lambda). map/filter/each/find/any/all/sort_by + D-ITER1 + D-AUTOPAR1 closure adapters.
+        "para_fold" => {
+            args.len() == 3
+                && args.iter().all(|arg| para_callback(&arg.expr))
+        }
+        "para_map" | "para_filter" | "para_partition" => {
+            args.len() == 1 && para_callback(&args[0].expr)
+        }
+        // (lambda). map/filter/each/find/any/all/sort_by + D-ITER1 +
+        // D-PARCAPTURE1 closure adapters.
         _ => {
             args.len() == 1
                 && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals))

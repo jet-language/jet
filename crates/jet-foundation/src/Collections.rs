@@ -75,8 +75,8 @@ pub fn is_closure_method(method: &str) -> bool {
         | "partition"
         // D-FAILCOMP1: failure-aware adapters
         | "filter_map"
-        // D-AUTOPAR1=A: explicit parallel adapters
-        | "par_map" | "par_filter" | "par_fold"
+        // D-PARCAPTURE1=D: explicit parallel adapters, consistently `para_`.
+        | "para_map" | "para_filter" | "para_partition" | "para_fold"
     )
 }
 
@@ -526,11 +526,11 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             key_span: None,
             value: Box::new(Type::Int),
         })),
-        // D-AUTOPAR1=A: parallel adapters. Return types mirror their sequential equivalents;
-        // sema refines V/acc from closure body (ret: None open return).
-        ("par_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // sema refines V
-        ("par_filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
-        ("par_fold", 2) => Some(Some(Type::Int)), // sema refines acc
+        // D-PARCAPTURE1=D: all adapters share the explicit `para_` surface.
+        ("para_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // sema refines V
+        ("para_filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
+        ("para_partition", 1) => Some(Some(partition_ret_ty(inner))),
+        ("para_fold", 3) => Some(Some(Type::Int)), // sema refines from seed factory
         // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor. Parsed
         // specially (the `..` between the two Int ends), so it always arrives
         // here as a 2-arg call; ownership tracking (E2305) happens at the
@@ -1231,22 +1231,32 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 ret: None,
                 effect_bound: None,
             }]),
-            // D-AUTOPAR1=A: parallel adapters — same closure shapes as sequential equivalents.
-            "par_map" => Some(vec![Type::Fn {
+            // D-PARCAPTURE1=D: parallel adapters. `para_fold` separates fresh
+            // worker state, per-item stepping, and deterministic merging.
+            "para_map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None, // sema refines V from closure body
                 effect_bound: None,
             }]),
-            "par_filter" => Some(vec![Type::Fn {
+            "para_filter" | "para_partition" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: Some(Box::new(Type::Bool)),
                 effect_bound: None,
             }]),
-            "par_fold" => Some(vec![
-                Type::Int, // init — sema refines acc type
+            "para_fold" => Some(vec![
+                Type::Fn {
+                    params: vec![],
+                    ret: None, // sema refines accumulator from seed factory
+                    effect_bound: None,
+                },
                 Type::Fn {
                     params: vec![Type::Int, (**inner).clone()],
                     ret: Some(Box::new(Type::Int)), // sema refines
+                    effect_bound: None,
+                },
+                Type::Fn {
+                    params: vec![Type::Int, Type::Int],
+                    ret: Some(Box::new(Type::Int)),
                     effect_bound: None,
                 },
             ]),

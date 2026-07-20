@@ -3,9 +3,43 @@
 use std::fs;
 use std::process::Command;
 
+use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet::REPL::run_transcript;
 
 mod common;
+
+#[test]
+fn parallel_adapters_match_forced_interpreter_and_default_jit_dev() {
+    let source = r#"fn run() {
+    values :: [1, 2, 3, 4]
+    print(values.para_map((n: Int) => n * 2))
+    print(values.para_filter((n: Int) => n % 2 == 0))
+    split :: values.para_partition((n: Int) => n % 2 == 0)
+    print(split.false_)
+    print(split.true_)
+    print(values.para_fold(() => 0, (acc: Int, n: Int) => acc + n, (left: Int, right: Int) => left + right))
+}
+"#;
+    let dir = common::unique_tmp("jet_para_dev_matrix");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, source).unwrap();
+    let expected = "[2, 4, 6, 8]\n[2, 4]\n[1, 3]\n[2, 4]\n10\n";
+    for (tier, use_interpreter) in [("forced-interpreter", true), ("default-jit-dev", false)] {
+        match dev_iteration(path.to_str().unwrap(), false, use_interpreter) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!(exit_code, 0, "{tier} exit");
+                assert_eq!(stderr, "", "{tier} stderr");
+                assert_eq!(stdout, expected, "{tier} stdout");
+            }
+            RunOutcome::Problems(diags) => panic!("{tier} rejected parallel adapters: {diags:#?}"),
+        }
+    }
+}
 
 #[test]
 fn repl_list_and_fixed_list_sequence_methods_are_exact() {
@@ -37,9 +71,10 @@ fn repl_list_and_fixed_list_sequence_methods_are_exact() {
             "[true, false, true].max()",
             "[true, false, true].min_by((b: Bool) => b)",
             "[true, false, true].max_by((b: Bool) => b)",
-            "[1, 2, 3, 4].par_filter((n: Int) => n % 2 == 0)",
-            "[1, 2, 3].par_fold(0, (acc: Int, n: Int) => acc + n)",
-            "[1, 2, 3].par_map((n: Int) => n * 2)",
+            "[1, 2, 3, 4].para_filter((n: Int) => n % 2 == 0)",
+            "[1, 2, 3].para_fold(() => 0, (acc: Int, n: Int) => acc + n, (left: Int, right: Int) => left + right)",
+            "[1, 2, 3].para_map((n: Int) => n * 2)",
+            "[1, 2, 3, 4].para_partition((n: Int) => n % 2 == 0)",
             "[1, 2, 3, 4].partition((n: Int) => n % 2 == 0)",
             "[4, 5, 6].position((n: Int) => n == 5)",
             "[2, 3, 4].product()",
@@ -91,6 +126,7 @@ fn repl_list_and_fixed_list_sequence_methods_are_exact() {
         "[2, 4] : List",
         "6 : Int",
         "[2, 4, 6] : List",
+        "(false_,true_)(false_: [1, 3], true_: [2, 4]) : (false_,true_)",
         "(false_,true_)(false_: [1, 3], true_: [2, 4]) : (false_,true_)",
         "1 : Option",
         "24 : Int",
@@ -215,9 +251,9 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
             "[true, false].scan(true, (a: Bool, b: Bool) => a && b)",
         ),
         (
-            "float-par-fold-seed",
+            "float-para-fold-seed",
             "",
-            "[1.5, 2.5].par_fold(0.5, (a: Float, n: Float) => a + n)",
+            "[1.5, 2.5].para_fold(() => 0.5, (a: Float, n: Float) => a + n, (left: Float, right: Float) => left + right)",
         ),
         (
             "empty-float-sum",

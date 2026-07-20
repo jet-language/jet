@@ -2706,8 +2706,17 @@ the one GC path (I8). Nested stores and later mutations update deterministic
 collector edges, including cycles, while source values remain bare. An external
 collector still needs a separate I6 ballot.
 Approximate/sketch algos
-are libraries (D-APPROX1); parallelism stays explicit `par_*`
-(D-AUTOPAR1); adaptive fidelity is a manual runtime-global knob:
+are libraries (D-APPROX1). **D-PARCAPTURE1=D** *(ratified 2026-07-20,
+card #392)* supersedes D-AUTOPAR1's provisional spelling: the sole explicit
+parallel collection family is the clean-break `para_map`, `para_filter`,
+`para_partition`, and `para_fold`; no `par_*` aliases remain. All four share
+one bounded indexed chunk engine. Map/filter preserve source order; partition
+returns source-ordered `(false_, true_)`; fold takes
+`(seed_factory, step, merge)` and uses stable chunks plus a deterministic merge
+tree. Sema rejects mutable captures and non-shareable/non-transferable worker
+values as E1111; stored/imported callbacks are rejected when their capture facts
+are unavailable, rather than silently serializing or inventing a capture merge.
+Adaptive fidelity is a manual runtime-global knob:
 `core.perf.Perf.fidelity()`, `default_fidelity()`, `override_fidelity(v)?`,
 and `reset_fidelity()` (D-FIDELITY-API1=A). No automatic adaptive scheduler or
 platform-signal providers ship in Epoch 3 (D-ADAPTRT1=C,

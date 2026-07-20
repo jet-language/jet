@@ -3,6 +3,24 @@
 use std::fs;
 
 #[test]
+fn fmt_parallel_collection_adapters_are_stable() {
+    let src = r#"fn run() {
+    values := [1, 2, 3, 4]
+    doubled :: values.para_map((n: Int) => n * 2)
+    even :: values.para_filter((n: Int) => n % 2 == 0)
+    split :: values.para_partition((n: Int) => n % 2 == 0)
+    total :: values.para_fold(() => 0, (acc: Int, n: Int) => acc + n, (left: Int, right: Int) => left + right)
+}
+"#;
+    let once = jet::format_source(src).expect("parallel collection adapters should format");
+    for spelling in ["para_map", "para_filter", "para_partition", "para_fold"] {
+        assert!(once.contains(spelling), "formatter dropped `{spelling}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("formatted parallel adapters should parse");
+    assert_eq!(once, twice, "parallel adapter formatting must be stable");
+}
+
+#[test]
 fn repr_c_enum_surface_is_stable() {
     let src = "@Layout(c, tag: U8)\nenum Packet { Ping(Int) = 3; Data(x: I32, y: I32) = 7 }\n";
     let once = jet::format_source(src).expect("C-layout enum should format");

@@ -31,6 +31,54 @@ fn run() {
 }
 
 #[test]
+fn parallel_adapters_reject_unsafe_boundaries_before_codegen() {
+    let mutable_capture = r#"
+fn run() {
+    seen: [Int] := []
+    ignored :: [1, 2, 3].para_map((n: Int) => { seen.push(n) })
+}
+"#;
+    let diags = jet::compile(mutable_capture).expect_err("mutable parallel capture must fail");
+    assert_eq!(
+        diags.iter().filter(|diag| diag.code == "E1111").count(),
+        1,
+        "{diags:#?}"
+    );
+
+    let borrowed_capture = r#"
+fn run() {
+    values := [1, 2, 3]
+    window :: values[0..1]
+    ignored :: [1, 2, 3].para_filter((n: Int) => window.contains(n))
+}
+"#;
+    let diags = jet::compile(borrowed_capture).expect_err("borrowed parallel capture must fail");
+    assert!(diags.iter().any(|diag| diag.code == "E1111"), "{diags:#?}");
+
+    let hidden_capture = r#"
+fn run() {
+    offset :: 1
+    callback :: (n: Int) => n + offset
+    ignored :: [1, 2, 3].para_map(callback)
+}
+"#;
+    let diags = jet::compile(hidden_capture).expect_err("stored parallel callback must fail");
+    assert!(diags.iter().any(|diag| diag.code == "E1111"), "{diags:#?}");
+}
+
+#[test]
+fn legacy_parallel_adapter_spellings_are_removed() {
+    for method in ["par_map", "par_filter", "par_partition", "par_fold"] {
+        let source = format!("fn run() {{ ignored :: [1, 2, 3].{method}((n: Int) => n) }}\n");
+        let diags = jet::compile(&source).expect_err("legacy parallel spelling must fail");
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0311"),
+            "{method} unexpectedly remained available: {diags:#?}"
+        );
+    }
+}
+
+#[test]
 fn bare_lambda_to_fn_typed_param_emits_param_type() {
     // c142: a bare lambda (no param annotation) passed to a user fn-typed param
     // used to ICE — codegen emitted `move |user_x| …` with no Rust type, so

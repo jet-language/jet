@@ -1266,6 +1266,28 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("{{ {} {} }}", lam.prep, wrapped)
             }
         }
+        TExprKind::HostBorrowCallback { callable, params } => {
+            let callable = emit_tir_expr(callable, cx);
+            let declarations = params
+                .iter()
+                .enumerate()
+                .map(|(index, ty)| format!("__jet_para_{index}: &{}", cx.rust_type(ty)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let arguments = params
+                .iter()
+                .enumerate()
+                .map(|(index, ty)| {
+                    if ty.is_scalar() {
+                        format!("*__jet_para_{index}")
+                    } else {
+                        format!("__jet_para_{index}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("move |{declarations}| ({callable})({arguments})")
+        }
         // c109 Phase 11: fan-out `f.[a, b, c]` → `vec![f(a), f(b), f(c)]`. The
         // per-item calls were lowered at lowering; emit only wraps them in `vec![…]`,
         // D-FIXARR1: fan-out `f.[a, b, c]` produces `[T#N]` — a Rust array literal `[…]`.
@@ -1294,7 +1316,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // reproducing `emit_builtin_method`'s closure arms byte-for-byte. Args (the
         // lambda + any seed) are emitted PLAINLY (raw `arg(i)`).
         TExprKind::ClosureMethod { recv, op, args } => {
+            let recv_is_fixed = matches!(recv.ty, Type::FixedList { .. });
             let recv = emit_tir_expr(recv, cx);
+            let para_recv = if recv_is_fixed {
+                format!("({recv}).to_vec()")
+            } else {
+                format!("({recv}).clone()")
+            };
             let a = |i: usize| {
                 args.get(i)
                     .map(|e| emit_tir_expr(e, cx))
@@ -1332,13 +1360,28 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::FilterMap => {
                     format!("jet_list_filter_map(({}).clone(), {})", recv, a(0))
                 }
-                // D-AUTOPAR1=A: parallel adapters.
-                TClosureOp::ParMap => format!("jet_list_par_map(({}).clone(), {})", recv, a(0)),
-                TClosureOp::ParFilter => {
-                    format!("jet_list_par_filter(({}).clone(), {})", recv, a(0))
+                // D-PARCAPTURE1=D: all adapters share the bounded `para_` engine.
+                TClosureOp::ParaMap => format!("jet_list_para_map({}, {})", para_recv, a(0)),
+                TClosureOp::ParaFilter => {
+                    format!("jet_list_para_filter({}, {})", para_recv, a(0))
                 }
-                TClosureOp::ParFold => {
-                    format!("jet_list_par_fold(({}).clone(), {}, {})", recv, a(0), a(1))
+                TClosureOp::ParaPartition { tuple_struct } => {
+                    format!(
+                        "jet_list_para_partition({}, {}, |__f, __t| \
+                         {} {{ user_false_: __f, user_true_: __t }})",
+                        para_recv,
+                        a(0),
+                        tuple_struct
+                    )
+                }
+                TClosureOp::ParaFold => {
+                    format!(
+                        "jet_list_para_fold({}, {}, {}, {})",
+                        para_recv,
+                        a(0),
+                        a(1),
+                        a(2)
+                    )
                 }
                 TClosureOp::Scan => {
                     format!("jet_list_scan(({}).clone(), {}, {})", recv, a(0), a(1))

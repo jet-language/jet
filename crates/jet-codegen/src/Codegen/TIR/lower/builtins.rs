@@ -446,9 +446,23 @@ pub(crate) fn resolve_closure_op(
         "skip_while" => TClosureOp::SkipWhile,
         "flat_map" => TClosureOp::FlatMap,
         "filter_map" => TClosureOp::FilterMap,
-        "par_map" => TClosureOp::ParMap,
-        "par_filter" => TClosureOp::ParFilter,
-        "par_fold" => TClosureOp::ParFold,
+        "para_map" => TClosureOp::ParaMap,
+        "para_filter" => TClosureOp::ParaFilter,
+        "para_fold" => TClosureOp::ParaFold,
+        "para_partition" => {
+            let elem_ty = match recv_ty {
+                Type::List(inner) | Type::FixedList { elem: inner, .. } => (**inner).clone(),
+                _ => Type::Int,
+            };
+            let list_ty = Type::List(Box::new(elem_ty));
+            let fields = vec![
+                ("false_".to_string(), list_ty.clone()),
+                ("true_".to_string(), list_ty),
+            ];
+            TClosureOp::ParaPartition {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
+        }
         "scan" => TClosureOp::Scan,
         "fold" => {
             // D-DYNARRAY1: a View's `recv` is already `&[T]` — fold it directly,

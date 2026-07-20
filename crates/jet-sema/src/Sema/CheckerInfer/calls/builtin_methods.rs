@@ -1,12 +1,82 @@
 use crate::AST::{Expr, Type};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Captures::lambda_collect_captures;
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::wrong_core_arity;
 use crate::Sema::Diagnostics::{collection_changed_in_loop, expr_root_ident, type_fix_hint};
 use crate::Syntax;
+use std::collections::HashSet;
 impl<'a> Checker<'a> {
+        fn reject_para_type(&mut self, role: &str, ty: &Type, span: Span) {
+            if self.sendability_problem(ty, true).is_some()
+                || super::super::is_reactive_handle_ty(ty)
+            {
+                self.diags.push(Diagnostic::error(
+                    "E1111",
+                    format!("parallel {role} cannot use `{}` across workers", ty.name()),
+                    "parallel collection workers may only share or transfer thread-safe owned values".to_string(),
+                    "copy the data into a plain owned value, or keep this operation sequential".to_string(),
+                    Some(span),
+                ));
+            }
+        }
+
+        fn check_para_lambda(&mut self, expr: &Expr) {
+            let Expr::Lambda(lam) = expr else {
+                if matches!(expr, Expr::Ident(name, _) if self.funcs.contains_key(name)) {
+                    return;
+                }
+                self.diags.push(Diagnostic::error(
+                    "E1111",
+                    "parallel callback does not expose worker-sharing facts".to_string(),
+                    "stored or imported callbacks may hide captures that are not safe to share between workers".to_string(),
+                    "pass a top-level function or write the callback directly as a lambda".to_string(),
+                    Some(expr.span()),
+                ));
+                return;
+            };
+            for name in &lam.meta.mut_captures {
+                self.diags.push(Diagnostic::error(
+                    "E1111",
+                    format!("parallel callback cannot change captured `{name}`"),
+                    "parallel workers need private accumulator state; changing caller-owned state would race or require a hidden merge rule".to_string(),
+                    "return the extra data, use `.para_partition(...)`, or use `.para_fold(seed, step, merge)`".to_string(),
+                    Some(lam.span),
+                ));
+            }
+
+            let params = lam.params.iter().map(|param| param.name.clone()).collect::<HashSet<_>>();
+            let mut read = HashSet::new();
+            let mut changed = HashSet::new();
+            lambda_collect_captures(&lam.body, &params, &mut read, &mut changed);
+            for name in read {
+                if changed.contains(&name)
+                    || self.imports.contains_key(&name)
+                    || self.core_imports.contains_key(&name)
+                    || self.consts.contains_key(&name)
+                {
+                    continue;
+                }
+                let Some(info) = self.lookup(&name) else { continue };
+                let ty = info.ty.clone();
+                if !info.sendable
+                    || self.is_view(&name)
+                    || self.sendability_problem(&ty, true).is_some()
+                    || super::super::is_reactive_handle_ty(&ty)
+                {
+                    self.diags.push(Diagnostic::error(
+                        "E1111",
+                        format!("parallel callback cannot share captured `{name}`"),
+                        "this capture is not safe to read from several worker threads".to_string(),
+                        "copy plain owned data into the callback, or keep this operation sequential".to_string(),
+                        Some(lam.span),
+                    ));
+                }
+            }
+        }
+
         pub(crate) fn finish_builtin_method(
             &mut self,
             receiver: &Expr,
@@ -182,7 +252,7 @@ impl<'a> Checker<'a> {
             if let Some(mut expected) = Collections::builtin_method_arg_types(recv_ty, method) {
                 let inferred_seed = if matches!(
                     method,
-                    "reduce" | "fold" | "scan" | "par_fold"
+                    "reduce" | "fold" | "scan"
                 ) {
                     let saved_exp = self.expected_type.take();
                     let seed = args.first_mut().and_then(|arg| self.infer(&mut arg.expr));
@@ -223,6 +293,24 @@ impl<'a> Checker<'a> {
                     };
                     self.expected_type = saved_exp;
                     self.lambda_escapes = saved_esc;
+                    if Syntax::PARA_METHODS.contains(&method) {
+                        self.check_para_lambda(&arg.expr);
+                    }
+                    if method == "para_fold" && i == 0 {
+                        if let Some(Type::Fn { ret: Some(acc), .. }) = &got {
+                            let acc = (**acc).clone();
+                            if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(1) {
+                                params[0] = acc.clone();
+                                *ret = Some(Box::new(acc.clone()));
+                            }
+                            if let Some(Type::Fn { params, ret, .. }) = expected.get_mut(2) {
+                                params[0] = acc.clone();
+                                params[1] = acc.clone();
+                                *ret = Some(Box::new(acc.clone()));
+                            }
+                            refined_ret = Some(acc);
+                        }
+                    }
                     if method == "zip" && i == 0 {
                         let recv_elem = match recv_ty {
                             Type::List(inner) | Type::FixedList { elem: inner, .. } => {
@@ -291,22 +379,13 @@ impl<'a> Checker<'a> {
                                 }
                             }
                         }
-                        // D-AUTOPAR1=A: par_map → [V]; refine V from closure's return type.
-                        if Collections::is_closure_method(method) && i == 0 && method == "par_map" {
+                        // D-PARCAPTURE1=D: para_map → [V].
+                        if Collections::is_closure_method(method) && i == 0 && method == "para_map" {
                             if let Type::Fn {
                                 ret: Some(ref r), ..
                             } = gt
                             {
                                 refined_ret = Some(Type::List(Box::new((**r).clone())));
-                            }
-                        }
-                        // D-AUTOPAR1=A: par_fold → acc; refine from closure's return type.
-                        if Collections::is_closure_method(method) && i == 1 && method == "par_fold" {
-                            if let Type::Fn {
-                                ret: Some(ref r), ..
-                            } = gt
-                            {
-                                refined_ret = Some((**r).clone());
                             }
                         }
                         if method == "reduce" && i == 1 {
@@ -360,6 +439,20 @@ impl<'a> Checker<'a> {
                                 Some(arg.expr.span()),
                             ));
                         }
+                    }
+                }
+                if Syntax::PARA_METHODS.contains(&method) {
+                    let item = match recv_ty {
+                        Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                            Some((**inner).clone())
+                        }
+                        _ => None,
+                    };
+                    if let Some(item) = item {
+                        self.reject_para_type("item", &item, span);
+                    }
+                    if let Some(result) = refined_ret.clone() {
+                        self.reject_para_type("result", &result, span);
                     }
                 }
             } else {

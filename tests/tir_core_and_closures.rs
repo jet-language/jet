@@ -5,7 +5,7 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{build_and_run, have_rustc};
+use tir_support::{build_and_run, build_and_run_multi, have_rustc};
 
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
@@ -131,7 +131,7 @@ fn use_float(value: Float) -> Float {
 fn run() {
     print(use_float([1, 2].fold(0.5, (a: Float, n: Int) => a + 0.5)))
     print(use_float([1, 2].reduce(0.5, (a: Float, n: Int) => a + 0.5)))
-    print(use_float([1, 2].par_fold(0.5, (a: Float, n: Int) => a + 0.5)))
+    print(use_float([1, 2].para_fold(() => 0.5, (a: Float, n: Int) => a + 0.5, (left: Float, right: Float) => left + right)))
     print(use_float([1, 2].scan(0.5, (a: Float, n: Int) => a + 0.5).sum()))
     print(use_float([1, 2].map((n: Int) => 1.5).sum()))
     print(use_float([\"1.5\", \"bad\", \"2.5\"].filter_map((s: String) => Float.parse(s)).sum()))
@@ -148,6 +148,77 @@ fn run() {
         stdout,
         "1.75\n1.75\n1.75\n2.75\n3.25\n4.25\n3.25\ntrue\ntrue\n[1, 2, 3]\n3\n"
     );
+}
+
+#[test]
+fn parallel_collection_adapters_use_stable_bounded_chunks() {
+    if !have_rustc() {
+        return;
+    }
+    let values = (0..130).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    let src = format!(
+        "fn double(n: Int) -> Int {{ return n * 2 }}\n\
+         fn one() -> Int {{ return 1 }}\n\
+         fn add_item(acc: Int, n: Int) -> Int {{ return acc + n }}\n\
+         fn merge_decimal(left: Int, right: Int) -> Int {{ return left * 10000 + right }}\n\
+         fn run() {{\n\
+             values: [Int] :: [{values}]\n\
+             offset :: 1\n\
+             mapped :: values.para_map((n: Int) => n * 2 + offset)\n\
+             named :: values.para_map(double)\n\
+             kept :: values.para_filter((n: Int) => n % 32 == 0)\n\
+             split :: values.para_partition((n: Int) => n % 32 == 0)\n\
+             fixed: [Int#4] :: [1, 2, 3, 4]\n\
+             fixed_split :: fixed.para_partition((n: Int) => n % 2 == 0)\n\
+             empty: [Int] :: []\n\
+             folded :: values.para_fold(\n\
+                 () => 1,\n\
+                 (acc: Int, n: Int) => acc + n,\n\
+                 (left: Int, right: Int) => left * 10000 + right\n\
+             )\n\
+             named_fold :: values.para_fold(one, add_item, merge_decimal)\n\
+             print(\"{{mapped.len()}}|{{mapped.first()}}|{{mapped.last()}}\")\n\
+             print(named.last())\n\
+             print(kept)\n\
+             print(split.true_)\n\
+             print(\"{{split.false_.len()}}|{{split.false_.first()}}|{{split.false_.last()}}\")\n\
+             print(fixed.para_map((n: Int) => n + 1))\n\
+             print(fixed_split.false_)\n\
+             print(fixed_split.true_)\n\
+             print(empty.para_fold(() => 7, (acc: Int, n: Int) => acc + n, (left: Int, right: Int) => left + right))\n\
+             print(folded)\n\
+             print(named_fold)\n\
+         }}\n"
+    );
+    let (code, stdout) = build_and_run("tir_parallel_collection_chunks", &src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "130|1|259\n258\n[0, 32, 64, 96, 128]\n[0, 32, 64, 96, 128]\n125|1|129\n[2, 3, 4, 5]\n[1, 3]\n[2, 4]\n7\n201761130258\n201761130258\n"
+    );
+}
+
+#[test]
+fn parallel_collection_adapters_work_in_imported_modules() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run_multi(
+        "tir_parallel_collection_module",
+        "main.jet",
+        &[
+            (
+                "main.jet",
+                "use worker\nfn run() { print(worker.double_all([1, 2, 3])) }\n",
+            ),
+            (
+                "worker.jet",
+                "pub fn double_all(values: [Int]) -> [Int] {\n    return values.para_map((n: Int) => n * 2)\n}\n",
+            ),
+        ],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "[2, 4, 6]\n");
 }
 
 #[test]

@@ -1948,15 +1948,19 @@ pub(crate) fn lower_method_call(
         // `tir_recv_jet_ty` intentionally returns `None` for literals, while the
         // lowered receiver still carries their resolved type. Use that total type
         // for the helper's borrowed callback convention as well.
+        let callback_recv_ty = match &recv_ty {
+            Type::FixedList { elem, .. } => Type::List(elem.clone()),
+            _ => recv_ty.clone(),
+        };
         let mut callback_params =
-            crate::Collections::builtin_method_arg_types(&recv_ty, method)
+            crate::Collections::builtin_method_arg_types(&callback_recv_ty, method)
             .and_then(|types| {
                 types.into_iter().find_map(|ty| match ty {
                     Type::Fn { params, .. } => Some(params),
                     _ => None,
                 })
             });
-        if matches!(method, "reduce" | "fold" | "scan" | "par_fold") {
+        if matches!(method, "reduce" | "fold" | "scan") {
             if let Some(seed_ty) = args.first().map(|arg| lower_expr(&arg.expr, cx, env).ty) {
                 if let Some(first) = callback_params
                     .as_mut()
@@ -1966,10 +1970,25 @@ pub(crate) fn lower_method_call(
                 }
             }
         }
+        let para_fold_params = if method == "para_fold" {
+            let acc = resolved_ret.cloned().unwrap_or(Type::Int);
+            let item = match &recv_ty {
+                Type::List(inner) | Type::FixedList { elem: inner, .. } => (**inner).clone(),
+                _ => Type::Int,
+            };
+            Some(vec![vec![], vec![acc.clone(), item], vec![acc.clone(), acc]])
+        } else {
+            None
+        };
         let targs = args
             .iter()
-            .map(|a| {
-                if let (Expr::Lambda(lam), Some(params)) = (&a.expr, callback_params.as_ref()) {
+            .enumerate()
+            .map(|(index, a)| {
+                let params = para_fold_params
+                    .as_ref()
+                    .and_then(|all| all.get(index))
+                    .or(callback_params.as_ref());
+                if let (Expr::Lambda(lam), Some(params)) = (&a.expr, params) {
                     let tl = lower_lambda_expecting_host_borrow(lam, cx, env, params, false);
                     return TExpr {
                         ty: Type::Fn {
@@ -1979,6 +1998,18 @@ pub(crate) fn lower_method_call(
                         },
                         kind: TExprKind::Lambda(Box::new(tl)),
                     };
+                }
+                if method.starts_with("para_") {
+                    if let Some(params) = params {
+                        let callable = lower_expr(&a.expr, cx, env);
+                        return TExpr {
+                            ty: callable.ty.clone(),
+                            kind: TExprKind::HostBorrowCallback {
+                                callable: Box::new(callable),
+                                params: params.clone(),
+                            },
+                        };
+                    }
                 }
                 lower_expr(&a.expr, cx, env)
             })

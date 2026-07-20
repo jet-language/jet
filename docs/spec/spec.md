@@ -1946,6 +1946,27 @@ emitted in Jet terms and execution exits with the runtime error code.
 Teaching errors: **E0040** points `async`/`await` users at `tasks.spawn`;
 **E0041** points `Mutex`/`lock` users at channels.
 
+### Parallel collection adapters (D-PARCAPTURE1=D)
+
+Lists expose one explicit parallel family: `para_map`, `para_filter`,
+`para_partition`, and `para_fold`. The old provisional `par_*` spellings are
+removed rather than aliased. Map and filter preserve source order. Partition
+returns `(false_: [T], true_: [T])`, preserving source order within each side.
+
+All four operations use one bounded indexed chunk engine. Chunk boundaries are
+stable, worker count never exceeds available host parallelism, and scheduling
+does not change result order. `para_fold(seed_factory, step, merge)` creates a
+fresh accumulator for each chunk, steps through each chunk in source order, and
+combines partial results with a deterministic adjacent-pair tree. An empty input
+calls the seed factory once.
+
+Sema rejects ordinary mutable captures, stored/imported callbacks whose capture
+facts are hidden, and values that cannot be safely shared or transferred between
+workers as **E1111**. Inline lambdas and top-level functions expose the required
+facts. There is no hidden serialization or implicit capture merge; callers
+return data, use `para_partition` or `para_fold`, or choose explicit synchronized
+state.
+
 ### Taskgroups and structured combinators (D-TASKSCOPE1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-06-30)
 
 Structured concurrency uses a scoped `taskgroup` (D-TASKSCOPE1=A). Inside

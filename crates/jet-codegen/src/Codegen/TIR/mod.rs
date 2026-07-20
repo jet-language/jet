@@ -1796,6 +1796,12 @@ pub enum TExprKind {
         op: TClosureOp,
         args: Vec<TExpr>,
     },
+    /// Adapt a named Jet callback to a parallel helper's borrowed host inputs.
+    /// Scalar reads dereference the host borrow; owned/non-scalar reads keep it.
+    HostBorrowCallback {
+        callable: Box<TExpr>,
+        params: Vec<Type>,
+    },
     /// c109 Phase 12: a numeric predicate / bit-population query
     /// (D-NUMOPS1: `is_nan`/`count_ones`/…) on a numeric receiver. These
     /// carry `recv_type == Some(<numeric name>)` (sema sets it for numeric receivers
@@ -2069,13 +2075,11 @@ pub enum TClosureOp {
     // D-FAILCOMP1: failure-aware adapters.
     /// `filter_map(f)` — `jet_list_filter_map((recv).clone(), f)`.
     FilterMap,
-    // D-AUTOPAR1=A: explicit parallel adapters.
-    /// `par_map(f)` — `jet_list_par_map((recv).clone(), f)`.
-    ParMap,
-    /// `par_filter(f)` — `jet_list_par_filter((recv).clone(), f)`.
-    ParFilter,
-    /// `par_fold(init, f)` — `jet_list_par_fold((recv).clone(), init, f)`.
-    ParFold,
+    // D-PARCAPTURE1=D: explicit `para_` adapters.
+    ParaMap,
+    ParaFilter,
+    ParaPartition { tuple_struct: String },
+    ParaFold,
     // D-HOLE1: Option combinators.
     /// `map` on `T?` — `(recv).as_ref().map(f)` (Rust's native `Option::map`, no
     /// prelude helper needed; `.as_ref()` supplies plain callback read access).

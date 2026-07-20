@@ -54,6 +54,20 @@
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 
+// D-PARCAPTURE1=D (ratified 2026-07-20): every explicit parallel collection
+// adapter uses the owner-selected `para_` prefix. These are a clean break from
+// D-AUTOPAR1's provisional `par_` spellings; there are no aliases.
+pub const METHOD_PARA_MAP: &str = "para_map";
+pub const METHOD_PARA_FILTER: &str = "para_filter";
+pub const METHOD_PARA_PARTITION: &str = "para_partition";
+pub const METHOD_PARA_FOLD: &str = "para_fold";
+pub const PARA_METHODS: &[&str] = &[
+    METHOD_PARA_MAP,
+    METHOD_PARA_FILTER,
+    METHOD_PARA_PARTITION,
+    METHOD_PARA_FOLD,
+];
+
 /// Validate a source-literal HTTP route before code generation. Runtime route
 /// parsing repeats this check for computed Strings.
 pub fn validate_http_route_pattern(pattern: &str) -> Result<(), String> {

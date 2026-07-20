@@ -2792,8 +2792,8 @@ impl<'a> Checker<'a> {
                             | "fold"
                             | "group_by"
                             | "count_by"
-                            | "par_map"
-                            | "par_fold"
+                            | "para_map"
+                            | "para_fold"
                     );
                     if refinement_capable
                         || result != declared_ret

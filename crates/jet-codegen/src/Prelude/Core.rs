@@ -1189,44 +1189,132 @@ fn jet_time_format_pattern(
     out
 }
 
-// D-AUTOPAR1=A: explicit parallel list adapters using std::thread::scope (I6-safe).
-fn jet_list_par_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
+// D-PARCAPTURE1=D: one bounded indexed engine for every explicit parallel
+// collection adapter. Chunk boundaries are fixed so scheduling cannot affect
+// result order or `para_fold`'s merge tree; the number of worker threads is
+// bounded by the host's available parallelism.
+const JET_PARA_CHUNK_ITEMS: usize = 64;
+
+fn jet_list_para_chunks<R, F>(len: usize, f: F) -> Vec<R>
+where
+    R: Send,
+    F: Fn(std::ops::Range<usize>) -> R + Sync,
+{
+    let chunk_count = len.div_ceil(JET_PARA_CHUNK_ITEMS);
+    if chunk_count == 0 {
+        return Vec::new();
+    }
+    let worker_count = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(chunk_count);
+    let mut indexed = std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(worker_count);
+        let f = &f;
+        for worker in 0..worker_count {
+            handles.push(scope.spawn(move || {
+                let mut out = Vec::new();
+                for chunk in (worker..chunk_count).step_by(worker_count) {
+                    let start = chunk * JET_PARA_CHUNK_ITEMS;
+                    let end = (start + JET_PARA_CHUNK_ITEMS).min(len);
+                    out.push((chunk, f(start..end)));
+                }
+                out
+            }));
+        }
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("parallel collection worker panicked"))
+            .collect::<Vec<_>>()
+    });
+    indexed.sort_unstable_by_key(|(chunk, _)| *chunk);
+    indexed.into_iter().map(|(_, result)| result).collect()
+}
+
+fn jet_list_para_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
 where
     T: Sync,
     U: Send,
     F: Fn(&T) -> U + Sync,
 {
-    std::thread::scope(|s| {
-        let handles: Vec<_> = xs.iter().map(|x| s.spawn(|| f(x))).collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    jet_list_para_chunks(xs.len(), |range| {
+        range.map(|index| f(&xs[index])).collect::<Vec<_>>()
     })
+    .into_iter()
+    .flatten()
+    .collect()
 }
-fn jet_list_par_filter<T, F>(xs: Vec<T>, f: F) -> Vec<T>
+
+fn jet_list_para_flags<T, F>(xs: &[T], f: F) -> Vec<bool>
 where
     T: Sync,
     F: Fn(&T) -> bool + Sync,
 {
-    let keep = std::thread::scope(|s| {
-        xs.iter()
-            .map(|x| s.spawn(|| f(x)))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect::<Vec<_>>()
-    });
+    jet_list_para_chunks(xs.len(), |range| {
+        range.map(|index| f(&xs[index])).collect::<Vec<_>>()
+    })
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn jet_list_para_filter<T, F>(xs: Vec<T>, f: F) -> Vec<T>
+where
+    T: Sync,
+    F: Fn(&T) -> bool + Sync,
+{
+    let keep = jet_list_para_flags(&xs, f);
     xs.into_iter()
         .zip(keep)
         .filter_map(|(x, keep)| keep.then_some(x))
         .collect()
 }
-// par_fold(init, f) — sequential execution; parallelism requires an associative combiner
-// the caller cannot provide separately. Semantically correct; future parallel version
-// would accept a combine: Fn(U, U) -> U argument.
-fn jet_list_par_fold<T, U, F>(xs: Vec<T>, init: U, f: F) -> U
+
+fn jet_list_para_partition<T, F, R, O>(xs: Vec<T>, f: F, out: O) -> R
 where
-    F: Fn(&U, &T) -> U,
+    T: Sync,
+    F: Fn(&T) -> bool + Sync,
+    O: FnOnce(Vec<T>, Vec<T>) -> R,
 {
-    xs.iter().fold(init, |acc, x| f(&acc, x))
+    let matches = jet_list_para_flags(&xs, f);
+    let mut false_items = Vec::new();
+    let mut true_items = Vec::new();
+    for (item, matched) in xs.into_iter().zip(matches) {
+        if matched {
+            true_items.push(item);
+        } else {
+            false_items.push(item);
+        }
+    }
+    out(false_items, true_items)
+}
+
+fn jet_list_para_fold<T, U, S, F, M>(xs: Vec<T>, seed: S, step: F, merge: M) -> U
+where
+    T: Sync,
+    U: Send,
+    S: Fn() -> U + Sync,
+    F: Fn(&U, &T) -> U + Sync,
+    M: Fn(&U, &U) -> U + Sync,
+{
+    let mut partials = jet_list_para_chunks(xs.len(), |range| {
+        range.fold(seed(), |acc, index| step(&acc, &xs[index]))
+    });
+    if partials.is_empty() {
+        return seed();
+    }
+    while partials.len() > 1 {
+        let mut next = Vec::with_capacity(partials.len().div_ceil(2));
+        let mut iter = partials.into_iter();
+        while let Some(left) = iter.next() {
+            match iter.next() {
+                Some(right) => next.push(merge(&left, &right)),
+                None => next.push(left),
+            }
+        }
+        partials = next;
+    }
+    partials.pop().expect("parallel fold produced no result")
 }
 
 // D-FIDELITY-API1=A: runtime-global fidelity signal. App code decides policy.

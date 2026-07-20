@@ -1,0 +1,7 @@
+Error [E1111]: parallel callback cannot change captured `seen`
+  --> tests/ui/parallel_mutable_capture.jet:4:21
+    |
+  4 |     values.para_map((n: Int) => {
+    |                     ^^^^^^^^^^^^^
+ Why: parallel workers need private accumulator state; changing caller-owned state would race or require a hidden merge rule
+ Fix: return the extra data, use `.para_partition(...)`, or use `.para_fold(seed, step, merge)`

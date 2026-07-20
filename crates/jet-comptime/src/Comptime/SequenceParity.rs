@@ -49,9 +49,10 @@ pub(super) fn eval_sequence_method(
             | "max_by"
             | "min"
             | "min_by"
-            | "par_filter"
-            | "par_fold"
-            | "par_map"
+            | "para_filter"
+            | "para_fold"
+            | "para_map"
+            | "para_partition"
             | "partition"
             | "position"
             | "product"
@@ -200,12 +201,33 @@ fn eval(
             }
             acc
         }
-        ("par_fold", [initial, f]) => {
-            let mut acc = initial.clone();
-            for x in xs {
-                acc = interp.call_closure(f, vec![acc, x.clone()], span)?;
+        ("para_fold", [seed, step, merge]) => {
+            const CHUNK_ITEMS: usize = 64;
+            if xs.is_empty() {
+                interp.call_closure(seed, vec![], span)?
+            } else {
+                let mut partials = Vec::new();
+                for chunk in xs.chunks(CHUNK_ITEMS) {
+                    let mut acc = interp.call_closure(seed, vec![], span)?;
+                    for x in chunk {
+                        acc = interp.call_closure(step, vec![acc, x.clone()], span)?;
+                    }
+                    partials.push(acc);
+                }
+                while partials.len() > 1 {
+                    let mut next = Vec::with_capacity((partials.len() + 1) / 2);
+                    let mut values = partials.into_iter();
+                    while let Some(left) = values.next() {
+                        if let Some(right) = values.next() {
+                            next.push(interp.call_closure(merge, vec![left, right], span)?);
+                        } else {
+                            next.push(left);
+                        }
+                    }
+                    partials = next;
+                }
+                partials.pop().expect("non-empty input makes one partial")
             }
-            acc
         }
         ("group_by", [f]) => {
             let mut out = BTreeMap::new();
@@ -242,7 +264,7 @@ fn eval(
         ("max", []) => option(extreme(xs, true, span)?, xs),
         ("min_by", [f]) => option(extreme_by(interp, xs, f, false, span, scope)?, xs),
         ("max_by", [f]) => option(extreme_by(interp, xs, f, true, span, scope)?, xs),
-        ("par_filter", [f]) => {
+        ("para_filter", [f]) => {
             let mut out = Vec::new();
             for x in xs {
                 if as_bool(&interp.call_closure(f, vec![x.clone()], span)?, span)? {
@@ -251,14 +273,14 @@ fn eval(
             }
             CtValue::List(out)
         }
-        ("par_map", [f]) => {
+        ("para_map", [f]) => {
             let mut out = Vec::with_capacity(xs.len());
             for x in xs {
                 out.push(interp.call_closure(f, vec![x.clone()], span)?);
             }
             CtValue::List(out)
         }
-        ("partition", [f]) => {
+        ("partition" | "para_partition", [f]) => {
             let mut no = Vec::new();
             let mut yes = Vec::new();
             for x in xs {

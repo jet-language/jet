@@ -120,7 +120,7 @@ fn run() {
     flattened := [1, 2].flat_map((n: Int) => [1.5])
     grouped := [1, 2].group_by((n: Int) => n % 2 == 0)
     counted := [1, 2].count_by((n: Int) => n % 2)
-    parallel := [1, 2].par_fold(0.5, (a: Float, n: Int) => a + 0.5)
+    parallel := [1, 2].para_fold(() => 0.5, (a: Float, n: Int) => a + 0.5, (left: Float, right: Float) => left + right)
     grouped_string_get := [1, 2].group_by((n: Int) => \"x\").get(\"x\")
     counted_string_get := [1, 2].count_by((n: Int) => \"x\").get(\"x\")
 }
