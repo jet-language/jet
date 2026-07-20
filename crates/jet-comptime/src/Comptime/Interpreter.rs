@@ -1238,6 +1238,7 @@ impl<'a> Interp<'a> {
                 method_span,
                 type_args,
                 args,
+                recv_type,
                 resolved_ret,
                 ..
             } => self.eval_method(
@@ -1245,6 +1246,7 @@ impl<'a> Interp<'a> {
                 method,
                 *method_span,
                 type_args,
+                recv_type.as_deref(),
                 resolved_ret.as_ref(),
                 args,
                 scope,

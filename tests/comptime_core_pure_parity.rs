@@ -35,6 +35,22 @@ const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
 }"#;
 const SCALAR_EXPR: &str = "scalar_view()";
 const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|-12|-1234|-123456|255|1234|123456|123456789";
+const INTEGER_BIT_QUERIES_DECLS: &str = r#"fn bit_byte(value: Int) -> U8 {
+    return U8.from_int(value) ?? 0
+}
+fn integer_bit_queries_view() -> String {
+    int: Int :: -1
+    i8: I8 :: -2
+    i16: I16 :: -32768
+    i32: I32 :: 0
+    u8: U8 :: 13
+    u16: U16 :: 256
+    u32: U32 :: 2147483648
+    u64: U64 :: 255
+    return "{int.count_ones()}:{int.count_zeros()}:{int.leading_zeros()}:{int.trailing_zeros()}|{i8.count_ones()}:{i8.count_zeros()}:{i8.leading_zeros()}:{i8.trailing_zeros()}|{i16.count_ones()}:{i16.count_zeros()}:{i16.leading_zeros()}:{i16.trailing_zeros()}|{i32.count_ones()}:{i32.count_zeros()}:{i32.leading_zeros()}:{i32.trailing_zeros()}|{u8.count_ones()}:{u8.count_zeros()}:{u8.leading_zeros()}:{u8.trailing_zeros()}|{u16.count_ones()}:{u16.count_zeros()}:{u16.leading_zeros()}:{u16.trailing_zeros()}|{u32.count_ones()}:{u32.count_zeros()}:{u32.leading_zeros()}:{u32.trailing_zeros()}|{u64.count_ones()}:{u64.count_zeros()}:{u64.leading_zeros()}:{u64.trailing_zeros()}|{bit_byte(13).leading_zeros()}"
+}"#;
+const INTEGER_BIT_QUERIES_EXPECTED: &str =
+    "64:0:0:0|7:1:0:1|1:15:0:15|0:32:32:32|3:5:4:0|1:15:7:8|1:31:0:31|8:56:56:0|4";
 const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() -> String {
     buffer := ByteBuffer.new()
     empty_before :: buffer.is_empty()
@@ -448,6 +464,18 @@ fn public_transcript_covers_remaining_core_pure_families() {
 }
 
 #[test]
+fn public_transcript_covers_integer_bit_queries_exactly() {
+    let values = exact_values(&[
+        INTEGER_BIT_QUERIES_DECLS,
+        "integer_bit_queries_view()",
+    ]);
+    assert_eq!(
+        values,
+        [format!("\"{INTEGER_BIT_QUERIES_EXPECTED}\" : String")]
+    );
+}
+
+#[test]
 fn public_transcript_composes_email_and_codecs_exactly() {
     let values = exact_values(&[
         "use core.email as email",
@@ -797,6 +825,16 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
     for (label, source) in cases {
         let _ = check_aot_comptime(label, &source);
     }
+}
+
+#[test]
+fn rustc_backed_integer_bit_queries_match_all_execution_tiers_exactly() {
+    let source = parity_source("integer_bit_queries_view()", INTEGER_BIT_QUERIES_DECLS);
+    assert_eq!(
+        check_aot_comptime("integer-bit-queries", &source),
+        INTEGER_BIT_QUERIES_EXPECTED
+    );
+    check_dev_tiers("integer-bit-queries", &source, INTEGER_BIT_QUERIES_EXPECTED);
 }
 
 #[test]

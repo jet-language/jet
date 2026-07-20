@@ -526,6 +526,20 @@ fn literal_int(e: &Expr) -> Option<i64> {
     }
 }
 
+fn integer_width_from_type(ty: &Type) -> Option<u32> {
+    match ty {
+        Type::Int => Some(64),
+        Type::IntN { bits, .. } => Some(u32::from(*bits)),
+        _ => None,
+    }
+}
+
+fn integer_width_from_name(name: &str) -> Option<u32> {
+    crate::AST::numeric_type_from_name(name)
+        .as_ref()
+        .and_then(integer_width_from_type)
+}
+
 impl<'a> Interp<'a> {
     /// `f.[a, b, c]` → `[f(a), f(b), f(c)]` (fan-out, ratified in
     /// docs/spec/spec.md (S75 fan-out). Comptime only supports
@@ -1307,12 +1321,35 @@ impl<'a> Interp<'a> {
         }
     }
 
+    fn integer_width_for_expr(&self, expr: &Expr) -> Option<u32> {
+        match expr {
+            Expr::Ident(name, _) => self
+                .binding_types
+                .get(name)
+                .and_then(integer_width_from_type),
+            Expr::Call(call) => self
+                .funcs
+                .get(&call.name)
+                .and_then(|func| func.return_type.as_ref())
+                .and_then(integer_width_from_type),
+            Expr::Int(_, _, width, _) => Some(width.map_or(64, |(_, bits)| u32::from(bits))),
+            Expr::Unary(_, inner, _) | Expr::Copy(inner, _) => self.integer_width_for_expr(inner),
+            Expr::Binary(_, left, _, _) => self.integer_width_for_expr(left),
+            Expr::MethodCall { receiver, .. } => match receiver.as_ref() {
+                Expr::Ident(type_name, _) => integer_width_from_name(type_name),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     pub(in super::super) fn eval_method(
         &mut self,
         receiver: &Expr,
         method: &str,
         span: Span,
         type_args: &[Type],
+        recv_type: Option<&str>,
         resolved_ret: Option<&Type>,
         args: &[crate::AST::CallArg],
         scope: &mut HashMap<String, CtValue>,
@@ -2890,6 +2927,31 @@ impl<'a> Interp<'a> {
                     return self.call_func(&format!("{}.{}", tn, method), f, frame);
                 }
             }
+        }
+        if let (
+            CtValue::Int(value),
+            method @ ("count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"),
+        ) = (&recv, method)
+        {
+            let width = recv_type
+                .and_then(integer_width_from_name)
+                .or_else(|| self.integer_width_for_expr(receiver))
+                .unwrap_or(64);
+            let mask = if width == 64 {
+                u64::MAX
+            } else {
+                (1_u64 << width) - 1
+            };
+            let bits = (*value as u64) & mask;
+            let ones = bits.count_ones();
+            let count = match method {
+                "count_ones" => ones,
+                "count_zeros" => width - ones,
+                "leading_zeros" => bits.leading_zeros() - (64 - width),
+                "trailing_zeros" => bits.trailing_zeros().min(width),
+                _ => unreachable!("integer bit-query set is closed"),
+            };
+            return Ok(CtValue::Int(i64::from(count)));
         }
         match (&recv, method) {
             (CtValue::Struct { type_name, fields }, method @ ("tick" | "advance" | "wait"))

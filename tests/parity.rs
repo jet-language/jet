@@ -1182,7 +1182,14 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                 let owner = if entry.owner == "FixedList" { "List" } else { &entry.owner };
                 let erased_scalar_dispatch = match entry.owner.as_str() {
                     "I8" | "I16" | "I32" | "U8" | "U16" | "U32" | "U64" => {
-                        entry.method == "to_string"
+                        matches!(
+                            entry.method.as_str(),
+                            "to_string"
+                                | "count_ones"
+                                | "count_zeros"
+                                | "leading_zeros"
+                                | "trailing_zeros"
+                        )
                             && ct_values.contains(&("Int".to_string(), entry.method.clone()))
                     }
                     _ => false,
@@ -1326,7 +1333,16 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         assert_eq!(record(&records, Surface::Value, owner, "to_string").class, Class::Covered);
     }
     assert_eq!(record(&records, Surface::Value, "Float", "origin").class, Class::PurePending);
-    assert_eq!(record(&records, Surface::Value, "U8", "count_ones").class, Class::PurePending);
+    for owner in ["Int", "I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
+        for method in [
+            "count_ones",
+            "count_zeros",
+            "leading_zeros",
+            "trailing_zeros",
+        ] {
+            assert_eq!(record(&records, Surface::Value, owner, method).class, Class::Covered);
+        }
+    }
     assert_eq!(record(&records, Surface::Value, "BigInt", "to_string").class, Class::Covered);
     for method in ["add", "add_new", "clear", "each", "has_key"] {
         assert_eq!(record(&records, Surface::Value, "Map", method).class, Class::Covered);
@@ -1529,14 +1545,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_147, 699, 108, 340));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_147, 731, 76, 340));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        18364725378447941444,
+        5630427836760419700,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
