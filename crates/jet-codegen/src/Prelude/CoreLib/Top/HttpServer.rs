@@ -705,11 +705,15 @@ fn jet_http_srv_request_version(raw: &[u8]) -> &str {
         .unwrap_or("HTTP/1.1")
 }
 
+fn jet_http_connection_options(value: &str) -> impl Iterator<Item = &str> {
+    value.split(',').map(jet_http_trim_ows).filter(|token| !token.is_empty())
+}
+
 fn jet_http_srv_request_keep_alive(version: &str, headers: &JetHttpHeaders) -> bool {
     let mut close = false;
     let mut keep_alive = false;
     for value in headers.all("connection") {
-        for token in value.split(',').map(str::trim) {
+        for token in jet_http_connection_options(value) {
             close |= token.eq_ignore_ascii_case("close");
             keep_alive |= token.eq_ignore_ascii_case("keep-alive");
         }
@@ -1076,7 +1080,14 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
         if !JetHttpHeaders::valid_value(value) {
             return Err(JetHttpReadError { status: 400, message: "request header value is malformed" });
         }
-        if name.eq_ignore_ascii_case("content-length") {
+        if name.eq_ignore_ascii_case("connection") {
+            if !jet_http_connection_options(value).all(JetHttpHeaders::valid_name) {
+                return Err(JetHttpReadError {
+                    status: 400,
+                    message: "connection option is malformed",
+                });
+            }
+        } else if name.eq_ignore_ascii_case("content-length") {
             let parsed = jet_http_trim_ows(value).parse::<usize>()
                 .map_err(|_| JetHttpReadError { status: 400, message: "content-length is malformed" })?;
             if content_length.replace(parsed).is_some_and(|old| old != parsed) {
