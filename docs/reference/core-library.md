@@ -434,7 +434,7 @@ Client surface:
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
 | `client.get(url)` / `client.post(url, body)` | `HttpClientResp ? String` | One-shot request helpers |
-| `client.request(method, url)` | `HttpClientReq` | Start a typed request builder |
+| `client.request(method, url)` | `HttpClientReq` | Start a typed request builder; malformed or unsupported URLs fail with a stable Jet error before transport |
 | `req.header(name, value)` / `.body(text)` | `HttpClientReq` | Add headers or a string body |
 | `req.form(name, value)` / `.multipart_text(name, value)` | `HttpClientReq` | Encode form or text multipart fields; multipart names percent-encode quotes and line breaks, and bounded RFC-valid boundary selection avoids every supplied name and value |
 | `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or a redirect limit from 0 through 4,294,967,295; unset follows at most 10, and out-of-range limits fail before transport |

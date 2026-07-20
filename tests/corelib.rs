@@ -5568,6 +5568,14 @@ fn main() {
         Some("HTTP read timeout must be non-negative".to_string()),
         Some("HTTP total timeout must be non-negative".to_string()),
     ]);
+    let unsupported_url = url.replacen("http://", "ftp://", 1);
+    let url_errors = ["http://[".to_string(), unsupported_url].map(|url| {
+        bridge::jet_http_client_send_impl(
+            "GET", &url, &[], None, None, None, None, None, None, None,
+            &[], &[], &[],
+        ).unwrap_err()
+    });
+    assert_eq!(url_errors, ["HTTP URL is invalid", "HTTP URL is invalid"]);
     let proxy_error = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None, None, Some("ftp://proxy.invalid"),
         &[], &[], &[],
