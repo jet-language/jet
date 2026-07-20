@@ -11,6 +11,79 @@ mod tests {
         jet_crypto_entropy_set_test_provider(|_| JetCryptoEntropyStep::Failed);
     }
 
+    #[cfg(target_os = "linux")]
+    enum PublishRace {
+        SwapParent { at: &'static str, parent: std::path::PathBuf, moved: std::path::PathBuf },
+        CreateDestination { at: &'static str, destination: std::path::PathBuf },
+        ReplaceCandidate { at: &'static str, parent: std::path::PathBuf, prefix: &'static str },
+    }
+
+    #[cfg(target_os = "linux")]
+    thread_local! {
+        static PUBLISH_RACE: RefCell<Option<PublishRace>> = const { RefCell::new(None) };
+    }
+
+    #[cfg(target_os = "linux")]
+    fn publication_race(created: &'static str) {
+        PUBLISH_RACE.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let ready = match slot.as_ref() {
+                Some(PublishRace::SwapParent { at, .. }
+                    | PublishRace::CreateDestination { at, .. }
+                    | PublishRace::ReplaceCandidate { at, .. }) => *at == created,
+                None => false,
+            };
+            if !ready { return; }
+            match slot.take().unwrap() {
+                PublishRace::SwapParent { parent, moved, .. } => {
+                    std::fs::rename(&parent, &moved).unwrap();
+                    std::fs::create_dir(&parent).unwrap();
+                }
+                PublishRace::CreateDestination { destination, .. } => {
+                    std::fs::write(destination, b"racer").unwrap();
+                }
+                PublishRace::ReplaceCandidate { parent, prefix, .. } => {
+                    assert!(std::fs::read_dir(&parent).unwrap().all(|entry| {
+                        !entry.unwrap().file_name().to_string_lossy().starts_with(&format!(".{prefix}-"))
+                    }));
+                    let candidate = parent.join(format!(".{prefix}-attacker"));
+                    let moved = parent.join(format!(".{prefix}-attacker-moved"));
+                    std::fs::write(&candidate, b"attacker-original").unwrap();
+                    std::fs::rename(&candidate, &moved).unwrap();
+                    std::fs::write(&candidate, b"attacker-replacement").unwrap();
+                }
+            }
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    fn arm_publish_race(action: PublishRace) {
+        PUBLISH_RACE.with(|slot| *slot.borrow_mut() = Some(action));
+        jet_crypto_set_file_temp_test_observer(publication_race);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn replace_candidate_at(at: &'static str, parent: &std::path::Path, prefix: &'static str) {
+        arm_publish_race(PublishRace::ReplaceCandidate {
+            at,
+            parent: parent.to_path_buf(),
+            prefix,
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    fn assert_attacker_candidates(parent: &std::path::Path, prefix: &str) {
+        assert_eq!(std::fs::read(parent.join(format!(".{prefix}-attacker"))).unwrap(), b"attacker-replacement");
+        assert_eq!(std::fs::read(parent.join(format!(".{prefix}-attacker-moved"))).unwrap(), b"attacker-original");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn assert_not_attacker(path: &std::path::Path) {
+        let bytes = std::fs::read(path).unwrap();
+        assert_ne!(bytes, b"attacker-original");
+        assert_ne!(bytes, b"attacker-replacement");
+    }
+
     fn decode_hex(text: &str) -> Vec<u8> {
         text.as_bytes()
             .chunks_exact(2)
@@ -532,6 +605,226 @@ mod tests {
         jet_crypto_entropy_clear_test_provider();
         assert!(!envelope.exists());
         assert_eq!(std::fs::read(&source).unwrap(), b"snapshot first");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn jetc_v2_linux_publication_holds_parent_and_never_replaces_a_racer() {
+        let root = test_dir("publish-races");
+        let source = root.join("source.bin");
+        std::fs::write(&source, b"held parent").unwrap();
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let public = jet_crypto_x25519_public_typed_impl(&recipient);
+
+        let parent = root.join("seal-parent");
+        let moved = root.join("seal-parent-moved");
+        std::fs::create_dir(&parent).unwrap();
+        let destination = parent.join("sealed.jetc");
+        arm_publish_race(PublishRace::SwapParent {
+            at: "seal-stage",
+            parent: parent.clone(),
+            moved: moved.clone(),
+        });
+        assert_eq!(
+            jet_crypto_file_seal_impl(
+                vec![public.clone()],
+                &source.to_string_lossy().into_owned(),
+                &destination.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::DestinationIo)
+        );
+        assert!(!destination.exists());
+        assert!(!moved.join("sealed.jetc").exists());
+        assert!(std::fs::read_dir(&moved).unwrap().next().is_none());
+
+        let race_parent = root.join("race-parent");
+        std::fs::create_dir(&race_parent).unwrap();
+        let raced = race_parent.join("sealed.jetc");
+        arm_publish_race(PublishRace::CreateDestination {
+            at: "seal-output",
+            destination: raced.clone(),
+        });
+        assert_eq!(
+            jet_crypto_file_seal_impl(
+                vec![public.clone()],
+                &source.to_string_lossy().into_owned(),
+                &raced.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::DestinationExists)
+        );
+        assert_eq!(std::fs::read(&raced).unwrap(), b"racer");
+        assert_eq!(std::fs::read_dir(&race_parent).unwrap().count(), 1);
+
+        let stable_parent = root.join("stable-parent");
+        std::fs::create_dir(&stable_parent).unwrap();
+        let envelope = stable_parent.join("sealed.jetc");
+        jet_crypto_file_seal_impl(
+            vec![public],
+            &source.to_string_lossy().into_owned(),
+            &envelope.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        let open_parent = root.join("open-parent");
+        let open_moved = root.join("open-parent-moved");
+        std::fs::create_dir(&open_parent).unwrap();
+        let restored = open_parent.join("restored.bin");
+        arm_publish_race(PublishRace::SwapParent {
+            at: "open-output",
+            parent: open_parent.clone(),
+            moved: open_moved.clone(),
+        });
+        assert_eq!(
+            jet_crypto_file_open_impl(
+                &recipient,
+                &envelope.to_string_lossy().into_owned(),
+                &restored.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::DestinationIo)
+        );
+        assert!(!restored.exists());
+        assert!(!open_moved.join("restored.bin").exists());
+        assert!(std::fs::read_dir(&open_moved).unwrap().next().is_none());
+
+        let real_parent = root.join("real-parent");
+        let linked_parent = root.join("linked-parent");
+        std::fs::create_dir(&real_parent).unwrap();
+        std::os::unix::fs::symlink(&real_parent, &linked_parent).unwrap();
+        let linked_destination = linked_parent.join("sealed.jetc");
+        assert_eq!(
+            jet_crypto_file_seal_impl(
+                vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+                &source.to_string_lossy().into_owned(),
+                &linked_destination.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::DestinationIo)
+        );
+        assert!(!real_parent.join("sealed.jetc").exists());
+        PUBLISH_RACE.with(|slot| assert!(slot.borrow().is_none()));
+        jet_crypto_clear_file_temp_test_observer();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn jetc_v2_linux_anonymous_inodes_ignore_every_former_temp_namespace() {
+        let root = test_dir("anonymous-inodes");
+        let source = root.join("source.bin");
+        let plaintext = b"anonymous inode payload";
+        std::fs::write(&source, plaintext).unwrap();
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let public = jet_crypto_x25519_public_typed_impl(&recipient);
+
+        let stage_parent = root.join("seal-stage-parent");
+        std::fs::create_dir(&stage_parent).unwrap();
+        let stage_envelope = stage_parent.join("sealed.jetc");
+        replace_candidate_at("seal-stage", &stage_parent, "jetc-stage");
+        jet_crypto_file_seal_impl(
+            vec![public.clone()],
+            &source.to_string_lossy().into_owned(),
+            &stage_envelope.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        assert_attacker_candidates(&stage_parent, "jetc-stage");
+        assert_not_attacker(&stage_envelope);
+
+        let output_parent = root.join("seal-output-parent");
+        std::fs::create_dir(&output_parent).unwrap();
+        let output_envelope = output_parent.join("sealed.jetc");
+        replace_candidate_at("seal-output", &output_parent, "jetc-output");
+        jet_crypto_file_seal_impl(
+            vec![public.clone()],
+            &source.to_string_lossy().into_owned(),
+            &output_envelope.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        assert_attacker_candidates(&output_parent, "jetc-output");
+        assert_not_attacker(&output_envelope);
+
+        let open_parent = root.join("open-output-parent");
+        std::fs::create_dir(&open_parent).unwrap();
+        let restored = open_parent.join("restored.bin");
+        replace_candidate_at("open-output", &open_parent, "jetc-open");
+        jet_crypto_file_open_impl(
+            &recipient,
+            &stage_envelope.to_string_lossy().into_owned(),
+            &restored.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        assert_eq!(std::fs::read(&restored).unwrap(), plaintext);
+        assert_attacker_candidates(&open_parent, "jetc-open");
+
+        let key = (0u8..32).collect::<Vec<_>>();
+        let nonce = (0u8..12).collect::<Vec<_>>();
+        let historical = b"historical anonymous migration";
+        let ciphertext = ChaCha20Poly1305::new_from_slice(&key).unwrap()
+            .encrypt(ChaNonce::from_slice(&nonce), historical.as_slice()).unwrap();
+        let mut v1 = b"JETC".to_vec();
+        v1.extend_from_slice(&[1, 1]);
+        v1.extend_from_slice(&nonce);
+        v1.extend_from_slice(&ciphertext);
+        let v1_source = root.join("historical.jetc");
+        std::fs::write(&v1_source, &v1).unwrap();
+
+        let migrate_stage_parent = root.join("migrate-stage-parent");
+        std::fs::create_dir(&migrate_stage_parent).unwrap();
+        let migrated_stage = migrate_stage_parent.join("migrated.jetc");
+        replace_candidate_at("migrate-stage", &migrate_stage_parent, "jetc-stage");
+        jet_crypto_expert_migrate_v1_impl(
+            &key,
+            &v1_source.to_string_lossy().into_owned(),
+            vec![public.clone()],
+            &migrated_stage.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        assert_attacker_candidates(&migrate_stage_parent, "jetc-stage");
+        assert_not_attacker(&migrated_stage);
+        assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+
+        let migrate_output_parent = root.join("migrate-output-parent");
+        std::fs::create_dir(&migrate_output_parent).unwrap();
+        let migrated_output = migrate_output_parent.join("migrated.jetc");
+        replace_candidate_at("migrate-output", &migrate_output_parent, "jetc-output");
+        jet_crypto_expert_migrate_v1_impl(
+            &key,
+            &v1_source.to_string_lossy().into_owned(),
+            vec![public.clone()],
+            &migrated_output.to_string_lossy().into_owned(),
+            never_cancelled,
+        ).unwrap();
+        assert_attacker_candidates(&migrate_output_parent, "jetc-output");
+        assert_not_attacker(&migrated_output);
+        assert_ne!(std::fs::read(&migrated_output).unwrap(), historical);
+
+        let swapped_parent = root.join("migrate-swapped-parent");
+        let moved_parent = root.join("migrate-swapped-parent-moved");
+        std::fs::create_dir(&swapped_parent).unwrap();
+        let swapped_output = swapped_parent.join("migrated.jetc");
+        arm_publish_race(PublishRace::SwapParent {
+            at: "migrate-output",
+            parent: swapped_parent.clone(),
+            moved: moved_parent.clone(),
+        });
+        assert_eq!(
+            jet_crypto_expert_migrate_v1_impl(
+                &key,
+                &v1_source.to_string_lossy().into_owned(),
+                vec![public],
+                &swapped_output.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::DestinationIo)
+        );
+        assert!(!swapped_output.exists());
+        assert!(!moved_parent.join("migrated.jetc").exists());
+        assert!(std::fs::read_dir(&moved_parent).unwrap().next().is_none());
+        assert_eq!(std::fs::read(&v1_source).unwrap(), v1);
+        PUBLISH_RACE.with(|slot| assert!(slot.borrow().is_none()));
+        jet_crypto_clear_file_temp_test_observer();
         std::fs::remove_dir_all(root).unwrap();
     }
 

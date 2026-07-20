@@ -602,14 +602,55 @@ pub fn jet_crypto_password_verify_impl(password: &String, stored: &String) -> bo
     .is_ok()
 }
 
+#[cfg(not(target_os = "linux"))]
 struct JetcTemp {
     path: std::path::PathBuf,
     file: Option<std::fs::File>,
 }
 
+struct JetcParent {
+    path: std::path::PathBuf,
+    #[cfg(target_os = "linux")]
+    file: std::fs::File,
+    #[cfg(target_os = "linux")]
+    destination: std::ffi::CString,
+    #[cfg(not(target_os = "linux"))]
+    metadata: std::fs::Metadata,
+}
+
+struct JetcPublishTemp {
+    file: Option<std::fs::File>,
+    #[cfg(not(target_os = "linux"))]
+    path: std::path::PathBuf,
+}
+
+#[cfg(not(target_os = "linux"))]
 static JETC_STAGE_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+#[cfg(test)]
+thread_local! {
+    static JETC_TEMP_CREATED_TEST_OBSERVER: std::cell::RefCell<Option<fn(&'static str)>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn jet_crypto_set_file_temp_test_observer(observer: fn(&'static str)) {
+    JETC_TEMP_CREATED_TEST_OBSERVER.with(|slot| *slot.borrow_mut() = Some(observer));
+}
+
+#[cfg(test)]
+fn jet_crypto_clear_file_temp_test_observer() {
+    JETC_TEMP_CREATED_TEST_OBSERVER.with(|slot| *slot.borrow_mut() = None);
+}
+
+#[cfg(test)]
+fn observe_jetc_temp_created(kind: &'static str) {
+    JETC_TEMP_CREATED_TEST_OBSERVER.with(|slot| {
+        if let Some(observer) = *slot.borrow() { observer(kind); }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
 impl Drop for JetcTemp {
     fn drop(&mut self) {
         self.file.take();
@@ -617,6 +658,124 @@ impl Drop for JetcTemp {
     }
 }
 
+impl Drop for JetcPublishTemp {
+    fn drop(&mut self) {
+        self.file.take();
+        #[cfg(not(target_os = "linux"))]
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn destination_parent_path(destination: &std::path::Path) -> Result<std::path::PathBuf, JetFileCryptoError> {
+    let parent = destination.parent().ok_or(JetFileCryptoError::DestinationIo)?;
+    Ok(if parent.as_os_str().is_empty() { std::path::PathBuf::from(".") } else { parent.to_path_buf() })
+}
+
+#[cfg(target_os = "linux")]
+fn open_linux_directory_nofollow(path: &std::path::Path) -> Result<std::fs::File, JetFileCryptoError> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    unsafe extern "C" { fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32; }
+    const FLAGS: i32 = 0o200000 | 0o400000 | 0o2000000;
+    let start = if path.is_absolute() { std::path::Path::new("/") } else { std::path::Path::new(".") };
+    let mut directory = std::fs::OpenOptions::new().read(true)
+        .custom_flags(0o200000 | 0o400000 | 0o2000000)
+        .open(start).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    for component in path.components() {
+        let std::path::Component::Normal(name) = component else {
+            if matches!(component, std::path::Component::RootDir | std::path::Component::CurDir) { continue; }
+            return Err(JetFileCryptoError::DestinationIo);
+        };
+        let name = std::ffi::CString::new(name.as_bytes()).map_err(|_| JetFileCryptoError::DestinationIo)?;
+        let fd = unsafe { openat(directory.as_raw_fd(), name.as_ptr(), FLAGS, 0) };
+        if fd < 0 { return Err(JetFileCryptoError::DestinationIo); }
+        directory = unsafe { std::fs::File::from_raw_fd(fd) };
+    }
+    if !directory.metadata().map_err(|_| JetFileCryptoError::DestinationIo)?.is_dir() {
+        return Err(JetFileCryptoError::DestinationIo);
+    }
+    Ok(directory)
+}
+
+#[cfg(target_os = "linux")]
+fn hold_destination_parent(destination: &std::path::Path) -> Result<JetcParent, JetFileCryptoError> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = destination_parent_path(destination)?;
+    let file = open_linux_directory_nofollow(&path)?;
+    let name = destination.file_name().ok_or(JetFileCryptoError::DestinationIo)?;
+    let destination = std::ffi::CString::new(name.as_bytes()).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    Ok(JetcParent { path, file, destination })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn hold_destination_parent(destination: &std::path::Path) -> Result<JetcParent, JetFileCryptoError> {
+    let path = destination_parent_path(destination)?;
+    let metadata = std::fs::metadata(&path).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    Ok(JetcParent { path, metadata })
+}
+
+#[cfg(target_os = "linux")]
+fn revalidate_destination_parent(parent: &JetcParent) -> Result<(), JetFileCryptoError> {
+    let current = open_linux_directory_nofollow(&parent.path)?;
+    if !same_parent_identity(
+        &parent.file.metadata().map_err(|_| JetFileCryptoError::DestinationIo)?,
+        &current.metadata().map_err(|_| JetFileCryptoError::DestinationIo)?,
+    ) { return Err(JetFileCryptoError::DestinationIo); }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn revalidate_destination_parent(parent: &JetcParent) -> Result<(), JetFileCryptoError> {
+    let current = std::fs::metadata(&parent.path).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    if !same_parent_identity(&parent.metadata, &current) { return Err(JetFileCryptoError::DestinationIo); }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn create_linux_anonymous_file(parent: &JetcParent) -> Result<std::fs::File, JetFileCryptoError> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::fs::MetadataExt;
+    unsafe extern "C" { fn openat(dirfd: i32, pathname: *const i8, flags: i32, mode: u32) -> i32; }
+    const O_TMPFILE: i32 = 0o20200000;
+    const O_CLOEXEC: i32 = 0o2000000;
+    let fd = unsafe { openat(parent.file.as_raw_fd(), c".".as_ptr(), 0o2 | O_TMPFILE | O_CLOEXEC, 0o600) };
+    if fd < 0 { return Err(JetFileCryptoError::DestinationIo); }
+    let file = unsafe { std::fs::File::from_raw_fd(fd) };
+    if file.metadata().map_err(|_| JetFileCryptoError::DestinationIo)?.nlink() != 0 {
+        return Err(JetFileCryptoError::DestinationIo);
+    }
+    Ok(file)
+}
+
+#[cfg(target_os = "linux")]
+fn create_publish_temp(parent: &JetcParent, _prefix: &str) -> Result<JetcPublishTemp, JetFileCryptoError> {
+    Ok(JetcPublishTemp { file: Some(create_linux_anonymous_file(parent)?) })
+}
+
+#[cfg(target_os = "linux")]
+fn create_unlinked_stage(parent: &JetcParent) -> Result<std::fs::File, JetFileCryptoError> {
+    create_linux_anonymous_file(parent)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn create_unlinked_stage(parent: &JetcParent) -> Result<std::fs::File, JetFileCryptoError> {
+    let mut stage = create_stage_in(&parent.path)?;
+    std::fs::remove_file(&stage.path).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    stage.path = std::path::PathBuf::new();
+    stage.file.take().ok_or(JetFileCryptoError::DestinationIo)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn create_publish_temp(parent: &JetcParent, prefix: &str) -> Result<JetcPublishTemp, JetFileCryptoError> {
+    let mut temp = create_temp_in(&parent.path, prefix)?;
+    Ok(JetcPublishTemp {
+        file: temp.file.take(),
+        path: std::mem::take(&mut temp.path),
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
 fn open_private_new(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true).write(true).create_new(true);
@@ -628,6 +787,7 @@ fn open_private_new(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     options.open(path)
 }
 
+#[cfg(not(target_os = "linux"))]
 fn create_temp_in(dir: &std::path::Path, prefix: &str) -> Result<JetcTemp, JetFileCryptoError> {
     for _ in 0..128 {
         let sequence = JETC_STAGE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -641,6 +801,7 @@ fn create_temp_in(dir: &std::path::Path, prefix: &str) -> Result<JetcTemp, JetFi
     Err(JetFileCryptoError::DestinationIo)
 }
 
+#[cfg(not(target_os = "linux"))]
 fn create_stage_in(dir: &std::path::Path) -> Result<JetcTemp, JetFileCryptoError> {
     for _ in 0..128 {
         let sequence = JETC_STAGE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -720,17 +881,16 @@ fn hash_stream(
 #[cfg(target_os = "linux")]
 fn snapshot_source(
     source: &std::path::Path,
-    destination_dir: &std::path::Path,
+    parent: &JetcParent,
     cancelled: fn() -> bool,
 ) -> Result<(std::fs::File, u64), JetFileCryptoError> {
     use std::io::{Read, Seek, SeekFrom, Write};
     let mut source_file = open_source_nofollow(source)?;
     let source_meta = source_file.metadata().map_err(|_| JetFileCryptoError::SourceIo)?;
-    let mut stage = create_stage_in(destination_dir)?;
-    let stage_path = stage.path.clone();
-    std::fs::remove_file(&stage_path).map_err(|_| JetFileCryptoError::DestinationIo)?;
-    stage.path = std::path::PathBuf::new();
-    let mut stage_file = stage.file.take().ok_or(JetFileCryptoError::DestinationIo)?;
+    let mut stage_file = create_unlinked_stage(parent)?;
+    #[cfg(test)]
+    observe_jetc_temp_created("seal-stage");
+    if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     let mut buffer = Zeroizing(vec![0u8; JETC_V2_CHUNK]);
     let mut source_hash = Sha256::new();
     let mut length = 0u64;
@@ -760,7 +920,7 @@ fn snapshot_source(
 #[cfg(not(target_os = "linux"))]
 fn snapshot_source(
     _source: &std::path::Path,
-    _destination_dir: &std::path::Path,
+    _parent: &JetcParent,
     _cancelled: fn() -> bool,
 ) -> Result<(std::fs::File, u64), JetFileCryptoError> {
     Err(JetFileCryptoError::SourceIo)
@@ -788,18 +948,39 @@ fn nonce24(prefix: &[u8; 16], index: u64) -> [u8; 24] {
     nonce
 }
 
-fn publish_temp(mut temp: JetcTemp, destination: &std::path::Path) -> Result<(), JetFileCryptoError> {
-    let dir = destination.parent().ok_or(JetFileCryptoError::DestinationIo)?;
+#[cfg(target_os = "linux")]
+fn publish_temp(mut temp: JetcPublishTemp, parent: &JetcParent, _destination: &std::path::Path) -> Result<(), JetFileCryptoError> {
+    use std::os::fd::AsRawFd;
+    unsafe extern "C" { fn linkat(olddirfd: i32, oldpath: *const i8, newdirfd: i32, newpath: *const i8, flags: i32) -> i32; }
+    const AT_EMPTY_PATH: i32 = 0x1000;
+    temp.file.as_mut().ok_or(JetFileCryptoError::DestinationIo)?.sync_all()
+        .map_err(|_| JetFileCryptoError::DestinationIo)?;
+    revalidate_destination_parent(parent)?;
+    let file = temp.file.as_ref().ok_or(JetFileCryptoError::DestinationIo)?;
+    if unsafe { linkat(file.as_raw_fd(), c"".as_ptr(), parent.file.as_raw_fd(), parent.destination.as_ptr(), AT_EMPTY_PATH) } != 0 {
+        return if std::io::Error::last_os_error().kind() == std::io::ErrorKind::AlreadyExists {
+            Err(JetFileCryptoError::DestinationExists)
+        } else {
+            Err(JetFileCryptoError::DestinationIo)
+        };
+    }
+    parent.file.sync_all().map_err(|_| JetFileCryptoError::DestinationIo)?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn publish_temp(mut temp: JetcPublishTemp, parent: &JetcParent, destination: &std::path::Path) -> Result<(), JetFileCryptoError> {
     temp.file.as_mut().ok_or(JetFileCryptoError::DestinationIo)?.sync_all()
         .map_err(|_| JetFileCryptoError::DestinationIo)?;
     temp.file.take();
+    revalidate_destination_parent(parent)?;
     match std::fs::hard_link(&temp.path, destination) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Err(JetFileCryptoError::DestinationExists),
         Err(_) => return Err(JetFileCryptoError::DestinationIo),
     }
     std::fs::remove_file(&temp.path).map_err(|_| JetFileCryptoError::DestinationIo)?;
-    std::fs::File::open(dir).and_then(|file| file.sync_all()).map_err(|_| JetFileCryptoError::DestinationIo)?;
+    std::fs::File::open(&parent.path).and_then(|file| file.sync_all()).map_err(|_| JetFileCryptoError::DestinationIo)?;
     temp.path = std::path::PathBuf::new();
     Ok(())
 }
@@ -817,14 +998,13 @@ fn seal_jetc_v2_from_snapshot(
     recipients: Vec<JetX25519PublicKey>,
     mut stage: std::fs::File,
     plain_len: u64,
+    parent: &JetcParent,
     destination: &String,
     cancelled: fn() -> bool,
     verify_output: bool,
 ) -> Result<(), JetFileCryptoError> {
     use std::io::{Read, Seek, SeekFrom, Write};
     let destination = std::path::Path::new(destination);
-    let dir = destination.parent().ok_or(JetFileCryptoError::DestinationIo)?;
-    let parent_before = std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)?;
     let body_len = jetc_v2_body_len(plain_len).ok_or(JetFileCryptoError::SourceIo)?;
     let header_len = JETC_V2_HEADER_BASE.checked_add(recipients.len() * JETC_V2_STANZA).and_then(|n| n.checked_add(JETC_V2_HEADER_TAG)).ok_or(JetFileCryptoError::DestinationIo)?;
     let mut fixed = Vec::with_capacity(20);
@@ -869,7 +1049,10 @@ fn seal_jetc_v2_from_snapshot(
     header.extend_from_slice(&header_tag);
     let mut header_hash_input = fixed.clone(); header_hash_input.extend_from_slice(&header);
     let header_hash: [u8; 32] = Sha256::digest(&header_hash_input).into();
-    let mut output = create_temp_in(dir, "jetc-output")?;
+    let mut output = create_publish_temp(parent, "jetc-output")?;
+    #[cfg(test)]
+    observe_jetc_temp_created(if verify_output { "migrate-output" } else { "seal-output" });
+    if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     let out = output.file.as_mut().ok_or(JetFileCryptoError::DestinationIo)?;
     out.write_all(&fixed).and_then(|_| out.write_all(&header)).map_err(|_| JetFileCryptoError::DestinationIo)?;
     let mut buffer = Zeroizing(vec![0u8; JETC_V2_CHUNK]); let mut index = 1u64; let mut remaining = plain_len;
@@ -893,17 +1076,16 @@ fn seal_jetc_v2_from_snapshot(
     out.write_all(&length.to_le_bytes()).and_then(|_| out.write_all(&[flags])).and_then(|_| out.write_all(&encrypted)).map_err(|_| JetFileCryptoError::DestinationIo)?;
     if verify_output {
         out.sync_all().map_err(|_| JetFileCryptoError::DestinationIo)?;
-        let staged_output = output.path.to_string_lossy().into_owned();
-        open_jetc_v2(None, Some((file_key.bytes(), &*ephemeral_secret)), &staged_output, None, cancelled)
+        let staged_output = output.file.as_ref().ok_or(JetFileCryptoError::DestinationIo)?
+            .try_clone().map_err(|_| JetFileCryptoError::DestinationIo)?;
+        open_jetc_v2_file(None, Some((file_key.bytes(), &*ephemeral_secret)), staged_output, None, cancelled)
             .map_err(|error| match error {
                 JetFileCryptoError::Cancelled => JetFileCryptoError::Cancelled,
                 _ => JetFileCryptoError::DestinationIo,
             })?;
     }
-    let parent_after = std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)?;
-    if !same_parent_identity(&parent_before, &parent_after) { return Err(JetFileCryptoError::DestinationIo); }
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
-    publish_temp(output, destination)
+    publish_temp(output, parent, destination)
 }
 
 fn seal_jetc_v2(
@@ -915,9 +1097,9 @@ fn seal_jetc_v2(
 ) -> Result<(), JetFileCryptoError> {
     let recipients = canonical_jetc_v2_recipients(recipients)?;
     let destination_path = std::path::Path::new(destination);
-    let dir = destination_path.parent().ok_or(JetFileCryptoError::DestinationIo)?;
-    let (stage, plain_len) = snapshot_source(std::path::Path::new(source), dir, cancelled)?;
-    seal_jetc_v2_from_snapshot(recipients, stage, plain_len, destination, cancelled, verify_output)
+    let parent = hold_destination_parent(destination_path)?;
+    let (stage, plain_len) = snapshot_source(std::path::Path::new(source), &parent, cancelled)?;
+    seal_jetc_v2_from_snapshot(recipients, stage, plain_len, &parent, destination, cancelled, verify_output)
 }
 
 pub fn jet_crypto_file_seal_impl(
@@ -960,15 +1142,15 @@ fn unwrap_jetc_v2_stanza(
     ))
 }
 
-fn open_jetc_v2(
+fn open_jetc_v2_file(
     recipient: Option<&JetX25519SecretKey>,
     known_writer_secrets: Option<(&[u8], &[u8; 32])>,
-    source: &String,
+    mut input: std::fs::File,
     destination: Option<&String>,
     cancelled: fn() -> bool,
 ) -> Result<(), JetFileCryptoError> {
-    use std::io::{Read, Write};
-    let mut input = open_source_nofollow(std::path::Path::new(source)).map_err(|_| JetFileCryptoError::OpenFailed)?;
+    use std::io::{Read, Seek, SeekFrom, Write};
+    input.seek(SeekFrom::Start(0)).map_err(|_| JetFileCryptoError::OpenFailed)?;
     let total = input.metadata().map_err(|_| JetFileCryptoError::OpenFailed)?.len();
     let mut fixed = [0u8; 20]; input.read_exact(&mut fixed).map_err(|_| JetFileCryptoError::OpenFailed)?;
     if &fixed[..4] != b"JETC" || fixed[4] != 2 || fixed[5] != 1 || fixed[6] != 1 || fixed[7] != 0 { return Err(JetFileCryptoError::OpenFailed); }
@@ -1045,13 +1227,11 @@ fn open_jetc_v2(
     let mut header_hash_input = fixed.to_vec(); header_hash_input.extend_from_slice(&header);
     let header_hash: [u8; 32] = Sha256::digest(&header_hash_input).into();
     let destination = destination.map(std::path::Path::new);
-    let parent_before = destination.map(|path| {
-        let dir = path.parent().ok_or(JetFileCryptoError::DestinationIo)?;
-        std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)
-    }).transpose()?;
-    let mut output = destination.map(|path| {
-        create_temp_in(path.parent().ok_or(JetFileCryptoError::DestinationIo)?, "jetc-open")
-    }).transpose()?;
+    let parent = destination.map(hold_destination_parent).transpose()?;
+    let mut output = parent.as_ref().map(|parent| create_publish_temp(parent, "jetc-open")).transpose()?;
+    #[cfg(test)]
+    if output.is_some() { observe_jetc_temp_created("open-output"); }
+    if output.is_some() && cancelled() { return Err(JetFileCryptoError::Cancelled); }
     let mut discard = std::io::sink();
     let out: &mut dyn Write = if let Some(temp) = output.as_mut() {
         temp.file.as_mut().ok_or(JetFileCryptoError::DestinationIo)?
@@ -1078,13 +1258,26 @@ fn open_jetc_v2(
     if !saw_final || consumed != body_len { return Err(JetFileCryptoError::OpenFailed); }
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     if let Some(destination) = destination {
-        let dir = destination.parent().ok_or(JetFileCryptoError::DestinationIo)?;
-        let parent_after = std::fs::metadata(dir).map_err(|_| JetFileCryptoError::DestinationIo)?;
-        if !same_parent_identity(parent_before.as_ref().ok_or(JetFileCryptoError::DestinationIo)?, &parent_after) { return Err(JetFileCryptoError::DestinationIo); }
-        publish_temp(output.ok_or(JetFileCryptoError::DestinationIo)?, destination)
+        publish_temp(
+            output.ok_or(JetFileCryptoError::DestinationIo)?,
+            parent.as_ref().ok_or(JetFileCryptoError::DestinationIo)?,
+            destination,
+        )
     } else {
         Ok(())
     }
+}
+
+fn open_jetc_v2(
+    recipient: Option<&JetX25519SecretKey>,
+    known_writer_secrets: Option<(&[u8], &[u8; 32])>,
+    source: &String,
+    destination: Option<&String>,
+    cancelled: fn() -> bool,
+) -> Result<(), JetFileCryptoError> {
+    let input = open_source_nofollow(std::path::Path::new(source))
+        .map_err(|_| JetFileCryptoError::OpenFailed)?;
+    open_jetc_v2_file(recipient, known_writer_secrets, input, destination, cancelled)
 }
 
 pub fn jet_crypto_file_open_impl(
@@ -1128,11 +1321,11 @@ pub fn jet_crypto_expert_migrate_v1_impl(
             .map_err(|_| JetFileCryptoError::OpenFailed)?,
     );
     let recipients = canonical_jetc_v2_recipients(recipients)?;
-    let dir = destination_path.parent().ok_or(JetFileCryptoError::DestinationIo)?;
-    let mut clear = create_stage_in(dir)?;
-    std::fs::remove_file(&clear.path).map_err(|_| JetFileCryptoError::DestinationIo)?;
-    clear.path = std::path::PathBuf::new();
-    let mut clear_file = clear.file.take().ok_or(JetFileCryptoError::DestinationIo)?;
+    let parent = hold_destination_parent(destination_path)?;
+    let mut clear_file = create_unlinked_stage(&parent)?;
+    #[cfg(test)]
+    observe_jetc_temp_created("migrate-stage");
+    if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     clear_file.write_all(plaintext.bytes()).map_err(|_| JetFileCryptoError::DestinationIo)?;
     clear_file.sync_all().map_err(|_| JetFileCryptoError::DestinationIo)?;
     clear_file.seek(SeekFrom::Start(0)).map_err(|_| JetFileCryptoError::DestinationIo)?;
@@ -1140,6 +1333,7 @@ pub fn jet_crypto_expert_migrate_v1_impl(
         recipients,
         clear_file,
         plaintext.len() as u64,
+        &parent,
         destination,
         cancelled,
         true,
