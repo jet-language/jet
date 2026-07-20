@@ -48,6 +48,11 @@
 // not part of the language surface.
 // D-OPDEF1=A adds no punctuation: `impl Type.Add`/`.Sub`/`.Mul`/`.Div`,
 // `.Equatable`, and `.Comparable` reuse ordinary trait-impl dot syntax.
+// D-HTTP-ROUTE-SYNTAX2=A owns the two route-pattern markers carried inside
+// ordinary String values. They are not lexer tokens; the HTTP router consumes
+// them after String evaluation.
+pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
+pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 
 /// Compiler-owned numeric source names for D-SHAPE-CONVERT1=A.
 pub const NUMERIC_CONVERSION_SOURCES: &[(&str, &str)] = &[

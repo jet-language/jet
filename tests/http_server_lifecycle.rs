@@ -11,6 +11,7 @@ mod jet_std {
     }
 }
 
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
 
 fn request(addr: std::net::SocketAddr, text: &'static [u8]) -> String {
@@ -20,6 +21,21 @@ fn request(addr: std::net::SocketAddr, text: &'static [u8]) -> String {
     let mut response = String::new();
     stream.read_to_string(&mut response).expect("response read");
     response
+}
+
+#[test]
+fn serve_once_waits_for_nonblocking_listener_readiness() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    jet_http_mux_add(&mux, "GET", "/ready", |_| jet_http_srv_response(200, &"ready".to_string()));
+    let client = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        request(addr, b"GET /ready HTTP/1.1\r\nHost: local\r\n\r\n")
+    });
+    jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux).expect("serve once");
+    assert!(client.join().expect("client").contains("ready"));
 }
 
 #[test]
@@ -159,8 +175,8 @@ fn server_handle_binds_serves_and_rejects_second_shutdown() {
 #[test]
 fn canonical_router_precedence_methods_and_conflicts() {
     let mux = jet_http_mux_new();
-    jet_http_mux_add(&mux, "GET", "/files/*", |req| {
-        jet_http_srv_response(200, &format!("wild:{}", jet_http_srv_req_param(&req, &"wildcard".to_string()).unwrap()))
+    jet_http_mux_add(&mux, "GET", "/files/*path", |req| {
+        jet_http_srv_response(200, &format!("wild:{}", jet_http_srv_req_param(&req, &"path".to_string()).unwrap()))
     });
     jet_http_mux_add(&mux, "GET", "/files/:id", |req| {
         jet_http_srv_response(200, &format!("param:{}", jet_http_srv_req_param(&req, &"id".to_string()).unwrap()))
@@ -175,6 +191,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
     assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/static")).body, "static");
     assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/42")).body, "param:42");
     assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/a/b")).body, "wild:a/b");
+    assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files")).body, "wild:");
     let head = jet_http_mux_dispatch(&mux, request("HEAD", "/files/static"));
     assert_eq!(head.status, 200);
     assert!(head.body.is_empty());
@@ -189,7 +206,28 @@ fn canonical_router_precedence_methods_and_conflicts() {
     assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), conflict).err().expect("conflict").contains("route conflict"));
     let legacy = jet_http_mux_new();
     jet_http_mux_add(&legacy, "GET", "/users/{id}", |_| jet_http_srv_response(200, &String::new()));
-    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), legacy).err().expect("brace pattern").contains("use `:name`"));
+    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), legacy).err().expect("brace pattern").contains("E2805"));
+
+    let bare = jet_http_mux_new();
+    jet_http_mux_add(&bare, "GET", "/files/*", |_| jet_http_srv_response(200, &String::new()));
+    assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), bare).err().expect("bare wildcard").contains("`*wildcard`"));
+
+    let bare_once = jet_http_mux_new();
+    jet_http_mux_add(&bare_once, "GET", "/files/*", |_| jet_http_srv_response(200, &String::new()));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind invalid route probe");
+    assert!(jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &bare_once)
+        .err().expect("serve-once validation").contains("`*wildcard`"));
+
+    let encoded = jet_http_mux_new();
+    jet_http_mux_add(&encoded, "GET", "/literal/%3Aadmin/%2Astar", |_| jet_http_srv_response(200, &"encoded".to_string()));
+    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%3Aadmin/%2Astar")).body, "encoded");
+    assert_eq!(jet_http_mux_dispatch(&encoded, request("GET", "/literal/%2F/admin")).status, 400);
+
+    for invalid in ["/x/*rest/more", "/x/:1bad", "/x/:id/:id", "/x/%2F", "/x/%2e%2e", "/x/%ZZ"] {
+        let invalid_mux = jet_http_mux_new();
+        jet_http_mux_add(&invalid_mux, "GET", invalid, |_| jet_http_srv_response(200, &String::new()));
+        assert!(jet_http_server_bind(&"127.0.0.1:0".to_string(), invalid_mux).is_err(), "accepted {invalid}");
+    }
 }
 
 #[test]

@@ -409,12 +409,8 @@ pub struct JetHttpResponse {
     pub headers: std::collections::BTreeMap<String, String>,
 }
 
-// D-ROUTE1=A: HTTP router — registration + :param dispatch.
-#[derive(Clone)]
-enum RouteSegment {
-    Static(String),
-    Param(String),
-}
+// D-HTTP-ROUTE-SYNTAX2=A: both HTTP front doors use the shared route grammar.
+type RouteSegment = JetHttpRouteSegment;
 
 type JetHttpHandler = Box<dyn Fn(JetHttpRequest) -> JetHttpResponse + Send + Sync>;
 
@@ -3054,20 +3050,8 @@ fn jet_http_router_new() -> JetHttpRouter {
     JetHttpRouter { routes: Vec::new() }
 }
 
-fn jet_http_router_parse_pattern(pattern: &str) -> Vec<RouteSegment> {
-    pattern
-        .split('/')
-        .filter_map(|seg| {
-            if seg.is_empty() {
-                return None;
-            }
-            if let Some(name) = seg.strip_prefix(':') {
-                Some(RouteSegment::Param(name.to_string()))
-            } else {
-                Some(RouteSegment::Static(seg.to_string()))
-            }
-        })
-        .collect()
+fn jet_http_router_parse_pattern(pattern: &str) -> Result<Vec<RouteSegment>, String> {
+    jet_http_route_parse(pattern).map(|pattern| pattern.segments)
 }
 
 fn jet_http_router_register(
@@ -3080,7 +3064,10 @@ fn jet_http_router_register(
 ) {
     // E2804 (runtime): duplicate method+pattern fails at registration time in
     // Jet-owned runtime voice, not a raw Rust panic banner.
-    let segs = jet_http_router_parse_pattern(&pattern);
+    let segs = match jet_http_router_parse_pattern(&pattern) {
+        Ok(segs) => segs,
+        Err(message) => jet_panic(file, line, &message),
+    };
     let is_dup = router.routes.iter().any(|r| {
         r.method == method
             && r.segments.len() == segs.len()
@@ -3090,6 +3077,7 @@ fn jet_http_router_register(
                 .all(|(a, b)| match (a, b) {
                     (RouteSegment::Static(x), RouteSegment::Static(y)) => x == y,
                     (RouteSegment::Param(_), RouteSegment::Param(_)) => true,
+                    (RouteSegment::CatchAll(_), RouteSegment::CatchAll(_)) => true,
                     _ => false,
                 })
     });
@@ -3107,32 +3095,20 @@ fn jet_http_router_register(
     });
 }
 
-/// Count static segments in a route (for precedence: more statics win).
-fn route_static_count(segs: &[RouteSegment]) -> usize {
-    segs.iter()
-        .filter(|s| matches!(s, RouteSegment::Static(_)))
-        .count()
-}
-
 fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetHttpResponse {
-    let path_segs: Vec<&str> = req.path.split('/').filter(|s| !s.is_empty()).collect();
-    // Collect matching routes with their static count (for precedence).
-    let mut candidates: Vec<(usize, usize)> = Vec::new(); // (route_idx, static_count)
+    let path_segs = match jet_http_route_path(&req.path) {
+        Ok(path) => path,
+        Err(_) => return JetHttpResponse {
+            status: "400 Bad Request".to_string(),
+            body: "400 bad request".to_string(),
+            headers: std::collections::BTreeMap::new(),
+        },
+    };
+    let mut candidates: Vec<(usize, std::collections::BTreeMap<String, String>, (usize, usize, usize))> = Vec::new();
     for (i, route) in router.routes.iter().enumerate() {
-        if route.segments.len() != path_segs.len() {
-            continue;
-        }
-        let mut ok = true;
-        for (rseg, pseg) in route.segments.iter().zip(path_segs.iter()) {
-            if let RouteSegment::Static(s) = rseg {
-                if s != pseg {
-                    ok = false;
-                    break;
-                }
-            }
-        }
-        if ok {
-            candidates.push((i, route_static_count(&route.segments)));
+        let pattern = JetHttpRoutePattern { segments: route.segments.clone() };
+        if let Some((params, score)) = jet_http_route_match(&pattern, &path_segs) {
+            candidates.push((i, params, score));
         }
     }
     if candidates.is_empty() {
@@ -3143,26 +3119,20 @@ fn jet_http_router_dispatch(router: &JetHttpRouter, req: JetHttpRequest) -> JetH
         };
     }
     // Pick highest static-count match with the right method; otherwise 405.
-    candidates.sort_by(|a, b| b.1.cmp(&a.1));
+    candidates.sort_by(|a, b| b.2.cmp(&a.2));
     let method_match = candidates
         .iter()
-        .find(|(i, _)| router.routes[*i].method == req.method);
-    let Some((route_idx, _)) = method_match.copied() else {
+        .find(|(i, _, _)| router.routes[*i].method == req.method);
+    let Some((route_idx, params, _)) = method_match else {
         return JetHttpResponse {
             status: "405 Method Not Allowed".to_string(),
             body: "405 method not allowed".to_string(),
             headers: std::collections::BTreeMap::new(),
         };
     };
-    let route = &router.routes[route_idx];
-    let mut params = std::collections::BTreeMap::new();
-    for (rseg, pseg) in route.segments.iter().zip(path_segs.iter()) {
-        if let RouteSegment::Param(name) = rseg {
-            params.insert(name.clone(), pseg.to_string());
-        }
-    }
+    let route = &router.routes[*route_idx];
     let mut req2 = req;
-    req2.params = params;
+    req2.params = params.clone();
     (route.handler)(req2)
 }
 

@@ -415,7 +415,7 @@ use core.http.server as server
 
 fn run() {
     mux :: server.mux()
-    mux.post("/api/:name/*", (req: HttpSrvReq) =>
+    mux.post("/api/:name/*path", (req: HttpSrvReq) =>
         server.response(200, req.body())
     )
 

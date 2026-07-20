@@ -171,6 +171,7 @@ fn jet_http_srv_response_status(resp: &JetHttpSrvResp) -> i64 { resp.status }
 fn jet_http_srv_response_body(resp: &JetHttpSrvResp) -> String { resp.body.clone() }
 
 fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
+    jet_http_mux_validate(&mux)?;
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -327,10 +328,16 @@ fn jet_http_mux_serve_once_listener(
     mux: &JetHttpMux,
 ) -> Result<(), String> {
     use std::io::Write;
-    let (mut stream, _peer) = listener
-        .inner
-        .accept()
-        .map_err(|e| format!("accept failed: {}", e))?;
+    jet_http_mux_validate(mux)?;
+    let (mut stream, _peer) = loop {
+        match listener.inner.accept() {
+            Ok(connection) => break connection,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(error) => return Err(format!("accept failed: {error}")),
+        }
+    };
     let raw = match jet_http_srv_read(&mut stream) {
         Ok(raw) => raw,
         Err(error) => {
@@ -542,6 +549,14 @@ fn jet_http_srv_parse(raw: &str) -> JetHttpSrvReq {
 }
 
 fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp {
+    let path = match jet_http_route_path(&req.path) {
+        Ok(path) => path,
+        Err(_) => return JetHttpSrvResp {
+            status: 400,
+            body: "400 Bad Request".to_string(),
+            headers: std::collections::BTreeMap::new(),
+        },
+    };
     // Route lookup is a short snapshot operation. Never retain the registry
     // lock while composing middleware or running user code: handlers may
     // overlap and may register another route on this same mux.
@@ -549,7 +564,10 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
         let routes = mux.0.lock().unwrap();
         routes
             .iter()
-            .filter_map(|route| jet_http_match_path(&route.pattern, &req.path).map(|(params, score)| (route.clone(), params, score)))
+            .filter_map(|route| {
+                let pattern = jet_http_route_parse(&route.pattern).ok()?;
+                jet_http_route_match(&pattern, &path).map(|(params, score)| (route.clone(), params, score))
+            })
             .collect()
     };
     let requested_method = req.method.to_uppercase();
@@ -594,46 +612,6 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
     }
 }
 
-fn jet_http_match_path(
-    pattern: &str,
-    path: &str,
-) -> Option<(std::collections::BTreeMap<String, String>, (usize, usize, usize))> {
-    let p_segs: Vec<&str> = pattern.split('/').collect();
-    let r_segs: Vec<&str> = path.split('?').next().unwrap_or(path).split('/').collect();
-    let mut params = std::collections::BTreeMap::new();
-    let mut literals = 0usize;
-    let mut singles = 0usize;
-    let mut wildcard = false;
-    let mut pi = 0usize;
-    let mut ri = 0usize;
-    while pi < p_segs.len() {
-        let p = p_segs[pi];
-        // Route params are `:name`; the final `*` is a catch-all bound to the
-        // reserved `wildcard` param (D-HTTPDEPTH1, core-library.md). `{…}` is
-        // not a route sigil — it collides with Jet string interpolation.
-        if p == "*" {
-            wildcard = true;
-            params.insert("wildcard".to_string(), r_segs[ri..].join("/"));
-            ri = r_segs.len();
-            pi += 1;
-            break;
-        }
-        let r = *r_segs.get(ri)?;
-        if let Some(name) = p.strip_prefix(':') {
-            params.insert(name.to_string(), r.to_string());
-            singles += 1;
-        } else if p == r {
-            literals += 1;
-        } else {
-            return None;
-        }
-        pi += 1;
-        ri += 1;
-    }
-    if pi != p_segs.len() || ri != r_segs.len() { return None; }
-    Some((params, (literals, usize::from(!wildcard), usize::MAX - singles)))
-}
-
 fn jet_http_allowed_methods(
     matches: &[(JetHttpMuxRoute, std::collections::BTreeMap<String, String>, (usize, usize, usize))],
 ) -> String {
@@ -648,26 +626,9 @@ fn jet_http_mux_validate(mux: &JetHttpMux) -> Result<(), String> {
     let routes = mux.0.lock().unwrap();
     let mut seen = std::collections::BTreeSet::new();
     for route in routes.iter() {
-        if !route.pattern.starts_with('/') { return Err(format!("invalid HTTP route `{}`: routes must start with `/`", route.pattern)); }
-        let segments: Vec<&str> = route.pattern.split('/').collect();
-        let mut names = std::collections::BTreeSet::new();
-        let mut canonical = Vec::new();
-        for (index, segment) in segments.iter().enumerate() {
-            // `{…}` is not a route sigil (it would collide with Jet string
-            // interpolation): routes use `:name` params and a final `*`
-            // catch-all (D-HTTPDEPTH1, core-library.md).
-            if segment.contains('{') || segment.contains('}') { return Err(format!("invalid HTTP route `{}`: use `:name` params or a final `*` wildcard", route.pattern)); }
-            if *segment == "*" {
-                if index + 1 != segments.len() { return Err(format!("invalid HTTP route `{}`: `*` catch-all must be final", route.pattern)); }
-                if !names.insert("wildcard") { return Err(format!("invalid HTTP route `{}`: duplicate catch-all", route.pattern)); }
-                canonical.push("*".to_string());
-            } else if let Some(name) = segment.strip_prefix(':') {
-                if name.is_empty() || !names.insert(name) { return Err(format!("invalid HTTP route `{}`: parameter names must be non-empty and unique", route.pattern)); }
-                canonical.push(":".to_string());
-            } else { canonical.push((*segment).to_string()); }
-        }
-        let key = (route.method.clone(), canonical.join("/"));
-        if !seen.insert(key) { return Err(format!("HTTP route conflict for {} `{}`", route.method, route.pattern)); }
+        let pattern = jet_http_route_parse(&route.pattern)?;
+        let key = (route.method.clone(), jet_http_route_shape(&pattern));
+        if !seen.insert(key) { return Err(format!("E2804: HTTP route conflict for {} `{}`", route.method, route.pattern)); }
     }
     Ok(())
 }

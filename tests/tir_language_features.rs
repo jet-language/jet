@@ -743,6 +743,66 @@ fn run() {
     );
 }
 
+#[test]
+fn http_router_named_catchall_and_encoded_marker_literals() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.http as http
+fn asset(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: \"200 OK\", body: req.param(\"path\") ?? \"missing\", headers: []}
+}
+fn literal(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: \"200 OK\", body: \"literal\", headers: []}
+}
+fn run() {
+    router :: http.router()
+    router.get(\"/assets/*path\", asset)
+    router.get(\"/literal/%3Aadmin/%2Astar\", literal)
+    first :: http.dispatch(router, http.parse(\"GET /assets/css/site.css HTTP/1.1\\nHost: localhost\"))
+    second :: http.dispatch(router, http.parse(\"GET /literal/%3Aadmin/%2Astar HTTP/1.1\\nHost: localhost\"))
+    print(first.body())
+    print(second.body())
+}
+";
+    let (code, stdout) = build_and_run("tir_http_route_syntax", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "css/site.css\nliteral\n");
+}
+
+#[test]
+fn http_router_retired_bare_catchall_is_jet_runtime_error() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.http as http
+fn handle(req: HttpRequest) -> HttpResponse {
+    return HttpResponse.{status: \"200 OK\", body: \"ok\", headers: []}
+}
+fn run() {
+    router :: http.router()
+    router.get(\"/assets/*\", handle)
+}
+";
+    let (code, _stdout, stderr) =
+        build_and_run_full("jet_tir_test", "tir_http_retired_catchall", src);
+    assert_ne!(code, 0);
+    assert!(
+        stderr.contains("panic: E2805: invalid HTTP route `/assets/*`: write a named catch-all such as `*wildcard`"),
+        "missing Jet-owned E2805 runtime text:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("tir_http_retired_catchall.jet:7"),
+        "missing source location:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("thread 'main' panicked"),
+        "raw Rust panic banner leaked:\n{stderr}"
+    );
+}
+
 /// c109 Phase 26: the `require(cond[, msg])` / `require_eq` rich-report builtins (S36,
 /// 14_panic). A satisfied `require` is a no-op; the program continues. (The failing
 /// branch's rich panic is exercised by the golden suite; here we prove the TIR

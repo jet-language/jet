@@ -2485,6 +2485,12 @@ index, not a substitute for that law.
   streaming bodies, forms/multipart, cookies, redirects, timeouts, TLS policy,
   and SSE, built on `core.url`, `core.mime`, and `core.net`. WebSocket support
   has its own top-level home, `core.ws`, per D-WS1=B.
+- **D-HTTP-ROUTE-SYNTAX2=A**: route-pattern Strings use `:name` for one
+  decoded path segment and a final `*name` for zero or more remaining decoded
+  segments. Names match `[A-Za-z_][A-Za-z0-9_]*` and are unique. Static
+  segments beginning with either marker use URL percent encoding. Bare `*`,
+  brace forms, duplicate names, encoded slashes, dot traversal, and malformed
+  percent/UTF-8 input are rejected; no compatibility alias remains.
 - **D-CRYPTO-SUITE1=A**: beginner crypto APIs are safe envelopes
   (`seal`/`open`, `sign`/`verify`, password hashing, key agreement, file
   envelope, `Secret`/`Key` types). Expert primitives live under
@@ -2675,11 +2681,13 @@ checked `Sql` literals feed `db.params(sql)`, rows stay inspectable maps with
 typed `db.row_*` reads, and `db.transaction`/`db.migrate` provide rollback and
 checksum-recorded migration helpers over the same parameterized path. `core.http`: client+server submodules; client
 supports HTTPS by default via rustls + system roots (D-TLS1=A); server is
-plain `fn(req: Request) -> Response` on a `mux` (`mux.get("/path", handler)`,
+plain `fn(req: Request) -> Response` on a `mux` (`mux.get("/users/:id", handler)`,
 `req.params["id"]`, `Server.serve(addr, mux)?`) with HTTPS enabled by the named
 option `Server.serve(addr, mux, tls: Server.tls(cert, key))` (D-TLSSERVE1=A).
-HTTP/1.1 depth is tracked by #301; HTTP/2 remains a separate transport upgrade,
-and WebSocket belongs to `core.ws` per D-WS1=B (D-HTTPLIB1–3, D-ROUTE1).
+HTTP route parameters use `:name` and final catch-alls use `*name`
+(D-HTTP-ROUTE-SYNTAX2=A). HTTP/1.1 depth is tracked by #301; HTTP/2 remains a
+separate transport upgrade, and WebSocket belongs to `core.ws` per D-WS1=B
+(D-HTTPLIB1–3, D-ROUTE1).
 Compression
 `core.compress.{gzip,zstd}` (D-CODECS1). Measurement-with-uncertainty in
 `core.science.measurement` (D-HONESTNUM1 shipped/partial; #310 verifies module

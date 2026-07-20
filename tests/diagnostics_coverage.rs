@@ -857,6 +857,7 @@ fn registered_unimplemented_codes_are_expected() {
         "E2802", // E2-M10 — staged
         "E2803", // E2-M10 — staged
         "E2804", // E2-M10 — staged, but appears in tests/ui snapshot
+        "E2805", // HTTP route-pattern runtime migration/validation error; exact panic snapshot lives in tir_language_features
         "E2902", // E2-M11 (@Todo typed holes) — staged
         "E2940", // D-PROVE-SEM1: emitted only when complete_required policy is wired
         "E3001", // E2-M12 runtime panic report — runtime, not compile-time

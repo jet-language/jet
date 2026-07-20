@@ -11,8 +11,8 @@ fn run() {
     addr :: listener.local_addr() ?? panic("address")
 
     mux :: http_server.mux()
-    mux.post("/api/:name/*", (req: HttpSrvReq) =>
-        http_server.response(200, "{req.param("name") ?? "missing"}|{req.param("wildcard") ?? "missing"}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{req.body()}")
+    mux.post("/api/:name/*path", (req: HttpSrvReq) =>
+        http_server.response(200, "{req.param("name") ?? "missing"}|{req.param("path") ?? "missing"}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{req.body()}")
     )
     mux.get("/events", (req: HttpSrvReq) => http_server.sse("ready"))
     mux.get("/file", (req: HttpSrvReq) =>
