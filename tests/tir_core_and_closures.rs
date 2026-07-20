@@ -5,7 +5,7 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{build_and_run, build_and_run_multi, have_rustc};
+use tir_support::{build_and_run, build_and_run_full, build_and_run_multi, have_rustc};
 
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
@@ -171,6 +171,7 @@ fn parallel_collection_adapters_use_stable_bounded_chunks() {
              fixed: [Int#4] :: [1, 2, 3, 4]\n\
              fixed_split :: fixed.para_partition((n: Int) => n % 2 == 0)\n\
              empty: [Int] :: []\n\
+             // Internal tree-shape probe: intentionally non-associative; public code must use an identity and associative merge.\n\
              folded :: values.para_fold(\n\
                  () => 1,\n\
                  (acc: Int, n: Int) => acc + n,\n\
@@ -196,6 +197,44 @@ fn parallel_collection_adapters_use_stable_bounded_chunks() {
         stdout,
         "130|1|259\n258\n[0, 32, 64, 96, 128]\n[0, 32, 64, 96, 128]\n125|1|129\n[2, 3, 4, 5]\n[1, 3]\n[2, 4]\n7\n201761130258\n201761130258\n"
     );
+}
+
+#[test]
+fn parallel_collection_adapters_report_lowest_input_failure() {
+    if !have_rustc() {
+        return;
+    }
+    let values = (0..130).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    for (method, callback, call) in [
+        (
+            "map",
+            "fn callback(n: Int) -> Int {\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"map-low\") }\n    if n == 65 { require(false, \"map-high\") }\n    return n\n}\n",
+            "ignored :: values.para_map(callback)",
+        ),
+        (
+            "filter",
+            "fn callback(n: Int) -> Bool {\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"filter-low\") }\n    if n == 65 { require(false, \"filter-high\") }\n    return true\n}\n",
+            "ignored :: values.para_filter(callback)",
+        ),
+        (
+            "partition",
+            "fn callback(n: Int) -> Bool {\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"partition-low\") }\n    if n == 65 { require(false, \"partition-high\") }\n    return true\n}\n",
+            "ignored :: values.para_partition(callback)",
+        ),
+        (
+            "fold",
+            "fn step(acc: Int, n: Int) -> Int {\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"fold-low\") }\n    if n == 65 { require(false, \"fold-high\") }\n    return acc + n\n}\n",
+            "ignored :: values.para_fold(() => 0, step, (left: Int, right: Int) => left + right)",
+        ),
+    ] {
+        let src = format!("{callback}\nfn run() {{\n    values: [Int] :: [{values}]\n    {call}\n}}\n");
+        let (code, stdout, stderr) =
+            build_and_run_full("jet_para_failure", &format!("para_{method}_failure"), &src);
+        assert_eq!(code, 70, "{method} stdout={stdout:?} stderr={stderr:?}");
+        assert!(stderr.contains(&format!("{method}-low")), "{stderr}");
+        assert!(!stderr.contains(&format!("{method}-high")), "{stderr}");
+        assert!(!stderr.contains("worker panicked"), "{stderr}");
+    }
 }
 
 #[test]

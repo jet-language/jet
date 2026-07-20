@@ -2713,7 +2713,11 @@ parallel collection family is the clean-break `para_map`, `para_filter`,
 one bounded indexed chunk engine. Map/filter preserve source order; partition
 returns source-ordered `(false_, true_)`; fold takes
 `(seed_factory, step, merge)` and uses stable chunks plus a deterministic merge
-tree. Sema rejects mutable captures and non-shareable/non-transferable worker
+tree. The seed is the two-sided merge identity and merge is associative. If
+callbacks fail concurrently, the original failure at the lowest source index
+wins; no partial result or accumulator escapes, while external effects already
+performed are not rolled back. Sema rejects mutable captures, function-typed
+items/results/accumulators, and other non-shareable/non-transferable worker
 values as E1111; stored/imported callbacks are rejected when their capture facts
 are unavailable, rather than silently serializing or inventing a capture merge.
 Adaptive fidelity is a manual runtime-global knob:

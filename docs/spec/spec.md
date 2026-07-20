@@ -1958,12 +1958,25 @@ stable, worker count never exceeds available host parallelism, and scheduling
 does not change result order. `para_fold(seed_factory, step, merge)` creates a
 fresh accumulator for each chunk, steps through each chunk in source order, and
 combines partial results with a deterministic adjacent-pair tree. An empty input
-calls the seed factory once.
+calls the seed factory once. The seed must be an identity for `merge`
+(`merge(seed, x) == x == merge(x, seed)`), and `merge` must be associative;
+otherwise the deterministic tree is still stable, but it does not define a
+portable parallel reduction.
+
+If callbacks fail at more than one item, each chunk stops at its first failure,
+all started chunks are joined, and the operation reports the original Jet
+failure belonging to the lowest source index, independent of worker completion
+order. It returns no
+partial map, filter, partition, or fold accumulator. Effects already performed
+outside the returned collection are not rolled back, so callbacks should keep
+external effects explicit and synchronization-safe.
 
 Sema rejects ordinary mutable captures, stored/imported callbacks whose capture
 facts are hidden, and values that cannot be safely shared or transferred between
 workers as **E1111**. Inline lambdas and top-level functions expose the required
-facts. There is no hidden serialization or implicit capture merge; callers
+facts. Function-typed items, results, and fold accumulators are not transferable
+worker values and are rejected before code generation. There is no hidden
+serialization or implicit capture merge; callers
 return data, use `para_partition` or `para_fold`, or choose explicit synchronized
 state.
 

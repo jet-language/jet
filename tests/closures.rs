@@ -64,6 +64,43 @@ fn run() {
 "#;
     let diags = jet::compile(hidden_capture).expect_err("stored parallel callback must fail");
     assert!(diags.iter().any(|diag| diag.code == "E1111"), "{diags:#?}");
+
+    for (role, source) in [
+        (
+            "item",
+            r#"fn bump(n: Int) -> Int { return n + 1 }
+fn run() {
+    callbacks: [fn(Int) -> Int] :: [bump]
+    ignored :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
+}
+"#,
+        ),
+        (
+            "result",
+            r#"fn run() {
+    ignored :: [1].para_map((n: Int) => (x: Int) => x + n)
+}
+"#,
+        ),
+        (
+            "accumulator",
+            r#"fn run() {
+    ignored :: [1].para_fold(
+        () => (x: Int) => x,
+        (callback: fn(Int) -> Int, n: Int) => callback,
+        (left: fn(Int) -> Int, right: fn(Int) -> Int) => left
+    )
+}
+"#,
+        ),
+    ] {
+        let diags = jet::compile(source)
+            .expect_err("function-typed worker values must fail in sema");
+        assert!(
+            diags.iter().any(|diag| diag.code == "E1111"),
+            "function {role} must stop before rustc: {diags:#?}"
+        );
+    }
 }
 
 #[test]

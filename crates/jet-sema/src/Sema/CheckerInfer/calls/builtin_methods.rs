@@ -9,8 +9,52 @@ use crate::Sema::Diagnostics::{collection_changed_in_loop, expr_root_ident, type
 use crate::Syntax;
 use std::collections::HashSet;
 impl<'a> Checker<'a> {
+        fn para_type_contains_function(&self, ty: &Type) -> bool {
+            fn contains(
+                registry: &crate::Sema::TypeRegistry,
+                ty: &Type,
+                seen: &mut HashSet<String>,
+            ) -> bool {
+                match ty {
+                    Type::Fn { .. } => true,
+                    Type::List(inner)
+                    | Type::Shared(inner)
+                    | Type::Option(inner)
+                    | Type::Tagged { inner, .. } => contains(registry, inner, seen),
+                    Type::Result { ok, err } => {
+                        contains(registry, ok, seen) || contains(registry, err, seen)
+                    }
+                    Type::Map { key, value, .. } => {
+                        contains(registry, key, seen) || contains(registry, value, seen)
+                    }
+                    Type::Tuple(fields) => fields
+                        .iter()
+                        .any(|(_, field_ty)| contains(registry, field_ty, seen)),
+                    Type::FixedList { elem, .. } => contains(registry, elem, seen),
+                    Type::Apply { args, .. }
+                        if args.iter().any(|arg| contains(registry, arg, seen)) =>
+                    {
+                        true
+                    }
+                    Type::Named(name) | Type::Apply { name, .. } => {
+                        if !seen.insert(name.clone()) {
+                            return false;
+                        }
+                        registry.struct_fields(name).is_some_and(|fields| {
+                            fields
+                                .iter()
+                                .any(|(_, _, field_ty, _)| contains(registry, field_ty, seen))
+                        })
+                    }
+                    _ => false,
+                }
+            }
+            contains(self.registry, ty, &mut HashSet::new())
+        }
+
         fn reject_para_type(&mut self, role: &str, ty: &Type, span: Span) {
-            if self.sendability_problem(ty, true).is_some()
+            if self.para_type_contains_function(ty)
+                || self.sendability_problem(ty, true).is_some()
                 || super::super::is_reactive_handle_ty(ty)
             {
                 self.diags.push(Diagnostic::error(

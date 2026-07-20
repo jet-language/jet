@@ -1195,10 +1195,77 @@ fn jet_time_format_pattern(
 // bounded by the host's available parallelism.
 const JET_PARA_CHUNK_ITEMS: usize = 64;
 
+struct JetParaFailure {
+    index: usize,
+    payload: Box<dyn std::any::Any + Send + 'static>,
+}
+
+enum JetParaRuntimeFailure {
+    Simple {
+        file: String,
+        line: u32,
+        msg: String,
+    },
+    Rich {
+        file: String,
+        line: u32,
+        fn_name: String,
+        src_line: String,
+        col: u32,
+        caret_len: u32,
+        msg: String,
+        locals: String,
+    },
+}
+
+impl JetParaRuntimeFailure {
+    fn raise(self) -> ! {
+        match self {
+            Self::Simple { file, line, msg } => jet_panic(&file, line, &msg),
+            Self::Rich {
+                file,
+                line,
+                fn_name,
+                src_line,
+                col,
+                caret_len,
+                msg,
+                locals,
+            } => jet_panic_rich(
+                &file, line, &fn_name, &src_line, col, caret_len, &msg, &locals,
+            ),
+        }
+    }
+}
+
+thread_local! {
+    static JET_PARA_DEFER_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn jet_para_call<R, F>(index: usize, f: F) -> Result<R, JetParaFailure>
+where
+    F: FnOnce() -> R,
+{
+    let result = JET_PARA_DEFER_FAILURE.with(|defer| {
+        let previous = defer.replace(true);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        defer.set(previous);
+        result
+    });
+    result.map_err(|payload| JetParaFailure { index, payload })
+}
+
+fn jet_para_raise_failure(failure: JetParaFailure) -> ! {
+    match failure.payload.downcast::<JetParaRuntimeFailure>() {
+        Ok(failure) => (*failure).raise(),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
 fn jet_list_para_chunks<R, F>(len: usize, f: F) -> Vec<R>
 where
     R: Send,
-    F: Fn(std::ops::Range<usize>) -> R + Sync,
+    F: Fn(std::ops::Range<usize>) -> Result<R, JetParaFailure> + Sync,
 {
     let chunk_count = len.div_ceil(JET_PARA_CHUNK_ITEMS);
     if chunk_count == 0 {
@@ -1222,13 +1289,35 @@ where
                 out
             }));
         }
-        handles
-            .into_iter()
-            .flat_map(|handle| handle.join().expect("parallel collection worker panicked"))
-            .collect::<Vec<_>>()
+        let mut indexed = Vec::with_capacity(chunk_count);
+        for handle in handles {
+            match handle.join() {
+                Ok(results) => indexed.extend(results),
+                Err(payload) => std::panic::resume_unwind(payload),
+            }
+        }
+        indexed
     });
     indexed.sort_unstable_by_key(|(chunk, _)| *chunk);
-    indexed.into_iter().map(|(_, result)| result).collect()
+    let mut results = Vec::with_capacity(chunk_count);
+    let mut first_failure: Option<JetParaFailure> = None;
+    for (_, outcome) in indexed {
+        match outcome {
+            Ok(result) => results.push(result),
+            Err(failure)
+                if first_failure
+                    .as_ref()
+                    .is_none_or(|first| failure.index < first.index) =>
+            {
+                first_failure = Some(failure);
+            }
+            Err(_) => {}
+        }
+    }
+    if let Some(failure) = first_failure {
+        jet_para_raise_failure(failure);
+    }
+    results
 }
 
 fn jet_list_para_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
@@ -1238,7 +1327,11 @@ where
     F: Fn(&T) -> U + Sync,
 {
     jet_list_para_chunks(xs.len(), |range| {
-        range.map(|index| f(&xs[index])).collect::<Vec<_>>()
+        let mut out = Vec::with_capacity(range.len());
+        for index in range {
+            out.push(jet_para_call(index, || f(&xs[index]))?);
+        }
+        Ok(out)
     })
     .into_iter()
     .flatten()
@@ -1251,7 +1344,11 @@ where
     F: Fn(&T) -> bool + Sync,
 {
     jet_list_para_chunks(xs.len(), |range| {
-        range.map(|index| f(&xs[index])).collect::<Vec<_>>()
+        let mut out = Vec::with_capacity(range.len());
+        for index in range {
+            out.push(jet_para_call(index, || f(&xs[index]))?);
+        }
+        Ok(out)
     })
     .into_iter()
     .flatten()
@@ -1298,7 +1395,12 @@ where
     M: Fn(&U, &U) -> U + Sync,
 {
     let mut partials = jet_list_para_chunks(xs.len(), |range| {
-        range.fold(seed(), |acc, index| step(&acc, &xs[index]))
+        let start = range.start;
+        let mut acc = jet_para_call(start, &seed)?;
+        for index in range {
+            acc = jet_para_call(index, || step(&acc, &xs[index]))?;
+        }
+        Ok((start, acc))
     });
     if partials.is_empty() {
         return seed();
@@ -1306,15 +1408,18 @@ where
     while partials.len() > 1 {
         let mut next = Vec::with_capacity(partials.len().div_ceil(2));
         let mut iter = partials.into_iter();
-        while let Some(left) = iter.next() {
+        while let Some((left_index, left)) = iter.next() {
             match iter.next() {
-                Some(right) => next.push(merge(&left, &right)),
-                None => next.push(left),
+                Some((_, right)) => match jet_para_call(left_index, || merge(&left, &right)) {
+                    Ok(merged) => next.push((left_index, merged)),
+                    Err(failure) => jet_para_raise_failure(failure),
+                },
+                None => next.push((left_index, left)),
             }
         }
         partials = next;
     }
-    partials.pop().expect("parallel fold produced no result")
+    partials.pop().expect("non-empty parallel fold lost its result").1
 }
 
 // D-FIDELITY-API1=A: runtime-global fidelity signal. App code decides policy.
@@ -1623,6 +1728,13 @@ fn jet_runtime_exit() -> ! {
 }
 
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
+    if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
+        std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Simple {
+            file: file.to_string(),
+            line,
+            msg: msg.to_string(),
+        }));
+    }
     jet_proof_record(2, 1, "panic", msg, file, line);
     if jet_runtime_should_unwind() {
         panic!("{} (at {}:{})", msg, file, line);
@@ -1742,6 +1854,18 @@ fn jet_panic_rich(
     msg: &str,
     locals: &str,
 ) -> ! {
+    if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
+        std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Rich {
+            file: file.to_string(),
+            line,
+            fn_name: fn_name.to_string(),
+            src_line: src_line.to_string(),
+            col,
+            caret_len,
+            msg: msg.to_string(),
+            locals: locals.to_string(),
+        }));
+    }
     jet_proof_record(2, 1, "panic", msg, file, line);
     let line_s = line.to_string();
     let margin = line_s.len();
