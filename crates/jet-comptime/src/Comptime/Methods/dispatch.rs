@@ -1358,6 +1358,12 @@ impl<'a> Interp<'a> {
                     fields: vec![("items".to_string(), CtValue::List(Vec::new()))],
                 });
             }
+            if type_name == crate::Syntax::TYPE_BIT_SET && method == "new" {
+                return Ok(CtValue::Struct {
+                    type_name: crate::Syntax::TYPE_BIT_SET.to_string(),
+                    fields: vec![("bits".to_string(), CtValue::List(Vec::new()))],
+                });
+            }
             if type_name == crate::Syntax::TYPE_SORTED_SET
                 && matches!(method, "new" | "from")
             {
@@ -1985,6 +1991,7 @@ impl<'a> Interp<'a> {
                 | "has_key"
                 | "keys"
                 | "capacity"
+                | "count"
                 | "len"
                 | "is_empty"
                 | "clear"
@@ -2002,6 +2009,77 @@ impl<'a> Interp<'a> {
         ) {
             let peek = self.eval(receiver, scope)?;
             match (&peek, method) {
+                (
+                    CtValue::Struct { type_name, fields },
+                    method @ ("add"
+                        | "remove"
+                        | "has"
+                        | "count"
+                        | "len"
+                        | "is_empty"
+                        | "clear"
+                        | "to_list"),
+                ) if type_name == crate::Syntax::TYPE_BIT_SET => {
+                    let mut bits = fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("bits", CtValue::List(bits)) => Some(bits.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut argv = Vec::with_capacity(args.len());
+                    for arg in args {
+                        argv.push(self.eval(&arg.expr, scope)?);
+                    }
+                    let mut changed = false;
+                    let result = match method {
+                        "count" => CtValue::Int(bits.len() as i64),
+                        "len" => CtValue::Int(match bits.last() {
+                            Some(CtValue::Int(bit)) => bit + 1,
+                            _ => 0,
+                        }),
+                        "is_empty" => CtValue::Bool(bits.is_empty()),
+                        "has" => CtValue::Bool(
+                            bits.contains(&CtValue::Int(as_int(&argv[0], span)?)),
+                        ),
+                        "to_list" => CtValue::List(bits.clone()),
+                        "add" => {
+                            let bit = as_int(&argv[0], span)?;
+                            let added = bit >= 0 && !bits.contains(&CtValue::Int(bit));
+                            if added {
+                                bits.push(CtValue::Int(bit));
+                                bits = sorted_unique(bits, span)?;
+                                changed = true;
+                            }
+                            CtValue::Bool(added)
+                        }
+                        "remove" => {
+                            let bit = CtValue::Int(as_int(&argv[0], span)?);
+                            if let Some(index) = bits.iter().position(|value| value == &bit) {
+                                bits.remove(index);
+                                changed = true;
+                            }
+                            CtValue::Unit
+                        }
+                        "clear" => {
+                            bits.clear();
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        _ => unreachable!("BitSet method set is closed"),
+                    };
+                    if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                        self.write_back(
+                            receiver,
+                            CtValue::Struct {
+                                type_name: crate::Syntax::TYPE_BIT_SET.to_string(),
+                                fields: vec![("bits".to_string(), CtValue::List(bits))],
+                            },
+                            scope,
+                        )?;
+                    }
+                    return Ok(result);
+                }
                 (
                     CtValue::Struct { type_name, fields },
                     method @ ("add"

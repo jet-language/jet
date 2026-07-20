@@ -116,6 +116,28 @@ fn rng_view() -> String {
     return "{int_draw}|{float_draw}|{range_draw}|{coin}|{chance}|{normal}|{exponential}|{bytes}|{picked}|{weighted}|{sample}|{deck}|{child_draw}|{after_split}"
 }"#;
 const RNG_EXPECTED: &str = "4|0.0316577610861849|1.3390388981797772|true|true|-0.6237918784672982|0.21210139132324568|[62, 20, 83, 254]|b|c|[c, a]|[1, 2, 5, 3, 4]|71|87";
+const BIT_SET_DECLS: &str = r#"fn add_bit(values: &BitSet, bit: Int) -> Bool {
+    return values.add(bit)
+}
+fn bit_set_view() -> String {
+    bits: BitSet := BitSet.new()
+    empty_before :: bits.is_empty()
+    negative_added :: bits.add(-1)
+    added_four :: bits.add(4)
+    added_one :: bits.add(1)
+    duplicate_four :: bits.add(4)
+    param_added :: add_bit(&bits, 9)
+    before_remove :: bits.to_list()
+    count_before :: bits.count()
+    len_before :: bits.len()
+    has_four :: bits.has(4)
+    bits.remove(4)
+    bits.remove(-1)
+    after_remove :: bits.to_list()
+    bits.clear()
+    return "{empty_before}|{negative_added}|{added_four}|{added_one}|{duplicate_four}|{param_added}|{before_remove}|{count_before}|{len_before}|{has_four}|{after_remove}|{bits.is_empty()}|{bits.count()}|{bits.len()}|{bits.to_list()}"
+}"#;
+const BIT_SET_EXPECTED: &str = "true|false|true|true|false|true|[1, 4, 9]|3|10|true|[1, 9]|true|0|0|[]";
 const SORTED_SET_DECLS: &str = r#"fn add_through_param(values: &SortedSet<Int>, value: Int) -> Bool {
     return values.add(value)
 }
@@ -261,6 +283,12 @@ fn public_transcript_covers_lru_methods_exactly() {
 fn public_transcript_covers_deque_methods_exactly() {
     let values = exact_values(&[DEQUE_DECLS, "deque_view()"]);
     assert_eq!(values, [format!("\"{DEQUE_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_covers_bit_set_methods_exactly() {
+    let values = exact_values(&[BIT_SET_DECLS, "bit_set_view()"]);
+    assert_eq!(values, [format!("\"{BIT_SET_EXPECTED}\" : String")]);
 }
 
 #[test]
@@ -514,6 +542,16 @@ fn rustc_backed_deque_matches_all_execution_tiers_exactly() {
     let source = parity_source("deque_view()", DEQUE_DECLS);
     assert_eq!(check_aot_comptime("deque/all-methods", &source), DEQUE_EXPECTED);
     check_dev_tiers("deque", &source, DEQUE_EXPECTED);
+}
+
+#[test]
+fn rustc_backed_bit_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+    let source = parity_source("bit_set_view()", BIT_SET_DECLS);
+    assert_eq!(
+        check_aot_comptime("bit-set/all-methods", &source),
+        BIT_SET_EXPECTED
+    );
+    check_dev_tiers_with_boundary("bit-set", &source, BIT_SET_EXPECTED, true);
 }
 
 #[test]
