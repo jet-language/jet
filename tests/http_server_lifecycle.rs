@@ -520,6 +520,79 @@ fn reset_content_has_zero_length_and_preserves_pipeline_boundaries() {
 }
 
 #[test]
+fn invalid_response_statuses_fail_closed_without_breaking_pipelines() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("response read");
+        response
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    for (path, status) in [("/low", 99), ("/high", 600)] {
+        let handler_calls = calls.clone();
+        jet_http_mux_add(&mux, "GET", path, move |_| {
+            handler_calls.fetch_add(1, Ordering::AcqRel);
+            jet_http_srv_response(status, &format!("secret-status-{status}"))
+        });
+    }
+    let next_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/next", move |_| {
+        next_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"next".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 8;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    for path in ["/low", "/high"] {
+        let response = exchange(
+            addr,
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: local\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        assert!(response.starts_with("HTTP/1.1 500 Internal Server Error"), "invalid status reached wire: {response}");
+        assert!(response.contains("Content-Length: 25\r\n"), "invalid status did not use generic 500 framing: {response}");
+        assert!(!response.contains("secret-status"), "invalid response body leaked: {response}");
+        assert_eq!(response.matches("HTTP/1.1").count(), 2, "invalid status broke response boundary: {response}");
+        assert!(response.ends_with("\r\n\r\nnext"), "successor response misaligned: {response}");
+    }
+
+    assert_eq!(calls.load(Ordering::Acquire), 4);
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 2);
+    assert_eq!(report.user_completed, 2);
+
+    for status in [100, 205, 299, 599] {
+        let response = jet_http_srv_response(status, &"valid".to_string());
+        assert_eq!(response.status, status);
+        assert_eq!(response.body, "valid");
+    }
+    for status in [i64::MIN, -1, 0, 99, 600, 1000, i64::MAX] {
+        let response = jet_http_srv_response(status, &"private".to_string());
+        assert_eq!(response.status, 500, "invalid status {status} survived");
+        assert_eq!(response.body, "500 Internal Server Error");
+        assert!(response.headers.to_flat().is_empty());
+    }
+}
+
+#[test]
 fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
     use std::io::{Read, Write};
     use std::sync::atomic::{AtomicUsize, Ordering};

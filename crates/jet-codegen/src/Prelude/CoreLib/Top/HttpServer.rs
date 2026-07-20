@@ -292,6 +292,14 @@ fn jet_http_mux_add_handler(mux: &JetHttpMux, method: &str, pattern: &str, handl
 }
 
 fn jet_http_srv_response(status: i64, body: &String) -> JetHttpSrvResp {
+    if !(100..=599).contains(&status) {
+        return JetHttpSrvResp {
+            status: 500,
+            body: "500 Internal Server Error".to_string(),
+            headers: JetHttpHeaders::new(),
+            head_content_length: None,
+        };
+    }
     JetHttpSrvResp {
         status,
         body: body.clone(),
