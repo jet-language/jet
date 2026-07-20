@@ -4,38 +4,18 @@
 // bridge functions use only primitive types (i64, String, Vec<String>) and are
 // called through wrappers here. This is the I6-safe pattern.
 
-#[derive(Clone)]
-struct JetHttpClientReq {
-    method: String,
-    url: String,
-    headers: JetHttpHeaders,
-    header_error: Option<String>,
-    body: Option<String>,
-    timeout_ms: Option<i64>,
-    connect_timeout_ms: Option<i64>,
-    read_timeout_ms: Option<i64>,
-    total_timeout_ms: Option<i64>,
-    redirects: Option<i64>,
-    proxy: Option<String>,
-    cookies: Vec<String>,   // alternating name, value pairs
-    form: Vec<String>,      // alternating name, value pairs
-    multipart: Vec<String>, // alternating name, value pairs
-}
-
-#[derive(Clone)]
-struct JetHttpClientResp {
-    status: i64,
-    body: String,
-    headers: JetHttpHeaders,
-}
-
 fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpClientReq {
     JetHttpClientReq {
         method: method.clone(),
         url: url.clone(),
+        path: String::new(),
+        version: "HTTP/1.1".to_string(),
         headers: JetHttpHeaders::new(),
         header_error: None,
-        body: None,
+        body: JetHttpBody::empty(),
+        body_set: false,
+        params: std::collections::BTreeMap::new(),
+        route_template: None,
         timeout_ms: None,
         connect_timeout_ms: None,
         read_timeout_ms: None,
@@ -54,13 +34,15 @@ fn jet_http_client_request_header(
     value: &String,
 ) -> JetHttpClientReq {
     if let Err(error) = req.headers.append(name, value) {
-        req.header_error = Some(error);
+        let _ = error;
+        req.header_error = Some(JetHttpError::InvalidHeader);
     }
     req
 }
 
 fn jet_http_client_request_body(mut req: JetHttpClientReq, body: &String) -> JetHttpClientReq {
-    req.body = Some(body.clone());
+    req.body = JetHttpBody::from_text(body.clone());
+    req.body_set = true;
     req
 }
 
@@ -130,7 +112,22 @@ fn jet_http_client_request_multipart_text(
 fn jet_http_client_response_status(resp: &JetHttpClientResp) -> i64 {
     resp.status
 }
-fn jet_http_client_response_body(resp: &JetHttpClientResp) -> String {
+
+fn jet_http_client_response_new(
+    status: i64,
+    body: Vec<u8>,
+    headers: Vec<String>,
+) -> Result<JetHttpClientResp, JetHttpError> {
+    Ok(JetHttpClientResp {
+        status,
+        version: "HTTP/1.1".to_string(),
+        body: JetHttpBody::from_bytes(body),
+        headers: JetHttpHeaders::from_flat(headers).map_err(|_| JetHttpError::InvalidHeader)?,
+        trailers: JetHttpHeaders::new(),
+        head_content_length: None,
+    })
+}
+fn jet_http_client_response_body(resp: &JetHttpClientResp) -> JetHttpBody {
     resp.body.clone()
 }
 fn jet_http_client_response_header(resp: &JetHttpClientResp, name: &String) -> Option<String> {

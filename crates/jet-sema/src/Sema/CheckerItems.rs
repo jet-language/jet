@@ -795,6 +795,9 @@ impl<'a> Checker<'a> {
         if let Some(v) = core_net_error_variants(enum_name) {
             return Some(v);
         }
+        if let Some(v) = core_http_variants(enum_name) {
+            return Some(v);
+        }
         if let Some(v) = core_io_variants(enum_name) {
             return Some(v);
         }

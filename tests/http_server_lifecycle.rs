@@ -82,6 +82,42 @@ fn shared_headers_preserve_repeats_validate_and_redact() {
 }
 
 #[test]
+fn shared_http_body_streams_bytes_once_and_uses_closed_errors() {
+    let body = JetHttpBody::reader(std::io::Cursor::new(vec![0, 255, 1, 2]), Some(4));
+    let alias = body.clone();
+    let chunks = body
+        .chunks(2)
+        .expect("first body consumer")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("stream chunks");
+    assert_eq!(chunks, vec![vec![0, 255], vec![1, 2]]);
+    assert_eq!(
+        alias.bytes(8),
+        Err(JetHttpError::BodyConsumed),
+        "a cloned message must not make a move-only body reusable",
+    );
+
+    let oversized = JetHttpBody::from_bytes(vec![1, 2, 3]);
+    assert_eq!(
+        oversized.bytes(2),
+        Err(JetHttpError::BodyTooLarge { limit: 2 }),
+    );
+    assert_eq!(
+        JetHttpBody::from_bytes(vec![0xff]).text(8),
+        Err(JetHttpError::UnsupportedEncoding),
+    );
+
+    let mut streamed = JetHttpBody::reader(std::io::Cursor::new(b"abcdef".to_vec()), None)
+        .chunks(2)
+        .unwrap();
+    let mut observed = Vec::new();
+    while let Some(chunk) = streamed.next() {
+        observed.extend(chunk.unwrap());
+    }
+    assert_eq!(observed, b"abcdef");
+}
+
+#[test]
 fn client_request_and_response_use_the_shared_headers() {
     let req = jet_http_client_request_header(
         jet_http_client_request_header(
@@ -104,7 +140,7 @@ fn client_request_and_response_use_the_shared_headers() {
         "Set-Cookie".to_string(), "a=1".to_string(),
         "set-cookie".to_string(), "b=2".to_string(),
     ]).unwrap();
-    let response = JetHttpClientResp { status: 200, body: String::new(), headers };
+    let response = jet_http_srv_response_with_headers(200, "", headers);
     assert_eq!(jet_http_client_response_cookies(&response), vec!["a=1", "b=2"]);
 
     let invalid_response = jet_http_srv_response_header(
@@ -128,7 +164,7 @@ fn live_server_round_trips_repeated_headers_in_order() {
         let mut headers = JetHttpHeaders::new();
         headers.append("Set-Cookie", "a=1").unwrap();
         headers.append("set-cookie", "b=2").unwrap();
-        JetHttpSrvResp { status: 200, body: "ok".to_string(), headers, head_content_length: None }
+        jet_http_srv_response_with_headers(200, "ok", headers)
     });
     let client = std::thread::spawn(move || {
         request(addr, b"GET /headers HTTP/1.1\r\nHost: local\r\nX-Tag: one\r\nx-tag: two\r\n\r\n")
@@ -138,6 +174,64 @@ fn live_server_round_trips_repeated_headers_in_order() {
     let first = response.find("Set-Cookie: a=1\r\n").expect("first repeated header");
     let second = response.find("set-cookie: b=2\r\n").expect("second repeated header");
     assert!(first < second, "repeated header order changed: {response}");
+}
+
+#[test]
+fn live_shared_messages_round_trip_binary_and_stream_unknown_length() {
+    use std::io::{Read, Write};
+
+    fn takes_canonical_request(_: JetHttpRequest) {}
+    fn takes_canonical_response(_: JetHttpResponse) {}
+
+    takes_canonical_request(jet_http_client_request_new(
+        &"POST".to_string(),
+        &"http://local/binary".to_string(),
+    ));
+    takes_canonical_response(jet_http_srv_response(200, &String::new()));
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mux = jet_http_mux_new();
+    jet_http_mux_add(&mux, "POST", "/binary", |req| {
+        assert_eq!(req.headers.all("x-repeat"), vec!["one", "two"]);
+        assert_eq!(req.body.bytes(8).unwrap(), vec![0, 255]);
+        let mut response = jet_http_srv_response_with_headers(
+            200,
+            "",
+            [
+                ("X-Repeat".to_string(), "alpha".to_string()),
+                ("x-repeat".to_string(), "beta".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        response.body = JetHttpBody::reader(
+            std::io::Cursor::new(vec![255, 0, 1]),
+            None,
+        );
+        response
+    });
+    let client = std::thread::spawn(move || {
+        let mut stream = std::net::TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(
+                b"POST /binary HTTP/1.1\r\nHost: local\r\nX-Repeat: one\r\nx-repeat: two\r\nContent-Length: 2\r\nConnection: close\r\n\r\n\0\xff",
+            )
+            .unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).unwrap();
+        response
+    });
+    jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux).unwrap();
+    let response = client.join().unwrap();
+    let header_end = response.windows(4).position(|bytes| bytes == b"\r\n\r\n").unwrap();
+    let headers = std::str::from_utf8(&response[..header_end]).unwrap();
+    assert!(headers.contains("Transfer-Encoding: chunked\r\n"), "{headers}");
+    let first = headers.find("X-Repeat: alpha").unwrap_or_else(|| panic!("{headers}"));
+    let second = headers.find("x-repeat: beta").unwrap_or_else(|| panic!("{headers}"));
+    assert!(first < second, "{headers}");
+    assert_eq!(&response[header_end + 4..], b"3\r\n\xff\0\x01\r\n0\r\n\r\n");
 }
 
 #[test]
@@ -245,7 +339,9 @@ fn plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("local addr");
     let mux = jet_http_mux_new();
-    jet_http_mux_add(&mux, "POST", "/one", |req| jet_http_srv_response(200, &req.body));
+    jet_http_mux_add(&mux, "POST", "/one", |req| {
+        jet_http_srv_response(200, &req.body.text(1024 * 1024).unwrap())
+    });
     jet_http_mux_add(&mux, "GET", "/two", |_| jet_http_srv_response(200, &"two".to_string()));
     jet_http_mux_add(&mux, "GET", "/empty", |_| jet_http_srv_response(204, &"forbidden".to_string()));
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -621,8 +717,10 @@ fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
     let handler_calls = post_calls.clone();
     jet_http_mux_add(&mux, "POST", "/echo", move |req| {
         handler_calls.fetch_add(1, Ordering::AcqRel);
-        let preview = (req.body.len() <= 32).then_some(req.body.as_str()).unwrap_or("");
-        jet_http_srv_response(200, &format!("{}:{preview}", req.body.len()))
+        let length = req.body.len();
+        let body = req.body.text(1024 * 1024).unwrap();
+        let preview = (length <= 32).then_some(body.as_str()).unwrap_or("");
+        jet_http_srv_response(200, &format!("{length}:{preview}"))
     });
     jet_http_mux_add(&mux, "GET", "/next", |_| {
         jet_http_srv_response(200, &"next".to_string())
@@ -776,7 +874,7 @@ fn expect_continue_is_ordered_bounded_and_rejects_before_dispatch() {
     let post_calls = calls.clone();
     jet_http_mux_add(&mux, "POST", "/echo", move |req| {
         post_calls.fetch_add(1, Ordering::AcqRel);
-        jet_http_srv_response(200, &req.body)
+        jet_http_srv_response(200, &req.body.text(1024 * 1024).unwrap())
     });
     let get_calls = calls.clone();
     jet_http_mux_add(&mux, "GET", "/next", move |_| {
@@ -1442,7 +1540,7 @@ fn content_length_is_one_identical_decimal_value_before_body_permission() {
     let post_calls = calls.clone();
     jet_http_mux_add(&mux, "POST", "/echo", move |req| {
         post_calls.fetch_add(1, Ordering::AcqRel);
-        jet_http_srv_response(200, &req.body)
+        jet_http_srv_response(200, &req.body.text(1024 * 1024).unwrap())
     });
     let get_calls = calls.clone();
     jet_http_mux_add(&mux, "GET", "/next", move |_| {
@@ -1694,9 +1792,8 @@ fn canonical_router_precedence_methods_and_conflicts() {
     jet_http_mux_add(&mux, "GET", "/files/static", |_| jet_http_srv_response(200, &"static".to_string()));
     jet_http_mux_add(&mux, "POST", "/files/:id", |_| jet_http_srv_response(201, &"posted".to_string()));
 
-    let request = |method: &str, path: &str| JetHttpSrvReq {
-        method: method.to_string(), path: path.to_string(), params: Default::default(),
-        body: String::new(), headers: Default::default(), route_template: None,
+    let request = |method: &str, path: &str| {
+        JetHttpSrvReq::server(method, path.to_string(), Vec::new(), Default::default())
     };
     assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/static")).body, "static");
     assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/42")).body, "param:42");
@@ -1791,9 +1888,8 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
         jet_http_srv_response(200, &jet_http_srv_req_param(&req, &"id".to_string()).unwrap())
     });
     jet_http_mux_add(&mux, "GET", "/panic", |_| panic!("private failure detail"));
-    let request = |path: &str| JetHttpSrvReq {
-        method: "GET".to_string(), path: path.to_string(), params: Default::default(),
-        body: String::new(), headers: Default::default(), route_template: None,
+    let request = |path: &str| {
+        JetHttpSrvReq::server("GET", path.to_string(), Vec::new(), Default::default())
     };
     assert_eq!(jet_http_mux_dispatch(&mux, request("/ok/one")).body, "one");
     assert_eq!(&*events.lock().unwrap(), &[
@@ -1819,7 +1915,12 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     for id in 0..16 {
         let mux = mux.clone();
         threads.push(std::thread::spawn(move || {
-            let req = JetHttpSrvReq { method: "GET".to_string(), path: format!("/ok/{id}"), params: Default::default(), body: String::new(), headers: Default::default(), route_template: None };
+            let req = JetHttpSrvReq::server(
+                "GET",
+                format!("/ok/{id}"),
+                Vec::new(),
+                Default::default(),
+            );
             assert_eq!(jet_http_mux_dispatch(&mux, req).body, id.to_string());
         }));
     }
@@ -1828,9 +1929,8 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
 
 #[test]
 fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
-    let request = |path: &str| JetHttpSrvReq {
-        method: "GET".to_string(), path: path.to_string(), params: Default::default(),
-        body: String::new(), headers: Default::default(), route_template: None,
+    let request = |path: &str| {
+        JetHttpSrvReq::server("GET", path.to_string(), Vec::new(), Default::default())
     };
 
     // Two requests must enter the same handler concurrently. Holding the route

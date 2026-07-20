@@ -748,11 +748,11 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
         ("core.http.client", "get") | ("core.http.client", "post") => {
             return Type::Result {
-                ok: Box::new(Type::Named("HttpClientResp".to_string())),
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
                 err: Box::new(Type::String),
             }
         }
-        ("core.http.client", "request") => return Type::Named("HttpClientReq".to_string()),
+        ("core.http.client", "request") => return Type::Named("HttpRequest".to_string()),
         ("core.http.server", "mux") => return Type::Named("HttpMux".to_string()),
         ("core.http.server", "bind") => return Type::Result {
             ok: Box::new(Type::Named("HttpServer".to_string())),
@@ -767,12 +767,12 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         }
         ("core.http.server", "static_file" | "static_file_range") => {
             return Type::Result {
-                ok: Box::new(Type::Named("HttpSrvResp".to_string())),
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
                 err: Box::new(Type::String),
             }
         }
-        ("core.http.server", "response") => return Type::Named("HttpSrvResp".to_string()),
-        ("core.http.server", "sse") => return Type::Named("HttpSrvResp".to_string()),
+        ("core.http.server", "response") => return Type::Named("HttpResponse".to_string()),
+        ("core.http.server", "sse") => return Type::Named("HttpResponse".to_string()),
         ("core.http.server", "access_log") => return Type::String,
         _ => {}
     }

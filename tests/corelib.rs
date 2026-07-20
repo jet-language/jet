@@ -5280,7 +5280,7 @@ fn core_http_client_preserves_repeated_headers_over_a_socket() {
         assert!(first < second, "repeated Warning values changed: {request}");
         stream
             .write_all(
-                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-A: one\r\nX-B: middle\r\nX-A: two\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nConnection: close\r\n\r\nok",
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-A: one\r\nX-B: middle\r\nX-A: two\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nConnection: close\r\n\r\n\xff\0",
             )
             .unwrap();
     });
@@ -5307,10 +5307,11 @@ fn main() {
         "Warning".to_string(), "one".to_string(),
         "Warning".to_string(), "two".to_string(),
     ];
-    let (_, _, headers) = bridge::jet_http_client_send_impl(
+    let (_, body, headers) = bridge::jet_http_client_send_impl(
         "GET", &url, &request_headers, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap();
+    assert_eq!(body, vec![255, 0]);
     let selected = headers.chunks_exact(2)
         .filter(|pair| matches!(pair[0].as_str(), "x-a" | "x-b" | "set-cookie"))
         .flat_map(|pair| [pair[0].clone(), pair[1].clone()])
@@ -5334,6 +5335,61 @@ fn main() {
     let output = Command::new(&bin).arg(format!("http://{addr}/")).output().unwrap();
     server.join().unwrap();
     assert!(output.status.success(), "bridge harness failed:\n{}", String::from_utf8_lossy(&output.stderr));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_http_client_exposes_binary_body_once() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0; 4096];
+        stream.read(&mut request).unwrap();
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nX-A: one\r\nX-A: two\r\nConnection: close\r\n\r\n\0\xff\x01")
+            .unwrap();
+    });
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_http_binary_body_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = format!(
+        r#"
+use core.http.client as client
+
+fn run() {{
+    response :: client.get("http://{addr}/") ?? panic("request")
+    values :: response.headers.all("x-a")
+    print(values.len())
+    print(values[0])
+    print(values[1])
+    body :: response.body()
+    bytes :: body.bytes(8) ?? panic("body")
+    print(bytes.len())
+    print(bytes[0])
+    print(bytes[1])
+    second :: body.bytes(8)
+    if second == {{
+        Ok(_) -> {{ print("reused") }}
+        Err(error) -> {{
+            if error == {{
+                .BodyConsumed -> {{ print("consumed") }}
+                else -> {{ print("wrong-error") }}
+            }}
+        }}
+    }}
+}}
+"#,
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "http_binary_body", &source, &[], None);
+    server.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "2\none\ntwo\n3\n0\n255\nconsumed\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -5411,7 +5467,7 @@ fn main() {
         "POST", &url, &[], None, None, None, None, None, None, None,
         &[], &[], &multipart,
     ).unwrap();
-    assert_eq!((response.0, response.1.as_str()), (200, "ok"));
+    assert_eq!((response.0, response.1.as_slice()), (200, b"ok".as_slice()));
 }
 "#,
     )
@@ -5738,12 +5794,12 @@ fn main() {
         "GET", &url, &[], None, None, None, None, None, Some(0), None,
         &[], &[], &[],
     ).unwrap();
-    assert_eq!((stopped.0, stopped.1.as_str()), (302, "redirect"));
+    assert_eq!((stopped.0, stopped.1.as_slice()), (302, b"redirect".as_slice()));
     let followed = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None,
         Some(i64::from(u32::MAX)), None, &[], &[], &[],
     ).unwrap();
-    assert_eq!((followed.0, followed.1.as_str()), (200, "ok"));
+    assert_eq!((followed.0, followed.1.as_slice()), (200, b"ok".as_slice()));
     let explicit = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None, Some(1), None,
         &[], &[], &[],
@@ -5753,7 +5809,7 @@ fn main() {
         "GET", &format!("{base}/within/0"), &[], None, None, None, None, None,
         None, None, &[], &[], &[],
     ).unwrap();
-    assert_eq!((within.0, within.1.as_str()), (200, "ok"));
+    assert_eq!((within.0, within.1.as_slice()), (200, b"ok".as_slice()));
     let over = bridge::jet_http_client_send_impl(
         "GET", &format!("{base}/over/0"), &[], None, None, None, None, None,
         None, None, &[], &[], &[],
@@ -5965,7 +6021,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr() ?? panic("address")
     mux :: server.mux()
-    mux.get("/", (req: HttpSrvReq) =>
+    mux.get("/", (req: HttpRequest) =>
         server.response(200, "ok")
             .header("Set-Cookie", "a=1")
             .header("Set-Cookie", "b=2")

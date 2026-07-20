@@ -190,7 +190,7 @@ fn lower_lambda_expecting_with_host_borrow(
         boxed: lam.meta.escapes,
         arc: lam.meta.escapes
             && lam.params.len() == 1
-            && matches!(lam.params[0].ty.as_ref(), Some(Type::Named(name)) if name == "HttpSrvReq"),
+            && matches!(lam.params[0].ty.as_ref(), Some(Type::Named(name)) if name == "HttpRequest"),
     }
 }
 

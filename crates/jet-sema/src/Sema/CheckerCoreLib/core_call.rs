@@ -2586,8 +2586,8 @@ impl<'a> Checker<'a> {
                     }
                     self.expect_url_arg("get", 0, &mut args[0]);
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpClientResp".to_string())),
-                        err: Box::new(Type::String),
+                        ok: Box::new(Type::Named("HttpResponse".to_string())),
+                        err: Box::new(Type::Named("HttpError".to_string())),
                     });
                 }
                 ("core.http.client", "post") => {
@@ -2602,8 +2602,8 @@ impl<'a> Checker<'a> {
                     self.expect_url_arg("post", 0, &mut args[0]);
                     self.expect_core_arg("post", 1, &Type::String, &mut args[1]);
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpClientResp".to_string())),
-                        err: Box::new(Type::String),
+                        ok: Box::new(Type::Named("HttpResponse".to_string())),
+                        err: Box::new(Type::Named("HttpError".to_string())),
                     });
                 }
                 ("core.http.client", "request") => {
@@ -2617,7 +2617,7 @@ impl<'a> Checker<'a> {
                     }
                     self.expect_core_arg("request", 0, &Type::String, &mut args[0]);
                     self.expect_url_arg("request", 1, &mut args[1]);
-                    return Some(Type::Named("HttpClientReq".to_string()));
+                    return Some(Type::Named("HttpRequest".to_string()));
                 }
                 ("core.http.server", "mux") => {
                     for a in args.iter_mut() {
@@ -2635,7 +2635,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("bind", 1, &Type::Named("HttpMux".to_string()), &mut args[1]);
                     return Some(Type::Result {
                         ok: Box::new(Type::Named("HttpServer".to_string())),
-                        err: Box::new(Type::String),
+                        err: Box::new(Type::Named("HttpError".to_string())),
                     });
                 }
                 ("core.http.server", "serve") => {
@@ -2682,7 +2682,7 @@ impl<'a> Checker<'a> {
                     }
                     return Some(Type::Result {
                         ok: Box::new(unit_ty()),
-                        err: Box::new(Type::String),
+                        err: Box::new(Type::Named("HttpError".to_string())),
                     });
                 }
                 ("core.http.server", "serve_once") => {
@@ -2698,7 +2698,7 @@ impl<'a> Checker<'a> {
                     self.infer(&mut args[1].expr);
                     return Some(Type::Result {
                         ok: Box::new(unit_ty()),
-                        err: Box::new(Type::String),
+                        err: Box::new(Type::Named("HttpError".to_string())),
                     });
                 }
                 ("core.http.server", "serve_once_listener") => {
@@ -2719,7 +2719,7 @@ impl<'a> Checker<'a> {
                     self.infer(&mut args[1].expr);
                     return Some(Type::Result {
                         ok: Box::new(unit_ty()),
-                        err: Box::new(Type::String),
+                        err: Box::new(Type::Named("HttpError".to_string())),
                     });
                 }
                 ("core.http.server", "tls") => {
@@ -2746,7 +2746,7 @@ impl<'a> Checker<'a> {
                     }
                     self.expect_core_arg("response", 0, &Type::Int, &mut args[0]);
                     self.expect_core_arg("response", 1, &Type::String, &mut args[1]);
-                    return Some(Type::Named("HttpSrvResp".to_string()));
+                    return Some(Type::Named("HttpResponse".to_string()));
                 }
                 ("core.http.server", "sse") => {
                     if args.len() != 1 {
@@ -2758,7 +2758,7 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     self.expect_core_arg("sse", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HttpSrvResp".to_string()));
+                    return Some(Type::Named("HttpResponse".to_string()));
                 }
                 ("core.http.server", "static_file") => {
                     if args.len() != 2 {
@@ -2772,8 +2772,8 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("static_file", 0, &Type::String, &mut args[0]);
                     self.expect_core_arg("static_file", 1, &Type::String, &mut args[1]);
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpSrvResp".to_string())),
-                        err: Box::new(Type::String),
+                        ok: Box::new(Type::Named("HttpResponse".to_string())),
+                        err: Box::new(Type::Named("HttpError".to_string())),
                     });
                 }
                 ("core.http.server", "static_file_range") => {
@@ -2788,14 +2788,14 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "static_file_range",
                         0,
-                        &Type::Named("HttpSrvReq".to_string()),
+                        &Type::Named("HttpRequest".to_string()),
                         &mut args[0],
                     );
                     self.expect_core_arg("static_file_range", 1, &Type::String, &mut args[1]);
                     self.expect_core_arg("static_file_range", 2, &Type::String, &mut args[2]);
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpSrvResp".to_string())),
-                        err: Box::new(Type::String),
+                        ok: Box::new(Type::Named("HttpResponse".to_string())),
+                        err: Box::new(Type::Named("HttpError".to_string())),
                     });
                 }
                 ("core.http.server", "access_log") => {
@@ -2810,7 +2810,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "access_log",
                         0,
-                        &Type::Named("HttpSrvReq".to_string()),
+                        &Type::Named("HttpRequest".to_string()),
                         &mut args[0],
                     );
                     self.expect_core_arg("access_log", 1, &Type::Int, &mut args[1]);

@@ -973,6 +973,10 @@ impl Cx {
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
             Type::Named(name) if name == "HttpClientReq" => "JetHttpClientReq".to_string(),
             Type::Named(name) if name == "HttpClientResp" => "JetHttpClientResp".to_string(),
+            Type::Named(name) if name == "HttpBody" => "JetHttpBody".to_string(),
+            Type::Named(name) if name == "HttpError" => "JetHttpError".to_string(),
+            Type::Named(name) if name == "HttpOperation" => "JetHttpOperation".to_string(),
+            Type::Named(name) if name == "HttpHeaders" => "JetHttpHeaders".to_string(),
             Type::Named(name) if name == "HttpMux" => "JetHttpMux".to_string(),
             Type::Named(name) if name == "HttpHandler" => "JetHttpMuxHandlerFn".to_string(),
             Type::Named(name) if name == "HttpServer" => "JetHttpServer".to_string(),
@@ -2002,6 +2006,68 @@ pub(crate) fn build_cx_items(
     for name in Syntax::IO_OPERATION_VARIANTS { cx.variant_owner.insert((*name).to_string(), Syntax::TYPE_IO_OPERATION.to_string()); }
     cx.cloneable.insert(Syntax::TYPE_IO_ERROR.to_string());
     cx.cloneable.insert(Syntax::TYPE_IO_OPERATION.to_string());
+    let zero = Span::new(0, 0);
+    let http_operations = ["ClientConnect", "ServerBind", "ServeListener"];
+    cx.enum_variants.insert(
+        "HttpOperation".to_string(),
+        http_operations
+            .iter()
+            .map(|name| ((*name).to_string(), VariantPayload::Unit))
+            .collect(),
+    );
+    for name in http_operations {
+        cx.variant_owner
+            .insert(name.to_string(), "HttpOperation".to_string());
+    }
+    let mut http_errors = [
+        "InvalidMethod",
+        "InvalidUrl",
+        "InvalidHeader",
+        "InvalidStatus",
+        "BodyConsumed",
+        "InvalidFraming",
+        "UnsupportedEncoding",
+        "Cancelled",
+    ]
+    .into_iter()
+    .map(|name| (name.to_string(), VariantPayload::Unit))
+    .collect::<Vec<_>>();
+    for (name, field, ty) in [
+        ("BodyTooLarge", "limit", Type::Int),
+        ("Resolve", "host", Type::String),
+        ("Connect", "address", Type::String),
+        ("Tls", "stage", Type::String),
+        ("Timeout", "phase", Type::String),
+        ("Proxy", "stage", Type::String),
+        ("Redirect", "reason", Type::String),
+        ("Protocol", "version", Type::String),
+        ("Io", "operation", Type::String),
+        ("ResourceUnavailable", "resource", Type::String),
+        ("Internal", "incident_id", Type::String),
+        (
+            "UnsupportedTarget",
+            "operation",
+            Type::Named("HttpOperation".to_string()),
+        ),
+    ] {
+        http_errors.push((
+            name.to_string(),
+            VariantPayload::Named(vec![VariantField {
+                name: field.to_string(),
+                name_span: zero,
+                ty,
+                ty_span: zero,
+            }]),
+        ));
+    }
+    for (name, _) in &http_errors {
+        cx.variant_owner
+            .insert(name.clone(), "HttpError".to_string());
+    }
+    cx.enum_variants
+        .insert("HttpError".to_string(), http_errors);
+    cx.cloneable.insert("HttpError".to_string());
+    cx.cloneable.insert("HttpOperation".to_string());
     cx.enum_variants.insert(
         Syntax::TYPE_ORDERING.to_string(),
         ["Less", "Equal", "Greater"]

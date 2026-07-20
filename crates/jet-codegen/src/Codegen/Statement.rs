@@ -23,6 +23,9 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let etype = resolved_type.as_deref().or(enum_type);
     let is_json = etype.map(is_json_type_name).unwrap_or(false);
     let is_io = etype.map(|t| matches!(t, "IOError" | "IOOperation")).unwrap_or(false);
+    let is_http = etype
+        .map(|t| matches!(t, "HttpError" | "HttpOperation"))
+        .unwrap_or(false);
     let is_email = etype.is_some_and(|t| matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError"));
     let is_auth = etype == Some("AuthError");
     let is_hook_outcome = etype == Some("HookOutcome");
@@ -46,6 +49,10 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 format!("{}jet_std::IoError", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_OPERATION {
                 format!("{}jet_std::IoOperation", cx.root_prefix)
+            } else if t == "HttpError" {
+                format!("{}JetHttpError", cx.root_prefix)
+            } else if t == "HttpOperation" {
+                format!("{}JetHttpOperation", cx.root_prefix)
             } else if matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError") {
                 let rust = if t == "EmailError" { "Error" } else { t };
                 format!("{}jet_email::{rust}", cx.root_prefix)
@@ -71,7 +78,7 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     // Variant names are mangled for user enums, but JSON and Key variants keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_io || is_email || is_auth || is_hook_outcome {
+        if is_json || is_key || is_io || is_http || is_email || is_auth || is_hook_outcome {
             v.to_string()
         } else {
             mangle_variant(v)

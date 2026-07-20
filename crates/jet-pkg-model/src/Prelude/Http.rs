@@ -21,7 +21,7 @@ fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, String> 
 
 /// Perform an HTTP GET. Returns (status_code, body, headers_flat) where headers_flat
 /// is alternating [key, value, key, value, ...].
-pub fn jet_http_client_get_impl(url: &String) -> Result<(i64, String, Vec<String>), String> {
+pub fn jet_http_client_get_impl(url: &String) -> Result<(i64, Vec<u8>, Vec<String>), String> {
     jet_http_client_send_impl("GET", url, &[], None, None, None, None, None, None, None, &[], &[], &[])
 }
 
@@ -29,12 +29,12 @@ pub fn jet_http_client_get_impl(url: &String) -> Result<(i64, String, Vec<String
 pub fn jet_http_client_post_impl(
     url: &String,
     body: &String,
-) -> Result<(i64, String, Vec<String>), String> {
+) -> Result<(i64, Vec<u8>, Vec<String>), String> {
     jet_http_client_send_impl(
         "POST",
         url,
         &[],
-        Some(body.as_str()),
+        Some(body.as_bytes()),
         None,
         None,
         None,
@@ -53,7 +53,7 @@ pub fn jet_http_client_send_impl(
     method: &str,
     url: &String,
     headers_flat: &[String],
-    body: Option<&str>,
+    body: Option<&[u8]>,
     timeout_ms: Option<i64>,
     connect_timeout_ms: Option<i64>,
     read_timeout_ms: Option<i64>,
@@ -63,7 +63,7 @@ pub fn jet_http_client_send_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, String, Vec<String>), String> {
+) -> Result<(i64, Vec<u8>, Vec<String>), String> {
     let default_timeout = validated_timeout("timeout", timeout_ms.unwrap_or(30_000))?;
     let connect_timeout = connect_timeout_ms
         .map(|milliseconds| validated_timeout("connect timeout", milliseconds))
@@ -122,7 +122,7 @@ pub fn jet_http_client_send_impl(
     let form_body;
     let multipart_body;
     let result = if let Some(b) = body {
-        req.send_string(b)
+        req.send_bytes(b)
     } else if !multipart_flat.is_empty() {
         let boundary = multipart_boundary(multipart_flat);
         multipart_body = encode_multipart(multipart_flat, &boundary);
@@ -142,12 +142,12 @@ pub fn jet_http_client_send_impl(
         Ok(resp) => {
             let status = resp.status() as i64;
             let flat = flatten_response_headers(&resp);
-            let body = read_response_text(resp)?;
+            let body = read_response_bytes(resp)?;
             Ok((status, body, flat))
         }
         Err(ureq::Error::Status(code, resp)) => {
             let flat = flatten_response_headers(&resp);
-            let body = read_response_text(resp)?;
+            let body = read_response_bytes(resp)?;
             Ok((code as i64, body, flat))
         }
         Err(ureq::Error::Transport(error))
@@ -191,7 +191,7 @@ pub fn jet_http_client_send_impl(
     }
 }
 
-fn read_response_text(response: ureq::Response) -> Result<String, String> {
+fn read_response_bytes(response: ureq::Response) -> Result<Vec<u8>, String> {
     use std::io::Read;
 
     let mut reader = response.into_reader();
@@ -211,7 +211,7 @@ fn read_response_text(response: ureq::Response) -> Result<String, String> {
         }
         bytes.extend_from_slice(&chunk[..read]);
     }
-    String::from_utf8(bytes).map_err(|_| "HTTP response body is not valid UTF-8".to_string())
+    Ok(bytes)
 }
 
 fn flatten_response_headers(response: &ureq::Response) -> Vec<String> {

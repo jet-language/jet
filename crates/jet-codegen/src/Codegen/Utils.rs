@@ -8,6 +8,10 @@ pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
                 format!("{}jet_std::IoError", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_OPERATION {
                 format!("{}jet_std::IoOperation", cx.root_prefix)
+            } else if t == "HttpError" {
+                format!("{}JetHttpError", cx.root_prefix)
+            } else if t == "HttpOperation" {
+                format!("{}JetHttpOperation", cx.root_prefix)
             } else if t == "AuthError" {
                 format!("{}JetAuthError", cx.root_prefix)
             } else if t == "HookOutcome" {
@@ -63,6 +67,10 @@ pub(crate) fn is_key_variant(variant: &str) -> bool {
 pub(crate) fn variant_rust_name(cx: &Cx, variant: &str) -> String {
     if is_json_variant(variant)
         || is_key_variant(variant)
+        || cx
+            .variant_owner
+            .get(variant)
+            .is_some_and(|owner| matches!(owner.as_str(), "HttpError" | "HttpOperation"))
         || cx.variant_owner.get(variant).is_some_and(|owner| owner == "HookOutcome")
         || cx.variant_owner.get(variant).is_some_and(|owner| owner == "AuthError")
     {

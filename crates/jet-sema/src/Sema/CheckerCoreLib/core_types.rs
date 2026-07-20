@@ -237,7 +237,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
-        | "HttpClientReq" | "HttpClientResp" | "HttpMux" | "HttpHandler" | "HttpSrvReq" | "HttpSrvResp" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
+        | "HttpHeaders" | "HttpBody" | "HttpError" | "HttpOperation" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -462,20 +462,13 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("ProcessChild", "stdin") => Some(Type::Named("ProcessStdin".to_string())),
         ("ProcessChild", "stdout") => Some(Type::Named("ProcessStdoutStream".to_string())),
         ("ProcessChild", "stderr") => Some(Type::Named("ProcessStderrStream".to_string())),
-        // E2-M10: HTTP request fields exposed to handlers.
-        ("HttpRequest", "method" | "path" | "body") => Some(Type::String),
-        ("HttpRequest", "headers") => Some(Type::Map {
-            key: Box::new(Type::String),
-            key_span: None,
-            value: Box::new(Type::String),
-        }),
-        // E2-M10: HTTP response fields.
-        ("HttpResponse", "status" | "body") => Some(Type::String),
-        ("HttpResponse", "headers") => Some(Type::Map {
-            key: Box::new(Type::String),
-            key_span: None,
-            value: Box::new(Type::String),
-        }),
+        // D-HTTP-CORE2=A: one byte-native message model.
+        ("HttpRequest", "method" | "path") => Some(Type::String),
+        ("HttpRequest", "body") => Some(Type::Named("HttpBody".to_string())),
+        ("HttpRequest", "headers") => Some(Type::Named("HttpHeaders".to_string())),
+        ("HttpResponse", "status") => Some(Type::Int),
+        ("HttpResponse", "body") => Some(Type::Named("HttpBody".to_string())),
+        ("HttpResponse", "headers") => Some(Type::Named("HttpHeaders".to_string())),
         // D-GAME-*: scene-owned headless game substrate fields.
         ("GameScene", "assets") => Some(Type::Named("GameAssets".to_string())),
         ("GameScene", "input") => Some(Type::Named("GameInputMap".to_string())),
@@ -679,6 +672,53 @@ pub(crate) fn core_net_error_variants(
         zero,
         VariantPayload::Single(Type::Named("NetDnsError".to_string()), zero),
     ));
+    Some(variants)
+}
+
+/// D-HTTP-CORE2=A / D-HTTP-UNSUPPORTED1=A: the one closed HTTP error tree.
+pub(crate) fn core_http_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::{VariantField, VariantPayload};
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    let mut variants = std::collections::HashMap::new();
+    if enum_name == "HttpOperation" {
+        for name in ["ClientConnect", "ServerBind", "ServeListener"] {
+            variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+        }
+        return Some(variants);
+    }
+    if enum_name != "HttpError" {
+        return None;
+    }
+    for name in [
+        "InvalidMethod", "InvalidUrl", "InvalidHeader", "InvalidStatus", "BodyConsumed",
+        "InvalidFraming", "UnsupportedEncoding", "Cancelled",
+    ] {
+        variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+    }
+    for (name, field, ty) in [
+        ("BodyTooLarge", "limit", Type::Int),
+        ("Resolve", "host", Type::String),
+        ("Connect", "address", Type::String),
+        ("Tls", "stage", Type::String),
+        ("Timeout", "phase", Type::String),
+        ("Proxy", "stage", Type::String),
+        ("Redirect", "reason", Type::String),
+        ("Protocol", "version", Type::String),
+        ("Io", "operation", Type::String),
+        ("ResourceUnavailable", "resource", Type::String),
+        ("Internal", "incident_id", Type::String),
+        ("UnsupportedTarget", "operation", Type::Named("HttpOperation".to_string())),
+    ] {
+        variants.insert(name.to_string(), (zero, VariantPayload::Named(vec![VariantField {
+            name: field.to_string(),
+            name_span: zero,
+            ty,
+            ty_span: zero,
+        }])));
+    }
     Some(variants)
 }
 
@@ -932,23 +972,7 @@ pub fn encoding_handle_method_return(
 /// Returns `Some(fields)` when the named type is a prelude struct users can construct.
 pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
     let str_ty = Type::String;
-    let map_ty = Type::Map {
-        key: Box::new(Type::String),
-        key_span: None,
-        value: Box::new(Type::String),
-    };
     match type_name {
-        "HttpResponse" => Some(vec![
-            ("status".to_string(), str_ty.clone()),
-            ("body".to_string(), str_ty),
-            ("headers".to_string(), map_ty),
-        ]),
-        "HttpRequest" => Some(vec![
-            ("method".to_string(), str_ty.clone()),
-            ("path".to_string(), str_ty.clone()),
-            ("body".to_string(), str_ty),
-            ("headers".to_string(), map_ty),
-        ]),
         // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }`
         // — the two dot-literal enum fields resolve via `resolve_enum_variants_cloned`
         // (below), the same "core enum, not in the user registry" mechanism as

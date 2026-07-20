@@ -1595,7 +1595,7 @@ pub(crate) fn lower_method_call(
     }
     // D-NETDEP1=A / D-HTTPLIB1=A: an HTTP type method (gate shape d10).
     if is_http_type(recv_type.as_deref()) && is_http_method_name(recv_type.as_deref(), method) {
-        let kind = recv_type.as_deref().unwrap_or("HttpClientReq").to_string();
+        let kind = recv_type.as_deref().unwrap_or("HttpRequest").to_string();
         let recv_t = lower_expr(receiver, cx, env);
         let result_ty = match (kind.as_str(), method) {
             ("HttpClientReq", "header")
@@ -1611,16 +1611,44 @@ pub(crate) fn lower_method_call(
             | ("HttpClientReq", "multipart_text") => Type::Named("HttpClientReq".to_string()),
             ("HttpClientReq", "send") => Type::Result {
                 ok: Box::new(Type::Named("HttpClientResp".to_string())),
-                err: Box::new(Type::String),
+                err: Box::new(Type::Named("HttpError".to_string())),
             },
             ("HttpClientResp", "status") => Type::Int,
-            ("HttpClientResp", "body") | ("HttpClientResp", "header") => Type::String,
+            ("HttpClientResp", "body") => Type::Named("HttpBody".to_string()),
+            ("HttpClientResp", "header") => Type::String,
             ("HttpClientResp", "cookies") => Type::List(Box::new(Type::String)),
+            ("HttpRequest", "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
+                | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text")
+                if !args.is_empty() && !(method == "header" && args.len() == 1) => {
+                    Type::Named("HttpRequest".to_string())
+                }
+            ("HttpRequest", "send") => Type::Result {
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            },
+            ("HttpRequest", "method" | "path") => Type::String,
+            ("HttpRequest", "body") => Type::Named("HttpBody".to_string()),
+            ("HttpRequest", "body_len") => Type::Int,
+            ("HttpRequest", "under_limit") => Type::Bool,
+            ("HttpRequest", "param" | "header") => Type::Option(Box::new(Type::String)),
+            ("HttpResponse", "header") if args.len() == 2 => Type::Named("HttpResponse".to_string()),
+            ("HttpResponse", "status") => Type::Int,
+            ("HttpResponse", "body") => Type::Named("HttpBody".to_string()),
+            ("HttpResponse", "header") => Type::Option(Box::new(Type::String)),
+            ("HttpResponse", "cookies") => Type::List(Box::new(Type::String)),
+            ("HttpHeaders", "first") => Type::Option(Box::new(Type::String)),
+            ("HttpHeaders", "all") => Type::List(Box::new(Type::String)),
+            ("HttpHeaders", "append" | "set") => Type::Result {
+                ok: Box::new(Type::Named("HttpHeaders".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            },
+            ("HttpHeaders", "remove") => Type::Named("HttpHeaders".to_string()),
             ("HttpMux", _) => unit_type(),
             ("HttpHandler", "handle") => Type::Named("HttpSrvResp".to_string()),
-            ("HttpSrvReq", "method") | ("HttpSrvReq", "path") | ("HttpSrvReq", "body") => {
+            ("HttpSrvReq", "method") | ("HttpSrvReq", "path") => {
                 Type::String
             }
+            ("HttpSrvReq", "body") => Type::Named("HttpBody".to_string()),
             ("HttpSrvReq", "body_len") => Type::Int,
             ("HttpSrvReq", "under_limit") => Type::Bool,
             ("HttpSrvReq", "param") | ("HttpSrvReq", "header") => {
@@ -1628,11 +1656,23 @@ pub(crate) fn lower_method_call(
             }
             ("HttpSrvResp", "header") => Type::Named("HttpSrvResp".to_string()),
             ("HttpSrvResp", "status") => Type::Int,
-            ("HttpSrvResp", "body") => Type::String,
-            ("HttpServer", "local_addr") => Type::Result { ok: Box::new(Type::String), err: Box::new(Type::String) },
+            ("HttpSrvResp", "body") => Type::Named("HttpBody".to_string()),
+            ("HttpBody", "bytes") => Type::Result {
+                ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            },
+            ("HttpBody", "text") => Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            },
+            ("HttpBody", "chunks") => Type::Result {
+                ok: Box::new(Type::List(Box::new(Type::List(Box::new(Type::Named("U8".to_string())))))),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            },
+            ("HttpServer", "local_addr") => Type::Result { ok: Box::new(Type::String), err: Box::new(Type::Named("HttpError".to_string())) },
             ("HttpServer", "serve" | "shutdown") => Type::Result {
                 ok: Box::new(Type::Named("HttpShutdownReport".to_string())),
-                err: Box::new(Type::String),
+                err: Box::new(Type::Named("HttpError".to_string())),
             },
             _ => unit_type(),
         };
@@ -1648,11 +1688,11 @@ pub(crate) fn lower_method_call(
                     && i == 1
                 {
                     if let Expr::Lambda(lam) = &a.expr {
-                        let params = vec![Type::Named("HttpSrvReq".to_string())];
+                        let params = vec![Type::Named("HttpRequest".to_string())];
                         return TExpr {
                             ty: Type::Fn {
                                 params: params.clone(),
-                                ret: Some(Box::new(Type::Named("HttpSrvResp".to_string()))),
+                                ret: Some(Box::new(Type::Named("HttpResponse".to_string()))),
                                 effect_bound: None,
                             },
                             kind: TExprKind::Lambda(Box::new(lower_lambda_expecting_value(
@@ -1664,11 +1704,19 @@ pub(crate) fn lower_method_call(
                 lower_expr(&a.expr, cx, env)
             })
             .collect();
+        let server_message_method = matches!(
+            (kind.as_str(), method, args.len()),
+            ("HttpRequest", "method" | "path" | "param" | "body_len" | "under_limit", _)
+                | ("HttpRequest", "header", 1)
+                | ("HttpRequest", "body", 0)
+                | ("HttpResponse", "header", 2)
+        );
         let op = if kind.starts_with("HttpServer")
             || kind == "HttpMux"
             || kind == "HttpHandler"
             || kind == "HttpSrvReq"
             || kind == "HttpSrvResp"
+            || server_message_method
         {
             THandleOp::HttpServerMethod {
                 kind,

@@ -2135,7 +2135,28 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // "body"/"header" dispatch by arity: 0-arg=response accessor, 1-arg=request builder.
                 THandleOp::HttpClientMethod { kind, method } => {
                     let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                    if kind == "HttpClientReq" {
+                    if kind == "HttpBody" {
+                        match method.as_str() {
+                            "bytes" => format!("{}jet_http_body_bytes(&({}), {})", root, recv, a(0)),
+                            "text" => format!("{}jet_http_body_text(&({}), {})", root, recv, a(0)),
+                            "chunks" => format!(
+                                "{}jet_http_body_chunks(&({}), {})",
+                                root,
+                                recv,
+                                if args.is_empty() { "65536".to_string() } else { a(0) },
+                            ),
+                            _ => unreachable!("unknown HttpBody method {method}"),
+                        }
+                    } else if kind == "HttpHeaders" {
+                        match method.as_str() {
+                            "first" => format!("{}jet_http_headers_first(&({}), &({}))", root, recv, a(0)),
+                            "all" => format!("{}jet_http_headers_all(&({}), &({}))", root, recv, a(0)),
+                            "append" => format!("{}jet_http_headers_append({}, &({}), &({}))", root, recv, a(0), a(1)),
+                            "set" => format!("{}jet_http_headers_set({}, &({}), &({}))", root, recv, a(0), a(1)),
+                            "remove" => format!("{}jet_http_headers_remove({}, &({}))", root, recv, a(0)),
+                            _ => unreachable!("unknown HttpHeaders method {method}"),
+                        }
+                    } else if kind == "HttpClientReq" || kind == "HttpRequest" {
                         match method.as_str() {
                             "header" => format!(
                                 "{}jet_http_client_request_header({}, &({}), &({}))",
@@ -2210,7 +2231,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             "send" => {
                                 // call bridge with req fields; assemble JetHttpClientResp
                                 format!(
-                                    "{{ let _r = &({}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {}::jet_http_client_send_impl(&_r.method, &_r.url, &_r.headers.to_flat(), _r.body.as_deref(), _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart).and_then(|(s,b,h)| Ok(JetHttpClientResp{{status:s,body:b,headers:JetHttpHeaders::from_flat(h)?}})) }} }}",
+                                    "{{ let _r = &({}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ let _body = if _r.body_set {{ _r.body.bytes(8 * 1024 * 1024).map(Some) }} else {{ Ok(None) }}; _body.and_then(|body| {}::jet_http_client_send_impl(&_r.method, &_r.url, &_r.headers.to_flat(), body.as_deref(), _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart).map_err(JetHttpError::from_bridge).and_then(|(s,b,h)| jet_http_client_response_new(s,b,h))) }} }} }}",
                                     recv, ffi
                                 )
                             }
@@ -2252,31 +2273,31 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             format!("{{ {}jet_http_mux_middleware(&({}), {}) }}", root, recv, a(0))
                         }
                         ("HttpHandler", "handle") => format!("({})({})", recv, a(0)),
-                        ("HttpSrvReq", "method") => {
+                        ("HttpSrvReq" | "HttpRequest", "method") => {
                             format!("{}jet_http_srv_req_method(&({}))", root, recv)
                         }
-                        ("HttpSrvReq", "path") => {
+                        ("HttpSrvReq" | "HttpRequest", "path") => {
                             format!("{}jet_http_srv_req_path(&({}))", root, recv)
                         }
-                        ("HttpSrvReq", "body") => {
+                        ("HttpSrvReq" | "HttpRequest", "body") => {
                             format!("{}jet_http_srv_req_body(&({}))", root, recv)
                         }
-                        ("HttpSrvReq", "param") => {
+                        ("HttpSrvReq" | "HttpRequest", "param") => {
                             format!("{}jet_http_srv_req_param(&({}), &({}))", root, recv, a(0))
                         }
-                        ("HttpSrvReq", "header") => {
+                        ("HttpSrvReq" | "HttpRequest", "header") => {
                             format!("{}jet_http_srv_req_header(&({}), &({}))", root, recv, a(0))
                         }
-                        ("HttpSrvReq", "body_len") => {
+                        ("HttpSrvReq" | "HttpRequest", "body_len") => {
                             format!("{}jet_http_srv_req_body_len(&({}))", root, recv)
                         }
-                        ("HttpSrvReq", "under_limit") => format!(
+                        ("HttpSrvReq" | "HttpRequest", "under_limit") => format!(
                             "{}jet_http_srv_req_under_limit(&({}), {})",
                             root,
                             recv,
                             a(0)
                         ),
-                        ("HttpSrvResp", "header") => format!(
+                        ("HttpSrvResp" | "HttpResponse", "header") => format!(
                             "{}jet_http_srv_response_header({}, &({}), &({}))",
                             root,
                             recv,
@@ -2285,9 +2306,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ),
                         ("HttpSrvResp", "status") => format!("{}jet_http_srv_response_status(&({}))", root, recv),
                         ("HttpSrvResp", "body") => format!("{}jet_http_srv_response_body(&({}))", root, recv),
-                        ("HttpServer", "local_addr") => format!("{}jet_http_server_local_addr(&({}))", root, recv),
-                        ("HttpServer", "serve") => format!("{}jet_http_server_serve(&({}))", root, recv),
-                        ("HttpServer", "shutdown") => format!("{}jet_http_server_shutdown(&({}), &({}))", root, recv, a(0)),
+                        ("HttpServer", "local_addr") => format!("{}jet_http_server_local_addr(&({})).map_err(JetHttpError::from_bridge)", root, recv),
+                        ("HttpServer", "serve") => format!("{}jet_http_server_serve(&({})).map_err(JetHttpError::from_bridge)", root, recv),
+                        ("HttpServer", "shutdown") => format!("{}jet_http_server_shutdown(&({}), &({})).map_err(JetHttpError::from_bridge)", root, recv, a(0)),
                         _ => {
                             if args.is_empty() {
                                 format!("({}).{}()", recv, method)

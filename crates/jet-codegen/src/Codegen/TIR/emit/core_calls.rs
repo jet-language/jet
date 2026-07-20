@@ -1802,9 +1802,18 @@ pub(crate) fn emit_tir_core_call(
             helper("jet_net_tls_close"), arg(0)
         ),
         // E2-M10: jet.http — HTTP client.
-        ("jet.http", "get") => format!("{}(&({}))", helper("jet_http_get"), arg(0)),
+        ("jet.http", "get") => format!(
+            "{}(&({})).map_err(JetHttpError::from_bridge).and_then(|(s,b,h)| jet_http_client_response_new(s,b,h))",
+            regex_fn("jet_http_client_get_impl"),
+            arg(0)
+        ),
         ("jet.http", "post") => {
-            format!("{}(&({}), &({}))", helper("jet_http_post"), arg(0), arg(1))
+            format!(
+                "{}(&({}), &({})).map_err(JetHttpError::from_bridge).and_then(|(s,b,h)| jet_http_client_response_new(s,b,h))",
+                regex_fn("jet_http_client_post_impl"),
+                arg(0),
+                arg(1)
+            )
         }
         // c109 Phase 25: HttpRouter producer + parse/dispatch (D-ROUTE1=A), byte-for-byte
         // `emit_core_call` (Source/Codegen/Expression.rs ~L1411). `router()` is arg-free;
@@ -2285,7 +2294,7 @@ pub(crate) fn emit_tir_core_call(
         ("core.sketch.cms", "new") => format!("JetCountMinSketch::new()"),
         ("core.sketch.reservoir", "new") => format!("JetReservoirSampler::new({})", arg(0)),
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client constructors.
-        // Bridge returns (i64, String, Vec<String>); CoreLib assembles JetHttpClientResp.
+        // Bridge returns primitives; CoreLib assembles the one shared response.
         ("core.http.client", "get") => {
             let u = if matches!(args.get(0).map(|e| &e.ty), Some(Type::Named(n)) if n == "Url") {
                 format!("({}).to_string_value()", arg(0))
@@ -2293,7 +2302,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             };
             format!(
-                "{}(&({})).and_then(|(s,b,h)| Ok(JetHttpClientResp{{status:s,body:b,headers:JetHttpHeaders::from_flat(h)?}}))",
+                "{}(&({})).map_err(JetHttpError::from_bridge).and_then(|(s,b,h)| jet_http_client_response_new(s,b,h))",
                 regex_fn("jet_http_client_get_impl"),
                 u
             )
@@ -2305,7 +2314,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             };
             format!(
-                "{}(&({}), &({})).and_then(|(s,b,h)| Ok(JetHttpClientResp{{status:s,body:b,headers:JetHttpHeaders::from_flat(h)?}}))",
+                "{}(&({}), &({})).map_err(JetHttpError::from_bridge).and_then(|(s,b,h)| jet_http_client_response_new(s,b,h))",
                 regex_fn("jet_http_client_post_impl"),
                 u,
                 arg(1)
@@ -2320,24 +2329,24 @@ pub(crate) fn emit_tir_core_call(
             format!("jet_http_client_request_new(&({}), &({}))", arg(0), u)
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
-        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {})", arg(0), arg(1)),
+        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(JetHttpError::from_bridge)", arg(0), arg(1)),
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
         ("core.http.server", "serve") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
-                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, handler| {ffi}::jet_http_server_tls_handle_impl(cert, key, stream, handler))",
+                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, handler| {ffi}::jet_http_server_tls_handle_impl(cert, key, stream, handler)).map_err(JetHttpError::from_bridge)",
                 arg(0),
                 arg(1),
                 arg(2)
             )
         }
-        ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {})", arg(0), arg(1)),
+        ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {}).map_err(JetHttpError::from_bridge)", arg(0), arg(1)),
         ("core.http.server", "serve_once") => {
-            format!("jet_http_mux_serve_once(&({}), {})", arg(0), arg(1))
+            format!("jet_http_mux_serve_once(&({}), {}).map_err(JetHttpError::from_bridge)", arg(0), arg(1))
         }
         ("core.http.server", "serve_once_listener") => {
             format!(
-                "jet_http_mux_serve_once_listener(&({}), &({}))",
+                "jet_http_mux_serve_once_listener(&({}), &({})).map_err(JetHttpError::from_bridge)",
                 arg(0),
                 arg(1)
             )
@@ -2348,10 +2357,10 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "tls") => format!("jet_http_srv_tls(&({}), &({}))", arg(0), arg(1)),
         ("core.http.server", "sse") => format!("jet_http_srv_sse(&({}))", arg(0)),
         ("core.http.server", "static_file") => {
-            format!("jet_http_srv_static_file(&({}), &({}))", arg(0), arg(1))
+            format!("jet_http_srv_static_file(&({}), &({})).map_err(JetHttpError::from_bridge)", arg(0), arg(1))
         }
         ("core.http.server", "static_file_range") => format!(
-            "jet_http_srv_static_file_range(&({}), &({}), &({}))",
+            "jet_http_srv_static_file_range(&({}), &({}), &({})).map_err(JetHttpError::from_bridge)",
             arg(0),
             arg(1),
             arg(2)

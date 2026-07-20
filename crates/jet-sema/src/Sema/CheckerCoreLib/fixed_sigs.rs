@@ -1576,7 +1576,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("HttpResponse".to_string()),
-                Type::String,
+                Type::Named("HttpError".to_string()),
             )),
         )),
         // POST / PUT / PATCH requests (body sent).
@@ -1584,7 +1584,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(
                 Type::Named("HttpResponse".to_string()),
-                Type::String,
+                Type::Named("HttpError".to_string()),
             )),
         )),
         // serve blocks until the listener is closed; handler is called per request.

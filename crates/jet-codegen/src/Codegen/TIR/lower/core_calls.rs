@@ -71,7 +71,7 @@ pub(crate) fn lower_core_closure_call(
                 lam,
                 cx,
                 env,
-                &[Type::Named("HttpSrvReq".to_string())],
+                &[Type::Named("HttpRequest".to_string())],
             );
             TCoreClosureKind::Serve {
                 addr: Box::new(addr),

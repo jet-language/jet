@@ -1068,8 +1068,8 @@ impl<'a> Checker<'a> {
                                     (&rt, &et),
                                     (Type::Named(name), Type::Fn { params, ret: Some(ret), .. })
                                         if name == "HttpHandler"
-                                            && params == &vec![Type::Named("HttpSrvReq".to_string())]
-                                            && ret.as_ref() == &Type::Named("HttpSrvResp".to_string())
+                                            && params == &vec![Type::Named("HttpRequest".to_string())]
+                                            && ret.as_ref() == &Type::Named("HttpResponse".to_string())
                                 );
                                 let string_view_compatible = string_view_return && et == Type::String;
                                 if et != rt && !http_handler_lambda && !string_view_compatible {
