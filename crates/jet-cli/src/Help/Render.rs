@@ -293,7 +293,14 @@ pub fn categorized_order(index: &[Entry]) -> Vec<&str> {
 
 /// The fuzzy-filtered result list (typing) — also the non-interactive
 /// `jet ? <query>` floor when `selected` is `None`.
-pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, selected: Option<usize>) -> String {
+pub fn render_result_list(
+    hits: &[Hit],
+    query: &str,
+    width: usize,
+    color: bool,
+    selected: Option<usize>,
+    height: Option<usize>,
+) -> String {
     let width = w(width);
     let theme = Theme::new(color);
     let mut out = String::new();
@@ -313,7 +320,18 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
         out.push_str(&selected_row(width, &empty, false, color));
         out.push('\n');
     }
-    for (i, hit) in hits.iter().enumerate() {
+    let example = hits.first().and_then(|hit| match hit {
+        Hit::Command { entry, .. } => entry.symbol.examples.first(),
+        Hit::Code(_) => None,
+    });
+    let visible_hits = height
+        .map(|height| height.saturating_sub(6 + usize::from(example.is_some())).max(1))
+        .unwrap_or(hits.len());
+    let selected_index = selected.unwrap_or(0).min(hits.len().saturating_sub(1));
+    let start = selected_index
+        .saturating_sub(visible_hits.saturating_sub(1))
+        .min(hits.len().saturating_sub(visible_hits));
+    for (i, hit) in hits.iter().enumerate().skip(start).take(visible_hits) {
         let is_sel = selected == Some(i) || (selected.is_none() && i == 0);
         match hit {
             Hit::Command { entry, haystack, positions, .. } => {
@@ -337,20 +355,18 @@ pub fn render_result_list(hits: &[Hit], query: &str, width: usize, color: bool, 
     }
     out.push_str(&mid(width, color));
     out.push('\n');
-    if let Some(Hit::Command { entry, .. }) = hits.first() {
-        if let Some(ex) = entry.symbol.examples.first() {
-            let ex_line = if color {
-                format!(
-                    "{} {}",
-                    theme.dim("example"),
-                    theme.bold(ex)
-                )
-            } else {
-                format!("example  {}", ex)
-            };
-            out.push_str(&selected_row(width, &ex_line, false, color));
-            out.push('\n');
-        }
+    if let Some(ex) = example {
+        let ex_line = if color {
+            format!(
+                "{} {}",
+                theme.dim("example"),
+                theme.bold(ex)
+            )
+        } else {
+            format!("example  {}", ex)
+        };
+        out.push_str(&selected_row(width, &ex_line, false, color));
+        out.push('\n');
     }
     let footer = if color {
         theme.dim("↑↓ move · ⏎ prefill shell · ⇥ detail · F1 reference")
@@ -632,7 +648,7 @@ mod tests {
     fn result_list_no_color_uses_bracket_emphasis() {
         let index = build_index();
         let hits = super::super::search(&index, "run");
-        let out = render_result_list(&hits, "run", 64, false, None);
+        let out = render_result_list(&hits, "run", 64, false, None, None);
         assert!(out.contains("[run]"), "expected bracketed match, got:\n{}", out);
     }
 
@@ -640,9 +656,9 @@ mod tests {
     fn result_list_styles_semantic_codes_and_no_match_with_shared_roles() {
         let index = build_index();
         let code = super::super::search(&index, "E0102");
-        let code_out = render_result_list(&code, "E0102", 64, true, None);
+        let code_out = render_result_list(&code, "E0102", 64, true, None, None);
         assert!(code_out.contains("\x1b[31mE0102\x1b[0m"), "{code_out}");
-        let empty = render_result_list(&[], "definitely-not-a-command", 64, true, None);
+        let empty = render_result_list(&[], "definitely-not-a-command", 64, true, None, None);
         assert!(empty.contains("\x1b[33mno matches\x1b[0m"), "{empty}");
     }
 
@@ -652,14 +668,14 @@ mod tests {
         let invert = format!("\x1b[{}m", Theme::INVERT_SGR);
 
         let code = super::super::search(&index, "E0102");
-        let code_out = render_result_list(&code, "E0102", 64, true, Some(0));
+        let code_out = render_result_list(&code, "E0102", 64, true, Some(0), None);
         assert!(
             code_out.contains(&format!("{invert}\x1b[31mE0102\x1b[0m{invert}")),
             "{code_out}"
         );
 
         let command = super::super::search(&index, "run");
-        let command_out = render_result_list(&command, "run", 64, true, Some(0));
+        let command_out = render_result_list(&command, "run", 64, true, Some(0), None);
         assert!(
             command_out.contains(&format!(
                 "{invert}jet \x1b[{}mrun\x1b[0m{invert}",
@@ -667,6 +683,31 @@ mod tests {
             )),
             "{command_out}"
         );
+    }
+
+    #[test]
+    fn bounded_result_list_scrolls_selected_row_and_restores_top() {
+        let index = build_index();
+        let hits = super::super::search(&index, "E");
+        let selected = 20;
+        let command = |position: usize| match &hits[position] {
+            Hit::Command { entry, .. } => entry.symbol.name.as_str(),
+            Hit::Code(_) => panic!("fuzzy query unexpectedly returned exact code"),
+        };
+
+        let scrolled = render_result_list(&hits, "E", 80, false, Some(selected), Some(10));
+        assert_eq!(scrolled.lines().count(), 10);
+        assert!(scrolled.lines().any(|line| {
+            line.starts_with("│> ")
+                && line.replace('[', "").replace(']', "").contains(&format!("jet {}", command(selected)))
+        }));
+
+        let restored = render_result_list(&hits, "E", 80, false, Some(0), Some(10));
+        assert_eq!(restored.lines().count(), 10);
+        assert!(restored.lines().any(|line| {
+            line.starts_with("│> ")
+                && line.replace('[', "").replace(']', "").contains(&format!("jet {}", command(0)))
+        }));
     }
 
     #[test]

@@ -375,7 +375,7 @@ pub fn run_query(query: &str, color: bool) -> String {
     }
     match &hits[0] {
         Hit::Code(ex) => crate::Explain::render(ex, color),
-        Hit::Command { .. } => Render::render_result_list(&hits, query, 72, color, None),
+        Hit::Command { .. } => Render::render_result_list(&hits, query, 72, color, None, None),
     }
 }
 

@@ -106,6 +106,7 @@ pub fn run(color: bool) -> io::Result<()> {
     let mut cat_entry: Option<usize> = None; // index into entries in selected category
     let mut hits: Vec<Hit> = Vec::new();
     let mut res_selected: usize = 0;
+    let mut res_scroll = 0usize;
     let mut ref_category: usize = 0;
     let mut ref_entry: Option<usize> = None; // index into `index`, filtered to ref_category
     let mut ref_query = String::new();
@@ -168,6 +169,7 @@ pub fn run(color: bool) -> io::Result<()> {
                 } else {
                     hits = search(&index, &query);
                     res_selected = 0;
+                    res_scroll = 0;
                     mode = Mode::Results;
                 }
             }
@@ -184,6 +186,7 @@ pub fn run(color: bool) -> io::Result<()> {
                 query.push(c);
                 hits = search(&index, &query);
                 res_selected = 0;
+                res_scroll = 0;
                 mode = Mode::Results;
             }
             Key::Up if matches!(mode, Mode::Reference) && reference_code(&index, &ref_query).is_some() => {
@@ -191,6 +194,12 @@ pub fn run(color: bool) -> io::Result<()> {
             }
             Key::Down if matches!(mode, Mode::Reference) && reference_code(&index, &ref_query).is_some() => {
                 ref_scroll = ref_scroll.saturating_add(1);
+            }
+            Key::Up if matches!(mode, Mode::Results | Mode::Detail) && result_code(&hits, res_selected).is_some() => {
+                res_scroll = res_scroll.saturating_sub(1);
+            }
+            Key::Down if matches!(mode, Mode::Results | Mode::Detail) && result_code(&hits, res_selected).is_some() => {
+                res_scroll = res_scroll.saturating_add(1);
             }
             Key::Up => move_selection(&mut mode, &mut cat_selected, &mut cat_entry, &hits, &mut res_selected, &index, &mut ref_category, &mut ref_entry, -1),
             Key::Down => move_selection(&mut mode, &mut cat_selected, &mut cat_entry, &hits, &mut res_selected, &index, &mut ref_category, &mut ref_entry, 1),
@@ -208,7 +217,7 @@ pub fn run(color: bool) -> io::Result<()> {
             Key::Enter => {
                 if matches!(mode, Mode::Categorized) && cat_entry.is_none() {
                     cat_entry = Some(0);
-                    frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, ref_category, ref_entry, &ref_query, ref_scroll, width, height, color);
+                    frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, res_scroll, ref_category, ref_entry, &ref_query, ref_scroll, width, height, color);
                     prev_lines = redraw(prev_lines, &frame);
                     continue;
                 }
@@ -235,7 +244,7 @@ pub fn run(color: bool) -> io::Result<()> {
             _ => {}
         }
 
-        frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, ref_category, ref_entry, &ref_query, ref_scroll, width, height, color);
+        frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, res_scroll, ref_category, ref_entry, &ref_query, ref_scroll, width, height, color);
         prev_lines = redraw(prev_lines, &frame);
     }
 }
@@ -315,6 +324,7 @@ fn render_current(
     query: &str,
     hits: &[Hit],
     res_selected: usize,
+    res_scroll: usize,
     ref_category: usize,
     ref_entry: Option<usize>,
     ref_query: &str,
@@ -323,14 +333,20 @@ fn render_current(
     height: usize,
     color: bool,
 ) -> String {
+    if matches!(mode, Mode::Results | Mode::Detail) {
+        if let Some(ex) = result_code(hits, res_selected) {
+            let canonical = Render::render_code_page(ex, color);
+            return Render::render_text_viewport(&canonical, width, height, res_scroll);
+        }
+    }
     match mode {
         Mode::Categorized => Render::render_categorized(index, cat_selected, cat_entry.is_some(), selected_category_cmd(index, cat_selected, cat_entry), width, color),
-        Mode::Results => Render::render_result_list(hits, query, width, color, Some(res_selected)),
+        Mode::Results => Render::render_result_list(hits, query, width, color, Some(res_selected), Some(height)),
         Mode::Detail => {
             let entry = current_entry(cat_selected, cat_entry, hits, res_selected, index);
             match entry {
                 Some(e) => Render::render_detail(e, width, color),
-                None => Render::render_result_list(hits, query, width, color, Some(res_selected)),
+                None => Render::render_result_list(hits, query, width, color, Some(res_selected), Some(height)),
             }
         }
         Mode::Reference => {
@@ -341,6 +357,13 @@ fn render_current(
             let sel = ref_entry.map(|i| &index[i]);
             Render::render_reference(index, ref_category, sel, width, height, color, ref_query)
         }
+    }
+}
+
+fn result_code(hits: &[Hit], selected: usize) -> Option<&crate::Explain::Explanation> {
+    match hits.get(selected) {
+        Some(Hit::Code(ex)) => Some(ex),
+        _ => None,
     }
 }
 

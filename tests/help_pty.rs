@@ -10,6 +10,10 @@ fn run_pty(keys: &[u8], color: &str, no_color: bool) -> String {
 }
 
 fn run_pty_sized(keys: &[u8], color: &str, no_color: bool, rows: usize, cols: usize) -> String {
+    run_pty_sized_steps(&[keys], color, no_color, rows, cols)
+}
+
+fn run_pty_sized_steps(steps: &[&[u8]], color: &str, no_color: bool, rows: usize, cols: usize) -> String {
     let jet = env!("CARGO_BIN_EXE_jet");
     let shell_line = format!(
         "stty rows {rows} cols {cols}; exec '{}' '?' '--color={}'",
@@ -23,7 +27,15 @@ fn run_pty_sized(keys: &[u8], color: &str, no_color: bool, rows: usize, cols: us
     if no_color { command.env("NO_COLOR", ""); }
     let mut child = command.spawn()
         .expect("util-linux script must allocate a real PTY");
-    child.stdin.take().unwrap().write_all(keys).unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for (index, keys) in steps.iter().enumerate() {
+        stdin.write_all(keys).unwrap();
+        stdin.flush().unwrap();
+        if index + 1 < steps.len() {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+    drop(stdin);
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "PTY child failed: {}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -58,6 +70,33 @@ fn final_frame_before_cleanup(transcript: &str) -> String {
         frame.truncate(cursor);
     }
     frame
+}
+
+fn cursor_up_counts(transcript: &str) -> Vec<usize> {
+    let bytes = transcript.as_bytes();
+    let mut counts = Vec::new();
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        if bytes[i] == b'\x1b' && bytes[i + 1] == b'[' && bytes[i + 2].is_ascii_digit() {
+            let mut end = i + 2;
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
+                end += 1;
+            }
+            if bytes.get(end) == Some(&b'A') {
+                counts.push(std::str::from_utf8(&bytes[i + 2..end]).unwrap().parse().unwrap());
+                i = end;
+            }
+        }
+        i += 1;
+    }
+    counts
+}
+
+fn transcript_selected_command(transcript: &str, command: &str) -> bool {
+    transcript.replace('\r', "").lines().any(|line| {
+        line.contains("│> ")
+            && line.replace('[', "").replace(']', "").contains(&format!("jet {command}"))
+    })
 }
 
 #[test]
@@ -128,6 +167,50 @@ fn f1_search_opens_verbatim_error_code_page() {
     let canonical = jet::Explain::render(&ex, false);
     let normalized = transcript.replace('\r', "");
     assert!(normalized.contains(&canonical), "F1 page diverged from canonical Explain bytes:\n{transcript}");
+}
+
+#[test]
+fn normal_search_and_detail_open_verbatim_error_code_page() {
+    let transcript = run_pty_sized_steps(&[b"E0102", b"\t", b"\x1b"], "never", false, 24, 120);
+    let ex = jet::Explain::lookup("E0102").unwrap();
+    let canonical = jet::Explain::render(&ex, false);
+    let normalized = transcript.replace('\r', "");
+    assert!(
+        normalized.matches(&canonical).count() >= 2,
+        "normal and Tab-detail E-code pages must both preserve canonical Explain bytes:\n{transcript}"
+    );
+}
+
+#[test]
+fn fuzzy_results_scroll_selected_row_within_terminal_height() {
+    let index = jet::Help::build_index();
+    let hits = jet::Help::search(&index, "E");
+    let move_count = hits.len().saturating_sub(1).min(20);
+    assert!(move_count > 18, "query must exercise a longer-than-viewport result set");
+    let command = |index: usize| match &hits[index] {
+        jet::Help::Hit::Command { entry, .. } => entry.symbol.name.as_str(),
+        jet::Help::Hit::Code(_) => panic!("fuzzy query unexpectedly returned exact code"),
+    };
+
+    let mut keys = b"E".to_vec();
+    keys.extend(std::iter::repeat_n(b"\x1b[B".as_slice(), move_count).flatten());
+    let transcript = run_pty_sized_steps(&[&keys, b"\x1b"], "never", false, 24, 80);
+    let frame = final_frame_before_cleanup(&transcript);
+
+    assert!(
+        cursor_up_counts(&transcript).into_iter().all(|count| count < 24),
+        "a redraw exceeded the 24-row viewport"
+    );
+    assert!(
+        transcript_selected_command(&transcript, command(move_count)),
+        "scrolled selection was not rendered"
+    );
+    assert!(transcript_selected_command(&frame, command(move_count)), "selected row was clipped:\n{frame}");
+    assert!(frame.lines().count() <= 24, "final frame exceeded 24 rows:\n{frame}");
+    assert!(
+        frame.lines().all(|line| visible_cols(line) <= 80),
+        "final frame exceeded 80 cols:\n{frame}"
+    );
 }
 
 #[test]
