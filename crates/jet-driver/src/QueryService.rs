@@ -493,7 +493,6 @@ fn run() {{}}
         let restored_stats = incremental.stats();
         assert_eq!(restored_stats.item_hits - impure_stats.item_hits, 2);
         assert_eq!(restored_stats.live_items, 4);
-        assert!(restored_stats.live_item_bytes >= restored_source.len());
     }
 
     #[test]

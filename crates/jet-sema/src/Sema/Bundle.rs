@@ -2924,6 +2924,83 @@ fn check_bundle_opts_for_output(
 
 #[cfg(test)]
 mod structure_tests {
+    use super::*;
+
+    fn incremental_bundle(source: &str) -> ProgramBundle {
+        let (tokens, lexer_diagnostics) = crate::Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).unwrap();
+        ProgramBundle {
+            entry: 0,
+            project_root: std::path::PathBuf::from("."),
+            modules: vec![crate::AST::LoadedModule {
+                path: std::path::PathBuf::from("cache-accounting.jet"),
+                display: "cache-accounting.jet".to_string(),
+                source: source.to_string(),
+                alias: "main".to_string(),
+                imports: std::mem::take(&mut program.imports),
+                items: std::mem::take(&mut program.items),
+                block_spans: std::mem::take(&mut program.block_spans),
+                web_target_ceiling: program.web_target_ceiling,
+                pub_file: program.pub_file,
+                no_prelude: program.no_prelude,
+                html_path: program.html_path,
+                no_alloc_policy: program.no_alloc_policy,
+                policy_declarations: program.policy_declarations,
+            }],
+            parse_teaching: Vec::new(),
+            used_core: HashSet::new(),
+            ffi_callback_fns: HashSet::new(),
+            cffi: crate::AST::CFfi::default(),
+            comptime_inputs: Vec::new(),
+            import_targets: HashMap::new(),
+            layer_ceiling: None,
+            inferred_layer: crate::Syntax::RuntimeLayer::Core,
+            web_partitions: HashMap::new(),
+            web_partition_enforced: false,
+            web_partition_report: None,
+            dep_roots: HashMap::new(),
+            active_os: crate::Syntax::OsTarget::host(),
+        }
+    }
+
+    #[test]
+    fn pending_diagnostics_have_exact_retained_byte_cost() {
+        let mut bundle = incremental_bundle("fn run() {}\n");
+        let mut cache = IncrementalSemaCache::new();
+        let (diagnostics, _) = check_bundle_with_effect_facts_incremental(
+            &mut bundle,
+            CompileMode::Check,
+            &mut cache,
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(cache.functions.len(), 1);
+
+        let before = cache.stats().live_item_bytes;
+        let pending = PendingFunctionDiagnostic {
+            function_key: "run".to_string(),
+            function_span: Span::new(0, 11),
+            diagnostic: Diagnostic::error(
+                "E2702",
+                "crypto API misuse".to_string(),
+                "known nonce length".to_string(),
+                "pass the exact nonce length".to_string(),
+                Some(Span::new(3, 6)),
+            ),
+        };
+        let expected_delta = format!("{:?}", vec![pending.clone()]).len()
+            - format!("{:?}", Vec::<PendingFunctionDiagnostic>::new()).len();
+        cache
+            .functions
+            .values_mut()
+            .next()
+            .unwrap()
+            .pending_diagnostics
+            .push(pending);
+
+        assert_eq!(cache.stats().live_item_bytes - before, expected_delta);
+    }
+
     #[test]
     fn bundle_stays_split_without_reordering_passes() {
         const MAX_MODULE_LINES: usize = 2500;
