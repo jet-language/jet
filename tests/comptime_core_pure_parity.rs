@@ -116,6 +116,41 @@ fn rng_view() -> String {
     return "{int_draw}|{float_draw}|{range_draw}|{coin}|{chance}|{normal}|{exponential}|{bytes}|{picked}|{weighted}|{sample}|{deck}|{child_draw}|{after_split}"
 }"#;
 const RNG_EXPECTED: &str = "4|0.0316577610861849|1.3390388981797772|true|true|-0.6237918784672982|0.21210139132324568|[62, 20, 83, 254]|b|c|[c, a]|[1, 2, 5, 3, 4]|71|87";
+const SORTED_SET_DECLS: &str = r#"fn add_through_param(values: &SortedSet<Int>, value: Int) -> Bool {
+    return values.add(value)
+}
+fn sorted_set_view() -> String {
+    values: SortedSet<Int> := SortedSet.from([3, 1, 2, 3])
+    initial :: values.to_list()
+    initial_len :: values.len()
+    initial_empty :: values.is_empty()
+    first :: values.first() ?? -1
+    last :: values.last() ?? -1
+    had_two :: values.has(2)
+    added_four :: values.add(4)
+    duplicate_two :: values.add(2)
+    values.remove(2)
+    has_two :: values.has(2)
+    current :: values.to_list()
+    other: SortedSet<Int> := SortedSet.from([5, 4, 0])
+    combined :: values.union(other).to_list()
+    after_union :: values.to_list()
+    words: SortedSet<String> := SortedSet.from(["z", "a", "m", "a"])
+    through_param: SortedSet<Int> := SortedSet.from([9, 7])
+    param_added :: add_through_param(&through_param, 8)
+    values.clear()
+    empty: SortedSet<Int> := SortedSet.new()
+    return "{initial}|{initial_len}|{initial_empty}|{first}|{last}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{words.to_list()}|{param_added}|{through_param.to_list()}|{values.is_empty()}|{values.len()}|{values.first() ?? -1}|{empty.is_empty()}"
+}"#;
+const SORTED_SET_EXPECTED: &str = "[1, 2, 3]|3|false|1|3|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|-1|true";
+const SORTED_SET_FIELD_DECLS: &str = r#"struct SortedSetHolder { values: SortedSet<Int> }
+fn sorted_set_field_view() -> String {
+    values: SortedSet<Int> := SortedSet.from([9, 7])
+    holder := SortedSetHolder.{ values: values }
+    added :: holder.values.add(8)
+    return "{added}|{holder.values.to_list()}"
+}"#;
+const SORTED_SET_FIELD_EXPECTED: &str = "true|[7, 8, 9]";
 
 fn exact_values(inputs: &[&str]) -> Vec<String> {
     let output = run_transcript(inputs, None);
@@ -226,6 +261,23 @@ fn public_transcript_covers_lru_methods_exactly() {
 fn public_transcript_covers_deque_methods_exactly() {
     let values = exact_values(&[DEQUE_DECLS, "deque_view()"]);
     assert_eq!(values, [format!("\"{DEQUE_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_covers_sorted_set_methods_exactly() {
+    let values = exact_values(&[SORTED_SET_DECLS, "sorted_set_view()"]);
+    assert_eq!(values, [format!("\"{SORTED_SET_EXPECTED}\" : String")]);
+}
+
+#[test]
+fn public_transcript_covers_sorted_set_field_writeback_exactly() {
+    // Direct field receivers work in the public comptime path. Generated-Rust
+    // lowering for this source shape remains a pre-existing TIR boundary.
+    let values = exact_values(&[SORTED_SET_FIELD_DECLS, "sorted_set_field_view()"]);
+    assert_eq!(
+        values,
+        [format!("\"{SORTED_SET_FIELD_EXPECTED}\" : String")]
+    );
 }
 
 fn parity_source(expression: &str, imports: &str) -> String {
@@ -462,6 +514,19 @@ fn rustc_backed_deque_matches_all_execution_tiers_exactly() {
     let source = parity_source("deque_view()", DEQUE_DECLS);
     assert_eq!(check_aot_comptime("deque/all-methods", &source), DEQUE_EXPECTED);
     check_dev_tiers("deque", &source, DEQUE_EXPECTED);
+}
+
+#[test]
+fn rustc_backed_sorted_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+    // Mutating a SortedSet returned directly by a call remains the existing
+    // non-place receiver boundary. A named `&SortedSet` receiver proves one
+    // mutating call result and its caller-visible writeback exactly.
+    let source = parity_source("sorted_set_view()", SORTED_SET_DECLS);
+    assert_eq!(
+        check_aot_comptime("sorted-set/all-methods", &source),
+        SORTED_SET_EXPECTED
+    );
+    check_dev_tiers_with_boundary("sorted-set", &source, SORTED_SET_EXPECTED, true);
 }
 
 #[test]

@@ -45,6 +45,22 @@ fn seeded_rng_float(state: &mut u64) -> f64 {
     (seeded_rng_next(state) >> 11) as f64 / (1u64 << 53) as f64
 }
 
+fn sorted_unique(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
+    let mut sort_error = None;
+    items.sort_by(|left, right| match cmp(left.clone(), right.clone(), span) {
+        Ok(order) => order,
+        Err(error) => {
+            sort_error.get_or_insert(error);
+            std::cmp::Ordering::Equal
+        }
+    });
+    if let Some(error) = sort_error {
+        return Err(error);
+    }
+    items.dedup();
+    Ok(items)
+}
+
 fn apply_seeded_rng_method(
     state: &mut u64,
     method: &str,
@@ -1342,6 +1358,22 @@ impl<'a> Interp<'a> {
                     fields: vec![("items".to_string(), CtValue::List(Vec::new()))],
                 });
             }
+            if type_name == crate::Syntax::TYPE_SORTED_SET
+                && matches!(method, "new" | "from")
+            {
+                let items = if method == "new" {
+                    Vec::new()
+                } else {
+                    match self.eval(&args[0].expr, scope)? {
+                        CtValue::List(items) => sorted_unique(items, span)?,
+                        _ => return Err(unsupported("SortedSet.from with a non-list", span)),
+                    }
+                };
+                return Ok(CtValue::Struct {
+                    type_name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                    fields: vec![("items".to_string(), CtValue::List(items))],
+                });
+            }
         }
         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
@@ -1962,9 +1994,119 @@ impl<'a> Interp<'a> {
                 | "pop_back"
                 | "peek_front"
                 | "peek_back"
+                | "has"
+                | "first"
+                | "last"
+                | "union"
+                | "to_list"
         ) {
             let peek = self.eval(receiver, scope)?;
             match (&peek, method) {
+                (
+                    CtValue::Struct { type_name, fields },
+                    method @ ("add"
+                        | "remove"
+                        | "has"
+                        | "first"
+                        | "last"
+                        | "union"
+                        | "to_list"
+                        | "len"
+                        | "is_empty"
+                        | "clear"),
+                ) if type_name == crate::Syntax::TYPE_SORTED_SET => {
+                    let mut items = fields
+                        .iter()
+                        .find_map(|(name, value)| match (name.as_str(), value) {
+                            ("items", CtValue::List(items)) => Some(items.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut argv = Vec::with_capacity(args.len());
+                    for arg in args {
+                        argv.push(self.eval(&arg.expr, scope)?);
+                    }
+                    let option_none = || {
+                        CtValue::None(match resolved_ret {
+                            Some(Type::Option(inner)) => (**inner).clone(),
+                            _ => Type::Int,
+                        })
+                    };
+                    let mut changed = false;
+                    let result = match method {
+                        "len" => CtValue::Int(items.len() as i64),
+                        "is_empty" => CtValue::Bool(items.is_empty()),
+                        "has" => CtValue::Bool(items.contains(&argv[0])),
+                        "first" => items
+                            .first()
+                            .cloned()
+                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                        "last" => items
+                            .last()
+                            .cloned()
+                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                        "to_list" => CtValue::List(items.clone()),
+                        "add" => {
+                            let added = !items.contains(&argv[0]);
+                            if added {
+                                items.push(argv[0].clone());
+                                items = sorted_unique(items, span)?;
+                                changed = true;
+                            }
+                            CtValue::Bool(added)
+                        }
+                        "remove" => {
+                            if let Some(index) = items.iter().position(|item| item == &argv[0]) {
+                                items.remove(index);
+                                changed = true;
+                            }
+                            CtValue::Unit
+                        }
+                        "union" => {
+                            let CtValue::Struct {
+                                type_name: other_type,
+                                fields: other_fields,
+                            } = &argv[0]
+                            else {
+                                return Err(unsupported("SortedSet.union with a non-set", span));
+                            };
+                            if other_type != crate::Syntax::TYPE_SORTED_SET {
+                                return Err(unsupported("SortedSet.union with a non-set", span));
+                            }
+                            if let Some(CtValue::List(other)) = other_fields
+                                .iter()
+                                .find(|(name, _)| name == "items")
+                                .map(|(_, value)| value)
+                            {
+                                items.extend(other.iter().cloned());
+                            }
+                            CtValue::Struct {
+                                type_name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                                fields: vec![(
+                                    "items".to_string(),
+                                    CtValue::List(sorted_unique(items.clone(), span)?),
+                                )],
+                            }
+                        }
+                        "clear" => {
+                            items.clear();
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        _ => unreachable!("SortedSet method set is closed"),
+                    };
+                    if changed && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                        self.write_back(
+                            receiver,
+                            CtValue::Struct {
+                                type_name: crate::Syntax::TYPE_SORTED_SET.to_string(),
+                                fields: vec![("items".to_string(), CtValue::List(items))],
+                            },
+                            scope,
+                        )?;
+                    }
+                    return Ok(result);
+                }
                 (
                     CtValue::Struct { type_name, fields },
                     method @ ("push_front"
