@@ -23,6 +23,40 @@ fn is_string_literal_expr(expr: &crate::AST::Expr) -> bool {
     }
 }
 
+fn literal_list_len(expr: &crate::AST::Expr) -> Option<usize> {
+    match expr {
+        crate::AST::Expr::ListLit(items, _)
+            if !items.iter().any(|item| matches!(item, crate::AST::Expr::Spread(..))) =>
+        {
+            Some(items.len())
+        }
+        crate::AST::Expr::Paren(inner, _) => literal_list_len(inner),
+        _ => None,
+    }
+}
+
+fn crypto_expert_nonce_diagnostic(
+    name: &str,
+    args: &[crate::AST::CallArg],
+) -> Option<Diagnostic> {
+    let (operation, expected) = match name {
+        "xchacha20poly1305_seal" | "xchacha20poly1305_open" =>
+            ("XChaCha20-Poly1305", 24),
+        "aes256gcm_seal" | "aes256gcm_open" => ("AES-256-GCM", 12),
+        _ => return None,
+    };
+    let nonce = args.get(1)?;
+    let actual = literal_list_len(&nonce.expr)?;
+    if actual == expected { return None; }
+    Some(Diagnostic::error(
+        "E2702",
+        "crypto API misuse".to_string(),
+        format!("{operation} nonce has {actual} bytes; this operation requires exactly {expected}"),
+        format!("pass a {expected}-byte nonce, or use core.crypto.seal so Jet generates it"),
+        Some(nonce.expr.span()),
+    ))
+}
+
 fn resolved_core_fixed_sig(
     module: &str,
     name: &str,
@@ -2755,6 +2789,7 @@ impl<'a> Checker<'a> {
                 }
                 return ret;
             }
+            let validation_diag_start = self.diags.len();
             if args.len() != params.len() {
                 self.diags
                     .push(wrong_core_arity(name, params.len(), args.len(), span));
@@ -2790,6 +2825,18 @@ impl<'a> Checker<'a> {
             }
             for arg in args.iter_mut().skip(params.len()) {
                 self.infer(&mut arg.expr);
+            }
+            let expert_gate_ok = module != "core.crypto.expert" || (
+                self.in_unsafe
+                    && self.core_imports.values().any(|imported| imported == "core.crypto.expert")
+            );
+            if expert_gate_ok
+                && args.len() == params.len()
+                && self.diags.len() == validation_diag_start
+            {
+                if let Some(diagnostic) = crypto_expert_nonce_diagnostic(name, args) {
+                    self.diags.push(diagnostic);
+                }
             }
             ret
         }

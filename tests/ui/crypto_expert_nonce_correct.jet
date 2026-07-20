@@ -1,0 +1,19 @@
+// D-CRYPTO-DIAG1=A: exact nonce lengths remain valid.
+use core.crypto.expert as expert
+
+fn run() {
+    @Unsafe("fixed interop vectors") {
+        x :: expert.xchacha20poly1305_seal(
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [],
+            []
+        )
+        y :: expert.aes256gcm_seal(
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [],
+            []
+        )
+    }
+}

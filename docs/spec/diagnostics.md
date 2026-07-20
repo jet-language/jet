@@ -700,7 +700,7 @@ renumbered, and no new `W` code may be allocated.
 | L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
 | L2101 | jet   | `jet self doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
 | E2701 | runtime | malformed input to a ring library parse function — row/line number and detail (E2-M9) |
-| E2702 | sema  | crypto API misuse at the boundary — reserved for future statically-detectable crypto errors (E2-M9, D-LR3) |
+| E2702 | sema  | compiler-known crypto API misuse at the boundary (E2-M9, D-CRYPTO-DIAG1) |
 | L2701 | sema  | advisory: regex pattern may catastrophically backtrack; suggest an anchor (E2-M9) |
 | E2903 | sema  | performance-budget declaration, typed value, unit, direction, comparison, or applicability is invalid (D-PERFBUDGET-OUTPUT1) |
 | E2904 | sema  | two performance budgets overlap on one effective key (D-PERFBUDGET-OUTPUT1) |
@@ -976,7 +976,7 @@ Wave-1 ring packages (`core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.ti
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2701 | `{parser}` found malformed input at row/line {n} — {detail}. | The ring library parse function encountered text it can't interpret: a missing delimiter, an unclosed quote, or an unexpected character. The row or line number points at the first offending record. | Fix the input at the location named, or validate it before parsing. |
-| E2702 | Crypto API misuse: {detail}. | A `core.crypto` call would use a key, nonce, or algorithm in an unsafe way — for example, an IV too short or a key length the algorithm doesn't accept. Reserved for future static checks. | Follow the fix named in the error; the `core.crypto` API is intentionally restrictive to surface misuse. |
+| E2702 | Crypto API misuse. | After syntax, effects, and types succeed, a compiler-known `core.crypto` argument violates a public cryptographic bound. The first live reason is an explicit expert AEAD nonce list whose length differs from the selected algorithm's exact nonce length. | Pass the exact nonce length named by the diagnostic, or use `core.crypto.seal` so Jet generates it. |
 | E2710 | `` `derive T.{Trait}` body failed while expanding `@[{Trait}]` on `{Type}` ``. | The user-authored derive body ran at compile time (D-METADERIVE1=A, D-CTCODEGEN1=A) and threw a comptime error — typically an undefined name, a bad method call, or a type mismatch in the body. The span points at the `@[Trait]` rule on the struct that triggered expansion. | Fix the `derive T.{Trait}` body: check that every name it references is bound in scope, every method it calls is valid on the reflected type, and every `emit()` argument is a `String`. |
 | E2711 | Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local. | A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract. | Define `derive T.{Trait}` or `{Type}` in the entry module. |
 | E2712 | *retired by D-CTBLOCKEXPOSE1* (was: `$` splice outside comptime context). | Runtime `$name` splices are allowed when a comptime value is in scope. | Define the value with `comptime name = ...`, or remove the `$` prefix. |
