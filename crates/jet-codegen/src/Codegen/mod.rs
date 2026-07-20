@@ -1373,6 +1373,7 @@ mod tests {
             modules: vec![crate::AST::LoadedModule {
                 path: PathBuf::from(root).join("main.jet"), display: "main.jet".into(), source: src.into(), alias: "main".into(),
                 imports: std::mem::take(&mut program.imports), items: std::mem::take(&mut program.items),
+                block_spans: std::mem::take(&mut program.block_spans),
                 web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file,
                 no_prelude: program.no_prelude, html_path: program.html_path,
                 no_alloc_policy: program.no_alloc_policy,

@@ -2699,12 +2699,17 @@ impl<'a> Checker<'a> {
                 ) {
                     *recv_type_out = Some(recv_ty.name());
                 }
-                let result = self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
-                // D-ITER1: tuple-producing methods need their exact named shape;
-                // sum/product need the static numeric identity when the list is empty.
-                // Preserve those resolved result types for codegen/comptime consumers.
+                let declared_ret = ret.clone();
+                let result =
+                    self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
+                // Preserve only exact facts the generic table could not express:
+                // callback/argument-refined results, tuple shapes, and numeric
+                // identities needed when a sequence is empty.
                 if let Some(ref ty) = result {
-                    if contains_tuple_type(ty) || matches!(method, "sum" | "product") {
+                    if result != declared_ret
+                        || contains_tuple_type(ty)
+                        || matches!(method, "sum" | "product")
+                    {
                         *resolved_ret_out = Some(ty.clone());
                     }
                 }

@@ -319,10 +319,10 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             resolved_ret,
             ..
         } => {
-            if matches!(method.as_str(), "zip" | "map") {
-                if let Some(ty) = resolved_ret {
-                    return Some(ty.clone());
-                }
+            // `resolved_ret` exists only when sema persisted a result more exact
+            // than the generic method table (or another required exact shape).
+            if let Some(ty) = resolved_ret {
+                return Some(ty.clone());
             }
             if method == "chars" {
                 return Some(Type::List(Box::new(Type::Char)));

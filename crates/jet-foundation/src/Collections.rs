@@ -1222,7 +1222,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             ]),
             "flat_map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
-                ret: Some(Box::new(Type::List(Box::new(Type::Int)))), // sema refines
+                ret: None, // sema refines the returned list's element type
                 effect_bound: None,
             }]),
             // D-FAILCOMP1: filter_map(f: T -> V?E) → [V]; keeps ok, drops err.

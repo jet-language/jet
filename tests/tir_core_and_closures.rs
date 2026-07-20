@@ -120,6 +120,35 @@ fn run() {
 }
 
 #[test]
+fn refined_collection_types_survive_tir_chains() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn use_float(value: Float) -> Float {
+    return value + 0.25
+}
+fn run() {
+    print(use_float([1, 2].fold(0.5, (a: Float, n: Int) => a + 0.5)))
+    print(use_float([1, 2].reduce(0.5, (a: Float, n: Int) => a + 0.5)))
+    print(use_float([1, 2].par_fold(0.5, (a: Float, n: Int) => a + 0.5)))
+    print(use_float([1, 2].scan(0.5, (a: Float, n: Int) => a + 0.5).sum()))
+    print(use_float([1, 2].map((n: Int) => 1.5).sum()))
+    print(use_float([\"1.5\", \"bad\", \"2.5\"].filter_map((s: String) => Float.parse(s)).sum()))
+    print(use_float([1, 2].flat_map((n: Int) => [1.5]).sum()))
+    print([1, 2, 3].group_by((n: Int) => n % 2 == 0).has_key(true))
+    print([1, 2, 3].count_by((n: Int) => n % 2).has_key(1))
+}
+";
+    let (code, stdout) = build_and_run("tir_refined_collection_types", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "1.75\n1.75\n1.75\n2.75\n3.25\n4.25\n3.25\ntrue\ntrue\n"
+    );
+}
+
+#[test]
 fn option_map_callback_receives_read_borrow() {
     if !have_rustc() {
         return;

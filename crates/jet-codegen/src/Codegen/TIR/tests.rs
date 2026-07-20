@@ -31,7 +31,7 @@
     /// (S57/M9.5) — are present before gating. Builds a single-module bundle the
     /// same way `lib.rs::check_for_eval` does, asserts sema accepted the program,
     /// then runs `tir_covers` on the sema-enriched function.
-    fn covers_after_sema(src: &str, fn_name: &str) -> bool {
+    fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
         let (toks, lex_diags) = crate::Lexer::lex(src);
         assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
         let mut prog = crate::Parser::parse(&toks).expect("parse failed");
@@ -75,6 +75,11 @@
                 .any(|d| d.severity == crate::Diagnostics::Severity::Error),
             "sema errors: {diags:?}"
         );
+        bundle
+    }
+
+    fn covers_after_sema(src: &str, fn_name: &str) -> bool {
+        let bundle = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
         let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
         let f = module
@@ -86,6 +91,69 @@
             })
             .unwrap_or_else(|| panic!("no fn {fn_name}"));
         tir_covers(f, &cx)
+    }
+
+    fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
+        let bundle = checked_bundle(src);
+        let module = &bundle.modules[bundle.entry];
+        let cx = build_cx_items(&module.items, src, "test.jet", None, &HashMap::new());
+        let f = module
+            .items
+            .iter()
+            .find_map(|item| match item {
+                Item::Func(f) if f.name == fn_name => Some(f),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no fn {fn_name}"));
+        lower_func(f, &cx)
+    }
+
+    #[test]
+    fn refined_collection_results_have_exact_tir_types() {
+        let src = "\
+fn run() {
+    folded := [1, 2].fold(0.5, (a: Float, n: Int) => a + 0.5)
+    reduced := [1, 2].reduce(0.5, (a: Float, n: Int) => a + 0.5)
+    scanned := [1, 2].scan(0.5, (a: Float, n: Int) => a + 0.5)
+    mapped := [1, 2].map((n: Int) => 1.5)
+    filtered := [\"1.5\", \"bad\"].filter_map((s: String) => Float.parse(s))
+    flattened := [1, 2].flat_map((n: Int) => [1.5])
+    grouped := [1, 2].group_by((n: Int) => n % 2 == 0)
+    counted := [1, 2].count_by((n: Int) => n % 2)
+    parallel := [1, 2].par_fold(0.5, (a: Float, n: Int) => a + 0.5)
+}
+";
+        let lowered = lower_after_sema(src, "run");
+        let actual: Vec<Type> = lowered
+            .body
+            .iter()
+            .filter_map(|stmt| match stmt {
+                TStmt::Let { init, .. } => Some(init.ty.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            actual,
+            vec![
+                Type::Float,
+                Type::Float,
+                Type::List(Box::new(Type::Float)),
+                Type::List(Box::new(Type::Float)),
+                Type::List(Box::new(Type::Float)),
+                Type::List(Box::new(Type::Float)),
+                Type::Map {
+                    key: Box::new(Type::Bool),
+                    key_span: None,
+                    value: Box::new(Type::List(Box::new(Type::Int))),
+                },
+                Type::Map {
+                    key: Box::new(Type::Int),
+                    key_span: None,
+                    value: Box::new(Type::Int),
+                },
+                Type::Float,
+            ]
+        );
     }
 
     /// c109 Phase 7: parse `src` and return whether the named method on `type_name`

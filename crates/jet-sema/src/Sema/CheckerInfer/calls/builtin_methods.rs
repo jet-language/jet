@@ -273,6 +273,21 @@ impl<'a> Checker<'a> {
                                 }
                             }
                         }
+                        if Collections::is_closure_method(method)
+                            && i == 0
+                            && method == "flat_map"
+                        {
+                            if let Type::Fn {
+                                ret: Some(ref r), ..
+                            } = gt
+                            {
+                                if let Type::List(inner) | Type::FixedList { elem: inner, .. } =
+                                    r.as_ref()
+                                {
+                                    refined_ret = Some(Type::List(inner.clone()));
+                                }
+                            }
+                        }
                         // D-AUTOPAR1=A: par_map → [V]; refine V from closure's return type.
                         if Collections::is_closure_method(method) && i == 0 && method == "par_map" {
                             if let Type::Fn {
