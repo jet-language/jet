@@ -867,7 +867,7 @@ fn absolute_form_target_matches_host_before_routing() {
         "GET /resource?x=<bad> HTTP/1.1\r\nHost: local\r\n",
         "GET /resource?x=é HTTP/1.1\r\nHost: local\r\n",
         "GET /resource#fragment HTTP/1.1\r\nHost: local\r\n",
-        "OPTIONS * HTTP/1.1\r\nHost: local\r\n",
+        "GET * HTTP/1.1\r\nHost: local\r\n",
     ] {
         let request = format!(
             "{invalid_target}\r\nGET /resource HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
@@ -1043,6 +1043,74 @@ fn request_methods_are_case_sensitive_during_routing() {
     }
 
     assert_eq!(calls.load(Ordering::Acquire), 5, "method case changed before routing");
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 5);
+    assert_eq!(report.user_completed, 5);
+}
+
+#[test]
+fn options_asterisk_reports_server_methods_without_dispatch() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => response.extend_from_slice(&buf[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(error) => panic!("response read: {error}"),
+            }
+        }
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    for (method, pattern) in [("GET", "/one"), ("POST", "/two"), ("get", "/three")] {
+        let handler_calls = calls.clone();
+        jet_http_mux_add(&mux, method, pattern, move |_| {
+            handler_calls.fetch_add(1, Ordering::AcqRel);
+            jet_http_srv_response(200, &"handled".to_string())
+        });
+    }
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 16;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    let response = exchange(
+        addr,
+        b"OPTIONS * HTTP/1.1\r\nHost: local\r\n\r\nGET /one HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert!(response.starts_with("HTTP/1.1 204 No Content"), "server-wide OPTIONS rejected: {response}");
+    assert!(response.contains("Allow: GET, HEAD, OPTIONS, POST, get\r\n"), "wrong server-wide Allow: {response}");
+    assert_eq!(response.matches("HTTP/1.1 200 OK").count(), 1, "OPTIONS * broke pipeline reuse: {response}");
+    assert!(response.ends_with("\r\n\r\nhandled"), "successor request did not dispatch: {response}");
+
+    for request_target in ["GET *", "GeT *", "OPTIONS **", "OPTIONS *?query"] {
+        let request = format!(
+            "{request_target} HTTP/1.1\r\nHost: local\r\n\r\nGET /one HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"
+        );
+        let response = exchange(addr, request.as_bytes());
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "invalid asterisk-form accepted: {response}");
+        assert!(!response.contains("200 OK"), "invalid asterisk-form dispatched or reused: {response}");
+        assert_eq!(response.matches("HTTP/1.1").count(), 1, "invalid asterisk-form reused connection: {response}");
+    }
+
+    assert_eq!(calls.load(Ordering::Acquire), 1, "OPTIONS or invalid asterisk-form invoked a handler");
     shutdown.store(true, Ordering::Release);
     let report = server.join().expect("server join");
     assert_eq!(report.user_accepted, 5);

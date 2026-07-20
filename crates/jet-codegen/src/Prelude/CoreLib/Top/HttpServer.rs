@@ -896,16 +896,21 @@ fn jet_http_path_query_valid(target: &str) -> bool {
 }
 
 fn jet_http_absolute_target(
+    method: &str,
     target: &str,
     host: Option<&JetHttpAuthority>,
     host_required: bool,
 ) -> Result<String, JetHttpReadError> {
+    if target == "*" {
+        return if method == "OPTIONS" {
+            Ok(target.to_string())
+        } else {
+            Err(JetHttpReadError { status: 400, message: "asterisk request target requires OPTIONS" })
+        };
+    }
     let path_query = if target.starts_with('/') {
         target.to_string()
     } else {
-        if target == "*" {
-            return Err(JetHttpReadError { status: 400, message: "asterisk request target is not supported" });
-        }
         let Some(scheme_end) = target.find("://") else {
             return Err(JetHttpReadError { status: 400, message: "request target form is not supported" });
         };
@@ -1145,7 +1150,7 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
         }
         None => None,
     };
-    let target = jet_http_absolute_target(target, host.as_ref(), version == "HTTP/1.1")?;
+    let target = jet_http_absolute_target(method, target, host.as_ref(), version == "HTTP/1.1")?;
     if transfer_encoding.is_some() && content_length.is_some() {
         return Err(JetHttpReadError { status: 400, message: "content-length and transfer-encoding cannot be combined" });
     }
@@ -1292,6 +1297,18 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpSrvReq, JetHttpReadError> {
 fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp {
     let requested_method = req.method.as_str();
     let is_head = requested_method == "HEAD";
+    if requested_method == "OPTIONS" && req.path == "*" {
+        let allow = {
+            let routes = mux.0.lock().unwrap();
+            jet_http_allowed_methods(routes.iter().map(|route| route.method.as_str()))
+        };
+        return JetHttpSrvResp {
+            status: 204,
+            body: String::new(),
+            headers: [("Allow".to_string(), allow)].into_iter().collect(),
+            head_content_length: None,
+        };
+    }
     let path = match jet_http_route_path(&req.path) {
         Ok(path) => path,
         Err(_) => {
@@ -1321,7 +1338,7 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
         && !path_matches.iter().any(|(_, route, _, _)| route.method == "HEAD")
     { "GET" } else { requested_method };
     if requested_method == "OPTIONS" && !path_matches.iter().any(|(_, route, _, _)| route.method == "OPTIONS") {
-        let allow = jet_http_allowed_methods(&path_matches);
+        let allow = jet_http_allowed_methods(path_matches.iter().map(|(_, route, _, _)| route.method.as_str()));
         return JetHttpSrvResp {
             status: 204,
             body: String::new(),
@@ -1356,7 +1373,9 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
         return jet_http_srv_head_response(JetHttpSrvResp {
             status: 405,
             body: "405 Method Not Allowed".to_string(),
-            headers: [("Allow".to_string(), jet_http_allowed_methods(&path_matches))].into_iter().collect(),
+            headers: [("Allow".to_string(), jet_http_allowed_methods(
+                path_matches.iter().map(|(_, route, _, _)| route.method.as_str()),
+            ))].into_iter().collect(),
             head_content_length: None,
         }, is_head);
     }
@@ -1376,11 +1395,9 @@ fn jet_http_srv_head_response(mut response: JetHttpSrvResp, is_head: bool) -> Je
     response
 }
 
-fn jet_http_allowed_methods(
-    matches: &[(usize, JetHttpMuxRoute, std::collections::BTreeMap<String, String>, JetHttpRoutePattern)],
-) -> String {
+fn jet_http_allowed_methods<'a>(registered: impl Iterator<Item = &'a str>) -> String {
     let mut methods = std::collections::BTreeSet::new();
-    for (_, route, _, _) in matches { methods.insert(route.method.clone()); }
+    methods.extend(registered.map(str::to_string));
     if methods.contains("GET") { methods.insert("HEAD".to_string()); }
     methods.insert("OPTIONS".to_string());
     methods.into_iter().collect::<Vec<_>>().join(", ")
