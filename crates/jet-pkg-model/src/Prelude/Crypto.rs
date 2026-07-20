@@ -625,6 +625,13 @@ struct JetcPublishTemp {
     path: std::path::PathBuf,
 }
 
+struct JetcSnapshot {
+    file: std::fs::File,
+    length: u64,
+    hash: [u8; 32],
+    metadata: std::fs::Metadata,
+}
+
 #[cfg(not(target_os = "linux"))]
 static JETC_STAGE_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
@@ -1006,7 +1013,7 @@ fn snapshot_source(
     source: &std::path::Path,
     parent: &JetcParent,
     cancelled: fn() -> bool,
-) -> Result<(std::fs::File, u64), JetFileCryptoError> {
+) -> Result<JetcSnapshot, JetFileCryptoError> {
     use std::io::{Seek, SeekFrom};
     let mut source_file = open_source_nofollow(source)?;
     let source_meta = source_file.metadata().map_err(|_| JetFileCryptoError::SourceIo)?;
@@ -1044,7 +1051,8 @@ fn snapshot_source(
     )?;
     if second_len != length || !bool::from(second_hash.ct_eq(&first_hash)) { return Err(JetFileCryptoError::SourceIo); }
     stage_file.seek(SeekFrom::Start(0)).map_err(|_| JetFileCryptoError::DestinationIo)?;
-    Ok((stage_file, length))
+    let metadata = stage_file.metadata().map_err(|_| JetFileCryptoError::SourceIo)?;
+    Ok(JetcSnapshot { file: stage_file, length, hash: stage_hash, metadata })
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1052,7 +1060,7 @@ fn snapshot_source(
     _source: &std::path::Path,
     _parent: &JetcParent,
     _cancelled: fn() -> bool,
-) -> Result<(std::fs::File, u64), JetFileCryptoError> {
+) -> Result<JetcSnapshot, JetFileCryptoError> {
     Err(JetFileCryptoError::SourceIo)
 }
 
@@ -1154,14 +1162,14 @@ fn canonical_jetc_v2_recipients(
 
 fn seal_jetc_v2_from_snapshot(
     recipients: Vec<JetX25519PublicKey>,
-    mut stage: std::fs::File,
-    plain_len: u64,
+    snapshot: JetcSnapshot,
     parent: &JetcParent,
     destination: &String,
     cancelled: fn() -> bool,
     verify_output: bool,
 ) -> Result<(), JetFileCryptoError> {
     use std::io::{Seek, SeekFrom};
+    let JetcSnapshot { file: mut stage, length: plain_len, hash: expected_hash, metadata: expected_metadata } = snapshot;
     let destination = std::path::Path::new(destination);
     let body_len = jetc_v2_body_len(plain_len).ok_or(JetFileCryptoError::SourceIo)?;
     let header_len = JETC_V2_HEADER_BASE.checked_add(recipients.len() * JETC_V2_STANZA).and_then(|n| n.checked_add(JETC_V2_HEADER_TAG)).ok_or(JetFileCryptoError::DestinationIo)?;
@@ -1216,6 +1224,7 @@ fn seal_jetc_v2_from_snapshot(
     jetc_write_all(out, &fixed, output_write).and_then(|_| jetc_write_all(out, &header, output_write))
         .map_err(|_| JetFileCryptoError::DestinationIo)?;
     let mut buffer = Zeroizing(vec![0u8; JETC_V2_CHUNK]); let mut index = 1u64; let mut remaining = plain_len;
+    let mut staged_hash = Sha256::new();
     stage.seek(SeekFrom::Start(0)).map_err(|_| JetFileCryptoError::SourceIo)?;
     while remaining >= JETC_V2_CHUNK as u64 {
         #[cfg(test)]
@@ -1223,6 +1232,7 @@ fn seal_jetc_v2_from_snapshot(
         if cancelled() { return Err(JetFileCryptoError::Cancelled); }
         jetc_read_exact(&mut stage, &mut buffer, if verify_output { "migrate-stage-read" } else { "seal-stage-read" })
             .map_err(|_| JetFileCryptoError::SourceIo)?;
+        staged_hash.update(buffer.bytes());
         let flags = 0u8; let length = JETC_V2_CHUNK as u32;
         let mut aad = b"JETC2 chunk".to_vec(); aad.extend_from_slice(&header_hash); aad.extend_from_slice(&index.to_le_bytes()); aad.extend_from_slice(&length.to_le_bytes()); aad.push(flags);
         let encrypted = XChaCha20Poly1305::new_from_slice(file_key.bytes()).map_err(|_| JetFileCryptoError::SealFailed(JetCryptoError::Internal { incident_id: "jetc2-body-key" }))?
@@ -1239,6 +1249,18 @@ fn seal_jetc_v2_from_snapshot(
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     jetc_read_exact(&mut stage, &mut buffer[..remaining as usize], if verify_output { "migrate-stage-read" } else { "seal-stage-read" })
         .map_err(|_| JetFileCryptoError::SourceIo)?;
+    staged_hash.update(&buffer[..remaining as usize]);
+    let stage_read = if verify_output { "migrate-stage-read" } else { "seal-stage-read" };
+    let mut trailing = [0u8; 1];
+    if jetc_read(&mut stage, &mut trailing, stage_read).map_err(|_| JetFileCryptoError::SourceIo)? != 0
+        || !same_source_identity(
+            &expected_metadata,
+            &stage.metadata().map_err(|_| JetFileCryptoError::SourceIo)?,
+        )
+        || !bool::from(<[u8; 32]>::from(staged_hash.finalize()).ct_eq(&expected_hash))
+    {
+        return Err(JetFileCryptoError::SourceIo);
+    }
     let flags = 1u8; let length = remaining as u32;
     let mut aad = b"JETC2 chunk".to_vec(); aad.extend_from_slice(&header_hash); aad.extend_from_slice(&index.to_le_bytes()); aad.extend_from_slice(&length.to_le_bytes()); aad.push(flags);
     let encrypted = XChaCha20Poly1305::new_from_slice(file_key.bytes()).map_err(|_| JetFileCryptoError::SealFailed(JetCryptoError::Internal { incident_id: "jetc2-final-key" }))?
@@ -1274,8 +1296,8 @@ fn seal_jetc_v2(
     let recipients = canonical_jetc_v2_recipients(recipients)?;
     let destination_path = std::path::Path::new(destination);
     let parent = hold_destination_parent(destination_path)?;
-    let (stage, plain_len) = snapshot_source(std::path::Path::new(source), &parent, cancelled)?;
-    seal_jetc_v2_from_snapshot(recipients, stage, plain_len, &parent, destination, cancelled, verify_output)
+    let snapshot = snapshot_source(std::path::Path::new(source), &parent, cancelled)?;
+    seal_jetc_v2_from_snapshot(recipients, snapshot, &parent, destination, cancelled, verify_output)
 }
 
 pub fn jet_crypto_file_seal_impl(
@@ -1515,11 +1537,16 @@ pub fn jet_crypto_expert_migrate_v1_impl(
     if cancelled() { return Err(JetFileCryptoError::Cancelled); }
     jetc_write_all(&mut clear_file, plaintext.bytes(), "migrate-stage-write").map_err(|_| JetFileCryptoError::DestinationIo)?;
     jetc_sync_all(&clear_file, "migrate-stage-fsync").map_err(|_| JetFileCryptoError::DestinationIo)?;
+    let metadata = clear_file.metadata().map_err(|_| JetFileCryptoError::DestinationIo)?;
     clear_file.seek(SeekFrom::Start(0)).map_err(|_| JetFileCryptoError::DestinationIo)?;
     seal_jetc_v2_from_snapshot(
         recipients,
-        clear_file,
-        plaintext.len() as u64,
+        JetcSnapshot {
+            file: clear_file,
+            length: plaintext.len() as u64,
+            hash: Sha256::digest(plaintext.bytes()).into(),
+            metadata,
+        },
         &parent,
         destination,
         cancelled,

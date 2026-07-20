@@ -662,6 +662,54 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn jetc_v2_rechecks_staged_snapshot_hash_and_eof_before_final() {
+        use std::io::{Seek, SeekFrom, Write};
+
+        let root = test_dir("stage-recheck");
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let expected = b"verified bytes";
+        for (name, staged, distinct_identity) in [
+            ("identity", expected.as_slice(), true),
+            ("changed", b"tampered bytes".as_slice(), false),
+            ("trailing", b"verified bytesattacker trailing bytes".as_slice(), false),
+        ] {
+            let destination = root.join(format!("{name}.jetc"));
+            let parent = hold_destination_parent(&destination).unwrap();
+            let mut stage = create_unlinked_stage(&parent).unwrap();
+            stage.write_all(staged).unwrap();
+            stage.sync_all().unwrap();
+            let identity_stage = distinct_identity.then(|| {
+                let mut file = create_unlinked_stage(&parent).unwrap();
+                file.write_all(expected).unwrap();
+                file.sync_all().unwrap();
+                file
+            });
+            let metadata = identity_stage.as_ref().unwrap_or(&stage).metadata().unwrap();
+            stage.seek(SeekFrom::Start(0)).unwrap();
+            assert_eq!(
+                seal_jetc_v2_from_snapshot(
+                    vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+                    JetcSnapshot {
+                        file: stage,
+                        length: expected.len() as u64,
+                        hash: Sha256::digest(expected).into(),
+                        metadata,
+                    },
+                    &parent,
+                    &destination.to_string_lossy().into_owned(),
+                    never_cancelled,
+                    false,
+                ),
+                Err(JetFileCryptoError::SourceIo),
+                "stage {name}",
+            );
+            assert!(!destination.exists());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn jetc_v2_rejects_oversize_source_before_staging() {
         use std::io::{Read, Seek, SeekFrom, Write};
 
