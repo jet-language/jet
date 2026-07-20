@@ -11,6 +11,7 @@ pub struct CheckedQuery {
     pub diagnostics: Arc<Vec<crate::Diagnostics::Diagnostic>>,
     pub bundle: Option<Arc<crate::AST::ProgramBundle>>,
     pub effect_facts: Arc<crate::Sema::SemIndexEffectFacts>,
+    dependencies: Arc<Vec<PathBuf>>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -86,7 +87,7 @@ impl CompilerQueries {
                     .iter()
                     .map(|(path, text)| (path.as_path(), text.as_str()))
                     .collect::<Vec<_>>();
-                let (diagnostics, bundle, facts) =
+                let (diagnostics, bundle, facts, dependencies) =
                     crate::Driver::check_file_with_effect_facts_incremental_overlays(
                         &path,
                         &overlay_refs,
@@ -97,6 +98,7 @@ impl CompilerQueries {
                     diagnostics: Arc::new(diagnostics),
                     bundle: bundle.map(Arc::new),
                     effect_facts: Arc::new(facts),
+                    dependencies: Arc::new(dependencies),
                 }
             })
         };
@@ -117,6 +119,7 @@ impl CompilerQueries {
                     diagnostics: Arc::new(diagnostics),
                     bundle: bundle.map(Arc::new),
                     effect_facts: Arc::new(facts),
+                    dependencies: Arc::new(Vec::new()),
                 }
             }
         }
@@ -199,35 +202,49 @@ impl CompilerQueries {
     }
 
     fn update_external_state(&mut self, root: &Path, checked: &CheckedQuery) {
-        let Some(bundle) = checked.bundle.as_deref() else {
-            return;
-        };
-        let mut files = bundle
-            .modules
+        let mut files = checked
+            .dependencies
             .iter()
-            .map(|module| canonical_path(&module.path))
-            .filter(|path| path != root)
+            .map(|path| canonical_path(path))
             .collect::<Vec<_>>();
-        files.extend(
-            bundle
-                .comptime_inputs
-                .iter()
-                .map(|input| canonical_path(&bundle.project_root.join(&input.path))),
-        );
-        files.extend([
-            bundle.project_root.join("pkg.jet"),
-            bundle.project_root.join(".jet/lock"),
-        ]);
+        if let Some(bundle) = checked.bundle.as_deref() {
+            files.extend(
+                bundle
+                    .modules
+                    .iter()
+                    .map(|module| canonical_path(&module.path)),
+            );
+            files.extend(
+                bundle
+                    .comptime_inputs
+                    .iter()
+                    .map(|input| canonical_path(&bundle.project_root.join(&input.path))),
+            );
+            files.extend([
+                bundle.project_root.join("pkg.jet"),
+                bundle.project_root.join(".jet/lock"),
+            ]);
+            if crate::Sema::bundle_has_comptime_evaluation(bundle)
+                || !bundle.comptime_inputs.is_empty()
+            {
+                self.volatile_roots.insert(root.to_path_buf());
+            } else {
+                self.volatile_roots.remove(root);
+            }
+        } else {
+            files.extend(
+                self.external_files
+                    .get(root)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
+        }
+        files.retain(|path| path != root);
+        files.extend(default_external_files(root));
         files.sort();
         files.dedup();
         self.external_files.insert(root.to_path_buf(), files);
-        if crate::Sema::bundle_has_comptime_evaluation(bundle)
-            || !bundle.comptime_inputs.is_empty()
-        {
-            self.volatile_roots.insert(root.to_path_buf());
-        } else {
-            self.volatile_roots.remove(root);
-        }
         let fingerprint = external_fingerprint(root, self.external_files.get(root), &self.overlays);
         self.engine.set_input(external_input(root), fingerprint);
     }
@@ -514,6 +531,41 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "E0003"));
+        assert!(repaired.diagnostics.is_empty(), "{:#?}", repaired.diagnostics);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn first_load_failure_tracks_import_for_repair() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-query-first-repair-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let dependency = root.join("b.jet");
+        let source = "module b;\nfn run() -> Int { return b.value() }\n";
+        let dependency_source = "pub fn value() -> Int { return 1 }\n";
+        std::fs::write(
+            &dependency,
+            "pub fn value() -> Int { return 1 }\n::\n",
+        )
+        .unwrap();
+        let mut service = CompilerQueries::new();
+        let broken = service.check_text(&main.to_string_lossy(), source, true);
+        assert!(broken
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0003"));
+
+        std::fs::write(&dependency, dependency_source).unwrap();
+        let repaired = service.check_text(&main.to_string_lossy(), source, true);
+        let fresh = CompilerQueries::new().check_text(&main.to_string_lossy(), source, true);
+        assert_eq!(
+            diagnostic_summary(&repaired.diagnostics),
+            diagnostic_summary(&fresh.diagnostics)
+        );
         assert!(repaired.diagnostics.is_empty(), "{:#?}", repaired.diagnostics);
         let _ = std::fs::remove_dir_all(root);
     }

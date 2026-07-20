@@ -120,7 +120,23 @@ pub fn load_entry_with_overlays(
     overlays: &[(&Path, &str)],
     for_check: bool,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-    load_entry_with_overlays_mode(entry_path, overlays, for_check, false)
+    load_entry_with_overlays_and_dependencies(entry_path, overlays, for_check).0
+}
+
+pub fn load_entry_with_overlays_and_dependencies(
+    entry_path: &str,
+    overlays: &[(&Path, &str)],
+    for_check: bool,
+) -> (Result<ProgramBundle, Vec<Diagnostic>>, Vec<PathBuf>) {
+    let mut dependencies = Vec::new();
+    let result = load_entry_with_overlays_mode(
+        entry_path,
+        overlays,
+        for_check,
+        false,
+        &mut dependencies,
+    );
+    (result, dependencies)
 }
 
 /// Structural tooling loads adjacent modules named by `use alias.Item` from
@@ -132,7 +148,14 @@ pub fn load_entry_with_overlays_and_import_root(
     overlays: &[(&Path, &str)],
     for_check: bool,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-    load_entry_with_overlays_mode(entry_path, overlays, for_check, true)
+    let mut dependencies = Vec::new();
+    load_entry_with_overlays_mode(
+        entry_path,
+        overlays,
+        for_check,
+        true,
+        &mut dependencies,
+    )
 }
 
 fn load_entry_with_overlays_mode(
@@ -140,6 +163,7 @@ fn load_entry_with_overlays_mode(
     overlays: &[(&Path, &str)],
     for_check: bool,
     load_adjacent_unqualified: bool,
+    dependencies: &mut Vec<PathBuf>,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
     let entry = PathBuf::from(entry_path);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -331,6 +355,7 @@ fn load_entry_with_overlays_mode(
         &mut parse_teaching,
         &project_parts,
         &project_part_failures,
+        dependencies,
     )?;
 
     // Explicit project imports report the same conflict at their source span
@@ -383,6 +408,7 @@ fn load_entry_with_overlays_mode(
                     &mut parse_teaching,
                     &project_parts,
                     &project_part_failures,
+                    dependencies,
                 )?;
                 // Supply the real adjacent module edge to sema. The user's
                 // source remains untouched; this is the structural workspace
@@ -699,8 +725,12 @@ fn load_file(
     parse_teaching: &mut Vec<Diagnostic>,
     project_parts: &crate::ProjectParts::ProjectPartsReport,
     project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
+    dependencies: &mut Vec<PathBuf>,
 ) -> Result<(), Vec<Diagnostic>> {
     let norm = normalize_path(path);
+    if !dependencies.contains(&norm) {
+        dependencies.push(norm.clone());
+    }
     if stack.contains(&norm) {
         let cycle: Vec<String> = stack
             .iter()
@@ -846,6 +876,7 @@ fn load_file(
             parse_teaching,
             project_parts,
             project_part_failures,
+            dependencies,
         ) {
             stack.pop();
             return Err(diags);
@@ -902,6 +933,7 @@ fn load_file(
             parse_teaching,
             project_parts,
             project_part_failures,
+            dependencies,
         ) {
             stack.pop();
             return Err(diags);

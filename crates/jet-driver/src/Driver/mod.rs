@@ -1907,7 +1907,9 @@ pub fn check_file_with_effect_facts(
     crate::Sema::SemIndexEffectFacts,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    check_file_with_effect_facts_impl(file, &overlays, is_lsp, None)
+    let (diagnostics, bundle, facts, _) =
+        check_file_with_effect_facts_impl(file, &overlays, is_lsp, None);
+    (diagnostics, bundle, facts)
 }
 
 pub fn check_file_with_effect_facts_incremental(
@@ -1921,7 +1923,9 @@ pub fn check_file_with_effect_facts_incremental(
     crate::Sema::SemIndexEffectFacts,
 ) {
     let overlays = overlay.into_iter().collect::<Vec<_>>();
-    check_file_with_effect_facts_impl(file, &overlays, is_lsp, Some(cache))
+    let (diagnostics, bundle, facts, _) =
+        check_file_with_effect_facts_impl(file, &overlays, is_lsp, Some(cache));
+    (diagnostics, bundle, facts)
 }
 
 pub fn check_file_with_effect_facts_incremental_overlays(
@@ -1933,6 +1937,7 @@ pub fn check_file_with_effect_facts_incremental_overlays(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    Vec<std::path::PathBuf>,
 ) {
     check_file_with_effect_facts_impl(file, overlays, is_lsp, Some(cache))
 }
@@ -1946,8 +1951,11 @@ fn check_file_with_effect_facts_impl(
     Vec<Diagnostic>,
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
+    Vec<std::path::PathBuf>,
 ) {
-    match crate::Loader::load_entry_with_overlays(file, overlays, is_lsp) {
+    let (loaded, dependencies) =
+        crate::Loader::load_entry_with_overlays_and_dependencies(file, overlays, is_lsp);
+    match loaded {
         Ok(mut bundle) => {
             let mut diags = std::mem::take(&mut bundle.parse_teaching);
             let (check_diags, facts) = match incremental {
@@ -1971,9 +1979,14 @@ fn check_file_with_effect_facts_impl(
                     diags.push(bad_build_signature(build.name_span));
                 }
             }
-            (diags, Some(bundle), facts)
+            (diags, Some(bundle), facts, dependencies)
         }
-        Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
+        Err(diags) => (
+            diags,
+            None,
+            crate::Sema::SemIndexEffectFacts::default(),
+            dependencies,
+        ),
     }
 }
 
@@ -1988,7 +2001,9 @@ pub fn check_file_with_overlays(
     Option<crate::AST::ProgramBundle>,
     crate::Sema::SemIndexEffectFacts,
 ) {
-    check_file_with_effect_facts_impl(file, overlays, is_lsp, None)
+    let (diagnostics, bundle, facts, _) =
+        check_file_with_effect_facts_impl(file, overlays, is_lsp, None);
+    (diagnostics, bundle, facts)
 }
 
 /// Structural tools check a staged file in its actual output directory and
