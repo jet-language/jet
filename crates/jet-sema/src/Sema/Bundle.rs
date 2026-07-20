@@ -2711,6 +2711,8 @@ fn check_bundle_opts_for_output(
             &module.items,
             &local_solved,
             &local_summaries,
+            &module_body_diagnostic_ranges[module_index],
+            &mut suppressed_diagnostic_indices,
             &mut diags,
         );
         super::Effects::check_inferred_purity(

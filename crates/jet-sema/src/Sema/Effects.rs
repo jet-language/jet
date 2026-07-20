@@ -789,6 +789,27 @@ mod inferred_purity_display_tests {
     }
 }
 
+/// D-CRYPTO-DIAG1: mark compiler-known crypto facts owned by one function for
+/// removal after an existing solved-effect check reports the higher-priority
+/// failure. The caller supplies its module's original body-diagnostic range.
+pub(crate) fn suppress_e2702_in_function(
+    function: &crate::AST::Func,
+    body_diagnostic_range: &std::ops::Range<usize>,
+    suppressed_diagnostic_indices: &mut HashSet<usize>,
+    diagnostics: &[Diagnostic],
+) {
+    for index in body_diagnostic_range.clone() {
+        let diagnostic = &diagnostics[index];
+        if diagnostic.code == "E2702"
+            && diagnostic.span.is_some_and(|span| {
+                span.start >= function.span.start && span.end <= function.span.end
+            })
+        {
+            suppressed_diagnostic_indices.insert(index);
+        }
+    }
+}
+
 /// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* body row is
 /// empty. Callees need not repeat `--[]->`; their solved row is the authority.
 /// D-CRYPTO-DIAG1 uses that same solved result to suppress later E2702 facts in
@@ -844,18 +865,13 @@ pub fn check_inferred_purity(
             return;
         }
         // D-CRYPTO-DIAG1=A: solved effect failures outrank later compiler-known
-        // crypto facts. The body range keeps spans module-local while this
-        // existing post-effect pass suppresses only E2702 inside this function.
-        for index in body_diagnostic_range.clone() {
-            let diagnostic = &diags[index];
-            if diagnostic.code == "E2702"
-                && diagnostic.span.is_some_and(|span| {
-                    span.start >= f.span.start && span.end <= f.span.end
-                })
-            {
-                suppressed_diagnostic_indices.insert(index);
-            }
-        }
+        // crypto facts. The recorded body range keeps suppression module-local.
+        suppress_e2702_in_function(
+            f,
+            body_diagnostic_range,
+            suppressed_diagnostic_indices,
+            diags,
+        );
         let chain = first_effectful_chain(&key, summaries, solved, &mut BTreeSet::new());
         let Some(first) = chain.first() else {
             // Direct ambient operations are diagnosed while checking the body,
