@@ -27,14 +27,13 @@ mod tests {
 
     #[test]
     fn every_bridge_entropy_consumer_fails_without_output() {
-        let key = vec![7u8; 32];
         let plaintext = b"secret".to_vec();
 
         fail_entropy();
-        assert_eq!(
-            jet_crypto_seal_impl(&key, &plaintext),
-            Err("the operating system could not provide cryptographic randomness".to_string())
-        );
+        assert!(matches!(
+            jet_crypto_seal_typed_impl(vec![JetX25519PublicKey([7; 32])], &plaintext, &vec![]),
+            Err(JetCryptoError::EntropyUnavailable)
+        ));
         jet_crypto_entropy_clear_test_provider();
 
         fail_entropy();
@@ -54,7 +53,6 @@ mod tests {
 
     #[test]
     fn entropy_failure_stays_typed_until_each_public_bridge_boundary() {
-        let key = vec![7u8; 32];
         let plaintext = b"secret".to_vec();
 
         fail_entropy();
@@ -65,10 +63,10 @@ mod tests {
         jet_crypto_entropy_clear_test_provider();
 
         fail_entropy();
-        assert_eq!(
-            seal_with_algo(&key, &plaintext, ALGO_CHACHA20),
+        assert!(matches!(
+            jet_crypto_seal_typed_impl(vec![JetX25519PublicKey([7; 32])], &plaintext, &vec![]),
             Err(JetCryptoError::EntropyUnavailable)
-        );
+        ));
         jet_crypto_entropy_clear_test_provider();
 
         fail_entropy();
@@ -88,10 +86,14 @@ mod tests {
 
     #[test]
     fn prior_crypto_suite_still_uses_live_entropy() {
-        let key = vec![9u8; 32];
         let plaintext = b"round trip".to_vec();
-        let envelope = jet_crypto_seal_impl(&key, &plaintext).unwrap();
-        assert_eq!(jet_crypto_open_impl(&key, &envelope).unwrap(), plaintext);
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let envelope = jet_crypto_seal_typed_impl(
+            vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+            &plaintext,
+            &vec![],
+        ).unwrap();
+        assert_eq!(jet_crypto_open_typed_impl(&recipient, envelope, &vec![]).unwrap(), plaintext);
 
         let (seed, public) = jet_crypto_keygen_impl().unwrap();
         assert_eq!(seed.len(), 32);
@@ -215,6 +217,17 @@ mod tests {
 
     #[test]
     fn jetc_v1_expert_open_accepts_only_the_pinned_grammar() {
+        let source = include_str!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
+        for retired in [
+            "fn seal_with_algo(",
+            "fn open_envelope(",
+            "fn jet_crypto_seal_impl(",
+            "fn jet_crypto_open_impl(",
+            "fn jet_crypto_seal_algo_impl(",
+        ] {
+            assert!(!source.contains(retired), "retired JETC v1 path remains: {retired}");
+        }
+        assert_eq!(source.matches("pub fn jet_crypto_expert_open_v1_impl(").count(), 1);
         let key = (0u8..32).collect::<Vec<_>>();
         let nonce = (0u8..12).collect::<Vec<_>>();
         let plaintext = b"historical JETC v1".to_vec();

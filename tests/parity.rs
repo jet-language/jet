@@ -1263,7 +1263,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     );
     assert_eq!(
         stable_hash(&rendered),
-        14995673468357351311,
+        2251475061663194642,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

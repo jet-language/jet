@@ -416,93 +416,6 @@ fn crypto_operation_error(_message: impl Into<String>) -> JetCryptoError {
     JetCryptoError::Internal { incident_id: "crypto-bridge" }
 }
 
-fn seal_with_algo(key: &[u8], plaintext: &[u8], algo: u8) -> Result<Vec<u8>, JetCryptoError> {
-    if key.len() != 32 {
-        return Err(crypto_operation_error(format!(
-            "crypto.seal expects a 32-byte key, got {} bytes",
-            key.len()
-        )));
-    }
-    let mut nonce = [0u8; NONCE_LEN];
-    jet_fill_random(&mut nonce)?;
-    let ciphertext = match algo {
-        ALGO_CHACHA20 => {
-            let cipher = ChaCha20Poly1305::new_from_slice(key).map_err(|e| {
-                crypto_operation_error(format!("invalid ChaCha20-Poly1305 key: {e}"))
-            })?;
-            cipher
-                .encrypt(ChaNonce::from_slice(&nonce), plaintext)
-                .map_err(|e| crypto_operation_error(format!("encryption failed: {e}")))?
-        }
-        ALGO_AES256 => {
-            let cipher = Aes256Gcm::new_from_slice(key)
-                .map_err(|e| crypto_operation_error(format!("invalid AES-256-GCM key: {e}")))?;
-            cipher
-                .encrypt(AesNonce::from_slice(&nonce), plaintext)
-                .map_err(|e| crypto_operation_error(format!("encryption failed: {e}")))?
-        }
-        other => {
-            return Err(crypto_operation_error(format!(
-                "unknown seal algorithm id {other}"
-            )))
-        }
-    };
-    let mut out = Vec::with_capacity(4 + 2 + NONCE_LEN + ciphertext.len());
-    out.extend_from_slice(MAGIC);
-    out.push(VERSION);
-    out.push(algo);
-    out.extend_from_slice(&nonce);
-    out.extend_from_slice(&ciphertext);
-    Ok(out)
-}
-
-fn open_envelope(key: &[u8], envelope: &[u8]) -> Result<Vec<u8>, String> {
-    if key.len() != 32 {
-        return Err(format!(
-            "crypto.open expects a 32-byte key, got {} bytes",
-            key.len()
-        ));
-    }
-    if envelope.len() < 4 + 2 + NONCE_LEN + 16 {
-        return Err("crypto.open: envelope too short".to_string());
-    }
-    if &envelope[..4] != MAGIC {
-        return Err("crypto.open: not a Jet crypto envelope (bad magic)".to_string());
-    }
-    let version = envelope[4];
-    if version != VERSION {
-        return Err(format!(
-            "crypto.open: unsupported envelope version {version} (only version {VERSION} is supported)"
-        ));
-    }
-    let algo = envelope[5];
-    let nonce = &envelope[6..6 + NONCE_LEN];
-    let ciphertext = &envelope[6 + NONCE_LEN..];
-    match algo {
-        ALGO_CHACHA20 => {
-            let cipher = ChaCha20Poly1305::new_from_slice(key)
-                .map_err(|e| format!("invalid ChaCha20-Poly1305 key: {e}"))?;
-            cipher
-                .decrypt(ChaNonce::from_slice(nonce), ciphertext)
-                .map_err(|_| {
-                    "crypto.open: authentication failed (wrong key or corrupted envelope)"
-                        .to_string()
-                })
-        }
-        ALGO_AES256 => {
-            let cipher = Aes256Gcm::new_from_slice(key)
-                .map_err(|e| format!("invalid AES-256-GCM key: {e}"))?;
-            cipher
-                .decrypt(AesNonce::from_slice(nonce), ciphertext)
-                .map_err(|_| {
-                    "crypto.open: authentication failed (wrong key or corrupted envelope)"
-                        .to_string()
-                })
-        }
-        other => Err(format!("crypto.open: unknown algorithm id {other}")),
-    }
-}
-
 /// D-CRYPTO-ENVELOPE2=A: the only historical JETC v1 reader. Every grammar,
 /// key, and authentication failure is deliberately collapsed to OpenFailed.
 pub fn jet_crypto_expert_open_v1_impl(
@@ -533,25 +446,6 @@ pub fn jet_crypto_expert_open_v1_impl(
 
 fn jet_fill_random(out: &mut [u8]) -> Result<(), JetCryptoEntropyError> {
     jet_crypto_entropy_fill(out)
-}
-
-/// Default seal — ChaCha20-Poly1305 (D-CRYPTOENV1 misuse-resistant envelope).
-pub fn jet_crypto_seal_impl(key: &Vec<u8>, plaintext: &Vec<u8>) -> Result<Vec<u8>, String> {
-    seal_with_algo(key, plaintext, ALGO_CHACHA20).map_err(|error| error.to_string())
-}
-
-/// Open any supported envelope version/algorithm (algorithm agility).
-pub fn jet_crypto_open_impl(key: &Vec<u8>, envelope: &Vec<u8>) -> Result<Vec<u8>, String> {
-    open_envelope(key, envelope)
-}
-
-/// Expert-only: seal with a specific algorithm id (migration tests / expert tier).
-pub fn jet_crypto_seal_algo_impl(
-    key: &Vec<u8>,
-    plaintext: &Vec<u8>,
-    algo: i64,
-) -> Result<Vec<u8>, String> {
-    seal_with_algo(key, plaintext, algo as u8).map_err(|error| error.to_string())
 }
 
 /// Sign `message` with a 32-byte Ed25519 seed key.

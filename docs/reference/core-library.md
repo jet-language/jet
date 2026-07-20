@@ -486,12 +486,13 @@ are linked only through the hidden bridge crate, not the compiler.
 use core.crypto as crypto
 
 fn run() {
-    key :: crypto.random.bytes(32)
-    box :: crypto.seal(key, "hello".bytes()) ?? return
-    plain :: crypto.open(key, box) ?? return
+    recipient :: crypto.X25519SecretKey.generate() ?? return
+    box :: crypto.seal([recipient.public_key()], "hello".bytes(), []) ?? return
+    plain :: crypto.open(&recipient, box, []) ?? return
 
-    stored :: crypto.password_hash("correct horse battery staple") ?? return
-    print(crypto.password_verify("correct horse battery staple", stored))
+    password :: crypto.Secret.from_text("correct horse battery staple")
+    stored :: crypto.password_hash(password) ?? return
+    print(crypto.password_verify(password, stored) ?? return)
 }
 ```
 
@@ -501,7 +502,7 @@ fn run() {
 | `sha512_bytes(bytes)` | `String` | SHA-512 hex digest |
 | `blake3_bytes(bytes)` | `String` | BLAKE3 hex digest |
 | `random.bytes(n)` | `[U8]` (edition 2026) | One fail-closed OS CSPRNG request, capped at 1,048,576 bytes; edition 2026 reports E3001/exit 70 when the internal provider rejects the length or is unavailable. The ratified fallible `RandomError` surface waits for the next major edition. |
-| `seal(key, bytes)` / `open(key, box)` | `[U8] ? String` | Authenticated encryption envelope; default is ChaCha20-Poly1305 with internal nonce |
+| `seal(recipients, bytes, aad)` / `open(&identity, box, aad)` | `Sealed ? CryptoError` / `[U8] ? CryptoError` | Canonical recipient-based JETV value envelope with internal key and nonce handling |
 | `file_seal(recipients, source, destination)` / `file_open(&identity, source, destination)` | `() ? FileCryptoError` | Recipient-based JETC v2 files with bounded 1 MiB authenticated chunks and atomic no-overwrite publication |
 | `expert.open_v1(key, envelope)` | `[U8] ? CryptoError` | Audited `@Unsafe`-only reader for canonical historical JETC v1 ChaCha20-Poly1305 or AES-256-GCM bytes; every failure is `OpenFailed` |
 | `sign(seed, bytes)` / `verify(public, bytes, sig)` | mixed | Ed25519 signatures (`verify` returns `() ? String`) |
@@ -516,7 +517,7 @@ Card 302 audit state:
 
 | Area | State |
 |------|-------|
-| AEAD envelope | Shipped: `seal/open`, internal nonce, ChaCha20-Poly1305 default, AES-GCM legacy open via expert bridge |
+| AEAD envelope | Shipped: one recipient-based JETV `seal/open` path; historical symmetric JETC v1 has no writer or safe fallback and is readable only through `expert.open_v1` |
 | Signatures | Shipped: Ed25519 sign/verify with RFC-vector golden |
 | Password hashing | Shipped: Argon2id PHC hash/verify, random salt default, deterministic salted vector helper |
 | KDF / key agreement | Shipped: HKDF-SHA256 and X25519 with RFC vectors |
