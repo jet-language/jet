@@ -1437,6 +1437,7 @@ fn jet_http_srv_format_connection(resp: &JetHttpSrvResp, version: &str, close: b
         200 => "OK",
         201 => "Created",
         204 => "No Content",
+        205 => "Reset Content",
         206 => "Partial Content",
         301 => "Moved Permanently",
         302 => "Found",
@@ -1453,11 +1454,12 @@ fn jet_http_srv_format_connection(resp: &JetHttpSrvResp, version: &str, close: b
         _ => "OK",
     };
     let body_forbidden = (100..200).contains(&resp.status) || matches!(resp.status, 204 | 304);
+    let reset_content = resp.status == 205;
     let mut out = format!("{} {} {}\r\n", version, resp.status, reason);
     if !body_forbidden {
         out.push_str(&format!(
             "Content-Length: {}\r\n",
-            resp.head_content_length.unwrap_or(resp.body.len()),
+            if reset_content { 0 } else { resp.head_content_length.unwrap_or(resp.body.len()) },
         ));
     }
     out.push_str(&format!("Connection: {}\r\n", if close { "close" } else { "keep-alive" }));
@@ -1481,7 +1483,7 @@ fn jet_http_srv_format_connection(resp: &JetHttpSrvResp, version: &str, close: b
         }
     }
     out.push_str("\r\n");
-    if !body_forbidden && resp.head_content_length.is_none() {
+    if !body_forbidden && !reset_content && resp.head_content_length.is_none() {
         out.push_str(&resp.body);
     }
     out

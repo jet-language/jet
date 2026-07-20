@@ -442,6 +442,84 @@ fn head_preserves_representation_length_without_a_wire_body() {
 }
 
 #[test]
+fn reset_content_has_zero_length_and_preserves_pipeline_boundaries() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("response read");
+        response
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let reset_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/reset", move |_| {
+        reset_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response_header(
+            jet_http_srv_response_header(
+                jet_http_srv_response_header(
+                    jet_http_srv_response(205, &"must-not-publish".to_string()),
+                    &"Content-Length".to_string(),
+                    &"999".to_string(),
+                ),
+                &"Transfer-Encoding".to_string(),
+                &"chunked".to_string(),
+            ),
+            &"X-Origin".to_string(),
+            &"reset".to_string(),
+        )
+    });
+    let next_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/next", move |_| {
+        next_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"next".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 8;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+    });
+
+    let pipelined = exchange(
+        addr,
+        b"GET /reset HTTP/1.1\r\nHost: local\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    let second = pipelined.find("HTTP/1.1 200 OK").expect("successor response");
+    let reset = &pipelined[..second];
+    assert!(reset.starts_with("HTTP/1.1 205 Reset Content"), "wrong 205 status: {pipelined}");
+    assert!(reset.contains("Content-Length: 0\r\n"), "205 was not zero-length: {pipelined}");
+    assert!(!reset.to_ascii_lowercase().contains("transfer-encoding:"), "205 retained custom framing: {pipelined}");
+    assert!(reset.contains("X-Origin: reset\r\n"), "205 lost representation metadata: {pipelined}");
+    assert!(reset.ends_with("\r\n\r\n"), "205 body shifted pipeline: {pipelined}");
+    assert!(pipelined[second..].ends_with("\r\n\r\nnext"), "successor response misaligned: {pipelined}");
+
+    let head = exchange(
+        addr,
+        b"HEAD /reset HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    let (head_headers, head_body) = head.split_once("\r\n\r\n").expect("HEAD 205 framing");
+    assert!(head_headers.starts_with("HTTP/1.1 205 Reset Content"), "{head}");
+    assert!(head_headers.contains("Content-Length: 0\r\n"), "HEAD metadata overrode 205: {head}");
+    assert!(head_body.is_empty(), "HEAD 205 emitted body bytes: {head}");
+
+    assert_eq!(calls.load(Ordering::Acquire), 3);
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 2);
+    assert_eq!(report.user_completed, 2);
+}
+
+#[test]
 fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
     use std::io::{Read, Write};
     use std::sync::atomic::{AtomicUsize, Ordering};
