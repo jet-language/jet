@@ -165,6 +165,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             module,
             method,
             args,
+            ..
         } => {
             // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` now returns a `(Sender<T>,
             // Receiver<T>)` tuple bound via a tuple-destructure `let` — a statement
@@ -488,7 +489,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             (binds.len() == 2
                 && matches!(
                     &init.kind,
-                    TExprKind::CoreCall { module, method, args }
+                    TExprKind::CoreCall { module, method, args, .. }
                         if module == "core.tasks" && method == "channel" && args.is_empty()
                 ))
                 || (jit_tuple_type(&init.ty)

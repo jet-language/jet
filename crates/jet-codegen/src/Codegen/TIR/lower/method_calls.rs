@@ -96,6 +96,22 @@ fn builtin_arg_takes_ownership(op: &TBuiltinOp, index: usize) -> bool {
     }
 }
 
+fn core_widen_to_vec(module: &str, method: &str, args: &[TExpr]) -> Vec<bool> {
+    let params = crate::Sema::core_fixed_sig(module, method)
+        .map(|(params, _)| params)
+        .unwrap_or_default();
+    args.iter()
+        .enumerate()
+        .map(|(index, arg)| {
+            matches!(
+                (&arg.ty, params.get(index).map(|(_, ty)| ty)),
+                (Type::FixedList { elem: actual, .. }, Some(Type::List(want)))
+                    if actual == want
+            )
+        })
+        .collect()
+}
+
 /// c109 Phase 6: lower a method call. The gate proved it is the synthetic `.clone()`
 /// or a user instance method on a covered type; resolve every dispatch fact here.
 pub(crate) fn lower_method_call(
@@ -289,9 +305,11 @@ pub(crate) fn lower_method_call(
         Some(helper)
     });
     if let Some(helper) = crypto_static {
+        let module = "jet.crypto";
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        let widen_to_vec = core_widen_to_vec(module, helper, &targs);
         return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
-            module: "jet.crypto".to_string(), method: helper.to_string(),
-            args: args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect(),
+            module: module.to_string(), method: helper.to_string(), args: targs, widen_to_vec,
         }};
     }
     if let Some(kind) = recv_type.as_deref() {
@@ -313,8 +331,10 @@ pub(crate) fn lower_method_call(
         };
         if let Some(helper) = helper {
             let recv = lower_expr(receiver, cx, env);
+            let args = vec![recv];
+            let widen_to_vec = core_widen_to_vec("jet.crypto", helper, &args);
             return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
-                module: "jet.crypto".to_string(), method: helper.to_string(), args: vec![recv],
+                module: "jet.crypto".to_string(), method: helper.to_string(), args, widen_to_vec,
             }};
         }
     }
@@ -971,12 +991,14 @@ pub(crate) fn lower_method_call(
             if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, env)
             {
                 let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
                 return TExpr {
                     ty: core_call_return_ty(&submodule, method),
                     kind: TExprKind::CoreCall {
                         module: submodule,
                         method: method.to_string(),
                         args: targs,
+                        widen_to_vec,
                     },
                 };
             }
@@ -992,6 +1014,7 @@ pub(crate) fn lower_method_call(
                     }
                     let targs: Vec<TExpr> =
                         args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                    let widen_to_vec = core_widen_to_vec(&module, method, &targs);
                     // c109 Phase 18: the `core.mem` pointer ops carry a non-fixed return
                     // type. `address_of` is always `Int`; `volatile_read(p)` reads through
                     // the typed pointer, so its result is `ptr_elem(p.ty)` — the `T` of the
@@ -1030,6 +1053,7 @@ pub(crate) fn lower_method_call(
                             module,
                             method: method.to_string(),
                             args: targs,
+                            widen_to_vec,
                         },
                     };
                 }
@@ -2469,12 +2493,14 @@ pub(crate) fn lower_method_call(
         // lower to the same core call shape as `use core.perf as perf`.
         if type_name == "Perf" && !cx.type_names.contains("Perf") {
             let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+            let widen_to_vec = core_widen_to_vec("core.perf", method, &targs);
             return TExpr {
                 ty: core_call_return_ty("core.perf", method),
                 kind: TExprKind::CoreCall {
                     module: "core.perf".to_string(),
                     method: method.to_string(),
                     args: targs,
+                    widen_to_vec,
                 },
             };
         }

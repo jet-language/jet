@@ -688,14 +688,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 10: a core/stdlib module call. Reproduces `emit_core_call`
         // (Source/Codegen/Expression.rs) byte-for-byte. `module`/`method` were
         // resolved at lowering; `cx.root_prefix`/`cx.ffi_crate` are program-level
-        // (read here, like Phase 9's `cx.file`). Args were lowered PLAINLY — the
-        // per-arm `&(…)`/`&mut (…)`/move wrappers are baked into each arm, exactly
-        // as `emit_core_call` does (it ignores `CallArg.flags`).
+        // (read here, like Phase 9's `cx.file`). Args were lowered plainly, with
+        // D-FIXARR1 widening explicit; per-arm borrow/move wrappers stay baked into
+        // each arm exactly as `emit_core_call` requires.
         TExprKind::CoreCall {
             module,
             method,
             args,
-        } => emit_tir_core_call(module, method, args, &e.ty, cx),
+            widen_to_vec,
+        } => emit_tir_core_call(module, method, args, widen_to_vec, &e.ty, cx),
         TExprKind::Binary {
             op,
             overflow,

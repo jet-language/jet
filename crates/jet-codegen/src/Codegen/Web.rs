@@ -324,7 +324,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
-        E::CoreCall { module, method, args } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
+        E::CoreCall { module, method, args, .. } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
         E::HandleMethod { recv, op, args } => matches!(op, TIR::THandleOp::UiBackendMethod { .. } | TIR::THandleOp::ReactiveGet | TIR::THandleOp::ReactiveSet) && web_expr_supported(recv) && args.iter().all(web_expr_supported),
         E::NumericMethod { recv, op: TIR::TNumericOp::CastAs { .. } } => web_expr_supported(recv),
         E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => web_expr_supported(value) && web_expr_supported(fallback),
@@ -1107,7 +1107,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         }
         E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs, file_prefix)?),
         E::MethodCall { recv, method_rust, args, .. } => format!("{}.{}({})", tir_js_expr(recv, funcs, file_prefix)?, web_name(method_rust), tir_call_args(args, funcs, file_prefix)?),
-        E::CoreCall { module, method, args } => tir_core_call(module, method, args, funcs, file_prefix)?,
+        E::CoreCall { module, method, args, .. } => tir_core_call(module, method, args, funcs, file_prefix)?,
         E::HandleMethod { recv, op: TIR::THandleOp::UiBackendMethod { method }, args } => {
             let recv = tir_js_expr(recv, funcs, file_prefix)?;
             let a = tir_plain_args(args, funcs, file_prefix)?;

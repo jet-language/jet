@@ -1,0 +1,29 @@
+// D-CRYPTO-DIAG1=A: exact fixed lengths and dynamic expert material remain valid.
+use core.crypto.expert as expert
+
+fn dynamic_material(key: [U8], nonce: [U8], signature: [U8]) {
+    @Unsafe("protocol-selected interop material") {
+        xchacha :: expert.xchacha20poly1305_seal(key, nonce, [], [])
+        ed :: expert.ed25519_verify_strict(key, [], signature)
+        x :: expert.x25519(key, key)
+    }
+}
+
+fn run() {
+    bytes32: [U8#32] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+    nonce12: [U8#12] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    nonce24: [U8#24] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    signature64: [U8#64] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+    @Unsafe("fixed interop vectors") {
+        xchacha :: expert.xchacha20poly1305_seal(bytes32, nonce24, [], [])
+        aes :: expert.aes256gcm_seal(bytes32, nonce12, [], [])
+        sign :: expert.ed25519_sign(bytes32, [])
+        verify :: expert.ed25519_verify_strict(bytes32, [], signature64)
+        shared_default :: expert.x25519(bytes32, bytes32)
+        shared_explicit :: expert.x25519(bytes32, bytes32, true)
+    }
+    dynamic_key: [U8] :: [0]
+    dynamic_nonce: [U8] :: [0]
+    dynamic_signature: [U8] :: [0]
+    dynamic_material(dynamic_key, dynamic_nonce, dynamic_signature)
+}

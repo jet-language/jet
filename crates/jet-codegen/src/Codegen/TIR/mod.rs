@@ -1669,15 +1669,17 @@ pub enum TExprKind {
     /// `emit_core_call` (Source/Codegen/Expression.rs) is a pure syntactic match on
     /// two already-resolved strings — NO type inference (I3) — so the TIR carries
     /// `module`/`method` as resolved strings and the emitter reproduces the match
-    /// byte-for-byte. The args are lowered as PLAIN expressions: `emit_core_call`'s
-    /// `arg(i)` is a raw `emit_expr`, ignoring `CallArg.flags` and the param
-    /// convention; the per-arm `&(…)`/`&mut (…)`/move wrappers are baked into each
-    /// emit arm, not a TIR field. `cx.root_prefix`/`cx.ffi_crate` are program-level
+    /// byte-for-byte. The args are lowered as plain expressions; the sole generic
+    /// conversion fact is D-FIXARR1 widening. Per-arm `&(…)`/`&mut (…)`/move wrappers
+    /// stay baked into each emit arm. `cx.root_prefix`/`cx.ffi_crate` are program-level
     /// (read at emit, like Phase 9's `cx.file`), never a per-node decision.
     CoreCall {
         module: String,
         method: String,
         args: Vec<TExpr>,
+        /// D-FIXARR1: per-argument `[T#N]` to `[T]` widening, resolved from the
+        /// authoritative Core signature during lowering.
+        widen_to_vec: Vec<bool>,
     },
     /// `if`-expression form (S68 / D-SG2). Both arms are value blocks.
     IfExpr {

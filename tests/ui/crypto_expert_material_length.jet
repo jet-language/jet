@@ -1,0 +1,24 @@
+// D-CRYPTO-DIAG1=A: compiler-known expert key-material lengths are E2702.
+use core.crypto.expert as expert
+
+fn run() {
+    bytes31: [U8#31] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+    bytes32: [U8#32] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+    bytes33: [U8#33] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+    nonce12: [U8#12] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    nonce24: [U8#24] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    signature63: [U8#63] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62]
+    signature64: [U8#64] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+
+    @Unsafe("fixed interop vectors") {
+        xchacha_seal :: expert.xchacha20poly1305_seal(bytes31, nonce24, [], [])
+        xchacha_open :: expert.xchacha20poly1305_open(bytes33, nonce24, [], [])
+        aes_seal :: expert.aes256gcm_seal(bytes31, nonce12, [], [])
+        aes_open :: expert.aes256gcm_open(bytes33, nonce12, [], [])
+        ed_sign :: expert.ed25519_sign([0], [])
+        ed_public :: expert.ed25519_verify_strict(bytes31, [], signature64)
+        ed_signature :: expert.ed25519_verify_strict(bytes32, [], signature63)
+        x_secret :: expert.x25519(bytes31, bytes32)
+        x_public :: expert.x25519(bytes32, bytes31, true)
+    }
+}

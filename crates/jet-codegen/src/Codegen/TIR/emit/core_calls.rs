@@ -15,13 +15,19 @@ pub(crate) fn emit_tir_core_call(
     module: &str,
     method: &str,
     args: &[TExpr],
+    widen_to_vec: &[bool],
     ret_ty: &Type,
     cx: &Cx,
 ) -> String {
     let arg = |i: usize| {
-        args.get(i)
+        let rendered = args.get(i)
             .map(|e| emit_tir_expr(e, cx))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if widen_to_vec.get(i).copied().unwrap_or(false) {
+            format!("({rendered}).to_vec()")
+        } else {
+            rendered
+        }
     };
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
     let regex_fn = |name: &str| {

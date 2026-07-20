@@ -35,6 +35,17 @@ fn literal_list_len(expr: &crate::AST::Expr) -> Option<usize> {
     }
 }
 
+fn known_list_len(checker: &Checker<'_>, expr: &crate::AST::Expr) -> Option<usize> {
+    match expr {
+        crate::AST::Expr::Ident(name, _) => match &checker.lookup(name)?.ty {
+            Type::FixedList { len, .. } => usize::try_from(*len).ok(),
+            _ => None,
+        },
+        crate::AST::Expr::Paren(inner, _) => known_list_len(checker, inner),
+        _ => literal_list_len(expr),
+    }
+}
+
 fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
     match expr {
         crate::AST::Expr::Int(value, ..) => Some(*value),
@@ -47,6 +58,7 @@ fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
 }
 
 fn crypto_misuse_diagnostic(
+    checker: &Checker<'_>,
     module: &str,
     name: &str,
     args: &[crate::AST::CallArg],
@@ -68,7 +80,7 @@ fn crypto_misuse_diagnostic(
     }
     if module == "core.crypto.expert" && name == "argon2id" {
         let salt = args.get(1)?;
-        if let Some(actual) = literal_list_len(&salt.expr) {
+        if let Some(actual) = known_list_len(checker, &salt.expr) {
             if !(8..=64).contains(&actual) {
                 let unit = if actual == 1 { "byte" } else { "bytes" };
                 return Some(Diagnostic::error(
@@ -149,6 +161,42 @@ fn crypto_misuse_diagnostic(
             }
         }
     }
+    let material_requirements: &[(usize, &str, &str, usize)] = match (module, name) {
+        ("core.crypto.expert", "xchacha20poly1305_seal" | "xchacha20poly1305_open") => {
+            &[(0, "XChaCha20-Poly1305 key", "key", 32)]
+        }
+        ("core.crypto.expert", "aes256gcm_seal" | "aes256gcm_open") => {
+            &[(0, "AES-256-GCM key", "key", 32)]
+        }
+        ("core.crypto.expert", "ed25519_sign") => {
+            &[(0, "Ed25519 signing seed", "signing seed", 32)]
+        }
+        ("core.crypto.expert", "ed25519_verify_strict") => &[
+            (0, "Ed25519 public key", "public key", 32),
+            (2, "Ed25519 signature", "signature", 64),
+        ],
+        ("core.crypto.expert", "x25519") => &[
+            (0, "X25519 secret key", "secret key", 32),
+            (1, "X25519 public key", "public key", 32),
+        ],
+        _ => &[],
+    };
+    for &(index, fact, replacement, expected) in material_requirements {
+        let arg = args.get(index)?;
+        let Some(actual) = known_list_len(checker, &arg.expr) else {
+            continue;
+        };
+        if actual != expected {
+            let unit = if actual == 1 { "byte" } else { "bytes" };
+            return Some(Diagnostic::error(
+                "E2702",
+                "crypto API misuse".to_string(),
+                format!("{fact} has {actual} {unit}; this operation requires exactly {expected}"),
+                format!("pass a {expected}-byte {replacement}"),
+                Some(arg.expr.span()),
+            ));
+        }
+    }
     let (operation, expected) = match name {
         "xchacha20poly1305_seal" | "xchacha20poly1305_open" =>
             ("XChaCha20-Poly1305", 24),
@@ -156,7 +204,7 @@ fn crypto_misuse_diagnostic(
         _ => return None,
     };
     let nonce = args.get(1)?;
-    let actual = literal_list_len(&nonce.expr)?;
+    let actual = known_list_len(checker, &nonce.expr)?;
     if actual == expected { return None; }
     let unit = if actual == 1 { "byte" } else { "bytes" };
     Some(Diagnostic::error(
@@ -2885,6 +2933,7 @@ impl<'a> Checker<'a> {
                 return None;
             };
             if module == "core.crypto.expert" && name == "x25519" {
+                let validation_diag_start = self.diags.len();
                 if !(2..=3).contains(&args.len()) {
                     self.diags
                         .push(wrong_core_arity(name, 2, args.len(), span));
@@ -2897,6 +2946,15 @@ impl<'a> Checker<'a> {
                 }
                 for arg in args.iter_mut().skip(params.len()) {
                     self.infer(&mut arg.expr);
+                }
+                if self.in_unsafe
+                    && self.core_imports.values().any(|imported| imported == module)
+                    && (2..=3).contains(&args.len())
+                    && self.diags.len() == validation_diag_start
+                {
+                    if let Some(diagnostic) = crypto_misuse_diagnostic(self, module, name, args) {
+                        self.fx_pending_diagnostics.push(diagnostic);
+                    }
                 }
                 return ret;
             }
@@ -2945,7 +3003,7 @@ impl<'a> Checker<'a> {
                 && args.len() == params.len()
                 && self.diags.len() == validation_diag_start
             {
-                if let Some(diagnostic) = crypto_misuse_diagnostic(module, name, args) {
+                if let Some(diagnostic) = crypto_misuse_diagnostic(self, module, name, args) {
                     self.fx_pending_diagnostics.push(diagnostic);
                 }
             }

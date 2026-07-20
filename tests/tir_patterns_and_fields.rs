@@ -280,6 +280,29 @@ fn run() {
     assert_eq!(stdout, "2\n4\n");
 }
 
+/// D-FIXARR1 / D-CRYPTO-DIAG1: Core calls use the same fixed-list widening as
+/// ordinary calls after sema consumes the compile-known length fact.
+#[test]
+fn fixed_size_list_widens_at_core_call() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.crypto.expert as expert
+
+fn run() {
+    seed: [U8#32] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+    @Unsafe(\"fixed signature vector\") {
+        signature :: expert.ed25519_sign(seed, [])
+    }
+    print(\"ok\")
+}
+";
+    let (code, stdout) = build_and_run("tir_fixed_list_core_call", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "ok\n");
+}
+
 /// c109 (B1): a mixed-switch over a NON-IDENT subject (a field access) with a
 /// payload-binding arm head. The deleted emitter once produced
 /// `matches!(…, Some(c))` then used the unbound `c` (E0425); TIR emits the Rust

@@ -323,7 +323,7 @@ impl LowerCtx<'_, '_> {
             TStmt::TupleDestructure { init, binds, .. } => {
                 if matches!(
                     &init.kind,
-                    TExprKind::CoreCall { module, method, args }
+                    TExprKind::CoreCall { module, method, args, .. }
                         if module == "core.tasks" && method == "channel" && args.is_empty()
                 ) {
                     let ch_ref = self
@@ -1435,6 +1435,7 @@ impl LowerCtx<'_, '_> {
                 module,
                 method,
                 args,
+                ..
             } => {
                 if module == "core.tasks" && method == "channel" && args.is_empty() {
                     let host_ref = self
