@@ -204,6 +204,12 @@ impl QueryEngine {
         }
     }
 
+    pub fn invalidate(&mut self, key: &QueryKey) {
+        if self.memo.remove(key).is_some() {
+            self.prune_invalid_memos(false);
+        }
+    }
+
     fn record_dep(&mut self, key: &InputKey) {
         if let Some(deps) = self.dep_stack.last_mut() {
             deps.push(DepKey::Input(key.clone()));
@@ -384,6 +390,21 @@ mod tests {
         assert_eq!(second, "symbols:3");
         assert_eq!(db.recompute_count(&tokens), 2);
         assert_eq!(db.recompute_count(&symbols), 2);
+    }
+
+    #[test]
+    fn explicit_invalidation_preserves_unrelated_queries() {
+        let mut db = QueryEngine::new();
+        db.set_input(InputKey::new("a.jet"), "alpha".into());
+        db.set_input(InputKey::new("b.jet"), "beta".into());
+        assert_eq!(word_count(&mut db, "a.jet"), 1);
+        assert_eq!(word_count(&mut db, "b.jet"), 1);
+
+        db.invalidate(&QueryKey::new("tokens", "a.jet"));
+        assert_eq!(word_count(&mut db, "a.jet"), 1);
+        assert_eq!(word_count(&mut db, "b.jet"), 1);
+        assert_eq!(db.recompute_count(&QueryKey::new("tokens", "a.jet")), 2);
+        assert_eq!(db.recompute_count(&QueryKey::new("tokens", "b.jet")), 1);
     }
 
     #[test]

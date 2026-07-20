@@ -1,6 +1,8 @@
 //! Canonical incremental front-end queries shared by compiler clients.
 
 use jet_queries::{FileKey, InputKey, QueryEngine, QueryKey};
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -28,7 +30,9 @@ pub struct CompilerQueryStats {
 #[derive(Default)]
 pub struct CompilerQueries {
     engine: QueryEngine,
-    sema: crate::Sema::IncrementalSemaCache,
+    sema: HashMap<PathBuf, crate::Sema::IncrementalSemaCache>,
+    external_files: HashMap<PathBuf, Vec<PathBuf>>,
+    volatile_roots: HashSet<PathBuf>,
 }
 
 impl CompilerQueries {
@@ -37,22 +41,37 @@ impl CompilerQueries {
     }
 
     pub fn check_text(&mut self, path: &str, text: &str, is_lsp: bool) -> CheckedQuery {
-        let file = FileKey::new(path);
+        let root = canonical_path(Path::new(path));
+        let path = root.to_string_lossy().into_owned();
+        let file = FileKey::new(path.clone());
+        let external = external_input(&root);
+        self.external_files
+            .entry(root.clone())
+            .or_insert_with(|| default_external_files(&root));
+        self.engine.set_input(
+            external.clone(),
+            external_fingerprint(&root, self.external_files.get(&root)),
+        );
         self.set_file_input(file.clone(), text);
-        let path = path.to_string();
-        let abs = canonical_path(Path::new(&path));
-        let engine = &mut self.engine;
-        let sema = &mut self.sema;
-        engine.query(
-            QueryKey::for_file(if is_lsp { "checked.lsp" } else { "checked" }, file.clone()),
-            |queries| {
+        let query = QueryKey::for_file(
+            if is_lsp { "checked.lsp" } else { "checked" },
+            file.clone(),
+        );
+        if self.volatile_roots.contains(&root) {
+            self.engine.invalidate(&query);
+        }
+        let checked = {
+            let engine = &mut self.engine;
+            let sema = self.sema.entry(root.clone()).or_default();
+            engine.query(query, |queries| {
                 let text = queries
-                    .input_text(&InputKey::file(file))
+                    .input_text(&InputKey::file(file.clone()))
                     .unwrap_or_default();
+                let _ = queries.input_text(&external);
                 let (diagnostics, bundle, facts) =
                     crate::Driver::check_file_with_effect_facts_incremental(
                         &path,
-                        Some((&abs, &text)),
+                        Some((&root, &text)),
                         is_lsp,
                         sema,
                     );
@@ -61,14 +80,16 @@ impl CompilerQueries {
                     bundle: bundle.map(Arc::new),
                     effect_facts: Arc::new(facts),
                 }
-            },
-        )
+            })
+        };
+        self.update_external_state(&root, &checked);
+        checked
     }
 
     pub fn check_disk(&mut self, path: &str, is_lsp: bool) -> CheckedQuery {
-        // Imported modules are loaded from disk below this query boundary. A
-        // disk check must therefore revalidate its full module closure.
-        self.invalidate_checked();
+        let root = canonical_path(Path::new(path));
+        let file = FileKey::new(root.to_string_lossy());
+        self.invalidate_file(&file);
         match std::fs::read_to_string(path) {
             Ok(text) => self.check_text(path, &text, is_lsp),
             Err(_) => {
@@ -84,7 +105,7 @@ impl CompilerQueries {
     }
 
     pub fn lex_text(&mut self, path: &str, text: &str) -> Arc<Vec<crate::Lexer::Token>> {
-        let file = FileKey::new(path);
+        let file = FileKey::new(canonical_path(Path::new(path)).to_string_lossy());
         self.set_file_input(file.clone(), text);
         self.engine
             .query(QueryKey::for_file("tokens", file.clone()), |queries| {
@@ -96,18 +117,32 @@ impl CompilerQueries {
     }
 
     pub fn remove_document(&mut self, path: &str) {
+        let root = canonical_path(Path::new(path));
+        let file = FileKey::new(root.to_string_lossy());
         if self
             .engine
-            .remove_input(&InputKey::file(FileKey::new(path)))
+            .remove_input(&InputKey::file(file.clone()))
         {
-            self.invalidate_checked();
-            self.sema.clear();
+            self.invalidate_file(&file);
+            self.engine.remove_input(&external_input(&root));
+            self.sema.remove(&root);
+            self.external_files.remove(&root);
+            self.volatile_roots.remove(&root);
         }
     }
 
     pub fn stats(&self) -> CompilerQueryStats {
         let query = self.engine.stats();
-        let item = self.sema.stats();
+        let item = self.sema.values().map(|cache| cache.stats()).fold(
+            crate::Sema::IncrementalSemaStats::default(),
+            |mut total, stats| {
+                total.hits += stats.hits;
+                total.recomputes += stats.recomputes;
+                total.live_items += stats.live_items;
+                total.live_item_bytes += stats.live_item_bytes;
+                total
+            },
+        );
         CompilerQueryStats {
             hits: query.hits,
             recomputes: query.recomputes,
@@ -127,21 +162,76 @@ impl CompilerQueries {
     }
 
     fn set_file_input(&mut self, file: FileKey, text: &str) {
-        if self
-            .engine
-            .set_input(InputKey::file(file), text.to_string())
-        {
-            // The loader may read this file while checking any root. Until
-            // item-level loader dependencies land, invalidate all checked roots
-            // conservatively; token queries remain precisely file-local.
-            self.invalidate_checked();
-        }
+        self.engine
+            .set_input(InputKey::file(file), text.to_string());
     }
 
-    fn invalidate_checked(&mut self) {
-        self.engine.invalidate_kind("checked");
-        self.engine.invalidate_kind("checked.lsp");
+    fn invalidate_file(&mut self, file: &FileKey) {
+        self.engine
+            .invalidate(&QueryKey::for_file("checked", file.clone()));
+        self.engine
+            .invalidate(&QueryKey::for_file("checked.lsp", file.clone()));
     }
+
+    fn update_external_state(&mut self, root: &Path, checked: &CheckedQuery) {
+        let Some(bundle) = checked.bundle.as_deref() else {
+            self.external_files.remove(root);
+            self.volatile_roots.remove(root);
+            return;
+        };
+        let mut files = bundle
+            .modules
+            .iter()
+            .map(|module| canonical_path(&module.path))
+            .filter(|path| path != root)
+            .collect::<Vec<_>>();
+        files.extend(
+            bundle
+                .comptime_inputs
+                .iter()
+                .map(|input| canonical_path(&bundle.project_root.join(&input.path))),
+        );
+        files.extend([
+            bundle.project_root.join("pkg.jet"),
+            bundle.project_root.join(".jet/lock"),
+        ]);
+        files.sort();
+        files.dedup();
+        self.external_files.insert(root.to_path_buf(), files);
+        if crate::Sema::bundle_has_comptime_evaluation(bundle)
+            || !bundle.comptime_inputs.is_empty()
+        {
+            self.volatile_roots.insert(root.to_path_buf());
+        } else {
+            self.volatile_roots.remove(root);
+        }
+        let fingerprint = external_fingerprint(root, self.external_files.get(root));
+        self.engine.set_input(external_input(root), fingerprint);
+    }
+}
+
+fn external_input(root: &Path) -> InputKey {
+    InputKey::new(format!("checked-external:{}", root.display()))
+}
+
+fn default_external_files(root: &Path) -> Vec<PathBuf> {
+    let project = root.parent().unwrap_or_else(|| Path::new("."));
+    let mut files = vec![project.join("pkg.jet"), project.join(".jet/lock")];
+    files.sort();
+    files
+}
+
+fn external_fingerprint(root: &Path, files: Option<&Vec<PathBuf>>) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    root.hash(&mut hasher);
+    for path in files.into_iter().flatten() {
+        path.hash(&mut hasher);
+        match std::fs::read(path) {
+            Ok(bytes) => bytes.hash(&mut hasher),
+            Err(error) => error.kind().hash(&mut hasher),
+        }
+    }
+    format!("{:016x}", hasher.finish())
 }
 
 fn canonical_path(path: &Path) -> PathBuf {
@@ -157,6 +247,13 @@ fn canonical_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn checked_key(path: impl AsRef<Path>) -> QueryKey {
+        QueryKey::for_file(
+            "checked.lsp",
+            FileKey::new(canonical_path(path.as_ref()).to_string_lossy()),
+        )
+    }
 
     fn diagnostic_summary(
         diagnostics: &[crate::Diagnostics::Diagnostic],
@@ -188,10 +285,7 @@ mod tests {
         );
         assert!(!check.diagnostics.is_empty());
         assert_eq!(
-            service.recompute_count(&QueryKey::for_file(
-                "checked.lsp",
-                FileKey::new("shared.jet")
-            )),
+            service.recompute_count(&checked_key("shared.jet")),
             1
         );
         assert_eq!(service.stats().hits, 1);
@@ -225,10 +319,7 @@ mod tests {
             "changed dependency must not leave importer diagnostics cached"
         );
         assert_eq!(
-            service.recompute_count(&QueryKey::for_file(
-                "checked.lsp",
-                FileKey::new(main.to_string_lossy())
-            )),
+            service.recompute_count(&checked_key(&main)),
             2
         );
         let _ = std::fs::remove_dir_all(root);
@@ -293,5 +384,113 @@ mod tests {
         );
         assert_eq!(incremental.stats().item_hits, 0);
         assert_eq!(incremental.stats().item_recomputes, 2);
+    }
+
+    #[test]
+    fn unrelated_roots_remain_warm() {
+        let root = std::env::temp_dir().join(format!("jet-query-roots-{}", std::process::id()));
+        let left = root.join("left/main.jet");
+        let right = root.join("right/main.jet");
+        std::fs::create_dir_all(left.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(right.parent().unwrap()).unwrap();
+        let mut service = CompilerQueries::new();
+        let left_before = "fn left() -> Int { return 1 }\n";
+        let left_after = "fn left() -> Int { return 2 }\n";
+        let right_source = "fn right() -> Int { return 3 }\n";
+
+        let _ = service.check_text(&left.to_string_lossy(), left_before, true);
+        let _ = service.check_text(&right.to_string_lossy(), right_source, true);
+        let _ = service.check_text(&left.to_string_lossy(), left_after, true);
+        let hits = service.stats().hits;
+        let _ = service.check_text(&right.to_string_lossy(), right_source, true);
+
+        assert_eq!(service.recompute_count(&checked_key(&left)), 2);
+        assert_eq!(service.recompute_count(&checked_key(&right)), 1);
+        assert_eq!(service.stats().hits, hits + 1, "right root must stay warm");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn overlay_tracks_imported_disk_inputs() {
+        let root = std::env::temp_dir().join(format!("jet-query-overlay-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let dependency = root.join("b.jet");
+        let source = "module b;\nfn run() -> Int { return b.value() }\n";
+        std::fs::write(&dependency, "pub fn value() -> Int { return 1 }\n").unwrap();
+        let mut service = CompilerQueries::new();
+        assert!(service
+            .check_text(&main.to_string_lossy(), source, true)
+            .diagnostics
+            .is_empty());
+
+        std::fs::write(
+            &dependency,
+            "pub fn value() -> String { return \"changed\" }\n",
+        )
+        .unwrap();
+        assert!(!service
+            .check_text(&main.to_string_lossy(), source, true)
+            .diagnostics
+            .is_empty());
+        assert_eq!(service.recompute_count(&checked_key(&main)), 2);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn comptime_local_disables_replay() {
+        let mut service = CompilerQueries::new();
+        let source = "fn run() {\n    comptime value = 1\n    print(\"{value}\")\n}\n";
+        assert!(service.check_text("comptime.jet", source, true).diagnostics.is_empty());
+        assert!(service.check_text("comptime.jet", source, true).diagnostics.is_empty());
+        assert_eq!(service.recompute_count(&checked_key("comptime.jet")), 2);
+        assert_eq!(service.stats().item_hits, 0);
+        assert_eq!(service.stats().live_items, 0);
+    }
+
+    #[test]
+    fn changed_embed_input_is_never_replayed() {
+        let root = std::env::temp_dir().join(format!("jet-query-embed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let asset = root.join("message.txt");
+        let source = concat!(
+            "comptime message = embed_file(\"message.txt\")\n",
+            "fn read() -> String { return message }\n"
+        );
+        std::fs::write(&asset, "first").unwrap();
+        let mut service = CompilerQueries::new();
+        let first = service.check_text(&main.to_string_lossy(), source, true);
+        assert!(first.diagnostics.is_empty());
+        assert!(format!("{:?}", first.bundle).contains("first"));
+
+        std::fs::write(&asset, "second").unwrap();
+        let second = service.check_text(&main.to_string_lossy(), source, true);
+        assert!(second.diagnostics.is_empty());
+        assert!(format!("{:?}", second.bundle).contains("second"));
+        assert_eq!(service.recompute_count(&checked_key(&main)), 2);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn retained_item_bytes_grow_with_retained_payloads() {
+        let mut service = CompilerQueries::new();
+        let one = "fn alpha() -> Int { return 1 }\n";
+        let two = concat!(
+            "fn alpha() -> Int { return 1 }\n",
+            "fn beta() -> Int { return \"a deliberately long wrong value\" }\n"
+        );
+        let _ = service.check_text("memory.jet", one, true);
+        let before = service.stats();
+        let _ = service.check_text("memory.jet", two, true);
+        let after = service.stats();
+
+        assert_eq!(after.live_items, 2);
+        assert!(
+            after.live_item_bytes >= before.live_item_bytes + (two.len() - one.len()),
+            "retained-byte total must cover the added key, function, and diagnostic payload"
+        );
     }
 }

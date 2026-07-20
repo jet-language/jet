@@ -27,6 +27,7 @@ pub(crate) struct CompletionItem {
     pub(crate) label: String,
     kind: u8,
     pub(crate) detail: Option<String>,
+    documentation: Option<String>,
     insert_text: Option<String>,
     insert_text_format: u8, // 1=plain, 2=snippet
     /// D-LSP5: import statement to insert at top of file (auto-import).
@@ -47,6 +48,10 @@ impl CompletionItem {
             ),
             None => String::new(),
         };
+        let documentation = match &self.documentation {
+            Some(value) => format!(r#","documentation":"{}""#, json_escape(value)),
+            None => String::new(),
+        };
         let additional = match &self.auto_import {
             Some(stmt) => format!(
                 r#","additionalTextEdits":[{{"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":0}}}},"newText":"{}"}}]"#,
@@ -55,14 +60,25 @@ impl CompletionItem {
             None => String::new(),
         };
         format!(
-            r#"{{"label":"{}","kind":{}{}{}{}}}"#,
+            r#"{{"label":"{}","kind":{}{}{}{}{}}}"#,
             json_escape(&self.label),
             self.kind,
             detail,
+            documentation,
             insert,
             additional
         )
     }
+}
+
+fn semantic_documentation(symbol: &jet_semindex::SemanticSymbol) -> String {
+    let provenance = match &symbol.provenance {
+        jet_semindex::SemanticProvenance::Source { module_path } => module_path,
+        jet_semindex::SemanticProvenance::Builtin { module } => module,
+        jet_semindex::SemanticProvenance::CommandRegistry => "command registry",
+        jet_semindex::SemanticProvenance::Session => "session",
+    };
+    format!("{}\n\n{}", symbol.summary, provenance)
 }
 
 /// Jet keywords for completion and rename validation.
@@ -212,6 +228,7 @@ pub(crate) fn compute_completions(
                         label: name,
                         kind: ck::MODULE,
                         detail: Some(format!("package from {source}")),
+                        documentation: None,
                         insert_text: None,
                         insert_text_format: 1,
                         auto_import: None,
@@ -235,6 +252,7 @@ pub(crate) fn compute_completions(
                         label: field.name.clone(),
                         kind: ck::PROPERTY,
                         detail: Some(format!("default: {} - {}", field.default, field.docs)),
+                        documentation: None,
                         insert_text: Some(format!("{}: ", field.name)),
                         insert_text_format: 1,
                         auto_import: None,
@@ -277,6 +295,7 @@ pub(crate) fn compute_completions(
                         label: symbol.name.clone(),
                         kind: semantic_completion_kind(symbol),
                         detail: Some(symbol.signature.clone()),
+                        documentation: Some(semantic_documentation(symbol)),
                         insert_text: None,
                         insert_text_format: 1,
                         auto_import: None,
@@ -299,6 +318,7 @@ pub(crate) fn compute_completions(
                                 label: label.clone(),
                                 kind: ck::ENUM_MEMBER,
                                 detail: Some(format!("variant of {}", enum_type)),
+                                documentation: None,
                                 insert_text: Some(format!("{}.{} {{}}", enum_type, v)),
                                 insert_text_format: 2,
                                 auto_import: None,
@@ -347,6 +367,7 @@ pub(crate) fn compute_completions(
                 label: symbol.name.clone(),
                 kind: semantic_completion_kind(symbol),
                 detail: Some(symbol.signature.clone()),
+                documentation: Some(semantic_documentation(symbol)),
                 insert_text: None,
                 insert_text_format: 1,
                 auto_import: match symbol.provenance {
@@ -368,6 +389,7 @@ pub(crate) fn compute_completions(
                 label: Syntax::KW_NEXT.to_string(),
                 kind: ck::KEYWORD,
                 detail: Some("advance the current loop".to_string()),
+                documentation: None,
                 insert_text: None,
                 insert_text_format: 1,
                 auto_import: None,
@@ -400,6 +422,7 @@ pub(crate) fn compute_completions(
                     label: label.to_string(),
                     kind: ck::SNIPPET,
                     detail: Some(detail.to_string()),
+                    documentation: None,
                     insert_text: Some(insert.to_string()),
                     insert_text_format: 2,
                     auto_import: None,

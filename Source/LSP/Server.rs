@@ -350,7 +350,7 @@ fn handle_request(
         }
         "textDocument/codeAction" => code_action_response(server, params, id),
         "textDocument/formatting" => format_response(server, params, id),
-        "textDocument/rangeFormatting" => format_response(server, params, id),
+        "textDocument/rangeFormatting" => range_format_response(server, params, id),
         "textDocument/completion" => completion_response(server, params, id),
         "textDocument/signatureHelp" => signature_help_response(server, params, id),
         "textDocument/documentSymbol" => document_symbol_response(server, params, id),
@@ -830,6 +830,74 @@ fn format_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) 
         json_escape(&formatted)
     );
     Some(response(id, &edit))
+}
+
+fn range_format_response(
+    server: &Server,
+    params: Option<&JsonValue>,
+    id: &JsonValue,
+) -> Option<String> {
+    let params = params?;
+    let td = json_get(params, "textDocument")?;
+    let uri = json_get(td, "uri").and_then(json_str)?;
+    let doc = server.docs.get(uri)?;
+    let requested = range_from_json(json_get(params, "range")?)?;
+    let Some((range, new_text)) = format_requested_lines(&doc.text, requested) else {
+        return Some(response(id, "[]"));
+    };
+    Some(response(
+        id,
+        &format!(
+            r#"[{{"range":{},"newText":"{}"}}]"#,
+            range_json(range),
+            json_escape(&new_text)
+        ),
+    ))
+}
+
+fn format_requested_lines(src: &str, requested: LspRange) -> Option<(LspRange, String)> {
+    apply_lsp_edit(src, requested, None, "")?;
+    let formatted = crate::format_source(src).ok()?;
+    let start_line = requested.start.line;
+    let end_line = requested
+        .end
+        .line
+        .saturating_add(u32::from(requested.end.character > 0));
+    if end_line < start_line {
+        return None;
+    }
+    let source_start = line_boundary(src, start_line)?;
+    let source_end = line_boundary(src, end_line).unwrap_or(src.len());
+    let formatted_start = line_boundary(&formatted, start_line)?;
+    let formatted_end = line_boundary(&formatted, end_line).unwrap_or(formatted.len());
+    let range = byte_span_to_range(
+        src,
+        crate::Diagnostics::Span::new(source_start, source_end),
+    );
+    let new_text = formatted[formatted_start..formatted_end].to_string();
+    (src[source_start..source_end] != new_text).then_some((range, new_text))
+}
+
+fn line_boundary(src: &str, line: u32) -> Option<usize> {
+    if line == 0 {
+        return Some(0);
+    }
+    let mut current = 0u32;
+    let bytes = src.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if matches!(bytes[index], b'\r' | b'\n') {
+            if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
+                index += 1;
+            }
+            current += 1;
+            if current == line {
+                return Some(index + 1);
+            }
+        }
+        index += 1;
+    }
+    None
 }
 
 fn completion_response(
@@ -2077,6 +2145,53 @@ mod project_part_tests {
 
         assert!(response.contains(r#""code":-32800"#), "{response}");
         assert!(!response.contains(r#""result":true"#), "{response}");
+    }
+
+    #[test]
+    fn range_formatting_leaves_unselected_lines_unchanged() {
+        let source = "fn one(){\nprint(1)\n}\nfn two(){\nprint(2)\n}\n";
+        let requested = LspRange {
+            start: LspPos {
+                line: 0,
+                character: 0,
+            },
+            end: LspPos {
+                line: 3,
+                character: 0,
+            },
+        };
+        let (range, new_text) =
+            format_requested_lines(source, requested).expect("range formatting edit");
+        let edited = apply_lsp_edit(source, range, None, &new_text).expect("valid edit");
+
+        assert!(edited.starts_with("fn one() {\n    print(1)\n}\n"), "{edited}");
+        assert!(edited.ends_with("fn two(){\nprint(2)\n}\n"), "{edited}");
+        assert_eq!(range.start, requested.start);
+        assert_eq!(range.end, requested.end);
+    }
+
+    #[test]
+    fn incremental_lsp_query_diagnostics_match_fresh_check_bytes() {
+        let path = "/tmp/lsp_incremental_diagnostic_parity.jet";
+        let before = "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return 2 }\n";
+        let mut doc = Document::new(path.to_string(), before.to_string(), 1);
+        let server = Server::new();
+        assert!(server.check(&doc).is_empty());
+
+        let value = before.rfind('2').unwrap();
+        let range = LspRange {
+            start: byte_offset_to_lsp(before, value),
+            end: byte_offset_to_lsp(before, value + 1),
+        };
+        assert!(doc.apply_range_edit(range, Some(1), "\"wrong\""));
+        let incremental = server.check(&doc);
+        let fresh = super::super::Check::check_document(path, &doc.text);
+
+        assert_eq!(
+            crate::render_all_json(path, &doc.text, &incremental),
+            crate::render_all_json(path, &doc.text, &fresh)
+        );
+        assert!(!incremental.is_empty());
     }
 
     #[cfg(unix)]

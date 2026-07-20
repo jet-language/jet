@@ -960,7 +960,7 @@ fn check_func_body_incremental(
     // facts. Include them in the cache input so whitespace-only edits cannot
     // reuse stale positions even when the canonical AST is unchanged.
     let debug = format!("{function:?}");
-    let cache_allowed = cache_allowed && !debug.contains("Comptime");
+    let cache_allowed = cache_allowed && !stmts_have_comptime_evaluation(&function.body);
     let input = debug.into_bytes();
     let Some(cache) = cache.filter(|_| cache_allowed) else {
         return check_func_body_bundle(
@@ -1017,6 +1017,9 @@ fn check_func_body_incremental(
     embed_inputs_out.extend(local_inputs.clone());
     global_addr_taken.extend(local_address_taken.clone());
     reference_anchors.extend(local_anchors.clone());
+    if !local_inputs.is_empty() {
+        return diagnostics;
+    }
     cache.store(
         key,
         CachedFunctionBody {

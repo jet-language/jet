@@ -1570,7 +1570,7 @@ pub(crate) use OsTarget::{check_os_target, desugar_os_switches};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{
-    check_bundle, check_bundle_allow_impure, check_bundle_for_output,
+    bundle_has_comptime_evaluation, check_bundle, check_bundle_allow_impure, check_bundle_for_output,
     check_bundle_for_output_opts, check_bundle_freestanding, check_bundle_with_effect_facts,
     check_bundle_with_effect_facts_incremental, specialize_function_types,
     IncrementalSemaCache, IncrementalSemaStats,

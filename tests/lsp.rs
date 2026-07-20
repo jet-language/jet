@@ -3240,11 +3240,17 @@ fn lsp_bench_reports_deterministic_cache_and_memory() {
     let report = jet::LSP::measure_bench(src, 10);
     assert_eq!(report.hits, 1, "unchanged warm request must hit once");
     assert_eq!(report.recomputes, 11, "cold check plus ten changed revisions");
-    assert_eq!(report.live_inputs, 1);
-    assert_eq!(report.live_input_bytes, src.len() + "\n// lsp-bench-edit:1\n".len());
+    assert_eq!(report.live_inputs, 2, "source and external-closure fingerprints");
+    assert_eq!(
+        report.live_input_bytes,
+        src.len() + "\n// lsp-bench-edit:1\n".len() + 16
+    );
     assert_eq!(report.live_memos, 1, "only current checked revision stays live");
     assert_eq!(report.item_hits, 10, "comment edits must reuse the checked item");
     assert_eq!(report.item_recomputes, 1, "only the cold item check may recompute");
     assert!(report.live_items > 0);
-    assert!(report.live_item_bytes > 0);
+    assert!(
+        report.live_item_bytes >= src.len(),
+        "retained item accounting must cover at least the checked source payload"
+    );
 }
