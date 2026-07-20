@@ -171,6 +171,21 @@ struct JetHttpBody {
     state: std::sync::Arc<std::sync::Mutex<JetHttpBodyState>>,
 }
 
+impl Drop for JetHttpBody {
+    fn drop(&mut self) {
+        if std::sync::Arc::strong_count(&self.state) != 1 {
+            return;
+        }
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(JetHttpBodySource::Bridge { handle, close, .. }) = state.source.take() {
+            close(handle);
+        }
+    }
+}
+
 impl JetHttpBody {
     fn empty() -> Self {
         Self::from_bytes(Vec::new())

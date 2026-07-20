@@ -691,6 +691,7 @@ use core.http.server as server
 fn handle_root(req: HttpRequest) -> HttpResponse ? HttpError {
     return Ok(server.response(200, \"welcome\"))
 }
+
 fn handle_user(req: HttpRequest) -> HttpResponse ? HttpError {
     id :: req.param(\"id\") ?? \"unknown\"
     return Ok(server.response(200, \"user={id}\"))
@@ -707,6 +708,24 @@ fn run() {
     let (code, stdout) = build_and_run("tir_http_router", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "welcome\n");
+}
+
+#[test]
+fn http_mux_unannotated_handler_lambda_is_owned_in_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.http.server as server
+fn run() {
+    mux :: server.mux()
+    mux.get(\"/\", (req) => Ok(server.response(200, req.path())))
+    print(\"registered\")
+}
+";
+    let (code, stdout) = build_and_run("tir_http_unannotated_handler", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "registered\n");
 }
 
 /// c109 Phase 25 / E2804: duplicate routes are user runtime errors. They must

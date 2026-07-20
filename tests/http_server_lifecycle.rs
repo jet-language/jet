@@ -49,6 +49,37 @@ include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
 
+static HTTP_BODY_CLOSES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+fn unread_bridge_body(
+    _handle: i64,
+    _max_chunk: usize,
+) -> Result<Option<Vec<u8>>, JetHttpError> {
+    Ok(Some(vec![1]))
+}
+
+fn close_unread_bridge_body(_handle: i64) {
+    HTTP_BODY_CLOSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[test]
+fn lazy_bridge_body_closes_once_when_its_last_owner_drops_unread() {
+    HTTP_BODY_CLOSES.store(0, std::sync::atomic::Ordering::SeqCst);
+    let body = JetHttpBody::bridge(
+        7,
+        Some(1),
+        unread_bridge_body,
+        close_unread_bridge_body,
+    );
+    let clone = body.clone();
+
+    drop(body);
+    assert_eq!(HTTP_BODY_CLOSES.load(std::sync::atomic::Ordering::SeqCst), 0);
+    drop(clone);
+    assert_eq!(HTTP_BODY_CLOSES.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
 fn read_response(stream: &mut std::net::TcpStream) -> String {
     use std::io::Read;
 

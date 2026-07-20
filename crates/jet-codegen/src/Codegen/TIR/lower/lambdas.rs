@@ -90,10 +90,16 @@ fn lower_lambda_expecting_with_host_borrow(
     // Http handlers cross the server boundary as owned requests. Their public
     // callback type is `Fn(HttpRequest)`, never Jet's ordinary read-borrowed
     // function convention.
-    let by_value = by_value
-        || (lam.meta.escapes
-            && lam.params.len() == 1
-            && matches!(lam.params[0].ty.as_ref(), Some(Type::Named(name)) if name == "HttpRequest"));
+    let http_handler = lam.meta.escapes
+        && lam.params.len() == 1
+        && matches!(
+            lam.params[0]
+                .ty
+                .as_ref()
+                .or_else(|| expected_params.and_then(|params| params.first())),
+            Some(Type::Named(name)) if name == "HttpRequest"
+        );
+    let by_value = by_value || http_handler;
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
     // does not leak its own bindings into the enclosing function.
@@ -195,9 +201,7 @@ fn lower_lambda_expecting_with_host_borrow(
         source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
         is_move,
         boxed: lam.meta.escapes,
-        arc: lam.meta.escapes
-            && lam.params.len() == 1
-            && matches!(lam.params[0].ty.as_ref(), Some(Type::Named(name)) if name == "HttpRequest"),
+        arc: http_handler,
     }
 }
 
