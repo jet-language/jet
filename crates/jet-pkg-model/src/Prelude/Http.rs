@@ -122,8 +122,8 @@ pub fn jet_http_client_send_impl(
     let result = if let Some(b) = body {
         req.send_string(b)
     } else if !multipart_flat.is_empty() {
-        let boundary = "jet-http-boundary";
-        multipart_body = encode_multipart(multipart_flat, boundary);
+        let boundary = multipart_boundary(multipart_flat);
+        multipart_body = encode_multipart(multipart_flat, &boundary);
         req.set(
             "content-type",
             &format!("multipart/form-data; boundary={boundary}"),
@@ -241,6 +241,34 @@ fn encode_form(fields: &[String]) -> String {
         i += 2;
     }
     out
+}
+
+fn multipart_boundary(fields: &[String]) -> String {
+    const PREFIX: &str = "jet-http-boundary-";
+    const LENGTH: usize = PREFIX.len() + 16;
+
+    let mut used = std::collections::HashSet::new();
+    for field in fields {
+        for window in field.as_bytes().windows(LENGTH) {
+            let Some(suffix) = window.strip_prefix(PREFIX.as_bytes()) else {
+                continue;
+            };
+            let Ok(suffix) = std::str::from_utf8(suffix) else {
+                continue;
+            };
+            if let Ok(suffix) = u64::from_str_radix(suffix, 16) {
+                used.insert(suffix);
+            }
+        }
+    }
+
+    let mut suffix = 0u64;
+    while used.contains(&suffix) {
+        suffix = suffix
+            .checked_add(1)
+            .expect("in-memory multipart fields cannot contain every u64 boundary suffix");
+    }
+    format!("{PREFIX}{suffix:016x}")
 }
 
 fn encode_multipart(fields: &[String], boundary: &str) -> String {

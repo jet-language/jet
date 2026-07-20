@@ -5338,6 +5338,141 @@ fn main() {
 }
 
 #[test]
+fn core_http_client_multipart_boundary_does_not_collide_with_fields() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut request = Vec::new();
+        loop {
+            let mut chunk = [0; 4096];
+            let read = stream.read(&mut chunk).unwrap();
+            assert_ne!(read, 0, "multipart request ended before its body");
+            request.extend_from_slice(&chunk[..read]);
+            let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n")
+            else {
+                continue;
+            };
+            let headers = String::from_utf8_lossy(&request[..header_end]);
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            if request.len() >= header_end + 4 + content_length {
+                break;
+            }
+        }
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            )
+            .unwrap();
+        String::from_utf8(request).unwrap()
+    });
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_http_multipart_boundary_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let compiled = compile_temp(
+        "http_multipart_seed.jet",
+        "use core.http.client as http\nfn run() { req :: http.request(\"POST\", \"http://127.0.0.1/\") }\n",
+    );
+    let link = compiled.ffi.expect("HTTP client bridge");
+    let harness = dir.join("bridge_multipart_boundary.rs");
+    let bin = dir.join("bridge_multipart_boundary");
+    fs::write(
+        &harness,
+        r#"
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let long_candidate = format!("jet-http-boundary{}", "-".repeat(53));
+    let candidates = (0u64..300)
+        .map(|suffix| format!("jet-http-boundary-{suffix:016x}"))
+        .collect::<String>();
+    let multipart = vec![
+        format!("{long_candidate}{candidates}"),
+        format!("before\r\n--{long_candidate}\r\n{candidates}\r\nafter"),
+    ];
+    let response = bridge::jet_http_client_send_impl(
+        "POST", &url, &[], None, None, None, None, None, None, None,
+        &[], &[], &multipart,
+    ).unwrap();
+    assert_eq!((response.0, response.1.as_str()), (200, "ok"));
+}
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "bridge harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin)
+        .arg(format!("http://{addr}/"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "bridge harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let request = server.join().unwrap();
+    let (headers, body) = request.split_once("\r\n\r\n").unwrap();
+    let boundary = headers
+        .lines()
+        .find_map(|line| line.strip_prefix("content-type: multipart/form-data; boundary="))
+        .unwrap();
+    let long_candidate = format!("jet-http-boundary{}", "-".repeat(53));
+    let candidates = (0u64..300)
+        .map(|suffix| format!("jet-http-boundary-{suffix:016x}"))
+        .collect::<String>();
+    let field_name = format!("{long_candidate}{candidates}");
+    let field_value = format!("before\r\n--{long_candidate}\r\n{candidates}\r\nafter");
+    assert!((1..=70).contains(&boundary.len()), "invalid boundary length: {boundary}");
+    assert!(boundary.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'));
+    assert_eq!(boundary, "jet-http-boundary-000000000000012c");
+    assert!(!field_name.contains(boundary), "multipart name collided");
+    assert!(!field_value.contains(boundary), "multipart value collided");
+    assert_eq!(
+        body,
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{field_name}\"\r\n\r\n{field_value}\r\n--{boundary}--\r\n"
+        )
+    );
+    assert_eq!(body.matches(&format!("--{boundary}")).count(), 2);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_http_client_rejects_negative_phase_timeouts_before_transport() {
     use std::io::{Read, Write};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
