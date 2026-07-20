@@ -75,10 +75,8 @@ pub fn jet_http_client_send_impl(
     }
     let agent = builder.build();
     let mut req = agent.request(method, url.as_str());
-    let mut i = 0;
-    while i + 1 < headers_flat.len() {
-        req = req.set(&headers_flat[i], &headers_flat[i + 1]);
-        i += 2;
+    for (name, value) in coalesce_request_headers(headers_flat) {
+        req = req.set(&name, &value);
     }
     if !cookies_flat.is_empty() {
         let mut cookie = String::new();
@@ -131,13 +129,36 @@ pub fn jet_http_client_send_impl(
 
 fn flatten_response_headers(response: &ureq::Response) -> Vec<String> {
     let mut flat = Vec::new();
+    let mut seen = std::collections::HashMap::<String, usize>::new();
     for name in response.headers_names() {
-        for value in response.all(&name) {
+        let index = seen.entry(name.clone()).or_default();
+        if let Some(value) = response.all(&name).get(*index) {
             flat.push(name.clone());
             flat.push(value.to_string());
         }
+        *index += 1;
     }
     flat
+}
+
+fn coalesce_request_headers(flat: &[String]) -> Vec<(String, String)> {
+    let mut headers: Vec<(String, String)> = Vec::new();
+    for pair in flat.chunks_exact(2) {
+        if let Some((_, value)) = headers
+            .iter_mut()
+            .find(|(name, _)| name.eq_ignore_ascii_case(&pair[0]))
+        {
+            value.push_str(if pair[0].eq_ignore_ascii_case("cookie") {
+                "; "
+            } else {
+                ", "
+            });
+            value.push_str(&pair[1]);
+        } else {
+            headers.push((pair[0].clone(), pair[1].clone()));
+        }
+    }
+    headers
 }
 
 fn encode_component(s: &str) -> String {

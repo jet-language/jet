@@ -41,6 +41,7 @@ struct JetHttpServerTls {
     key_pem: String,
 }
 
+#[derive(Debug)]
 struct JetHttpReadError {
     status: i64,
     message: &'static str,
@@ -165,7 +166,7 @@ fn jet_http_srv_response_header(
     name: &String,
     value: &String,
 ) -> JetHttpSrvResp {
-    if resp.headers.set(name, value).is_err() {
+    if resp.headers.append(name, value).is_err() {
         resp.status = 500;
         resp.body = "500 Internal Server Error".to_string();
         resp.headers = JetHttpHeaders::new();
@@ -318,7 +319,14 @@ fn jet_http_server_handle_stream(stream: &mut std::net::TcpStream, mux: &JetHttp
         Ok(raw) => raw,
         Err(error) => { let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes()); return; }
     };
-    let response = jet_http_mux_dispatch(mux, jet_http_srv_parse(&raw));
+    let request = match jet_http_srv_parse(&raw) {
+        Ok(request) => request,
+        Err(error) => {
+            let _ = stream.write_all(jet_http_srv_read_error_response(&error).as_bytes());
+            return;
+        }
+    };
+    let response = jet_http_mux_dispatch(mux, request);
     let _ = stream.write_all(jet_http_srv_format(&response).as_bytes());
 }
 
@@ -345,7 +353,15 @@ fn jet_http_mux_serve_once_listener(
             return Ok(());
         }
     };
-    let req = jet_http_srv_parse(&raw);
+    let req = match jet_http_srv_parse(&raw) {
+        Ok(req) => req,
+        Err(error) => {
+            stream
+                .write_all(jet_http_srv_read_error_response(&error).as_bytes())
+                .map_err(|e| format!("http write failed: {}", e))?;
+            return Ok(());
+        }
+    };
     let resp = jet_http_mux_dispatch(mux, req);
     let text = jet_http_srv_format(&resp);
     stream
@@ -529,9 +545,10 @@ where
         let handle_one = handle.clone();
         std::thread::spawn(move || {
             let dispatch = Box::new(move |raw: String| {
-                let req = jet_http_srv_parse(&raw);
-                let resp = jet_http_mux_dispatch(&m, req);
-                jet_http_srv_format(&resp)
+                match jet_http_srv_parse(&raw) {
+                    Ok(req) => jet_http_srv_format(&jet_http_mux_dispatch(&m, req)),
+                    Err(error) => jet_http_srv_read_error_response(&error),
+                }
             });
             if let Err(e) = handle_one(&tls_cfg.cert_pem, &tls_cfg.key_pem, stream, dispatch) {
                 eprintln!("http TLS connection failed: {}", e);
@@ -540,33 +557,45 @@ where
     }
 }
 
-fn jet_http_srv_parse(raw: &str) -> JetHttpSrvReq {
-    let sep = raw.find("\r\n\r\n").unwrap_or(raw.len());
+fn jet_http_srv_parse(raw: &str) -> Result<JetHttpSrvReq, JetHttpReadError> {
+    let sep = raw.find("\r\n\r\n").ok_or(JetHttpReadError {
+        status: 400,
+        message: "request headers are incomplete",
+    })?;
     let header_part = &raw[..sep];
-    let body = if sep + 4 <= raw.len() {
-        raw[sep + 4..].to_string()
-    } else {
-        String::new()
-    };
+    let content_length = jet_http_validate_headers(header_part.as_bytes())?;
+    let body = &raw[sep + 4..];
+    if body.len() != content_length {
+        return Err(JetHttpReadError {
+            status: 400,
+            message: "request body does not match content-length",
+        });
+    }
     let mut lines = header_part.lines();
-    let req_line = lines.next().unwrap_or("GET / HTTP/1.1");
+    let req_line = lines.next().unwrap_or("");
     let mut parts = req_line.splitn(3, ' ');
-    let method = parts.next().unwrap_or("GET").to_string();
-    let path = parts.next().unwrap_or("/").to_string();
+    let method = parts.next().unwrap_or("").to_string();
+    let path = parts.next().unwrap_or("").to_string();
     let mut headers = JetHttpHeaders::new();
     for line in lines {
-        if let Some((k, v)) = line.split_once(": ") {
-            headers.append_unchecked(k.to_string(), v.to_string());
-        }
+        let (name, value) = line.split_once(':').ok_or(JetHttpReadError {
+            status: 400,
+            message: "request header is malformed",
+        })?;
+        let value = value.trim_start_matches(|character| character == ' ' || character == '\t');
+        headers.append(name, value).map_err(|_| JetHttpReadError {
+            status: 400,
+            message: "request header is malformed",
+        })?;
     }
-    JetHttpSrvReq {
+    Ok(JetHttpSrvReq {
         method,
         path,
         params: std::collections::BTreeMap::new(),
-        body,
+        body: body.to_string(),
         headers,
         route_template: None,
-    }
+    })
 }
 
 fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp {
@@ -681,8 +710,24 @@ fn jet_http_srv_format(resp: &JetHttpSrvResp) -> String {
         reason,
         resp.body.len()
     );
-    for (k, v) in &resp.headers {
-        out.push_str(&format!("{}: {}\r\n", k, v));
+    let connection_headers = resp
+        .headers
+        .all("connection")
+        .into_iter()
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>();
+    for (name, value) in &resp.headers {
+        let framing = name.eq_ignore_ascii_case("content-length")
+            || name.eq_ignore_ascii_case("transfer-encoding")
+            || name.eq_ignore_ascii_case("connection");
+        let nominated = connection_headers
+            .iter()
+            .any(|candidate| name.eq_ignore_ascii_case(candidate));
+        if !framing && !nominated {
+            out.push_str(&format!("{}: {}\r\n", name, value));
+        }
     }
     out.push_str("\r\n");
     out.push_str(&resp.body);

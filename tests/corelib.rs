@@ -5270,12 +5270,17 @@ fn core_http_client_preserves_repeated_headers_over_a_socket() {
         let mut bytes = [0; 4096];
         let read = stream.read(&mut bytes).unwrap();
         let request = String::from_utf8_lossy(&bytes[..read]);
-        let first = request.find("X-Trace: one\r\n").expect("first request header");
-        let second = request.find("x-trace: two\r\n").expect("second request header");
-        assert!(first < second, "repeated request headers changed: {request}");
+        let warnings = request
+            .lines()
+            .filter(|line| line.to_ascii_lowercase().starts_with("warning:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let first = warnings.find("one").expect("first Warning value");
+        let second = warnings.find("two").expect("second Warning value");
+        assert!(first < second, "repeated Warning values changed: {request}");
         stream
             .write_all(
-                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nSet-Cookie: a=1\r\nset-cookie: b=2\r\nX-Custom: visible\r\nConnection: close\r\n\r\nok",
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nX-A: one\r\nX-B: middle\r\nX-A: two\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nConnection: close\r\n\r\nok",
             )
             .unwrap();
     });
@@ -5286,25 +5291,89 @@ fn core_http_client_preserves_repeated_headers_over_a_socket() {
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
+    let compiled = compile_temp(
+        "http_bridge_seed.jet",
+        "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n",
+    );
+    let link = compiled.ffi.expect("HTTP client bridge");
+    let harness = dir.join("bridge_headers.rs");
+    let bin = dir.join("bridge_headers");
+    fs::write(
+        &harness,
+        r#"
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let request_headers = vec![
+        "Warning".to_string(), "one".to_string(),
+        "Warning".to_string(), "two".to_string(),
+    ];
+    let (_, _, headers) = bridge::jet_http_client_send_impl(
+        "GET", &url, &request_headers, None, None, None, None, None, None, None,
+        &[], &[], &[],
+    ).unwrap();
+    let selected = headers.chunks_exact(2)
+        .filter(|pair| matches!(pair[0].as_str(), "x-a" | "x-b" | "set-cookie"))
+        .flat_map(|pair| [pair[0].clone(), pair[1].clone()])
+        .collect::<Vec<_>>();
+    assert_eq!(selected, vec![
+        "x-a", "one", "x-b", "middle", "x-a", "two",
+        "set-cookie", "a=1", "set-cookie", "b=2",
+    ]);
+}
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args(["--edition", "2021", harness.to_str().unwrap(), "-o", bin.to_str().unwrap()]);
+    rustc.arg("--extern").arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc.arg("-L").arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(built.status.success(), "bridge harness compile failed:\n{}", String::from_utf8_lossy(&built.stderr));
+    let output = Command::new(&bin).arg(format!("http://{addr}/")).output().unwrap();
+    server.join().unwrap();
+    assert!(output.status.success(), "bridge harness failed:\n{}", String::from_utf8_lossy(&output.stderr));
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_http_server_public_response_appends_repeated_headers() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_http_server_headers_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
     let src = r#"
-use core.http.client as http
+use core.http.client as client
+use core.http.server as server
+use core.net as net
+use core.tasks as tasks
 
 fn run() {
-    response :: http.request("GET", "http://__ADDR__/")
-        .header("X-Trace", "one")
-        .header("x-trace", "two")
-        .send() ?? panic("request failed")
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    addr :: listener.local_addr() ?? panic("address")
+    mux :: server.mux()
+    mux.get("/", (req: HttpSrvReq) =>
+        server.response(200, "ok")
+            .header("Set-Cookie", "a=1")
+            .header("Set-Cookie", "b=2")
+    )
+    serving :: tasks.spawn(take(listener, mux) () =>
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    )
+    response :: client.get("http://{addr}/") ?? panic("get")
     cookies :: response.cookies()
+    print(cookies.len())
     print(cookies[0])
     print(cookies[1])
-    print(response.header("x-custom") ?? "missing")
+    serving.join()
 }
-"#
-    .replace("__ADDR__", &addr.to_string());
-    let (code, stdout, stderr) = build_and_run(&dir, "http_headers", &src, &[], None);
-    server.join().unwrap();
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "http_server_headers", src, &[], None);
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(stdout, "a=1\nb=2\nvisible\n");
+    assert_eq!(stdout, "2\na=1\nb=2\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

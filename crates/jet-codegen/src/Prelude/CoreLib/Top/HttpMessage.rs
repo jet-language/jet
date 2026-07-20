@@ -38,10 +38,6 @@ impl JetHttpHeaders {
         Ok(())
     }
 
-    fn append_unchecked(&mut self, name: String, value: String) {
-        self.entries.push((name, value));
-    }
-
     fn set(&mut self, name: &str, value: &str) -> Result<(), String> {
         if !Self::valid_name(name) {
             return Err(format!("invalid HTTP header name `{name}`"));

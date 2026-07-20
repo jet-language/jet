@@ -111,6 +111,53 @@ fn live_server_round_trips_repeated_headers_in_order() {
 }
 
 #[test]
+fn parser_and_framing_share_validated_headers() {
+    let request = jet_http_srv_parse("GET / HTTP/1.1\r\nHost:local\r\nX-Tag:\tvalue\r\n\r\n")
+        .expect("optional header whitespace");
+    assert_eq!(request.headers.first("host"), Some("local"));
+    assert_eq!(request.headers.first("x-tag"), Some("value"));
+    assert_eq!(
+        jet_http_srv_parse("GET / HTTP/1.1\r\nBad Name:value\r\n\r\n")
+            .err()
+            .expect("invalid header name")
+            .status,
+        400
+    );
+    assert_eq!(
+        jet_http_srv_parse("GET / HTTP/1.1\r\nX-Safe:bad\0value\r\n\r\n")
+            .err()
+            .expect("invalid header value")
+            .status,
+        400
+    );
+
+    let response = jet_http_srv_response_header(
+        jet_http_srv_response_header(
+            jet_http_srv_response_header(
+                jet_http_srv_response_header(
+                    jet_http_srv_response(200, &"ok".to_string()),
+                    &"Content-Length".to_string(),
+                    &"999".to_string(),
+                ),
+                &"Transfer-Encoding".to_string(),
+                &"chunked".to_string(),
+            ),
+            &"Connection".to_string(),
+            &"X-Smuggle".to_string(),
+        ),
+        &"X-Smuggle".to_string(),
+        &"leak".to_string(),
+    );
+    let wire = jet_http_srv_format(&response);
+    assert_eq!(wire.matches("Content-Length:").count(), 1, "{wire}");
+    assert!(wire.contains("Content-Length: 2\r\n"), "{wire}");
+    assert_eq!(wire.matches("Connection:").count(), 1, "{wire}");
+    assert!(wire.contains("Connection: close\r\n"), "{wire}");
+    assert!(!wire.to_ascii_lowercase().contains("transfer-encoding:"), "{wire}");
+    assert!(!wire.to_ascii_lowercase().contains("x-smuggle:"), "{wire}");
+}
+
+#[test]
 fn serve_once_waits_for_nonblocking_listener_readiness() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     listener.set_nonblocking(true).expect("nonblocking");
