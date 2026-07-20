@@ -22,7 +22,6 @@ const MEASUREMENT_FN: &str = "fn measurement_math() -> String {\n    a :: measur
 const MEASUREMENT_DECLS: &str = "use core.science.measurement as measurement\nfn measurement_math() -> String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
 const MEASUREMENT_EXPR: &str = "measurement_math()";
 const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
-    f32: F32 :: 1.5
     i8: I8 :: -12
     i16: I16 :: -1234
     i32: I32 :: -123456
@@ -32,10 +31,10 @@ const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
     u64: U64 :: 123456789
     nan :: Float.parse("NaN") ?? 0.0
     infinity :: Float.parse("inf") ?? 0.0
-    return "{"a@b@c".after("@")}|{"a@b@c".before("@")}|{"no-sep".after("@")}|{"no-sep".before("@")}|{"é🙂".bytes()}|{"aé🙂z".slice(1, 2)}|{nan.is_nan()}|{infinity.is_infinite()}|{1.0.is_finite()}|{f32.is_finite()}|{f32.to_string()}|{i8.to_string()}|{i16.to_string()}|{i32.to_string()}|{u8.to_string()}|{u16.to_string()}|{u32.to_string()}|{u64.to_string()}"
+    return "{"a@b@c".after("@")}|{"a@b@c".before("@")}|{"no-sep".after("@")}|{"no-sep".before("@")}|{"é🙂".bytes()}|{"aé🙂z".slice(1, 2)}|{nan.is_nan()}|{infinity.is_infinite()}|{1.0.is_finite()}|{i8.to_string()}|{i16.to_string()}|{i32.to_string()}|{u8.to_string()}|{u16.to_string()}|{u32.to_string()}|{u64.to_string()}"
 }"#;
 const SCALAR_EXPR: &str = "scalar_view()";
-const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|true|1.5|-12|-1234|-123456|255|1234|123456|123456789";
+const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|-12|-1234|-123456|255|1234|123456|123456789";
 
 fn exact_values(inputs: &[&str]) -> Vec<String> {
     let output = run_transcript(inputs, None);

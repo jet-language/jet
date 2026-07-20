@@ -1022,11 +1022,6 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
             Surface::Value => {
                 let owner = if entry.owner == "FixedList" { "List" } else { &entry.owner };
                 let erased_scalar_dispatch = match entry.owner.as_str() {
-                    "F32" => ct_values.contains(&("Float".to_string(), entry.method.clone()))
-                        && matches!(
-                            entry.method.as_str(),
-                            "is_nan" | "is_infinite" | "is_finite" | "to_string"
-                        ),
                     "I8" | "I16" | "I32" | "U8" | "U16" | "U32" | "U64" => {
                         entry.method == "to_string"
                             && ct_values.contains(&("Int".to_string(), entry.method.clone()))
@@ -1143,12 +1138,13 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     for method in ["after", "before", "bytes", "slice"] {
         assert_eq!(record(&records, Surface::Value, "String", method).class, Class::Covered);
     }
-    for owner in ["Float", "F32"] {
-        for method in ["is_nan", "is_infinite", "is_finite"] {
-            assert_eq!(record(&records, Surface::Value, owner, method).class, Class::Covered);
-        }
+    for method in ["is_nan", "is_infinite", "is_finite"] {
+        assert_eq!(record(&records, Surface::Value, "Float", method).class, Class::Covered);
+        assert_eq!(record(&records, Surface::Value, "F32", method).class, Class::PurePending);
     }
-    assert_eq!(record(&records, Surface::Value, "F32", "to_string").class, Class::Covered);
+    // CtValue::Float currently erases F32's width. Do not infer coverage from
+    // Float dispatch until comptime preserves f32 rounding across stored values.
+    assert_eq!(record(&records, Surface::Value, "F32", "to_string").class, Class::PurePending);
     for owner in ["I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
         assert_eq!(record(&records, Surface::Value, owner, "to_string").class, Class::Covered);
     }
@@ -1245,14 +1241,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_134, 604, 192, 338));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_134, 600, 196, 338));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        17333455774043674941,
+        7278611365531187171,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
