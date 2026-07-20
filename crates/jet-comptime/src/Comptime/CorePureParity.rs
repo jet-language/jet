@@ -69,6 +69,44 @@ pub(super) fn evaluate_method(
         }
         ("Date" | "LocalDate", "to_string", 0) => date_from_value(recv, type_name, span)
             .map(|date| CtValue::Str(date.to_string_fmt())),
+        ("Date" | "LocalDate", "weekday", 0) => date_from_value(recv, type_name, span)
+            .map(|date| CtValue::Int((date.day_number() + 6) % 7)),
+        ("Date" | "LocalDate", "iso_weekday", 0) => date_from_value(recv, type_name, span)
+            .map(|date| CtValue::Int(date.day_number() % 7 + 1)),
+        ("Date" | "LocalDate", "day_of_year", 0) => date_from_value(recv, type_name, span)
+            .map(|date| {
+                CtValue::Int(date.day_number() - Date::new(date.year, 1, 1).day_number() + 1)
+            }),
+        ("Date" | "LocalDate", "iso_week", 0) => date_from_value(recv, type_name, span)
+            .map(|date| {
+                let thursday = date.add_days(4 - (date.day_number() % 7 + 1));
+                CtValue::Int(
+                    (thursday.day_number() - Date::new(thursday.year, 1, 1).day_number()) / 7 + 1,
+                )
+            }),
+        ("Date" | "LocalDate", "add_days", 1) => date_from_value(recv, type_name, span)
+            .and_then(|date| Ok(date.add_days(as_int(&args[0], span)?).value())),
+        ("Date" | "LocalDate", "add_months", 1) => date_from_value(recv, type_name, span)
+            .and_then(|date| Ok(date.add_months(as_int(&args[0], span)?).value())),
+        ("Date" | "LocalDate", "diff_days", 1) => date_from_value(recv, type_name, span)
+            .and_then(|date| {
+                Ok(CtValue::Int(
+                    date.day_number()
+                        - date_from_value(&args[0], "LocalDate", span)?.day_number(),
+                ))
+            }),
+        ("Date" | "LocalDate", "add_period", 1) => date_from_value(recv, type_name, span)
+            .and_then(|date| date_add_period(date, &args[0], span).map(Date::value)),
+        ("Date" | "LocalDate", "truncate", 1) => date_from_value(recv, type_name, span)
+            .and_then(|date| Ok(date_truncate(date, string_arg(args, 0, span)?).value())),
+        ("Date" | "LocalDate", "format", 1) => date_from_value(recv, type_name, span)
+            .and_then(|date| {
+                Ok(CtValue::Str(format_time_pattern(
+                    string_arg(args, 0, span)?,
+                    date,
+                    LocalTime::new(0, 0, 0),
+                )))
+            }),
         ("LocalTime", "hour" | "minute" | "second", 0) => {
             value_field(recv, "LocalTime", method, span)
         }
@@ -78,9 +116,71 @@ pub(super) fn evaluate_method(
         ("DateTime", "to_unix_ms", 0) => int_field(recv, "DateTime", "secs", span)
             .map(|seconds| CtValue::Int(seconds.saturating_mul(1_000))),
         ("DateTime", "to_string", 0) => datetime_string(recv, span).map(CtValue::Str),
+        ("DateTime", "date", 0) => {
+            datetime_from_value(recv, span).map(|date_time| date_time.date().value())
+        }
+        ("DateTime", "time", 0) => {
+            datetime_from_value(recv, span).map(|date_time| date_time.time().value())
+        }
+        ("DateTime", "hour", 0) => datetime_from_value(recv, span)
+            .map(|date_time| CtValue::Int(date_time.time().hour)),
+        ("DateTime", "minute", 0) => datetime_from_value(recv, span)
+            .map(|date_time| CtValue::Int(date_time.time().minute)),
+        ("DateTime", "second", 0) => datetime_from_value(recv, span)
+            .map(|date_time| CtValue::Int(date_time.seconds.rem_euclid(60))),
+        ("DateTime", "format_rfc3339", 0) => datetime_from_value(recv, span).map(
+            |date_time| {
+                CtValue::Str(format!(
+                    "{}T{}Z",
+                    date_time.date().to_string_fmt(),
+                    date_time.time().to_string_fmt()
+                ))
+            },
+        ),
+        ("DateTime", "format", 1) => datetime_from_value(recv, span).and_then(|date_time| {
+            Ok(CtValue::Str(format_time_pattern(
+                string_arg(args, 0, span)?,
+                date_time.date(),
+                date_time.time(),
+            )))
+        }),
+        ("DateTime", "plus_duration", 1) => {
+            datetime_from_value(recv, span).and_then(|date_time| {
+                let millis = int_field(&args[0], crate::Syntax::DURATION_TYPE, "ms", span)?;
+                Ok(DateTime {
+                    seconds: date_time
+                        .seconds
+                        .saturating_add(millis.div_euclid(1_000)),
+                }
+                .value())
+            })
+        }
+        ("DateTime", "truncate" | "round", 1) => {
+            datetime_from_value(recv, span).and_then(|date_time| {
+                let size = match string_arg(args, 0, span)? {
+                    "day" => 86_400,
+                    "hour" => 3_600,
+                    "minute" => 60,
+                    _ => 1,
+                };
+                let seconds = if method == "round" {
+                    date_time
+                        .seconds
+                        .saturating_add(size / 2)
+                        .div_euclid(size)
+                        * size
+                } else {
+                    date_time.seconds.div_euclid(size) * size
+                };
+                Ok(DateTime { seconds }.value())
+            })
+        }
         ("Period", "to_string", 0) => period_string(recv, span).map(CtValue::Str),
         ("Measurement", "value" | "uncertainty", 0) => {
             value_field(recv, "Measurement", method, span)
+        }
+        ("Measurement", "add" | "sub" | "mul" | "div", 1) => {
+            measurement_arithmetic(recv, method, &args[0], span)
         }
         _ => return None,
     };
@@ -454,6 +554,17 @@ impl Date {
         Self::new(year, month, day + 1)
     }
 
+    fn add_days(self, days: i64) -> Self {
+        Self::from_day_number(self.day_number() + days)
+    }
+
+    fn add_months(self, months: i64) -> Self {
+        let total = self.month - 1 + months;
+        let year = self.year + total / 12;
+        let month = total % 12 + 1;
+        Self::new(year, month, self.day.min(Self::days_in_month(year, month)))
+    }
+
     fn to_string_fmt(self) -> String {
         format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
     }
@@ -478,6 +589,14 @@ struct LocalTime {
 }
 
 impl LocalTime {
+    fn new(hour: i64, minute: i64, second: i64) -> Self {
+        Self {
+            hour: hour.clamp(0, 23),
+            minute: minute.clamp(0, 59),
+            second: second.clamp(0, 59),
+        }
+    }
+
     fn parse(value: &str) -> Result<Self, String> {
         let parts = value.splitn(3, ':').collect::<Vec<_>>();
         if parts.len() != 3 {
@@ -525,6 +644,27 @@ impl LocalTime {
     }
 }
 
+#[derive(Clone, Copy)]
+struct DateTime {
+    seconds: i64,
+}
+
+impl DateTime {
+    fn date(self) -> Date {
+        let epoch = Date::new(1970, 1, 1).day_number();
+        Date::from_day_number(epoch + self.seconds.div_euclid(86_400))
+    }
+
+    fn time(self) -> LocalTime {
+        let seconds = self.seconds.rem_euclid(86_400);
+        LocalTime::new(seconds / 3_600, (seconds / 60) % 60, seconds % 60)
+    }
+
+    fn value(self) -> CtValue {
+        datetime_value(self.seconds)
+    }
+}
+
 fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date, Diagnostic> {
     Ok(Date::new(
         int_field(value, type_name, "year", span)?,
@@ -539,6 +679,49 @@ fn local_time_from_value(value: &CtValue, span: Span) -> Result<LocalTime, Diagn
         minute: int_field(value, "LocalTime", "minute", span)?,
         second: int_field(value, "LocalTime", "second", span)?,
     })
+}
+
+fn datetime_from_value(value: &CtValue, span: Span) -> Result<DateTime, Diagnostic> {
+    Ok(DateTime {
+        seconds: int_field(value, "DateTime", "secs", span)?,
+    })
+}
+
+fn date_add_period(date: Date, period: &CtValue, span: Span) -> Result<Date, Diagnostic> {
+    let months = int_field(period, "Period", "years", span)?
+        .saturating_mul(12)
+        .saturating_add(int_field(period, "Period", "months", span)?);
+    Ok(date
+        .add_months(months)
+        .add_days(int_field(period, "Period", "days", span)?))
+}
+
+fn date_truncate(date: Date, unit: &str) -> Date {
+    match unit {
+        "year" => Date::new(date.year, 1, 1),
+        "month" => Date::new(date.year, date.month, 1),
+        _ => date,
+    }
+}
+
+fn format_time_pattern(pattern: &str, date: Date, time: LocalTime) -> String {
+    let mut output = pattern.to_string();
+    let weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        [(date.day_number() % 7) as usize];
+    output = output.replace("yyyy", &format!("{:04}", date.year));
+    output = output.replace(
+        "DDD",
+        &format!(
+            "{:03}",
+            date.day_number() - Date::new(date.year, 1, 1).day_number() + 1
+        ),
+    );
+    output = output.replace("EEE", weekday);
+    output = output.replace("MM", &format!("{:02}", date.month));
+    output = output.replace("dd", &format!("{:02}", date.day));
+    output = output.replace("HH", &format!("{:02}", time.hour));
+    output = output.replace("mm", &format!("{:02}", time.minute));
+    output.replace("ss", &format!("{:02}", time.second))
 }
 
 fn period_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
@@ -680,6 +863,60 @@ fn measurement(args: &[CtValue], span: Span) -> EvalResult {
                 "uncertainty",
                 CtValue::Float(float_arg(args, 1, span)?),
             ),
+        ],
+    ))
+}
+
+fn measurement_arithmetic(
+    left: &CtValue,
+    method: &str,
+    right: &CtValue,
+    span: Span,
+) -> EvalResult {
+    let left_value = match field(left, "Measurement", "value") {
+        Some(CtValue::Float(value)) => *value,
+        _ => return Err(unsupported("malformed Measurement.value value", span)),
+    };
+    let left_uncertainty = match field(left, "Measurement", "uncertainty") {
+        Some(CtValue::Float(value)) => *value,
+        _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
+    };
+    let right_value = match field(right, "Measurement", "value") {
+        Some(CtValue::Float(value)) => *value,
+        _ => return Err(unsupported("malformed Measurement.value value", span)),
+    };
+    let right_uncertainty = match field(right, "Measurement", "uncertainty") {
+        Some(CtValue::Float(value)) => *value,
+        _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
+    };
+    let (value, uncertainty) = match method {
+        "add" => (
+            left_value + right_value,
+            (left_uncertainty * left_uncertainty + right_uncertainty * right_uncertainty).sqrt(),
+        ),
+        "sub" => (
+            left_value - right_value,
+            (left_uncertainty * left_uncertainty + right_uncertainty * right_uncertainty).sqrt(),
+        ),
+        "mul" => (
+            left_value * right_value,
+            ((right_value * left_uncertainty).powi(2)
+                + (left_value * right_uncertainty).powi(2))
+            .sqrt(),
+        ),
+        "div" => (
+            left_value / right_value,
+            ((left_uncertainty / right_value).powi(2)
+                + (left_value * right_uncertainty / (right_value * right_value)).powi(2))
+            .sqrt(),
+        ),
+        _ => unreachable!(),
+    };
+    Ok(structure(
+        "Measurement",
+        vec![
+            ("value", CtValue::Float(value)),
+            ("uncertainty", CtValue::Float(uncertainty)),
         ],
     ))
 }

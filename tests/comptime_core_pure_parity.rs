@@ -5,6 +5,7 @@ use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet::REPL::run_transcript;
 
 mod common;
@@ -13,6 +14,13 @@ static SEQ: AtomicU64 = AtomicU64::new(0);
 
 const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String; bucket: String; score: Float }\nfn pivot_view() -> String {\n    prefix :: \"p\"\n    rows :: [PivotRow.{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) => \"{prefix}{row.team}\", (row) => row.bucket, (row) => row.score)\n    return \"{groups[0].key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
 const PIVOT_EXPR: &str = "pivot_view()";
+const CIVIL_FN: &str = "fn civil_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const CIVIL_DECLS: &str = "use core.time as time\nuse core.time.date as date\nuse core.time.datetime as datetime\nfn civil_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const CIVIL_EXPR: &str = "civil_view()";
+const CIVIL_DEV_DECLS: &str = "use core.time.date as date\nuse core.time.datetime as datetime\nfn civil_dev_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    dt :: datetime.from_timestamp(-1)\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const MEASUREMENT_FN: &str = "fn measurement_math() -> String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
+const MEASUREMENT_DECLS: &str = "use core.science.measurement as measurement\nfn measurement_math() -> String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
+const MEASUREMENT_EXPR: &str = "measurement_math()";
 
 fn exact_values(inputs: &[&str]) -> Vec<String> {
     let output = run_transcript(inputs, None);
@@ -92,6 +100,27 @@ fn public_transcript_composes_email_and_codecs_exactly() {
     );
 }
 
+#[test]
+fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
+    let values = exact_values(&[
+        "use core.time as time",
+        "use core.time.date as date",
+        "use core.time.datetime as datetime",
+        CIVIL_FN,
+        CIVIL_EXPR,
+        "use core.science.measurement as measurement",
+        MEASUREMENT_FN,
+        MEASUREMENT_EXPR,
+    ]);
+    assert_eq!(
+        values,
+        [
+            "\"2|4|60|9|2024-03-01|2025-02-28|28|2024-03-31|2024-02-01|Thu 2024-060|1969-12-31|23:59:59|23:59:59|1969-12-31T23:59:59Z|1969-12-31 23:59:59|0|-60|0\" : String",
+            "\"3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0\" : String",
+        ]
+    );
+}
+
 fn parity_source(expression: &str, imports: &str) -> String {
     format!(
         "{imports}\ncomptime expected = {expression}\n\nfn run() {{\n    actual :: {expression}\n    print(\"{{expected}}\")\n    print(\"{{actual}}\")\n}}\n"
@@ -146,6 +175,29 @@ fn check_aot_comptime(label: &str, source: &str) -> String {
     assert_eq!(lines.len(), 2, "{label} emitted unexpected output: {lines:?}");
     assert_eq!(lines[0], lines[1], "{label} comptime/AOT divergence");
     lines[0].to_string()
+}
+
+fn check_dev_tiers(label: &str, source: &str, expected: &str) {
+    let id = SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = common::unique_tmp(&format!("jet_core_pure_dev_{id}"));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{label}.jet"));
+    fs::write(&path, source).unwrap();
+    let path = path.to_string_lossy();
+    for (tier, interpreter_only) in [("interpreter", true), ("default-dev", false)] {
+        match dev_iteration(&path, false, interpreter_only) {
+            RunOutcome::Ran { stdout, stderr, exit_code } => {
+                assert_eq!(exit_code, 0, "{label} {tier} exit");
+                assert_eq!(stderr, "", "{label} {tier} stderr");
+                assert_eq!(
+                    stdout,
+                    format!("{expected}\n{expected}\n"),
+                    "{label} {tier} stdout"
+                );
+            }
+            RunOutcome::Problems(diags) => panic!("{label} {tier} failed: {diags:?}"),
+        }
+    }
 }
 
 #[test]
@@ -208,6 +260,26 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
     for (label, source) in cases {
         let _ = check_aot_comptime(label, &source);
     }
+}
+
+#[test]
+fn rustc_backed_civil_and_measurement_methods_match_comptime_exactly() {
+    let civil = "2|4|60|9|2024-03-01|2025-02-28|28|2024-03-31|2024-02-01|Thu 2024-060|1969-12-31|23:59:59|23:59:59|1969-12-31T23:59:59Z|1969-12-31 23:59:59|0|-60|0";
+    let measurement = "3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0";
+    let civil_source = parity_source(CIVIL_EXPR, CIVIL_DECLS);
+    let civil_dev = "2|4|60|9|2024-03-01|2025-02-28|28|2024-02-01|Thu 2024-060|1969-12-31|23:59:59|23:59:59|1969-12-31T23:59:59Z|1969-12-31 23:59:59|-60|0";
+    let civil_dev_source = parity_source("civil_dev_view()", CIVIL_DEV_DECLS);
+    let measurement_source = parity_source(MEASUREMENT_EXPR, MEASUREMENT_DECLS);
+    assert_eq!(
+        check_aot_comptime("civil/all-deterministic-methods", &civil_source),
+        civil
+    );
+    assert_eq!(
+        check_aot_comptime("measurement/arithmetic", &measurement_source),
+        measurement
+    );
+    check_dev_tiers("civil", &civil_dev_source, civil_dev);
+    check_dev_tiers("measurement", &measurement_source, measurement);
 }
 
 #[test]
