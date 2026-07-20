@@ -1056,16 +1056,36 @@ fn snapshot_source(
 }
 
 fn jetc_v2_body_len(plain_len: u64) -> Option<u64> {
+    if plain_len > JETC_V2_MAX_PLAINTEXT { return None; }
     let full = plain_len / JETC_V2_CHUNK as u64;
     let tail = plain_len % JETC_V2_CHUNK as u64;
     let non_final = full.checked_mul(JETC_V2_CHUNK as u64 + 21)?;
     non_final.checked_add(tail + 21)
 }
 
+fn jetc_v2_plain_len(body_len: u64) -> Option<u64> {
+    let record_len = JETC_V2_CHUNK as u64 + 21;
+    let full = body_len / record_len;
+    let final_record_len = body_len % record_len;
+    if !(21..record_len).contains(&final_record_len) { return None; }
+    full.checked_mul(JETC_V2_CHUNK as u64)?
+        .checked_add(final_record_len - 21)
+        .filter(|length| *length <= JETC_V2_MAX_PLAINTEXT)
+}
+
 fn jetc_v2_container_len_matches(total: u64, header_len: usize, body_len: u64) -> bool {
     header_len <= 32 * 1024 * 1024
         && body_len <= JETC_V2_MAX_BODY_LEN
+        && jetc_v2_plain_len(body_len).is_some()
         && 20u64.checked_add(header_len as u64).and_then(|n| n.checked_add(body_len)) == Some(total)
+}
+
+fn jetc_v2_record_shape_valid(length: usize, flags: u8) -> bool {
+    match flags {
+        0 => length == JETC_V2_CHUNK,
+        1 => length < JETC_V2_CHUNK,
+        _ => false,
+    }
 }
 
 fn recipient_id(public: &[u8; 32]) -> [u8; 16] {
@@ -1402,7 +1422,7 @@ fn open_jetc_v2_file(
         if index > JETC_V2_MAX_RECORDS || body_len - consumed < 21 { return Err(JetFileCryptoError::OpenFailed); }
         let mut record = [0u8; 5]; jetc_read_exact(&mut input, &mut record, input_read).map_err(|_| JetFileCryptoError::OpenFailed)?;
         let length = u32::from_le_bytes(record[..4].try_into().map_err(|_| JetFileCryptoError::OpenFailed)?) as usize; let flags = record[4];
-        if flags & !1 != 0 || length > JETC_V2_CHUNK || (flags == 0 && length != JETC_V2_CHUNK) || saw_final { return Err(JetFileCryptoError::OpenFailed); }
+        if !jetc_v2_record_shape_valid(length, flags) || saw_final { return Err(JetFileCryptoError::OpenFailed); }
         let encrypted_len = length.checked_add(16).ok_or(JetFileCryptoError::OpenFailed)?;
         consumed = consumed.checked_add(5 + encrypted_len as u64).ok_or(JetFileCryptoError::OpenFailed)?;
         if consumed > body_len { return Err(JetFileCryptoError::OpenFailed); }

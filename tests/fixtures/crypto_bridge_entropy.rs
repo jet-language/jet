@@ -593,6 +593,58 @@ mod tests {
     }
 
     #[test]
+    fn jetc_v2_record_boundaries_are_canonical() {
+        let root = test_dir("record-boundaries");
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let public = jet_crypto_x25519_public_typed_impl(&recipient);
+        for (name, size, expected) in [
+            ("empty", 0, vec![(0, 1)]),
+            ("chunk-minus-one", JETC_V2_CHUNK - 1, vec![((JETC_V2_CHUNK - 1) as u32, 1)]),
+            ("chunk", JETC_V2_CHUNK, vec![(JETC_V2_CHUNK as u32, 0), (0, 1)]),
+            ("chunk-plus-one", JETC_V2_CHUNK + 1, vec![(JETC_V2_CHUNK as u32, 0), (1, 1)]),
+        ] {
+            let source = root.join(format!("{name}.bin"));
+            let envelope = root.join(format!("{name}.jetc"));
+            let restored = root.join(format!("{name}.out"));
+            let plaintext = (0..size).map(|index| (index % 251) as u8).collect::<Vec<_>>();
+            std::fs::write(&source, &plaintext).unwrap();
+            jet_crypto_file_seal_impl(
+                vec![public.clone()],
+                &source.to_string_lossy().into_owned(),
+                &envelope.to_string_lossy().into_owned(),
+                never_cancelled,
+            ).unwrap();
+            let encoded = std::fs::read(&envelope).unwrap();
+            let header_len = u32::from_le_bytes(encoded[8..12].try_into().unwrap()) as usize;
+            let body_len = u64::from_le_bytes(encoded[12..20].try_into().unwrap());
+            assert_eq!(jetc_v2_plain_len(body_len), Some(size as u64));
+            let mut at = 20 + header_len;
+            let mut records = Vec::new();
+            while at < encoded.len() {
+                let length = u32::from_le_bytes(encoded[at..at + 4].try_into().unwrap());
+                let flags = encoded[at + 4];
+                assert!(jetc_v2_record_shape_valid(length as usize, flags));
+                records.push((length, flags));
+                at += 5 + length as usize + 16;
+            }
+            assert_eq!(at, encoded.len());
+            assert_eq!(records, expected);
+            jet_crypto_file_open_impl(
+                &recipient,
+                &envelope.to_string_lossy().into_owned(),
+                &restored.to_string_lossy().into_owned(),
+                never_cancelled,
+            ).unwrap();
+            assert_eq!(std::fs::read(&restored).unwrap(), plaintext);
+            assert_eq!(std::fs::read(&source).unwrap(), plaintext);
+        }
+        assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+            !entry.unwrap().file_name().to_string_lossy().starts_with(".jetc-")
+        }));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn jetc_v2_rejects_tamper_truncation_append_and_cancellation_without_output() {
         let root = test_dir("hostile");
         let source = root.join("source.bin");
@@ -608,7 +660,22 @@ mod tests {
         let canonical = std::fs::read(&envelope).unwrap();
         let header_len = u32::from_le_bytes(canonical[8..12].try_into().unwrap()) as usize;
         let body_at = 20 + header_len;
+        assert_eq!(jetc_v2_body_len(0), Some(21));
+        assert_eq!(jetc_v2_body_len((JETC_V2_CHUNK - 1) as u64), Some(JETC_V2_CHUNK as u64 + 20));
+        assert_eq!(jetc_v2_body_len(JETC_V2_CHUNK as u64), Some(JETC_V2_CHUNK as u64 + 42));
+        assert_eq!(jetc_v2_body_len(JETC_V2_CHUNK as u64 + 1), Some(JETC_V2_CHUNK as u64 + 43));
         assert_eq!(jetc_v2_body_len(JETC_V2_MAX_PLAINTEXT), Some(JETC_V2_MAX_BODY_LEN));
+        assert_eq!(jetc_v2_body_len(JETC_V2_MAX_PLAINTEXT + 1), None);
+        assert_eq!(jetc_v2_plain_len(20), None);
+        assert_eq!(jetc_v2_plain_len(JETC_V2_CHUNK as u64 + 21), None);
+        assert_eq!(jetc_v2_plain_len(JETC_V2_MAX_BODY_LEN), Some(JETC_V2_MAX_PLAINTEXT));
+        assert_eq!(jetc_v2_plain_len(JETC_V2_MAX_BODY_LEN + 1), None);
+        assert!(jetc_v2_record_shape_valid(JETC_V2_CHUNK, 0));
+        assert!(jetc_v2_record_shape_valid(0, 1));
+        assert!(jetc_v2_record_shape_valid(JETC_V2_CHUNK - 1, 1));
+        assert!(!jetc_v2_record_shape_valid(JETC_V2_CHUNK - 1, 0));
+        assert!(!jetc_v2_record_shape_valid(JETC_V2_CHUNK, 1));
+        assert!(!jetc_v2_record_shape_valid(0, 2));
         assert!(jetc_v2_container_len_matches(
             20 + header_len as u64 + JETC_V2_MAX_BODY_LEN,
             header_len,
