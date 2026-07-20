@@ -1082,6 +1082,32 @@ fn options_asterisk_reports_server_methods_without_dispatch() {
             jet_http_srv_response(200, &"handled".to_string())
         });
     }
+    let middleware_calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let middleware_events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let wrapper_calls = middleware_calls.clone();
+    let wrapper_events = middleware_events.clone();
+    jet_http_mux_middleware(&mux, move |next| {
+        let calls = wrapper_calls.clone();
+        let events = wrapper_events.clone();
+        std::sync::Arc::new(move |req| {
+            calls.fetch_add(1, Ordering::AcqRel);
+            events.lock().unwrap().push(format!("{}:{}", req.method, req.path));
+            jet_http_srv_response_header(
+                next(req),
+                &"X-Middleware".to_string(),
+                &"observed".to_string(),
+            )
+        })
+    });
+    jet_http_mux_middleware(&mux, move |next| {
+        std::sync::Arc::new(move |req| {
+            if jet_http_srv_req_header(&req, &"X-Block".to_string()).is_some() {
+                jet_http_srv_response(403, &"blocked".to_string())
+            } else {
+                next(req)
+            }
+        })
+    });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
     let mut options = JetHttpServerOptions::safe();
@@ -1091,12 +1117,37 @@ fn options_asterisk_reports_server_methods_without_dispatch() {
         jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
     });
 
+    let standalone = exchange(
+        addr,
+        b"OPTIONS * HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert!(standalone.starts_with("HTTP/1.1 204 No Content"), "server-wide OPTIONS rejected: {standalone}");
+    assert!(standalone.contains("Allow: GET, HEAD, OPTIONS, POST, get\r\n"), "wrong server-wide Allow: {standalone}");
+    assert_eq!(standalone.matches("X-Middleware: observed\r\n").count(), 1, "middleware did not wrap OPTIONS exactly once: {standalone}");
+
+    let path_local = exchange(
+        addr,
+        b"OPTIONS /one HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert!(path_local.starts_with("HTTP/1.1 204 No Content"), "path OPTIONS rejected: {path_local}");
+    assert!(path_local.contains("Allow: GET, HEAD, OPTIONS\r\n"), "wrong path Allow: {path_local}");
+    assert_eq!(path_local.matches("X-Middleware: observed\r\n").count(), 1, "middleware did not wrap path OPTIONS exactly once: {path_local}");
+
+    let blocked = exchange(
+        addr,
+        b"OPTIONS * HTTP/1.1\r\nHost: local\r\nX-Block: yes\r\nConnection: close\r\n\r\n",
+    );
+    assert!(blocked.starts_with("HTTP/1.1 403 Forbidden"), "middleware could not reject OPTIONS: {blocked}");
+    assert!(!blocked.contains("Allow:"), "rejected OPTIONS leaked method inventory: {blocked}");
+    assert_eq!(blocked.matches("X-Middleware: observed\r\n").count(), 1, "rejection was not wrapped exactly once: {blocked}");
+
     let response = exchange(
         addr,
         b"OPTIONS * HTTP/1.1\r\nHost: local\r\n\r\nGET /one HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
     );
     assert!(response.starts_with("HTTP/1.1 204 No Content"), "server-wide OPTIONS rejected: {response}");
     assert!(response.contains("Allow: GET, HEAD, OPTIONS, POST, get\r\n"), "wrong server-wide Allow: {response}");
+    assert_eq!(response.matches("X-Middleware: observed\r\n").count(), 2, "middleware did not wrap each pipelined request once: {response}");
     assert_eq!(response.matches("HTTP/1.1 200 OK").count(), 1, "OPTIONS * broke pipeline reuse: {response}");
     assert!(response.ends_with("\r\n\r\nhandled"), "successor request did not dispatch: {response}");
 
@@ -1111,10 +1162,14 @@ fn options_asterisk_reports_server_methods_without_dispatch() {
     }
 
     assert_eq!(calls.load(Ordering::Acquire), 1, "OPTIONS or invalid asterisk-form invoked a handler");
+    assert_eq!(middleware_calls.load(Ordering::Acquire), 5, "OPTIONS middleware count changed");
+    assert_eq!(&*middleware_events.lock().unwrap(), &[
+        "OPTIONS:*", "OPTIONS:/one", "OPTIONS:*", "OPTIONS:*", "GET:/one",
+    ]);
     shutdown.store(true, Ordering::Release);
     let report = server.join().expect("server join");
-    assert_eq!(report.user_accepted, 5);
-    assert_eq!(report.user_completed, 5);
+    assert_eq!(report.user_accepted, 8);
+    assert_eq!(report.user_completed, 8);
 }
 
 #[test]

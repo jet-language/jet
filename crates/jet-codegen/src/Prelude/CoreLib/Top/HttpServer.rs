@@ -1298,16 +1298,20 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
     let requested_method = req.method.as_str();
     let is_head = requested_method == "HEAD";
     if requested_method == "OPTIONS" && req.path == "*" {
-        let allow = {
-            let routes = mux.0.lock().unwrap();
-            jet_http_allowed_methods(routes.iter().map(|route| route.method.as_str()))
-        };
-        return JetHttpSrvResp {
-            status: 204,
-            body: String::new(),
-            headers: [("Allow".to_string(), allow)].into_iter().collect(),
-            head_content_length: None,
-        };
+        let routes = mux.0.clone();
+        let handler: JetHttpMuxHandlerFn = std::sync::Arc::new(move |_| {
+            let allow = {
+                let routes = routes.lock().unwrap();
+                jet_http_allowed_methods(routes.iter().map(|route| route.method.as_str()))
+            };
+            JetHttpSrvResp {
+                status: 204,
+                body: String::new(),
+                headers: [("Allow".to_string(), allow)].into_iter().collect(),
+                head_content_length: None,
+            }
+        });
+        return jet_http_mux_run_handler(mux, req, handler);
     }
     let path = match jet_http_route_path(&req.path) {
         Ok(path) => path,
@@ -1339,12 +1343,13 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
     { "GET" } else { requested_method };
     if requested_method == "OPTIONS" && !path_matches.iter().any(|(_, route, _, _)| route.method == "OPTIONS") {
         let allow = jet_http_allowed_methods(path_matches.iter().map(|(_, route, _, _)| route.method.as_str()));
-        return JetHttpSrvResp {
+        let handler: JetHttpMuxHandlerFn = std::sync::Arc::new(move |_| JetHttpSrvResp {
             status: 204,
             body: String::new(),
-            headers: [("Allow".to_string(), allow)].into_iter().collect(),
+            headers: [("Allow".to_string(), allow.clone())].into_iter().collect(),
             head_content_length: None,
-        };
+        });
+        return jet_http_mux_run_handler(mux, req, handler);
     }
     if let Some((_, route, params, _)) = path_matches.iter()
         .filter(|(_, route, _, _)| route.method == effective_method)
@@ -1355,18 +1360,7 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
         let mut r2 = req.clone();
         r2.params = params.clone();
         r2.route_template = Some(route.pattern.clone());
-        let middlewares = mux.1.lock().unwrap().clone();
-        let mut handler = route.handler.clone();
-        for middleware in middlewares.iter().rev() { handler = middleware(handler); }
-        let response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(r2))) {
-            Ok(response) => response,
-            Err(_) => JetHttpSrvResp {
-                status: 500,
-                body: "500 Internal Server Error".to_string(),
-                headers: JetHttpHeaders::new(),
-                head_content_length: None,
-            },
-        };
+        let response = jet_http_mux_run_handler(mux, r2, route.handler.clone());
         return jet_http_srv_head_response(response, is_head);
     }
     if !path_matches.is_empty() {
@@ -1385,6 +1379,24 @@ fn jet_http_mux_dispatch(mux: &JetHttpMux, req: JetHttpSrvReq) -> JetHttpSrvResp
         headers: JetHttpHeaders::new(),
         head_content_length: None,
     }, is_head)
+}
+
+fn jet_http_mux_run_handler(
+    mux: &JetHttpMux,
+    req: JetHttpSrvReq,
+    mut handler: JetHttpMuxHandlerFn,
+) -> JetHttpSrvResp {
+    let middlewares = mux.1.lock().unwrap().clone();
+    for middleware in middlewares.iter().rev() { handler = middleware(handler); }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
+        Ok(response) => response,
+        Err(_) => JetHttpSrvResp {
+            status: 500,
+            body: "500 Internal Server Error".to_string(),
+            headers: JetHttpHeaders::new(),
+            head_content_length: None,
+        },
+    }
 }
 
 fn jet_http_srv_head_response(mut response: JetHttpSrvResp, is_head: bool) -> JetHttpSrvResp {
