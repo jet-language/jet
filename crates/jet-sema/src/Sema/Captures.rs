@@ -325,7 +325,9 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::Place(inner, _, _) => expr_refs_name(inner, name),
         Expr::Binary(_, l, r, _) => expr_refs_name(l, name) || expr_refs_name(r, name),
         Expr::CompareChain { operands, .. } => operands.iter().any(|e| expr_refs_name(e, name)),
-        Expr::Call(c) => c.args.iter().any(|a| expr_refs_name(&a.expr, name)),
+        Expr::Call(c) => {
+            c.name == name || c.args.iter().any(|a| expr_refs_name(&a.expr, name))
+        }
         Expr::CallValue { callee, args, .. } => {
             expr_refs_name(callee, name) || args.iter().any(|a| expr_refs_name(&a.expr, name))
         }

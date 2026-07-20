@@ -1,7 +1,8 @@
 use crate::AST::{Expr, Type};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Captures::lambda_collect_captures;
+use crate::Generics::substitute_type;
+use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::wrong_core_arity;
@@ -9,54 +10,128 @@ use crate::Sema::Diagnostics::{collection_changed_in_loop, expr_root_ident, type
 use crate::Syntax;
 use std::collections::HashSet;
 impl<'a> Checker<'a> {
-        fn para_type_contains_function(&self, ty: &Type) -> bool {
-            fn contains(
-                registry: &crate::Sema::TypeRegistry,
+        fn para_type_is_transferable(&self, ty: &Type) -> bool {
+            fn transferable(
+                checker: &Checker<'_>,
                 ty: &Type,
-                seen: &mut HashSet<String>,
+                owner_hint: Option<usize>,
+                seen: &mut HashSet<(usize, String)>,
             ) -> bool {
+                if checker.sendability_problem(ty, true).is_some()
+                    || super::super::is_reactive_handle_ty(ty)
+                {
+                    return false;
+                }
                 match ty {
-                    Type::Fn { .. } => true,
+                    Type::Fn { .. } | Type::TraitObject(_) => false,
                     Type::List(inner)
                     | Type::Shared(inner)
                     | Type::Option(inner)
-                    | Type::Tagged { inner, .. } => contains(registry, inner, seen),
-                    Type::Result { ok, err } => {
-                        contains(registry, ok, seen) || contains(registry, err, seen)
-                    }
-                    Type::Map { key, value, .. } => {
-                        contains(registry, key, seen) || contains(registry, value, seen)
-                    }
+                    | Type::Tagged { inner, .. } => transferable(checker, inner, owner_hint, seen),
+                    Type::Result { ok, err } => transferable(checker, ok, owner_hint, seen)
+                        && transferable(checker, err, owner_hint, seen),
+                    Type::Map { key, value, .. } => transferable(checker, key, owner_hint, seen)
+                        && transferable(checker, value, owner_hint, seen),
                     Type::Tuple(fields) => fields
                         .iter()
-                        .any(|(_, field_ty)| contains(registry, field_ty, seen)),
-                    Type::FixedList { elem, .. } => contains(registry, elem, seen),
-                    Type::Apply { args, .. }
-                        if args.iter().any(|arg| contains(registry, arg, seen)) =>
-                    {
-                        true
-                    }
+                        .all(|(_, field_ty)| transferable(checker, field_ty, owner_hint, seen)),
+                    Type::FixedList { elem, .. } => transferable(checker, elem, owner_hint, seen),
                     Type::Named(name) | Type::Apply { name, .. } => {
-                        if !seen.insert(name.clone()) {
+                        let args = match ty {
+                            Type::Apply { args, .. } => args.as_slice(),
+                            _ => &[],
+                        };
+                        if !args
+                            .iter()
+                            .all(|arg| transferable(checker, arg, owner_hint, seen))
+                        {
                             return false;
                         }
-                        registry.struct_fields(name).is_some_and(|fields| {
-                            fields
-                                .iter()
-                                .any(|(_, _, field_ty, _)| contains(registry, field_ty, seen))
-                        })
+                        let (import_ns, leaf) = name
+                            .rsplit_once('.')
+                            .map_or((None, name.as_str()), |(alias, leaf)| (Some(alias), leaf));
+                        let hinted_owner = owner_hint.filter(|&owner| {
+                            if owner == checker.module_idx {
+                                checker.registry.contains(leaf)
+                            } else {
+                                checker
+                                    .modules
+                                    .and_then(|modules| modules.get(owner))
+                                    .is_some_and(|module| module.registry.contains(leaf))
+                            }
+                        });
+                        let Some(owner) = hinted_owner
+                            .or_else(|| checker.struct_owner_module(leaf, import_ns))
+                        else {
+                            return true;
+                        };
+                        let key = (owner, leaf.to_string());
+                        if !seen.insert(key.clone()) {
+                            return true;
+                        }
+                        let (registry, trait_reg) = if owner == checker.module_idx {
+                            (checker.registry, checker.trait_reg)
+                        } else {
+                            let Some(module) = checker
+                                .modules
+                                .and_then(|modules| modules.get(owner))
+                            else {
+                                return false;
+                            };
+                            (&module.registry, &module.trait_reg)
+                        };
+                        let subst = registry
+                            .type_alias(leaf)
+                            .map(|(params, _)| params)
+                            .or_else(|| trait_reg.struct_params.get(leaf).map(Vec::as_slice))
+                            .unwrap_or(&[])
+                            .iter()
+                            .zip(args.iter())
+                            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+                            .collect();
+                        let safe = match registry.types.get(leaf) {
+                            Some(crate::Sema::TypeDef::Struct { fields, .. }) => fields.iter().all(
+                                |(_, _, field_ty, _)| {
+                                    let actual = trait_reg.instantiate_type(field_ty, &subst);
+                                    transferable(checker, &actual, Some(owner), seen)
+                                },
+                            ),
+                            Some(crate::Sema::TypeDef::Enum { variants, .. }) => variants
+                                .values()
+                                .all(|(_, payload)| match payload {
+                                    crate::AST::VariantPayload::Unit => true,
+                                    crate::AST::VariantPayload::Single(payload, _) => {
+                                        let actual = trait_reg.instantiate_type(payload, &subst);
+                                        transferable(checker, &actual, Some(owner), seen)
+                                    }
+                                    crate::AST::VariantPayload::Named(fields) => fields.iter().all(
+                                        |field| {
+                                            let actual =
+                                                trait_reg.instantiate_type(&field.ty, &subst);
+                                            transferable(checker, &actual, Some(owner), seen)
+                                        },
+                                    ),
+                                }),
+                            Some(crate::Sema::TypeDef::Alias { target, .. }) => {
+                                let actual = substitute_type(target, &subst);
+                                transferable(checker, &actual, Some(owner), seen)
+                            }
+                            Some(crate::Sema::TypeDef::Distinct { base, .. }) => {
+                                transferable(checker, base, Some(owner), seen)
+                            }
+                            None => true,
+                        };
+                        seen.remove(&key);
+                        safe
                     }
-                    _ => false,
+                    _ => true,
                 }
             }
-            contains(self.registry, ty, &mut HashSet::new())
+            transferable(self, ty, None, &mut HashSet::new())
         }
 
         fn reject_para_type(&mut self, role: &str, ty: &Type, span: Span) {
-            if self.para_type_contains_function(ty)
-                || self.sendability_problem(ty, true).is_some()
-                || super::super::is_reactive_handle_ty(ty)
-            {
+            if !self.para_type_is_transferable(ty) {
                 self.diags.push(Diagnostic::error(
                     "E1111",
                     format!("parallel {role} cannot use `{}` across workers", ty.name()),
@@ -95,20 +170,28 @@ impl<'a> Checker<'a> {
             let mut read = HashSet::new();
             let mut changed = HashSet::new();
             lambda_collect_captures(&lam.body, &params, &mut read, &mut changed);
+            // Direct-call syntax carries its callee as `Call::name`, rather
+            // than an `Expr::Ident`. Add only matching outer bindings here so
+            // top-level/builtin calls stay non-captures while stored function
+            // values receive the same worker-sharing check as every other read.
+            for name in self.scopes.iter().flat_map(|scope| scope.keys()) {
+                if !params.contains(name) && lambda_body_refs_name(&lam.body, name) {
+                    read.insert(name.clone());
+                }
+            }
             for name in read {
                 if changed.contains(&name)
                     || self.imports.contains_key(&name)
                     || self.core_imports.contains_key(&name)
-                    || self.consts.contains_key(&name)
                 {
                     continue;
                 }
-                let Some(info) = self.lookup(&name) else { continue };
-                let ty = info.ty.clone();
-                if !info.sendable
-                    || self.is_view(&name)
-                    || self.sendability_problem(&ty, true).is_some()
-                    || super::super::is_reactive_handle_ty(&ty)
+                let captured = self
+                    .lookup(&name)
+                    .map(|info| (info.ty.clone(), info.sendable))
+                    .or_else(|| self.consts.get(&name).cloned().map(|ty| (ty, true)));
+                let Some((ty, sendable)) = captured else { continue };
+                if !sendable || self.is_view(&name) || !self.para_type_is_transferable(&ty)
                 {
                     self.diags.push(Diagnostic::error(
                         "E1111",

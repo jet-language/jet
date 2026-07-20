@@ -30,6 +30,24 @@ pub fn build_and_run(name: &str, src: &str) -> (i32, String) {
 }
 
 pub fn build_and_run_full(prefix: &str, name: &str, src: &str) -> (i32, String, String) {
+    build_and_run_full_inner(prefix, name, src, None)
+}
+
+pub fn build_and_run_full_with_cfg(
+    prefix: &str,
+    name: &str,
+    src: &str,
+    rustc_cfg: &str,
+) -> (i32, String, String) {
+    build_and_run_full_inner(prefix, name, src, Some(rustc_cfg))
+}
+
+fn build_and_run_full_inner(
+    prefix: &str,
+    name: &str,
+    src: &str,
+    rustc_cfg: Option<&str>,
+) -> (i32, String, String) {
     let dir = unique_tmp(prefix);
     fs::create_dir_all(&dir).unwrap();
     let jet_path = dir.join(format!("{name}.jet"));
@@ -52,6 +70,9 @@ pub fn build_and_run_full(prefix: &str, name: &str, src: &str) -> (i32, String, 
         "-o",
         bin.to_str().unwrap(),
     ]);
+    if let Some(cfg) = rustc_cfg {
+        rustc_cmd.args(["--cfg", cfg]);
+    }
     if let Some(link) = &out.ffi {
         rustc_cmd
             .arg("--extern")

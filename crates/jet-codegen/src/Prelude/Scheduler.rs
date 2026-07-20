@@ -96,6 +96,11 @@ where
 static TEST_IOCP_GQCS_FATAL: AtomicBool = AtomicBool::new(false);
 
 fn jet_scheduler_fatal(msg: &str) -> ! {
+    if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
+        std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::SchedulerFatal {
+            msg: msg.to_string(),
+        }));
+    }
     if jet_scheduler_panic_should_unwind() {
         panic!("{}", msg);
     }

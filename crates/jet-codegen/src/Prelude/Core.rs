@@ -1216,6 +1216,18 @@ enum JetParaRuntimeFailure {
         msg: String,
         locals: String,
     },
+    Diagnostic {
+        rendered: String,
+    },
+    Contract {
+        file: String,
+        line: u32,
+        clause_kw: String,
+        msg: String,
+    },
+    SchedulerFatal {
+        msg: String,
+    },
 }
 
 impl JetParaRuntimeFailure {
@@ -1234,6 +1246,21 @@ impl JetParaRuntimeFailure {
             } => jet_panic_rich(
                 &file, line, &fn_name, &src_line, col, caret_len, &msg, &locals,
             ),
+            Self::Diagnostic { rendered } => jet_runtime_diagnostic(rendered),
+            Self::Contract {
+                file,
+                line,
+                clause_kw,
+                msg,
+            } => jet_contract_fail(&file, line, &clause_kw, &msg),
+            // The scheduler prelude is emitted only when task support is used,
+            // while the parallel carrier is part of the always-present core
+            // prelude.  Reproduce the scheduler's ordinary fatal boundary here
+            // without creating a generated-code dependency on an optional item.
+            Self::SchedulerFatal { msg } => {
+                eprintln!("panic: {}", msg);
+                std::process::exit(70);
+            }
         }
     }
 }
@@ -1271,6 +1298,9 @@ where
     if chunk_count == 0 {
         return Vec::new();
     }
+    #[cfg(jet_para_test_workers)]
+    let worker_count = 3.min(chunk_count);
+    #[cfg(not(jet_para_test_workers))]
     let worker_count = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
@@ -1290,7 +1320,7 @@ where
             }));
         }
         let mut indexed = Vec::with_capacity(chunk_count);
-        for handle in handles {
+        for handle in handles.into_iter().rev() {
             match handle.join() {
                 Ok(results) => indexed.extend(results),
                 Err(payload) => std::panic::resume_unwind(payload),
@@ -1745,6 +1775,9 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
 }
 
 fn jet_runtime_diagnostic(rendered: String) -> ! {
+    if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
+        std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Diagnostic { rendered }));
+    }
     if jet_interrupt_handler_should_unwind() {
         panic!("{}", rendered);
     }
@@ -1756,6 +1789,14 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
 /// (the second argument to `@Pre(cond, "msg")`/`@Post(cond, "msg")`).
 #[allow(dead_code)] // only called from generated code that has a @Pre/@Post
 fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
+    if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
+        std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Contract {
+            file: file.to_string(),
+            line,
+            clause_kw: clause_kw.to_string(),
+            msg: msg.to_string(),
+        }));
+    }
     if jet_runtime_should_unwind() {
         panic!(
             "@{} contract failed: {} (at {}:{})",

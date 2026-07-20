@@ -93,6 +93,25 @@ fn run() {
 }
 "#,
         ),
+        (
+            "enum payload",
+            r#"alias Boxed<T> = T
+enum CallbackPayload { Callback(Boxed<fn(Int) -> Int>) }
+fn bump(n: Int) -> Int { return n + 1 }
+fn run() {
+    payloads: [CallbackPayload] :: [CallbackPayload.Callback(bump)]
+    ignored :: payloads.para_map((payload: CallbackPayload) => 1)
+}
+"#,
+        ),
+        (
+            "stored-function capture",
+            r#"fn run() {
+    stored :: (n: Int) => n + 1
+    ignored :: [1].para_map((n: Int) => stored(n))
+}
+"#,
+        ),
     ] {
         let diags = jet::compile(source)
             .expect_err("function-typed worker values must fail in sema");

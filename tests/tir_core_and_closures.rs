@@ -5,7 +5,9 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{build_and_run, build_and_run_full, build_and_run_multi, have_rustc};
+use tir_support::{
+    build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc,
+};
 
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
@@ -208,33 +210,86 @@ fn parallel_collection_adapters_report_lowest_input_failure() {
     for (method, callback, call) in [
         (
             "map",
-            "fn callback(n: Int) -> Int {\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"map-low\") }\n    if n == 65 { require(false, \"map-high\") }\n    return n\n}\n",
+            "fn callback(n: Int) -> Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"map-low\") }\n    if n == 65 { require(false, \"map-high\") }\n    return n\n}\n",
             "ignored :: values.para_map(callback)",
         ),
         (
             "filter",
-            "fn callback(n: Int) -> Bool {\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"filter-low\") }\n    if n == 65 { require(false, \"filter-high\") }\n    return true\n}\n",
+            "fn callback(n: Int) -> Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"filter-low\") }\n    if n == 65 { require(false, \"filter-high\") }\n    return true\n}\n",
             "ignored :: values.para_filter(callback)",
         ),
         (
             "partition",
-            "fn callback(n: Int) -> Bool {\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"partition-low\") }\n    if n == 65 { require(false, \"partition-high\") }\n    return true\n}\n",
+            "fn callback(n: Int) -> Bool {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"partition-low\") }\n    if n == 65 { require(false, \"partition-high\") }\n    return true\n}\n",
             "ignored :: values.para_partition(callback)",
         ),
         (
             "fold",
-            "fn step(acc: Int, n: Int) -> Int {\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"fold-low\") }\n    if n == 65 { require(false, \"fold-high\") }\n    return acc + n\n}\n",
+            "fn step(acc: Int, n: Int) -> Int {\n    if n == 0 { print(\"worker-0-start\") }\n    if n == 64 { print(\"worker-1-start\") }\n    if n == 128 { print(\"worker-2-complete\") }\n    if n == 1 { loop i; 0..200000 { ignored :: i } require(false, \"fold-low\") }\n    if n == 65 { require(false, \"fold-high\") }\n    return acc + n\n}\n",
             "ignored :: values.para_fold(() => 0, step, (left: Int, right: Int) => left + right)",
         ),
     ] {
         let src = format!("{callback}\nfn run() {{\n    values: [Int] :: [{values}]\n    {call}\n}}\n");
-        let (code, stdout, stderr) =
-            build_and_run_full("jet_para_failure", &format!("para_{method}_failure"), &src);
+        let (code, stdout, stderr) = build_and_run_full_with_cfg(
+            "jet_para_failure",
+            &format!("para_{method}_failure"),
+            &src,
+            "jet_para_test_workers",
+        );
         assert_eq!(code, 70, "{method} stdout={stdout:?} stderr={stderr:?}");
-        assert!(stderr.contains(&format!("{method}-low")), "{stderr}");
+        for marker in ["worker-0-start", "worker-1-start", "worker-2-complete"] {
+            assert!(stdout.contains(marker), "{method} missed {marker}: {stdout:?}");
+        }
+        assert_eq!(
+            stderr.lines().next(),
+            Some(format!("panic: {method}-low").as_str()),
+            "{stderr}"
+        );
+        assert_eq!(stderr.matches(&format!("{method}-low")).count(), 2, "{stderr}");
         assert!(!stderr.contains(&format!("{method}-high")), "{stderr}");
         assert!(!stderr.contains("worker panicked"), "{stderr}");
     }
+}
+
+#[test]
+fn parallel_collection_adapters_select_across_runtime_failure_carriers() {
+    if !have_rustc() {
+        return;
+    }
+    let values = (0..130).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
+    let src = format!(
+        "use core.time as time\n\
+         @Pre(n != 65, \"contract-high\") fn checked(n: Int) -> Int {{ return n }}\n\
+         fn callback(n: Int) -> Int {{\n\
+             if n == 0 {{ print(\"worker-0-start\") }}\n\
+             if n == 64 {{ print(\"worker-1-start\") }}\n\
+             if n == 128 {{ print(\"worker-2-complete\") }}\n\
+             if n == 1 {{ @Context(deadline: time.now() - 1) {{ time.sleep(1) }} }}\n\
+             if n == 65 {{ return checked(n) }}\n\
+             return n\n\
+         }}\n\
+         fn run() {{\n\
+             values: [Int] :: [{values}]\n\
+             ignored :: values.para_map(callback)\n\
+         }}\n"
+    );
+    let (code, stdout, stderr) = build_and_run_full_with_cfg(
+        "jet_para_failure",
+        "para_cross_carrier_failure",
+        &src,
+        "jet_para_test_workers",
+    );
+    assert_eq!(code, 70, "stdout={stdout:?} stderr={stderr:?}");
+    for marker in ["worker-0-start", "worker-1-start", "worker-2-complete"] {
+        assert!(stdout.contains(marker), "missed {marker}: {stdout:?}");
+    }
+    assert_eq!(
+        stderr,
+        "Error [E3003]: deadline exceeded while waiting in time sleep\n\
+         Why: this wait point observed the task context deadline from `@Context(deadline: …)`\n\
+         Fix: raise the deadline budget or shorten the work before this wait point\n"
+    );
+    assert!(!stderr.contains("contract-high"), "{stderr}");
 }
 
 #[test]
