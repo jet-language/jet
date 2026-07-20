@@ -162,6 +162,11 @@ pub fn jet_http_client_send_impl(
             Err("HTTP proxy connection failed".to_string())
         }
         Err(ureq::Error::Transport(error))
+            if error.kind() == ureq::ErrorKind::ProxyUnauthorized =>
+        {
+            Err("HTTP proxy authentication failed".to_string())
+        }
+        Err(ureq::Error::Transport(error))
             if error.kind() == ureq::ErrorKind::ConnectionFailed =>
         {
             Err("HTTP connection failed".to_string())
