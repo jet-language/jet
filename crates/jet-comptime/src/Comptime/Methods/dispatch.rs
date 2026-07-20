@@ -2,6 +2,9 @@
 //! `eval_fan_out`, `eval_require`, `eval_embed_file`. These are further
 //! `impl Interp` methods; the struct and spine live in `interp.rs`.
 
+#[path = "../SequenceParity.rs"]
+mod sequence_parity;
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -1725,6 +1728,21 @@ impl<'a> Interp<'a> {
                 argv.push(self.eval(&a.expr, scope)?);
             }
             let mut container = self.eval(receiver, scope)?;
+            if let Some(result) = sequence_parity::eval_sequence_method(
+                self,
+                &container,
+                method,
+                &argv,
+                span,
+            ) {
+                return match result? {
+                    sequence_parity::SequenceOutcome::Value(value) => Ok(value),
+                    sequence_parity::SequenceOutcome::WriteBack(value) => {
+                        self.write_back(receiver, value, scope)?;
+                        Ok(CtValue::Unit)
+                    }
+                };
+            }
             let ret = apply_mutating(&mut container, method, argv, span)?;
             self.write_back(receiver, container, scope)?;
             return Ok(ret);
@@ -1811,6 +1829,21 @@ impl<'a> Interp<'a> {
                 "embed a UTF-8 text file".to_string(),
                 Some(span),
             ));
+        }
+        if let Some(result) = sequence_parity::eval_sequence_method(
+            self,
+            &recv,
+            method,
+            &argv,
+            span,
+        ) {
+            return match result? {
+                sequence_parity::SequenceOutcome::Value(value) => Ok(value),
+                sequence_parity::SequenceOutcome::WriteBack(value) => {
+                    self.write_back(receiver, value, scope)?;
+                    Ok(CtValue::Unit)
+                }
+            };
         }
         // D-BUILDENTRY1: selected-root `BuildContext` is interpreter-owned.
         // Driver removes `fn build` before runtime codegen.

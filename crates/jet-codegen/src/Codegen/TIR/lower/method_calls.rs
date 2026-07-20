@@ -1918,9 +1918,13 @@ pub(crate) fn lower_method_call(
         // Collection helpers lend callback inputs (`&T`, or `&U, &T` for
         // folds). Lower that host borrow exactly once, including scalar
         // payloads. `Option.map` emits through `.as_ref()` for the same law.
-        let mut callback_params = recv_ast_ty
-            .as_ref()
-            .and_then(|ty| crate::Collections::builtin_method_arg_types(ty, method))
+        // `tir_recv_jet_ty` intentionally returns `None` for literals, while the
+        // lowered receiver still carries their resolved type. Use that total type
+        // for the helper's borrowed callback convention as well.
+        let mut callback_params = crate::Collections::builtin_method_arg_types(
+            recv_ast_ty.as_ref().unwrap_or(&recv_t.ty),
+            method,
+        )
             .and_then(|types| {
                 types.into_iter().find_map(|ty| match ty {
                     Type::Fn { params, .. } => Some(params),

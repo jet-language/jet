@@ -1198,9 +1198,10 @@ impl<'a> Interp<'a> {
             Expr::Copy(inner, _) => self.eval(inner, scope),
             // D-SHAPE-PLACE1=A: sema wraps read-only bindings from a field or
             // index in a transparent place borrow. CtValue has value semantics,
-            // so reading the wrapped value is the faithful comptime equivalent.
-            // Mutable places still need an aliasing model and remain E0956.
-            Expr::Place(inner, crate::AST::PlaceAccess::Read, _) => self.eval(inner, scope),
+            // so either access mode uses the same sliced List value for the
+            // read-only View/ViewMut method surface. Sema already enforces the
+            // write window's alias/provenance rules before comptime runs.
+            Expr::Place(inner, _, _) => self.eval(inner, scope),
             Expr::Present(inner, _) => Ok(CtValue::Some(Box::new(self.eval(inner, scope)?))),
             Expr::Absent(_) => Ok(CtValue::None(Type::Int)),
             Expr::Call(call) => self.eval_call(&call.name, call.name_span, &call.args, scope),
