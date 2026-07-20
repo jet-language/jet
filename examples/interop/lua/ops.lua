@@ -1,4 +1,9 @@
 local calls = 0
+local counter_state = { requests = 3 }
+
+function counters(input)
+  return counter_state
+end
 
 function transform(input)
   calls = calls + 1

@@ -9,6 +9,10 @@ struct Payload {
 
 fn run() --[Lua, Io]-> {
     session :: ops.open() ?? panic("Lua open failed")
+    counters :: ops.counters_view(session, 5000) ?? panic("Lua table view failed")
+    print(ops.view_get_int(counters, "requests") ?? panic("Lua table read failed"))
+    _changed :: ops.view_set_int(counters, "requests", 8) ?? panic("Lua table write failed")
+    print(ops.view_get_int(counters, "requests") ?? panic("Lua table reread failed"))
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Null]), "scalar": DataTree.Float(3.5)])
     print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("first call failed")))
     print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("second call failed")))
@@ -21,5 +25,4 @@ fn run() --[Lua, Io]-> {
     print(json.canonical(timed))
     recovered :: ops.echo(session, DataTree.Text("recovered"), 5000) ?? panic("recovery failed")
     print(json.canonical(recovered))
-    ops.close(^session)
 }

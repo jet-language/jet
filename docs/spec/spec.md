@@ -1169,6 +1169,14 @@ and input or output at least 1 MiB fail at the boundary. Lua errors become the
 closed `LuaError` variants; exception text, paths, and stack frames never cross.
 Calls carry the `Lua` effect root.
 
+Sibling `<name>_view(session, deadline_ms)` adapters require the Lua function to
+return a table and pin that table in the owning session's registry. `TableView`
+integer reads and writes address the live table directly: they do not serialize
+the table through JSON or `DataTree`, and Lua-side mutations are visible through
+the same view. `TableView.Close` releases the registry reference at scope exit.
+Session close releases every remaining table and invalidates all copied or stale
+view handles; post-close access returns `LuaError.NotRunning`.
+
 The VM instruction hook enforces each call deadline and observes concurrent
 `cancel(session)` requests without destroying the session. A caught timeout,
 cancellation, Lua exception, or protocol error leaves the VM available for the

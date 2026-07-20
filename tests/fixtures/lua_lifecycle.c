@@ -10,6 +10,10 @@ extern const char *jet_lua_ops_invoke_transform(int64_t, const char *, int64_t);
 extern const char *jet_lua_ops_invoke_echo(int64_t, const char *, int64_t);
 extern const char *jet_lua_ops_invoke_fail_call(int64_t, const char *, int64_t);
 extern const char *jet_lua_ops_invoke_spin(int64_t, const char *, int64_t);
+extern int64_t jet_lua_ops_view_counters(int64_t, int64_t);
+extern int64_t jet_lua_ops_view_get_int(int64_t, int64_t, const char *);
+extern void jet_lua_ops_view_set_int(int64_t, int64_t, const char *, int64_t);
+extern void jet_lua_ops_view_release(int64_t, int64_t);
 extern void jet_lua_ops_cancel(int64_t);
 extern void jet_lua_ops_close(int64_t);
 
@@ -26,6 +30,14 @@ int main(void) {
     handle = jet_lua_ops_open();
     int64_t other = jet_lua_ops_open();
     assert(handle && other);
+    int64_t table = jet_lua_ops_view_counters(handle, 1000);
+    assert(table > 0 && !jet_lua_ops_take_error());
+    assert(jet_lua_ops_view_get_int(handle, table, "requests") == 3);
+    assert(!jet_lua_ops_take_error());
+    jet_lua_ops_view_set_int(handle, table, "requests", 8);
+    assert(!jet_lua_ops_take_error());
+    assert(jet_lua_ops_view_get_int(handle, table, "requests") == 8);
+    assert(!jet_lua_ops_take_error());
     const char *first = jet_lua_ops_invoke_transform(handle, "{\"map\":{\"x\":1},\"list\":[true,null],\"scalar\":2.5}", 1000);
     assert(!jet_lua_ops_take_error() && strstr(first, "\"calls\":1"));
     const char *second = jet_lua_ops_invoke_transform(handle, "false", 1000);
@@ -50,6 +62,10 @@ int main(void) {
     assert(!strcmp(jet_lua_ops_invoke_echo(handle, "\"cancel recovery\"", 1000), "\"cancel recovery\""));
     assert(!jet_lua_ops_take_error());
     jet_lua_ops_close(handle);
+    assert(jet_lua_ops_view_get_int(handle, table, "requests") == 0);
+    assert(jet_lua_ops_take_error() == 1);
+    jet_lua_ops_view_release(handle, table);
+    assert(jet_lua_ops_take_error() == 1);
     jet_lua_ops_invoke_echo(handle, "null", 1000);
     assert(jet_lua_ops_take_error() == 1);
     jet_lua_ops_close(handle);
