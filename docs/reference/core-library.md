@@ -437,7 +437,7 @@ Client surface:
 | `client.request(method, url)` | `HttpClientReq` | Start a typed request builder |
 | `req.header(name, value)` / `.body(text)` | `HttpClientReq` | Add headers or a string body |
 | `req.form(name, value)` / `.multipart_text(name, value)` | `HttpClientReq` | Encode form or text multipart fields |
-| `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or redirect limit |
+| `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or a redirect limit from 0 through 4,294,967,295; out-of-range limits fail before transport |
 | `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` | `HttpClientReq` | Set nonnegative global/per-phase deadlines; negative milliseconds fail before transport |
 | `req.proxy(url)` | `HttpClientReq` | Use an explicit proxy; env proxies are honored by default |
 | `req.send()` | `HttpClientResp ? String` | Execute the request |

@@ -75,6 +75,13 @@ pub fn jet_http_client_send_impl(
     let total_timeout = total_timeout_ms
         .map(|milliseconds| validated_timeout("total timeout", milliseconds))
         .transpose()?;
+    let redirects = redirects
+        .map(|limit| {
+            u32::try_from(limit).map_err(|_| {
+                "HTTP redirect limit must be between 0 and 4294967295".to_string()
+            })
+        })
+        .transpose()?;
     let mut builder = ureq::AgentBuilder::new()
         .timeout_connect(connect_timeout)
         .timeout_read(read_timeout)
@@ -84,7 +91,7 @@ pub fn jet_http_client_send_impl(
         builder = builder.timeout(timeout);
     }
     if let Some(n) = redirects {
-        builder = builder.redirects(n.max(0) as u32);
+        builder = builder.redirects(n);
     }
     if let Some(p) = proxy {
         builder = builder.proxy(ureq::Proxy::new(p).map_err(|e| e.to_string())?);

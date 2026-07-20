@@ -5426,6 +5426,141 @@ fn main() {
 }
 
 #[test]
+fn core_http_client_rejects_invalid_redirect_limits_before_transport() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let stop = std::sync::Arc::new(AtomicBool::new(false));
+    let accepted = std::sync::Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let server_stop = stop.clone();
+    let server_accepted = accepted.clone();
+    let server_requests = requests.clone();
+    let server = std::thread::spawn(move || {
+        while !server_stop.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    server_accepted.fetch_add(1, Ordering::AcqRel);
+                    stream
+                        .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                        .unwrap();
+                    let mut request = [0; 4096];
+                    let read = stream.read(&mut request).unwrap();
+                    let request = String::from_utf8_lossy(&request[..read]);
+                    let target = request
+                        .lines()
+                        .next()
+                        .and_then(|line| line.split_ascii_whitespace().nth(1))
+                        .unwrap();
+                    server_requests.lock().unwrap().push(target.to_string());
+                    let response: &[u8] = match target {
+                        "/redirect" => b"HTTP/1.1 302 Found\r\nLocation: /target\r\nContent-Length: 8\r\nConnection: close\r\n\r\nredirect",
+                        "/target" => b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        _ => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    };
+                    stream.write_all(response).unwrap();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
+        }
+    });
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_http_redirect_range_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let compiled = compile_temp(
+        "http_redirect_seed.jet",
+        "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n",
+    );
+    let link = compiled.ffi.expect("HTTP client bridge");
+    let harness = dir.join("bridge_redirect_range.rs");
+    let bin = dir.join("bridge_redirect_range");
+    fs::write(
+        &harness,
+        r#"
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let errors = [-1, i64::from(u32::MAX) + 1].into_iter().map(|redirects| {
+        bridge::jet_http_client_send_impl(
+            "GET", &url, &[], None, None, None, None, None, Some(redirects), None,
+            &[], &[], &[],
+        ).err()
+    }).collect::<Vec<_>>();
+    assert_eq!(errors, vec![
+        Some("HTTP redirect limit must be between 0 and 4294967295".to_string()),
+        Some("HTTP redirect limit must be between 0 and 4294967295".to_string()),
+    ]);
+    let stopped = bridge::jet_http_client_send_impl(
+        "GET", &url, &[], None, None, None, None, None, Some(0), None,
+        &[], &[], &[],
+    ).unwrap();
+    assert_eq!((stopped.0, stopped.1.as_str()), (302, "redirect"));
+    let followed = bridge::jet_http_client_send_impl(
+        "GET", &url, &[], None, None, None, None, None,
+        Some(i64::from(u32::MAX)), None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!((followed.0, followed.1.as_str()), (200, "ok"));
+}
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "bridge harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin)
+        .arg(format!("http://{addr}/redirect"))
+        .output()
+        .unwrap();
+    stop.store(true, Ordering::Release);
+    server.join().unwrap();
+    assert!(
+        output.status.success(),
+        "bridge harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        accepted.load(Ordering::Acquire),
+        3,
+        "invalid redirect limit reached transport or redirect boundary behavior changed"
+    );
+    assert_eq!(
+        *requests.lock().unwrap(),
+        vec!["/redirect", "/redirect", "/target"],
+        "redirect boundaries sent an unexpected request sequence"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_http_client_bounds_and_strictly_decodes_response_bodies() {
     use std::io::{Read, Write};
 
