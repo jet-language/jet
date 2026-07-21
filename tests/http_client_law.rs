@@ -1054,6 +1054,130 @@ fn run() {{
 }
 
 #[test]
+fn post_307_replays_streamed_body_under_redirect_tee_cap() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_post_307_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("upload.fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success(),
+        "mkfifo failed"
+    );
+    let body_len = 96 * 1024usize;
+    let seen_first = Arc::new(AtomicBool::new(false));
+    let seen_first_flag = seen_first.clone();
+    let seen_replay = Arc::new(AtomicBool::new(false));
+    let seen_replay_flag = seen_replay.clone();
+    let server = std::thread::spawn(move || {
+        let (mut first, _) = listener.accept().unwrap();
+        let head = request_head(&mut first);
+        assert!(head.starts_with(b"POST /from HTTP/1.1\r\n"));
+        let head_text = String::from_utf8_lossy(&head);
+        assert!(
+            head_text
+                .to_ascii_lowercase()
+                .contains(&format!("content-length: {body_len}")),
+            "missing content-length: {head_text}"
+        );
+        let mut got = 0usize;
+        let mut buf = [0u8; 4096];
+        while got < body_len {
+            let read = first.read(&mut buf).unwrap();
+            assert_ne!(read, 0, "first upload ended early at {got}");
+            got += read;
+            if got >= 64 * 1024 {
+                seen_first_flag.store(true, Ordering::SeqCst);
+            }
+        }
+        first
+            .write_all(
+                b"HTTP/1.1 307 Temporary Redirect\r\nLocation: /to\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        drop(first);
+
+        let (mut second, _) = listener.accept().unwrap();
+        let head = request_head(&mut second);
+        assert!(
+            head.starts_with(b"POST /to HTTP/1.1\r\n"),
+            "307 must preserve POST: {}",
+            String::from_utf8_lossy(&head)
+        );
+        let head_text = String::from_utf8_lossy(&head).to_ascii_lowercase();
+        assert!(
+            head_text.contains(&format!("content-length: {body_len}")),
+            "replay missing content-length: {head_text}"
+        );
+        got = 0;
+        while got < body_len {
+            let read = second.read(&mut buf).unwrap();
+            assert_ne!(read, 0, "replayed upload ended early at {got}");
+            got += read;
+        }
+        assert_eq!(got, body_len);
+        seen_replay_flag.store(true, Ordering::SeqCst);
+        second
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+    });
+    let fifo_writer = fifo.clone();
+    let writer = std::thread::spawn(move || {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .open(&fifo_writer)
+            .unwrap();
+        let payload = vec![b'p'; body_len];
+        file.write_all(&payload).unwrap();
+    });
+    let fifo_path = fifo
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let src = format!(
+        r#"
+use core.http.client as http
+use core.http as message
+use core.files as files
+fn run() {{
+    input :: files.open("{fifo_path}") ?? panic("open")
+    body :: message.Body.reader(^input, {body_len}) ?? panic("reader")
+    // Default redirect_limit (>0) must tee POST so 307 can replay the body.
+    req :: http.request("POST", "http://{addr}/from").body(body)
+    resp :: req.send() ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+    print(resp.redirect_history().len())
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "post_307_replay", &src);
+    server.join().unwrap();
+    writer.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "ok\n1\n");
+    assert!(
+        seen_first.load(Ordering::SeqCst),
+        "first POST never streamed a 64KiB boundary before 307"
+    );
+    assert!(
+        seen_replay.load(Ordering::SeqCst),
+        "307 follow never received the teed POST body"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn unknown_length_upload_uses_h1_chunked_transfer_encoding() {
     use std::sync::atomic::{AtomicBool, Ordering};
 

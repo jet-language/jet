@@ -2004,10 +2004,11 @@ fn send_following_redirects_upload(
                 custom_roots,
             )?
         } else if let Some(ref mut read) = body_stream {
-            // Only buffer when a later redirect may need to replay the body
-            // (307/308 on replayable methods with redirect_limit > 0). Otherwise
-            // stream once with no tee — redirects(0) never replays.
-            let mut tee = (redirect_limit > 0 && replayable(method.as_str(), true))
+            // Buffer only when a later redirect may need the body again (307/308
+            // preserve method+body for non-safe methods). Connection-retry
+            // `replayable()` excludes POST and must not gate this tee.
+            // redirects(0) and bodyless/safe methods stream with no tee.
+            let mut tee = (redirect_limit > 0 && redirect_may_replay_body(method.as_str()))
                 .then(Vec::new);
             let chunked = stream_len.is_none();
             let has_body = true;
@@ -2757,6 +2758,12 @@ fn replayable(method: &str, _has_body: bool) -> bool {
         method,
         "GET" | "HEAD" | "PUT" | "DELETE" | "OPTIONS" | "TRACE"
     )
+}
+
+/// Methods whose body can survive a 307/308 follow. 301/302/303 rewrite POST to
+/// GET and drop the body; GET/HEAD/OPTIONS/TRACE never need an upload tee.
+fn redirect_may_replay_body(method: &str) -> bool {
+    !matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE")
 }
 
 fn connect(
