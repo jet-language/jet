@@ -142,6 +142,19 @@ mod jet_gtk {
         css_class: Option<String>,
     }
 
+    // Direct widgets remain children of `vbox` for the state's whole lifetime.
+    // Reconciled widgets may be removed, so their handles store only a stable
+    // path and resolve the current GTK pointer at every use.
+    enum GtkWidgetHandleTarget {
+        Direct(*mut GtkWidget),
+        TreePath(String),
+    }
+
+    struct GtkWidgetHandle {
+        target: GtkWidgetHandleTarget,
+        kind: GtkWidgetKind,
+    }
+
     struct GtkState {
         // Seam parity (display-free): keeps `GtkBackend` a full `JetBackend` so
         // the null/tui measure→layout→paint path is available on it too.
@@ -157,8 +170,7 @@ mod jet_gtk {
         display_ok: bool,
         window: *mut GtkWidget,
         vbox: *mut GtkWidget,
-        widgets: Vec<*mut GtkWidget>,
-        is_button: Vec<bool>,
+        widget_handles: Vec<GtkWidgetHandle>,
         tree_widgets: Vec<GtkWidgetRecord>,
         availability: GtkAvailability,
     }
@@ -348,6 +360,19 @@ mod jet_gtk {
             }
             self.trace(&format!("focus {path}"));
         }
+
+        fn resolve_widget_handle(&self, id: i64) -> Option<(*mut GtkWidget, GtkWidgetKind)> {
+            let handle = self.widget_handles.get(id as usize)?;
+            let widget = match &handle.target {
+                GtkWidgetHandleTarget::Direct(widget) => *widget,
+                GtkWidgetHandleTarget::TreePath(path) => self
+                    .tree_widgets
+                    .iter()
+                    .find(|record| record.path == *path && record.kind == handle.kind)
+                    .map(|record| record.widget)?,
+            };
+            (!widget.is_null()).then_some((widget, handle.kind))
+        }
     }
 
     impl Drop for GtkState {
@@ -386,8 +411,7 @@ mod jet_gtk {
                     display_ok: false,
                     window: std::ptr::null_mut(),
                     vbox: std::ptr::null_mut(),
-                    widgets: Vec::new(),
-                    is_button: Vec::new(),
+                    widget_handles: Vec::new(),
                     tree_widgets: Vec::new(),
                     availability: GtkAvailability::Uninitialized,
                 })),
@@ -445,20 +469,22 @@ mod jet_gtk {
         fn add_widget(&self, text: &str, is_button: bool) -> i64 {
             let mut state = self.state.borrow_mut();
             state.ensure_init();
-            let id = state.widgets.len() as i64;
+            let id = state.widget_handles.len() as i64;
             let tree_kind = if is_button { GtkWidgetKind::Button } else { GtkWidgetKind::Label };
-            if let Some(widget) = state
+            if let Some(path) = state
                 .tree_widgets
                 .iter()
                 .find(|record| record.kind == tree_kind && record.label == text)
-                .map(|record| record.widget)
+                .map(|record| record.path.clone())
             {
-                state.widgets.push(widget);
-                state.is_button.push(is_button);
+                state.widget_handles.push(GtkWidgetHandle {
+                    target: GtkWidgetHandleTarget::TreePath(path),
+                    kind: tree_kind,
+                });
                 state.trace(&format!("bind {text}"));
                 return id;
             }
-            if state.display_ok {
+            let widget = if state.display_ok {
                 let ctext = CString::new(text).unwrap_or_else(|_| CString::new("").unwrap());
                 // SAFETY: display is live (ensure_init); pointers are GTK handles.
                 unsafe {
@@ -468,45 +494,44 @@ mod jet_gtk {
                         gtk_label_new(ctext.as_ptr())
                     };
                     gtk_box_append(state.vbox, widget);
-                    state.widgets.push(widget);
+                    widget
                 }
             } else {
-                state.widgets.push(std::ptr::null_mut());
-            }
-            state.is_button.push(is_button);
+                std::ptr::null_mut()
+            };
+            state.widget_handles.push(GtkWidgetHandle {
+                target: GtkWidgetHandleTarget::Direct(widget),
+                kind: tree_kind,
+            });
             id
         }
 
         /// Update a widget's text in place (the reactive counter's live update).
         pub fn set_text(&self, id: i64, text: &str) {
             let state = self.state.borrow();
-            let Some(&widget) = state.widgets.get(id as usize) else {
+            let Some((widget, kind)) = state.resolve_widget_handle(id) else {
+                state.trace(&format!("handle-miss {id}"));
                 return;
             };
-            if !state.display_ok || widget.is_null() {
-                return;
-            }
             let ctext = CString::new(text).unwrap_or_else(|_| CString::new("").unwrap());
-            let is_button = state.is_button.get(id as usize).copied().unwrap_or(false);
             // SAFETY: display is live and `widget` is a GTK label/button handle.
             unsafe {
-                if is_button {
+                if kind == GtkWidgetKind::Button {
                     gtk_button_set_label(widget, ctext.as_ptr());
                 } else {
                     gtk_label_set_text(widget, ctext.as_ptr());
                 }
             }
+            state.trace(&format!("handle-set-text {id} {text}"));
         }
 
         /// Apply a Px minimum size (D-STYLEUNIT1's `Px` reaching native layout).
         pub fn set_size(&self, id: i64, width: i64, height: i64) {
             let state = self.state.borrow();
-            let Some(&widget) = state.widgets.get(id as usize) else {
+            let Some((widget, _)) = state.resolve_widget_handle(id) else {
+                state.trace(&format!("handle-miss {id}"));
                 return;
             };
-            if !state.display_ok || widget.is_null() {
-                return;
-            }
             // SAFETY: display is live and `widget` is a GTK widget handle.
             unsafe {
                 gtk_widget_set_size_request(widget, width as c_int, height as c_int);
@@ -517,12 +542,10 @@ mod jet_gtk {
         /// reaching the native paint pipeline).
         pub fn set_color(&self, id: i64, color: &str) {
             let state = self.state.borrow();
-            let Some(&widget) = state.widgets.get(id as usize) else {
+            let Some((widget, _)) = state.resolve_widget_handle(id) else {
+                state.trace(&format!("handle-miss {id}"));
                 return;
             };
-            if !state.display_ok || widget.is_null() {
-                return;
-            }
             let class_name = format!("jetfill{}", color.trim_start_matches('#'));
             let css = format!(".{class_name} {{ background-color: {color}; }}");
             let (Ok(cclass), Ok(ccss)) = (CString::new(class_name), CString::new(css)) else {
@@ -548,12 +571,10 @@ mod jet_gtk {
         /// Wire a button's "clicked" signal to a Jet handler.
         pub fn on_click<F: Fn() + 'static>(&self, id: i64, handler: F) {
             let state = self.state.borrow();
-            let Some(&widget) = state.widgets.get(id as usize) else {
+            let Some((widget, GtkWidgetKind::Button)) = state.resolve_widget_handle(id) else {
+                state.trace(&format!("handle-miss {id}"));
                 return;
             };
-            if !state.display_ok || widget.is_null() {
-                return;
-            }
             let boxed: *mut Rc<dyn Fn()> = Box::into_raw(Box::new(Rc::new(handler) as Rc<dyn Fn()>));
             let signal = CString::new("clicked").unwrap();
             // SAFETY: display is live; `widget` is a GTK button; `boxed` is a

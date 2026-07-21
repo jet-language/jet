@@ -408,9 +408,14 @@ fn run() {
     size := app.measure(first, ui.constraint(0.0, 0.0, 320.0, 240.0))
     app.layout(first, ui.rect(0.0, 0.0, size.width, size.height))
     app.paint(first)
+    save := app.button("Save")
     app.on_event(ui.key_event("Tab"))
-    second := ui.box([ui.text("Updated"), ui.button("Save")])
+    second := ui.box([ui.text("Updated")])
     app.paint(second)
+    app.set_text(save, "stale")
+    third := ui.box([ui.text("Updated"), ui.button("Save")])
+    app.paint(third)
+    app.set_text(save, "Rebound")
     print(app.focused_label())
 }
 "#;
@@ -447,6 +452,10 @@ fn run() {
         "GTK_UI focus root/2",
         "GTK_UI update root/0 Updated",
         "GTK_UI remove root/2",
+        "GTK_UI remove root/1",
+        "GTK_UI handle-miss 0",
+        "GTK_UI create root/1 Button",
+        "GTK_UI handle-set-text 0 Rebound",
         "GTK_UI cleanup",
     ] {
         assert!(trace.contains(event), "missing `{event}` in GTK trace:\n{trace}");

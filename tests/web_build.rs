@@ -336,7 +336,7 @@ const origAppend = doc.body.appendChild.bind(doc.body);
 doc.body.appendChild = (el) => { if (el.id) doc._byId.set(el.id, el); return origAppend(el); };
 globalThis.document = doc;
 
-const { render_tree, render_focus_tree } = await import("./app.js");
+const { render_tree, render_focus_tree, render_two_backends } = await import("./app.js");
 render_tree(true);
 let container = doc.getElementById("jet-app");
 console.log(container.children.map((el) => `${el.tagName}:${el.getAttribute("role")}:${el.getAttribute("aria-label")}`).join("|"));
@@ -347,6 +347,11 @@ const second = container.children.find((el) => el.getAttribute("aria-label") ===
 second.focus();
 render_focus_tree();
 console.log(`focus=${doc.activeElement === second}:${doc.activeElement?.getAttribute("aria-label")}`);
+render_two_backends();
+const backendA = container.children.find((el) => el.getAttribute("aria-label") === "Backend A");
+backendA.focus();
+render_two_backends();
+console.log(`scoped=${doc.activeElement === backendA}:${doc.activeElement?.getAttribute("aria-label")}`);
 "#;
 
 fn run_typed_ui_tree_harness(dir: &PathBuf) -> String {
@@ -1114,11 +1119,27 @@ fn render_focus_tree() {
     backend.paint(tree)
 }
 
+@Target(Js)
+fn render_two_backends() {
+    first := ui.null_backend()
+    first_tree := ui.button("Backend A")
+    first.layout(first_tree, ui.rect(0.0, 0.0, 80.0, 24.0))
+    first.paint(first_tree)
+
+    second := ui.null_backend()
+    second_tree := ui.button("Backend B")
+    second.layout(second_tree, ui.rect(0.0, 24.0, 80.0, 24.0))
+    second.paint(second_tree)
+}
+
 fn run() {}
 "#;
     let dir = build_web_fixture("typed_tree", src, "tests/fixtures/web_typed_tree.jet");
     let stdout = run_typed_ui_tree_harness(&dir);
-    assert_eq!(stdout, "DIV:label:Named\nDIV:null:null\nfocus=true:Cancel\n");
+    assert_eq!(
+        stdout,
+        "DIV:label:Named\nDIV:null:null\nfocus=true:Cancel\nscoped=true:Backend A\n"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 

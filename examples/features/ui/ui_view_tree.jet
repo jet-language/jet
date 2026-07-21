@@ -1,17 +1,54 @@
-// D-UITREE1: one canonical UiNode tree. Repainting the same paths lets retained
-// backends update stable native/DOM widgets instead of maintaining another View.
+// D-UITREE1: one canonical UiNode tree. A signal change re-runs the render
+// effect, while the diff paints only canonical leaves whose content changed.
 use core.ui as ui
+use core.reactive as reactive
+
+fn repaint(old: [UiNode], updated: [UiNode]) -> Int {
+    backend := ui.null_backend()
+    n := 0
+    i := 0
+    loop leaf; updated {
+        same := false
+        if i < old.len() {
+            if leaf.label == old[i].label {
+                same = true
+            }
+        }
+        if !same {
+            backend.layout(leaf, ui.rect(0.0, Float.from_int(i), leaf.width, leaf.height))
+            backend.paint(leaf)
+            n++
+        }
+        i++
+    }
+    loop cmd; backend.commands() {
+        print("repaint: {cmd}")
+    }
+    return n
+}
 
 fn run() {
-    backend := ui.null_backend()
-    initial := ui.box([ui.text("a"), ui.text("b")])
-    size := backend.measure(initial, ui.constraint(0.0, 0.0, 80.0, 24.0))
-    backend.layout(initial, ui.rect(0.0, 0.0, size.width, size.height))
-    backend.paint(initial)
-    print("paint: a")
-    print("paint: b")
+    initial: [UiNode] := [ui.text("a"), ui.text("b")]
+    leaves := reactive.signal(initial)
+    backend := ui.tui_backend()
+    render_backend := ~backend
+    ui.reactive_render(take(render_backend) () => {
+        tree := ui.box(leaves.get())
+        size := render_backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+        render_backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+        render_backend.paint(tree)
+    })
 
-    updated := ui.box([ui.text("a"), ui.text("zz")])
-    backend.paint(updated)
-    print("update: zz")
+    empty: [UiNode] := []
+    before := leaves.get()
+    print("initial repaints: {repaint(empty, before)}")
+    print("renders: {backend.render_count()}")
+
+    leaves.set([ui.text("a"), ui.text("zz")])
+    after := leaves.get()
+    print("update repaints: {repaint(before, after)}")
+    print("renders: {backend.render_count()}")
+    loop line; backend.frame_lines() {
+        print("frame: {line}")
+    }
 }

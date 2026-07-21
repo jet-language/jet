@@ -127,7 +127,10 @@ export function paint(backend, node) {
   const activeKey = typeof document !== "undefined"
     ? document.activeElement?.dataset?.jetKey ?? null
     : null;
-  const focusedKey = activeKey
+  const backendPrefix = `${backend.boxKey}/`;
+  const activeInBackend = activeKey !== null
+    && (activeKey === backend.boxKey || activeKey.startsWith(backendPrefix));
+  const focusedKey = (activeInBackend ? activeKey : null)
     ?? backend.focusNodes[backend.focusedIndex]?.dataset?.jetKey
     ?? null;
   backend.focusNodes = [];
@@ -205,7 +208,7 @@ export function paint(backend, node) {
   backend.focusedIndex = preservedIndex >= 0
     ? preservedIndex
     : backend.focusNodes.length ? 0 : -1;
-  if (backend.focusedIndex >= 0 && (activeKey !== null || focusedKey === null)) {
+  if (backend.focusedIndex >= 0 && (activeInBackend || activeKey === null)) {
     backend.focusNodes[backend.focusedIndex].focus?.();
   }
   return backend;
