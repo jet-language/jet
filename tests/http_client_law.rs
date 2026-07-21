@@ -95,6 +95,56 @@ fn run() {{
 }
 
 #[test]
+fn h1_skips_early_hints_reuses_final_response_and_rejects_upgrade() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        assert!(request_head(&mut stream).starts_with(b"GET /early HTTP/1.1\r\n"));
+        stream
+            .write_all(
+                b"HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: keep-alive\r\n\r\none",
+            )
+            .unwrap();
+        assert!(request_head(&mut stream).starts_with(b"GET /reuse HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\ntwo")
+            .unwrap();
+    });
+    let upgrade_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let upgrade_addr = upgrade_listener.local_addr().unwrap();
+    let upgrade_server = std::thread::spawn(move || {
+        let (mut stream, _) = upgrade_listener.accept().unwrap();
+        request_head(&mut stream);
+        stream
+            .write_all(
+                b"HTTP/1.1 101 Switching Protocols\r\nConnection: upgrade\r\nUpgrade: websocket\r\n\r\n",
+            )
+            .unwrap();
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+fn run() {{
+    first :: http.get("http://{addr}/early") ?? panic("early")
+    print(first.body().text(8) ?? panic("first body"))
+    second :: http.get("http://{addr}/reuse") ?? panic("reuse")
+    print(second.body().text(8) ?? panic("second body"))
+    if http.get("http://{upgrade_addr}/upgrade") == {{
+        .Ok(_) -> {{ print("accepted") }}
+        .Err(error) -> {{ print(error) }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = common::build_and_run("jet_http_client_law", "interim", &src);
+    server.join().unwrap();
+    upgrade_server.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "one\ntwo\nunsupported HTTP protocol unsupported\n");
+}
+
+#[test]
 fn gzip_decoding_streams_before_the_response_finishes() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -444,22 +494,28 @@ fn explicit_h2c_negotiates_hpack_and_reuses_one_session() {
         // :status 200 plus content-length: 2, with the value HPACK-Huffman encoded.
         let response = [0x88, 0x0f, 0x0d, 0x81, 0x17];
         write_h2_frame(&mut stream, 1, 4, 1, &response);
-        let request = loop {
+        write_h2_frame(&mut stream, 0, 1, 1, b"w0");
+
+        // Do not send either final response HEADERS until both request streams
+        // are open. A client that holds its connection mutex while awaiting the
+        // first HEADERS deadlocks here instead of multiplexing.
+        let mut requests = Vec::new();
+        while requests.len() < 2 {
             let frame = read_h2_frame(&mut stream);
             if frame.0 == 6 && frame.1 & 1 == 0 {
                 write_h2_frame(&mut stream, 6, 1, 0, &frame.3);
                 continue;
             }
             if frame.0 == 1 {
-                break frame;
+                requests.push(frame);
             }
-        };
-        assert_eq!(request.2, 3);
-        assert_ne!(request.1 & 4, 0);
+        }
+        requests.sort_by_key(|frame| frame.2);
+        assert_eq!(requests.iter().map(|frame| frame.2).collect::<Vec<_>>(), [3, 5]);
+        write_h2_frame(&mut stream, 1, 4, 5, &response);
         write_h2_frame(&mut stream, 1, 4, 3, &response);
-        // Deliver stream 3 first. The client reading stream 1 must queue it, not block multiplexing.
-        write_h2_frame(&mut stream, 0, 1, 3, b"b2");
-        write_h2_frame(&mut stream, 0, 1, 1, b"a1");
+        write_h2_frame(&mut stream, 0, 1, 5, b"b2");
+        write_h2_frame(&mut stream, 0, 1, 3, b"a1");
         drop(stream);
 
         // A pooled HTTP/2 session may go stale between requests. The client must
@@ -518,26 +574,41 @@ fn main() {
     let url = std::env::args().nth(1).unwrap();
     let root = bridge::jet_http_client_new_impl();
     let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
-    let first = bridge::jet_http_client_send_with_impl(
+    let warm = bridge::jet_http_client_send_with_impl(
         client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
-    let second = bridge::jet_http_client_send_with_impl(
-        client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
-    ).unwrap();
-    assert_eq!(bridge::jet_http_client_body_read_impl(first.1, 64).unwrap(), Some(b"a1".to_vec()));
-    assert_eq!(bridge::jet_http_client_body_read_impl(second.1, 64).unwrap(), Some(b"b2".to_vec()));
-    assert_eq!(bridge::jet_http_client_body_read_impl(first.1, 64).unwrap(), None);
-    assert_eq!(bridge::jet_http_client_body_read_impl(second.1, 64).unwrap(), None);
+    assert_eq!(bridge::jet_http_client_body_read_impl(warm.1, 64).unwrap(), Some(b"w0".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(warm.1, 64).unwrap(), None);
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+    let send = |barrier: std::sync::Arc<std::sync::Barrier>, url: String| std::thread::spawn(move || {
+        barrier.wait();
+        let response = bridge::jet_http_client_send_with_impl(
+            client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        ).unwrap();
+        let body = bridge::jet_http_client_body_read_impl(response.1, 64).unwrap().unwrap();
+        assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 64).unwrap(), None);
+        (response, body)
+    });
+    let first = send(barrier.clone(), url.clone());
+    let second = send(barrier.clone(), url.clone());
+    barrier.wait();
+    let first = first.join().unwrap();
+    let second = second.join().unwrap();
+    let mut bodies = vec![first.1, second.1];
+    bodies.sort();
+    assert_eq!(bodies, vec![b"a1".to_vec(), b"b2".to_vec()]);
     let third = bridge::jet_http_client_send_with_impl(
         client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
     assert_eq!(bridge::jet_http_client_body_read_impl(third.1, 64).unwrap(), Some(b"c3".to_vec()));
     assert_eq!(bridge::jet_http_client_body_read_impl(third.1, 64).unwrap(), None);
-    assert_eq!(bridge::jet_http_client_response_protocol_impl(first.1), "HTTP/2");
-    assert_eq!(bridge::jet_http_client_response_protocol_impl(second.1), "HTTP/2");
+    assert_eq!(bridge::jet_http_client_response_protocol_impl(warm.1), "HTTP/2");
+    assert_eq!(bridge::jet_http_client_response_protocol_impl(first.0.1), "HTTP/2");
+    assert_eq!(bridge::jet_http_client_response_protocol_impl(second.0.1), "HTTP/2");
     assert_eq!(bridge::jet_http_client_response_protocol_impl(third.1), "HTTP/2");
-    assert!(!bridge::jet_http_client_response_reused_impl(first.1));
-    assert!(bridge::jet_http_client_response_reused_impl(second.1));
+    assert!(!bridge::jet_http_client_response_reused_impl(warm.1));
+    assert!(bridge::jet_http_client_response_reused_impl(first.0.1));
+    assert!(bridge::jet_http_client_response_reused_impl(second.0.1));
     assert!(!bridge::jet_http_client_response_reused_impl(third.1));
 }
 

@@ -863,6 +863,7 @@ struct H2Connection {
     stream_send_windows: HashMap<u32, i64>,
     max_frame: usize,
     streams: HashMap<u32, VecDeque<H2Frame>>,
+    active_streams: std::collections::HashSet<u32>,
 }
 
 impl H2Connection {
@@ -881,6 +882,7 @@ impl H2Connection {
             stream_send_windows: HashMap::new(),
             max_frame: 16_384,
             streams: HashMap::new(),
+            active_streams: std::collections::HashSet::new(),
         })
     }
 
@@ -988,7 +990,7 @@ impl H2Connection {
         }
     }
 
-    fn request(
+    fn start_request(
         &mut self,
         method: &str,
         url: &ParsedUrl,
@@ -996,7 +998,7 @@ impl H2Connection {
         body: Option<&[u8]>,
         decompress: bool,
         facts: &Arc<Mutex<ResponseFacts>>,
-    ) -> Result<(u32, i64, Vec<(String, String)>, bool), JetHttpBridgeError> {
+    ) -> Result<u32, JetHttpBridgeError> {
         let write_started = Instant::now();
         let stream = self.next_stream;
         self.next_stream = self
@@ -1047,9 +1049,16 @@ impl H2Connection {
             }
         }
         self.stream_send_windows.remove(&stream);
+        self.active_streams.insert(stream);
         self.io.flush().map_err(map_h2_io)?;
         set_timing(facts, 3, elapsed_ms(write_started));
-        let first_started = Instant::now();
+        Ok(stream)
+    }
+
+    fn poll_response_headers(
+        &mut self,
+        stream: u32,
+    ) -> Result<Option<(i64, Vec<(String, String)>, bool)>, JetHttpBridgeError> {
         loop {
             let frame = match self
                 .streams
@@ -1058,7 +1067,11 @@ impl H2Connection {
                 .or_else(|| self.pending.pop_front())
             {
                 Some(frame) => frame,
-                None => h2_read_frame(&mut self.io)?,
+                None => match h2_read_frame(&mut self.io) {
+                    Ok(frame) => frame,
+                    Err(JetHttpBridgeError::Timeout) => return Ok(None),
+                    Err(error) => return Err(error),
+                },
             };
             if self.control(&frame)? {
                 continue;
@@ -1071,6 +1084,7 @@ impl H2Connection {
                 continue;
             }
             if frame.kind == 3 {
+                self.active_streams.remove(&stream);
                 return Err(JetHttpBridgeError::Protocol);
             }
             if frame.kind != 1 {
@@ -1083,8 +1097,7 @@ impl H2Connection {
             if status < 200 {
                 continue;
             }
-            set_timing(facts, 4, elapsed_ms(first_started));
-            return Ok((stream, status, headers, end));
+            return Ok(Some((status, headers, end)));
         }
     }
 }
@@ -2151,13 +2164,17 @@ fn send_once(
                 let mut connection = connection
                     .lock()
                     .map_err(|_| JetHttpBridgeError::Internal)?;
-                set_stream_timeouts(
-                    &mut connection.io,
-                    first_byte_timeout,
-                    write_timeout,
-                    total_deadline,
-                )?;
-                connection.probe()
+                if connection.active_streams.is_empty() {
+                    set_stream_timeouts(
+                        &mut connection.io,
+                        first_byte_timeout,
+                        write_timeout,
+                        total_deadline,
+                    )?;
+                    connection.probe()
+                } else {
+                    Ok(())
+                }
             };
             if probe.is_err() {
                 pool.lock()
@@ -2192,7 +2209,7 @@ fn send_once(
                 .map_err(|_| JetHttpBridgeError::Internal)?
                 .put(key.clone(), HttpStream::H2(connection.clone()));
         }
-        let (stream_id, status, response_headers, end_stream, remote_address) = {
+        let (stream_id, remote_address) = {
             let mut connection = connection
                 .lock()
                 .map_err(|_| JetHttpBridgeError::Internal)?;
@@ -2202,21 +2219,40 @@ fn send_once(
                 write_timeout,
                 total_deadline,
             )?;
-            let (stream_id, status, response_headers, end_stream) =
-                connection.request(method, url, headers, body, decompress, &facts)?;
+            let stream_id =
+                connection.start_request(method, url, headers, body, decompress, &facts)?;
             let remote_address = connection
                 .io
                 .peer_addr()
                 .map(|address| address.to_string())
                 .unwrap_or_default();
-            (
-                stream_id,
-                status,
-                response_headers,
-                end_stream,
-                remote_address,
-            )
+            (stream_id, remote_address)
         };
+        let first_started = Instant::now();
+        let first_deadline = Instant::now()
+            .checked_add(first_byte_timeout)
+            .map(|deadline| total_deadline.map_or(deadline, |total| total.min(deadline)))
+            .ok_or(JetHttpBridgeError::Timeout)?;
+        let (status, response_headers, end_stream) = loop {
+            if Instant::now() >= first_deadline {
+                return Err(JetHttpBridgeError::Timeout);
+            }
+            let polled = {
+                let mut connection = connection
+                    .lock()
+                    .map_err(|_| JetHttpBridgeError::Internal)?;
+                let slice = first_deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(10));
+                set_stream_timeouts(&mut connection.io, slice, write_timeout, total_deadline)?;
+                connection.poll_response_headers(stream_id)?
+            };
+            if let Some(response) = polled {
+                break response;
+            }
+            std::thread::yield_now();
+        };
+        set_timing(&facts, 4, elapsed_ms(first_started));
         return read_h2_response(
             connection,
             stream_id,
@@ -2479,8 +2515,14 @@ fn write_request(stream: &mut HttpStream, bytes: &[u8]) -> Result<(), (JetHttpBr
 }
 
 fn read_head_bytes(stream: &mut impl Read) -> Result<(Vec<u8>, Vec<u8>, i64), JetHttpBridgeError> {
+    read_head_bytes_after(stream, Vec::new())
+}
+
+fn read_head_bytes_after(
+    stream: &mut impl Read,
+    mut bytes: Vec<u8>,
+) -> Result<(Vec<u8>, Vec<u8>, i64), JetHttpBridgeError> {
     const MAX_HEAD: usize = 64 * 1024;
-    let mut bytes = Vec::new();
     let mut chunk = [0u8; 4096];
     let started = Instant::now();
     let mut first_byte_ms = None;
@@ -2700,6 +2742,14 @@ struct H2BodyReader {
 }
 
 impl H2BodyReader {
+    fn release_stream(&self) {
+        if let Some(session) = &self.connection {
+            if let Ok(mut connection) = session.try_lock() {
+                connection.active_streams.remove(&self.stream_id);
+            }
+        }
+    }
+
     fn finish(&mut self) -> std::io::Result<()> {
         if self.finished {
             return Ok(());
@@ -2714,6 +2764,7 @@ impl H2BodyReader {
             ));
         }
         self.finished = true;
+        self.release_stream();
         self.permit.take();
         if let Ok(mut facts) = self.facts.lock() {
             facts.timings_ms[6] = elapsed_ms(self.request_started);
@@ -2796,6 +2847,7 @@ impl H2BodyReader {
                     self.cursor = 0;
                     self.end_after_pending = frame.flags & 1 != 0;
                     if self.pending.is_empty() && self.end_after_pending {
+                        connection.active_streams.remove(&self.stream_id);
                         self.finish()?;
                     }
                     return Ok(());
@@ -2811,6 +2863,7 @@ impl H2BodyReader {
                         ));
                     }
                     if end {
+                        connection.active_streams.remove(&self.stream_id);
                         self.finish()?;
                         return Ok(());
                     }
@@ -2824,6 +2877,12 @@ impl H2BodyReader {
                 _ => {}
             }
         }
+    }
+}
+
+impl Drop for H2BodyReader {
+    fn drop(&mut self) {
+        self.release_stream();
     }
 }
 
@@ -2897,10 +2956,30 @@ fn read_response(
     total_deadline: Option<Instant>,
     permit: OriginPermit,
 ) -> Result<NativeResponse, JetHttpBridgeError> {
-    let (head, initial, first_byte_ms) = read_head_bytes(&mut stream)?;
-    set_timing(&facts, 4, first_byte_ms);
+    let (status, version, headers, initial) = {
+        let mut pending = Vec::new();
+        let mut first_byte_ms = None;
+        let mut interim_count = 0usize;
+        loop {
+            let (head, after, elapsed) = read_head_bytes_after(&mut stream, pending)?;
+            first_byte_ms.get_or_insert(elapsed);
+            let (status, version, headers) = parse_status_and_headers(&head)?;
+            if status == 101 {
+                return Err(JetHttpBridgeError::Protocol);
+            }
+            if (100..=199).contains(&status) {
+                interim_count += 1;
+                if interim_count > 16 {
+                    return Err(JetHttpBridgeError::InvalidFraming);
+                }
+                pending = after;
+                continue;
+            }
+            set_timing(&facts, 4, first_byte_ms.unwrap_or(elapsed));
+            break (status, version, headers, after);
+        }
+    };
     set_stream_timeouts(&mut stream, read_timeout, read_timeout, total_deadline)?;
-    let (status, version, headers) = parse_status_and_headers(&head)?;
     if let Ok(mut response_facts) = facts.lock() {
         response_facts.raw_content_encoding =
             header_first(&headers, "content-encoding").map(str::to_string);
