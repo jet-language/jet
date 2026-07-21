@@ -1,6 +1,6 @@
 //! D-PERFSESSION1=D: `jet perf` writes/reads a versioned `.jettrace`.
-//! C1: command family + verify. C2: run/attach capture wall/alloc/tasks with
-//! Jet symbol identity from the observe live snapshot.
+//! C1: command family + verify. C2: run/attach capture wall/alloc/tasks/locks
+//! with Jet symbol identity from the observe live snapshot.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -102,6 +102,34 @@ fn assert_honest_tasks(text: &str) {
     assert!(
         !text.contains("\"tasks\":[]"),
         "empty tasks false-green leaked beside non-empty claim: {text}"
+    );
+}
+
+/// Fail if locks empty, not channel, or missing real waiters (idle scrape).
+fn assert_honest_locks(text: &str) {
+    let locks_at = text
+        .find("\"locks\":[{")
+        .unwrap_or_else(|| panic!("missing non-empty locks array: {text}"));
+    let locks = &text[locks_at..];
+    assert!(
+        locks.contains("\"kind\":\"channel\""),
+        "missing channel lock kind: {text}"
+    );
+    assert!(
+        locks.contains("\"recv_waiters\":1")
+            || locks.contains("\"recv_waiters\":2")
+            || locks.contains("\"send_waiters\":1")
+            || locks.contains("\"send_waiters\":2"),
+        "missing contended waiters: {text}"
+    );
+    assert!(
+        !text.contains("\"locks\":[]"),
+        "empty locks false-green leaked beside non-empty claim: {text}"
+    );
+    assert!(
+        !locks.contains("\"recv_waiters\":0,\"send_waiters\":0")
+            && !locks.contains("\"send_waiters\":0,\"recv_waiters\":0"),
+        "idle zero-waiter lock row leaked: {text}"
     );
 }
 
@@ -232,7 +260,7 @@ fn perf_run_captures_wall_and_alloc_into_jettrace() {
     // Non-entry `probe_work` must appear in source_identity; sample symbol is
     // parsed `fn run` only — never a hardcoded invention. Arena stays live in
     // `run` so observe still sees outstanding allocations during sleep.
-    // Spawned child sleeps longer than parent so poll sees parent causality.
+    // Child blocks on channel receive so poll sees contention + parent link.
     fs::write(
         &source,
         r#"use core.mem as mem
@@ -244,12 +272,19 @@ fn probe_work() {
 }
 
 fn run() {
+    // Channel setup before arena so spawn panic cannot capture the arena view.
+    (ready_sender, ready) :: tasks.channel<Int>()
+    (hold_sender, blocked) :: tasks.channel<Int>(1)
+    child :: tasks.spawn(take(ready_sender, blocked) () => {
+        ready_sender.send(1)
+        blocked.receive() ?? panic("closed")
+    })
+    child.detach()
+    ready.receive() ?? panic("closed")
+    // hold_sender stays live so the blocked receive keeps real waiters.
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     probe_work()
-    child :: tasks.spawn(() => {
-        time.sleep(2000)
-    })
     print("READY")
     time.sleep(800)
 }
@@ -279,6 +314,7 @@ fn run() {
     let text = fs::read_to_string(&out).unwrap();
     assert_honest_wall_and_alloc(&text);
     assert_honest_tasks(&text);
+    assert_honest_locks(&text);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("session.jet"), "{text}");
@@ -300,6 +336,9 @@ fn run() {
     assert!(stdout.contains("tasks count="), "{stdout}");
     assert!(stdout.contains("children="), "{stdout}");
     assert!(!stdout.contains("tasks count=0 "), "zero tasks in view: {stdout}");
+    assert!(stdout.contains("locks count="), "{stdout}");
+    assert!(stdout.contains("waiters="), "{stdout}");
+    assert!(!stdout.contains("locks count=0 "), "zero locks in view: {stdout}");
     assert!(stdout.contains("session.jet#run"), "{stdout}");
     assert!(stdout.contains("command run"), "{stdout}");
 
@@ -325,12 +364,19 @@ fn probe_work() {
 }
 
 fn run() {
+    // Channel setup before arena so spawn panic cannot capture the arena view.
+    (ready_sender, ready) :: tasks.channel<Int>()
+    (hold_sender, blocked) :: tasks.channel<Int>(1)
+    child :: tasks.spawn(take(ready_sender, blocked) () => {
+        ready_sender.send(1)
+        blocked.receive() ?? panic("closed")
+    })
+    child.detach()
+    ready.receive() ?? panic("closed")
+    // hold_sender stays live so the blocked receive keeps real waiters.
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     probe_work()
-    child :: tasks.spawn(() => {
-        time.sleep(30000)
-    })
     print("READY")
     time.sleep(30000)
 }
@@ -371,13 +417,14 @@ fn run() {
             Ok(snapshot)
                 if snapshot.contains("\"arena_allocations\":")
                     && !snapshot.contains("\"arena_allocations\":0")
-                    && snapshot.contains("\"parent\":1") =>
+                    && snapshot.contains("\"parent\":1")
+                    && snapshot.contains("\"recv_waiters\":1") =>
             {
                 break
             }
             _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
             other => panic!(
-                "observe snapshot never became readable with allocs+child task: {other:?}"
+                "observe snapshot never became readable with allocs+child+contention: {other:?}"
             ),
         }
     }
@@ -407,6 +454,7 @@ fn run() {
     let text = fs::read_to_string(&out).unwrap();
     assert_honest_wall_and_alloc(&text);
     assert_honest_tasks(&text);
+    assert_honest_locks(&text);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("live.jet"), "{text}");
@@ -428,6 +476,9 @@ fn run() {
     assert!(stdout.contains("tasks count="), "{stdout}");
     assert!(stdout.contains("children="), "{stdout}");
     assert!(!stdout.contains("tasks count=0 "), "zero tasks in view: {stdout}");
+    assert!(stdout.contains("locks count="), "{stdout}");
+    assert!(stdout.contains("waiters="), "{stdout}");
+    assert!(!stdout.contains("locks count=0 "), "zero locks in view: {stdout}");
     assert!(stdout.contains("live.jet#run"), "{stdout}");
 
     let _ = fs::remove_dir_all(&root);

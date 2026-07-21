@@ -199,6 +199,47 @@ impl TraceTask {
     }
 }
 
+/// One observe-published channel contention fact (Jet sync waits; no Mutex).
+/// Only contended channels belong here — idle scrape rows are omitted by capture.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceLock {
+    pub kind: String,
+    pub id: u64,
+    pub depth: u64,
+    pub capacity: Option<u64>,
+    pub send_waiters: u64,
+    pub recv_waiters: u64,
+    pub closed: bool,
+    pub symbol: JetSymbolRef,
+}
+
+impl TraceLock {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            (
+                "capacity".into(),
+                match self.capacity {
+                    Some(capacity) => CanonicalJson::Integer(capacity.to_string()),
+                    None => CanonicalJson::Null,
+                },
+            ),
+            ("closed".into(), CanonicalJson::Bool(self.closed)),
+            ("depth".into(), CanonicalJson::Integer(self.depth.to_string())),
+            ("id".into(), CanonicalJson::Integer(self.id.to_string())),
+            ("kind".into(), CanonicalJson::String(self.kind.clone())),
+            (
+                "recv_waiters".into(),
+                CanonicalJson::Integer(self.recv_waiters.to_string()),
+            ),
+            (
+                "send_waiters".into(),
+                CanonicalJson::Integer(self.send_waiters.to_string()),
+            ),
+            ("symbol".into(), self.symbol.to_json()?),
+        ])
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceIdentity {
     pub path: String,
@@ -236,6 +277,7 @@ pub struct TraceSkeleton {
     pub samples: Vec<TraceSample>,
     pub allocations: Vec<TraceAllocation>,
     pub tasks: Vec<TraceTask>,
+    pub locks: Vec<TraceLock>,
     pub source_identity: Vec<SourceIdentity>,
 }
 
@@ -257,6 +299,11 @@ impl TraceSkeleton {
             .iter()
             .map(TraceTask::to_json)
             .collect::<Result<Vec<_>, _>>()?;
+        let locks = self
+            .locks
+            .iter()
+            .map(TraceLock::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
         let source_identity = self
             .source_identity
             .iter()
@@ -269,7 +316,7 @@ impl TraceSkeleton {
             ("capture_policy".into(), self.capture_policy.to_json()?),
             ("command".into(), CanonicalJson::String(self.command.clone())),
             ("io".into(), CanonicalJson::Array(Vec::new())),
-            ("locks".into(), CanonicalJson::Array(Vec::new())),
+            ("locks".into(), CanonicalJson::Array(locks)),
             ("native".into(), CanonicalJson::Array(Vec::new())),
             ("samples".into(), CanonicalJson::Array(samples)),
             ("source_identity".into(), CanonicalJson::Array(source_identity)),
@@ -360,7 +407,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
         }
         _ => return Err("content.argv is not an array".into()),
     }
-    for key in ["browser", "io", "locks", "native", "spans"] {
+    for key in ["browser", "io", "native", "spans"] {
         match &fields[key] {
             CanonicalJson::Array(_) => {}
             _ => return Err(format!("content.{key} is not an array")),
@@ -369,6 +416,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     validate_samples(&fields["samples"])?;
     validate_allocations(&fields["allocations"])?;
     validate_tasks(&fields["tasks"])?;
+    validate_locks(&fields["locks"])?;
     validate_source_identity(&fields["source_identity"])?;
     validate_capture_policy(&fields["capture_policy"])?;
     validate_toolchain(&fields["toolchain"])?;
@@ -437,6 +485,53 @@ fn validate_tasks(value: &CanonicalJson) -> Result<(), String> {
         match &fields["cancelled"] {
             CanonicalJson::Bool(_) => {}
             _ => return Err(format!("{label}.cancelled is not a boolean")),
+        }
+        validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+    }
+    Ok(())
+}
+
+fn validate_locks(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.locks is not an array".into()),
+    };
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.locks[{i}]");
+        let fields = object_keys(
+            item,
+            &label,
+            &[
+                "capacity",
+                "closed",
+                "depth",
+                "id",
+                "kind",
+                "recv_waiters",
+                "send_waiters",
+                "symbol",
+            ],
+        )?;
+        let kind = text(&fields["kind"], &format!("{label}.kind"))?;
+        if kind != "channel" {
+            return Err(format!("{label}.kind must be channel"));
+        }
+        unsigned(&fields["id"], &format!("{label}.id"))?;
+        unsigned(&fields["depth"], &format!("{label}.depth"))?;
+        match &fields["capacity"] {
+            CanonicalJson::Null => {}
+            other => {
+                unsigned(other, &format!("{label}.capacity"))?;
+            }
+        }
+        let send_waiters = unsigned(&fields["send_waiters"], &format!("{label}.send_waiters"))?;
+        let recv_waiters = unsigned(&fields["recv_waiters"], &format!("{label}.recv_waiters"))?;
+        if send_waiters == 0 && recv_waiters == 0 {
+            return Err(format!("{label} has no waiters (idle channel is not a lock fact)"));
+        }
+        match &fields["closed"] {
+            CanonicalJson::Bool(_) => {}
+            _ => return Err(format!("{label}.closed is not a boolean")),
         }
         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
     }
@@ -591,6 +686,7 @@ mod tests {
             samples: Vec::new(),
             allocations: Vec::new(),
             tasks: Vec::new(),
+            locks: Vec::new(),
             source_identity: Vec::new(),
         }
     }
@@ -670,6 +766,53 @@ mod tests {
         assert!(text.contains("\"state\":\"blocked\""), "{text}");
         assert!(text.contains("\"wait\":\"time sleep\""), "{text}");
         verify_jettrace(&bytes).unwrap();
+    }
+
+    #[test]
+    fn captured_locks_round_trip_with_channel_waiters() {
+        let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
+        skeleton.locks.push(TraceLock {
+            kind: "channel".into(),
+            id: 3,
+            depth: 0,
+            capacity: Some(1),
+            send_waiters: 0,
+            recv_waiters: 1,
+            closed: false,
+            symbol: symbol.clone(),
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("\"locks\":[{"), "{text}");
+        assert!(text.contains("\"kind\":\"channel\""), "{text}");
+        assert!(text.contains("\"recv_waiters\":1"), "{text}");
+        assert!(text.contains("\"capacity\":1"), "{text}");
+        verify_jettrace(&bytes).unwrap();
+    }
+
+    #[test]
+    fn idle_channel_lock_row_is_rejected() {
+        let mut skeleton = sample_skeleton();
+        skeleton.locks.push(TraceLock {
+            kind: "channel".into(),
+            id: 1,
+            depth: 0,
+            capacity: Some(1),
+            send_waiters: 0,
+            recv_waiters: 0,
+            closed: false,
+            symbol: JetSymbolRef {
+                path: "app.jet".into(),
+                name: "run".into(),
+            },
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let err = verify_jettrace(&bytes).unwrap_err();
+        assert!(err.contains("no waiters"), "{err}");
     }
 
     #[test]

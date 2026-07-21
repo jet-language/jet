@@ -2,7 +2,7 @@
 //!
 //! `run`/`test`/`bench` spawn the exact base-intent driver (`jet run|test|bench …`)
 //! with observe enabled, poll live facts while the child runs, then write one
-//! `.jettrace` with wall/alloc samples before exiting with the child's code.
+//! `.jettrace` with wall/alloc/tasks/locks before exiting with the child's code.
 //! `attach`/`view`/`compare`/`export` share the same artifact verify seam.
 //! Capture reuses the observe live snapshot (D-OBSERVE-LIVE1) attributed to a
 //! Jet source symbol.
@@ -10,7 +10,7 @@
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
     trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
-    TraceSample, TraceSkeleton, TraceTask, TraceToolchain, TRACE_SCHEMA, TRACE_VERSION,
+    TraceLock, TraceSample, TraceSkeleton, TraceTask, TraceToolchain, TRACE_SCHEMA, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
@@ -31,6 +31,7 @@ struct CaptureBundle {
     samples: Vec<TraceSample>,
     allocations: Vec<TraceAllocation>,
     tasks: Vec<TraceTask>,
+    locks: Vec<TraceLock>,
     source_identity: Vec<SourceIdentity>,
 }
 
@@ -40,6 +41,7 @@ impl CaptureBundle {
             samples: Vec::new(),
             allocations: Vec::new(),
             tasks: Vec::new(),
+            locks: Vec::new(),
             source_identity: Vec::new(),
         }
     }
@@ -374,10 +376,27 @@ fn capture_from_source(
             });
         }
     }
+    // Locks: only contended observe channels (waiters > 0). Idle scrape omitted.
+    let mut locks = Vec::new();
+    if let (Some(symbol), Some(snapshot)) = (symbol.as_ref(), snapshot) {
+        for observed in observe_locks(snapshot) {
+            locks.push(TraceLock {
+                kind: "channel".into(),
+                id: observed.id,
+                depth: observed.depth,
+                capacity: observed.capacity,
+                send_waiters: observed.send_waiters,
+                recv_waiters: observed.recv_waiters,
+                closed: observed.closed,
+                symbol: symbol.clone(),
+            });
+        }
+    }
     Ok(CaptureBundle {
         samples,
         allocations,
         tasks,
+        locks,
         source_identity: vec![SourceIdentity {
             path: path_text,
             sha256,
@@ -440,6 +459,59 @@ fn observe_tasks(snapshot: &str) -> Vec<ObservedTask> {
         });
     }
     out.sort_by_key(|task| task.id);
+    out
+}
+
+struct ObservedLock {
+    id: u64,
+    depth: u64,
+    capacity: Option<u64>,
+    send_waiters: u64,
+    recv_waiters: u64,
+    closed: bool,
+}
+
+/// Contended observe channels only. Idle depth/capacity scrapes are not locks.
+fn observe_locks(snapshot: &str) -> Vec<ObservedLock> {
+    let Some(inner) = json_array_inner(snapshot, "channels") else {
+        return Vec::new();
+    };
+    if inner.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for object in split_json_objects(inner) {
+        let Some(id) = json_u64(object, "id") else {
+            continue;
+        };
+        let Some(depth) = json_u64(object, "depth") else {
+            continue;
+        };
+        let Some(send_waiters) = json_u64(object, "send_waiters") else {
+            continue;
+        };
+        let Some(recv_waiters) = json_u64(object, "recv_waiters") else {
+            continue;
+        };
+        if send_waiters == 0 && recv_waiters == 0 {
+            continue;
+        }
+        let capacity = if object.contains("\"capacity\":null") {
+            None
+        } else {
+            json_u64(object, "capacity")
+        };
+        let closed = object.contains("\"closed\":true");
+        out.push(ObservedLock {
+            id,
+            depth,
+            capacity,
+            send_waiters,
+            recv_waiters,
+            closed,
+        });
+    }
+    out.sort_by_key(|lock| lock.id);
     out
 }
 
@@ -559,16 +631,19 @@ fn poll_observe_snapshot(root_pid: u32) -> Option<String> {
         if let Ok(snapshot) = jet::DevServer::LiveInspect::read(pid) {
             let (count, bytes) = observe_arena_resources(&snapshot);
             let tasks = observe_tasks(&snapshot);
+            let locks = observe_locks(&snapshot);
             let child_tasks = tasks.iter().filter(|task| task.parent > 0).count() as u64;
+            let contended = locks.len() as u64;
             let score = (if count > 0 || bytes > 0 { 100 } else { 0 })
                 + child_tasks.saturating_mul(10)
+                + contended.saturating_mul(20)
                 + tasks.len() as u64;
             if score > best_score {
                 best_score = score;
                 best = Some(snapshot);
             }
-            // Prefer a snapshot that already shows alloc + spawned child.
-            if (count > 0 || bytes > 0) && child_tasks > 0 {
+            // Prefer a snapshot that already shows alloc + spawned child + contention.
+            if (count > 0 || bytes > 0) && child_tasks > 0 && contended > 0 {
                 return best;
             }
         }
@@ -699,6 +774,9 @@ fn view(args: &[String]) -> i32 {
             if let Some((n, child_n, symbol)) = task_summary(&trace) {
                 println!("tasks count={n} children={child_n} · {symbol}");
             }
+            if let Some((n, waiters, symbol)) = lock_summary(&trace) {
+                println!("locks count={n} waiters={waiters} · {symbol}");
+            }
             0
         }
         Err(message) => {
@@ -779,8 +857,9 @@ fn export(args: &[String]) -> i32 {
     let loss = if first_sample(&trace).is_some()
         || first_allocation(&trace).is_some()
         || task_summary(&trace).is_some()
+        || lock_summary(&trace).is_some()
     {
-        "json-envelope; domains present are wall/cpu/alloc/tasks only — no pprof/otel/chrome payloads"
+        "json-envelope; domains present are wall/cpu/alloc/tasks/locks only — no pprof/otel/chrome payloads"
     } else {
         "json-envelope-only; no pprof/otel/chrome payloads in skeleton"
     };
@@ -810,6 +889,7 @@ fn write_session_trace(
         samples: capture.samples,
         allocations: capture.allocations,
         tasks: capture.tasks,
+        locks: capture.locks,
         source_identity: capture.source_identity,
     };
     let bytes = build_skeleton_bytes(&skeleton)?;
@@ -985,6 +1065,32 @@ fn task_summary(trace: &CanonicalJson) -> Option<(usize, usize, String)> {
         }
     }
     Some((items.len(), children, symbol.unwrap_or_else(|| "?".into())))
+}
+
+fn lock_summary(trace: &CanonicalJson) -> Option<(usize, u64, String)> {
+    let items = content_array(trace, "locks")?;
+    if items.is_empty() {
+        return None;
+    }
+    let mut waiters = 0u64;
+    let mut symbol = None;
+    for item in items {
+        let CanonicalJson::Object(fields) = item else {
+            continue;
+        };
+        if let Some(CanonicalJson::Integer(send)) = fields.get("send_waiters") {
+            waiters = waiters.saturating_add(send.parse().unwrap_or(0));
+        }
+        if let Some(CanonicalJson::Integer(recv)) = fields.get("recv_waiters") {
+            waiters = waiters.saturating_add(recv.parse().unwrap_or(0));
+        }
+        if symbol.is_none() {
+            if let Some(value) = fields.get("symbol") {
+                symbol = symbol_label(value);
+            }
+        }
+    }
+    Some((items.len(), waiters, symbol.unwrap_or_else(|| "?".into())))
 }
 
 fn symbol_label(value: &CanonicalJson) -> Option<String> {
