@@ -2429,6 +2429,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "access_log") => {
             format!("jet_http_srv_access_log(&({}), {})", arg(0), arg(1))
         }
+        ("core.http.server", "request_id") => {
+            format!("jet_http_srv_install_request_id(&({}))", arg(0))
+        }
         // D-TIMEDEPTH1=A: civil-time constructors.
         ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),
         ("core.time.date", "today") => format!("JetDate::today_utc()"),

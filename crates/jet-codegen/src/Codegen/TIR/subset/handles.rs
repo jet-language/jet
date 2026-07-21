@@ -775,6 +775,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.http.server", "response") => return Type::Named("HttpResponse".to_string()),
         ("core.http.server", "sse") => return Type::Named("HttpResponse".to_string()),
         ("core.http.server", "access_log") => return Type::String,
+        ("core.http.server", "request_id") => return unit_type(),
         _ => {}
     }
     crate::Sema::core_fixed_sig(module, method)

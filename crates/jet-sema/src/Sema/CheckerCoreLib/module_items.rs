@@ -686,6 +686,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "static_file",
             "static_file_range",
             "access_log",
+            "request_id",
         ],
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.

@@ -3403,3 +3403,48 @@ fn jet_http_srv_access_log(req: &JetHttpRequest, status: i64) -> String {
     let route = req.route_template.as_deref().unwrap_or_else(|| req.path.split('?').next().unwrap_or(&req.path));
     format!("{} {} {}", req.method, route, status)
 }
+
+/// D-HTTP-SERVER2 built-in `request_id` middleware: ordinary Handler wrapper.
+/// Keeps a valid inbound `x-request-id`, otherwise assigns one, and echoes it
+/// on the response when the handler did not set the header.
+fn jet_http_request_id_valid(value: &str) -> bool {
+    let len = value.len();
+    (1..=128).contains(&len)
+        && value.bytes().all(|byte| {
+            byte.is_ascii_graphic() || byte == b' ' || byte == b'\t'
+        })
+}
+
+fn jet_http_new_request_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("req-{nanos:x}-{seq:x}")
+}
+
+fn jet_http_srv_request_id(next: JetHttpHandler) -> JetHttpHandler {
+    std::sync::Arc::new(move |mut request| {
+        let id = match request.headers.get("x-request-id") {
+            Some(value) if jet_http_request_id_valid(value) => value.clone(),
+            _ => jet_http_new_request_id(),
+        };
+        let _ = request.headers.set("x-request-id", &id);
+        match next(request) {
+            Ok(mut response) => {
+                if response.headers.get("x-request-id").is_none() {
+                    let _ = response.headers.set("x-request-id", &id);
+                }
+                Ok(response)
+            }
+            Err(error) => Err(error),
+        }
+    })
+}
+
+fn jet_http_srv_install_request_id(mux: &JetHttpMux) {
+    jet_http_mux_middleware(mux, jet_http_srv_request_id);
+}

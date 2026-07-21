@@ -2945,6 +2945,23 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("access_log", 1, &Type::Int, &mut args[1]);
                     return Some(Type::String);
                 }
+                ("core.http.server", "request_id") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("request_id", 1, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg(
+                        "request_id",
+                        0,
+                        &Type::Named("HttpMux".to_string()),
+                        &mut args[0],
+                    );
+                    return Some(Type::Named("Unit".to_string()));
+                }
                 // D-TIMEDEPTH1=A: civil-time constructors.
                 ("core.time.date", "new") => {
                     if args.len() != 3 {

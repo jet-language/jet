@@ -2571,6 +2571,82 @@ fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
 }
 
 #[test]
+fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
+    let mux = jet_http_mux_new();
+    jet_http_srv_install_request_id(&mux);
+    jet_http_mux_add(&mux, "GET", "/id", |req| {
+        let id = req
+            .headers
+            .get("x-request-id")
+            .cloned()
+            .unwrap_or_else(|| "missing".to_string());
+        let event = jet_http_srv_access_event(&req, 200, id.len() as i64, 1, "127.0.0.1:0", "HTTP/1.1", false);
+        assert_eq!(event.request_id, id);
+        jet_http_srv_response(200, &id)
+    });
+
+    let mut forged = JetHttpRequest::server("GET", "/id".to_string(), Vec::new(), JetHttpHeaders::new());
+    let _ = forged.headers.set("x-request-id", &"x".repeat(129));
+    let replaced = jet_http_mux_dispatch(&mux, forged).expect("dispatch");
+    let replaced_id = replaced.headers.get("x-request-id").cloned().expect("response id");
+    assert!(replaced_id.starts_with("req-"), "{replaced_id}");
+    assert_eq!(replaced.body.text(64).unwrap(), replaced_id);
+    assert_ne!(replaced_id.len(), 129);
+
+    let mut empty_id = JetHttpRequest::server("GET", "/id".to_string(), Vec::new(), JetHttpHeaders::new());
+    let _ = empty_id.headers.set("x-request-id", "");
+    let empty_replaced = jet_http_mux_dispatch(&mux, empty_id).expect("dispatch empty id");
+    assert!(
+        empty_replaced
+            .headers
+            .get("x-request-id")
+            .is_some_and(|value| value.starts_with("req-")),
+        "empty inbound id must be replaced"
+    );
+    let server = jet_http_server_bind(&"127.0.0.1:0".to_string(), mux).expect("bind");
+    let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
+        .expect("addr")
+        .parse()
+        .expect("parse");
+    let serving = server.clone();
+    let serve = std::thread::spawn(move || jet_http_server_serve(&serving));
+
+    let assigned = request(
+        addr,
+        b"GET /id HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert!(assigned.starts_with("HTTP/1.1 200 OK"), "{assigned}");
+    let assigned_header = assigned
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("x-request-id")
+                .then(|| value.trim().to_string())
+        })
+        .expect("assigned x-request-id header");
+    assert!(assigned_header.starts_with("req-"), "{assigned_header}");
+    assert!(
+        assigned.ends_with(&format!("\r\n\r\n{assigned_header}")),
+        "body must match assigned id: {assigned}"
+    );
+
+    let preserved = request(
+        addr,
+        b"GET /id HTTP/1.1\r\nHost: local\r\nX-Request-Id: client-trace-7\r\nConnection: close\r\n\r\n",
+    );
+    assert!(preserved.starts_with("HTTP/1.1 200 OK"), "{preserved}");
+    assert!(
+        preserved.to_ascii_lowercase().contains("x-request-id: client-trace-7"),
+        "{preserved}"
+    );
+    assert!(preserved.ends_with("\r\n\r\nclient-trace-7"), "{preserved}");
+
+    let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 200 }).expect("shutdown");
+    assert_eq!(report.user_completed, report.user_accepted, "{report:?}");
+    let _ = serve.join().expect("serve join");
+}
+
+#[test]
 fn server_safe_defaults_static_files_ranges_and_access_events_are_bounded() {
     let options = JetHttpServerOptions::safe();
     assert_eq!(options.max_body_bytes, 1024 * 1024);
