@@ -29,7 +29,9 @@
 //!   negotiation must pass before analyze.
 //! - [`ExtensionSession`]: Idle → Loaded → (optional staged response) → Closed.
 //!   Staging never mutates compiler facts; [`ExtensionSession::rollback`] discards
-//!   staged output; [`ExtensionSession::close`] drops the guest (guest memory gone).
+//!   staged output only (accept latch stays final); [`ExtensionSession::close`]
+//!   invokes a guest closer (host passes `jet_compiler_extension_close`) so
+//!   guest Store/memory is dropped.
 
 use crate::FFI::WASMTIME_CRATE_SPEC;
 use crate::JSON::{self, Json};
@@ -587,7 +589,9 @@ pub enum SessionPhase {
     Closed,
 }
 
-/// Session state machine: staging is ephemeral; rollback / close discard it.
+/// Session state machine: staging is ephemeral; rollback discards staged only
+/// (accept latch stays final); close invokes the guest closer so WASM memory
+/// is dropped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionSession {
     phase: SessionPhase,
@@ -654,10 +658,11 @@ impl ExtensionSession {
         Ok(self.staged.as_ref().unwrap())
     }
 
-    /// Discard staged findings/edits (rollback). Compiler facts unchanged.
+    /// Discard staged findings/edits only. Compiler facts unchanged.
+    /// Does **not** clear the accept latch — after [`Self::accept_staged`],
+    /// rollback cannot reopen staging; open a new session instead.
     pub fn rollback(&mut self) {
         self.staged = None;
-        self.committed = false;
     }
 
     /// Host-only accept of staged output. Still does not call rustc (I2/I3).
@@ -673,13 +678,22 @@ impl ExtensionSession {
         Ok(staged)
     }
 
-    /// Close guest; drops handle + stages (rollback of uncommitted work).
-    pub fn close(&mut self) -> Option<u64> {
+    /// Close the session and drop the guest via `close_guest(handle)`.
+    ///
+    /// Host path must pass the WASM runtime closer
+    /// (`jet_compiler_extension_close` in `Prelude/CompilerExtension.rs`) so
+    /// the guest `Store`/linear memory is freed. Returns whatever the closer
+    /// reports (or `false` when no handle was live). Clears staged output;
+    /// session ends in [`SessionPhase::Closed`].
+    pub fn close(&mut self, close_guest: impl FnOnce(u64) -> bool) -> bool {
         let handle = self.handle.take();
         self.staged = None;
         self.committed = false;
         self.phase = SessionPhase::Closed;
-        handle
+        match handle {
+            Some(h) => close_guest(h),
+            None => false,
+        }
     }
 }
 
@@ -1343,10 +1357,66 @@ mod tests {
         assert!(session.is_committed());
         assert!(session.staged().is_none());
 
-        let handle = session.close();
-        assert_eq!(handle, Some(7));
+        let mut closed_handle = None;
+        let dropped = session.close(|h| {
+            closed_handle = Some(h);
+            true // stand-in for jet_compiler_extension_close
+        });
+        assert!(dropped);
+        assert_eq!(closed_handle, Some(7));
         assert_eq!(session.phase(), SessionPhase::Closed);
         assert!(session.stage_response(&snap, &raw).is_err());
+    }
+
+    #[test]
+    fn accept_then_rollback_refuses_restage() {
+        let snap = sample_snapshot();
+        let response = AnalyzeResponse {
+            protocol: 1,
+            findings: vec![Finding {
+                rule: "r".into(),
+                span_id: "sp1".into(),
+                message: "m".into(),
+                severity: "warning".into(),
+            }],
+            proposed_edits: vec![],
+            artifacts: vec![],
+        };
+        let raw = response.encode().unwrap();
+
+        let mut session = ExtensionSession::new();
+        session.on_loaded(3).unwrap();
+        session.stage_response(&snap, &raw).unwrap();
+        session.accept_staged().unwrap();
+        assert!(session.is_committed());
+
+        session.rollback();
+        assert!(session.staged().is_none());
+        assert!(
+            session.is_committed(),
+            "rollback must not clear the accept latch"
+        );
+        let err = session.stage_response(&snap, &raw).unwrap_err();
+        assert!(
+            err.message.contains("already committed"),
+            "restage after accept+rollback must refuse: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn close_invokes_guest_closer_with_handle() {
+        let mut session = ExtensionSession::new();
+        session.on_loaded(42).unwrap();
+        let mut calls = Vec::new();
+        assert!(session.close(|h| {
+            calls.push(h);
+            true
+        }));
+        assert_eq!(calls, vec![42]);
+        assert_eq!(session.phase(), SessionPhase::Closed);
+        // Second close: no live handle → closer not called, returns false.
+        assert!(!session.close(|_| panic!("closer must not run without handle")));
     }
 
     #[test]

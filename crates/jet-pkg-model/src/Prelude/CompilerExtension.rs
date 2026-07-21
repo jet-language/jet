@@ -129,6 +129,10 @@ pub fn jet_compiler_extension_load(path: &str) -> String {
 /// Close a loaded compiler-extension. Returns `true` if the handle was live.
 /// Closing drops guest memory — uncommitted staged host results stay host-side
 /// and must be rolled back by the session owner separately.
+///
+/// Host path: pass this as the closer to
+/// `CompilerExtension::ExtensionSession::close` so session teardown and guest
+/// Store drop happen together.
 pub fn jet_compiler_extension_close(handle: u64) -> bool {
     EXTENSIONS.with(|m| m.borrow_mut().remove(&handle).is_some())
 }

@@ -286,9 +286,11 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   Loader applies fuel + `StoreLimits`; snapshot declares the same caps.
 - **Trust:** v1 admits only `untrusted` components (zero host imports).
 - **Lifecycle:** `ExtensionSession` Idle → Loaded → Closed. `stage_response`
-  validates without commit; `rollback` discards staged output; `close` drops
-  the guest handle (guest memory gone). Uncommitted work never reaches sema
-  or codegen.
+  validates without commit; `rollback` discards staged output only (an
+  accepted commit latch stays final — restage requires a new session);
+  `close(close_guest)` invokes the WASM host closer
+  (`jet_compiler_extension_close`) so guest Store/memory is dropped.
+  Uncommitted work never reaches sema or codegen.
 
 ## Rules
 
