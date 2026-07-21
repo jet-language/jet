@@ -8,7 +8,7 @@ fn scratch() -> PathBuf {
         std::thread::current().name().unwrap_or("test")
     ));
     let _ = std::fs::remove_dir_all(&path);
-    std::fs::create_dir(&path).unwrap();
+    std::fs::create_dir_all(&path).unwrap();
     path
 }
 
@@ -52,6 +52,45 @@ fn e2702_json_exits_one_and_creates_no_artifact() {
     }
     for forbidden in ["password", "plaintext", "ciphertext", "backend", "rustc", "dependency"] {
         assert!(!json.contains(forbidden), "leaked `{forbidden}`: {json}");
+    }
+    assert!(!root.join(".jet").exists(), "check emitted .jet state");
+    assert!(!root.join("build").exists(), "check emitted a build artifact");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn multiple_e2702_diagnostics_are_independent_json_lines() {
+    let root = scratch();
+    std::fs::write(
+        root.join("main.jet"),
+        concat!(
+            "use core.crypto as crypto\n",
+            "fn first() {\n",
+            "    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 8161)\n",
+            "}\n",
+            "fn second() {\n",
+            "    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([2]), [], [], 8162)\n",
+            "}\n",
+            "fn run() {}\n",
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", "main.jet", "--json"])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let json = String::from_utf8(output.stderr).unwrap();
+    let lines = json.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "{json}");
+    for (line, actual) in lines.into_iter().zip([8161, 8162]) {
+        assert!(line.starts_with("{\"schema\":\"jet.diagnostic/v1\",\"code\":\"E2702\""), "{line}");
+        assert!(line.contains("\"reason\":\"output_length\""), "{line}");
+        assert!(line.contains("\"operation\":\"hkdf_sha256\""), "{line}");
+        assert!(line.contains(&format!("\"actual\":{actual}")), "{line}");
     }
     assert!(!root.join(".jet").exists(), "check emitted .jet state");
     assert!(!root.join("build").exists(), "check emitted a build artifact");

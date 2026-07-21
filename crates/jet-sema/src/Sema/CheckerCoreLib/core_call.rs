@@ -1,5 +1,5 @@
 use crate::AST::{AccessConvention, Type};
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{CryptoMisuseReason, Diagnostic, Span};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{is_displayable, is_printable, type_fix_hint, types_comparable};
 use crate::Sema::Effects::{core_effect, e0746, is_irreversible_effect};
@@ -83,12 +83,14 @@ fn crypto_misuse_diagnostic(
         let length = args.get(3)?;
         let actual = literal_int(&length.expr)?;
         if !(0..=8160).contains(&actual) {
-            return Some(Diagnostic::error(
-                "E2702",
-                "crypto API misuse".to_string(),
+            return Some(Diagnostic::crypto_misuse(
                 format!("HKDF-SHA256 output length is {actual} bytes; this operation requires 0..8160"),
                 "pass an output length from 0 through 8160 bytes".to_string(),
-                Some(length.expr.span()),
+                length.expr.span(),
+                CryptoMisuseReason::OutputLength,
+                "hkdf_sha256",
+                "0..8160",
+                i128::from(actual),
             ));
         }
     }
@@ -97,12 +99,14 @@ fn crypto_misuse_diagnostic(
         if let Some(actual) = known_list_len(checker, &salt.expr) {
             if !(8..=64).contains(&actual) {
                 let unit = if actual == 1 { "byte" } else { "bytes" };
-                return Some(Diagnostic::error(
-                    "E2702",
-                    "crypto API misuse".to_string(),
+                return Some(Diagnostic::crypto_misuse(
                     format!("Argon2id salt has {actual} {unit}; this operation requires 8..64"),
                     "pass an explicit salt from 8 through 64 bytes".to_string(),
-                    Some(salt.expr.span()),
+                    salt.expr.span(),
+                    CryptoMisuseReason::SaltLength,
+                    "argon2id",
+                    "8..64",
+                    actual as i128,
                 ));
             }
         }
@@ -111,12 +115,14 @@ fn crypto_misuse_diagnostic(
         let memory_kib = literal_int(&memory.expr);
         if let Some(actual) = memory_kib {
             if !(8_192..=262_144).contains(&actual) {
-                return Some(Diagnostic::error(
-                    "E2702",
-                    "crypto API misuse".to_string(),
+                return Some(Diagnostic::crypto_misuse(
                     format!("Argon2id memory cost is {actual} KiB; this operation requires 8192..262144"),
                     "pass a memory cost from 8192 through 262144 KiB".to_string(),
-                    Some(memory.expr.span()),
+                    memory.expr.span(),
+                    CryptoMisuseReason::MemoryCost,
+                    "argon2id",
+                    "8192..262144",
+                    i128::from(actual),
                 ));
             }
         }
@@ -125,12 +131,14 @@ fn crypto_misuse_diagnostic(
         let iteration_count = literal_int(&iterations.expr);
         if let Some(actual) = iteration_count {
             if !(1..=10).contains(&actual) {
-                return Some(Diagnostic::error(
-                    "E2702",
-                    "crypto API misuse".to_string(),
+                return Some(Diagnostic::crypto_misuse(
                     format!("Argon2id iteration count is {actual}; this operation requires 1..10"),
                     "pass an iteration count from 1 through 10".to_string(),
-                    Some(iterations.expr.span()),
+                    iterations.expr.span(),
+                    CryptoMisuseReason::IterationCount,
+                    "argon2id",
+                    "1..10",
+                    i128::from(actual),
                 ));
             }
         }
@@ -138,12 +146,14 @@ fn crypto_misuse_diagnostic(
         let lanes = args.get(4)?;
         if let Some(actual) = literal_int(&lanes.expr) {
             if !(1..=8).contains(&actual) {
-                return Some(Diagnostic::error(
-                    "E2702",
-                    "crypto API misuse".to_string(),
+                return Some(Diagnostic::crypto_misuse(
                     format!("Argon2id lane count is {actual}; this operation requires 1..8"),
                     "pass a lane count from 1 through 8".to_string(),
-                    Some(lanes.expr.span()),
+                    lanes.expr.span(),
+                    CryptoMisuseReason::LaneCount,
+                    "argon2id",
+                    "1..8",
+                    i128::from(actual),
                 ));
             }
         }
@@ -151,12 +161,14 @@ fn crypto_misuse_diagnostic(
         let output = args.get(5)?;
         if let Some(actual) = literal_int(&output.expr) {
             if !(16..=64).contains(&actual) {
-                return Some(Diagnostic::error(
-                    "E2702",
-                    "crypto API misuse".to_string(),
+                return Some(Diagnostic::crypto_misuse(
                     format!("Argon2id output length is {actual} bytes; this operation requires 16..64"),
                     "pass an output length from 16 through 64 bytes".to_string(),
-                    Some(output.expr.span()),
+                    output.expr.span(),
+                    CryptoMisuseReason::OutputLength,
+                    "argon2id",
+                    "16..64",
+                    i128::from(actual),
                 ));
             }
         }
@@ -164,17 +176,29 @@ fn crypto_misuse_diagnostic(
         if let (Some(memory_kib), Some(iteration_count)) = (memory_kib, iteration_count) {
             if let Some(actual) = memory_kib.checked_mul(iteration_count) {
                 if actual > 1_048_576 {
-                    return Some(Diagnostic::error(
-                        "E2702",
-                        "crypto API misuse".to_string(),
+                    return Some(Diagnostic::crypto_misuse(
                         format!("Argon2id memory-time cost is {actual} KiB-rounds; this operation permits at most 1048576"),
                         "reduce memory or iterations so their product is at most 1048576 KiB-rounds".to_string(),
-                        Some(Span::new(memory.expr.span().start, iterations.expr.span().end)),
+                        Span::new(memory.expr.span().start, iterations.expr.span().end),
+                        CryptoMisuseReason::MemoryTimeCost,
+                        "argon2id",
+                        "at most 1048576",
+                        i128::from(actual),
                     ));
                 }
             }
         }
     }
+    let operation_name = match name {
+        "xchacha20poly1305_seal" => "xchacha20poly1305_seal",
+        "xchacha20poly1305_open" => "xchacha20poly1305_open",
+        "aes256gcm_seal" => "aes256gcm_seal",
+        "aes256gcm_open" => "aes256gcm_open",
+        "ed25519_sign" => "ed25519_sign",
+        "ed25519_verify_strict" => "ed25519_verify_strict",
+        "x25519" => "x25519",
+        _ => return None,
+    };
     let material_requirements: &[(usize, &str, &str, usize)] = match (module, name) {
         ("core.crypto.expert", "xchacha20poly1305_seal" | "xchacha20poly1305_open") => {
             &[(0, "XChaCha20-Poly1305 key", "key", 32)]
@@ -202,31 +226,36 @@ fn crypto_misuse_diagnostic(
         };
         if actual != expected {
             let unit = if actual == 1 { "byte" } else { "bytes" };
-            return Some(Diagnostic::error(
-                "E2702",
-                "crypto API misuse".to_string(),
+            return Some(Diagnostic::crypto_misuse(
                 format!("{fact} has {actual} {unit}; this operation requires exactly {expected}"),
                 format!("pass a {expected}-byte {replacement}"),
-                Some(arg.expr.span()),
+                arg.expr.span(),
+                CryptoMisuseReason::InvalidLength,
+                operation_name,
+                if expected == 64 { "exactly 64" } else { "exactly 32" },
+                actual as i128,
             ));
         }
     }
-    let (operation, expected) = match name {
-        "xchacha20poly1305_seal" | "xchacha20poly1305_open" =>
-            ("XChaCha20-Poly1305", 24),
-        "aes256gcm_seal" | "aes256gcm_open" => ("AES-256-GCM", 12),
+    let (operation, expected, expected_text) = match name {
+        "xchacha20poly1305_seal" | "xchacha20poly1305_open" => {
+            ("XChaCha20-Poly1305", 24, "exactly 24")
+        }
+        "aes256gcm_seal" | "aes256gcm_open" => ("AES-256-GCM", 12, "exactly 12"),
         _ => return None,
     };
     let nonce = args.get(1)?;
     let actual = known_list_len(checker, &nonce.expr)?;
     if actual == expected { return None; }
     let unit = if actual == 1 { "byte" } else { "bytes" };
-    Some(Diagnostic::error(
-        "E2702",
-        "crypto API misuse".to_string(),
+    Some(Diagnostic::crypto_misuse(
         format!("{operation} nonce has {actual} {unit}; this operation requires exactly {expected}"),
         format!("pass a {expected}-byte nonce, or use core.crypto.seal so Jet generates it"),
-        Some(nonce.expr.span()),
+        nonce.expr.span(),
+        CryptoMisuseReason::NonceLength,
+        operation_name,
+        expected_text,
+        actual as i128,
     ))
 }
 
