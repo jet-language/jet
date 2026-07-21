@@ -611,24 +611,26 @@ impl jet_std::JSONReader {
             if i != usize::MAX && matches!(b.get(i), Some(b'e' | b'E')) { i += 1; if matches!(b.get(i), Some(b'+' | b'-')) { i += 1; } let start = i; while matches!(b.get(i), Some(b'0'..=b'9')) { i += 1; } if i == start { i = usize::MAX; } }
             i == b.len()
         };
-        let result = if !valid {
-            Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - bytes.len() as i64, self.line, self.column, format!("invalid JSON number `{}`", text)))
-        } else if !text.contains(['.', 'e', 'E']) {
-            match text.parse::<i64>() {
-                Ok(value) => Ok(jet_std::DataEvent::Int(value)),
-                Err(_) => match text.parse::<f64>() {
-                    Ok(value) if value.is_finite() => Ok(jet_std::DataEvent::Float(value)),
-                    _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.offset - bytes.len() as i64, self.line, self.column, "JSON number is outside the DataTree numeric range")),
-                },
+        let start = self.offset - bytes.len() as i64;
+        if !valid {
+            self.release_item_heap(bytes.capacity());
+            drop(bytes);
+            return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, start, self.line, self.column, "invalid JSON number"));
+        }
+        if !text.contains(['.', 'e', 'E']) {
+            if let Ok(value) = text.parse::<i64>() {
+                self.release_item_heap(bytes.capacity());
+                drop(bytes);
+                return Ok(jet_std::DataEvent::Int(value));
             }
-        } else {
-            match text.parse::<f64>() {
-                Ok(value) if value.is_finite() => Ok(jet_std::DataEvent::Float(value)),
-                _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.offset - bytes.len() as i64, self.line, self.column, "JSON number is outside the DataTree numeric range")),
-            }
-        };
+        }
+        let value = text.parse::<f64>();
         self.release_item_heap(bytes.capacity());
-        result
+        drop(bytes);
+        match value {
+            Ok(value) if value.is_finite() => Ok(jet_std::DataEvent::Float(value)),
+            _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, start, self.line, self.column, "JSON number is outside the DataTree numeric range")),
+        }
     }
 
     fn parse_value(&mut self) -> Result<jet_std::DataEvent, jet_std::EncodingError> {

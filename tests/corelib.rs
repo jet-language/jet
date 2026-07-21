@@ -1480,6 +1480,9 @@ fn json_stream_number_token_stays_under_counting_allocator_ceiling() {
     let input_path = dir.join("number.json");
     fs::write(&input_path, format!("1{}", "0".repeat(149_999))).unwrap();
     let input = input_path.to_string_lossy().replace('\\', "\\\\");
+    let malformed_path = dir.join("malformed.json");
+    fs::write(&malformed_path, format!("1{}+", "0".repeat(199_998))).unwrap();
+    let malformed = malformed_path.to_string_lossy().replace('\\', "\\\\");
     let source = format!(
         r#"
 use core.encoding as encoding
@@ -1503,6 +1506,26 @@ fn run() {{
             if again == {{
                 Ok(_) -> {{ panic("number allocation error not terminal") }}
                 Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+            }}
+        }}
+    }}
+
+    malformed_limits := encoding.EncodingLimits.safe()
+    malformed_limits.buffer_bytes = 4096
+    malformed_limits.max_depth = 1
+    malformed_limits.max_item_bytes = 200000
+    malformed_limits.max_expansion_bytes = 0
+    malformed_input :: files.open("{malformed}") ?? panic("open malformed number")
+    malformed_reader :: json.reader(^malformed_input, malformed_limits) ?? panic("create malformed reader")
+    malformed_result :: malformed_reader.next()
+    if malformed_result == {{
+        Ok(_) -> {{ panic("malformed number accepted") }}
+        Err(first) -> {{
+            print(first.reason)
+            again :: malformed_reader.next()
+            if again == {{
+                Ok(_) -> {{ panic("malformed number error not terminal") }}
+                Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason) }}
             }}
         }}
     }}
@@ -1583,7 +1606,10 @@ fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<Option<j
     assert!(rustc.status.success(), "rustc rejected counted JSON program:\n{}", String::from_utf8_lossy(&rustc.stderr));
     let run = Command::new(&bin).current_dir(&dir).output().unwrap();
     assert!(run.status.success(), "counted JSON program failed:\n{}", String::from_utf8_lossy(&run.stderr));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "JSON number allocation exceeded the bounded codec heap ceiling\ntrue\n");
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "JSON number allocation exceeded the bounded codec heap ceiling\ntrue\ninvalid JSON number\ntrue\n"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 
