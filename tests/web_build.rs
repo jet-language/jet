@@ -1609,3 +1609,75 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn web_wasm_list_string_export_hostile_roundtrip() {
+    // D-JSBIND1 / criterion #3: [String] export params+returns as contiguous
+    // LE [count][len][utf8]… packed u64; JS TextEncoder/Decoder + free.
+    // Hostile: empty list, empty elem, tab/newline, emoji, multi.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm list-string (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_list_string.jet");
+    let dir = build_web_fixture(
+        "wasm_list_string",
+        src,
+        "examples/features/web/web_wasm_list_string.jet",
+    );
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("fn jet_abi_list_string_ret(v: Vec<String>) -> u64"),
+        "list-string return helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("fn jet_abi_list_string_arg(packed: u64) -> Vec<String>"),
+        "list-string arg helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_list_string_alloc(byte_len: u32) -> u32"),
+        "list-string alloc export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_list_string_free(ptr: u32, byte_len: u32)"),
+        "list-string free export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("let user_xs = jet_abi_list_string_arg(user_xs)")
+            || wasm.contains("let xs = jet_abi_list_string_arg(xs)"),
+        "export wrapper must unpack [String] param:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_list_string_ret(jet_wasm_")
+            && wasm.contains("-> u64 "),
+        "export must pack [String] return as u64:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("marshalAbi(") && js.contains("\"list-string\""),
+        "JS bridge must marshal [String] params:\n{js}"
+    );
+    assert!(
+        js.contains("unmarshalAbi(raw, \"list-string\", wasm)"),
+        "JS bridge must unmarshal [String] returns:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_list_string_alloc")
+            && runtime.contains("jet_abi_list_string_free")
+            && runtime.contains("list-string"),
+        "runtime missing list-string ABI encode/decode:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_list_string.out");
+    assert_eq!(stdout, expected);
+    assert!(
+        stdout.as_bytes().contains(&b'\t'),
+        "TAB byte was lost in [String] roundtrip:\n{stdout:?}"
+    );
+    assert!(
+        stdout.contains("emoji🌍"),
+        "Unicode scalar was lost:\n{stdout}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

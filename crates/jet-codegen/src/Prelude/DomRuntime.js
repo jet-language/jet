@@ -483,7 +483,8 @@ export async function instantiateWasm(wasmPath, imports = {}) {
 
 /** D-JSBIND1=A: marshal ABI-safe values at the JS/WASM boundary.
  *  String params: TextEncoder → jet_abi_string_alloc → packed u64 (ptr<<32)|len.
- *  [Int] params: BigInt64Array → jet_abi_list_i64_alloc → packed u64 (ptr<<32)|len. */
+ *  [Int] params: BigInt64Array → jet_abi_list_i64_alloc → packed u64 (ptr<<32)|len.
+ *  [String] params: contiguous LE [count][len][utf8]… → jet_abi_list_string_alloc. */
 export function marshalAbi(value, kind, wasm) {
   if (kind === "string") {
     const bytes = new TextEncoder().encode(String(value ?? ""));
@@ -502,6 +503,26 @@ export function marshalAbi(value, kind, wasm) {
     }
     return (BigInt(ptr) << 32n) | BigInt(arr.length);
   }
+  if (kind === "list-string") {
+    const arr = Array.isArray(value) ? value : [];
+    if (arr.length === 0) return 0n;
+    const enc = new TextEncoder();
+    const parts = arr.map((s) => enc.encode(String(s ?? "")));
+    let byteLen = 4;
+    for (const p of parts) byteLen += 4 + p.length;
+    const ptr = wasm.jet_abi_list_string_alloc(byteLen);
+    const bytes = new Uint8Array(wasm.memory.buffer, ptr, byteLen);
+    const view = new DataView(wasm.memory.buffer, ptr, byteLen);
+    view.setUint32(0, arr.length, true);
+    let o = 4;
+    for (const p of parts) {
+      view.setUint32(o, p.length, true);
+      o += 4;
+      bytes.set(p, o);
+      o += p.length;
+    }
+    return (BigInt(ptr) << 32n) | BigInt(byteLen);
+  }
   if (kind === "struct-point") {
     return { x: Number(value?.x ?? 0), y: Number(value?.y ?? 0) };
   }
@@ -510,7 +531,8 @@ export function marshalAbi(value, kind, wasm) {
 
 /** D-JSBIND1=A: read ABI-safe return values from WASM.
  *  String returns are packed u64 (ptr<<32)|len; ownership frees via jet_abi_string_free.
- *  [Int] returns are packed u64 (ptr<<32)|len; ownership frees via jet_abi_list_i64_free. */
+ *  [Int] returns are packed u64 (ptr<<32)|len; ownership frees via jet_abi_list_i64_free.
+ *  [String] returns are packed u64 (ptr<<32)|byte_len; frees via jet_abi_list_string_free. */
 export function unmarshalAbi(value, kind, wasm) {
   if (kind === "string") {
     const packed = typeof value === "bigint" ? value : BigInt(value);
@@ -527,6 +549,29 @@ export function unmarshalAbi(value, kind, wasm) {
     const view = new BigInt64Array(wasm.memory.buffer, ptr, len);
     const out = Array.from(view, (x) => Number(x));
     wasm.jet_abi_list_i64_free(ptr, len);
+    return out;
+  }
+  if (kind === "list-string") {
+    const packed = typeof value === "bigint" ? value : BigInt(value);
+    const ptr = Number(packed >> 32n);
+    const byteLen = Number(packed & 0xffffffffn);
+    if (byteLen === 0) {
+      if (ptr !== 0) wasm.jet_abi_list_string_free(ptr, 0);
+      return [];
+    }
+    const bytes = new Uint8Array(wasm.memory.buffer, ptr, byteLen).slice();
+    wasm.jet_abi_list_string_free(ptr, byteLen);
+    const view = new DataView(bytes.buffer);
+    const count = view.getUint32(0, true);
+    const out = [];
+    let o = 4;
+    const dec = new TextDecoder("utf-8", { fatal: true });
+    for (let i = 0; i < count; i++) {
+      const len = view.getUint32(o, true);
+      o += 4;
+      out.push(dec.decode(bytes.subarray(o, o + len)));
+      o += len;
+    }
     return out;
   }
   if (typeof value === "bigint") {

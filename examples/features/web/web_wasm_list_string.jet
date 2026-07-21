@@ -1,0 +1,27 @@
+// D-JSBIND1 / #123: Wasm @WasmExport [String] ABI (contiguous count/len/utf8
+// blob) with hostile empty / empty-elem / tab+newline / Unicode / multi roundtrip.
+@WasmExport
+fn echo_strs(xs: [String]) -> [String] {
+    return ~xs
+}
+
+@WasmExport
+fn count_strs(xs: [String]) -> Int {
+    n := 0
+    loop x; xs {
+        n = n + 1
+    }
+    return n
+}
+
+@Target(Js)
+fn run() {
+    empty: [String] :: []
+    print(count_strs(empty))
+    print(count_strs([""]))
+    print(echo_strs([""]))
+    print(echo_strs(["ascii-ok"]))
+    print(echo_strs(["tab\tline\nbreak"]))
+    print(echo_strs(["emoji🌍"]))
+    print(echo_strs(["a", "b", "c"]))
+}
