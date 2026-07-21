@@ -1,13 +1,95 @@
-//! Std-only `core.archive` evaluator used by comptime, REPL, and interpreter.
+//! Std-only archive and stream-codec evaluator used by comptime, REPL, and
+//! interpreter.
 //!
 //! ZIP writes the same uncompressed single-entry shape as AOT's
 //! `ZipWriter::start_file(FileOptions::default())`; reads accept stored and
 //! DEFLATE entries. TAR reads ordinary ustar/GNU archives and writes GNU
-//! archives. Invalid inputs follow the AOT bridge and return empty values.
+//! archives. GZIP writes stored DEFLATE and reads stored/fixed/dynamic DEFLATE.
+//! Invalid inputs stay bounded and follow each public API's existing
+//! empty/`Err` contract.
 
 use std::path::{Component, Path};
 
 const TAR_BLOCK: usize = 512;
+const MAX_CODEC_OUTPUT: usize = 64 * 1024 * 1024;
+
+pub(super) fn gzip_compress(data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+    if data.is_empty() {
+        out.extend_from_slice(&[1, 0, 0, 255, 255]);
+    } else {
+        let mut blocks = data.chunks(u16::MAX as usize).peekable();
+        while let Some(block) = blocks.next() {
+            out.push(u8::from(blocks.peek().is_none()));
+            let len = block.len() as u16;
+            put_u16(&mut out, len);
+            put_u16(&mut out, !len);
+            out.extend_from_slice(block);
+        }
+    }
+    put_u32(&mut out, crc32(data));
+    put_u32(&mut out, data.len() as u32);
+    out
+}
+
+pub(super) fn gzip_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+    let fail = || "compress.gzip.decompress: invalid gzip data".to_string();
+    if data.len() < 18 || data[..3] != [0x1f, 0x8b, 8] {
+        return Err(fail());
+    }
+    let flags = data[3];
+    if flags & 0xe0 != 0 {
+        return Err(fail());
+    }
+    let trailer = data.len() - 8;
+    let mut offset = 10usize;
+    if flags & 4 != 0 {
+        let len = read_u16(data, offset).ok_or_else(&fail)? as usize;
+        offset = offset
+            .checked_add(2 + len)
+            .filter(|end| *end <= trailer)
+            .ok_or_else(&fail)?;
+    }
+    for mask in [8, 16] {
+        if flags & mask != 0 {
+            let len = data
+                .get(offset..trailer)
+                .and_then(|rest| rest.iter().position(|byte| *byte == 0))
+                .ok_or_else(&fail)?;
+            offset = offset
+                .checked_add(len + 1)
+                .filter(|end| *end <= trailer)
+                .ok_or_else(&fail)?;
+        }
+    }
+    if flags & 2 != 0 {
+        let header_crc = read_u16(data, offset).ok_or_else(&fail)?;
+        if header_crc != crc32(&data[..offset]) as u16 {
+            return Err(fail());
+        }
+        offset = offset
+            .checked_add(2)
+            .filter(|end| *end <= trailer)
+            .ok_or_else(&fail)?;
+    }
+    let expected_size = read_u32(data, trailer + 4).ok_or_else(&fail)?;
+    let expected = expected_size as usize;
+    if expected > MAX_CODEC_OUTPUT || offset > trailer {
+        return Err(fail());
+    }
+    let (out, consumed) =
+        inflate_with_consumed(&data[offset..trailer], expected).ok_or_else(&fail)?;
+    if consumed != trailer - offset {
+        return Err(fail());
+    }
+    if out.len() as u32 != expected_size {
+        return Err(fail());
+    }
+    if crc32(&out) != read_u32(data, trailer).ok_or_else(&fail)? {
+        return Err(fail());
+    }
+    Ok(out)
+}
 
 pub(super) fn zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
     let name = name.as_bytes();
@@ -457,6 +539,10 @@ fn reverse_bits(mut code: u32, count: usize) -> u32 {
 }
 
 fn inflate(data: &[u8], expected_len: usize) -> Option<Vec<u8>> {
+    inflate_with_consumed(data, expected_len).map(|(out, _)| out)
+}
+
+fn inflate_with_consumed(data: &[u8], expected_len: usize) -> Option<(Vec<u8>, usize)> {
     let mut bits = Bits { data, bit: 0 };
     let mut out = Vec::new();
     loop {
@@ -486,7 +572,7 @@ fn inflate(data: &[u8], expected_len: usize) -> Option<Vec<u8>> {
             _ => return None,
         }
         if final_block {
-            return Some(out);
+            return Some((out, bits.bit.div_ceil(8)));
         }
     }
 }
@@ -639,5 +725,45 @@ mod tests {
         let expected = b"the quick brown fox jumps over the lazy dog; pack my box with five dozen liquor jugs. "
             .repeat(2);
         assert_eq!(inflate(&compressed, expected.len()), Some(expected));
+    }
+
+    #[test]
+    fn gzip_round_trip_with_bounded_frames() {
+        for data in [&[][..], b"hello", &vec![42; 200_000]] {
+            assert_eq!(gzip_decompress(&gzip_compress(data)), Ok(data.to_vec()));
+        }
+    }
+
+    #[test]
+    fn python_gzip_golden_decodes() {
+        // Python 3: gzip.compress(b"hello", mtime=0). Not produced by this
+        // encoder, and its fixed-Huffman payload exercises a different path.
+        let gzip = [
+            31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16,
+            54, 5, 0, 0, 0,
+        ];
+        assert_eq!(gzip_decompress(&gzip), Ok(b"hello".to_vec()));
+    }
+
+    #[test]
+    fn gzip_rejects_truncation_corruption_and_oversized_frames() {
+        let mut gzip = gzip_compress(b"hello");
+        gzip[14] ^= 1;
+        assert!(gzip_decompress(&gzip).is_err());
+        assert!(gzip_decompress(&[31, 139, 8]).is_err());
+        let mut trailing = gzip_compress(b"hello");
+        trailing.insert(trailing.len() - 8, 0);
+        assert!(gzip_decompress(&trailing).is_err());
+        let mut wrong_size = gzip_compress(b"hello");
+        let trailer = wrong_size.len() - 4;
+        wrong_size[trailer..].copy_from_slice(&6u32.to_le_bytes());
+        assert!(gzip_decompress(&wrong_size).is_err());
+        let mut with_hcrc = gzip_compress(b"hello");
+        with_hcrc[3] |= 2;
+        let hcrc = (crc32(&with_hcrc[..10]) as u16).to_le_bytes();
+        with_hcrc.splice(10..10, hcrc);
+        assert_eq!(gzip_decompress(&with_hcrc), Ok(b"hello".to_vec()));
+        with_hcrc[10] ^= 1;
+        assert!(gzip_decompress(&with_hcrc).is_err());
     }
 }
