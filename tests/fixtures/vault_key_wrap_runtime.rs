@@ -109,8 +109,8 @@ mod vault_key_wrap_tests {
         });
         let one = jvkw_export_to_recipients::<JetSigningKey>(signing_origin.clone(), Zeroizing(signing_bytes.clone()), signing_public, 1_700_000_000_123, &vec![recipients[0].clone()]).unwrap();
         let sixteen = jvkw_export_to_recipients::<JetX25519SecretKey>(x25519_origin.clone(), Zeroizing(x25519_bytes.clone()), x25519_public, 1_700_000_000_123, &recipients).unwrap();
-        let pass_signing = jvkw_export_to_passphrase::<JetSigningKey>(signing_origin, Zeroizing(signing_bytes), signing_public, 1_700_000_000_123, &passphrase).unwrap();
-        let pass_x25519 = jvkw_export_to_passphrase::<JetX25519SecretKey>(x25519_origin, Zeroizing(x25519_bytes), x25519_public, 1_700_000_000_123, &passphrase).unwrap();
+        let pass_signing = jvkw_export_to_passphrase::<JetSigningKey>(signing_origin, Zeroizing(signing_bytes), signing_public, 1_700_000_000_123, &passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel).unwrap();
+        let pass_x25519 = jvkw_export_to_passphrase::<JetX25519SecretKey>(x25519_origin, Zeroizing(x25519_bytes), x25519_public, 1_700_000_000_123, &passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel).unwrap();
         let hashes: Vec<String> = [&one, &sixteen, &pass_signing, &pass_x25519].into_iter()
             .map(|wrapped| hex_bytes(&vault_hash(&[&wrapped.bytes()])))
             .collect();
@@ -121,6 +121,10 @@ mod vault_key_wrap_tests {
             "641432fbff634bfa49ad1b2637dcb6bf947a60dec19750e0dd20e07e3656a95d",
         ]);
         assert_eq!(sixteen.bytes().len(), 16 + sixteen.header_len() + 80);
+        let mut epoch_created = one.bytes();
+        let created_at = 16 + 16 + 2 + "release".len() + 8 + 16 + 32;
+        epoch_created[created_at..created_at + 8].copy_from_slice(&0u64.to_le_bytes());
+        assert!(JetWrappedVaultKey::from_bytes(epoch_created).is_ok(), "created_unix_ms=0 is canonical");
         jet_crypto_entropy_clear_test_provider();
     }
 
@@ -162,7 +166,9 @@ mod vault_key_wrap_tests {
         let wrong = jet_crypto_x25519_generate_impl().unwrap();
         let public = jet_crypto_x25519_public_typed_impl(&recipient);
         let wrapped = jet_vault_export_to_recipients_at(&root, &reference, &vec![public]).unwrap();
+        jet_vault_keywrap_reset_test_crypto_counts();
         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "copy", wrapped.clone(), JetVaultKeyUnlock::Recipient(&wrong)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
+        assert_eq!(jet_vault_keywrap_test_recipient_open_count(), 1, "no-match executes exactly one dummy X25519/HKDF/AEAD path");
         let phrase = Secret(b"sixteen-byte passphrase".to_vec());
         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "copy", wrapped.clone(), JetVaultKeyUnlock::Passphrase(&phrase)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetX25519SecretKey>(&root, "copy", wrapped.clone(), JetVaultKeyUnlock::Recipient(&recipient)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
@@ -170,7 +176,6 @@ mod vault_key_wrap_tests {
         tampered[20] ^= 1;
         let tampered = JetWrappedVaultKey::from_bytes(tampered).unwrap();
         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "copy", tampered, JetVaultKeyUnlock::Recipient(&recipient)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
-        assert_eq!(jet_vault_keywrap_test_recipient_open_count(), 1, "no-match performs exactly one bounded crypto path");
         jet_vault_clear_test_authorizer();
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -183,10 +188,14 @@ mod vault_key_wrap_tests {
         let recipient = jet_crypto_x25519_generate_impl().unwrap();
         let public = jet_crypto_x25519_public_typed_impl(&recipient);
         let wrapped = jet_vault_export_to_recipients_at(&root, &reference, &vec![public]).unwrap();
+        let expected_export = format!("JVLA1 action=export mode=recipient outcome=BearerCopy key_type=1 origin_repo={} origin_name=72656c65617365 origin_generation={} origin_id={} origin_hash={} destination=- bearer_copy=true source_revocation_recall=false mutation=true", vault_uuid_hex(&reference.repo_uuid), reference.generation, hex_bytes(&reference.opaque_id), hex_bytes(&reference.record_hash));
+        assert_eq!(std::fs::read_to_string(root.join(".jet/vault-audit")).unwrap().lines().last().unwrap(), expected_export);
         let revision = decoded_store(&root).revision;
         let existing = import::<JetSigningKey>(&root, "ignored", wrapped.clone(), JetVaultKeyUnlock::Recipient(&recipient)).unwrap();
         assert_eq!(existing, reference);
         assert_eq!(decoded_store(&root).revision, revision);
+        let expected_idempotent = format!("JVLA1 action=import mode=recipient outcome=AlreadyPresent key_type=1 origin_repo={} origin_name=72656c65617365 origin_generation={} origin_id={} origin_hash={} destination=69676e6f726564 bearer_copy=false source_revocation_recall=false mutation=false", vault_uuid_hex(&reference.repo_uuid), reference.generation, hex_bytes(&reference.opaque_id), hex_bytes(&reference.record_hash));
+        assert_eq!(std::fs::read_to_string(root.join(".jet/vault-audit")).unwrap().lines().last().unwrap(), expected_idempotent);
 
         let retire = jet_vault_prepare_retire_at(&root, &reference, "archive").unwrap();
         let write = jet_vault_authorize_write_impl(&retire, "retire archived key").unwrap();
@@ -271,7 +280,9 @@ mod vault_key_wrap_tests {
         let phrase = Secret(b"sixteen-byte passphrase".to_vec());
         let wrapped = jet_vault_export_to_passphrase_at(&root, &reference, &phrase).unwrap();
         let wrong_phrase = Secret(b"different recovery phrase".to_vec());
+        jet_vault_keywrap_reset_test_crypto_counts();
         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "wrong", wrapped.clone(), JetVaultKeyUnlock::Passphrase(&wrong_phrase)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
+        assert_eq!(jet_vault_keywrap_test_passphrase_open_count(), 1, "wrong passphrase executes one admitted Argon2 class");
         let shown = format!("{wrapped:?} {wrapped}");
         assert!(shown.contains("mode:passphrase"));
         assert!(shown.contains("type:signing"));
@@ -289,5 +300,96 @@ mod vault_key_wrap_tests {
         assert!(observed.get(), "prepared plaintext key is zeroized when abandoned");
         jet_vault_clear_test_authorizer();
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unsupported_provider_preflight_precedes_all_secret_work() {
+        use std::os::unix::fs::symlink;
+        let source = scratch("preflight-source");
+        let destination = scratch("preflight-destination");
+        provision(&source);
+        provision(&destination);
+        let reference = generate::<JetSigningKey>(&source, "release");
+        let identity = jet_crypto_x25519_generate_impl().unwrap();
+        let wrapped = jet_vault_export_to_recipients_at(
+            &source,
+            &reference,
+            &vec![jet_crypto_x25519_public_typed_impl(&identity)],
+        ).unwrap();
+        std::fs::remove_dir_all(destination.join(".jet")).unwrap();
+        symlink(destination.join("keys"), destination.join(".jet")).unwrap();
+        jet_vault_keywrap_reset_test_crypto_counts();
+        assert_eq!(
+            jet_vault_prepare_import_wrapped_at::<JetSigningKey>(
+                &destination,
+                "restored",
+                wrapped,
+                JetVaultKeyUnlock::Recipient(&identity),
+            ).unwrap_err(),
+            JetVaultKeyWrapError::Vault(JetVaultError::UnsupportedProvider),
+        );
+        assert_eq!(jet_vault_keywrap_test_recipient_open_count(), 0);
+        assert_eq!(jet_vault_keywrap_test_passphrase_open_count(), 0);
+        jet_vault_clear_test_authorizer();
+        std::fs::remove_dir_all(source).unwrap();
+        std::fs::remove_dir_all(destination).unwrap();
+    }
+
+    #[test]
+    fn pwhash_pool_proves_fifo_cancellation_exhaustion_and_exact_release() {
+        struct ResetBudget;
+        impl Drop for ResetBudget { fn drop(&mut self) { jet_pwhash_test_set_budget(0); } }
+        let _reset = ResetBudget;
+        assert_eq!(jet_pwhash_weight_kib(65_536, 1_048_576).unwrap(), 77_824);
+        assert_eq!(JET_PWHASH_BUDGET_KIB / 77_824, 4, "canonical budget admits exactly four maximum-password default jobs");
+        let weight = jet_pwhash_weight_kib(8_192, 16).unwrap();
+        jet_pwhash_test_set_budget(weight);
+
+        let first_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let first_entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let first_release = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let first = {
+            let cancel = first_cancel.clone();
+            let entered = first_entered.clone();
+            let release = first_release.clone();
+            std::thread::spawn(move || jet_pwhash_test_run(cancel, Some((entered, release))))
+        };
+        first_entered.wait();
+        let (_, _, admitted_runs) = jet_pwhash_test_snapshot();
+
+        let queued_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let queued = {
+            let cancel = queued_cancel.clone();
+            std::thread::spawn(move || jet_pwhash_test_run(cancel, None))
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while jet_pwhash_test_snapshot().1 != 1 && std::time::Instant::now() < deadline { std::thread::yield_now(); }
+        assert_eq!(jet_pwhash_test_snapshot().1, 1, "second request waits at the FIFO head");
+        queued_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(matches!(queued.join().unwrap(), Err(JetPwhashRunError::Cancelled)));
+        assert_eq!(jet_pwhash_test_snapshot().2, admitted_runs, "queued cancellation performs no Argon2 work");
+        first_release.wait();
+        assert!(first.join().unwrap().is_ok());
+        assert_eq!(jet_pwhash_test_snapshot().0, 0, "admitted weight is released exactly once");
+
+        let running_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let running_entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let running_release = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let running = {
+            let cancel = running_cancel.clone();
+            let entered = running_entered.clone();
+            let release = running_release.clone();
+            std::thread::spawn(move || jet_pwhash_test_run(cancel, Some((entered, release))))
+        };
+        running_entered.wait();
+        running_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        running_release.wait();
+        assert!(matches!(running.join().unwrap(), Err(JetPwhashRunError::Cancelled)), "admitted cancellation finishes then discards the backend result");
+        assert_eq!(jet_pwhash_test_snapshot().0, 0, "cancelled admitted weight is released exactly once");
+
+        let before_exhaustion = jet_pwhash_test_snapshot().2;
+        jet_pwhash_test_set_budget(weight - 1_024);
+        assert!(matches!(jet_pwhash_test_run(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), None), Err(JetPwhashRunError::ResourceUnavailable)));
+        assert_eq!(jet_pwhash_test_snapshot(), (0, 0, before_exhaustion), "budget exhaustion allocates no Argon2 arena");
     }
 }

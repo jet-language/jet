@@ -335,10 +335,241 @@ pub fn jet_crypto_digest256_bytes_impl(d:&JetDigest256)->Vec<u8>{d.0.to_vec()} p
 pub fn jet_crypto_digest256_hex_impl(d:&JetDigest256)->String{hex_encode(&d.0)} pub fn jet_crypto_digest512_hex_impl(d:&JetDigest512)->String{hex_encode(&d.0)}
 pub fn jet_crypto_hkdf_typed_impl(ikm:&Secret,salt:&Vec<u8>,info:&Vec<u8>,length:i64)->Result<Secret,JetCryptoError>{if !(0..=8160).contains(&length){return Err(JetCryptoError::OutputLength{operation:"hkdf_sha256",minimum:0,maximum:8160,actual:length.unsigned_abs() as usize})}let mut out=vec![0;length as usize];Hkdf::<sha2::Sha256>::new(Some(salt),&ikm.0).expand(info,&mut out).map_err(|_|JetCryptoError::Internal{incident_id:"hkdf-expand"})?;Ok(Secret(out))}
 pub fn jet_crypto_constant_time_secret_impl(a:&Secret,b:&Secret)->bool{let max=a.0.len().max(b.0.len());let mut diff=a.0.len()^b.0.len();for i in 0..max{diff|=(a.0.get(i).copied().unwrap_or(0)^b.0.get(i).copied().unwrap_or(0))as usize;}diff==0}
-pub fn jet_crypto_password_hash_typed_impl(password:&Secret)->Result<JetPasswordHash,JetCryptoError>{let mut salt=[0;16];jet_crypto_entropy_fill(&mut salt).map_err(|_|JetCryptoError::EntropyUnavailable)?;let encoded=argon2::password_hash::SaltString::encode_b64(&salt).map_err(|_|JetCryptoError::Internal{incident_id:"password-salt"})?;let hash=argon2::PasswordHasher::hash_password(&argon2::Argon2::default(),&password.0,&encoded).map_err(|_|JetCryptoError::ResourceUnavailable{resource:"password hashing"})?.to_string();zeroize(&mut salt);Ok(JetPasswordHash(hash))}
+
+const JET_PWHASH_BUDGET_KIB: usize = 311_296;
+const JET_PWHASH_WORKERS: usize = 4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum JetPwhashRunError { ResourceUnavailable, Cancelled, Backend }
+
+struct JetPwhashBlocks(Vec<argon2::Block>);
+impl Drop for JetPwhashBlocks {
+    fn drop(&mut self) {
+        for block in &mut self.0 {
+            unsafe { std::ptr::write_volatile(block, argon2::Block::default()) };
+        }
+        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+struct JetPwhashJob {
+    id: u64,
+    weight_kib: usize,
+    params: argon2::Params,
+    password: std::sync::Mutex<Option<Zeroizing<Vec<u8>>>>,
+    salt: std::sync::Mutex<Option<Zeroizing<Vec<u8>>>>,
+    cancelled: std::sync::atomic::AtomicBool,
+    result: std::sync::Mutex<Option<Result<Zeroizing<Vec<u8>>, JetPwhashRunError>>>,
+    ready: std::sync::Condvar,
+    #[cfg(test)] pause: Option<(std::sync::Arc<std::sync::Barrier>, std::sync::Arc<std::sync::Barrier>)>,
+}
+
+struct JetPwhashState {
+    next_id: u64,
+    used_kib: usize,
+    queue: std::collections::VecDeque<std::sync::Arc<JetPwhashJob>>,
+}
+
+struct JetPwhashPool {
+    state: std::sync::Mutex<JetPwhashState>,
+    ready: std::sync::Condvar,
+}
+
+#[cfg(test)]
+static JET_PWHASH_TEST_BUDGET_KIB: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+#[cfg(test)]
+static JET_PWHASH_TEST_RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn jet_pwhash_budget_kib() -> usize {
+    #[cfg(test)] {
+        let value = JET_PWHASH_TEST_BUDGET_KIB.load(std::sync::atomic::Ordering::SeqCst);
+        if value != 0 { return value; }
+    }
+    JET_PWHASH_BUDGET_KIB
+}
+
+fn jet_pwhash_weight_kib(memory_kib: usize, password_len: usize) -> Result<usize, JetPwhashRunError> {
+    let raw = memory_kib
+        .checked_add(memory_kib.checked_add(7).ok_or(JetPwhashRunError::ResourceUnavailable)? / 8)
+        .and_then(|value| value.checked_add(2_048))
+        .and_then(|value| value.checked_add(password_len.checked_add(1_023)? / 1_024))
+        .and_then(|value| value.checked_add(1))
+        .ok_or(JetPwhashRunError::ResourceUnavailable)?;
+    raw.checked_add(1_023)
+        .map(|value| value / 1_024 * 1_024)
+        .ok_or(JetPwhashRunError::ResourceUnavailable)
+}
+
+fn jet_pwhash_pool() -> Result<&'static std::sync::Arc<JetPwhashPool>, JetPwhashRunError> {
+    static POOL: std::sync::OnceLock<Result<std::sync::Arc<JetPwhashPool>, JetPwhashRunError>> = std::sync::OnceLock::new();
+    match POOL.get_or_init(|| {
+        let pool = std::sync::Arc::new(JetPwhashPool {
+            state: std::sync::Mutex::new(JetPwhashState { next_id: 1, used_kib: 0, queue: std::collections::VecDeque::new() }),
+            ready: std::sync::Condvar::new(),
+        });
+        for _ in 0..JET_PWHASH_WORKERS {
+            let worker = pool.clone();
+            if std::thread::Builder::new().name("jet-pwhash".into()).spawn(move || jet_pwhash_worker(worker)).is_err() {
+                return Err(JetPwhashRunError::ResourceUnavailable);
+            }
+        }
+        Ok(pool)
+    }) { Ok(pool) => Ok(pool), Err(error) => Err(*error) }
+}
+
+fn jet_pwhash_worker(pool: std::sync::Arc<JetPwhashPool>) {
+    loop {
+        let job = {
+            let mut state = pool.state.lock().unwrap();
+            loop {
+                let budget = jet_pwhash_budget_kib();
+                if let Some(front) = state.queue.front() {
+                    if state.used_kib.checked_add(front.weight_kib).is_some_and(|used| used <= budget) {
+                        let job = state.queue.pop_front().unwrap();
+                        state.used_kib += job.weight_kib;
+                        break job;
+                    }
+                }
+                state = pool.ready.wait(state).unwrap();
+            }
+        };
+        #[cfg(test)] {
+            JET_PWHASH_TEST_RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if let Some((entered, release)) = &job.pause { entered.wait(); release.wait(); }
+        }
+        let result = {
+            let password = job.password.lock().unwrap().take().unwrap();
+            let salt = job.salt.lock().unwrap().take().unwrap();
+            let mut output_bytes=Vec::new();
+            let mut block_bytes=Vec::new();
+            let allocated=output_bytes.try_reserve_exact(job.params.output_len().unwrap_or(32)).and_then(|_|block_bytes.try_reserve_exact(job.params.block_count()));
+            if allocated.is_err(){if job.cancelled.load(std::sync::atomic::Ordering::Acquire){Err(JetPwhashRunError::Cancelled)}else{Err(JetPwhashRunError::ResourceUnavailable)}}else{
+                output_bytes.resize(job.params.output_len().unwrap_or(32),0);
+                block_bytes.resize(job.params.block_count(),argon2::Block::default());
+                let mut output=Zeroizing(output_bytes);
+                let mut blocks=JetPwhashBlocks(block_bytes);
+                let engine = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, job.params.clone());
+                let derived = engine.hash_password_into_with_memory(&password.0, &salt.0, &mut output.0, &mut blocks.0);
+                drop(blocks);
+                if job.cancelled.load(std::sync::atomic::Ordering::Acquire) {Err(JetPwhashRunError::Cancelled)}else if derived.is_err(){Err(JetPwhashRunError::Backend)}else{Ok(output)}
+            }
+        };
+        {
+            let mut state = pool.state.lock().unwrap();
+            state.used_kib -= job.weight_kib;
+            pool.ready.notify_all();
+        }
+        *job.result.lock().unwrap() = Some(result);
+        job.ready.notify_one();
+    }
+}
+
+fn jet_crypto_argon2id_run_with<F>(
+    password: &[u8],
+    salt: &[u8],
+    params: argon2::Params,
+    cancelled: F,
+    #[cfg(test)] pause: Option<(std::sync::Arc<std::sync::Barrier>, std::sync::Arc<std::sync::Barrier>)>,
+) -> Result<Zeroizing<Vec<u8>>, JetPwhashRunError>
+where F: Fn() -> bool {
+    let weight_kib = jet_pwhash_weight_kib(params.m_cost() as usize, password.len())?;
+    if weight_kib > jet_pwhash_budget_kib() { return Err(JetPwhashRunError::ResourceUnavailable); }
+    if cancelled() { return Err(JetPwhashRunError::Cancelled); }
+    let pool = jet_pwhash_pool()?;
+    let mut password_copy=Vec::new();password_copy.try_reserve_exact(password.len()).map_err(|_|JetPwhashRunError::ResourceUnavailable)?;password_copy.extend_from_slice(password);
+    let mut salt_copy=Vec::new();salt_copy.try_reserve_exact(salt.len()).map_err(|_|JetPwhashRunError::ResourceUnavailable)?;salt_copy.extend_from_slice(salt);
+    let job = {
+        let mut state = pool.state.lock().unwrap();
+        let id = state.next_id;
+        state.next_id = state.next_id.checked_add(1).ok_or(JetPwhashRunError::ResourceUnavailable)?;
+        let job = std::sync::Arc::new(JetPwhashJob {
+            id, weight_kib, params,
+            password: std::sync::Mutex::new(Some(Zeroizing(password_copy))),
+            salt: std::sync::Mutex::new(Some(Zeroizing(salt_copy))),
+            cancelled: std::sync::atomic::AtomicBool::new(false),
+            result: std::sync::Mutex::new(None), ready: std::sync::Condvar::new(),
+            #[cfg(test)] pause,
+        });
+        state.queue.push_back(job.clone());
+        pool.ready.notify_all();
+        job
+    };
+    loop {
+        if cancelled() {
+            job.cancelled.store(true, std::sync::atomic::Ordering::Release);
+            let removed = {
+                let mut state = pool.state.lock().unwrap();
+                state.queue.iter().position(|queued| queued.id == job.id).map(|index| state.queue.remove(index).unwrap())
+            };
+            if let Some(removed) = removed {
+                drop(removed.password.lock().unwrap().take());
+                drop(removed.salt.lock().unwrap().take());
+                *removed.result.lock().unwrap() = Some(Err(JetPwhashRunError::Cancelled));
+                removed.ready.notify_one();
+                pool.ready.notify_all();
+            }
+        }
+        let mut result = job.result.lock().unwrap();
+        if let Some(result) = result.take() { return result; }
+        result = job.ready.wait_timeout(result, std::time::Duration::from_millis(2)).unwrap().0;
+        if let Some(result) = result.take() { return result; }
+    }
+}
+
+fn jet_crypto_argon2id_run(password: &[u8], salt: &[u8], params: argon2::Params, cancelled: fn() -> bool) -> Result<Zeroizing<Vec<u8>>, JetPwhashRunError> {
+    jet_crypto_argon2id_run_with(password, salt, params, cancelled, #[cfg(test)] None)
+}
+
+#[cfg(test)]
+fn jet_pwhash_test_set_budget(kib:usize){JET_PWHASH_TEST_BUDGET_KIB.store(kib,std::sync::atomic::Ordering::SeqCst);if let Ok(pool)=jet_pwhash_pool(){pool.ready.notify_all();}}
+#[cfg(test)]
+fn jet_pwhash_test_snapshot()->(usize,usize,usize){let pool=jet_pwhash_pool().unwrap();let state=pool.state.lock().unwrap();(state.used_kib,state.queue.len(),JET_PWHASH_TEST_RUNS.load(std::sync::atomic::Ordering::SeqCst))}
+#[cfg(test)]
+fn jet_pwhash_test_run(cancelled:std::sync::Arc<std::sync::atomic::AtomicBool>,pause:Option<(std::sync::Arc<std::sync::Barrier>,std::sync::Arc<std::sync::Barrier>)>)->Result<Zeroizing<Vec<u8>>,JetPwhashRunError>{let params=argon2::Params::new(8_192,1,1,Some(16)).unwrap();jet_crypto_argon2id_run_with(b"sixteen-byte-key",b"sixteen-byte-salt",params,move||cancelled.load(std::sync::atomic::Ordering::SeqCst),pause)}
+
+fn jet_pwhash_cancel_or_crypto<T>(result: Result<T, JetPwhashRunError>, cancel_outcome: fn()) -> Result<T, JetCryptoError> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(JetPwhashRunError::Cancelled) => { cancel_outcome(); Err(JetCryptoError::Internal { incident_id: "cancel-returned" }) }
+        Err(JetPwhashRunError::ResourceUnavailable) => Err(JetCryptoError::ResourceUnavailable { resource: "password hashing" }),
+        Err(JetPwhashRunError::Backend) => Err(JetCryptoError::Internal { incident_id: "argon2-backend" }),
+    }
+}
+
+fn jet_crypto_never_cancelled() -> bool { false }
+fn jet_crypto_ignore_cancel() {}
+
+fn jet_crypto_password_hash_typed_with_cancel(password:&Secret, cancelled:fn()->bool, cancel_outcome:fn())->Result<JetPasswordHash,JetCryptoError>{
+    if password.0.len()>1_048_576{return Err(JetCryptoError::PasswordPolicy{reason:"password exceeds 1048576 bytes"})}
+    let mut salt=[0;16];jet_crypto_entropy_fill(&mut salt).map_err(|_|JetCryptoError::EntropyUnavailable)?;
+    let params=argon2::Params::new(65_536,3,1,Some(32)).map_err(|_|JetCryptoError::Internal{incident_id:"password-params"})?;
+    let output=jet_pwhash_cancel_or_crypto(jet_crypto_argon2id_run(&password.0,&salt,params,cancelled),cancel_outcome)?;
+    let encoded=argon2::password_hash::SaltString::encode_b64(&salt).map_err(|_|JetCryptoError::Internal{incident_id:"password-salt"})?;
+    let encoded_output=argon2::password_hash::Output::new(&output.0).map_err(|_|JetCryptoError::Internal{incident_id:"password-output"})?;
+    let hash=format!("$argon2id$v=19$m=65536,t=3,p=1${}${}",encoded.as_str(),format!("${encoded_output}"));
+    zeroize(&mut salt);Ok(JetPasswordHash(hash))
+}
+pub fn jet_crypto_password_hash_typed_impl(password:&Secret)->Result<JetPasswordHash,JetCryptoError>{jet_crypto_password_hash_typed_with_cancel(password,jet_crypto_never_cancelled,jet_crypto_ignore_cancel)}
+pub fn jet_crypto_password_hash_typed_cancel_impl(password:&Secret,cancelled:fn()->bool,cancel_outcome:fn())->Result<JetPasswordHash,JetCryptoError>{jet_crypto_password_hash_typed_with_cancel(password,cancelled,cancel_outcome)}
 pub fn jet_crypto_password_parse_impl(text:String)->Result<JetPasswordHash,JetCryptoError>{argon2::PasswordHash::new(&text).map_err(|_|JetCryptoError::InvalidEncoding{operation:"PasswordHash.parse",value_kind:"PHC string"})?;Ok(JetPasswordHash(text))}
 pub fn jet_crypto_password_text_impl(hash:&JetPasswordHash)->String{hash.0.clone()}
-pub fn jet_crypto_password_verify_typed_impl(password:&Secret,stored:&JetPasswordHash)->Result<bool,JetCryptoError>{let parsed=argon2::PasswordHash::new(&stored.0).map_err(|_|JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC string"})?;Ok(argon2::PasswordVerifier::verify_password(&argon2::Argon2::default(),&password.0,&parsed).is_ok())}
+fn jet_crypto_password_verify_typed_with_cancel(password:&Secret,stored:&JetPasswordHash,cancelled:fn()->bool,cancel_outcome:fn())->Result<bool,JetCryptoError>{
+    use argon2::password_hash::PasswordHash;
+    if password.0.len()>1_048_576{return Err(JetCryptoError::PasswordPolicy{reason:"password exceeds 1048576 bytes"})}
+    let parsed=PasswordHash::new(&stored.0).map_err(|_|JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC string"})?;
+    let memory=parsed.params.get_decimal("m").ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC parameters"})?;
+    let iterations=parsed.params.get_decimal("t").ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC parameters"})?;
+    let lanes=parsed.params.get_decimal("p").ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC parameters"})?;
+    let salt=parsed.salt.ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC salt"})?;
+    let expected=parsed.hash.ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC output"})?;
+    let mut salt_bytes=Zeroizing(vec![0;64]);let salt_len=salt.decode_b64(&mut salt_bytes.0).map_err(|_|JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC salt"})?.len();salt_bytes.0.truncate(salt_len);
+    if !(8_192..=262_144).contains(&memory)||!(1..=10).contains(&iterations)||!(1..=8).contains(&lanes)||memory<8*lanes||memory.checked_mul(iterations).is_none_or(|value|value>1_048_576)||!(8..=64).contains(&salt_bytes.0.len())||!(16..=64).contains(&expected.as_bytes().len()){return Err(JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})}
+    let params=argon2::Params::new(memory,iterations,lanes,Some(expected.as_bytes().len())).map_err(|_|JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})?;
+    let output=jet_pwhash_cancel_or_crypto(jet_crypto_argon2id_run(&password.0,&salt_bytes.0,params,cancelled),cancel_outcome)?;
+    Ok(bool::from(output.0.ct_eq(expected.as_bytes())))
+}
+pub fn jet_crypto_password_verify_typed_impl(password:&Secret,stored:&JetPasswordHash)->Result<bool,JetCryptoError>{jet_crypto_password_verify_typed_with_cancel(password,stored,jet_crypto_never_cancelled,jet_crypto_ignore_cancel)}
+pub fn jet_crypto_password_verify_typed_cancel_impl(password:&Secret,stored:&JetPasswordHash,cancelled:fn()->bool,cancel_outcome:fn())->Result<bool,JetCryptoError>{jet_crypto_password_verify_typed_with_cancel(password,stored,cancelled,cancel_outcome)}
 
 fn expert_aead_lengths(
     operation: &'static str,
@@ -388,9 +619,11 @@ pub fn jet_crypto_expert_x25519_impl(secret:&Vec<u8>,public:&Vec<u8>,reject_all_
 pub fn jet_crypto_expert_hkdf_sha256_impl(ikm:&Vec<u8>,salt:&Vec<u8>,info:&Vec<u8>,length:i64)->Result<Secret,JetCryptoError>{
     if !(0..=8160).contains(&length){return Err(JetCryptoError::OutputLength{operation:"expert.hkdf_sha256",minimum:0,maximum:8160,actual:length.unsigned_abs() as usize})}let mut out=vec![0;length as usize];Hkdf::<sha2::Sha256>::new(Some(salt),ikm).expand(info,&mut out).map_err(|_|JetCryptoError::Internal{incident_id:"expert-hkdf-expand"})?;Ok(Secret(out))
 }
-pub fn jet_crypto_expert_argon2id_impl(password:&Secret,salt:&Vec<u8>,memory_kib:i64,iterations:i64,lanes:i64,output_length:i64)->Result<Secret,JetCryptoError>{
-    if password.0.len()>1_048_576{return Err(JetCryptoError::PasswordPolicy{reason:"password exceeds 1048576 bytes"})}if !(8..=64).contains(&salt.len()){return Err(invalid_length("expert.argon2id","salt","8..=64",salt.len()))}if !(8_192..=262_144).contains(&memory_kib)||!(1..=10).contains(&iterations)||!(1..=8).contains(&lanes)||memory_kib<8*lanes||memory_kib.checked_mul(iterations).is_none_or(|v|v>1_048_576){return Err(JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})}if !(16..=64).contains(&output_length){return Err(JetCryptoError::OutputLength{operation:"expert.argon2id",minimum:16,maximum:64,actual:output_length.unsigned_abs() as usize})}let params=argon2::Params::new(memory_kib as u32,iterations as u32,lanes as u32,Some(output_length as usize)).map_err(|_|JetCryptoError::PasswordPolicy{reason:"invalid Argon2id parameters"})?;let engine=argon2::Argon2::new(argon2::Algorithm::Argon2id,argon2::Version::V0x13,params);let mut out=vec![0;output_length as usize];engine.hash_password_into(&password.0,salt,&mut out).map_err(|_|JetCryptoError::ResourceUnavailable{resource:"password hashing"})?;Ok(Secret(out))
+fn jet_crypto_expert_argon2id_with_cancel(password:&Secret,salt:&Vec<u8>,memory_kib:i64,iterations:i64,lanes:i64,output_length:i64,cancelled:fn()->bool,cancel_outcome:fn())->Result<Secret,JetCryptoError>{
+    if password.0.len()>1_048_576{return Err(JetCryptoError::PasswordPolicy{reason:"password exceeds 1048576 bytes"})}if !(8..=64).contains(&salt.len()){return Err(invalid_length("expert.argon2id","salt","8..=64",salt.len()))}if !(8_192..=262_144).contains(&memory_kib)||!(1..=10).contains(&iterations)||!(1..=8).contains(&lanes)||memory_kib<8*lanes||memory_kib.checked_mul(iterations).is_none_or(|v|v>1_048_576){return Err(JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})}if !(16..=64).contains(&output_length){return Err(JetCryptoError::OutputLength{operation:"expert.argon2id",minimum:16,maximum:64,actual:output_length.unsigned_abs() as usize})}let params=argon2::Params::new(memory_kib as u32,iterations as u32,lanes as u32,Some(output_length as usize)).map_err(|_|JetCryptoError::PasswordPolicy{reason:"invalid Argon2id parameters"})?;let mut out=jet_pwhash_cancel_or_crypto(jet_crypto_argon2id_run(&password.0,salt,params,cancelled),cancel_outcome)?;Ok(Secret(std::mem::take(&mut out.0)))
 }
+pub fn jet_crypto_expert_argon2id_impl(password:&Secret,salt:&Vec<u8>,memory_kib:i64,iterations:i64,lanes:i64,output_length:i64)->Result<Secret,JetCryptoError>{jet_crypto_expert_argon2id_with_cancel(password,salt,memory_kib,iterations,lanes,output_length,jet_crypto_never_cancelled,jet_crypto_ignore_cancel)}
+pub fn jet_crypto_expert_argon2id_cancel_impl(password:&Secret,salt:&Vec<u8>,memory_kib:i64,iterations:i64,lanes:i64,output_length:i64,cancelled:fn()->bool,cancel_outcome:fn())->Result<Secret,JetCryptoError>{jet_crypto_expert_argon2id_with_cancel(password,salt,memory_kib,iterations,lanes,output_length,cancelled,cancel_outcome)}
 pub fn jet_crypto_expert_secret_bytes_impl(secret:&Secret)->Vec<u8>{secret.0.clone()}
 pub fn jet_crypto_expert_signing_key_bytes_impl(key:&JetSigningKey)->Vec<u8>{key.0.clone()}
 pub fn jet_crypto_expert_x25519_secret_bytes_impl(key:&JetX25519SecretKey)->Vec<u8>{key.0.clone()}
@@ -580,27 +813,20 @@ pub fn jet_crypto_password_hash_with_salt_impl(
     password: &String,
     salt: &Vec<u8>,
 ) -> Result<String, String> {
-    if salt.len() < 8 {
-        return Err("crypto.password_hash salt must be at least 8 bytes".to_string());
+    if !(8..=64).contains(&salt.len()) {
+        return Err("crypto.password_hash salt must contain 8..=64 bytes".to_string());
     }
-    let salt = argon2::password_hash::SaltString::encode_b64(salt)
+    if password.len() > 1_048_576 { return Err("crypto.password_hash password exceeds 1048576 bytes".to_string()); }
+    let params=argon2::Params::new(65_536,3,1,Some(32)).map_err(|_|"crypto.password_hash parameters failed".to_string())?;
+    let output=jet_crypto_argon2id_run(password.as_bytes(),salt,params,jet_crypto_never_cancelled).map_err(|error|match error{JetPwhashRunError::ResourceUnavailable=>"crypto.password_hash resource unavailable",JetPwhashRunError::Cancelled=>"crypto.password_hash cancelled",JetPwhashRunError::Backend=>"crypto.password_hash failed"}.to_string())?;
+    let encoded_salt = argon2::password_hash::SaltString::encode_b64(salt)
         .map_err(|e| format!("crypto.password_hash salt failed: {e}"))?;
-    let argon2 = argon2::Argon2::default();
-    argon2::PasswordHasher::hash_password(&argon2, password.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| format!("crypto.password_hash failed: {e}"))
+    let encoded_output=argon2::password_hash::Output::new(&output.0).map_err(|e|format!("crypto.password_hash failed: {e}"))?;
+    Ok(format!("$argon2id$v=19$m=65536,t=3,p=1${}${}",encoded_salt.as_str(),format!("${encoded_output}")))
 }
 
 pub fn jet_crypto_password_verify_impl(password: &String, stored: &String) -> bool {
-    let Ok(hash) = argon2::PasswordHash::new(stored) else {
-        return false;
-    };
-    argon2::PasswordVerifier::verify_password(
-        &argon2::Argon2::default(),
-        password.as_bytes(),
-        &hash,
-    )
-    .is_ok()
+    jet_crypto_password_verify_typed_impl(&Secret(password.as_bytes().to_vec()),&JetPasswordHash(stored.clone())).unwrap_or(false)
 }
 
 #[cfg(not(target_os = "linux"))]

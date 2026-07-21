@@ -16,7 +16,7 @@ edition = "2021"
 [dependencies]
 aes-gcm = "0.10"
 age = "0.10"
-argon2 = "0.5"
+argon2 = { version = "0.5", features = ["zeroize"] }
 blake3 = "1"
 chacha20poly1305 = "0.10"
 ed25519-dalek = "2"
@@ -32,6 +32,7 @@ x25519-dalek = "2"
     let output = std::process::Command::new("cargo")
         .args(["test", "--offline", "--quiet", "--manifest-path"])
         .arg(dir.join("Cargo.toml"))
+        .args(["--", "--test-threads=1"])
         .env("CARGO_TARGET_DIR", dir.join("target"))
         .output()
         .unwrap();

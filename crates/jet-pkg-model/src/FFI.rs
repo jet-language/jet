@@ -951,6 +951,10 @@ mod net_tls_close_tests {
 /// These are emitted verbatim as the right-hand side of the `name = …` line.
 const FEATURED_DEPS: &[(&str, &str)] = &[
     (
+        "argon2",
+        "{ version = \"0.5\", features = [\"zeroize\"] }",
+    ),
+    (
         "rusqlite",
         "{ version = \"0.31\", features = [\"bundled\"] }",
     ),

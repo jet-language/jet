@@ -465,6 +465,7 @@ fn vault_identity_at(root: &std::path::Path) -> std::path::PathBuf { if root == 
 #[cfg(target_os="linux")] const VAULT_O_CREAT:u64=0x40;
 #[cfg(target_os="linux")] const VAULT_O_EXCL:u64=0x80;
 #[cfg(target_os="linux")] const VAULT_O_RDWR:u64=2;
+#[cfg(target_os="linux")] const VAULT_O_APPEND:u64=0x400;
 #[cfg(target_os="linux")] const VAULT_O_TMPFILE:u64=0x410000;
 #[cfg(target_os="linux")] const VAULT_RENAME_NOREPLACE:u32=1;
 #[cfg(target_os="linux")] const VAULT_RENAME_EXCHANGE:u32=2;
@@ -479,6 +480,25 @@ fn vault_identity_at(root: &std::path::Path) -> std::path::PathBuf { if root == 
 fn vault_linux_openat(dirfd:i32,name:&str,flags:u64,mode:u64)->Result<std::fs::File,std::io::Error>{use std::os::fd::FromRawFd;let name=std::ffi::CString::new(name).map_err(|_|std::io::Error::from_raw_os_error(22))?;let how=VaultOpenHow{flags:flags|VAULT_O_NOFOLLOW|VAULT_O_CLOEXEC,mode,resolve:VAULT_RESOLVE};let fd=unsafe{syscall(VAULT_SYS_OPENAT2,dirfd,name.as_ptr(),&how as *const VaultOpenHow,std::mem::size_of::<VaultOpenHow>())};if fd<0{Err(std::io::Error::last_os_error())}else{Ok(unsafe{std::fs::File::from_raw_fd(fd as i32)})}}
 #[cfg(target_os="linux")]
 fn vault_linux_dir(root:&std::path::Path)->Result<std::fs::File,JetVaultError>{use std::os::fd::AsRawFd;use std::os::unix::fs::{MetadataExt,PermissionsExt};let root_file=std::fs::File::open(root).map_err(|_|JetVaultError::Io{operation:"open",redacted_path:"<repository>"})?;let dir=vault_linux_openat(root_file.as_raw_fd(),".jet",VAULT_O_DIRECTORY,0).map_err(|error|if matches!(error.raw_os_error(),Some(18|20|22|38|40)){JetVaultError::UnsupportedProvider}else{JetVaultError::Io{operation:"open",redacted_path:"<vault-dir>"}})?;let metadata=dir.metadata().map_err(|_|JetVaultError::Io{operation:"stat",redacted_path:"<vault-dir>"})?;let(user,_)=vault_authority_identity()?;if !metadata.is_dir()||metadata.uid()!=user||metadata.permissions().mode()&0o022!=0{return Err(JetVaultError::UnsupportedProvider)}Ok(dir)}
+#[cfg(target_os="linux")]
+fn vault_audit_append_at(root:&std::path::Path,action:&str,mode:&str,outcome:&str,key_type:u8,origin:&JetVaultOrigin,destination:Option<&str>)->Result<(),JetVaultError>{
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{MetadataExt,PermissionsExt};
+    static AUDIT:std::sync::OnceLock<std::sync::Mutex<()>>=std::sync::OnceLock::new();
+    let _guard=AUDIT.get_or_init(||std::sync::Mutex::new(())).lock().map_err(|_|JetVaultError::Internal{incident_id:"vault-audit-lock"})?;
+    let dir=vault_linux_dir(root)?;
+    let mut file=vault_linux_openat(dir.as_raw_fd(),"vault-audit",VAULT_O_RDWR|VAULT_O_APPEND|VAULT_O_CREAT,0o600).map_err(|error|if matches!(error.raw_os_error(),Some(18|20|22|38|40)){JetVaultError::UnsupportedProvider}else{JetVaultError::Io{operation:"audit",redacted_path:"<vault-audit>"}})?;
+    let metadata=file.metadata().map_err(|_|JetVaultError::Io{operation:"audit",redacted_path:"<vault-audit>"})?;
+    let(user,_)=vault_authority_identity()?;
+    if !metadata.is_file()||metadata.uid()!=user||metadata.permissions().mode()&0o077!=0{return Err(JetVaultError::UnsupportedProvider)}
+    let destination=destination.map(|name|hex_bytes(name.as_bytes())).unwrap_or_else(||"-".into());
+    writeln!(file,"JVLA1 action={action} mode={mode} outcome={outcome} key_type={key_type} origin_repo={} origin_name={} origin_generation={} origin_id={} origin_hash={} destination={} bearer_copy={} source_revocation_recall=false mutation={}",vault_uuid_hex(&origin.repo_uuid),hex_bytes(origin.name.as_bytes()),origin.generation,hex_bytes(&origin.opaque_id),hex_bytes(&origin.record_hash),destination,action=="export",outcome!="AlreadyPresent").map_err(|_|JetVaultError::Io{operation:"audit",redacted_path:"<vault-audit>"})?;
+    file.sync_all().map_err(|_|JetVaultError::Io{operation:"audit",redacted_path:"<vault-audit>"})?;
+    dir.sync_all().map_err(|_|JetVaultError::Io{operation:"audit",redacted_path:"<vault-dir>"})
+}
+#[cfg(not(target_os="linux"))]
+fn vault_audit_append_at(root:&std::path::Path,action:&str,mode:&str,outcome:&str,key_type:u8,origin:&JetVaultOrigin,destination:Option<&str>)->Result<(),JetVaultError>{let _=(root,action,mode,outcome,key_type,origin,destination);Err(JetVaultError::UnsupportedProvider)}
 #[cfg(target_os="linux")]
 fn vault_linux_read(root:&std::path::Path,name:&str)->Result<Option<Vec<u8>>,JetVaultError>{use std::io::Read;use std::os::fd::AsRawFd;let dir=vault_linux_dir(root)?;let mut file=match vault_linux_openat(dir.as_raw_fd(),name,0,0){Ok(file)=>file,Err(error)=>return match error.raw_os_error(){Some(2)=>Ok(None),Some(38|22|40)=>Err(JetVaultError::UnsupportedProvider),_=>Err(JetVaultError::Locked)}};let mut bytes=Vec::new();file.read_to_end(&mut bytes).map_err(|_|JetVaultError::Locked)?;Ok(Some(bytes))}
 #[derive(Clone,Copy,Debug,Eq,PartialEq)] enum VaultStartKind{Absent,Historical,V2}
