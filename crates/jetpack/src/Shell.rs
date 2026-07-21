@@ -378,6 +378,7 @@ fn zsh_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
          zle -N __jetpack_help_prefill 2>/dev/null || true\n\
          bindkey '^[?' __jetpack_help_prefill 2>/dev/null || true\n\
          jet() {{ if [[ $# -eq 1 && $1 == '?' ]]; then local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty) || return; [[ -n $picked ]] || return 0; print -z -- \"$picked\"; return 0; fi; command jet \"$@\"; }}\n\
+         alias jet='noglob jet'\n\
          __jetpack_spinner() {{ local -a frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏); local i=1; while true; do if [[ ${{+NO_COLOR}} = 1 ]]; then printf '\\r%s running %s · %ss' $frames[$i] $1 $(( $EPOCHSECONDS - $2 )) >&2; else printf '\\r\\033[{accent}m%s\\033[0m running %s · %ss' $frames[$i] $1 $(( $EPOCHSECONDS - $2 )) >&2; fi; (( i = i % 10 + 1 )); sleep .1; done; }}\n\
          __jetpack_preexec() {{ case $1 in 'jet build'*) __jetpack_kind=build;; 'jet test'*) __jetpack_kind=test;; *) __jetpack_kind=''; return;; esac; __jetpack_command=$1; __jetpack_started=$EPOCHSECONDS; if [[ -t 2 ]]; then __jetpack_spinner $__jetpack_kind $__jetpack_started &!; __jetpack_spinner_pid=$!; fi; }}\n\
          __jetpack_precmd() {{ local code=$?; [[ -n $__jetpack_kind ]] || return; if [[ -n $__jetpack_spinner_pid ]]; then kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; if [[ ${{+NO_COLOR}} = 1 ]]; then printf '\\r                                        \\r' >&2; else printf '\\r\\033[2K' >&2; fi; fi; local elapsed=$(( EPOCHSECONDS - __jetpack_started )) result; [[ $code = 0 ]] && result=ok || result=\"failed ($code)\"; [[ $__jetpack_kind = build ]] && __jetpack_build_status=\"$result · ${{elapsed}}s\" || __jetpack_test_status=\"$result · ${{elapsed}}s\"; if [[ ${{+NO_COLOR}} = 1 ]]; then printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else [[ $code = 0 ]] && printf '\\033[{success}m✓\\033[0m %s ok · %ss\\n' $__jetpack_kind $elapsed || printf '\\033[{error}m✗\\033[0m %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; fi; if [[ $code != 0 ]]; then [[ ${{+NO_COLOR}} = 1 ]] && printf '%s\\n' \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\" || printf '\\033[{warn}m→\\033[0m %s\\n' \"$__jetpack_kind failed. Rerun: $__jetpack_command\"; fi; __jetpack_kind=''; __jetpack_spinner_pid=''; }}\n\
@@ -573,6 +574,8 @@ mod tests {
         assert!(zsh.contains("bindkey '^[?' __jetpack_help_prefill"));
         assert!(zsh.contains("jet() {"));
         assert!(zsh.contains("print -z --"));
+        assert!(zsh.contains("alias jet='noglob jet'"));
+        assert!(zsh.contains("setopt NO_NOMATCH"));
 
         let fish = fish_init("web-api", PromptPathMode::Short, PromptStripMode::Off);
         assert!(fish.contains("commandline -r -- \"$picked\""));
@@ -656,8 +659,15 @@ mod tests {
         std::fs::remove_file(&marker).unwrap();
 
         let zdir = write_temp_dir("jetpack-help-zdotdir-literal");
+        // Hostile: a one-character pathname must not steal bare `jet ?` via zsh glob.
+        std::fs::write(zdir.join("x"), "").unwrap();
         std::fs::write(zdir.join(".zshrc"), zsh_rc("help", PromptPathMode::Short, PromptStripMode::Off)).unwrap();
-        let zsh = format!("PATH={} ZDOTDIR={} zsh -d -i", shell_single_quote(&path), zdir.display());
+        let zsh = format!(
+            "cd {} && PATH={} ZDOTDIR={} zsh -d -i",
+            shell_single_quote(&zdir.display().to_string()),
+            shell_single_quote(&path),
+            shell_single_quote(&zdir.display().to_string())
+        );
         let zsh_literal_out = pty_prefill_oracle(&zsh, &marker, b"jet ?\n");
         let _ = std::fs::remove_dir_all(zdir);
         assert!(zsh_literal_out.contains("JET_HELP_WIDGET_RETURNED"), "{zsh_literal_out}");
