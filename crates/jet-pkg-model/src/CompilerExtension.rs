@@ -70,6 +70,12 @@ pub const APPLICATION_PLUGIN_WORLD: &str = "jetplugin";
 /// the host runtime; typed decode is host-owned).
 pub const ANALYZE_EXPORT: &str = "analyze";
 
+/// Expert env registration until a user-facing spelling is balloted
+/// (D-DX5-HOOK1: "Exact user-facing registration spelling remains a later
+/// ballot if new syntax is needed"). Absolute or relative path to one
+/// `compiler-extension-v1` `.wasm` component. Unset → skip the post-sema hook.
+pub const ENV_COMPILER_EXTENSION: &str = "JET_COMPILER_EXTENSION";
+
 /// Capabilities a v1 component may negotiate. Later stages extend this set
 /// rather than inventing a second plugin system (D-DX5-HOOK1 hybrid law).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -758,6 +764,69 @@ pub fn parse_analyze_result(wire: &str) -> Result<Vec<u8>, ProtocolError> {
 pub fn message_exposes_rustc(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     lower.contains("rustc") || lower.contains("error[e") || lower.contains("--explain")
+}
+
+/// Load → analyze → validate/stage → accept → close through the real wasmtime
+/// host. Fail-closed: guest traps and protocol errors never panic or commit.
+pub fn analyze_wasm_component(
+    wasm_path: &str,
+    snapshot: &TypedSnapshot,
+) -> Result<AnalyzeResponse, ProtocolError> {
+    use crate::CompilerExtensionHost::{
+        jet_compiler_extension_analyze, jet_compiler_extension_close, jet_compiler_extension_load,
+    };
+
+    let wire = jet_compiler_extension_load(wasm_path);
+    let handle = match parse_load_result(&wire) {
+        Ok(h) => h,
+        Err(e) => {
+            if message_exposes_rustc(&e.message) {
+                return Err(ProtocolError::new(
+                    "compiler-extension failed with an internal message",
+                ));
+            }
+            return Err(e);
+        }
+    };
+    let mut session = ExtensionSession::new();
+    if let Err(e) = session.on_loaded(handle) {
+        let _ = jet_compiler_extension_close(handle);
+        return Err(e);
+    }
+
+    let snap_bytes = match snapshot.encode() {
+        Ok(b) => b,
+        Err(e) => {
+            let _ = session.close(jet_compiler_extension_close);
+            return Err(e);
+        }
+    };
+    let analyze_wire = jet_compiler_extension_analyze(handle, &snap_bytes);
+    let raw = match parse_analyze_result(&analyze_wire) {
+        Ok(b) => b,
+        Err(e) => {
+            let _ = session.close(jet_compiler_extension_close);
+            if message_exposes_rustc(&e.message) {
+                return Err(ProtocolError::new(
+                    "compiler-extension failed with an internal message",
+                ));
+            }
+            return Err(e);
+        }
+    };
+    if let Err(e) = session.stage_response(snapshot, &raw) {
+        let _ = session.close(jet_compiler_extension_close);
+        return Err(e);
+    }
+    let accepted = match session.accept_staged() {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = session.close(jet_compiler_extension_close);
+            return Err(e);
+        }
+    };
+    let _ = session.close(jet_compiler_extension_close);
+    Ok(accepted)
 }
 
 /// This host's mechanism identity.

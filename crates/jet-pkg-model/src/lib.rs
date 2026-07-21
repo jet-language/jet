@@ -58,6 +58,10 @@ pub mod Envelope;
 // from application `target: plugin` and PATH `jet-*` helpers; reuses the
 // wasmtime Component Model substrate owned beside `Prelude/Plugin.rs`).
 pub mod CompilerExtension;
+/// In-process wasmtime host for `compiler-extension-v1` (same source as
+/// `FFI::COMPILER_EXTENSION_RUNTIME` / `Prelude/CompilerExtension.rs`).
+#[path = "Prelude/CompilerExtension.rs"]
+pub mod CompilerExtensionHost;
 pub mod FFI;
 pub mod JSON;
 pub mod LintPolicy;

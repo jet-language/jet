@@ -296,8 +296,13 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   `crates/jet-pkg-model/fixtures/compiler_extension/` through the same
   `Prelude/CompilerExtension.rs` host. Proves one custom-lint finding
   round-trip plus fail-closed crash / malformed / incompatible / fuel-exhaust
-  guests (Jet-owned `E:` wires; no rustc leak; no auto-commit). Compiler
-  post-sema wiring and wall-clock epoch `timeout_ms` enforcement remain open.
+  guests (Jet-owned `E:` wires; no rustc leak; no auto-commit).
+- **Post-sema driver wire:** when `JET_COMPILER_EXTENSION` names a component
+  path (expert env registration — no new user syntax until a spelling ballot),
+  `jet-driver::CompilerExtensionHook` freezes a typed snapshot after sema,
+  runs `CompilerExtension::analyze_wasm_component`, and maps findings to
+  `L1401` or host failures to `E1402`. Wall-clock epoch `timeout_ms`
+  enforcement and nondeterminism policy remain open.
 
 ## Rules
 

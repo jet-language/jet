@@ -414,7 +414,8 @@ fn compiler_seam_crates_have_only_path_dependencies() {
         ("jetpack", &["D-DEP-CRYPTO1=A"]),
         // Card #367 / D-PRODUCT-SPLIT1=C: FFI.rs (the rustls test-only
         // loopback peer) moved from `jetpack` to `jet-pkg-model`.
-        ("jet-pkg-model", &["D-DEP1", "D-EMAIL-DKIM-CONFIG1"]),
+        // D-DX5-HOOK1: in-process compiler-extension wasmtime host (#549).
+        ("jet-pkg-model", &["D-DEP1", "D-EMAIL-DKIM-CONFIG1", "D-DX5-HOOK1"]),
     ];
 
     let root = root();

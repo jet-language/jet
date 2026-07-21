@@ -157,6 +157,22 @@ fn ui_snapshots() {
         let jetpack_hangar_digest_mismatch = src
             .lines()
             .any(|line| line.trim() == "// @jetpack_hangar_digest_mismatch");
+        // D-DX5-HOOK1 / Tower #549: `// @compiler_extension <repo-relative.wasm>`
+        // sets JET_COMPILER_EXTENSION for this fixture only (no user syntax).
+        let compiler_extension = src.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("// @compiler_extension ")
+                .map(|p| p.trim().to_string())
+        });
+        if let Some(ref rel) = compiler_extension {
+            let wasm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+            std::env::set_var(
+                "JET_COMPILER_EXTENSION",
+                wasm.to_str().expect("utf-8 wasm path"),
+            );
+        } else {
+            std::env::remove_var("JET_COMPILER_EXTENSION");
+        }
         let actual = if jetpack_hangar_digest_mismatch {
             run_jetpack_hangar_digest_mismatch_snapshot()
         } else if programmable_build {
@@ -245,6 +261,9 @@ fn ui_snapshots() {
                 Ok(_) => "(no errors)\n".to_string(),
             }
         };
+        if compiler_extension.is_some() {
+            std::env::remove_var("JET_COMPILER_EXTENSION");
+        }
         let actual = normalize_volatile_ui_snapshot(&shown_path, actual);
 
         let expect_path = if path.file_name().unwrap() == "main.jet" {
@@ -429,13 +448,35 @@ fn lint_snapshots() {
         let src = fs::read_to_string(&path).unwrap();
         let shown_path = format!("tests/ui_lint/{}", name);
 
+        // D-DX5-HOOK1: optional `// @compiler_extension <repo-relative.wasm>`.
+        let compiler_extension = src.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("// @compiler_extension ")
+                .map(|p| p.trim().to_string())
+        });
+        if let Some(ref rel) = compiler_extension {
+            let wasm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+            std::env::set_var(
+                "JET_COMPILER_EXTENSION",
+                wasm.to_str().expect("utf-8 wasm path"),
+            );
+        } else {
+            std::env::remove_var("JET_COMPILER_EXTENSION");
+        }
+
         let out = jet::compile_with_path(&src, &path.to_string_lossy()).unwrap_or_else(|diags| {
+            if compiler_extension.is_some() {
+                std::env::remove_var("JET_COMPILER_EXTENSION");
+            }
             panic!(
                 "lint fixture {} must compile:\n{}",
                 name,
                 jet::render_diagnostics(&shown_path, &src, &diags)
             );
         });
+        if compiler_extension.is_some() {
+            std::env::remove_var("JET_COMPILER_EXTENSION");
+        }
         assert!(
             !out.lints.is_empty(),
             "lint fixture {} should emit at least one lint",

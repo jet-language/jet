@@ -1611,6 +1611,7 @@ fn compile_bundle_path_opts_full(
     for d in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
+        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle))
     {
         match d.severity {
             Severity::Error => errors.push(d),
@@ -1979,6 +1980,7 @@ fn check_file_with_effect_facts_impl(
                     diags.push(bad_build_signature(build.name_span));
                 }
             }
+            diags.extend(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle));
             (diags, Some(bundle), facts, dependencies)
         }
         Err(diags) => (
@@ -2025,6 +2027,7 @@ pub fn check_file_with_overlays_and_import_root(
                 crate::Sema::CompileMode::Check,
             );
             diags.extend(check_diags);
+            diags.extend(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle));
             (diags, Some(bundle), facts)
         }
         Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
@@ -2181,6 +2184,7 @@ pub fn compile_bundle_path_with_entry(
     for d in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
+        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle))
     {
         match d.severity {
             Severity::Error => errors.push(d),

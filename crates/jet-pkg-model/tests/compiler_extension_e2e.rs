@@ -1,26 +1,24 @@
 //! Tower #549 C4 — real compiler-extension WASM guest harness.
 //!
-//! Compiles the include_str host (`Prelude/CompilerExtension.rs`) in-process
-//! with the ratified wasmtime Component Model pin, drives fixture components
-//! under `fixtures/compiler_extension/`, and proves:
+//! Drives fixture components under `fixtures/compiler_extension/` through the
+//! compiled `CompilerExtensionHost` (same wasmtime substrate the driver uses)
+//! and proves:
 //! - one custom-lint finding analyze → validate → stage → accept round-trip
 //! - crash / malformed / incompatible / fuel-exhaust guests fail closed
 //!   (Jet `E:` wires, no process abort, no rustc leak, no auto-commit)
 //!
-//! Compiler post-sema wiring and wall-clock epoch `timeout_ms` remain open.
+//! Driver post-sema wire lives in `jet-driver::CompilerExtensionHook`.
+//! Wall-clock epoch `timeout_ms` and nondeterminism policy remain open.
 
 #![allow(non_snake_case)]
 
-#[path = "../src/Prelude/CompilerExtension.rs"]
-mod extension_host;
-
-use extension_host::{
-    jet_compiler_extension_analyze, jet_compiler_extension_close, jet_compiler_extension_load,
-};
 use jet_pkg_model::CompilerExtension::{
     message_exposes_rustc, parse_analyze_result, parse_load_result, AnalyzeResponse, Capability,
     ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact, SymbolFact, TypedSnapshot,
     TypeFact,
+};
+use jet_pkg_model::CompilerExtensionHost::{
+    jet_compiler_extension_analyze, jet_compiler_extension_close, jet_compiler_extension_load,
 };
 use std::path::PathBuf;
 
@@ -185,4 +183,15 @@ fn fuel_exhaustion_times_out_fail_closed() {
     assert!(session.staged().is_none());
     assert!(!session.is_committed());
     assert!(session.close(jet_compiler_extension_close));
+}
+
+#[test]
+fn analyze_wasm_component_helper_accepts_lint() {
+    let snap = sample_snapshot();
+    let path = fixture("lint_no_x.wasm");
+    let accepted =
+        jet_pkg_model::CompilerExtension::analyze_wasm_component(path.to_str().unwrap(), &snap)
+            .expect("helper round-trip");
+    assert_eq!(accepted.findings.len(), 1);
+    assert_eq!(accepted.findings[0].rule, "no-x");
 }
