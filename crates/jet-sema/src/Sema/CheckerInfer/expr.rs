@@ -2282,12 +2282,18 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         if let Expr::Field(base, leaf, _) = &**inner {
             if let Expr::Ident(alias, _) = &**base {
-                if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding")
-                    && leaf == "DataEvent"
-                {
-                    **inner = Expr::Ident("DataEvent".to_string(), span);
-                    let mut empty = Vec::new();
-                    return Some(self.check_enum_lit("DataEvent", member, &mut empty, span));
+                if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
+                    let enum_name = match leaf.as_str() {
+                        "DataEvent" => Some("DataEvent"),
+                        "EncodingFormat" => Some("EncodingFormat"),
+                        "EncodingErrorKind" => Some("EncodingErrorKind"),
+                        _ => None,
+                    };
+                    if let Some(enum_name) = enum_name {
+                        **inner = Expr::Ident(enum_name.to_string(), span);
+                        let mut empty = Vec::new();
+                        return Some(self.check_enum_lit(enum_name, member, &mut empty, span));
+                    }
                 }
             }
         }

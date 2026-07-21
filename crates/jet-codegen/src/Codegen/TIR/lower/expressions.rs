@@ -1098,6 +1098,27 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // Resolve the head here (totality); a missing alias falls to `user_unknown`,
             // exactly as the AST path (the gate already required the alias to resolve).
             if let Some(alias) = import_ns {
+                if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding")
+                    && matches!(
+                        type_name.as_str(),
+                        "EncodingLimits" | "EncodingCause" | "EncodingError"
+                    )
+                    && type_args.is_empty()
+                {
+                    let tfields = fields
+                        .iter()
+                        .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                        .collect();
+                    return TExpr {
+                        ty: Type::Named(type_name.clone()),
+                        kind: TExprKind::StructLit {
+                            rust_type: format!("{}jet_std::{}", cx.root_prefix, type_name),
+                            fields: tfields,
+                            extra: None,
+                            as_trait: None,
+                        },
+                    };
+                }
                 if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor")
                     && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
                     && type_args.is_empty()
@@ -1265,6 +1286,25 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
+            // D-ENCSTREAM-SURFACE1=A: shared encoding value constructors.
+            if matches!(
+                type_name.as_str(),
+                "EncodingLimits" | "EncodingCause" | "EncodingError"
+            ) {
+                let tfields = fields
+                    .iter()
+                    .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
+                    .collect();
+                return TExpr {
+                    ty: Type::Named(type_name.clone()),
+                    kind: TExprKind::StructLit {
+                        rust_type: format!("{}jet_std::{type_name}", cx.root_prefix),
+                        fields: tfields,
+                        extra: None,
+                        as_trait: None,
+                    },
+                };
+            }
             // D-VALIDATE1: `FieldError.{ path: …, reason: … }` — same shape,
             // separate jet_std Rust head.
             if type_name == "FieldError" {
@@ -1426,6 +1466,23 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ty: Type::Named("DataEvent".to_string()),
                         kind: TExprKind::EnumLit {
                             prefix: format!("{}jet_std::DataEvent::{}", cx.root_prefix, member),
+                            payload: TEnumPayload::Unit,
+                        },
+                    };
+                }
+                if env.ty_of(enum_name).is_none()
+                    && ((enum_name == "EncodingFormat"
+                        && matches!(member.as_str(), "JSON" | "JSONL" | "CSV" | "XML" | "CBOR"))
+                        || (enum_name == "EncodingErrorKind"
+                            && matches!(
+                                member.as_str(),
+                                "Syntax" | "Truncated" | "Unsupported" | "Limit" | "IO" | "State"
+                            )))
+                {
+                    return TExpr {
+                        ty: Type::Named(enum_name.clone()),
+                        kind: TExprKind::EnumLit {
+                            prefix: format!("{}jet_std::{}::{}", cx.root_prefix, enum_name, member),
                             payload: TEnumPayload::Unit,
                         },
                     };

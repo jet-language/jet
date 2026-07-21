@@ -34,7 +34,33 @@ impl<'a> Checker<'a> {
                 ("core.tls", "TlsVersion") => Some(Type::Named("TlsVersion".to_string())),
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
                 ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
+                // D-ENCSTREAM-SURFACE1=A: shared encoding values are module fields on
+                // `core.encoding`, then unit/payload constructors attach as Field/Call.
                 ("core.encoding", "DataEvent") => Some(Type::Named("DataEvent".to_string())),
+                ("core.encoding", "EncodingLimits") => Some(Type::Named("EncodingLimits".to_string())),
+                ("core.encoding", "EncodingError") => Some(Type::Named("EncodingError".to_string())),
+                ("core.encoding", "EncodingCause") => Some(Type::Named("EncodingCause".to_string())),
+                ("core.encoding", "EncodingFormat") => Some(Type::Named("EncodingFormat".to_string())),
+                ("core.encoding", "EncodingErrorKind") => {
+                    Some(Type::Named("EncodingErrorKind".to_string()))
+                }
+                (
+                    "core.encoding.json",
+                    "JSONReader" | "JSONWriter",
+                ) => Some(Type::Named(name.to_string())),
+                (
+                    "core.encoding.jsonl",
+                    "JSONLReader" | "JSONLWriter",
+                ) => Some(Type::Named(name.to_string())),
+                ("core.encoding.csv", "CSVReader" | "CSVWriter") => {
+                    Some(Type::Named(name.to_string()))
+                }
+                ("core.encoding.xml", "XMLReader" | "XMLWriter") => {
+                    Some(Type::Named(name.to_string()))
+                }
+                ("core.encoding.cbor", "CBORReader" | "CBORWriter") => {
+                    Some(Type::Named(name.to_string()))
+                }
                 _ => {
                     self.diags.push(unknown_core_item(module, name, span));
                     let _ = alias_span;

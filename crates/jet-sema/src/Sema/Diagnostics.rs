@@ -804,6 +804,19 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         }
         Type::List(inner) => types_comparable(inner, registry),
         Type::Named(name) if name == "U8" => true,
+        // D-ENCSTREAM-SURFACE1=A: shared encoding value types compare by value.
+        Type::Named(name)
+            if matches!(
+                name.as_str(),
+                "EncodingFormat"
+                    | "EncodingErrorKind"
+                    | "EncodingCause"
+                    | "EncodingError"
+                    | "EncodingLimits"
+            ) =>
+        {
+            true
+        }
         Type::Named(name) => registry.contains(name) && incomparable_field(ty, registry).is_none(),
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, .. } if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") => false,

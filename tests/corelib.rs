@@ -490,7 +490,11 @@ fn run() {
 fn encoding_stream_foundation_types_are_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(&dir, "encoding_foundation",
+    let path = dir.join("foundation.json");
+    let bad_path = dir.join("bad-limits.json");
+    let path_text = path.to_string_lossy().replace('\\', "\\\\");
+    let bad_text = bad_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
         r#"
 use core.encoding as encoding
 use core.encoding.json as json
@@ -498,33 +502,102 @@ use core.encoding.jsonl as jsonl
 use core.encoding.csv as csv
 use core.encoding.xml as xml
 use core.encoding.cbor as cbor
+use core.files as files
 
-fn keep_error(v: ^encoding.EncodingError) -> encoding.EncodingError { return v }
-fn keep_cause(v: ^encoding.EncodingCause) -> encoding.EncodingCause { return v }
-fn keep_event(v: ^encoding.DataEvent) -> encoding.DataEvent { return v }
-fn keep_format(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat { return v }
-fn keep_kind(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind { return v }
-fn keep_json_reader(v: ^json.JSONReader) -> json.JSONReader { return v }
-fn keep_json_writer(v: ^json.JSONWriter) -> json.JSONWriter { return v }
-fn keep_jsonl_reader(v: ^jsonl.JSONLReader) -> jsonl.JSONLReader { return v }
-fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) -> jsonl.JSONLWriter { return v }
-fn keep_csv_reader(v: ^csv.CSVReader) -> csv.CSVReader { return v }
-fn keep_csv_writer(v: ^csv.CSVWriter) -> csv.CSVWriter { return v }
-fn keep_xml_reader(v: ^xml.XMLReader) -> xml.XMLReader { return v }
-fn keep_xml_writer(v: ^xml.XMLWriter) -> xml.XMLWriter { return v }
-fn keep_cbor_reader(v: ^cbor.CBORReader) -> cbor.CBORReader { return v }
-fn keep_cbor_writer(v: ^cbor.CBORWriter) -> cbor.CBORWriter { return v }
+fn keep_error(v: ^encoding.EncodingError) -> encoding.EncodingError {{ return v }}
+fn keep_cause(v: ^encoding.EncodingCause) -> encoding.EncodingCause {{ return v }}
+fn keep_event(v: ^encoding.DataEvent) -> encoding.DataEvent {{ return v }}
+fn keep_format(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat {{ return v }}
+fn keep_kind(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind {{ return v }}
+fn keep_json_reader(v: ^json.JSONReader) -> json.JSONReader {{ return v }}
+fn keep_json_writer(v: ^json.JSONWriter) -> json.JSONWriter {{ return v }}
+fn keep_jsonl_reader(v: ^jsonl.JSONLReader) -> jsonl.JSONLReader {{ return v }}
+fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) -> jsonl.JSONLWriter {{ return v }}
+fn keep_csv_reader(v: ^csv.CSVReader) -> csv.CSVReader {{ return v }}
+fn keep_csv_writer(v: ^csv.CSVWriter) -> csv.CSVWriter {{ return v }}
+fn keep_xml_reader(v: ^xml.XMLReader) -> xml.XMLReader {{ return v }}
+fn keep_xml_writer(v: ^xml.XMLWriter) -> xml.XMLWriter {{ return v }}
+fn keep_cbor_reader(v: ^cbor.CBORReader) -> cbor.CBORReader {{ return v }}
+fn keep_cbor_writer(v: ^cbor.CBORWriter) -> cbor.CBORWriter {{ return v }}
 
-fn run() {
+fn run() {{
     limits: encoding.EncodingLimits := encoding.EncodingLimits.safe()
-    print("{limits.buffer_bytes}:{limits.max_depth}:{limits.max_item_bytes}:{limits.max_expansion_depth}:{limits.max_expansion_bytes}")
-}
-"#,
-        &[],
-        None,
+    print("{{limits.buffer_bytes}}:{{limits.max_depth}}:{{limits.max_item_bytes}}:{{limits.max_expansion_depth}}:{{limits.max_expansion_bytes}}")
+    if limits.max_total_bytes == None {{ print(true) }} else {{ print(false) }}
+    print(keep_format(^encoding.EncodingFormat.JSON) == encoding.EncodingFormat.JSON)
+    print(keep_kind(^encoding.EncodingErrorKind.Limit) == encoding.EncodingErrorKind.Limit)
+
+    cause := encoding.EncodingCause.{{ kind: "io", os_code: None, message: "nope" }}
+    kept_cause := keep_cause(^cause)
+    print(kept_cause.kind)
+    print(kept_cause.message)
+
+    err := encoding.EncodingError.{{
+        format: encoding.EncodingFormat.JSON,
+        kind: encoding.EncodingErrorKind.Limit,
+        byte_offset: 0,
+        line: None,
+        column: None,
+        path: "",
+        reason: "buffer_bytes 1 is outside 4096..16777216",
+        cause: None,
+    }}
+    kept_err := keep_error(^err)
+    print(kept_err.format == encoding.EncodingFormat.JSON)
+    print(kept_err.kind == encoding.EncodingErrorKind.Limit)
+    print(kept_err.byte_offset)
+    if kept_err.cause == None {{ print(true) }} else {{ print(false) }}
+    print("{{kept_err}}")
+
+    event := encoding.DataEvent.Null
+    kept_event := keep_event(^event)
+    print(true)
+
+    output :: files.create("{path_text}") ?? panic("create")
+    writer :: json.writer(^output, limits, false) ?? panic("writer")
+    kept_writer := keep_json_writer(^writer)
+    kept_writer.write(encoding.DataEvent.Null) ?? panic("write")
+    kept_writer.finish() ?? panic("finish")
+
+    bad := encoding.EncodingLimits.safe()
+    bad.buffer_bytes = 1
+    bad_output :: files.create("{bad_text}") ?? panic("bad create")
+    if json.writer(^bad_output, bad, false) == {{
+        Ok(_) -> {{ print("limits-missed") }}
+        Err(reject) -> {{
+            print("{{reject}}")
+            print(reject.format == encoding.EncodingFormat.JSON)
+            print(reject.kind == encoding.EncodingErrorKind.Limit)
+            print(reject.reason)
+        }}
+    }}
+}}
+"#
     );
+    let (code, stdout, stderr) = build_and_run(&dir, "encoding_foundation", &source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert_eq!(stdout, "65536:256:16777216:32:8388608\n");
+    assert_eq!(
+        stdout,
+        concat!(
+            "65536:256:16777216:32:8388608\n",
+            "true\n",
+            "true\n",
+            "true\n",
+            "io\n",
+            "nope\n",
+            "true\n",
+            "true\n",
+            "0\n",
+            "true\n",
+            "JSON Limit at byte 0: buffer_bytes 1 is outside 4096..16777216\n",
+            "true\n",
+            "JSON Limit at byte 0, line 1, column 1: buffer_bytes 1 is outside 4096..16777216\n",
+            "true\n",
+            "true\n",
+            "buffer_bytes 1 is outside 4096..16777216\n",
+        )
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), "null");
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);
 }

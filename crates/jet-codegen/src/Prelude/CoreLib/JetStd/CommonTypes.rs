@@ -36,6 +36,41 @@
         pub line: Option<i64>, pub column: Option<i64>, pub path: String,
         pub reason: String, pub cause: Option<EncodingCause>,
     }
+    impl EncodingError {
+        /// D-ENCSTREAM-SURFACE1=A: handle-free IO snapshot when kind is IO.
+        pub fn cause(&self) -> Option<EncodingCause> {
+            self.cause.clone()
+        }
+        fn display_text(&self) -> String {
+            let mut out = format!("{:?} {:?} at byte {}", self.format, self.kind, self.byte_offset);
+            if let Some(line) = self.line {
+                out.push_str(&format!(", line {line}"));
+            }
+            if let Some(column) = self.column {
+                out.push_str(&format!(", column {column}"));
+            }
+            if !self.path.is_empty() {
+                out.push_str(&format!(", path {}", self.path));
+            }
+            out.push_str(&format!(": {}", self.reason));
+            out
+        }
+    }
+    impl std::fmt::Display for EncodingError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.display_text())
+        }
+    }
+    impl super::JetShow for EncodingError {
+        fn jet_show(&self) -> String {
+            self.display_text()
+        }
+    }
+    impl super::JetDisplay for EncodingError {
+        fn jet_display(&self) -> String {
+            self.display_text()
+        }
+    }
     #[derive(Clone, Debug, PartialEq)]
     pub enum DataEvent {
         Null, Bool(bool), Int(i64), Float(f64), Text(String), Bytes(Vec<u8>),

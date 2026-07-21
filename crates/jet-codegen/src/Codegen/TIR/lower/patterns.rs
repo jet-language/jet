@@ -600,6 +600,9 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if type_name == "DataEvent" {
         return format!("{}jet_std::DataEvent::{}", cx.root_prefix, variant);
     }
+    if matches!(type_name, "EncodingFormat" | "EncodingErrorKind") {
+        return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
+    }
     if matches!(type_name, "XMLEncoding" | "XMLLexicalPolicy" | "XMLCanonicalMode") {
         return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);
     }

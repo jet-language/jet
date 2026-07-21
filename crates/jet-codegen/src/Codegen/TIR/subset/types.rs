@@ -365,6 +365,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     matches!(
         name,
         "HttpRequest" | "HttpResponse" | "TextWidth" | "AsyncPolicy" | "DecodeError" | "FieldError"
+            | "EncodingLimits" | "EncodingCause" | "EncodingError"
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"
             | "XMLRenderOptions" | "XMLCanonical" | "XMLError"
             | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig"
