@@ -10,9 +10,10 @@ use std::collections::BTreeMap;
 
 pub const TRACE_SCHEMA: &str = "jet.trace";
 pub const TRACE_VERSION: &str = "1";
-pub const CAPTURE_POLICY_SCHEMA: &str = "2";
+pub const CAPTURE_POLICY_SCHEMA: &str = "3";
 pub const TRACE_TASK_ROW_LIMIT: u64 = 4096;
 pub const TRACE_IO_ROW_LIMIT: u64 = 4096;
+pub const TRACE_NATIVE_ROW_LIMIT: u64 = 1;
 
 /// Default privacy exclusions from D-PERFSESSION1 (sorted for A-canonical bytes).
 pub const DEFAULT_EXCLUSIONS: &[&str] = &[
@@ -58,6 +59,7 @@ impl TraceToolchain {
 pub struct CapturePolicy {
     pub allowlist: Vec<String>,
     pub io_rows_truncated: bool,
+    pub native_rows_truncated: bool,
     pub task_rows_truncated: bool,
 }
 
@@ -66,6 +68,7 @@ impl CapturePolicy {
         Self {
             allowlist: Vec::new(),
             io_rows_truncated: false,
+            native_rows_truncated: false,
             task_rows_truncated: false,
         }
     }
@@ -91,6 +94,14 @@ impl CapturePolicy {
             (
                 "io_rows_truncated".into(),
                 CanonicalJson::Bool(self.io_rows_truncated),
+            ),
+            (
+                "native_row_limit".into(),
+                CanonicalJson::Integer(TRACE_NATIVE_ROW_LIMIT.to_string()),
+            ),
+            (
+                "native_rows_truncated".into(),
+                CanonicalJson::Bool(self.native_rows_truncated),
             ),
             ("schema".into(), CanonicalJson::Integer(CAPTURE_POLICY_SCHEMA.into())),
             (
@@ -309,6 +320,50 @@ impl TraceIo {
     }
 }
 
+/// One bounded aggregate of native process CPU time. No native frames,
+/// arguments, environment, or process id enter the artifact.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceNative {
+    pub clock: String,
+    /// Cumulative profiled-process CPU time at observation.
+    pub duration_ns: Option<u64>,
+    /// Monotonic nanoseconds from this trace session's start.
+    pub observed_at_ns: u64,
+    pub reason: String,
+    pub status: String,
+    pub symbol: JetSymbolRef,
+    pub target: String,
+    pub task_id: Option<u64>,
+}
+
+impl TraceNative {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("clock".into(), CanonicalJson::String(self.clock.clone())),
+            (
+                "duration_ns".into(),
+                self.duration_ns
+                    .map(|value| CanonicalJson::Integer(value.to_string()))
+                    .unwrap_or(CanonicalJson::Null),
+            ),
+            (
+                "observed_at_ns".into(),
+                CanonicalJson::Integer(self.observed_at_ns.to_string()),
+            ),
+            ("reason".into(), CanonicalJson::String(self.reason.clone())),
+            ("status".into(), CanonicalJson::String(self.status.clone())),
+            ("symbol".into(), self.symbol.to_json()?),
+            ("target".into(), CanonicalJson::String(self.target.clone())),
+            (
+                "task_id".into(),
+                self.task_id
+                    .map(|value| CanonicalJson::Integer(value.to_string()))
+                    .unwrap_or(CanonicalJson::Null),
+            ),
+        ])
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceIdentity {
     pub path: String,
@@ -348,6 +403,7 @@ pub struct TraceSkeleton {
     pub tasks: Vec<TraceTask>,
     pub locks: Vec<TraceLock>,
     pub io: Vec<TraceIo>,
+    pub native: Vec<TraceNative>,
     pub source_identity: Vec<SourceIdentity>,
 }
 
@@ -379,6 +435,11 @@ impl TraceSkeleton {
             .iter()
             .map(TraceIo::to_json)
             .collect::<Result<Vec<_>, _>>()?;
+        let native = self
+            .native
+            .iter()
+            .map(TraceNative::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
         let source_identity = self
             .source_identity
             .iter()
@@ -392,7 +453,7 @@ impl TraceSkeleton {
             ("command".into(), CanonicalJson::String(self.command.clone())),
             ("io".into(), CanonicalJson::Array(io)),
             ("locks".into(), CanonicalJson::Array(locks)),
-            ("native".into(), CanonicalJson::Array(Vec::new())),
+            ("native".into(), CanonicalJson::Array(native)),
             ("samples".into(), CanonicalJson::Array(samples)),
             ("source_identity".into(), CanonicalJson::Array(source_identity)),
             ("spans".into(), CanonicalJson::Array(Vec::new())),
@@ -494,6 +555,9 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     let tasks = validate_tasks(&fields["tasks"], limits.task_rows)?;
     validate_locks(&fields["locks"])?;
     validate_io(&fields["io"], &tasks, limits.io_rows)?;
+    if let Some(limit) = limits.native_rows {
+        validate_native(&fields["native"], &tasks, limit)?;
+    }
     validate_source_identity(&fields["source_identity"])?;
     validate_toolchain(&fields["toolchain"])?;
     Ok(())
@@ -716,6 +780,77 @@ fn validate_io(
     Ok(())
 }
 
+fn validate_native(
+    value: &CanonicalJson,
+    tasks: &BTreeMap<u64, (u64, String, String, CanonicalJson)>,
+    row_limit: usize,
+) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.native is not an array".into()),
+    };
+    if items.len() > row_limit {
+        return Err("content.native exceeds capture_policy.native_row_limit".into());
+    }
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.native[{i}]");
+        let fields = object_keys(
+            item,
+            &label,
+            &[
+                "clock",
+                "duration_ns",
+                "observed_at_ns",
+                "reason",
+                "status",
+                "symbol",
+                "target",
+                "task_id",
+            ],
+        )?;
+        if text(&fields["clock"], &format!("{label}.clock"))? != "process_cpu" {
+            return Err(format!("{label}.clock must be process_cpu"));
+        }
+        unsigned(&fields["observed_at_ns"], &format!("{label}.observed_at_ns"))?;
+        let reason = text(&fields["reason"], &format!("{label}.reason"))?;
+        let status = text(&fields["status"], &format!("{label}.status"))?;
+        if text(&fields["target"], &format!("{label}.target"))?.is_empty() {
+            return Err(format!("{label}.target is empty"));
+        }
+        validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+        match status {
+            "captured" => {
+                unsigned(&fields["duration_ns"], &format!("{label}.duration_ns"))?;
+                let task_id = unsigned(&fields["task_id"], &format!("{label}.task_id"))?;
+                let Some((parent, _, _, task_symbol)) = tasks.get(&task_id) else {
+                    return Err(format!("{label}.task_id refers to missing task {task_id}"));
+                };
+                if *parent != 0 {
+                    return Err(format!("{label}.task_id must identify the root task"));
+                }
+                if &fields["symbol"] != task_symbol {
+                    return Err(format!("{label}.symbol does not match its task"));
+                }
+                if !reason.is_empty() {
+                    return Err(format!("{label}.reason must be empty when captured"));
+                }
+            }
+            "unavailable" => {
+                if fields["duration_ns"] != CanonicalJson::Null
+                    || fields["task_id"] != CanonicalJson::Null
+                {
+                    return Err(format!("{label} unavailable timing must not claim data"));
+                }
+                if reason.is_empty() {
+                    return Err(format!("{label}.reason is empty"));
+                }
+            }
+            _ => return Err(format!("{label}.status must be captured or unavailable")),
+        }
+    }
+    Ok(())
+}
+
 fn validate_source_identity(value: &CanonicalJson) -> Result<(), String> {
     let items = match value {
         CanonicalJson::Array(items) => items,
@@ -760,6 +895,7 @@ fn unsigned(value: &CanonicalJson, label: &str) -> Result<u64, String> {
 #[derive(Clone, Copy)]
 struct CaptureLimits {
     io_rows: Option<usize>,
+    native_rows: Option<usize>,
     task_rows: Option<usize>,
 }
 
@@ -779,10 +915,11 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
             // unknown/unbounded legacy semantics; never normalize it to false.
             CaptureLimits {
                 io_rows: None,
+                native_rows: None,
                 task_rows: None,
             },
         ),
-        Some(CanonicalJson::Integer(schema)) if schema == CAPTURE_POLICY_SCHEMA => (
+        Some(CanonicalJson::Integer(schema)) if schema == "2" => (
             object_keys(
                 value,
                 "capture_policy",
@@ -798,6 +935,29 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
             )?,
             CaptureLimits {
                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
+                native_rows: None,
+                task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
+            },
+        ),
+        Some(CanonicalJson::Integer(schema)) if schema == CAPTURE_POLICY_SCHEMA => (
+            object_keys(
+                value,
+                "capture_policy",
+                &[
+                    "allowlist",
+                    "default_exclusions",
+                    "io_row_limit",
+                    "io_rows_truncated",
+                    "native_row_limit",
+                    "native_rows_truncated",
+                    "schema",
+                    "task_row_limit",
+                    "task_rows_truncated",
+                ],
+            )?,
+            CaptureLimits {
+                io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
+                native_rows: Some(TRACE_NATIVE_ROW_LIMIT as usize),
                 task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
             },
         ),
@@ -827,6 +987,16 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
             if !matches!(fields[key], CanonicalJson::Bool(_)) {
                 return Err(format!("capture_policy.{key} is not a boolean"));
             }
+        }
+    }
+    if limits.native_rows.is_some() {
+        if unsigned(&fields["native_row_limit"], "capture_policy.native_row_limit")?
+            != TRACE_NATIVE_ROW_LIMIT
+        {
+            return Err("capture_policy native row limit does not match this schema".into());
+        }
+        if !matches!(fields["native_rows_truncated"], CanonicalJson::Bool(_)) {
+            return Err("capture_policy.native_rows_truncated is not a boolean".into());
         }
     }
     match &fields["allowlist"] {
@@ -922,6 +1092,7 @@ mod tests {
             tasks: Vec::new(),
             locks: Vec::new(),
             io: Vec::new(),
+            native: Vec::new(),
             source_identity: Vec::new(),
         }
     }
@@ -1152,16 +1323,66 @@ mod tests {
     }
 
     #[test]
+    fn native_timing_round_trips_with_root_causality_and_unavailable_state() {
+        let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
+        skeleton.tasks.push(TraceTask {
+            id: 1,
+            parent: 0,
+            state: "done".into(),
+            wait: String::new(),
+            cancelled: false,
+            symbol: symbol.clone(),
+        });
+        skeleton.native.push(TraceNative {
+            clock: "process_cpu".into(),
+            duration_ns: Some(42),
+            observed_at_ns: 99,
+            reason: String::new(),
+            status: "captured".into(),
+            symbol: symbol.clone(),
+            target: "x86_64-unknown-linux-gnu".into(),
+            task_id: Some(1),
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("\"native\":[{"), "{text}");
+        assert!(text.contains("\"duration_ns\":42"), "{text}");
+        assert!(text.contains("\"observed_at_ns\":99"), "{text}");
+        assert!(text.contains("\"task_id\":1"), "{text}");
+        verify_jettrace(&bytes).unwrap();
+
+        skeleton.tasks.clear();
+        skeleton.native[0] = TraceNative {
+            clock: "process_cpu".into(),
+            duration_ns: None,
+            observed_at_ns: 0,
+            reason: "process CPU timing is unavailable on target wasm32-unknown-unknown".into(),
+            status: "unavailable".into(),
+            symbol,
+            target: "wasm32-unknown-unknown".into(),
+            task_id: None,
+        };
+        verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap()).unwrap();
+    }
+
+    #[test]
     fn capture_policy_audits_fixed_row_caps_and_truncation() {
         let mut skeleton = sample_skeleton();
         skeleton.capture_policy.io_rows_truncated = true;
+        skeleton.capture_policy.native_rows_truncated = true;
         skeleton.capture_policy.task_rows_truncated = true;
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
         let text = String::from_utf8(bytes.clone()).unwrap();
         assert!(text.contains("\"capture_policy\":{\"allowlist\":[]"), "{text}");
-        assert!(text.contains("\"schema\":2,\"task_row_limit\""), "{text}");
+        assert!(text.contains("\"schema\":3,\"task_row_limit\""), "{text}");
         assert!(text.contains("\"io_row_limit\":4096"), "{text}");
         assert!(text.contains("\"io_rows_truncated\":true"), "{text}");
+        assert!(text.contains("\"native_row_limit\":1"), "{text}");
+        assert!(text.contains("\"native_rows_truncated\":true"), "{text}");
         assert!(text.contains("\"task_row_limit\":4096"), "{text}");
         assert!(text.contains("\"task_rows_truncated\":true"), "{text}");
         verify_jettrace(&bytes).unwrap();
@@ -1209,6 +1430,8 @@ mod tests {
         for key in [
             "io_row_limit",
             "io_rows_truncated",
+            "native_row_limit",
+            "native_rows_truncated",
             "task_row_limit",
             "task_rows_truncated",
         ] {
@@ -1223,6 +1446,21 @@ mod tests {
         assert!(!text.contains("rows_truncated"), "legacy truncation was fabricated: {text}");
         assert!(text.contains("\"version\":1"), "outer version changed: {text}");
         verify_jettrace(&bytes).unwrap();
+    }
+
+    #[test]
+    fn capture_policy_v2_remains_readable_with_unknown_native_limit() {
+        let mut content = sample_skeleton().content_json().unwrap();
+        let CanonicalJson::Object(fields) = &mut content else {
+            unreachable!()
+        };
+        let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+            unreachable!()
+        };
+        policy.remove("native_row_limit");
+        policy.remove("native_rows_truncated");
+        policy.insert("schema".into(), CanonicalJson::Integer("2".into()));
+        verify_jettrace(&jettrace_artifact(content).bytes()).unwrap();
     }
 
     #[test]

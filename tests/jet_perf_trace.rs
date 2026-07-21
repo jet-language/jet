@@ -1,6 +1,7 @@
 //! D-PERFSESSION1=D: `jet perf` writes/reads a versioned `.jettrace`.
-//! C1: command family + verify. C2: run/attach capture wall/alloc/tasks/locks/io
-//! with Jet symbol identity from the observe live snapshot.
+//! C1: command family + verify. C2: run/attach capture
+//! wall/alloc/tasks/locks/io/native timing with Jet symbol identity from the
+//! observe live snapshot.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -203,6 +204,25 @@ fn assert_honest_io(text: &str) {
     );
 }
 
+fn assert_honest_native(text: &str, expect_elapsed: bool) {
+    let native_at = text
+        .find("\"native\":[{")
+        .unwrap_or_else(|| panic!("missing native timing: {text}"));
+    let native = &text[native_at..];
+    assert!(native.contains("\"clock\":\"process_cpu\""), "{text}");
+    assert!(native.contains("\"status\":\"captured\""), "{text}");
+    assert!(native.contains("\"duration_ns\":"), "{text}");
+    let observed = json_u64_after(native, "observed_at_ns")
+        .unwrap_or_else(|| panic!("missing native session-relative clock: {text}"));
+    if expect_elapsed {
+        assert!(observed > 0, "run native observation did not advance: {text}");
+    }
+    assert!(native.contains("\"task_id\":1"), "{text}");
+    assert!(native.contains("\"target\":"), "{text}");
+    assert!(text.contains("\"native_row_limit\":1"), "{text}");
+    assert!(text.contains("\"native_rows_truncated\":false"), "{text}");
+}
+
 #[test]
 fn perf_run_keeps_completed_socket_echo_io_span() {
     if !common::have_rustc() {
@@ -362,6 +382,8 @@ fn perf_view_reads_hash_valid_legacy_capture_policy_v1() {
     for key in [
         "io_row_limit",
         "io_rows_truncated",
+        "native_row_limit",
+        "native_rows_truncated",
         "task_row_limit",
         "task_rows_truncated",
     ] {
@@ -500,6 +522,7 @@ fn run() {
     assert_honest_tasks(&text);
     assert_honest_locks(&text);
     assert_honest_io(&text);
+    assert_honest_native(&text, true);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("session.jet"), "{text}");
@@ -526,6 +549,8 @@ fn run() {
     assert!(!stdout.contains("locks count=0 "), "zero locks in view: {stdout}");
     assert!(stdout.contains("io count="), "{stdout}");
     assert!(!stdout.contains("io count=0 "), "zero io in view: {stdout}");
+    assert!(stdout.contains("native process_cpu="), "{stdout}");
+    assert!(stdout.contains("target="), "{stdout}");
     assert!(stdout.contains("session.jet#run"), "{stdout}");
     assert!(stdout.contains("command run"), "{stdout}");
 
@@ -652,6 +677,7 @@ fn run() {
     assert_honest_tasks(&text);
     assert_honest_locks(&text);
     assert_honest_io(&text);
+    assert_honest_native(&text, false);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("live.jet"), "{text}");
@@ -678,6 +704,7 @@ fn run() {
     assert!(!stdout.contains("locks count=0 "), "zero locks in view: {stdout}");
     assert!(stdout.contains("io count="), "{stdout}");
     assert!(!stdout.contains("io count=0 "), "zero io in view: {stdout}");
+    assert!(stdout.contains("native process_cpu="), "{stdout}");
     assert!(stdout.contains("live.jet#run"), "{stdout}");
 
     let _ = fs::remove_dir_all(&root);

@@ -2,7 +2,8 @@
 //!
 //! `run`/`test`/`bench` spawn the exact base-intent driver (`jet run|test|bench …`)
 //! with observe enabled, poll live facts while the child runs, then write one
-//! `.jettrace` with wall/alloc/tasks/locks/io before exiting with the child's code.
+//! `.jettrace` with wall/alloc/tasks/locks/io/native timing before exiting with
+//! the child's code.
 //! `attach`/`view`/`compare`/`export` share the same artifact verify seam.
 //! Capture reuses the observe live snapshot (D-OBSERVE-LIVE1) attributed to a
 //! Jet source symbol.
@@ -10,8 +11,8 @@
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
     trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
-    TraceIo, TraceLock, TraceSample, TraceSkeleton, TraceTask, TraceToolchain, TRACE_SCHEMA,
-    TRACE_IO_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
+    TraceIo, TraceLock, TraceNative, TraceSample, TraceSkeleton, TraceTask, TraceToolchain,
+    TRACE_SCHEMA, TRACE_IO_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
@@ -36,6 +37,8 @@ struct CaptureBundle {
     locks: Vec<TraceLock>,
     io: Vec<TraceIo>,
     io_rows_truncated: bool,
+    native: Vec<TraceNative>,
+    native_rows_truncated: bool,
     source_identity: Vec<SourceIdentity>,
     task_rows_truncated: bool,
 }
@@ -49,6 +52,8 @@ impl CaptureBundle {
             locks: Vec::new(),
             io: Vec::new(),
             io_rows_truncated: false,
+            native: Vec::new(),
+            native_rows_truncated: false,
             source_identity: Vec::new(),
             task_rows_truncated: false,
         }
@@ -114,6 +119,7 @@ fn run_session(action: &str, args: &[String]) -> i32 {
     let started = Instant::now();
     let mut last_snapshot = None;
     let mut io_timeline = IoTimeline::default();
+    let mut native_timing = NativeTimingInput::unavailable(0);
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -121,7 +127,15 @@ fn run_session(action: &str, args: &[String]) -> i32 {
                 if parsed.source.is_some() {
                     // Observe publishes under the program PID, not the jet host.
                     if let Some(snapshot) = poll_observe_snapshot(pid) {
-                        io_timeline.observe(&snapshot.tasks, elapsed_ns(started));
+                        let observed_at_ns = elapsed_ns(started);
+                        io_timeline.observe(&snapshot.tasks, observed_at_ns);
+                        native_timing = snapshot
+                            .process_cpu_ns
+                            .map(|duration_ns| NativeTimingInput::Captured {
+                                duration_ns,
+                                observed_at_ns,
+                            })
+                            .unwrap_or_else(|| NativeTimingInput::unavailable(observed_at_ns));
                         last_snapshot = Some(snapshot.text);
                     }
                 }
@@ -142,8 +156,9 @@ fn run_session(action: &str, args: &[String]) -> i32 {
             source,
             last_snapshot.as_deref(),
             wall_ns,
-            None,
+            native_timing.duration_ns(),
             Some(&io_timeline),
+            Some(&native_timing),
         ) {
             Ok(bundle) => bundle,
             // Missing/unreadable source still gets a schema-valid skeleton.
@@ -286,8 +301,24 @@ fn attach(args: &[String]) -> i32 {
 
     let capture = match (source.as_deref(), jet::DevServer::LiveInspect::read(pid)) {
         (Some(path), Ok(snapshot)) => {
-            let (wall_ns, cpu_ns) = process_times(pid).unwrap_or((0, 0));
-            match capture_from_source(path, Some(&snapshot), wall_ns, Some(cpu_ns), None) {
+            let timing = process_times(pid);
+            let wall_ns = timing.map(|(wall_ns, _)| wall_ns).unwrap_or(0);
+            let cpu_ns = timing.map(|(_, cpu_ns)| cpu_ns);
+            let native_timing = timing
+                .map(|(_, duration_ns)| NativeTimingInput::Captured {
+                    duration_ns,
+                    // Attach is a point capture: trace-session origin is now.
+                    observed_at_ns: 0,
+                })
+                .unwrap_or_else(|| NativeTimingInput::unavailable(wall_ns));
+            match capture_from_source(
+                path,
+                Some(&snapshot),
+                wall_ns,
+                cpu_ns,
+                None,
+                Some(&native_timing),
+            ) {
                 Ok(bundle) => bundle,
                 Err(message) => {
                     eprintln!("Error [E2102]: {message}");
@@ -332,6 +363,7 @@ fn capture_from_source(
     wall_ns: u64,
     cpu_ns: Option<u64>,
     io_timeline: Option<&IoTimeline>,
+    native_timing: Option<&NativeTimingInput>,
 ) -> Result<CaptureBundle, String> {
     let path = PathBuf::from(source_path);
     if path.extension().and_then(|e| e.to_str()) != Some("jet") {
@@ -437,6 +469,48 @@ fn capture_from_source(
             });
         }
     }
+    let mut native = Vec::new();
+    if let (Some(symbol), Some(timing)) = (symbol.as_ref(), native_timing) {
+        let root_task = tasks.iter().find(|task| task.parent == 0);
+        native.push(match (timing, root_task) {
+            (
+                NativeTimingInput::Captured {
+                    duration_ns,
+                    observed_at_ns,
+                },
+                Some(task),
+            ) => TraceNative {
+                clock: "process_cpu".into(),
+                duration_ns: Some(*duration_ns),
+                observed_at_ns: *observed_at_ns,
+                reason: String::new(),
+                status: "captured".into(),
+                symbol: symbol.clone(),
+                target: env!("JET_BUILD_TARGET").into(),
+                task_id: Some(task.id),
+            },
+            (NativeTimingInput::Captured { observed_at_ns, .. }, None) => TraceNative {
+                clock: "process_cpu".into(),
+                duration_ns: None,
+                observed_at_ns: *observed_at_ns,
+                reason: "root task causality was not observable".into(),
+                status: "unavailable".into(),
+                symbol: symbol.clone(),
+                target: env!("JET_BUILD_TARGET").into(),
+                task_id: None,
+            },
+            (NativeTimingInput::Unavailable { observed_at_ns, reason }, _) => TraceNative {
+                clock: "process_cpu".into(),
+                duration_ns: None,
+                observed_at_ns: *observed_at_ns,
+                reason: reason.clone(),
+                status: "unavailable".into(),
+                symbol: symbol.clone(),
+                target: env!("JET_BUILD_TARGET").into(),
+                task_id: None,
+            },
+        });
+    }
     Ok(CaptureBundle {
         samples,
         allocations,
@@ -446,6 +520,8 @@ fn capture_from_source(
         io_rows_truncated: io_timeline
             .map(|timeline| timeline.io_rows_truncated)
             .unwrap_or(snapshot_tasks.truncated),
+        native,
+        native_rows_truncated: false,
         source_identity: vec![SourceIdentity {
             path: path_text,
             sha256,
@@ -458,6 +534,42 @@ fn capture_from_source(
             .map(|timeline| timeline.task_rows_truncated)
             .unwrap_or(snapshot_tasks.truncated),
     })
+}
+
+enum NativeTimingInput {
+    Captured { duration_ns: u64, observed_at_ns: u64 },
+    Unavailable { observed_at_ns: u64, reason: String },
+}
+
+impl NativeTimingInput {
+    fn unavailable(observed_at_ns: u64) -> Self {
+        Self::Unavailable {
+            observed_at_ns,
+            reason: native_unavailable_reason(),
+        }
+    }
+
+    fn duration_ns(&self) -> Option<u64> {
+        match self {
+            Self::Captured { duration_ns, .. } => Some(*duration_ns),
+            Self::Unavailable { .. } => None,
+        }
+    }
+}
+
+fn native_unavailable_reason() -> String {
+    if native_process_cpu_supported(std::env::consts::OS) {
+        "process CPU timing was not observable".into()
+    } else {
+        format!(
+            "process CPU timing is unavailable on target {}",
+            env!("JET_BUILD_TARGET")
+        )
+    }
+}
+
+fn native_process_cpu_supported(os: &str) -> bool {
+    matches!(os, "linux" | "android")
 }
 
 fn observe_arena_resources(snapshot: &str) -> (u64, u64) {
@@ -825,6 +937,7 @@ fn json_string(object: &str, key: &str) -> Option<String> {
 
 /// `jet run` hosts compile then exec; observe publishes under the program PID.
 struct PolledSnapshot {
+    process_cpu_ns: Option<u64>,
     tasks: ObservedTasks,
     text: String,
 }
@@ -854,6 +967,7 @@ fn poll_observe_snapshot(root_pid: u32) -> Option<PolledSnapshot> {
             if score > best_score {
                 best_score = score;
                 best = Some(PolledSnapshot {
+                    process_cpu_ns: process_times(pid).map(|(_, cpu_ns)| cpu_ns),
                     tasks,
                     text: snapshot,
                 });
@@ -996,6 +1110,9 @@ fn view(args: &[String]) -> i32 {
             if let Some((n, symbol)) = io_summary(&trace) {
                 println!("io count={n} · {symbol}");
             }
+            if let Some(summary) = native_summary(&trace) {
+                println!("{summary}");
+            }
             0
         }
         Err(message) => {
@@ -1078,8 +1195,9 @@ fn export(args: &[String]) -> i32 {
         || task_summary(&trace).is_some()
         || lock_summary(&trace).is_some()
         || io_summary(&trace).is_some()
+        || native_summary(&trace).is_some()
     {
-        "json-envelope; domains present are wall/cpu/alloc/tasks/locks/io only — no pprof/otel/chrome payloads"
+        "json-envelope; domains present are wall/cpu/alloc/tasks/locks/io/native only — no pprof/otel/chrome payloads"
     } else {
         "json-envelope-only; no pprof/otel/chrome payloads in skeleton"
     };
@@ -1103,6 +1221,7 @@ fn write_session_trace(
 ) -> Result<PathBuf, String> {
     let mut capture_policy = CapturePolicy::default_exclusions();
     capture_policy.io_rows_truncated = capture.io_rows_truncated;
+    capture_policy.native_rows_truncated = capture.native_rows_truncated;
     capture_policy.task_rows_truncated = capture.task_rows_truncated;
     let skeleton = TraceSkeleton {
         command: command.into(),
@@ -1114,6 +1233,7 @@ fn write_session_trace(
         tasks: capture.tasks,
         locks: capture.locks,
         io: capture.io,
+        native: capture.native,
         source_identity: capture.source_identity,
     };
     let bytes = build_skeleton_bytes(&skeleton)?;
@@ -1336,6 +1456,52 @@ fn io_summary(trace: &CanonicalJson) -> Option<(usize, String)> {
     Some((items.len(), symbol.unwrap_or_else(|| "?".into())))
 }
 
+fn native_summary(trace: &CanonicalJson) -> Option<String> {
+    let item = content_array(trace, "native")?.first()?;
+    let CanonicalJson::Object(fields) = item else {
+        return None;
+    };
+    let status = match fields.get("status")? {
+        CanonicalJson::String(value) => value.as_str(),
+        _ => return None,
+    };
+    let target = match fields.get("target")? {
+        CanonicalJson::String(value) => value.as_str(),
+        _ => return None,
+    };
+    let symbol = fields
+        .get("symbol")
+        .and_then(symbol_label)
+        .unwrap_or_else(|| "?".into());
+    match status {
+        "captured" => {
+            let duration = match fields.get("duration_ns")? {
+                CanonicalJson::Integer(value) => value.as_str(),
+                _ => return None,
+            };
+            let observed = match fields.get("observed_at_ns")? {
+                CanonicalJson::Integer(value) => value.as_str(),
+                _ => return None,
+            };
+            let task = match fields.get("task_id")? {
+                CanonicalJson::Integer(value) => value.as_str(),
+                _ => return None,
+            };
+            Some(format!(
+                "native process_cpu={duration}ns observed_at={observed}ns target={target} task={task} · {symbol}"
+            ))
+        }
+        "unavailable" => {
+            let reason = match fields.get("reason")? {
+                CanonicalJson::String(value) => value.as_str(),
+                _ => return None,
+            };
+            Some(format!("native unavailable target={target} reason={reason} · {symbol}"))
+        }
+        _ => None,
+    }
+}
+
 fn symbol_label(value: &CanonicalJson) -> Option<String> {
     let CanonicalJson::Object(fields) = value else { return None };
     let path = match fields.get("path")? {
@@ -1375,5 +1541,14 @@ mod tests {
         assert_eq!(timeline.completed.len(), TRACE_IO_ROW_LIMIT as usize);
         assert!(timeline.task_rows_truncated);
         assert!(timeline.io_rows_truncated);
+    }
+
+    #[test]
+    fn native_process_cpu_support_matrix_is_explicit() {
+        assert!(native_process_cpu_supported("linux"));
+        assert!(native_process_cpu_supported("android"));
+        assert!(!native_process_cpu_supported("macos"));
+        assert!(!native_process_cpu_supported("windows"));
+        assert!(!native_process_cpu_supported("wasi"));
     }
 }
