@@ -2911,3 +2911,127 @@ fn native_http2_routes_huffman_headers_and_enforces_stream_framing() {
         &std::sync::atomic::AtomicBool::new(false),
     ).is_err());
 }
+
+#[test]
+fn http2_shutdown_sends_goaway_with_last_stream_and_drains_active() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let mux = jet_http_mux_new();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let release = std::sync::Arc::new(AtomicBool::new(false));
+    let handler_release = release.clone();
+    jet_http_mux_add(&mux, "GET", "/slow", move |_| {
+        entered_tx.send(()).expect("entered");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !handler_release.load(Ordering::Acquire) {
+            assert!(std::time::Instant::now() < deadline, "release timed out");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        jet_http_srv_response(200, &"drained".to_string())
+    });
+    jet_http_mux_add(&mux, "GET", "/late", |_| jet_http_srv_response(200, &"too late".to_string()));
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut client = std::net::TcpStream::connect(addr).unwrap();
+    let (mut server_stream, _) = listener.accept().unwrap();
+    let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let options = JetHttpServerOptions {
+        workers: 1,
+        admission_queue: 1,
+        shutdown_grace: std::time::Duration::from_secs(2),
+        read_idle_timeout: std::time::Duration::from_secs(2),
+        ..JetHttpServerOptions::safe()
+    };
+    let server = std::thread::spawn(move || {
+        jet_http2_serve(&mut server_stream, &mux, &options, &server_shutdown)
+    });
+
+    client.set_read_timeout(Some(std::time::Duration::from_millis(50))).unwrap();
+    client.write_all(JET_HTTP2_PREFACE).unwrap();
+    client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+    client.write_all(&h2_frame(1, 0x5, 1, &h2_request_headers(0x82, "/slow"))).unwrap();
+    client.flush().unwrap();
+
+    let read_frame = |stream: &mut std::net::TcpStream| -> Option<(u8, u8, u32, Vec<u8>)> {
+        let mut header = [0u8; 9];
+        match stream.read_exact(&mut header) {
+            Ok(()) => {}
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                return None;
+            }
+            Err(error) => panic!("frame header: {error}"),
+        }
+        let length = (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+        let mut payload = vec![0; length];
+        stream.read_exact(&mut payload).expect("frame payload");
+        Some((
+            header[3],
+            header[4],
+            u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff,
+            payload,
+        ))
+    };
+
+    let mut saw_server_settings = false;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while !saw_server_settings {
+        assert!(std::time::Instant::now() < deadline, "missing SETTINGS");
+        let Some((kind, flags, stream, _payload)) = read_frame(&mut client) else { continue };
+        if kind == 4 && stream == 0 {
+            saw_server_settings = true;
+            if flags & 0x1 == 0 {
+                client.write_all(&h2_frame(4, 0x1, 0, &[])).unwrap();
+            }
+        }
+    }
+    entered_rx.recv_timeout(std::time::Duration::from_secs(1)).expect("handler entered");
+    shutdown.store(true, Ordering::Release);
+
+    let mut goaway_last = None;
+    let mut saw_body = false;
+    let mut refused_late = false;
+    let mut late_sent = false;
+    let mut released = false;
+    let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while std::time::Instant::now() < drain_deadline && (goaway_last.is_none() || !saw_body || !refused_late) {
+        if goaway_last.is_some() && !late_sent {
+            client.write_all(&h2_frame(1, 0x5, 3, &h2_request_headers(0x82, "/late"))).unwrap();
+            client.flush().unwrap();
+            late_sent = true;
+        }
+        if goaway_last.is_some() && late_sent && !released {
+            release.store(true, Ordering::Release);
+            released = true;
+        }
+        let Some((kind, _flags, stream, payload)) = read_frame(&mut client) else { continue };
+        match kind {
+            7 => {
+                assert_eq!(stream, 0);
+                assert!(payload.len() >= 8, "GOAWAY payload too short");
+                let last = u32::from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff;
+                let error = u32::from_be_bytes(payload[4..8].try_into().unwrap());
+                assert_eq!(error, 0, "GOAWAY should be NO_ERROR");
+                goaway_last = Some(last);
+            }
+            0 if stream == 1 => {
+                if payload.windows(7).any(|part| part == b"drained") {
+                    saw_body = true;
+                }
+            }
+            3 if stream == 3 => {
+                assert_eq!(payload.len(), 4);
+                assert_eq!(u32::from_be_bytes(payload[..4].try_into().unwrap()), 7);
+                refused_late = true;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(goaway_last, Some(1), "GOAWAY must advertise the accepted last stream");
+    assert!(saw_body, "active request must drain after GOAWAY");
+    assert!(refused_late, "streams after GOAWAY must be refused");
+    release.store(true, Ordering::Release);
+    server.join().expect("server join").expect("http2 serve");
+}

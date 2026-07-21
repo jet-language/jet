@@ -525,7 +525,7 @@ fn jet_http_server_handle_stream(
     let _ = stream.set_write_timeout(Some(options.write_idle_timeout));
     if jet_http2_is_preface(stream, options.read_header_timeout) {
         if jet_http2_serve(stream, mux, options, shutdown).is_err() {
-            let _ = jet_http2_write_frame(stream, 7, 0, 0, &[0, 0, 0, 0, 0, 0, 0, 1]);
+            let _ = jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(0, 1));
             let _ = std::io::Write::flush(stream);
         }
         let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -680,6 +680,13 @@ fn jet_http2_write_frame(
     ];
     writer.write_all(&header).and_then(|()| writer.write_all(payload))
         .map_err(|_| "HTTP/2 write failed".to_string())
+}
+
+fn jet_http2_goaway_payload(last_stream: u32, error_code: u32) -> [u8; 8] {
+    let mut payload = [0u8; 8];
+    payload[..4].copy_from_slice(&(last_stream & 0x7fff_ffff).to_be_bytes());
+    payload[4..].copy_from_slice(&error_code.to_be_bytes());
+    payload
 }
 
 fn jet_http2_integer(input: &[u8], cursor: &mut usize, prefix: u8) -> Result<usize, String> {
@@ -1258,7 +1265,20 @@ fn jet_http2_serve(
     let mut connection_receive_window = 65_535i64;
     let mut stream_receive_windows = std::collections::BTreeMap::<u32, i64>::new();
     let mut saw_client_settings = false;
-    while !shutdown.load(Ordering::Acquire) {
+    let mut going_away = false;
+    let mut goaway_sent = false;
+    let mut grace_deadline = None;
+    loop {
+        if shutdown.load(Ordering::Acquire) && !going_away {
+            going_away = true;
+            grace_deadline = Some(std::time::Instant::now() + options.shutdown_grace);
+            jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(last_stream, 0))?;
+            stream.flush().map_err(|_| "HTTP/2 GOAWAY write failed".to_string())?;
+            goaway_sent = true;
+        }
+        if grace_deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+            break;
+        }
         while let Ok((stream_id, flow_bytes)) = consumed_rx.try_recv() {
             let Some(request) = requests.get_mut(&stream_id) else { continue };
             let increment = flow_bytes.min(request.unconsumed_flow);
@@ -1306,6 +1326,9 @@ fn jet_http2_serve(
             stream_windows.remove(&id);
             stream_receive_windows.remove(&id);
         }
+        if going_away && requests.is_empty() && outgoing.is_empty() {
+            break;
+        }
         let now = std::time::Instant::now();
         let expired = requests.iter()
             .filter_map(|(id, request)| (!request.inbound_closed
@@ -1327,6 +1350,7 @@ fn jet_http2_serve(
             Ok(frame) => { last_activity = std::time::Instant::now(); frame }
             Err(error) if error == "HTTP/2 read timed out" => {
                 let now = std::time::Instant::now();
+                if going_away { continue; }
                 if now.duration_since(last_activity) >= options.read_idle_timeout { return Ok(()); }
                 continue;
             }
@@ -1366,7 +1390,13 @@ fn jet_http2_serve(
                 request.pump();
             }
             1 => {
-                if frame.stream == 0 || frame.stream % 2 == 0 || frame.stream <= last_stream { return Err("HTTP/2 HEADERS stream id is invalid".to_string()); }
+                if going_away || frame.stream == 0 || frame.stream % 2 == 0 || frame.stream <= last_stream {
+                    if going_away && frame.stream != 0 {
+                        jet_http2_write_frame(stream, 3, 0, frame.stream, &7u32.to_be_bytes())?;
+                        continue;
+                    }
+                    return Err("HTTP/2 HEADERS stream id is invalid".to_string());
+                }
                 if requests.len() >= max_streams { return Err("HTTP/2 concurrent stream limit exceeded".to_string()); }
                 last_stream = frame.stream;
                 let mut offset = 0usize;
@@ -1500,7 +1530,11 @@ fn jet_http2_serve(
     for request in requests.values() {
         if let Some(control) = &request.control { control.cancel(); }
     }
-    jet_http2_write_frame(stream, 7, 0, 0, &[0, 0, 0, 0, 0, 0, 0, 0])
+    if !goaway_sent {
+        jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(last_stream, 0))?;
+    }
+    let _ = stream.flush();
+    Ok(())
 }
 
 struct JetHttpContinueReader<R> {
