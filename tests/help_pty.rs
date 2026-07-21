@@ -117,6 +117,17 @@ fn enter_expands_then_emits_prefill_without_running_it() {
 }
 
 #[test]
+fn alt_enter_prefills_example_without_running_it() {
+    // Expand category, then Alt-Enter (ESC then Enter) for the example line.
+    let transcript = run_pty(b"\r\x1b\r", "never", false).replace('\r', "");
+    assert!(
+        transcript.contains("jet run examples/features/basics/hello.jet"),
+        "Alt-Enter should prefill example:\n{transcript}"
+    );
+    assert!(!transcript.contains("Hello, Jet!"), "Alt-Enter executed selected command:\n{transcript}");
+}
+
+#[test]
 fn shell_prefill_mode_keeps_palette_on_tty_while_stdout_is_captured() {
     let jet = env!("CARGO_BIN_EXE_jet");
     let picked = std::path::Path::new("/tmp").join(format!("jet-help-picked-{}", std::process::id()));
