@@ -1490,14 +1490,14 @@ fn write_unfinished(path: String) {{
     writer :: jsonl.writer(^output) ?? panic("writer")
     writer.write(DataTree.Text("alpha")) ?? panic("record")
     writer.flush() ?? panic("flush")
-    // no finish — Drop must close the handle without claiming success
+    // no finish — Drop must leave the record LF unwritten (incomplete wire)
 }}
 
 fn run() {{
     write_unfinished("{partial}")
-    // Same-path reopen after Drop: unfinished record still on this path.
+    // Same-path reopen after Drop: incomplete bytes (no record LF) still here.
     leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
-    print(leftover == "\"alpha\"\n")
+    print(leftover == "\"alpha\"")
     // Same-path recreate: Drop must have released the unfinished writer handle.
     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
     reopen_writer :: jsonl.writer(^reopen_out) ?? panic("reopen writer")
@@ -1505,6 +1505,8 @@ fn run() {{
     reopen_writer.finish() ?? panic("reopen finish")
     finished :: files.read("{partial}") ?? panic("same-path read after finish")
     print(finished == "null\n")
+    // Honesty: unfinished Drop wire ≠ finished wire for the same value.
+    print(leftover != "\"alpha\"\n")
 
     limits := encoding.EncodingLimits.safe()
     limits.buffer_bytes = 4096
@@ -1540,7 +1542,7 @@ fn run() {{
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "true\ntrue\n100003\n$[0]\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
+        "true\ntrue\ntrue\n100003\n$[0]\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
     );
     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null\n");
     assert_eq!(stderr, "");
@@ -1553,6 +1555,98 @@ fn run() {{
         other => panic!("JSONL stream drop/heap default-dev failed: {other:?}"),
     }
     assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn csv_stream_drop_and_codec_heap_ceiling_are_enforced() {
+    let dir = std::env::temp_dir().join(format!("jet_csv_stream_drop_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let partial_path = dir.join("partial.csv");
+    let heap_path = dir.join("heap.csv");
+    // Capacity doubles to 131072; the next byte charges past the shared codec
+    // heap ceiling while still under max_item_bytes (same counting allocator).
+    let field = "x".repeat(131_072);
+    fs::write(&heap_path, format!("{field}y")).unwrap();
+    let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+    let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.csv as csv
+use core.files as files
+
+fn write_unfinished(path: String) {{
+    output :: files.create(path) ?? panic("create partial")
+    writer :: csv.writer(^output) ?? panic("writer")
+    writer.write(["alpha", "beta"]) ?? panic("record")
+    writer.flush() ?? panic("flush")
+    // no finish — Drop must leave the record CRLF unwritten (incomplete wire)
+}}
+
+fn run() {{
+    write_unfinished("{partial}")
+    // Same-path reopen after Drop: incomplete bytes (no record CRLF) still here.
+    leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+    print(leftover == "alpha,beta")
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+    reopen_writer :: csv.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(["done"]) ?? panic("reopen write")
+    reopen_writer.finish() ?? panic("reopen finish")
+    finished :: files.read("{partial}") ?? panic("same-path read after finish")
+    // finished is "done\\r\\n"; Jet has no \\r escape — prove via length + prefix.
+    print(finished.starts_with("done") && finished.len() == 6)
+    // Honesty: unfinished Drop wire ≠ finished row terminator.
+    print(leftover.len() == 10)
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 150000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{heap}") ?? panic("heap open")
+    reader :: csv.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 4 {{
+        result :: reader.next()
+        if result == {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("heap-not-latched") }}
+                    Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "csv_stream_drop_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "true\ntrue\ntrue\n131073\n$[0][0]\nCSV record heap exceeded the bounded codec heap ceiling\ntrue\n"
+    );
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "done\r\n");
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("csv_stream_drop_heap.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("CSV stream drop/heap default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "done\r\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
