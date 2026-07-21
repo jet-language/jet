@@ -1386,12 +1386,10 @@ fn json_stream_drop_and_codec_heap_ceiling_are_enforced() {
     let dir = std::env::temp_dir().join(format!("jet_json_stream_drop_heap_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let partial_path = dir.join("partial.json");
-    let reopen_path = dir.join("reopen.json");
     let heap_path = dir.join("heap.json");
     let key = "k".repeat(100_000);
     fs::write(&heap_path, format!("{{\"{key}\":0}}")).unwrap();
     let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
-    let reopen = reopen_path.to_string_lossy().replace('\\', "\\\\");
     let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
     let source = format!(
         r#"
@@ -1410,12 +1408,16 @@ fn write_unfinished(path: String) {{
 
 fn run() {{
     write_unfinished("{partial}")
-    // Handle closed by Drop: a new writer can own the path again.
-    reopen_out :: files.create("{reopen}") ?? panic("reopen create")
+    // Same-path reopen after Drop: unfinished bytes still on this path.
+    leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+    print(leftover == "[7")
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
     reopen_writer :: json.writer(^reopen_out) ?? panic("reopen writer")
     reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
     reopen_writer.finish() ?? panic("reopen finish")
-    print(true)
+    finished :: files.read("{partial}") ?? panic("same-path read after finish")
+    print(finished == "null")
 
     limits := encoding.EncodingLimits.safe()
     limits.buffer_bytes = 4096
@@ -1451,10 +1453,9 @@ fn run() {{
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "true\n100003\n$\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
+        "true\ntrue\n100003\n$\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
     );
-    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "[7");
-    assert_eq!(fs::read_to_string(&reopen_path).unwrap(), "null");
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null");
     assert_eq!(stderr, "");
     let dev_path = dir.join("json_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
@@ -1464,7 +1465,7 @@ fn run() {{
         }
         other => panic!("JSON stream drop/heap default-dev failed: {other:?}"),
     }
-    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "[7");
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1473,12 +1474,10 @@ fn jsonl_stream_drop_and_codec_heap_ceiling_are_enforced() {
     let dir = std::env::temp_dir().join(format!("jet_jsonl_stream_drop_heap_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let partial_path = dir.join("partial.jsonl");
-    let reopen_path = dir.join("reopen.jsonl");
     let heap_path = dir.join("heap.jsonl");
     let key = "k".repeat(100_000);
     fs::write(&heap_path, format!("{{\"{key}\":0}}\n")).unwrap();
     let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
-    let reopen = reopen_path.to_string_lossy().replace('\\', "\\\\");
     let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
     let source = format!(
         r#"
@@ -1496,12 +1495,16 @@ fn write_unfinished(path: String) {{
 
 fn run() {{
     write_unfinished("{partial}")
-    // Handle closed by Drop: a new writer can own a fresh path.
-    reopen_out :: files.create("{reopen}") ?? panic("reopen create")
+    // Same-path reopen after Drop: unfinished record still on this path.
+    leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+    print(leftover == "\"alpha\"\n")
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
     reopen_writer :: jsonl.writer(^reopen_out) ?? panic("reopen writer")
     reopen_writer.write(DataTree.Null) ?? panic("reopen write")
     reopen_writer.finish() ?? panic("reopen finish")
-    print(true)
+    finished :: files.read("{partial}") ?? panic("same-path read after finish")
+    print(finished == "null\n")
 
     limits := encoding.EncodingLimits.safe()
     limits.buffer_bytes = 4096
@@ -1537,10 +1540,9 @@ fn run() {{
     assert_eq!(code, 0, "stderr: {stderr}");
     assert_eq!(
         stdout,
-        "true\n100003\n$[0]\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
+        "true\ntrue\n100003\n$[0]\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
     );
-    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "\"alpha\"\n");
-    assert_eq!(fs::read_to_string(&reopen_path).unwrap(), "null\n");
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null\n");
     assert_eq!(stderr, "");
     let dev_path = dir.join("jsonl_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
@@ -1550,7 +1552,7 @@ fn run() {{
         }
         other => panic!("JSONL stream drop/heap default-dev failed: {other:?}"),
     }
-    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "\"alpha\"\n");
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null\n");
     let _ = fs::remove_dir_all(&dir);
 }
 
