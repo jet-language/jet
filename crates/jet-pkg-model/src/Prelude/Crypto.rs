@@ -504,7 +504,7 @@ where F: Fn() -> bool {
     let mut cancellation_observed=false;
     #[cfg(test)] let mut final_pause=final_pause;
     loop {
-        if cancelled() {
+        if !cancellation_observed&&cancelled() {
             cancellation_observed=true;
             job.cancelled.store(true, std::sync::atomic::Ordering::Release);
             let removed = {

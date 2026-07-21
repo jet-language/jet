@@ -241,7 +241,7 @@
             let inherited_deadline = super::jet_ctx_deadline_ms();
             let control = super::JetTaskControl::new();
             JetTask {
-                handle: Some(super::jet_scheduler_spawn_with_control(
+                handle: Some(super::jet_scheduler_spawn_blocking_with_control(
                     move || {
                         let _deadline_guard = inherited_deadline.map(super::jet_ctx_push_deadline);
                         f()
@@ -258,7 +258,7 @@
         ) -> JetTask<T> {
             let inherited_deadline = super::jet_ctx_deadline_ms();
             JetTask {
-                handle: Some(super::jet_scheduler_spawn_with_control(
+                handle: Some(super::jet_scheduler_spawn_blocking_with_control(
                     move || {
                         let _deadline_guard = inherited_deadline.map(super::jet_ctx_push_deadline);
                         let _typed_deadline_boundary = super::JetTypedDeadlineBoundary::enter();

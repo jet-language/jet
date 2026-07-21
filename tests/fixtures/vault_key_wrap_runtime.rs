@@ -9,6 +9,8 @@ include!("../../crates/jet-pkg-model/src/Prelude/VaultKeyWrap.rs");
 #[cfg(test)]
 mod vault_key_wrap_tests {
     use super::*;
+    static STRESS_CANCEL:std::sync::atomic::AtomicBool=std::sync::atomic::AtomicBool::new(false);
+    fn stress_cancelled()->bool{STRESS_CANCEL.load(std::sync::atomic::Ordering::SeqCst)}
 
     fn scratch(tag: &str) -> std::path::PathBuf {
         let path = std::env::temp_dir().join(format!(
@@ -414,26 +416,27 @@ mod vault_key_wrap_tests {
     #[test]
     fn pwhash_wait_compensates_one_worker_and_arbitrates_cancel_with_shield() {
         std::env::set_var("JET_SCHEDULER_THREADS", "1");
-        let mut controls=Vec::new();let mut waits=Vec::new();let mut releases=Vec::new();
+        STRESS_CANCEL.store(false,std::sync::atomic::Ordering::SeqCst);let mut waits=Vec::new();let mut releases=Vec::new();
         for _ in 0..4 {
-            let entered=std::sync::Arc::new(std::sync::Barrier::new(2));let release=std::sync::Arc::new(std::sync::Barrier::new(2));let control=JetTaskControl::new();
-            waits.push(jet_scheduler_spawn_with_control({let entered=entered.clone();let release=release.clone();move||jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,Some((entered,release)),None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave)},control.clone()));
-            entered.wait();controls.push(control);releases.push(release);
+            let entered=std::sync::Arc::new(std::sync::Barrier::new(2));let release=std::sync::Arc::new(std::sync::Barrier::new(2));
+            waits.push(jet_scheduler_spawn_blocking({let entered=entered.clone();let release=release.clone();move||jet_pwhash_test_run_with(stress_cancelled,Some((entered,release)),None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave)}));
+            entered.wait();releases.push(release);
         }
-        for _ in 4..6 { let control=JetTaskControl::new();waits.push(jet_scheduler_spawn_with_control(move||jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,None,None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave),control.clone()));controls.push(control); }
+        for _ in 4..9 { waits.push(jet_scheduler_spawn_blocking(move||jet_pwhash_test_run_with(stress_cancelled,None,None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave))); }
         let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
-        while (jet_pwhash_test_snapshot().1,jet_scheduler_blocking_wait_stats().0)!=(2,6) { assert!(std::time::Instant::now()<deadline,"six waiters must reach four admitted plus two queued jobs: pwhash={:?}, scheduler={:?}",jet_pwhash_test_snapshot(),jet_scheduler_blocking_wait_stats());std::thread::yield_now(); }
-        assert_eq!(jet_pwhash_test_queued_secrets(),2,"queued jobs retain only bounded caller-owned secret copies");
+        while (jet_pwhash_test_snapshot().1,jet_scheduler_blocking_wait_stats().0)!=(5,9) { assert!(std::time::Instant::now()<deadline,"nine waiters must reach four admitted plus five queued jobs: pwhash={:?}, scheduler={:?}",jet_pwhash_test_snapshot(),jet_scheduler_blocking_wait_stats());std::thread::sleep(std::time::Duration::from_millis(1)); }
+        assert_eq!(jet_pwhash_test_queued_secrets(),5,"queued jobs retain only bounded caller-owned secret copies");
+        let overflows:Vec<_>=(0..3).map(|_|jet_scheduler_spawn_blocking(move||jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,None,None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave))).collect();
         let(progress_tx,progress_rx)=std::sync::mpsc::channel();
         let progress=jet_scheduler_spawn(move||progress_tx.send(()).unwrap());
-        progress_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("compensation worker must run unrelated task while sole configured worker waits");
-        let(_,current,peak)=jet_scheduler_blocking_wait_stats();assert!(current<=8&&peak<=8,"compensation thread peak must stay globally bounded: current={current}, peak={peak}");
-        for control in &controls { control.cancel(); }
-        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
-        while jet_pwhash_test_snapshot().1!=0||jet_pwhash_test_queued_secrets()!=0 { assert!(std::time::Instant::now()<deadline,"cancellation must drain queued jobs and secrets");std::thread::yield_now(); }
+        progress_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("reserved compensation worker must defer recursive Argon jobs and run unrelated work after saturation");
+        let(_,current,peak)=jet_scheduler_blocking_wait_stats();assert!(current<=9&&peak<=9,"compensation thread peak must stay globally bounded: current={current}, peak={peak}");
+        STRESS_CANCEL.store(true,std::sync::atomic::Ordering::SeqCst);
         for release in releases { release.wait(); }
         for wait in waits { assert!(matches!(wait.join(),Err(JetPwhashRunError::Cancelled))); }progress.join();
-        assert_eq!(jet_pwhash_test_snapshot().0,0,"cancelled admitted jobs release the full Argon arena budget");assert_eq!(jet_pwhash_test_queued_secrets(),0);
+        for overflow in overflows { assert!(overflow.join().is_ok(),"deferred Argon caller completes after saturation clears"); }
+        STRESS_CANCEL.store(false,std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(jet_pwhash_test_snapshot().0,0,"cancelled admitted jobs release the full Argon arena budget");assert_eq!(jet_pwhash_test_snapshot().1,0,"cancel/release drains queued Argon jobs");assert_eq!(jet_pwhash_test_queued_secrets(),0,"cancel/release drains queued secret copies");
         let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
         while jet_scheduler_blocking_wait_stats().0!=0||jet_scheduler_blocking_wait_stats().1!=0 { assert!(std::time::Instant::now()<deadline,"all waits and compensation threads must drain");std::thread::yield_now(); }
 

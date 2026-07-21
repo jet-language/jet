@@ -3,7 +3,7 @@
 use jet_codegen::scheduler::{
     jet_scheduler_all, jet_scheduler_any, jet_scheduler_race, jet_scheduler_select_int_channels,
     jet_scheduler_deliver_shield_exit, jet_scheduler_shield_enter,
-    jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms, jet_scheduler_spawn_with_control,
+    jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms, jet_scheduler_spawn_blocking_with_control,
     jet_scheduler_wait_without_unwind, JetSchedulerChannel, JetSchedulerJoin, JetSchedulerWait,
     JetShieldExit, JetTaskControl,
 };
@@ -247,7 +247,7 @@ where
     let rt_ptr = active_runtime_ptr().expect("jit spawn without active runtime");
     let rt_addr = rt_ptr as usize;
     let control = JetTaskControl::new();
-    let join = jet_scheduler_spawn_with_control(
+    let join = jet_scheduler_spawn_blocking_with_control(
         move || {
             // SAFETY: `rt_ptr` is the resident heap for this JIT invocation; workers
             // only touch mutex-backed channel state and indexed sender slots.

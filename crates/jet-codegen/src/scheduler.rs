@@ -57,7 +57,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-type Job = Box<dyn FnOnce() + Send>;
+struct Job { run:Box<dyn FnOnce()+Send>,blocking:bool }
 
 thread_local! {
     static JET_SCHEDULER_CATCHING_PANIC: std::cell::Cell<bool> =
@@ -1015,7 +1015,7 @@ struct WorkerSlot {
 
 // Fixed ceiling prevents blocking waiters from turning scheduler progress into an unbounded thread source.
 const JET_BLOCKING_COMPENSATION_LIMIT:usize=8;
-struct BlockingWaitState { waits:usize,threads:usize,peak:usize }
+struct BlockingWaitState { waits:usize,threads:usize,peak:usize,reserve:bool }
 
 struct Scheduler {
     workers: Vec<WorkerSlot>,
@@ -1027,38 +1027,39 @@ struct Scheduler {
 }
 
 impl Scheduler {
-    fn pop_local(&self, id: usize) -> Option<Job> {
-        self.workers[id].queue.lock().unwrap().pop_back()
+    fn pop_local(&self, id: usize,allow_blocking:bool) -> Option<Job> {
+        let mut queue=self.workers[id].queue.lock().unwrap();if allow_blocking{queue.pop_back()}else{queue.iter().rposition(|job|!job.blocking).map(|index|queue.remove(index).unwrap())}
     }
 
-    fn pop_global(&self) -> Option<Job> {
-        self.global.lock().unwrap().pop_front()
+    fn pop_global(&self,allow_blocking:bool) -> Option<Job> {
+        let mut queue=self.global.lock().unwrap();if allow_blocking{queue.pop_front()}else{queue.iter().position(|job|!job.blocking).map(|index|queue.remove(index).unwrap())}
     }
 
-    fn steal_from(&self, thief: usize) -> Option<Job> {
+    fn steal_from(&self, thief: usize,allow_blocking:bool) -> Option<Job> {
         for (idx, w) in self.workers.iter().enumerate() {
             if idx == thief {
                 continue;
             }
             let mut q = w.queue.lock().unwrap();
-            if let Some(job) = q.pop_front() {
+            let job=if allow_blocking{q.pop_front()}else{q.iter().position(|job|!job.blocking).map(|index|q.remove(index).unwrap())};
+            if let Some(job) = job {
                 return Some(job);
             }
         }
         None
     }
 
-    fn take_work(&self, id: usize) -> Option<Job> {
-        self.pop_local(id)
-            .or_else(|| self.pop_global())
-            .or_else(|| self.steal_from(id))
+    fn take_work(&self, id: usize,allow_blocking:bool) -> Option<Job> {
+        self.pop_local(id,allow_blocking)
+            .or_else(|| self.pop_global(allow_blocking))
+            .or_else(|| self.steal_from(id,allow_blocking))
     }
 
     fn worker_loop(self: &Arc<Self>, id: usize) {
         loop {
-            if let Some(job) = self.take_work(id) {
+            if let Some(job) = self.take_work(id,true) {
                 self.live.fetch_add(1, Ordering::Relaxed);
-                job();
+                (job.run)();
                 self.live.fetch_sub(1, Ordering::Relaxed);
                 self.notify.notify_one();
                 continue;
@@ -1075,16 +1076,16 @@ impl Scheduler {
     }
 
     fn blocking_wait_enter(self:&Arc<Self>){
-        let spawn={let mut state=self.blocking_wait.lock().unwrap();state.waits+=1;if state.threads<state.waits.min(JET_BLOCKING_COMPENSATION_LIMIT){state.threads+=1;state.peak=state.peak.max(state.threads);true}else{false}};
-        if spawn { let sched=self.clone();thread::Builder::new().name("jet-blocking-compensation".into()).spawn(move||sched.compensation_loop()).unwrap_or_else(|_|jet_scheduler_fatal("could not start scheduler compensation worker")); }
+        let spawn={let mut state=self.blocking_wait.lock().unwrap();state.waits+=1;let ordinary=state.threads-usize::from(state.reserve);let reserve=if ordinary<state.waits.min(JET_BLOCKING_COMPENSATION_LIMIT){false}else if state.waits>JET_BLOCKING_COMPENSATION_LIMIT&&!state.reserve{state.reserve=true;true}else{return};state.threads+=1;state.peak=state.peak.max(state.threads);Some(reserve)};
+        if let Some(reserve)=spawn { let sched=self.clone();thread::Builder::new().name(if reserve{"jet-blocking-reserve"}else{"jet-blocking-compensation"}.into()).spawn(move||sched.compensation_loop(reserve)).unwrap_or_else(|_|jet_scheduler_fatal("could not start scheduler compensation worker")); }
     }
 
     fn blocking_wait_leave(&self){let mut state=self.blocking_wait.lock().unwrap();state.waits-=1;drop(state);self.notify.notify_all();}
 
-    fn compensation_loop(self:&Arc<Self>){
+    fn compensation_loop(self:&Arc<Self>,reserve:bool){
         loop{
-            {let mut state=self.blocking_wait.lock().unwrap();if state.waits==0{state.threads-=1;return}}
-            if let Some(job)=self.take_work(0){self.live.fetch_add(1,Ordering::Relaxed);job();self.live.fetch_sub(1,Ordering::Relaxed);self.notify.notify_one();continue}
+            {let mut state=self.blocking_wait.lock().unwrap();if (reserve&&state.waits<=JET_BLOCKING_COMPENSATION_LIMIT)||(!reserve&&state.waits==0){state.threads-=1;if reserve{state.reserve=false}return}}
+            if let Some(job)=self.take_work(0,!reserve){self.live.fetch_add(1,Ordering::Relaxed);(job.run)();self.live.fetch_sub(1,Ordering::Relaxed);self.notify.notify_one();continue}
             let guard=self.global.lock().unwrap();let _=self.notify.wait_timeout(guard,Duration::from_millis(2)).unwrap();
         }
     }
@@ -1131,7 +1132,7 @@ fn scheduler() -> Arc<Scheduler> {
                 notify: Condvar::new(),
                 live: AtomicUsize::new(0),
                 shutdown: AtomicBool::new(false),
-                blocking_wait:Mutex::new(BlockingWaitState{waits:0,threads:0,peak:0}),
+                blocking_wait:Mutex::new(BlockingWaitState{waits:0,threads:0,peak:0,reserve:false}),
             });
             for id in 0..n {
                 let s = sched.clone();
@@ -1365,6 +1366,12 @@ where
     jet_scheduler_spawn_with_control(f, JetTaskControl::new())
 }
 
+pub fn jet_scheduler_spawn_blocking<F,T>(f:F)->JetSchedulerJoin<T>
+where F:FnOnce()->T+Send+'static,T:Send+'static,
+{
+    jet_scheduler_spawn_blocking_with_control(f,JetTaskControl::new())
+}
+
 pub fn jet_scheduler_spawn_with_control<F, T>(
     f: F,
     control: Arc<JetTaskControl>,
@@ -1373,10 +1380,22 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
+    jet_scheduler_spawn_with_control_kind(f,control,false)
+}
+
+pub fn jet_scheduler_spawn_blocking_with_control<F,T>(f:F,control:Arc<JetTaskControl>)->JetSchedulerJoin<T>
+where F:FnOnce()->T+Send+'static,T:Send+'static,
+{
+    jet_scheduler_spawn_with_control_kind(f,control,true)
+}
+
+fn jet_scheduler_spawn_with_control_kind<F,T>(f:F,control:Arc<JetTaskControl>,blocking:bool)->JetSchedulerJoin<T>
+where F:FnOnce()->T+Send+'static,T:Send+'static,
+{
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let completion_order = Arc::new(OnceLock::new());
     let task_completion_order = completion_order.clone();
-    scheduler().submit(Box::new(move || {
+    scheduler().submit(Job{blocking,run:Box::new(move || {
         jet_scheduler_set_task_control(Some(control.clone()));
         jet_scheduler_task_panic_enter();
         control.wait_while_paused();
@@ -1405,7 +1424,7 @@ where
             .set(next_task_completion_order())
             .expect("task completion recorded twice");
         let _ = tx.send(result);
-    }));
+    })});
     JetSchedulerJoin {
         rx,
         completion_order,
