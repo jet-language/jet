@@ -98,14 +98,9 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // `inner_join`/`left_join` and Packet B's `pivot_sum` route through the
     // interpreter because their closure arguments need live `Interp` access.
     //
-    // core.archive / core.compress.*: AOT is pure [U8]→[U8] (hand-rolled /
-    // FFI byte transforms), not ambient FS. Still need an honest comptime
-    // port — keep PurePending, do not wash as Boundary.
-    ("core.archive", "tar_add"),
-    ("core.archive", "tar_get"),
-    ("core.archive", "tar_names_json"),
-    ("core.archive", "zip_compress"),
-    ("core.archive", "zip_decompress"),
+    // core.compress.*: AOT is a pure [U8]→[U8] byte transform, not ambient
+    // FS. Still needs an honest comptime port — keep PurePending, do not wash
+    // as Boundary. core.archive is interpreter-resident (card #392 C4).
     ("core.compress.gzip", "compress"),
     ("core.compress.gzip", "decompress"),
     ("core.compress.zstd", "compress"),
@@ -1581,10 +1576,16 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             Class::Boundary
         );
     }
-    for method in ["tar_add", "zip_compress"] {
+    for method in [
+        "tar_add",
+        "tar_get",
+        "tar_names_json",
+        "zip_compress",
+        "zip_decompress",
+    ] {
         assert_eq!(
             record(&records, Surface::Fixed, "core.archive", method).class,
-            Class::PurePending
+            Class::Covered
         );
     }
     assert_eq!(
@@ -1636,7 +1637,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 777, 12, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 782, 7, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1644,7 +1645,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        6456568292006822851,
+        14096273572204797594,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

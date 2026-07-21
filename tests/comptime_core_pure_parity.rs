@@ -1282,3 +1282,27 @@ fn public_transcript_covers_solver_exactly() {
     ]);
     assert_eq!(values, [format!("\"{SOLVER_EXPECTED}\" : String")]);
 }
+
+const ARCHIVE_DECLS: &str = r#"use core.archive as archive
+fn archive_view() -> String {
+    bytes: [U8] :: [72, 101, 108, 108, 111]
+    zipped :: archive.zip_compress("hello.txt", bytes)
+    empty: [U8] :: []
+    tarred := archive.tar_add(empty, "hello.txt", bytes)
+    tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116])
+    zip_bytes :: archive.zip_decompress(zipped)
+    tar_bytes :: archive.tar_get(tarred, "quote\"slash\\.txt")
+    return "{zip_bytes}|{tar_bytes}|{archive.tar_names_json(tarred)}|{archive.tar_get(tarred, "missing").len()}"
+}"#;
+const ARCHIVE_EXPECTED: &str =
+    "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0";
+
+#[test]
+fn rustc_backed_archive_matches_aot_comptime_and_dev_tiers() {
+    let source = parity_source("archive_view()", ARCHIVE_DECLS);
+    assert_eq!(
+        check_aot_comptime("archive/all-pure-calls", &source),
+        ARCHIVE_EXPECTED
+    );
+    check_dev_tiers("archive-all-pure-calls", &source, ARCHIVE_EXPECTED);
+}

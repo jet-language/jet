@@ -1,0 +1,20 @@
+# Tower #392 C4: core.archive runs inside tier-0; no native/AOT fallback.
+> use core.archive as archive
+ok
+> bytes: [U8] :: [72, 101, 108, 108, 111]
+> zipped :: archive.zip_compress("hello.txt", bytes)
+> zipped.len() > bytes.len()
+true : Bool
+> String.from_bytes(archive.zip_decompress(zipped)) ?? panic("zip utf8")
+"Hello" : String
+> empty: [U8] :: []
+> tarred := archive.tar_add(empty, "hello.txt", bytes)
+> tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116])
+> String.from_bytes(archive.tar_get(tarred, "hello.txt")) ?? panic("tar utf8")
+"Hello" : String
+> String.from_bytes(archive.tar_get(tarred, "quote\"slash\\.txt")) ?? panic("tar utf8")
+"Jet" : String
+> archive.tar_get(tarred, "missing.txt")
+[] : [U8]
+> archive.tar_names_json(tarred) == "[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]"
+true : Bool

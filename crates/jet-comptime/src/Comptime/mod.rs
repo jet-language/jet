@@ -16,6 +16,7 @@
 
 pub mod Build;
 mod Builtins;
+mod ArchiveLite;
 mod DataLite;
 mod DataPipeline;
 mod Diagnostics;
