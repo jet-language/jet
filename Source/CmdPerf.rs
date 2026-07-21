@@ -2,7 +2,7 @@
 //!
 //! `run`/`test`/`bench` spawn the exact base-intent driver (`jet run|test|bench …`)
 //! with observe enabled, poll live facts while the child runs, then write one
-//! `.jettrace` with wall/alloc/tasks/locks before exiting with the child's code.
+//! `.jettrace` with wall/alloc/tasks/locks/io before exiting with the child's code.
 //! `attach`/`view`/`compare`/`export` share the same artifact verify seam.
 //! Capture reuses the observe live snapshot (D-OBSERVE-LIVE1) attributed to a
 //! Jet source symbol.
@@ -10,7 +10,8 @@
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
     trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
-    TraceLock, TraceSample, TraceSkeleton, TraceTask, TraceToolchain, TRACE_SCHEMA, TRACE_VERSION,
+    TraceIo, TraceLock, TraceSample, TraceSkeleton, TraceTask, TraceToolchain, TRACE_SCHEMA,
+    TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
@@ -32,6 +33,7 @@ struct CaptureBundle {
     allocations: Vec<TraceAllocation>,
     tasks: Vec<TraceTask>,
     locks: Vec<TraceLock>,
+    io: Vec<TraceIo>,
     source_identity: Vec<SourceIdentity>,
 }
 
@@ -42,6 +44,7 @@ impl CaptureBundle {
             allocations: Vec::new(),
             tasks: Vec::new(),
             locks: Vec::new(),
+            io: Vec::new(),
             source_identity: Vec::new(),
         }
     }
@@ -392,11 +395,24 @@ fn capture_from_source(
             });
         }
     }
+    // I/O: only blocked observe waits matching the live io classifier.
+    let mut io = Vec::new();
+    if let (Some(symbol), Some(snapshot)) = (symbol.as_ref(), snapshot) {
+        for observed in observe_io(snapshot) {
+            io.push(TraceIo {
+                kind: observed.kind,
+                task_id: observed.task_id,
+                wait: observed.wait,
+                symbol: symbol.clone(),
+            });
+        }
+    }
     Ok(CaptureBundle {
         samples,
         allocations,
         tasks,
         locks,
+        io,
         source_identity: vec![SourceIdentity {
             path: path_text,
             sha256,
@@ -512,6 +528,32 @@ fn observe_locks(snapshot: &str) -> Vec<ObservedLock> {
         });
     }
     out.sort_by_key(|lock| lock.id);
+    out
+}
+
+struct ObservedIo {
+    kind: String,
+    task_id: u64,
+    wait: String,
+}
+
+/// Blocked observe tasks with real I/O waits only. Idle/time/channel scrapes omitted.
+fn observe_io(snapshot: &str) -> Vec<ObservedIo> {
+    let mut out = Vec::new();
+    for task in observe_tasks(snapshot) {
+        if task.state != "blocked" {
+            continue;
+        }
+        let Some(kind) = TraceIo::kind_for_wait(&task.wait) else {
+            continue;
+        };
+        out.push(ObservedIo {
+            kind: kind.into(),
+            task_id: task.id,
+            wait: task.wait,
+        });
+    }
+    out.sort_by_key(|row| row.task_id);
     out
 }
 
@@ -632,18 +674,21 @@ fn poll_observe_snapshot(root_pid: u32) -> Option<String> {
             let (count, bytes) = observe_arena_resources(&snapshot);
             let tasks = observe_tasks(&snapshot);
             let locks = observe_locks(&snapshot);
+            let io = observe_io(&snapshot);
             let child_tasks = tasks.iter().filter(|task| task.parent > 0).count() as u64;
             let contended = locks.len() as u64;
+            let io_n = io.len() as u64;
             let score = (if count > 0 || bytes > 0 { 100 } else { 0 })
                 + child_tasks.saturating_mul(10)
                 + contended.saturating_mul(20)
+                + io_n.saturating_mul(20)
                 + tasks.len() as u64;
             if score > best_score {
                 best_score = score;
                 best = Some(snapshot);
             }
-            // Prefer a snapshot that already shows alloc + spawned child + contention.
-            if (count > 0 || bytes > 0) && child_tasks > 0 && contended > 0 {
+            // Prefer a snapshot that already shows alloc + spawned child + contention + I/O.
+            if (count > 0 || bytes > 0) && child_tasks > 0 && contended > 0 && io_n > 0 {
                 return best;
             }
         }
@@ -777,6 +822,9 @@ fn view(args: &[String]) -> i32 {
             if let Some((n, waiters, symbol)) = lock_summary(&trace) {
                 println!("locks count={n} waiters={waiters} · {symbol}");
             }
+            if let Some((n, symbol)) = io_summary(&trace) {
+                println!("io count={n} · {symbol}");
+            }
             0
         }
         Err(message) => {
@@ -858,8 +906,9 @@ fn export(args: &[String]) -> i32 {
         || first_allocation(&trace).is_some()
         || task_summary(&trace).is_some()
         || lock_summary(&trace).is_some()
+        || io_summary(&trace).is_some()
     {
-        "json-envelope; domains present are wall/cpu/alloc/tasks/locks only — no pprof/otel/chrome payloads"
+        "json-envelope; domains present are wall/cpu/alloc/tasks/locks/io only — no pprof/otel/chrome payloads"
     } else {
         "json-envelope-only; no pprof/otel/chrome payloads in skeleton"
     };
@@ -890,6 +939,7 @@ fn write_session_trace(
         allocations: capture.allocations,
         tasks: capture.tasks,
         locks: capture.locks,
+        io: capture.io,
         source_identity: capture.source_identity,
     };
     let bytes = build_skeleton_bytes(&skeleton)?;
@@ -1091,6 +1141,25 @@ fn lock_summary(trace: &CanonicalJson) -> Option<(usize, u64, String)> {
         }
     }
     Some((items.len(), waiters, symbol.unwrap_or_else(|| "?".into())))
+}
+
+fn io_summary(trace: &CanonicalJson) -> Option<(usize, String)> {
+    let items = content_array(trace, "io")?;
+    if items.is_empty() {
+        return None;
+    }
+    let mut symbol = None;
+    for item in items {
+        let CanonicalJson::Object(fields) = item else {
+            continue;
+        };
+        if symbol.is_none() {
+            if let Some(value) = fields.get("symbol") {
+                symbol = symbol_label(value);
+            }
+        }
+    }
+    Some((items.len(), symbol.unwrap_or_else(|| "?".into())))
 }
 
 fn symbol_label(value: &CanonicalJson) -> Option<String> {

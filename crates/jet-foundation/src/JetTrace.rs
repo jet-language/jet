@@ -240,6 +240,45 @@ impl TraceLock {
     }
 }
 
+/// One observe-published blocked I/O wait (D-OBSERVE-LIVE1 io classifier).
+/// Idle scrapes and non-I/O waits are omitted by capture; verify rejects them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceIo {
+    pub kind: String,
+    pub task_id: u64,
+    pub wait: String,
+    pub symbol: JetSymbolRef,
+}
+
+impl TraceIo {
+    /// Same classifier observe uses for `effects.io` (tcp / network / `io `).
+    pub fn is_io_wait(wait: &str) -> bool {
+        wait.contains("tcp") || wait.contains("network") || wait.starts_with("io ")
+    }
+
+    pub fn kind_for_wait(wait: &str) -> Option<&'static str> {
+        if !Self::is_io_wait(wait) {
+            return None;
+        }
+        if wait.contains("tcp") {
+            Some("tcp")
+        } else if wait.contains("network") {
+            Some("network")
+        } else {
+            Some("io")
+        }
+    }
+
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("kind".into(), CanonicalJson::String(self.kind.clone())),
+            ("symbol".into(), self.symbol.to_json()?),
+            ("task_id".into(), CanonicalJson::Integer(self.task_id.to_string())),
+            ("wait".into(), CanonicalJson::String(self.wait.clone())),
+        ])
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceIdentity {
     pub path: String,
@@ -278,6 +317,7 @@ pub struct TraceSkeleton {
     pub allocations: Vec<TraceAllocation>,
     pub tasks: Vec<TraceTask>,
     pub locks: Vec<TraceLock>,
+    pub io: Vec<TraceIo>,
     pub source_identity: Vec<SourceIdentity>,
 }
 
@@ -304,6 +344,11 @@ impl TraceSkeleton {
             .iter()
             .map(TraceLock::to_json)
             .collect::<Result<Vec<_>, _>>()?;
+        let io = self
+            .io
+            .iter()
+            .map(TraceIo::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
         let source_identity = self
             .source_identity
             .iter()
@@ -315,7 +360,7 @@ impl TraceSkeleton {
             ("browser".into(), CanonicalJson::Array(Vec::new())),
             ("capture_policy".into(), self.capture_policy.to_json()?),
             ("command".into(), CanonicalJson::String(self.command.clone())),
-            ("io".into(), CanonicalJson::Array(Vec::new())),
+            ("io".into(), CanonicalJson::Array(io)),
             ("locks".into(), CanonicalJson::Array(locks)),
             ("native".into(), CanonicalJson::Array(Vec::new())),
             ("samples".into(), CanonicalJson::Array(samples)),
@@ -407,7 +452,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
         }
         _ => return Err("content.argv is not an array".into()),
     }
-    for key in ["browser", "io", "native", "spans"] {
+    for key in ["browser", "native", "spans"] {
         match &fields[key] {
             CanonicalJson::Array(_) => {}
             _ => return Err(format!("content.{key} is not an array")),
@@ -417,6 +462,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     validate_allocations(&fields["allocations"])?;
     validate_tasks(&fields["tasks"])?;
     validate_locks(&fields["locks"])?;
+    validate_io(&fields["io"])?;
     validate_source_identity(&fields["source_identity"])?;
     validate_capture_policy(&fields["capture_policy"])?;
     validate_toolchain(&fields["toolchain"])?;
@@ -532,6 +578,36 @@ fn validate_locks(value: &CanonicalJson) -> Result<(), String> {
         match &fields["closed"] {
             CanonicalJson::Bool(_) => {}
             _ => return Err(format!("{label}.closed is not a boolean")),
+        }
+        validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+    }
+    Ok(())
+}
+
+fn validate_io(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.io is not an array".into()),
+    };
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.io[{i}]");
+        let fields = object_keys(item, &label, &["kind", "symbol", "task_id", "wait"])?;
+        let kind = text(&fields["kind"], &format!("{label}.kind"))?;
+        if !matches!(kind, "tcp" | "network" | "io") {
+            return Err(format!("{label}.kind must be tcp, network, or io"));
+        }
+        unsigned(&fields["task_id"], &format!("{label}.task_id"))?;
+        let wait = text(&fields["wait"], &format!("{label}.wait"))?;
+        if wait.is_empty() {
+            return Err(format!("{label}.wait is empty (vacuous I/O row)"));
+        }
+        let Some(expected) = TraceIo::kind_for_wait(wait) else {
+            return Err(format!(
+                "{label}.wait is not an observe I/O wait (idle scrape is not an I/O fact)"
+            ));
+        };
+        if kind != expected {
+            return Err(format!("{label}.kind does not match wait classifier"));
         }
         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
     }
@@ -687,6 +763,7 @@ mod tests {
             allocations: Vec::new(),
             tasks: Vec::new(),
             locks: Vec::new(),
+            io: Vec::new(),
             source_identity: Vec::new(),
         }
     }
@@ -813,6 +890,45 @@ mod tests {
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
         let err = verify_jettrace(&bytes).unwrap_err();
         assert!(err.contains("no waiters"), "{err}");
+    }
+
+    #[test]
+    fn captured_io_round_trip_with_tcp_accept_wait() {
+        let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
+        skeleton.io.push(TraceIo {
+            kind: "tcp".into(),
+            task_id: 3,
+            wait: "tcp accept".into(),
+            symbol: symbol.clone(),
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("\"io\":[{"), "{text}");
+        assert!(text.contains("\"kind\":\"tcp\""), "{text}");
+        assert!(text.contains("\"wait\":\"tcp accept\""), "{text}");
+        assert!(text.contains("\"task_id\":3"), "{text}");
+        verify_jettrace(&bytes).unwrap();
+    }
+
+    #[test]
+    fn vacuous_io_row_is_rejected() {
+        let mut skeleton = sample_skeleton();
+        skeleton.io.push(TraceIo {
+            kind: "tcp".into(),
+            task_id: 1,
+            wait: "time sleep".into(),
+            symbol: JetSymbolRef {
+                path: "app.jet".into(),
+                name: "run".into(),
+            },
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let err = verify_jettrace(&bytes).unwrap_err();
+        assert!(err.contains("not an observe I/O wait"), "{err}");
     }
 
     #[test]

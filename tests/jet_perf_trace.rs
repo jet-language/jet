@@ -1,5 +1,5 @@
 //! D-PERFSESSION1=D: `jet perf` writes/reads a versioned `.jettrace`.
-//! C1: command family + verify. C2: run/attach capture wall/alloc/tasks/locks
+//! C1: command family + verify. C2: run/attach capture wall/alloc/tasks/locks/io
 //! with Jet symbol identity from the observe live snapshot.
 
 use std::fs;
@@ -130,6 +130,38 @@ fn assert_honest_locks(text: &str) {
         !locks.contains("\"recv_waiters\":0,\"send_waiters\":0")
             && !locks.contains("\"send_waiters\":0,\"recv_waiters\":0"),
         "idle zero-waiter lock row leaked: {text}"
+    );
+}
+
+/// Fail if io empty, missing tcp wait, or vacuous non-I/O wait leaked.
+fn assert_honest_io(text: &str) {
+    let io_at = text
+        .find("\"io\":[{")
+        .unwrap_or_else(|| panic!("missing non-empty io array: {text}"));
+    let after = &text[io_at + "\"io\":[".len()..];
+    let end = after
+        .find(']')
+        .unwrap_or_else(|| panic!("unclosed io array: {text}"));
+    let io = &after[..end];
+    assert!(
+        io.contains("\"kind\":\"tcp\""),
+        "missing tcp io kind: {text}"
+    );
+    assert!(
+        io.contains("\"wait\":\"tcp accept\"") || io.contains("\"wait\":\"tcp accept readiness\""),
+        "missing real tcp accept wait: {text}"
+    );
+    assert!(
+        io.contains("\"task_id\":"),
+        "missing io task_id: {text}"
+    );
+    assert!(
+        !text.contains("\"io\":[]"),
+        "empty io false-green leaked beside non-empty claim: {text}"
+    );
+    assert!(
+        !io.contains("\"wait\":\"time sleep\"") && !io.contains("\"wait\":\"channel "),
+        "non-I/O wait leaked into io: {io}"
     );
 }
 
@@ -264,6 +296,7 @@ fn perf_run_captures_wall_and_alloc_into_jettrace() {
     fs::write(
         &source,
         r#"use core.mem as mem
+use core.net as net
 use core.tasks as tasks
 use core.time as time
 
@@ -280,6 +313,12 @@ fn run() {
         blocked.receive() ?? panic("closed")
     })
     child.detach()
+    // Second child blocks on accept with no client — real observe I/O wait.
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    io_child :: tasks.spawn(take(listener) () => {
+        _ :: listener.accept() ?? panic("accept")
+    })
+    io_child.detach()
     ready.receive() ?? panic("closed")
     // hold_sender stays live so the blocked receive keeps real waiters.
     arena :: mem.Arena.new()
@@ -315,6 +354,7 @@ fn run() {
     assert_honest_wall_and_alloc(&text);
     assert_honest_tasks(&text);
     assert_honest_locks(&text);
+    assert_honest_io(&text);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("session.jet"), "{text}");
@@ -339,6 +379,8 @@ fn run() {
     assert!(stdout.contains("locks count="), "{stdout}");
     assert!(stdout.contains("waiters="), "{stdout}");
     assert!(!stdout.contains("locks count=0 "), "zero locks in view: {stdout}");
+    assert!(stdout.contains("io count="), "{stdout}");
+    assert!(!stdout.contains("io count=0 "), "zero io in view: {stdout}");
     assert!(stdout.contains("session.jet#run"), "{stdout}");
     assert!(stdout.contains("command run"), "{stdout}");
 
@@ -356,6 +398,7 @@ fn perf_attach_captures_wall_and_alloc_with_jet_symbol_from_observe() {
     fs::write(
         &source,
         r#"use core.mem as mem
+use core.net as net
 use core.tasks as tasks
 use core.time as time
 
@@ -372,6 +415,12 @@ fn run() {
         blocked.receive() ?? panic("closed")
     })
     child.detach()
+    // Second child blocks on accept with no client — real observe I/O wait.
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    io_child :: tasks.spawn(take(listener) () => {
+        _ :: listener.accept() ?? panic("accept")
+    })
+    io_child.detach()
     ready.receive() ?? panic("closed")
     // hold_sender stays live so the blocked receive keeps real waiters.
     arena :: mem.Arena.new()
@@ -418,13 +467,15 @@ fn run() {
                 if snapshot.contains("\"arena_allocations\":")
                     && !snapshot.contains("\"arena_allocations\":0")
                     && snapshot.contains("\"parent\":1")
-                    && snapshot.contains("\"recv_waiters\":1") =>
+                    && snapshot.contains("\"recv_waiters\":1")
+                    && (snapshot.contains("\"wait\":\"tcp accept\"")
+                        || snapshot.contains("\"wait\":\"tcp accept readiness\"")) =>
             {
                 break
             }
             _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
             other => panic!(
-                "observe snapshot never became readable with allocs+child+contention: {other:?}"
+                "observe snapshot never became readable with allocs+child+contention+io: {other:?}"
             ),
         }
     }
@@ -455,6 +506,7 @@ fn run() {
     assert_honest_wall_and_alloc(&text);
     assert_honest_tasks(&text);
     assert_honest_locks(&text);
+    assert_honest_io(&text);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("live.jet"), "{text}");
@@ -479,6 +531,8 @@ fn run() {
     assert!(stdout.contains("locks count="), "{stdout}");
     assert!(stdout.contains("waiters="), "{stdout}");
     assert!(!stdout.contains("locks count=0 "), "zero locks in view: {stdout}");
+    assert!(stdout.contains("io count="), "{stdout}");
+    assert!(!stdout.contains("io count=0 "), "zero io in view: {stdout}");
     assert!(stdout.contains("live.jet#run"), "{stdout}");
 
     let _ = fs::remove_dir_all(&root);
