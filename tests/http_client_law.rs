@@ -2341,26 +2341,52 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
             l_onoff: 1,
             l_linger: 0,
         };
-        unsafe {
+        let result = unsafe {
             setsockopt(
                 stream.as_raw_fd(),
                 SOL_SOCKET,
                 SO_LINGER,
                 (&linger as *const Linger).cast(),
                 std::mem::size_of::<Linger>() as u32,
-            );
-        }
+            )
+        };
+        assert_eq!(
+            result,
+            0,
+            "SO_LINGER setup failed: {}",
+            std::io::Error::last_os_error()
+        );
         drop(stream);
     }
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
     let addr = listener.local_addr().unwrap();
     let url = format!("http://{addr}/");
     let puts = Arc::new(AtomicUsize::new(0));
     let puts_observed = puts.clone();
     let server = std::thread::spawn(move || {
+        let accept = || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
+                        break stream;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            Instant::now() < deadline,
+                            "timed out waiting for retry connection"
+                        );
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("retry accept failed: {error}"),
+                }
+            }
+        };
         // 1) Same TCP proves pool reuse, then RST forces write-path Io reconnect.
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept();
         assert!(request_head(&mut stream).starts_with(b"GET /warm HTTP/1.1\r\n"));
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nw")
@@ -2376,7 +2402,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
             .unwrap();
         rst_before_next_write(stream);
 
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept();
         assert!(
             request_head(&mut stream).starts_with(b"GET /retry HTTP/1.1\r\n"),
             "Safe must reconnect once after write-before-bytes Io on a reused pool socket"
@@ -2387,7 +2413,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
         rst_before_next_write(stream);
 
         // 2) Safe: warm + POST fails on stale socket without dialing again.
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept();
         assert!(request_head(&mut stream).starts_with(b"GET /warm2 HTTP/1.1\r\n"));
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nx")
@@ -2395,7 +2421,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
         rst_before_next_write(stream);
 
         // 3) retries(.None): warm + stale GET fails without reconnect.
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept();
         let head = request_head(&mut stream);
         assert!(
             head.starts_with(b"GET /warm3 HTTP/1.1\r\n"),
@@ -2408,7 +2434,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
         rst_before_next_write(stream);
 
         // 4) Safe denies PUT retry (no dial); Idempotent opts in.
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept();
         let head = request_head(&mut stream);
         assert!(
             head.starts_with(b"GET /warm4 HTTP/1.1\r\n"),
@@ -2420,7 +2446,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
             .unwrap();
         rst_before_next_write(stream);
 
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept();
         let head = request_head(&mut stream);
         assert!(
             head.starts_with(b"GET /warm5 HTTP/1.1\r\n"),
@@ -2432,7 +2458,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
             .unwrap();
         rst_before_next_write(stream);
 
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept();
         puts_observed.fetch_add(1, Ordering::Relaxed);
         assert!(request_head(&mut stream).starts_with(b"PUT /allowed HTTP/1.1\r\n"));
         stream
@@ -2492,6 +2518,53 @@ fn drain(handle: i64) -> Vec<u8> {
     out
 }
 
+fn wait_for_pooled_rst() {
+    #[repr(C)]
+    struct PollFd {
+        fd: i32,
+        events: i16,
+        revents: i16,
+    }
+    extern "C" {
+        fn poll(fds: *mut PollFd, nfds: usize, timeout: i32) -> i32;
+    }
+    const POLLIN: i16 = 0x0001;
+    const POLLERR: i16 = 0x0008;
+    let sockets = std::fs::read_dir("/proc/self/fd")
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            std::fs::read_link(entry.path())
+                .ok()?
+                .to_string_lossy()
+                .starts_with("socket:[")
+                .then(|| entry.file_name().to_string_lossy().parse::<i32>().ok())
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sockets.len(),
+        1,
+        "expected exactly one pooled TCP socket: {sockets:?}"
+    );
+    let mut socket = PollFd {
+        fd: sockets[0],
+        events: POLLIN,
+        revents: 0,
+    };
+    let ready = unsafe { poll(&mut socket, 1, 2000) };
+    assert_eq!(
+        ready, 1,
+        "pooled socket reset was not observed before retry"
+    );
+    assert_ne!(
+        socket.revents & POLLERR,
+        0,
+        "pooled socket has no pending reset: {:#x}",
+        socket.revents
+    );
+}
+
 fn main() {
     let base = std::env::args().nth(1).unwrap();
     let root = bridge::jet_http_client_new_impl();
@@ -2515,6 +2588,7 @@ fn main() {
         "write-path retry proof requires a reused pooled connection first"
     );
     assert_eq!(drain(pooled.1), b"r");
+    wait_for_pooled_rst();
 
     let retry = format!("{base}retry");
     let second = send(safe, "GET", &retry, None).unwrap();
@@ -2523,10 +2597,12 @@ fn main() {
         "write-before-bytes Io reconnect must dial fresh"
     );
     assert_eq!(drain(second.1), b"ok");
+    wait_for_pooled_rst();
 
     let warm2 = format!("{base}warm2");
     let third = send(safe, "GET", &warm2, None).unwrap();
     assert_eq!(drain(third.1), b"x");
+    wait_for_pooled_rst();
     let post = format!("{base}unsafe");
     assert!(send(safe, "POST", &post, Some(b"nope")).is_err());
 
@@ -2541,6 +2617,7 @@ fn main() {
     let warm3 = format!("{base}warm3");
     let fourth = send(none, "GET", &warm3, None).unwrap();
     assert_eq!(drain(fourth.1), b"y");
+    wait_for_pooled_rst();
     let again = format!("{base}again");
     assert!(send(none, "GET", &again, None).is_err());
     bridge::jet_http_client_drop_impl(none);
@@ -2548,6 +2625,7 @@ fn main() {
     let warm4 = format!("{base}warm4");
     let fifth = send(safe, "GET", &warm4, None).unwrap();
     assert_eq!(drain(fifth.1), b"z");
+    wait_for_pooled_rst();
     let denied = format!("{base}denied");
     assert!(send(safe, "PUT", &denied, None).is_err());
     bridge::jet_http_client_drop_impl(safe);
@@ -2563,6 +2641,7 @@ fn main() {
     let warm5 = format!("{base}warm5");
     let sixth = send(idem, "GET", &warm5, None).unwrap();
     assert_eq!(drain(sixth.1), b"q");
+    wait_for_pooled_rst();
     let allowed = format!("{base}allowed");
     let seventh = send(idem, "PUT", &allowed, None).unwrap();
     assert_eq!(drain(seventh.1), b"ok");
@@ -2594,12 +2673,12 @@ fn main() {
         String::from_utf8_lossy(&built.stderr)
     );
     let output = Command::new(&bin).arg(&url).output().unwrap();
-    server.join().unwrap();
     assert!(
         output.status.success(),
         "retry harness failed:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    server.join().unwrap();
     assert_eq!(puts.load(Ordering::Relaxed), 1, "only Idempotent PUT should dial");
     let _ = fs::remove_dir_all(&dir);
 }
