@@ -887,6 +887,36 @@ impl<'a> Checker<'a> {
                     };
                     return Some(Type::List(Box::new(elem)));
                 }
+                ("core.data", "schema") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    let Some(arg) = args.get_mut(0) else {
+                        return Some(Type::List(Box::new(Type::Named("DataColumn".to_string()))));
+                    };
+                    let ty = self.infer(&mut arg.expr)?;
+                    let ok = match &ty {
+                        Type::List(_) => true,
+                        Type::Apply { name, args } => {
+                            matches!(name.as_str(), "Table" | "Series" | "LazyFrame")
+                                && args.len() == 1
+                        }
+                        _ => false,
+                    };
+                    if !ok {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`data.schema` needs a typed table or series, not {}",
+                                ty.show()
+                            ),
+                            "core.data schema reads column names and types from the row model".to_string(),
+                            "pass a `Table<T>`, `Series<T>`, `LazyFrame<T>`, or `[T]` value".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                    }
+                    return Some(Type::List(Box::new(Type::Named("DataColumn".to_string()))));
+                }
                 ("core.data", "missing_count") => {
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));

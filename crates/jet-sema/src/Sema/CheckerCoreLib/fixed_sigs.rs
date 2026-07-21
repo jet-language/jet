@@ -87,9 +87,9 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.tasks", "channel" | "after")
             | (
                 "core.data",
-                "csv" | "count" | "table" | "rows" | "series" | "values" | "missing_count"
-                    | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect" | "plan"
-                    | "filter" | "sort_by" | "group_count" | "group_sum" | "group_mean",
+                "csv" | "count" | "table" | "rows" | "series" | "values" | "schema"
+                    | "missing_count" | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect"
+                    | "plan" | "filter" | "sort_by" | "group_count" | "group_sum" | "group_mean",
             )
             | ("core.vault", "current" | "versions" | "load" | "status"
                 | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"

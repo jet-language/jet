@@ -1,4 +1,5 @@
 use crate::AST::{Type};
+use crate::Codegen::escape_rust_str;
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::emit_tir_expr;
@@ -10,6 +11,42 @@ use crate::Codegen::TIR::enc_row_target_rust_traced;
 use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::enc_target_rust_traced;
 use crate::Codegen::TIR::TExpr;
+
+fn emit_data_schema_columns(elem_ty: &Type, cx: &Cx) -> String {
+    let column = |name: &str, type_name: &str| {
+        format!(
+            "{root}jet_std::DataColumn {{ name: {name}.to_string(), type_name: {ty}.to_string() }}",
+            root = cx.root_prefix,
+            name = escape_rust_str(name),
+            ty = escape_rust_str(type_name),
+        )
+    };
+    match elem_ty {
+        Type::Named(struct_name) => match cx.struct_fields.get(struct_name) {
+            Some(fields) if !fields.is_empty() => {
+                let items: Vec<String> = fields
+                    .iter()
+                    .map(|(fname, fty)| column(fname, &fty.name()))
+                    .collect();
+                format!("vec![{}]", items.join(", "))
+            }
+            _ => format!("vec![{}]", column("value", &elem_ty.name())),
+        },
+        _ => format!("vec![{}]", column("value", &elem_ty.name())),
+    }
+}
+
+fn data_schema_elem_ty(arg_ty: &Type) -> Option<&Type> {
+    match arg_ty {
+        Type::List(inner) => Some(inner.as_ref()),
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "Table" | "Series" | "LazyFrame") && args.len() == 1 =>
+        {
+            Some(&args[0])
+        }
+        _ => None,
+    }
+}
 
 pub(crate) fn emit_http_bridge_error(ffi: &str, error: &str) -> String {
     format!(
@@ -788,6 +825,15 @@ pub(crate) fn emit_tir_core_call(
         ("core.data", "rows") => format!("{}(&({}))", helper("jet_data_rows"), arg(0)),
         ("core.data", "series") => format!("{}(&({}))", helper("jet_data_series"), arg(0)),
         ("core.data", "values") => format!("{}(&({}))", helper("jet_data_series_values"), arg(0)),
+        ("core.data", "schema") => {
+            let elem = args
+                .first()
+                .and_then(|a| data_schema_elem_ty(&a.ty))
+                .cloned()
+                .unwrap_or(Type::Int);
+            // Argument is evaluated for effects, then discarded — schema is type-driven.
+            format!("{{ let _ = &({}); {} }}", arg(0), emit_data_schema_columns(&elem, cx))
+        }
         ("core.data", "missing_count") => {
             format!("{}(&({}))", helper("jet_data_missing_count"), arg(0))
         }

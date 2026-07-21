@@ -210,6 +210,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "rows",
             "series",
             "values",
+            "schema",
             "missing_count",
             "lazy",
             "lazy_filter",

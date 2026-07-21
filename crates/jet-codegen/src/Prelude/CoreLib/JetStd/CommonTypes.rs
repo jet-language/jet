@@ -318,6 +318,13 @@
         pub mean: f64,
     }
 
+    /// D-DATAFRAME1=A: one typed column in a `Table`/`Series` schema.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DataColumn {
+        pub name: String,
+        pub type_name: String,
+    }
+
     #[derive(Clone, Debug, PartialEq)]
     pub struct DataStatus {
         pub step: String,

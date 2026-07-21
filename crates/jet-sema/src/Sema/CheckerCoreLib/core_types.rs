@@ -152,7 +152,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
         | "WatchEvent" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
-        | "DataGroup" | "DataStatus" | "DataSummary"
+        | "DataGroup" | "DataColumn" | "DataStatus" | "DataSummary"
         // D-LOGTRACE1=A: typed structured logging values.
         | "LogField" | "LogSpan"
         // D-ITERTOOLS1=A: expanded collection handles.
@@ -413,6 +413,12 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "key" => Some(Type::String),
             "count" => Some(Type::Int),
             "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if type_name == "DataColumn" {
+        return match field {
+            "name" | "type_name" => Some(Type::String),
             _ => None,
         };
     }

@@ -1590,6 +1590,7 @@ field is a Jet field error before codegen.
 | `csv<T>(text)` | `[T] ? DecodeError` | Header-mapped typed CSV rows |
 | `table(rows)` / `rows(table)` | `Table<T>` / `[T]` | Wrap and unwrap the typed in-memory table model |
 | `series(values)` / `values(series)` | `Series<T>` / `[T]` | Wrap and unwrap typed series values |
+| `schema(table_or_series)` | `[DataColumn]` | Column names and Jet type names for the row/value model |
 | `missing_count(series)` | `Int` | Count absent `T?` values in a typed series |
 | `lazy(table)` / `collect(plan)` | `LazyFrame<T>` / `Table<T>` | Build a typed plan; execute it only when materialized |
 | `lazy_filter(plan, row => ok)` / `lazy_sort_by(plan, row => key)` | `LazyFrame<T>` | Append deferred typed operations without visiting rows |
@@ -1610,6 +1611,8 @@ field is a Jet field error before codegen.
 | `bar_text(groups)` / `bar_svg(groups)` | `String` | Deterministic text/SVG bar output |
 
 `Table<T>` and `LazyFrame<T>` keep typed rows; `Series<T>` keeps typed values.
+`data.schema` returns `[DataColumn]` with `.name` and `.type_name` for each
+column of a table row type, or a single `value` column for a series element type.
 Missing values are ordinary Jet optionals (`T?`) inside a series, not a second
 sentinel type. `DataGroup` fields: `.key: String`, `.count: Int`, `.sum: Float`,
 `.mean: Float`. `DataJoin<L, R>` fields are `.left: L` and `.right: R`; the

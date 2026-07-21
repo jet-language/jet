@@ -6,14 +6,8 @@
 //! EncodingTraits.rs` + `DataFmt.rs`) so comptime/REPL tier-0 matches AOT
 //! byte-for-byte (R12 parity).
 //!
-//! Not here: `table`/`rows`/`series`/`values`/`missing_count`/`csv`/`count`/
-//! `lazy`/`lazy_filter`/`lazy_sort_by`/`collect`/`plan`/`filter`/`sort_by`/
-//! `group_count`/`group_sum`/`group_mean` — those are the generic,
-//! call-site-typed table/lazy-pipeline half of `core.data`
-//! (`fixed_sigs.rs`'s `is_call_site_typed`, resolved via `infer_core_call`
-//! + codegen's `enc_target_rust`, not a plain fixed signature); porting a
-//! generic typed-decode + closure-driven lazy pipeline into `CtValue` is a
-//! distinct, larger design pass and stays an open gap.
+//! Not here: none of the call-site-typed table/lazy pipeline names above —
+//! those live in `DataPipeline.rs` (including `schema`).
 
 pub(super) fn sum(values: &[f64]) -> f64 {
     values.iter().copied().sum()
@@ -96,6 +90,7 @@ pub(super) fn status_rows() -> Vec<(&'static str, &'static str, &'static str)> {
         ("core.data.table", "native", "native"),
         ("core.data.lazy", "native", "native"),
         ("core.data.missing", "native", "native"),
+        ("core.data.schema", "native", "native"),
         (
             "py.* / r.* / gpu.*",
             "bridge-ready",

@@ -6229,6 +6229,55 @@ fn run() {
 }
 
 #[test]
+fn core_data_schema_ingest_and_select() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping core.data schema test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_data_schema_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "data_schema",
+        r#"
+use core.data as data
+
+@Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0"
+    rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
+    table :: data.table(rows)
+    cols :: data.schema(table)
+    loop c; cols {
+        print("{c.name}:{c.type_name}")
+    }
+    selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)
+    print("selected:{data.count(selected)}")
+    loop t; selected {
+        print("{t.team}:{t.minutes}")
+    }
+    print("{data.status()[5].step}:{data.status()[5].path}")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "core.data schema program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "team:String\nminutes:Float\nselected:2\nTools:5.0\nCore:8.0\ncore.data.schema:native\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn io_input_reads_a_line_from_stdin() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

@@ -1,5 +1,5 @@
 //! Card #392 pass 5: `core.data`'s typed table/lazy pipeline
-//! (`table`/`rows`/`series`/`values`/`missing_count`/`csv`/`count`/`lazy`/
+//! (`table`/`rows`/`series`/`values`/`schema`/`missing_count`/`csv`/`count`/`lazy`/
 //! `lazy_filter`/`lazy_sort_by`/`collect`/`plan`/`filter`/`sort_by`/
 //! `group_count`/`group_sum`/`group_mean`) at comptime. Mirrors
 //! `Codegen/Prelude/CoreLib/Top/EncodingTraits.rs`'s `jet_data_*` helpers
@@ -55,6 +55,26 @@ fn expect_struct<'a>(v: &'a CtValue, type_name: &str, what: &str, span: Span) ->
             Ok((xs, missing, plan))
         }
         _ => Err(unsupported(&format!("`data.{}` needs a `{}` value", what, type_name), span)),
+    }
+}
+
+fn ct_value_type_name(v: &CtValue) -> String {
+    match v {
+        CtValue::Int(_) => "Int".to_string(),
+        CtValue::Float(value) => value.jet_type().show(),
+        CtValue::Bool(_) => "Bool".to_string(),
+        CtValue::Char(_) => "Char".to_string(),
+        CtValue::Str(_) => "String".to_string(),
+        CtValue::BigInt(_) => "BigInt".to_string(),
+        CtValue::Bytes(_) => "[U8]".to_string(),
+        CtValue::List(_) => "List".to_string(),
+        CtValue::Map(_) => "Map".to_string(),
+        CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name.clone(),
+        CtValue::Some(inner) => format!("{}?", ct_value_type_name(inner)),
+        CtValue::None(ty) => format!("{}?", ty.name()),
+        CtValue::ResOk(_) | CtValue::ResErr(_) => "Result".to_string(),
+        CtValue::Unit => "()".to_string(),
+        CtValue::Closure(_) => "Fn".to_string(),
     }
 }
 
@@ -166,6 +186,77 @@ impl<'a> Interp<'a> {
             "values" => {
                 let (values, ..) = expect_struct(&argv[0], "Series", "values", span)?;
                 Ok(CtValue::List(values.clone()))
+            }
+            "schema" => {
+                let recv = argv.first().ok_or_else(|| {
+                    unsupported("`data.schema()`: missing argument", span)
+                })?;
+                let sample = match recv {
+                    CtValue::List(xs) => xs.first(),
+                    CtValue::Struct { type_name, .. }
+                        if type_name == "Table" || type_name == "LazyFrame" =>
+                    {
+                        // Schema is the row model, not deferred filter results — read
+                        // the stored source rows without materializing lazy ops.
+                        expect_struct(recv, type_name, "schema", span)?.0.first()
+                    }
+                    CtValue::Struct { type_name, .. } if type_name == "Series" => {
+                        expect_struct(recv, "Series", "schema", span)?.0.first()
+                    }
+                    _ => {
+                        return Err(unsupported(
+                            "`data.schema()` needs a typed table or series",
+                            span,
+                        ));
+                    }
+                };
+                let columns = match sample {
+                    Some(CtValue::Struct { type_name, fields }) => {
+                        if let Some(def) = self.structs.get(type_name.as_str()) {
+                            def.fields
+                                .iter()
+                                .map(|f| {
+                                    ct_struct(
+                                        "DataColumn",
+                                        vec![
+                                            ("name", CtValue::Str(f.name.clone())),
+                                            ("type_name", CtValue::Str(f.ty.name())),
+                                        ],
+                                    )
+                                })
+                                .collect()
+                        } else {
+                            // ponytail: fall back to runtime field names when the
+                            // struct def is out of the comptime registry.
+                            fields
+                                .iter()
+                                .map(|(name, value)| {
+                                    ct_struct(
+                                        "DataColumn",
+                                        vec![
+                                            ("name", CtValue::Str(name.clone())),
+                                            (
+                                                "type_name",
+                                                CtValue::Str(ct_value_type_name(value)),
+                                            ),
+                                        ],
+                                    )
+                                })
+                                .collect()
+                        }
+                    }
+                    Some(value) => vec![ct_struct(
+                        "DataColumn",
+                        vec![
+                            ("name", CtValue::Str("value".to_string())),
+                            ("type_name", CtValue::Str(ct_value_type_name(value))),
+                        ],
+                    )],
+                    // ponytail: empty containers have no sample row; AOT still
+                    // emits the static type schema. Non-empty paths match AOT.
+                    None => Vec::new(),
+                };
+                Ok(CtValue::List(columns))
             }
             "missing_count" => {
                 let (values, missing, _) = expect_struct(&argv[0], "Series", "missing_count", span)?;

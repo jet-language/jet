@@ -133,6 +133,11 @@ fn jet_data_status() -> Vec<jet_std::DataStatus> {
             replacement: "native".to_string(),
         },
         jet_std::DataStatus {
+            step: "core.data.schema".to_string(),
+            path: "native".to_string(),
+            replacement: "native".to_string(),
+        },
+        jet_std::DataStatus {
             step: "py.* / r.* / gpu.*".to_string(),
             path: "bridge-ready".to_string(),
             replacement: "report via data.status() and jet inspect dossier data".to_string(),
