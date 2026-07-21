@@ -46,6 +46,35 @@ fn json_u64_after(haystack: &str, key: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
+fn assert_completed_io_bound_to_tasks(text: &str) {
+    let io = text
+        .split_once("\"io\":[")
+        .and_then(|(_, tail)| tail.split_once("],\"locks\""))
+        .map(|(array, _)| array)
+        .unwrap_or_else(|| panic!("missing io array: {text}"));
+    let tasks = text
+        .split_once("\"tasks\":[")
+        .and_then(|(_, tail)| tail.split_once("],\"toolchain\""))
+        .map(|(array, _)| array)
+        .unwrap_or_else(|| panic!("missing tasks array: {text}"));
+    let mut spans = 0;
+    for span in io.split("},{") {
+        let task_id = json_u64_after(span, "task_id")
+            .unwrap_or_else(|| panic!("I/O span missing task_id: {span}"));
+        let task = tasks
+            .split("},{")
+            .find(|task| json_u64_after(task, "id") == Some(task_id))
+            .unwrap_or_else(|| panic!("I/O task {task_id} missing: {text}"));
+        assert!(task.contains("\"state\":\"done\""), "I/O task {task_id} not done: {task}");
+        assert!(task.contains("\"wait\":\"\""), "done I/O task {task_id} retained wait: {task}");
+        let start = json_u64_after(span, "start_ns").unwrap();
+        let end = json_u64_after(span, "end_ns").unwrap();
+        assert!(end > start, "completed I/O task {task_id} has no duration: {span}");
+        spans += 1;
+    }
+    assert!(spans > 0, "no completed I/O spans: {text}");
+}
+
 /// Fail if capture invented 1ns wall or recorded a zero-alloc scrape-success.
 fn assert_honest_wall_and_alloc(text: &str) {
     let wall_at = text
@@ -221,10 +250,7 @@ fn run() {
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "echo:ping");
     let text = fs::read_to_string(&out).unwrap();
     assert_honest_io(&text);
-    assert!(text.contains("\"state\":\"done\""), "completed task not modeled: {text}");
-    let start = json_u64_after(&text[text.find("\"io\":[{").unwrap()..], "start_ns").unwrap();
-    let end = json_u64_after(&text[text.find("\"io\":[{").unwrap()..], "end_ns").unwrap();
-    assert!(end > start, "completed wait has no measured duration: {text}");
+    assert_completed_io_bound_to_tasks(&text);
     let _ = fs::remove_dir_all(&root);
 }
 

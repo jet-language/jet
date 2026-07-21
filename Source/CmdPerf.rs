@@ -11,7 +11,7 @@ use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
     trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
     TraceIo, TraceLock, TraceSample, TraceSkeleton, TraceTask, TraceToolchain, TRACE_SCHEMA,
-    TRACE_VERSION,
+    TRACE_IO_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
@@ -35,7 +35,9 @@ struct CaptureBundle {
     tasks: Vec<TraceTask>,
     locks: Vec<TraceLock>,
     io: Vec<TraceIo>,
+    io_rows_truncated: bool,
     source_identity: Vec<SourceIdentity>,
+    task_rows_truncated: bool,
 }
 
 impl CaptureBundle {
@@ -46,7 +48,9 @@ impl CaptureBundle {
             tasks: Vec::new(),
             locks: Vec::new(),
             io: Vec::new(),
+            io_rows_truncated: false,
             source_identity: Vec::new(),
+            task_rows_truncated: false,
         }
     }
 }
@@ -117,8 +121,8 @@ fn run_session(action: &str, args: &[String]) -> i32 {
                 if parsed.source.is_some() {
                     // Observe publishes under the program PID, not the jet host.
                     if let Some(snapshot) = poll_observe_snapshot(pid) {
-                        io_timeline.observe(&snapshot, elapsed_ns(started));
-                        last_snapshot = Some(snapshot);
+                        io_timeline.observe(&snapshot.tasks, elapsed_ns(started));
+                        last_snapshot = Some(snapshot.text);
                     }
                 }
                 std::thread::sleep(Duration::from_millis(25));
@@ -343,6 +347,7 @@ fn capture_from_source(
         path: path_text.clone(),
         name,
     });
+    let snapshot_tasks = snapshot.map(observe_tasks).unwrap_or_default();
     let mut samples = Vec::new();
     // Honest wall: omit when zero; never invent 1ns via max(1).
     if let (Some(symbol), true) = (symbol.as_ref(), wall_ns > 0) {
@@ -376,8 +381,7 @@ fn capture_from_source(
     if let Some(symbol) = symbol.as_ref() {
         let observed = io_timeline
             .map(IoTimeline::tasks)
-            .or_else(|| snapshot.map(observe_tasks))
-            .unwrap_or_default();
+            .unwrap_or_else(|| snapshot_tasks.rows.clone());
         for observed in observed {
             tasks.push(TraceTask {
                 id: observed.id,
@@ -411,9 +415,7 @@ fn capture_from_source(
         let observed = io_timeline
             .map(|timeline| timeline.completed.clone())
             .unwrap_or_else(|| {
-                snapshot
-                    .map(observe_io)
-                    .unwrap_or_default()
+                observe_io(&snapshot_tasks.rows)
                     .into_iter()
                     .map(|io| ObservedIoSpan {
                         end_ns: wall_ns,
@@ -441,6 +443,9 @@ fn capture_from_source(
         tasks,
         locks,
         io,
+        io_rows_truncated: io_timeline
+            .map(|timeline| timeline.io_rows_truncated)
+            .unwrap_or(snapshot_tasks.truncated),
         source_identity: vec![SourceIdentity {
             path: path_text,
             sha256,
@@ -449,6 +454,9 @@ fn capture_from_source(
                 .map(|name| (name, "fn".into()))
                 .collect(),
         }],
+        task_rows_truncated: io_timeline
+            .map(|timeline| timeline.task_rows_truncated)
+            .unwrap_or(snapshot_tasks.truncated),
     })
 }
 
@@ -471,16 +479,23 @@ struct ObservedTask {
     cancelled: bool,
 }
 
-/// Parse observe `tasks` objects in id order. Empty when array absent/empty.
-fn observe_tasks(snapshot: &str) -> Vec<ObservedTask> {
+#[derive(Clone, Default)]
+struct ObservedTasks {
+    rows: Vec<ObservedTask>,
+    truncated: bool,
+}
+
+/// Parse at most the artifact policy's task-row cap, in id order.
+fn observe_tasks(snapshot: &str) -> ObservedTasks {
     let Some(inner) = json_array_inner(snapshot, "tasks") else {
-        return Vec::new();
+        return ObservedTasks::default();
     };
     if inner.is_empty() {
-        return Vec::new();
+        return ObservedTasks::default();
     }
     let mut out = Vec::new();
-    for object in split_json_objects(inner) {
+    let (objects, truncated) = split_json_objects(inner, TRACE_TASK_ROW_LIMIT as usize);
+    for object in objects {
         let Some(id) = json_u64(object, "id") else {
             continue;
         };
@@ -504,7 +519,10 @@ fn observe_tasks(snapshot: &str) -> Vec<ObservedTask> {
         });
     }
     out.sort_by_key(|task| task.id);
-    out
+    ObservedTasks {
+        rows: out,
+        truncated,
+    }
 }
 
 struct ObservedLock {
@@ -525,7 +543,7 @@ fn observe_locks(snapshot: &str) -> Vec<ObservedLock> {
         return Vec::new();
     }
     let mut out = Vec::new();
-    for object in split_json_objects(inner) {
+    for object in split_json_objects(inner, TRACE_TASK_ROW_LIMIT as usize).0 {
         let Some(id) = json_u64(object, "id") else {
             continue;
         };
@@ -579,28 +597,37 @@ struct ObservedIoSpan {
 struct IoTimeline {
     active: BTreeMap<(u64, String), (String, u64)>,
     completed: Vec<ObservedIoSpan>,
+    io_rows_truncated: bool,
+    task_rows_truncated: bool,
     tasks: BTreeMap<u64, ObservedTask>,
 }
 
 impl IoTimeline {
-    const MAX_ROWS: usize = 4096;
-
-    fn observe(&mut self, snapshot: &str, now_ns: u64) {
-        let observed_tasks = observe_tasks(snapshot);
-        let current_ids = observed_tasks.iter().map(|task| task.id).collect::<BTreeSet<_>>();
+    fn observe(&mut self, observed_tasks: &ObservedTasks, now_ns: u64) {
+        self.task_rows_truncated |= observed_tasks.truncated;
+        self.io_rows_truncated |= observed_tasks.truncated;
+        let current_ids = observed_tasks
+            .rows
+            .iter()
+            .map(|task| task.id)
+            .collect::<BTreeSet<_>>();
         for task in self.tasks.values_mut() {
             if !current_ids.contains(&task.id) {
                 task.state = "done".into();
                 task.wait.clear();
             }
         }
-        for task in observed_tasks {
-            if self.tasks.contains_key(&task.id) || self.tasks.len() < Self::MAX_ROWS {
-                self.tasks.insert(task.id, task);
+        for task in &observed_tasks.rows {
+            if self.tasks.contains_key(&task.id)
+                || self.tasks.len() < TRACE_TASK_ROW_LIMIT as usize
+            {
+                self.tasks.insert(task.id, task.clone());
+            } else {
+                self.task_rows_truncated = true;
             }
         }
 
-        let observed_io = observe_io(snapshot);
+        let observed_io = observe_io(&observed_tasks.rows);
         let current = observed_io
             .iter()
             .map(|row| (row.task_id, row.wait.clone()))
@@ -623,10 +650,15 @@ impl IoTimeline {
             }
         }
         for row in observed_io {
-            if self.tasks.contains_key(&row.task_id) && self.active.len() < Self::MAX_ROWS {
-                self.active
-                    .entry((row.task_id, row.wait))
-                    .or_insert((row.kind, now_ns));
+            let key = (row.task_id, row.wait);
+            if !self.tasks.contains_key(&row.task_id) {
+                self.io_rows_truncated = true;
+            } else if self.active.contains_key(&key) {
+                continue;
+            } else if self.active.len() + self.completed.len() < TRACE_IO_ROW_LIMIT as usize {
+                self.active.insert(key, (row.kind, now_ns));
+            } else {
+                self.io_rows_truncated = true;
             }
         }
     }
@@ -649,8 +681,10 @@ impl IoTimeline {
     }
 
     fn push(&mut self, span: ObservedIoSpan) {
-        if self.completed.len() < Self::MAX_ROWS {
+        if self.completed.len() < TRACE_IO_ROW_LIMIT as usize {
             self.completed.push(span);
+        } else {
+            self.io_rows_truncated = true;
         }
     }
 
@@ -664,9 +698,9 @@ fn elapsed_ns(started: Instant) -> u64 {
 }
 
 /// Blocked observe tasks with real I/O waits only. Idle/time/channel scrapes omitted.
-fn observe_io(snapshot: &str) -> Vec<ObservedIo> {
+fn observe_io(tasks: &[ObservedTask]) -> Vec<ObservedIo> {
     let mut out = Vec::new();
-    for task in observe_tasks(snapshot) {
+    for task in tasks {
         if task.state != "blocked" {
             continue;
         }
@@ -676,7 +710,7 @@ fn observe_io(snapshot: &str) -> Vec<ObservedIo> {
         out.push(ObservedIo {
             kind: kind.into(),
             task_id: task.id,
-            wait: task.wait,
+            wait: task.wait.clone(),
         });
     }
     out.sort_by_key(|row| row.task_id);
@@ -717,7 +751,7 @@ fn json_array_inner<'a>(snapshot: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
-fn split_json_objects(inner: &str) -> Vec<&str> {
+fn split_json_objects(inner: &str, limit: usize) -> (Vec<&str>, bool) {
     let mut out = Vec::new();
     let bytes = inner.as_bytes();
     let mut i = 0usize;
@@ -727,6 +761,9 @@ fn split_json_objects(inner: &str) -> Vec<&str> {
         }
         if i >= bytes.len() {
             break;
+        }
+        if out.len() == limit {
+            return (out, true);
         }
         if bytes[i] != b'{' {
             break;
@@ -762,7 +799,7 @@ fn split_json_objects(inner: &str) -> Vec<&str> {
             i += 1;
         }
     }
-    out
+    (out, false)
 }
 
 fn json_string(object: &str, key: &str) -> Option<String> {
@@ -787,7 +824,12 @@ fn json_string(object: &str, key: &str) -> Option<String> {
 }
 
 /// `jet run` hosts compile then exec; observe publishes under the program PID.
-fn poll_observe_snapshot(root_pid: u32) -> Option<String> {
+struct PolledSnapshot {
+    tasks: ObservedTasks,
+    text: String,
+}
+
+fn poll_observe_snapshot(root_pid: u32) -> Option<PolledSnapshot> {
     let mut stack = vec![root_pid];
     let mut seen = std::collections::BTreeSet::new();
     let mut best = None;
@@ -800,18 +842,21 @@ fn poll_observe_snapshot(root_pid: u32) -> Option<String> {
             let (count, bytes) = observe_arena_resources(&snapshot);
             let tasks = observe_tasks(&snapshot);
             let locks = observe_locks(&snapshot);
-            let io = observe_io(&snapshot);
-            let child_tasks = tasks.iter().filter(|task| task.parent > 0).count() as u64;
+            let io = observe_io(&tasks.rows);
+            let child_tasks = tasks.rows.iter().filter(|task| task.parent > 0).count() as u64;
             let contended = locks.len() as u64;
             let io_n = io.len() as u64;
             let score = (if count > 0 || bytes > 0 { 100 } else { 0 })
                 + child_tasks.saturating_mul(10)
                 + contended.saturating_mul(20)
                 + io_n.saturating_mul(20)
-                + tasks.len() as u64;
+                + tasks.rows.len() as u64;
             if score > best_score {
                 best_score = score;
-                best = Some(snapshot);
+                best = Some(PolledSnapshot {
+                    tasks,
+                    text: snapshot,
+                });
             }
             // Prefer a snapshot that already shows alloc + spawned child + contention + I/O.
             if (count > 0 || bytes > 0) && child_tasks > 0 && contended > 0 && io_n > 0 {
@@ -1056,11 +1101,14 @@ fn write_session_trace(
     out: Option<&str>,
     capture: CaptureBundle,
 ) -> Result<PathBuf, String> {
+    let mut capture_policy = CapturePolicy::default_exclusions();
+    capture_policy.io_rows_truncated = capture.io_rows_truncated;
+    capture_policy.task_rows_truncated = capture.task_rows_truncated;
     let skeleton = TraceSkeleton {
         command: command.into(),
         argv: argv.to_vec(),
         toolchain: current_toolchain(),
-        capture_policy: CapturePolicy::default_exclusions(),
+        capture_policy,
         samples: capture.samples,
         allocations: capture.allocations,
         tasks: capture.tasks,
@@ -1299,4 +1347,33 @@ fn symbol_label(value: &CanonicalJson) -> Option<String> {
         _ => return None,
     };
     Some(format!("{path}#{name}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_ingestion_is_capped_and_audits_possible_io_loss() {
+        let tasks = (1..=TRACE_TASK_ROW_LIMIT + 1)
+            .map(|id| {
+                format!(
+                    "{{\"id\":{id},\"parent\":0,\"state\":\"blocked\",\"wait\":\"tcp accept\",\"cancelled\":false}}"
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let snapshot = format!("{{\"tasks\":[{tasks}]}}");
+        let observed = observe_tasks(&snapshot);
+        assert_eq!(observed.rows.len(), TRACE_TASK_ROW_LIMIT as usize);
+        assert!(observed.truncated);
+
+        let mut timeline = IoTimeline::default();
+        timeline.observe(&observed, 10);
+        timeline.finish(20);
+        assert_eq!(timeline.tasks.len(), TRACE_TASK_ROW_LIMIT as usize);
+        assert_eq!(timeline.completed.len(), TRACE_IO_ROW_LIMIT as usize);
+        assert!(timeline.task_rows_truncated);
+        assert!(timeline.io_rows_truncated);
+    }
 }

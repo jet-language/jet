@@ -10,7 +10,9 @@ use std::collections::BTreeMap;
 
 pub const TRACE_SCHEMA: &str = "jet.trace";
 pub const TRACE_VERSION: &str = "1";
-pub const CAPTURE_POLICY_SCHEMA: &str = "1";
+pub const CAPTURE_POLICY_SCHEMA: &str = "2";
+pub const TRACE_TASK_ROW_LIMIT: u64 = 4096;
+pub const TRACE_IO_ROW_LIMIT: u64 = 4096;
 
 /// Default privacy exclusions from D-PERFSESSION1 (sorted for A-canonical bytes).
 pub const DEFAULT_EXCLUSIONS: &[&str] = &[
@@ -55,11 +57,17 @@ impl TraceToolchain {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturePolicy {
     pub allowlist: Vec<String>,
+    pub io_rows_truncated: bool,
+    pub task_rows_truncated: bool,
 }
 
 impl CapturePolicy {
     pub fn default_exclusions() -> Self {
-        Self { allowlist: Vec::new() }
+        Self {
+            allowlist: Vec::new(),
+            io_rows_truncated: false,
+            task_rows_truncated: false,
+        }
     }
 
     pub fn to_json(&self) -> Result<CanonicalJson, String> {
@@ -76,7 +84,23 @@ impl CapturePolicy {
                 CanonicalJson::Array(allowlist.into_iter().map(CanonicalJson::String).collect()),
             ),
             ("default_exclusions".into(), CanonicalJson::Array(exclusions)),
+            (
+                "io_row_limit".into(),
+                CanonicalJson::Integer(TRACE_IO_ROW_LIMIT.to_string()),
+            ),
+            (
+                "io_rows_truncated".into(),
+                CanonicalJson::Bool(self.io_rows_truncated),
+            ),
             ("schema".into(), CanonicalJson::Integer(CAPTURE_POLICY_SCHEMA.into())),
+            (
+                "task_row_limit".into(),
+                CanonicalJson::Integer(TRACE_TASK_ROW_LIMIT.to_string()),
+            ),
+            (
+                "task_rows_truncated".into(),
+                CanonicalJson::Bool(self.task_rows_truncated),
+            ),
         ])
     }
 }
@@ -515,11 +539,16 @@ fn validate_allocations(value: &CanonicalJson) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_tasks(value: &CanonicalJson) -> Result<BTreeMap<u64, (u64, CanonicalJson)>, String> {
+fn validate_tasks(
+    value: &CanonicalJson,
+) -> Result<BTreeMap<u64, (u64, String, String, CanonicalJson)>, String> {
     let items = match value {
         CanonicalJson::Array(items) => items,
         _ => return Err("content.tasks is not an array".into()),
     };
+    if items.len() > TRACE_TASK_ROW_LIMIT as usize {
+        return Err("content.tasks exceeds capture_policy.task_row_limit".into());
+    }
     let mut tasks = BTreeMap::new();
     for (i, item) in items.iter().enumerate() {
         let label = format!("content.tasks[{i}]");
@@ -540,26 +569,34 @@ fn validate_tasks(value: &CanonicalJson) -> Result<BTreeMap<u64, (u64, Canonical
         if !matches!(state, "running" | "queued" | "blocked" | "done") {
             return Err(format!("{label}.state must be a live observe task state"));
         }
-        text(&fields["wait"], &format!("{label}.wait"))?;
+        let wait = text(&fields["wait"], &format!("{label}.wait"))?;
         match &fields["cancelled"] {
             CanonicalJson::Bool(_) => {}
             _ => return Err(format!("{label}.cancelled is not a boolean")),
         }
         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
         if tasks
-            .insert(id, (parent, fields["symbol"].clone()))
+            .insert(
+                id,
+                (
+                    parent,
+                    state.into(),
+                    wait.into(),
+                    fields["symbol"].clone(),
+                ),
+            )
             .is_some()
         {
             return Err(format!("{label}.id duplicates task {id}"));
         }
     }
-    for (&id, (parent, _)) in &tasks {
+    for (&id, (parent, _, _, _)) in &tasks {
         if *parent != 0 && !tasks.contains_key(parent) {
             return Err(format!("content.tasks task {id} has missing parent {parent}"));
         }
         let mut seen = std::collections::BTreeSet::new();
         let mut current = id;
-        while let Some((next, _)) = tasks.get(&current) {
+        while let Some((next, _, _, _)) = tasks.get(&current) {
             if *next == 0 {
                 break;
             }
@@ -621,12 +658,15 @@ fn validate_locks(value: &CanonicalJson) -> Result<(), String> {
 
 fn validate_io(
     value: &CanonicalJson,
-    tasks: &BTreeMap<u64, (u64, CanonicalJson)>,
+    tasks: &BTreeMap<u64, (u64, String, String, CanonicalJson)>,
 ) -> Result<(), String> {
     let items = match value {
         CanonicalJson::Array(items) => items,
         _ => return Err("content.io is not an array".into()),
     };
+    if items.len() > TRACE_IO_ROW_LIMIT as usize {
+        return Err("content.io exceeds capture_policy.io_row_limit".into());
+    }
     for (i, item) in items.iter().enumerate() {
         let label = format!("content.io[{i}]");
         let fields = object_keys(
@@ -639,7 +679,7 @@ fn validate_io(
             return Err(format!("{label}.kind must be tcp, network, or io"));
         }
         let task_id = unsigned(&fields["task_id"], &format!("{label}.task_id"))?;
-        let Some((_, task_symbol)) = tasks.get(&task_id) else {
+        let Some((_, task_state, task_wait, task_symbol)) = tasks.get(&task_id) else {
             return Err(format!("{label}.task_id refers to missing task {task_id}"));
         };
         let start_ns = unsigned(&fields["start_ns"], &format!("{label}.start_ns"))?;
@@ -658,6 +698,13 @@ fn validate_io(
         };
         if kind != expected {
             return Err(format!("{label}.kind does not match wait classifier"));
+        }
+        match task_state.as_str() {
+            "done" if task_wait.is_empty() => {}
+            "blocked" if task_wait == wait => {}
+            "done" => return Err(format!("{label} completed task must have an empty wait")),
+            "blocked" => return Err(format!("{label}.wait does not match its blocked task")),
+            _ => return Err(format!("{label} task must be blocked or done")),
         }
         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
         if &fields["symbol"] != task_symbol {
@@ -709,7 +756,19 @@ fn unsigned(value: &CanonicalJson, label: &str) -> Result<u64, String> {
 }
 
 fn validate_capture_policy(value: &CanonicalJson) -> Result<(), String> {
-    let fields = object_keys(value, "capture_policy", &["allowlist", "default_exclusions", "schema"])?;
+    let fields = object_keys(
+        value,
+        "capture_policy",
+        &[
+            "allowlist",
+            "default_exclusions",
+            "io_row_limit",
+            "io_rows_truncated",
+            "schema",
+            "task_row_limit",
+            "task_rows_truncated",
+        ],
+    )?;
     if fields["schema"] != CanonicalJson::Integer(CAPTURE_POLICY_SCHEMA.into()) {
         return Err("unsupported capture_policy schema".into());
     }
@@ -723,6 +782,18 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<(), String> {
         .collect::<Vec<_>>();
     if exclusions != &expected {
         return Err("capture_policy.default_exclusions does not match D-PERFSESSION1 defaults".into());
+    }
+    if unsigned(&fields["io_row_limit"], "capture_policy.io_row_limit")?
+        != TRACE_IO_ROW_LIMIT
+        || unsigned(&fields["task_row_limit"], "capture_policy.task_row_limit")?
+            != TRACE_TASK_ROW_LIMIT
+    {
+        return Err("capture_policy row limits do not match this schema".into());
+    }
+    for key in ["io_rows_truncated", "task_rows_truncated"] {
+        if !matches!(fields[key], CanonicalJson::Bool(_)) {
+            return Err(format!("capture_policy.{key} is not a boolean"));
+        }
     }
     match &fields["allowlist"] {
         CanonicalJson::Array(items) => {
@@ -977,6 +1048,14 @@ mod tests {
         assert!(text.contains("\"wait\":\"tcp accept\""), "{text}");
         assert!(text.contains("\"task_id\":3"), "{text}");
         verify_jettrace(&bytes).unwrap();
+
+        skeleton.tasks[0].wait = "tcp accept".into();
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        assert!(
+            verify_jettrace(&bytes)
+                .unwrap_err()
+                .contains("completed task must have an empty wait")
+        );
     }
 
     #[test]
@@ -1036,6 +1115,52 @@ mod tests {
         });
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
         assert!(verify_jettrace(&bytes).unwrap_err().contains("missing task 3"));
+    }
+
+    #[test]
+    fn capture_policy_audits_fixed_row_caps_and_truncation() {
+        let mut skeleton = sample_skeleton();
+        skeleton.capture_policy.io_rows_truncated = true;
+        skeleton.capture_policy.task_rows_truncated = true;
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("\"capture_policy\":{\"allowlist\":[]"), "{text}");
+        assert!(text.contains("\"schema\":2,\"task_row_limit\""), "{text}");
+        assert!(text.contains("\"io_row_limit\":4096"), "{text}");
+        assert!(text.contains("\"io_rows_truncated\":true"), "{text}");
+        assert!(text.contains("\"task_row_limit\":4096"), "{text}");
+        assert!(text.contains("\"task_rows_truncated\":true"), "{text}");
+        verify_jettrace(&bytes).unwrap();
+
+        let mut content = skeleton.content_json().unwrap();
+        let CanonicalJson::Object(content) = &mut content else {
+            unreachable!()
+        };
+        let CanonicalJson::Object(policy) = content.get_mut("capture_policy").unwrap() else {
+            unreachable!()
+        };
+        policy.insert("task_row_limit".into(), CanonicalJson::Integer("0".into()));
+        let bytes = jettrace_artifact(CanonicalJson::Object(content.clone())).bytes();
+        assert!(
+            verify_jettrace(&bytes)
+                .unwrap_err()
+                .contains("row limits do not match")
+        );
+
+        let mut content = skeleton.content_json().unwrap();
+        let CanonicalJson::Object(fields) = &mut content else {
+            unreachable!()
+        };
+        fields.insert(
+            "tasks".into(),
+            CanonicalJson::Array(vec![CanonicalJson::Null; TRACE_TASK_ROW_LIMIT as usize + 1]),
+        );
+        let bytes = jettrace_artifact(content).bytes();
+        assert!(
+            verify_jettrace(&bytes)
+                .unwrap_err()
+                .contains("exceeds capture_policy.task_row_limit")
+        );
     }
 
     #[test]
