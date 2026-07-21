@@ -41,6 +41,38 @@ impl ShellKind {
     }
 }
 
+/// Help-app prefill widgets for an already-running user shell (`jet env hook`)
+/// and for branded jetpack subshells. Idempotent when sourced twice.
+pub fn help_prefill_widgets(kind: ShellKind) -> String {
+    match kind {
+        ShellKind::Bash => "\
+if ! type __jetpack_help_prefill >/dev/null 2>&1; then\n\
+  __jetpack_help_prefill() { local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty) || return; [ -n \"$picked\" ] || return; READLINE_LINE=$picked; READLINE_POINT=$(printf %s \"$READLINE_LINE\" | wc -c); }\n\
+  bind -x '\"\\e?\":__jetpack_help_prefill' 2>/dev/null || true\n\
+  jet() { if [ \"$#\" -eq 1 ] && [ \"$1\" = '?' ]; then local picked code line; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty); code=$?; [ -n \"$picked\" ] || return $code; if IFS= read -r -e -i \"$picked\" -p \"${PS1@P}\" line; then [ -n \"$line\" ] || return 0; history -s -- \"$line\"; eval -- \"$line\"; return $?; fi; return 0; fi; command jet \"$@\"; }\n\
+fi\n"
+        .into(),
+        ShellKind::Zsh => "\
+if ! typeset -f __jetpack_help_prefill >/dev/null 2>&1; then\n\
+  setopt NO_NOMATCH\n\
+  __jetpack_help_prefill() { local picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty); [[ -n $picked ]] || return; BUFFER=$picked; CURSOR=$#BUFFER; zle redisplay; }\n\
+  zle -N __jetpack_help_prefill 2>/dev/null || true\n\
+  bindkey '^[?' __jetpack_help_prefill 2>/dev/null || true\n\
+  jet() { if [[ $# -eq 1 && $1 == '?' ]]; then local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty) || return; [[ -n $picked ]] || return 0; print -z -- \"$picked\"; return 0; fi; command jet \"$@\"; }\n\
+  alias jet='noglob jet'\n\
+fi\n"
+        .into(),
+        ShellKind::Fish => "\
+if not functions -q __jetpack_help_prefill\n\
+  function __jetpack_help_prefill; set -l picked (begin; set -lx JET_HELP_SHELL_PREFILL 1; command jet '?' </dev/tty; end); test -n \"$picked\"; or return; commandline -r -- \"$picked\"; commandline -C (string length -- \"$picked\"); end\n\
+  bind \\e\\? __jetpack_help_prefill\n\
+  function jet; if test (count $argv) -eq 1; and test \"$argv[1]\" = '?'; set -e __jetpack_help_pending; set -l picked (begin; set -lx JET_HELP_SHELL_PREFILL 1; command jet '?' </dev/tty; end); set -l code $status; if test -n \"$picked\"; set -g __jetpack_help_pending \"$picked\"; end; return $code; end; command jet $argv; end\n\
+  function __jetpack_help_postexec --on-event fish_postexec; set -q __jetpack_help_pending; or return; commandline -r -- \"$__jetpack_help_pending\"; commandline -C (string length -- \"$__jetpack_help_pending\"); set -e __jetpack_help_pending; end\n\
+end\n"
+        .into(),
+    }
+}
+
 /// A composed environment: what to expose and how to label the prompt.
 pub struct Env {
     pub bin_dirs: Vec<String>,
@@ -852,7 +884,7 @@ mod tests {
         .unwrap();
         let zsh = pty(
             &format!("ZDOTDIR={} zsh -d -i", zdir.display()),
-            "unset zle_bracketed_paste\necho JETPACK_CAPTURE_START\njet() { [[ $1 = build ]] }\njet build\njet test\nexit 0\n",
+            "unset zle_bracketed_paste\necho JETPACK_CAPTURE_START\nunalias jet 2>/dev/null\nunfunction jet 2>/dev/null\njet() { [[ $1 = build ]] }\njet build\njet test\nexit 0\n",
             false,
         );
         let _ = std::fs::remove_dir_all(zdir);
@@ -932,7 +964,7 @@ mod tests {
         let shell = format!("ZDOTDIR={} zsh -d -i", dir.display());
         let output = pty(
             &shell,
-            "unset zle_bracketed_paste\necho JETPACK_CAPTURE_START\njet() { sleep .3; [[ $1 = build ]] }\njet build\njet test\n\x07\n__jetpack_status_words\necho JETPACK_ZSH_PTY_DONE\nexit 0\n",
+            "unset zle_bracketed_paste\necho JETPACK_CAPTURE_START\nunalias jet 2>/dev/null\nunfunction jet 2>/dev/null\njet() { sleep .3; [[ $1 = build ]] }\njet build\njet test\n\x07\n__jetpack_status_words\necho JETPACK_ZSH_PTY_DONE\nexit 0\n",
             true,
         );
         let _ = std::fs::remove_dir_all(dir);

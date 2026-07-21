@@ -90,6 +90,10 @@ fn hook_prints_installable_snippet_per_shell() {
             stdout.contains(&format!("command jet env export {shell}")),
             "`hook {shell}` must call back into `jet env export {shell}`:\n{stdout}"
         );
+        assert!(
+            stdout.contains("__jetpack_help_prefill"),
+            "`hook {shell}` must install help-app prefill widgets:\n{stdout}"
+        );
     }
 }
 

@@ -103,26 +103,36 @@ fn transcript_selected_command(transcript: &str, command: &str) -> bool {
 }
 
 #[test]
-fn enter_expands_then_emits_prefill_without_running_it() {
+fn enter_expands_then_guides_without_hooks_instead_of_pasting() {
+    // Bare interactive TTY (no JET_HELP_SHELL_PREFILL) must not print the
+    // command to stdout — that looks like a paste and leaves an empty prompt.
     let transcript = run_pty(b"\r\r", "never", false).replace('\r', "");
     assert!(
-        transcript.contains("jet run"),
-        "Enter should prefill command:\n{transcript}"
+        transcript.contains("selected: jet run"),
+        "Enter should name the selected command:\n{transcript}"
+    );
+    assert!(
+        transcript.contains("not inserted") && transcript.contains("jet env hook"),
+        "Enter without hooks should tell the user how to install prefill:\n{transcript}"
     );
     assert!(
         !transcript.contains("examples/features/basics/hello.jet"),
-        "Enter prefills example, not command:\n{transcript}"
+        "Enter selects command, not example:\n{transcript}"
     );
     assert!(!transcript.contains("Hello, Jet!"), "Enter executed selected command:\n{transcript}");
 }
 
 #[test]
-fn alt_enter_prefills_example_without_running_it() {
+fn alt_enter_guides_example_without_hooks_instead_of_pasting() {
     // Expand category, then Alt-Enter (ESC then Enter) for the example line.
     let transcript = run_pty(b"\r\x1b\r", "never", false).replace('\r', "");
     assert!(
-        transcript.contains("jet run examples/features/basics/hello.jet"),
-        "Alt-Enter should prefill example:\n{transcript}"
+        transcript.contains("selected: jet run examples/features/basics/hello.jet"),
+        "Alt-Enter should name the selected example:\n{transcript}"
+    );
+    assert!(
+        transcript.contains("not inserted") && transcript.contains("jet env hook"),
+        "Alt-Enter without hooks should tell the user how to install prefill:\n{transcript}"
     );
     assert!(!transcript.contains("Hello, Jet!"), "Alt-Enter executed selected command:\n{transcript}");
 }

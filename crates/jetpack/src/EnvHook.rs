@@ -59,10 +59,13 @@ pub struct Activation {
 }
 
 /// Render the opt-in shell hook the user installs once. Idempotent to install
-/// (re-sourcing never double-registers).
+/// (re-sourcing never double-registers). Also installs `jet ?` / Alt-?
+/// help-app prefill widgets so a normal bash/zsh/fish session gets the same
+/// editable-buffer behavior as a branded jetpack subshell.
 pub fn render_hook(kind: ShellKind) -> String {
+    use crate::Shell::help_prefill_widgets;
     let export = Syntax::ENV_EXPORT_VERB;
-    match kind {
+    let env_hook = match kind {
         ShellKind::Bash => format!(
             "__jet_env_hook() {{\n  \
                local __jet_out\n  \
@@ -89,7 +92,8 @@ pub fn render_hook(kind: ShellKind) -> String {
                test -n \"$__jet_out\"; and eval \"$__jet_out\"\n\
              end\n"
         ),
-    }
+    };
+    format!("{env_hook}{}", help_prefill_widgets(kind))
 }
 
 /// Render the statements that load an env into the current shell.
@@ -216,6 +220,16 @@ mod tests {
         assert!(fish.contains("--on-event fish_prompt"));
         assert!(fish.contains("--on-variable PWD"));
         assert!(fish.contains("command jet env export fish"));
+
+        // Help prefill ships with the hook so normal shells (not only jetpack
+        // enter) get Alt-? / literal `jet ?` editable-buffer insertion.
+        for hook in [&bash, &zsh, &fish] {
+            assert!(hook.contains("__jetpack_help_prefill"));
+            assert!(hook.contains("JET_HELP_SHELL_PREFILL"));
+        }
+        assert!(bash.contains("READLINE_LINE=$picked"));
+        assert!(zsh.contains("print -z --"));
+        assert!(fish.contains("fish_postexec"));
     }
 
     #[test]

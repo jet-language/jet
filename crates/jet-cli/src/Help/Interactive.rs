@@ -255,9 +255,21 @@ pub fn run(color: bool) -> io::Result<()> {
                 drop(alt);
                 drop(_guard);
                 if let Some(cmd) = command {
-                    // Shell widgets capture this one line and replace their
-                    // editable buffer. They never execute it.
-                    println!("{}", cmd);
+                    // Prefill widgets (`jet env hook` / jetpack shell) set
+                    // JET_HELP_SHELL_PREFILL and capture the sole stdout line.
+                    // Piped `$(jet ?)` also needs that line. A bare interactive
+                    // TTY without hooks must NOT print it — that looks like a
+                    // paste and leaves the next prompt empty.
+                    if shell_prefill || !io::stdout().is_terminal() {
+                        println!("{}", cmd);
+                    } else {
+                        eprintln!("selected: {cmd}");
+                        eprintln!(
+                            "not inserted into the prompt — install once, then open a new shell:"
+                        );
+                        eprintln!("  jet env hook bash >> ~/.bashrc   # or zsh / fish");
+                        eprintln!("then: jet ?  or  Alt-?");
+                    }
                 }
                 return Ok(());
             }
