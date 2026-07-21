@@ -555,9 +555,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     let tasks = validate_tasks(&fields["tasks"], limits.task_rows)?;
     validate_locks(&fields["locks"])?;
     validate_io(&fields["io"], &tasks, limits.io_rows)?;
-    if let Some(limit) = limits.native_rows {
-        validate_native(&fields["native"], &tasks, limit)?;
-    }
+    validate_native(&fields["native"], &tasks, limits.native_rows)?;
     validate_source_identity(&fields["source_identity"])?;
     validate_toolchain(&fields["toolchain"])?;
     Ok(())
@@ -783,14 +781,16 @@ fn validate_io(
 fn validate_native(
     value: &CanonicalJson,
     tasks: &BTreeMap<u64, (u64, String, String, CanonicalJson)>,
-    row_limit: usize,
+    row_limit: Option<usize>,
 ) -> Result<(), String> {
     let items = match value {
         CanonicalJson::Array(items) => items,
         _ => return Err("content.native is not an array".into()),
     };
-    if items.len() > row_limit {
-        return Err("content.native exceeds capture_policy.native_row_limit".into());
+    if let Some(row_limit) = row_limit {
+        if items.len() > row_limit {
+            return Err("content.native exceeds capture_policy.native_row_limit".into());
+        }
     }
     for (i, item) in items.iter().enumerate() {
         let label = format!("content.native[{i}]");
@@ -1461,6 +1461,65 @@ mod tests {
         policy.remove("native_rows_truncated");
         policy.insert("schema".into(), CanonicalJson::Integer("2".into()));
         verify_jettrace(&jettrace_artifact(content).bytes()).unwrap();
+    }
+
+    #[test]
+    fn legacy_capture_policies_still_reject_malformed_native_rows() {
+        for schema in ["1", "2"] {
+            let mut skeleton = sample_skeleton();
+            let symbol = JetSymbolRef {
+                path: "app.jet".into(),
+                name: "run".into(),
+            };
+            skeleton.tasks.push(TraceTask {
+                id: 1,
+                parent: 0,
+                state: "done".into(),
+                wait: String::new(),
+                cancelled: false,
+                symbol: symbol.clone(),
+            });
+            skeleton.native.push(TraceNative {
+                clock: "process_cpu".into(),
+                duration_ns: Some(42),
+                observed_at_ns: 99,
+                reason: String::new(),
+                status: "captured".into(),
+                symbol,
+                target: "x86_64-unknown-linux-gnu".into(),
+                task_id: Some(1),
+            });
+            let mut content = skeleton.content_json().unwrap();
+            let CanonicalJson::Object(fields) = &mut content else {
+                unreachable!()
+            };
+            let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+                unreachable!()
+            };
+            policy.remove("native_row_limit");
+            policy.remove("native_rows_truncated");
+            if schema == "1" {
+                for key in [
+                    "io_row_limit",
+                    "io_rows_truncated",
+                    "task_row_limit",
+                    "task_rows_truncated",
+                ] {
+                    policy.remove(key);
+                }
+            }
+            policy.insert("schema".into(), CanonicalJson::Integer(schema.into()));
+            let CanonicalJson::Array(native) = fields.get_mut("native").unwrap() else {
+                unreachable!()
+            };
+            let CanonicalJson::Object(row) = &mut native[0] else {
+                unreachable!()
+            };
+            row.insert("status".into(), CanonicalJson::String("forged".into()));
+
+            let error = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
+            assert!(error.contains("status must be captured or unavailable"), "{schema}: {error}");
+        }
     }
 
     #[test]

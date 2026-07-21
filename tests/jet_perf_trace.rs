@@ -50,6 +50,11 @@ fn json_u64_after(haystack: &str, key: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
+fn json_string_after<'a>(haystack: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("\"{key}\":\"");
+    haystack.split_once(&needle)?.1.split_once('"').map(|(value, _)| value)
+}
+
 fn assert_completed_io_bound_to_tasks(text: &str) {
     let io = text
         .split_once("\"io\":[")
@@ -204,21 +209,42 @@ fn assert_honest_io(text: &str) {
     );
 }
 
-fn assert_honest_native(text: &str, expect_elapsed: bool) {
+fn assert_honest_native(text: &str, expect_elapsed: bool, expect_cpu_work: bool) {
     let native_at = text
         .find("\"native\":[{")
         .unwrap_or_else(|| panic!("missing native timing: {text}"));
     let native = &text[native_at..];
     assert!(native.contains("\"clock\":\"process_cpu\""), "{text}");
-    assert!(native.contains("\"status\":\"captured\""), "{text}");
-    assert!(native.contains("\"duration_ns\":"), "{text}");
     let observed = json_u64_after(native, "observed_at_ns")
         .unwrap_or_else(|| panic!("missing native session-relative clock: {text}"));
     if expect_elapsed {
         assert!(observed > 0, "run native observation did not advance: {text}");
+        let wall_at = text.find("\"domain\":\"wall\"").unwrap();
+        let wall = json_u64_after(&text[wall_at..], "duration_ns").unwrap();
+        assert!(observed <= wall, "native observation is after trace wall: {text}");
     }
-    assert!(native.contains("\"task_id\":1"), "{text}");
-    assert!(native.contains("\"target\":"), "{text}");
+    let target = json_string_after(native, "target")
+        .unwrap_or_else(|| panic!("missing native target: {text}"));
+    if cfg!(any(target_os = "linux", target_os = "android")) {
+        assert!(native.contains("\"status\":\"captured\""), "{text}");
+        let duration = json_u64_after(native, "duration_ns")
+            .unwrap_or_else(|| panic!("missing captured native duration: {text}"));
+        if expect_cpu_work {
+            assert!(duration > 0, "deliberate CPU work captured as zero: {text}");
+        }
+        assert!(native.contains("\"reason\":\"\""), "{text}");
+        assert!(native.contains("\"task_id\":1"), "{text}");
+    } else {
+        assert!(native.contains("\"status\":\"unavailable\""), "{text}");
+        assert!(native.contains("\"duration_ns\":null"), "{text}");
+        assert!(native.contains("\"task_id\":null"), "{text}");
+        assert!(
+            native.contains(&format!(
+                "\"reason\":\"process CPU timing is unavailable on target {target}\""
+            )),
+            "{text}"
+        );
+    }
     assert!(text.contains("\"native_row_limit\":1"), "{text}");
     assert!(text.contains("\"native_rows_truncated\":false"), "{text}");
 }
@@ -491,7 +517,11 @@ fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     probe_work()
-    print("READY")
+    checksum := 0
+    loop i; 0..5000000 {
+        checksum += i % 97
+    }
+    print("READY {checksum}")
     time.sleep(800)
 }
 "#,
@@ -522,7 +552,7 @@ fn run() {
     assert_honest_tasks(&text);
     assert_honest_locks(&text);
     assert_honest_io(&text);
-    assert_honest_native(&text, true);
+    assert_honest_native(&text, true, true);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("session.jet"), "{text}");
@@ -677,7 +707,7 @@ fn run() {
     assert_honest_tasks(&text);
     assert_honest_locks(&text);
     assert_honest_io(&text);
-    assert_honest_native(&text, false);
+    assert_honest_native(&text, false, false);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("live.jet"), "{text}");

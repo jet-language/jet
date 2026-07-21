@@ -558,13 +558,14 @@ impl NativeTimingInput {
 }
 
 fn native_unavailable_reason() -> String {
-    if native_process_cpu_supported(std::env::consts::OS) {
+    native_unavailable_reason_for(std::env::consts::OS, env!("JET_BUILD_TARGET"))
+}
+
+fn native_unavailable_reason_for(os: &str, target: &str) -> String {
+    if native_process_cpu_supported(os) {
         "process CPU timing was not observable".into()
     } else {
-        format!(
-            "process CPU timing is unavailable on target {}",
-            env!("JET_BUILD_TARGET")
-        )
+        format!("process CPU timing is unavailable on target {target}")
     }
 }
 
@@ -1044,32 +1045,17 @@ fn json_u64(object: &str, key: &str) -> Option<u64> {
 fn process_times(pid: u32) -> Option<(u64, u64)> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
-        // ponytail: Linux USER_HZ is almost always 100; sysconf later if needed.
-        // Parse /proc/uptime as integer ticks — f64 loses precision on long uptime
-        // and can make now_ticks < starttime → fabricated-looking zero wall.
-        const CLK_TCK: u64 = 100;
+        let ticks_per_second = proc_clock_ticks_per_second()?;
         let uptime = fs::read_to_string("/proc/uptime").ok()?;
-        let (secs_s, rest) = uptime.split_once('.')?;
-        let secs: u64 = secs_s.parse().ok()?;
-        let frac_s = rest.split_whitespace().next()?;
-        let hundredths: u64 = frac_s
-            .chars()
-            .take(2)
-            .collect::<String>()
-            .parse()
-            .ok()?;
-        let now_ticks = secs.saturating_mul(CLK_TCK).saturating_add(hundredths);
+        let now_ticks = uptime_ticks(&uptime, ticks_per_second)?;
         let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         let fields = stat.rsplit_once(") ")?.1;
         let fields: Vec<&str> = fields.split_whitespace().collect();
         let utime: u64 = fields.get(11)?.parse().ok()?;
         let stime: u64 = fields.get(12)?.parse().ok()?;
         let starttime: u64 = fields.get(19)?.parse().ok()?;
-        let wall_ticks = now_ticks.saturating_sub(starttime);
-        let wall_ns = wall_ticks.saturating_mul(1_000_000_000 / CLK_TCK);
-        let cpu_ns = utime
-            .saturating_add(stime)
-            .saturating_mul(1_000_000_000 / CLK_TCK);
+        let wall_ns = ticks_to_ns(now_ticks.checked_sub(starttime)?, ticks_per_second)?;
+        let cpu_ns = ticks_to_ns(utime.checked_add(stime)?, ticks_per_second)?;
         Some((wall_ns, cpu_ns))
     }
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
@@ -1077,6 +1063,64 @@ fn process_times(pid: u32) -> Option<(u64, u64)> {
         let _ = pid;
         None
     }
+}
+
+fn proc_clock_ticks_per_second() -> Option<u64> {
+    let auxv = fs::read("/proc/self/auxv").ok()?;
+    clock_ticks_per_second_from_auxv(&auxv)
+}
+
+fn clock_ticks_per_second_from_auxv(auxv: &[u8]) -> Option<u64> {
+    const AT_CLKTCK: u64 = 17;
+    for pair in auxv.chunks_exact(std::mem::size_of::<usize>() * 2) {
+        let (tag, value) = pair.split_at(std::mem::size_of::<usize>());
+        let tag = native_word(tag)?;
+        if tag == 0 {
+            break;
+        }
+        if tag == AT_CLKTCK {
+            return match native_word(value)? {
+                0 => None,
+                ticks => Some(ticks),
+            };
+        }
+    }
+    None
+}
+
+fn native_word(bytes: &[u8]) -> Option<u64> {
+    let word: [u8; std::mem::size_of::<usize>()] = bytes.try_into().ok()?;
+    u64::try_from(usize::from_ne_bytes(word)).ok()
+}
+
+fn uptime_ticks(uptime: &str, ticks_per_second: u64) -> Option<u64> {
+    if ticks_per_second == 0 {
+        return None;
+    }
+    let uptime = uptime.split_whitespace().next()?;
+    let (seconds, fraction) = uptime.split_once('.').unwrap_or((uptime, ""));
+    let seconds: u128 = seconds.parse().ok()?;
+    let mut ticks = seconds.checked_mul(ticks_per_second as u128)?;
+    if !fraction.is_empty() {
+        let scale = 10u128.checked_pow(fraction.len() as u32)?;
+        let fraction: u128 = fraction.parse().ok()?;
+        ticks = ticks.checked_add(
+            fraction
+                .checked_mul(ticks_per_second as u128)?
+                .checked_div(scale)?,
+        )?;
+    }
+    u64::try_from(ticks).ok()
+}
+
+fn ticks_to_ns(ticks: u64, ticks_per_second: u64) -> Option<u64> {
+    if ticks_per_second == 0 {
+        return None;
+    }
+    let nanos = (ticks as u128)
+        .checked_mul(1_000_000_000)?
+        .checked_div(ticks_per_second as u128)?;
+    u64::try_from(nanos).ok()
 }
 
 fn view(args: &[String]) -> i32 {
@@ -1550,5 +1594,30 @@ mod tests {
         assert!(!native_process_cpu_supported("macos"));
         assert!(!native_process_cpu_supported("windows"));
         assert!(!native_process_cpu_supported("wasi"));
+        assert_eq!(
+            native_unavailable_reason_for("windows", "x86_64-pc-windows-msvc"),
+            "process CPU timing is unavailable on target x86_64-pc-windows-msvc"
+        );
+        assert_eq!(
+            native_unavailable_reason_for("linux", "x86_64-unknown-linux-gnu"),
+            "process CPU timing was not observable"
+        );
+    }
+
+    #[test]
+    fn proc_tick_conversion_uses_the_injected_rate_without_overflow() {
+        let mut auxv = Vec::new();
+        auxv.extend_from_slice(&17usize.to_ne_bytes());
+        auxv.extend_from_slice(&250usize.to_ne_bytes());
+        auxv.extend_from_slice(&0usize.to_ne_bytes());
+        auxv.extend_from_slice(&0usize.to_ne_bytes());
+        assert_eq!(clock_ticks_per_second_from_auxv(&auxv), Some(250));
+        assert_eq!(uptime_ticks("2.50 1.00\n", 100), Some(250));
+        assert_eq!(uptime_ticks("2.50 1.00\n", 250), Some(625));
+        assert_eq!(ticks_to_ns(1, 100), Some(10_000_000));
+        assert_eq!(ticks_to_ns(1, 250), Some(4_000_000));
+        assert_eq!(ticks_to_ns(1, 1_000), Some(1_000_000));
+        assert_eq!(ticks_to_ns(1, 0), None);
+        assert_eq!(ticks_to_ns(u64::MAX, 1), None);
     }
 }
