@@ -18,12 +18,20 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 
 mod common;
 use common::{
     fixture_filter, fixture_matches, jetpack_bin, normalize_fixture_selector, unified_diff,
     unique_tmp,
 };
+
+/// Serialize `JET_COMPILER_EXTENSION` mutations across UI/lint snapshot
+/// threads (same race the driver unit tests already lock).
+fn compiler_extension_env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 // ============================================================================
 // Section: error snapshots, tests/ui/*.stderr (was tests/ui.rs)
@@ -164,14 +172,17 @@ fn ui_snapshots() {
                 .strip_prefix("// @compiler_extension ")
                 .map(|p| p.trim().to_string())
         });
+        let _cex_env = compiler_extension.as_ref().map(|_| {
+            compiler_extension_env_lock()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        });
         if let Some(ref rel) = compiler_extension {
             let wasm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
             std::env::set_var(
                 "JET_COMPILER_EXTENSION",
                 wasm.to_str().expect("utf-8 wasm path"),
             );
-        } else {
-            std::env::remove_var("JET_COMPILER_EXTENSION");
         }
         let actual = if jetpack_hangar_digest_mismatch {
             run_jetpack_hangar_digest_mismatch_snapshot()
@@ -454,14 +465,17 @@ fn lint_snapshots() {
                 .strip_prefix("// @compiler_extension ")
                 .map(|p| p.trim().to_string())
         });
+        let _cex_env = compiler_extension.as_ref().map(|_| {
+            compiler_extension_env_lock()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        });
         if let Some(ref rel) = compiler_extension {
             let wasm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
             std::env::set_var(
                 "JET_COMPILER_EXTENSION",
                 wasm.to_str().expect("utf-8 wasm path"),
             );
-        } else {
-            std::env::remove_var("JET_COMPILER_EXTENSION");
         }
 
         let out = jet::compile_with_path(&src, &path.to_string_lossy()).unwrap_or_else(|diags| {

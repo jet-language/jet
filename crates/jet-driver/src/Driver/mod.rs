@@ -741,6 +741,10 @@ fn compile_bundle_path_build_inner(
     for diag in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
+        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(
+            &bundle,
+            Some(&effect_facts),
+        ))
     {
         match diag.severity {
             // Generated declarations do not exist during the pre-build
@@ -1071,17 +1075,29 @@ fn compile_bundle_path_build_inner(
     // program, not syntax checked in isolation. Re-run the complete front end
     // before any runtime codegen.
     if build_run.is_some() && options.execute {
-        let planned_diags = if options.freestanding {
-            crate::Sema::check_bundle_freestanding(&mut bundle, compile_mode)
+        let (planned_diags, planned_facts) = if options.freestanding {
+            (
+                crate::Sema::check_bundle_freestanding(&mut bundle, compile_mode),
+                None,
+            )
         } else if options.allow_impure {
-            crate::Sema::check_bundle_allow_impure(&mut bundle, compile_mode)
+            (
+                crate::Sema::check_bundle_allow_impure(&mut bundle, compile_mode),
+                None,
+            )
         } else {
-            crate::Sema::check_bundle(&mut bundle, compile_mode)
+            let (diags, facts) =
+                crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
+            (diags, Some(facts))
         };
         let mut planned_errors = Vec::new();
         for diag in std::mem::take(&mut bundle.parse_teaching)
             .into_iter()
             .chain(planned_diags)
+            .chain(crate::CompilerExtensionHook::post_sema_diagnostics(
+                &bundle,
+                planned_facts.as_ref(),
+            ))
         {
             match diag.severity {
                 Severity::Error => planned_errors.push(diag),
@@ -1611,7 +1627,7 @@ fn compile_bundle_path_opts_full(
     for d in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
-        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle))
+        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None))
     {
         match d.severity {
             Severity::Error => errors.push(d),
@@ -1980,7 +1996,10 @@ fn check_file_with_effect_facts_impl(
                     diags.push(bad_build_signature(build.name_span));
                 }
             }
-            diags.extend(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle));
+            diags.extend(crate::CompilerExtensionHook::post_sema_diagnostics(
+                &bundle,
+                Some(&facts),
+            ));
             (diags, Some(bundle), facts, dependencies)
         }
         Err(diags) => (
@@ -2027,7 +2046,10 @@ pub fn check_file_with_overlays_and_import_root(
                 crate::Sema::CompileMode::Check,
             );
             diags.extend(check_diags);
-            diags.extend(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle));
+            diags.extend(crate::CompilerExtensionHook::post_sema_diagnostics(
+                &bundle,
+                Some(&facts),
+            ));
             (diags, Some(bundle), facts)
         }
         Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
@@ -2184,7 +2206,7 @@ pub fn compile_bundle_path_with_entry(
     for d in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
-        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle))
+        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None))
     {
         match d.severity {
             Severity::Error => errors.push(d),

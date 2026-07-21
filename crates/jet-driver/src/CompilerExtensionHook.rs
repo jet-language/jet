@@ -7,8 +7,9 @@
 //! spelling ballot. Failures are Jet-owned (E1402); guests never crash the
 //! compiler or expose rustc (I2/I3).
 
-use crate::AST::{Item, ProgramBundle};
+use crate::AST::{Func, Item, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::SemIndexEffectFacts;
 use jet_pkg_model::CompilerExtension::{
     self, message_exposes_rustc, AnalyzeResponse, Capability, Finding, SpanFact, SymbolFact,
     TypeFact, TypedSnapshot, ENV_COMPILER_EXTENSION,
@@ -17,7 +18,14 @@ use jet_pkg_model::CompilerExtension::{
 /// Run configured compiler-extension(s) after a successful sema pass.
 /// Returns diagnostics to merge with the check/compile result (empty when
 /// the env var is unset).
-pub fn post_sema_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
+///
+/// `effect_facts` carries solved post-sema effects when the caller ran
+/// `check_bundle_with_effect_facts`. When absent, `ReadEffects` is omitted
+/// from advertised capabilities — never invent `"pure"` or other placeholders.
+pub fn post_sema_diagnostics(
+    bundle: &ProgramBundle,
+    effect_facts: Option<&SemIndexEffectFacts>,
+) -> Vec<Diagnostic> {
     let Ok(path) = std::env::var(ENV_COMPILER_EXTENSION) else {
         return Vec::new();
     };
@@ -26,7 +34,7 @@ pub fn post_sema_diagnostics(bundle: &ProgramBundle) -> Vec<Diagnostic> {
         return Vec::new();
     }
 
-    let snapshot = match snapshot_from_bundle(bundle) {
+    let snapshot = match snapshot_from_bundle(bundle, effect_facts) {
         Ok(s) => s,
         Err(e) => return vec![host_failure(&e.message, None)],
     };
@@ -61,13 +69,21 @@ fn sanitize_host_message(message: &str) -> String {
 }
 
 /// Build a deterministic v1 snapshot from entry-module function symbols.
-pub fn snapshot_from_bundle(bundle: &ProgramBundle) -> Result<TypedSnapshot, CompilerExtension::ProtocolError> {
+///
+/// Types come from the post-sema AST signature. Effects come from solved
+/// `SemIndexEffectFacts` when provided; otherwise `ReadEffects` is not
+/// advertised and symbol `effects` stay empty.
+pub fn snapshot_from_bundle(
+    bundle: &ProgramBundle,
+    effect_facts: Option<&SemIndexEffectFacts>,
+) -> Result<TypedSnapshot, CompilerExtension::ProtocolError> {
     let module = &bundle.modules[bundle.entry];
     let file = module.display.clone();
-    let mut types = vec![TypeFact {
-        id: "t0".into(),
-        repr: "Fn".into(),
-    }];
+    let mut capabilities = Capability::v1_defaults().to_vec();
+    if effect_facts.is_none() {
+        capabilities.retain(|c| *c != Capability::ReadEffects);
+    }
+    let mut types = Vec::new();
     let mut symbols = Vec::new();
     let mut spans = Vec::new();
     let mut n = 0u32;
@@ -76,15 +92,24 @@ pub fn snapshot_from_bundle(bundle: &ProgramBundle) -> Result<TypedSnapshot, Com
             continue;
         };
         n += 1;
+        let tid = format!("t{n}");
         let sid = format!("s{n}");
         let spid = format!("sp{n}");
+        types.push(TypeFact {
+            id: tid.clone(),
+            repr: fn_type_repr(func),
+        });
+        let effects = effect_facts
+            .and_then(|facts| facts.solved.get(&format!("{}::{}", module.alias, func.name)))
+            .map(|set| set.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
         symbols.push(SymbolFact {
             id: sid,
             name: func.name.clone(),
             kind: "fn".into(),
-            type_id: "t0".into(),
+            type_id: tid,
             span_id: spid.clone(),
-            effects: vec!["pure".into()],
+            effects,
             provenance: "sema".into(),
         });
         spans.push(SpanFact {
@@ -96,11 +121,13 @@ pub fn snapshot_from_bundle(bundle: &ProgramBundle) -> Result<TypedSnapshot, Com
     }
     if symbols.is_empty() {
         // Guests may still run; provide a file-level span so span_id refs can resolve.
-        types.clear();
-        types.push(TypeFact {
-            id: "t0".into(),
-            repr: "Unit".into(),
+        // No invented type/effect facts — drop read caps that would lie.
+        capabilities.retain(|c| {
+            *c != Capability::ReadTypes
+                && *c != Capability::ReadSymbols
+                && *c != Capability::ReadEffects
         });
+        types.clear();
         spans.push(SpanFact {
             id: "sp1".into(),
             file,
@@ -108,12 +135,20 @@ pub fn snapshot_from_bundle(bundle: &ProgramBundle) -> Result<TypedSnapshot, Com
             end: 0,
         });
     }
-    TypedSnapshot::new(
-        Capability::v1_defaults().to_vec(),
-        types,
-        symbols,
-        spans,
-    )
+    TypedSnapshot::new(capabilities, types, symbols, spans)
+}
+
+fn fn_type_repr(func: &Func) -> String {
+    let params = func
+        .params
+        .iter()
+        .map(|p| format!("{}{}: {}", p.convention.sigil(), p.name, p.ty.name()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    match &func.return_type {
+        Some(ret) => format!("fn({params}) -> {}", ret.name()),
+        None => format!("fn({params})"),
+    }
 }
 
 fn findings_to_diagnostics(
@@ -213,6 +248,47 @@ mod tests {
         assert!(!message_exposes_rustc(&err.what));
         assert!(!message_exposes_rustc(&err.why));
         assert!(!diags.iter().any(|d| d.code == "L1401"));
+    }
+
+    #[test]
+    fn snapshot_uses_solved_effects_not_invented_pure() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        let dir = tempfile_dir();
+        let src_path = dir.join("main.jet");
+        std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+        let (diags, bundle, facts) =
+            crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+        assert!(
+            !diags.iter().any(|d| d.severity == crate::Diagnostics::Severity::Error),
+            "sema must succeed; diags={diags:?}"
+        );
+        let bundle = bundle.expect("bundle");
+        let snap = snapshot_from_bundle(&bundle, Some(&facts)).expect("snapshot");
+        assert!(
+            snap.capabilities.contains(&Capability::ReadEffects),
+            "facts present → advertise ReadEffects"
+        );
+        let run = snap
+            .symbols
+            .iter()
+            .find(|s| s.name == "run")
+            .expect("run symbol");
+        assert!(
+            !run.effects.iter().any(|e| e == "pure"),
+            "must not invent effect name `pure`; got {:?}",
+            run.effects
+        );
+        assert!(
+            run.effects.iter().any(|e| e == "Io" || e == "Log"),
+            "print must solve to a real effect; got {:?}",
+            run.effects
+        );
+        assert!(
+            snap.types.iter().any(|t| t.id == run.type_id && t.repr.starts_with("fn(")),
+            "type_id must point at a real fn signature repr; types={:?}",
+            snap.types
+        );
     }
 
     fn tempfile_dir() -> PathBuf {
