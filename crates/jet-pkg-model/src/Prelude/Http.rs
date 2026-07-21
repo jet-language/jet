@@ -776,6 +776,9 @@ impl CookieJar {
             let (name, value) = attribute.split_once('=').unwrap_or((attribute, ""));
             match name.to_ascii_lowercase().as_str() {
                 "domain" => {
+                    if url.host.parse::<std::net::IpAddr>().is_ok() {
+                        return;
+                    }
                     let candidate = value.trim_start_matches('.').to_ascii_lowercase();
                     if !valid_cookie_domain(&candidate) || !domain_matches(&url.host, &candidate) {
                         return;
@@ -838,7 +841,7 @@ impl CookieJar {
         let now = SystemTime::now();
         self.cookies
             .retain(|cookie| cookie.expires.is_none_or(|expires| expires > now));
-        if !secure
+        if url.scheme != "https"
             && self.cookies.iter().any(|cookie| {
                 cookie.secure
                     && cookie.name == name

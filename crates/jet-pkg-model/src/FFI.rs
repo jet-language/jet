@@ -338,7 +338,7 @@ pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
 
 /// Native HTTP client runtime emitted into the bridge crate when `core.http.client` is used.
 const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/Http.rs");
-/// Mozilla Public Suffix List snapshot, compacted to whitespace-separated rules.
+/// Mozilla Public Suffix List snapshot, IDNA-ToASCII and whitespace compacted.
 /// Source: https://publicsuffix.org/list/public_suffix_list.dat (MPL-2.0).
 const HTTP_PUBLIC_SUFFIX_LIST: &str = include_str!("Prelude/public_suffix_list.dat");
 

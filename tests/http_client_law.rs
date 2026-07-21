@@ -320,10 +320,18 @@ fn vendored_public_suffix_snapshot_is_compact_and_keeps_rule_kinds() {
         "crates/jet-pkg-model/src/Prelude/public_suffix_list.dat",
     )
     .unwrap();
-    assert_eq!(data.len(), 141_908);
+    assert_eq!(data.len(), 144_039);
     assert_eq!(data.lines().count(), 1);
+    assert!(data.is_ascii());
     let rules = data.split_whitespace().collect::<std::collections::HashSet<_>>();
-    for required in ["com", "co.uk", "*.ck", "!www.ck", "github.io"] {
+    for required in [
+        "com",
+        "co.uk",
+        "*.ck",
+        "!www.ck",
+        "github.io",
+        "xn--55qx5d.cn",
+    ] {
         assert!(rules.contains(required), "PSL snapshot lost {required}");
     }
 }
@@ -500,6 +508,9 @@ fn cookie_jar_uses_schemeful_registrable_sites_and_rejects_public_suffixes() {
             ),
             ("http://evil.co.uk/start", None),
             ("http://api.example.co.uk/cross-site", None),
+            ("http://seed.b.xn--55qx5d.cn/seed", None),
+            ("http://a.xn--55qx5d.cn/start", None),
+            ("http://target.b.xn--55qx5d.cn/next", None),
         ];
         for (index, (target, cookie)) in expected.into_iter().enumerate() {
             let (mut stream, _) = proxy.accept().unwrap();
@@ -533,6 +544,17 @@ fn cookie_jar_uses_schemeful_registrable_sites_and_rejects_public_suffixes() {
                     "Location: http://api.example.co.uk/cross-site\r\n",
                     "Content-Length: 0\r\nConnection: close\r\n\r\n",
                 ),
+                5 => concat!(
+                    "HTTP/1.1 200 OK\r\n",
+                    "Set-Cookie: idn_public=bad; Domain=xn--55qx5d.cn; Path=/\r\n",
+                    "Set-Cookie: idn_strict=good; Domain=b.xn--55qx5d.cn; Path=/; SameSite=Strict\r\n",
+                    "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                ),
+                6 => concat!(
+                    "HTTP/1.1 302 Found\r\n",
+                    "Location: http://target.b.xn--55qx5d.cn/next\r\n",
+                    "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                ),
                 _ => "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
             };
             stream.write_all(response.as_bytes()).unwrap();
@@ -549,10 +571,59 @@ fn run() {{
     seed :: client.send(http.request("GET", "http://shop.example.co.uk/dir/seed")) ?? panic("seed")
     same :: client.send(http.request("GET", "http://other.example.co.uk/dir/start")) ?? panic("same site")
     cross :: client.send(http.request("GET", "http://evil.co.uk/start")) ?? panic("cross site")
+    idn_seed :: client.send(http.request("GET", "http://seed.b.xn--55qx5d.cn/seed")) ?? panic("idn seed")
+    idn_cross :: client.send(http.request("GET", "http://a.xn--55qx5d.cn/start")) ?? panic("idn site")
 }}
 "#
     );
     let (code, _, stderr) = common::build_and_run("jet_http_client_law", "cookie_site", &src);
+    server.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+}
+
+#[test]
+fn cookie_jar_rejects_domain_attributes_on_ip_hosts() {
+    let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy_addr = proxy.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        for request in 0..2 {
+            let (mut stream, _) = proxy.accept().unwrap();
+            let head = String::from_utf8(request_head(&mut stream))
+                .unwrap()
+                .to_ascii_lowercase();
+            if request == 0 {
+                assert!(!head.contains("\r\ncookie:"), "unexpected seed cookie: {head}");
+                stream
+                    .write_all(
+                        concat!(
+                            "HTTP/1.1 200 OK\r\n",
+                            "Set-Cookie: host=ok; Path=/\r\n",
+                            "Set-Cookie: suffix=bad; Domain=0.0.1; Path=/\r\n",
+                            "Set-Cookie: exact=bad; Domain=127.0.0.1; Path=/\r\n",
+                            "Content-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+            } else {
+                assert!(
+                    head.contains("\r\ncookie: host=ok\r\n"),
+                    "host-only IP cookie missing: {head}"
+                );
+                assert!(
+                    !head.contains("suffix=") && !head.contains("exact="),
+                    "IP Domain cookie escaped: {head}"
+                );
+                stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                ).unwrap();
+            }
+        }
+    });
+    let src = format!(
+        "use core.http.client as http\nfn run() {{\n    client :: http.Client.new().cookies(.Memory).proxy(.Url(\"http://{proxy_addr}\")).protocols(false, true, false)\n    seed :: client.send(http.request(\"GET\", \"http://127.0.0.1/seed\")) ?? panic(\"seed\")\n    check :: client.send(http.request(\"GET\", \"http://127.0.0.1/check\")) ?? panic(\"check\")\n}}\n"
+    );
+    let (code, _, stderr) = common::build_and_run("jet_http_client_law", "cookie_ip_domain", &src);
     server.join().unwrap();
     assert_eq!(code, 0, "stderr:\n{stderr}");
 }
@@ -569,7 +640,7 @@ fn cookie_jar_enforces_per_domain_and_global_count_bounds() {
                 let head = String::from_utf8(request_head(&mut stream)).unwrap();
                 assert!(
                     head.starts_with(&format!(
-                        "GET http://d{domain}.test/seed{batch} HTTP/1.1\r\n"
+                        "GET http://d{domain}.xn--55qx5d.cn/seed{batch} HTTP/1.1\r\n"
                     )),
                     "seed {domain}/{batch}: {head}"
                 );
@@ -603,13 +674,13 @@ fn cookie_jar_enforces_per_domain_and_global_count_bounds() {
         let count = if domain == 0 { 181 } else { 180 };
         for (batch, _) in (0..count).step_by(90).enumerate() {
             sends.push_str(&format!(
-                "    r{request} :: client.send(http.request(\"GET\", \"http://d{domain}.test/seed{batch}\")) ?? panic(\"seed\")\n    b{request} :: r{request}.body().bytes(1) ?? panic(\"drain\")\n"
+                "    r{request} :: client.send(http.request(\"GET\", \"http://d{domain}.xn--55qx5d.cn/seed{batch}\")) ?? panic(\"seed\")\n    b{request} :: r{request}.body().bytes(1) ?? panic(\"drain\")\n"
             ));
             request += 1;
         }
     }
     let src = format!(
-        "use core.http.client as http\nfn run() {{\n    client :: http.Client.new().cookies(.Memory).proxy(.Url(\"http://{proxy_addr}\")).protocols(false, true, false)\n{sends}    verify :: client.send(http.request(\"GET\", \"http://d0.test/verify\")) ?? panic(\"verify\")\n}}\n"
+        "use core.http.client as http\nfn run() {{\n    client :: http.Client.new().cookies(.Memory).proxy(.Url(\"http://{proxy_addr}\")).protocols(false, true, false)\n{sends}    verify :: client.send(http.request(\"GET\", \"http://d0.xn--55qx5d.cn/verify\")) ?? panic(\"verify\")\n}}\n"
     );
     let (code, _, stderr) = common::build_and_run("jet_http_client_law", "cookie_bounds", &src);
     server.join().unwrap();
@@ -2013,7 +2084,7 @@ fn main() {
     let cookie_https = TcpListener::bind("127.0.0.1:0").unwrap();
     let cookie_https_addr = cookie_https.local_addr().unwrap();
     let cookie_https_server = thread::spawn(move || {
-        for request in 0..2 {
+        for request in 0..3 {
             let (socket, _) = cookie_https.accept().unwrap();
             let connection = rustls::ServerConnection::new(server.clone()).unwrap();
             let mut stream = rustls::StreamOwned::new(connection, socket);
@@ -2023,9 +2094,14 @@ fn main() {
                 stream.write_all(
                     b"HTTP/1.1 200 OK\r\nSet-Cookie: session=secure; Path=/; Secure\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 ).unwrap();
-            } else {
+            } else if request == 1 {
                 assert!(head.contains("\r\ncookie: session=secure\r\n"), "insecure overwrite won: {head}");
                 assert!(!head.contains("injected="), "HTTP set a Secure cookie: {head}");
+                stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nSet-Cookie: session=https-plain; Path=/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                ).unwrap();
+            } else {
+                assert!(head.contains("\r\ncookie: session=https-plain\r\n"), "HTTPS replacement lost: {head}");
                 stream.write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
                 ).unwrap();
@@ -2041,7 +2117,7 @@ fn main() {
     let cookie_client = bridge::jet_http_client_cookies_impl(cookie_proto, true).unwrap();
     let secure_url = format!("https://localhost:{}/cookie", cookie_https_addr.port());
     let insecure_url = format!("http://localhost:{}/cookie", cookie_http_addr.port());
-    for url in [&secure_url, &insecure_url, &secure_url] {
+    for url in [&secure_url, &insecure_url, &secure_url, &secure_url] {
         let response = bridge::jet_http_client_send_with_impl(
             cookie_client, "GET", url, &[], None, None, None, None, None, None, None, None, None,
             None, None, &[], &[], &[],
