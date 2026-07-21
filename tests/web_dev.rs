@@ -207,6 +207,64 @@ fn wait_for_port(child_stdout: std::process::ChildStdout) -> u16 {
 }
 
 #[test]
+fn ui_showcase_uses_builtin_host_and_keeps_companion_page_live() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping UI showcase dev host proof (need rustc)");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!("jet_ui_showcase_dev_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("app.jet"),
+        include_str!("../examples/features/web/ui_showcase.jet"),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("ui_showcase.html"),
+        include_str!("../examples/features/web/ui_showcase.html"),
+    )
+    .unwrap();
+
+    let port = unused_local_port();
+    let child = Command::new(jet_bin())
+        .args(["dev", "app.jet", &format!("--port={port}")])
+        .current_dir(&dir)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start UI showcase dev host");
+
+    struct KillOnDrop(std::process::Child);
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let guard = KillOnDrop(child);
+    wait_for_server_up(port, Duration::from_secs(30));
+
+    for request in 0..3 {
+        let (status, body) = http_get(port, "/").expect("GET showcase companion page");
+        assert_eq!(status, 200, "request {request}");
+        let html = String::from_utf8_lossy(&body);
+        assert!(html.contains("<h1>Flight deck</h1>"), "request {request}: {html}");
+        assert!(
+            html.contains("data-motion-state=\"idle\"") && html.contains("init_app"),
+            "request {request}: showcase host served a generic shell"
+        );
+    }
+    let (status, js) = http_get(port, "/app.js").expect("GET showcase app.js");
+    assert_eq!(status, 200);
+    assert!(String::from_utf8_lossy(&js).contains("export function init_app()"));
+
+    drop(guard);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn jet_dev_web_serves_and_rebuilds_on_save() {
     if !have_tool("rustc") {
         eprintln!("note: skipping jet_dev_web_serves_and_rebuilds_on_save (need rustc)");

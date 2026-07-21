@@ -71,11 +71,10 @@
     background: linear-gradient(160deg, #ffd39a, #e8790c);
     cursor: pointer;
     box-shadow: 0 8px 20px -6px rgba(232,121,12,0.35);
-    transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+    transition: box-shadow 120ms ease, opacity 120ms ease;
   }
-  button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 10px 24px -6px rgba(232,121,12,0.45); }
-  button:active:not(:disabled) { transform: translateY(1px) scale(0.98); }
-  button:disabled { opacity: 0.5; cursor: default; }
+  button:hover { box-shadow: 0 10px 24px -6px rgba(232,121,12,0.45); }
+  button:focus-visible { outline: 3px solid #a9b4e8; outline-offset: 3px; }
   .footer {
     margin-top: 20px;
     font-size: 12px;
@@ -89,24 +88,24 @@
   <p class="kicker">jet · compiled to js + wasm</p>
   <h1>Flight deck</h1>
   <p class="subtitle">view tree · typed style · motion · reactive signals — one page</p>
-  <div id="jet-app"></div>
-  <button id="boost-btn">Boost fuel</button>
+  <div id="jet-app" aria-live="polite"></div>
+  <button id="boost-btn" type="button" aria-label="Boost fuel" data-motion-state="idle">Boost fuel</button>
   <p class="footer">Typed <code>Color</code> structs render every card's fill —<br>
     Boost tweens Fuel 40%&nbsp;&rarr;&nbsp;95% over 600ms and bumps the reactive counter —<br>
     <code>examples/features/web/ui_showcase.jet</code></p>
 </div>
 <script type="module">
-import { initApp, initFuel } from "./app.js";
+import { init_app, init_fuel } from "./app.js";
 
-// `initApp`/`initFuel` each paint their own real DOM elements once (the two
+// `init_app`/`init_fuel` each paint their own real DOM elements once (the two
 // static stat cards + the "Boosts" counter box, and the Fuel card) and
 // return the live `Signal` object `core.reactive.signal` compiled to
 // (crates/jet-codegen/src/Prelude/DomRuntime.js's `makeSignal`) — this page
 // drives both signals directly with plain `.get()`/`.set()`, the same real
 // reactive object 195_ui_web_reactive.jet's native golden test exercises,
 // not a lookalike.
-const boosts = initApp();
-const elapsed = initFuel();
+const boosts = init_app();
+const elapsed = init_fuel();
 
 const DURATION_MS = 600;
 let boosting = false;
@@ -115,9 +114,12 @@ let boostStart = 0;
 const btn = document.getElementById("boost-btn");
 btn.addEventListener("click", () => {
   boosts.set(boosts.get() + 1);
-  boosting = true;
   boostStart = performance.now();
-  btn.disabled = true;
+  btn.dataset.motionState = "running";
+  if (!boosting) {
+    boosting = true;
+    setTimeout(frame, 0);
+  }
 });
 
 // D-MOTIONTIME1: motion is a pure function of elapsed clock time — this loop
@@ -125,18 +127,17 @@ btn.addEventListener("click", () => {
 // signal from real wall-clock time (`performance.now()`); `tween(...)` inside
 // `initFuel`'s `reactive_render` closure derives the eased Fuel value fresh
 // every time that signal changes.
-function frame(now) {
-  if (boosting) {
-    const t = Math.round(now - boostStart);
-    elapsed.set(t);
-    if (t >= DURATION_MS) {
-      boosting = false;
-      btn.disabled = false;
-    }
+function frame() {
+  if (!boosting) return;
+  const t = Math.round(performance.now() - boostStart);
+  elapsed.set(t);
+  if (t >= DURATION_MS) {
+    boosting = false;
+    btn.dataset.motionState = "complete";
+    return;
   }
-  requestAnimationFrame(frame);
+  setTimeout(frame, 16);
 }
-requestAnimationFrame(frame);
 </script>
 </body>
 </html>

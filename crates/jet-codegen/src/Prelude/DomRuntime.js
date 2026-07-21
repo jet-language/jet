@@ -51,27 +51,53 @@ let jetDomScopeName = "__top__";
 let jetDomScopeCounter = 0;
 let jetDomScopeDepth = 0;
 const jetDomBoxRegistry = new Map();
+let jetDomTouchedBackends = new Set();
 
 export function enterRenderScope(name) {
   if (jetDomScopeDepth === 0) {
     jetDomScopeName = name;
     jetDomScopeCounter = 0;
+    jetDomTouchedBackends = new Set();
   }
   jetDomScopeDepth++;
 }
 
 export function exitRenderScope() {
   jetDomScopeDepth = Math.max(0, jetDomScopeDepth - 1);
+  if (jetDomScopeDepth === 0) {
+    const prefix = `${jetDomScopeName}#`;
+    for (const [key, record] of jetDomBoxRegistry) {
+      const backendKey = key.split("/")[0];
+      if (key.startsWith(prefix) && !jetDomTouchedBackends.has(backendKey)) {
+        record.element?.remove?.();
+        jetDomBoxRegistry.delete(key);
+      }
+    }
+  }
 }
 
 export function createBackend() {
   const boxKey = `${jetDomScopeName}#${jetDomScopeCounter++}`;
-  return { kind: "dom", commands: [], root: jetDomContainer(), boxKey };
+  jetDomTouchedBackends.add(boxKey);
+  return {
+    kind: "dom",
+    commands: [],
+    root: jetDomContainer(),
+    boxKey,
+    focusNodes: [],
+    focusedIndex: -1,
+  };
 }
 
 export function measure(node, constraint) {
-  const width = Math.min(Math.max(node.width, constraint.minWidth), constraint.maxWidth);
-  const height = Math.min(Math.max(node.height, constraint.minHeight), constraint.maxHeight);
+  const naturalWidth = node.kind === "box"
+    ? node.children.reduce((width, child) => Math.max(width, child.width), 0)
+    : node.width;
+  const naturalHeight = node.kind === "box"
+    ? node.children.reduce((height, child) => height + child.height, 0)
+    : node.height;
+  const width = Math.min(Math.max(naturalWidth, constraint.minWidth), constraint.maxWidth);
+  const height = Math.min(Math.max(naturalHeight, constraint.minHeight), constraint.maxHeight);
   return { width, height };
 }
 
@@ -97,23 +123,36 @@ function jetReadableTextColor(hex) {
 
 export function paint(backend, node) {
   const frame = backend.frame ?? { x: 0, y: 0, width: node.width, height: node.height };
-  const fillColor = node.color ?? "#000000";
-  const fill = `fill({x:${frame.x},y:${frame.y},w:${frame.width},h:${frame.height}}, ${fillColor})`;
-  const text = `text({x:${frame.x},y:${frame.y},w:${frame.width},h:${frame.height}}, ${node.label})`;
-  backend.commands.push(fill);
-  backend.commands.push(text);
-  if (backend.root) {
-    // Looked up by the backend's scope-derived `boxKey` (see
-    // `createBackend`/`enterRenderScope` above), not by backend-object
-    // identity and not by a global `[data-jet-node]` query — that's what
-    // lets several `ui.null_backend()` instances created within one call
-    // paint as several distinct, independently updating DOM elements, while
-    // a backend re-created by a repeated call to the same entry point still
-    // resolves to the same, reused element.
-    let box = jetDomBoxRegistry.get(backend.boxKey);
+  const live = new Set();
+  backend.focusNodes = [];
+  const render = (current, currentFrame, path) => {
+    if (current.kind === "box") {
+      let y = currentFrame.y;
+      current.children.forEach((child, index) => {
+        render(child, { x: currentFrame.x, y, width: currentFrame.width, height: child.height }, `${path}/${index}`);
+        y += child.height;
+      });
+      return;
+    }
+    const fillColor = current.color ?? "#000000";
+    if (current.kind !== "text") {
+      backend.commands.push(`fill({x:${currentFrame.x},y:${currentFrame.y},w:${currentFrame.width},h:${currentFrame.height}}, ${fillColor})`);
+    }
+    backend.commands.push(`text({x:${currentFrame.x},y:${currentFrame.y},w:${currentFrame.width},h:${currentFrame.height}}, ${current.label})`);
+    live.add(path);
+    if (!backend.root) return;
+    const tag = current.kind === "button" ? "button" : current.kind === "textInput" ? "input" : current.kind === "text" ? "span" : "div";
+    let record = jetDomBoxRegistry.get(path);
+    if (record && record.tag !== tag) {
+      record.element?.remove?.();
+      jetDomBoxRegistry.delete(path);
+      record = null;
+    }
+    let box = record?.element;
     if (!box) {
-      box = document.createElement("div");
+      box = document.createElement(tag);
       box.dataset.jetNode = "1";
+      box.dataset.jetKey = path;
       box.style.position = "absolute";
       box.style.boxSizing = "border-box";
       box.style.border = "1px solid rgba(0,0,0,0.15)";
@@ -123,15 +162,37 @@ export function paint(backend, node) {
       box.style.alignItems = "center";
       box.style.justifyContent = "center";
       backend.root.appendChild(box);
-      jetDomBoxRegistry.set(backend.boxKey, box);
+      jetDomBoxRegistry.set(path, { element: box, tag });
     }
-    box.style.left = `${frame.x}px`;
-    box.style.top = `${frame.y}px`;
-    box.style.width = `${frame.width}px`;
-    box.style.height = `${frame.height}px`;
-    box.style.background = fillColor;
+    box.style.left = `${currentFrame.x}px`;
+    box.style.top = `${currentFrame.y}px`;
+    box.style.width = `${currentFrame.width}px`;
+    box.style.height = `${currentFrame.height}px`;
+    box.style.background = current.kind === "text" ? "transparent" : fillColor;
     box.style.color = jetReadableTextColor(fillColor);
-    box.textContent = node.label;
+    if (tag === "input") box.value = current.label;
+    else box.textContent = current.label;
+    if (current.role) {
+      box.setAttribute?.("role", current.role);
+      box.setAttribute?.("aria-label", current.label);
+    }
+    if (current.role === "button" || current.role === "textbox") {
+      backend.focusNodes.push(box);
+    }
+  };
+  render(node, frame, backend.boxKey);
+  if (backend.root) {
+    const prefix = `${backend.boxKey}/`;
+    for (const [key, record] of jetDomBoxRegistry) {
+      if ((key === backend.boxKey || key.startsWith(prefix)) && !live.has(key)) {
+        record.element?.remove?.();
+        jetDomBoxRegistry.delete(key);
+      }
+    }
+  }
+  backend.focusedIndex = backend.focusNodes.length ? 0 : -1;
+  if (backend.focusedIndex >= 0) {
+    backend.focusNodes[backend.focusedIndex].focus?.();
   }
   return backend;
 }
@@ -147,7 +208,25 @@ export function onEvent(backend, event) {
   if (event.kind === "resize" && (event.width <= 0 || event.height <= 0)) {
     return "Ignored";
   }
+  if (event.kind === "key" && event.code === "Tab" && backend.focusNodes.length) {
+    backend.focusedIndex = (backend.focusedIndex + 1) % backend.focusNodes.length;
+    backend.focusNodes[backend.focusedIndex].focus?.();
+    return "Handled";
+  }
   return "Handled";
+}
+
+export function setFocusGroup(backend, nodes) {
+  const labels = nodes.filter((node) => node.role === "button" || node.role === "textbox").map((node) => node.label);
+  backend.focusNodes = Array.from(backend.root?.children ?? []).filter((element) => labels.includes(element.getAttribute?.("aria-label") ?? element.textContent));
+  backend.focusedIndex = backend.focusNodes.length ? 0 : -1;
+  backend.focusNodes[0]?.focus?.();
+}
+
+export function focusedLabel(backend) {
+  if (backend.focusedIndex < 0) return "";
+  const element = backend.focusNodes[backend.focusedIndex];
+  return String(element?.getAttribute?.("aria-label") ?? element?.textContent ?? "");
 }
 
 function query(selector) {
@@ -231,7 +310,41 @@ export function storageClear(kind) {
 }
 
 export function makeNode(label, width, height, color) {
-  return { label: String(label), width, height, color: color != null ? String(color) : undefined };
+  return {
+    kind: "custom",
+    label: String(label),
+    width,
+    height,
+    color: color != null ? String(color) : undefined,
+    role: color != null ? "label" : null,
+    children: [],
+  };
+}
+
+export function makeNodeRole(label, width, height, role) {
+  return { kind: role === "button" ? "button" : role === "textbox" ? "textInput" : "custom", label: String(label), width, height, role, children: [] };
+}
+
+export function makeText(text) {
+  const label = String(text);
+  return { kind: "text", label, width: Array.from(label).length, height: 1, role: "label", children: [] };
+}
+
+export function makeButton(text) {
+  const label = String(text);
+  return { kind: "button", label, width: Array.from(label).length + 4, height: 1, role: "button", children: [] };
+}
+
+export function makeBox(children) {
+  const list = Array.from(children ?? []);
+  return {
+    kind: "box",
+    label: "",
+    width: list.reduce((width, child) => Math.max(width, child.width), 0),
+    height: list.reduce((height, child) => height + child.height, 0),
+    role: "group",
+    children: list,
+  };
 }
 
 export function makeConstraint(minW, minH, maxW, maxH) {
@@ -246,12 +359,23 @@ export function makeKeyEvent(code) {
   return { kind: "key", code: String(code) };
 }
 
+export function makeResizeEvent(width, height) {
+  return { kind: "resize", width, height };
+}
+
+export function ariaRoleButton() { return "button"; }
+export function ariaRoleTextInput() { return "textbox"; }
+export function ariaRoleLabel() { return "label"; }
+export function ariaRoleContainer() { return "group"; }
+
 // D-RENDERTGT2=A carried into JS (Phase 7 web/DOM backend): a minimal
 // reactive runtime mirroring the Rust `JetSignal`/`jet_reactive_effect`
 // prelude (crates/jet-codegen/src/Prelude/CoreLib.rs). An "observer" is the
 // closure currently (re)running; reading a signal while an observer is
 // active subscribes it; `set` re-runs every subscriber synchronously.
 const jetReactiveObservers = [];
+const jetReactiveRootEffects = new Set();
+let jetReactiveNextObserver = 1;
 
 function jetReactiveActiveObserver() {
   return jetReactiveObservers.length > 0
@@ -261,20 +385,22 @@ function jetReactiveActiveObserver() {
 
 /** D-RENDERTGT2=A: `reactive.signal(initial)` → a `{ get, set }` cell. */
 export function makeSignal(initial) {
-  const cell = { value: initial, subs: [] };
+  const cell = { value: initial, subs: new Map() };
   return {
     get() {
       const obs = jetReactiveActiveObserver();
-      if (obs && !cell.subs.includes(obs)) {
-        cell.subs.push(obs);
+      if (obs && !cell.subs.has(obs.id)) {
+        cell.subs.set(obs.id, new WeakRef(obs));
+        obs.dependencies.add(cell);
       }
       return cell.value;
     },
     set(value) {
       cell.value = value;
-      const subs = cell.subs.slice();
-      for (const sub of subs) {
-        sub();
+      for (const [id, weak] of Array.from(cell.subs)) {
+        const sub = weak.deref();
+        if (sub) sub.run();
+        else cell.subs.delete(id);
       }
     },
   };
@@ -284,16 +410,45 @@ export function makeSignal(initial) {
  * D-RENDERTGT2=A: `ui.reactive_render(() => { ... })` — run `body` now, and
  * again whenever a signal it read changes. Mirrors `jet_reactive_effect`.
  */
-export function reactiveRender(body) {
-  const observer = () => {
-    jetReactiveObservers.push(observer);
-    try {
-      body();
-    } finally {
-      jetReactiveObservers.pop();
-    }
+export function makeEffect(body) {
+  const observer = {
+    id: jetReactiveNextObserver++,
+    active: true,
+    running: false,
+    body,
+    dependencies: new Set(),
+    run() {
+      if (!this.active || this.running) return;
+      this.running = true;
+      for (const cell of this.dependencies) cell.subs.delete(this.id);
+      this.dependencies.clear();
+      jetReactiveObservers.push(this);
+      try {
+        this.body();
+      } finally {
+        jetReactiveObservers.pop();
+        this.running = false;
+      }
+    },
   };
-  observer();
+  observer.run();
+  return {
+    unsubscribe() {
+      if (!observer.active) return;
+      observer.active = false;
+      for (const cell of observer.dependencies) cell.subs.delete(observer.id);
+      observer.dependencies.clear();
+      observer.body = null;
+    },
+    isActive() {
+      return observer.active;
+    },
+  };
+}
+
+/** Runtime-owned rendering effect; public `reactive.effect` returns its handle. */
+export function reactiveRender(body) {
+  jetReactiveRootEffects.add(makeEffect(body));
 }
 
 export async function instantiateWasm(wasmPath, imports = {}) {

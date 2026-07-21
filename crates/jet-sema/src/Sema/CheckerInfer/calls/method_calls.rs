@@ -2526,7 +2526,8 @@ impl<'a> Checker<'a> {
             if let Type::Named(name) = &recv_ty {
                 if matches!(
                     name.as_str(),
-                    crate::Syntax::TYPE_SUBSCRIPTION
+                    crate::Syntax::TYPE_EFFECT
+                        | crate::Syntax::TYPE_SUBSCRIPTION
                         | crate::Syntax::TYPE_EVENT_SCOPE
                         | crate::Syntax::TYPE_EVENT_TRACE
                 ) {

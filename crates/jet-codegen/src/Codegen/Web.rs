@@ -322,14 +322,15 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::DistinctCtor { arg, .. } => web_expr_supported(arg),
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
+        E::ListLit(elements) => elements.iter().all(web_expr_supported),
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
-        E::HandleMethod { recv, op, args } => matches!(op, TIR::THandleOp::UiBackendMethod { .. } | TIR::THandleOp::ReactiveGet | TIR::THandleOp::ReactiveSet) && web_expr_supported(recv) && args.iter().all(web_expr_supported),
-        E::NumericMethod { recv, op: TIR::TNumericOp::CastAs { .. } } => web_expr_supported(recv),
+        E::HandleMethod { recv, op, args } => matches!(op, TIR::THandleOp::UiBackendMethod { .. } | TIR::THandleOp::ReactiveGet | TIR::THandleOp::ReactiveSet | TIR::THandleOp::ReactiveEffectMethod { .. }) && web_expr_supported(recv) && args.iter().all(web_expr_supported),
+        E::NumericMethod { recv, op: TIR::TNumericOp::CastAs { .. } | TIR::TNumericOp::FloatToInt { .. } } => web_expr_supported(recv),
         E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => web_expr_supported(value) && web_expr_supported(fallback),
         E::Lambda(lam) => web_lambda_supported(lam),
-        E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => web_lambda_supported(executable),
+        E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } | TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => web_lambda_supported(executable),
         _ => false,
     }
 }
@@ -1087,6 +1088,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
         E::Field { recv, field_rust, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field_rust)),
         E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
+        E::ListLit(elements) => format!("[{}]", elements.iter().map(|element| tir_js_expr(element, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", ")),
         E::Call { name, args } => {
             let name = local_web_key(file_prefix, name);
             let args = tir_call_args(args, funcs, file_prefix)?;
@@ -1117,14 +1119,28 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 ("paint", 1) => format!("jetDom.paint({recv}, {})", a[0]),
                 ("commands", 0) => format!("jetDom.commands({recv})"),
                 ("on_event", 1) => format!("jetDom.onEvent({recv}, {})", a[0]),
+                ("set_focus_group", 1) => format!("jetDom.setFocusGroup({recv}, {})", a[0]),
+                ("focused_label", 0) => format!("jetDom.focusedLabel({recv})"),
                 _ => return Err(()),
             }
         }
         E::HandleMethod { recv, op: TIR::THandleOp::ReactiveGet, args } if args.is_empty() => format!("{}.get()", tir_js_expr(recv, funcs, file_prefix)?),
         E::HandleMethod { recv, op: TIR::THandleOp::ReactiveSet, args } if args.len() == 1 => format!("{}.set({})", tir_js_expr(recv, funcs, file_prefix)?, tir_js_expr(&args[0], funcs, file_prefix)?),
+        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveEffectMethod { method }, args } if args.is_empty() => {
+            let recv = tir_js_expr(recv, funcs, file_prefix)?;
+            match method.as_str() {
+                "unsubscribe" => format!("{recv}.unsubscribe()"),
+                "is_active" => format!("{recv}.isActive()"),
+                _ => return Err(()),
+            }
+        }
         E::NumericMethod { recv, op } => match op {
             TIR::TNumericOp::CastAs { dst_rust } if dst_rust.contains("i") || dst_rust.contains("u") => format!("Math.trunc({})", tir_js_expr(recv, funcs, file_prefix)?),
             TIR::TNumericOp::CastAs { .. } => tir_js_expr(recv, funcs, file_prefix)?,
+            TIR::TNumericOp::FloatToInt { lower, upper_exclusive, .. } => {
+                let value = tir_js_expr(recv, funcs, file_prefix)?;
+                format!("(() => {{ const __jet_value = {value}; return Number.isFinite(__jet_value) && __jet_value >= {lower} && __jet_value < {upper_exclusive} ? Math.trunc(__jet_value) : null; }})()")
+            }
             _ => return Err(()),
         },
         E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => format!("({} ?? {})", tir_js_expr(value, funcs, file_prefix)?, tir_js_expr(fallback, funcs, file_prefix)?),
@@ -1136,6 +1152,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             }
         }
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs, file_prefix)?),
+        E::CoreClosureCall { kind: TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => format!("jetDom.makeEffect({})", tir_js_lambda(executable, funcs, file_prefix)?),
         _ => return Err(()),
     })
 }
@@ -1204,9 +1221,18 @@ fn tir_core_call(
         "null_backend" => "jetDom.createBackend()".to_string(),
         "node" => format!("jetDom.makeNode({}, {}, {})", get(0), get(1), get(2)),
         "node_color" => format!("jetDom.makeNode({}, {}, {}, {})", get(0), get(1), get(2), get(3)),
+        "node_role" => format!("jetDom.makeNodeRole({}, {}, {}, {})", get(0), get(1), get(2), get(3)),
+        "text" => format!("jetDom.makeText({})", get(0)),
+        "button" => format!("jetDom.makeButton({})", get(0)),
+        "box" => format!("jetDom.makeBox({})", get(0)),
         "constraint" => format!("jetDom.makeConstraint({}, {}, {}, {})", get(0), get(1), get(2), get(3)),
         "rect" => format!("jetDom.makeRect({}, {}, {}, {})", get(0), get(1), get(2), get(3)),
         "key_event" => format!("jetDom.makeKeyEvent({})", get(0)),
+        "resize_event" => format!("jetDom.makeResizeEvent({}, {})", get(0), get(1)),
+        "aria_role_button" => "jetDom.ariaRoleButton()".to_string(),
+        "aria_role_text_input" => "jetDom.ariaRoleTextInput()".to_string(),
+        "aria_role_label" => "jetDom.ariaRoleLabel()".to_string(),
+        "aria_role_container" => "jetDom.ariaRoleContainer()".to_string(),
         "signal" => format!("jetDom.makeSignal({})", get(0)),
         "on" => format!("jetDom.on({}, {}, {})", get(0), get(1), get(2)),
         "value" => format!("jetDom.value({})", get(0)),
@@ -1223,8 +1249,10 @@ fn web_core_arity(module: &str, method: &str) -> Option<usize> {
         (true, "clear") => Some(0),
         (false, "null_backend") => Some(0),
         (false, "node") => Some(3),
-        (false, "node_color" | "constraint" | "rect") => Some(4),
-        (false, "key_event" | "signal" | "value") => Some(1),
+        (false, "node_color" | "node_role" | "constraint" | "rect") => Some(4),
+        (false, "resize_event") => Some(2),
+        (false, "aria_role_button" | "aria_role_text_input" | "aria_role_label" | "aria_role_container") => Some(0),
+        (false, "key_event" | "signal" | "value" | "text" | "button" | "box") => Some(1),
         (false, "on") => Some(3),
         _ => None,
     }

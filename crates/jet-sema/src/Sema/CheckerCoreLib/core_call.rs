@@ -2222,7 +2222,7 @@ impl<'a> Checker<'a> {
                 }
                 // D-REACT1=B: reactive.effect(() => { … }) runs the body now and again
                 // whenever a signal it read changes. The body is a zero-parameter,
-                // unit-returning closure; the call itself yields nothing.
+                // unit-returning closure; the call returns a retained Effect.
                 ("jet.reactive", "effect") => {
                     if args.len() != 1 {
                         self.diags
@@ -2251,7 +2251,7 @@ impl<'a> Checker<'a> {
                         }
                         None => return None,
                     }
-                    return None; // effect returns nothing
+                    return Some(Type::Named(crate::Syntax::TYPE_EFFECT.to_string()));
                 }
                 // D-EVENT1=D: first-party typed Event/Hook family. Constructors are
                 // module functions so the semantic family is one Core library surface,

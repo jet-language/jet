@@ -103,6 +103,10 @@ pub(crate) fn is_reactive_method_name(method: &str, nargs: usize) -> bool {
     matches!((method, nargs), ("get", 0) | ("set", 1))
 }
 
+pub(crate) fn is_reactive_effect_method_name(method: &str, nargs: usize) -> bool {
+    matches!((method, nargs), ("unsubscribe" | "is_active", 0))
+}
+
 pub(crate) fn is_event_handle_type(name: Option<&str>) -> bool {
     matches!(
         name,

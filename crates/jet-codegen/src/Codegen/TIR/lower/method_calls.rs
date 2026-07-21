@@ -28,6 +28,7 @@ use crate::Codegen::TIR::is_http_type;
 use crate::Codegen::TIR::is_loadable_method_name;
 use crate::Codegen::TIR::is_measurement_method_name;
 use crate::Codegen::TIR::is_reactive_method_name;
+use crate::Codegen::TIR::is_reactive_effect_method_name;
 use crate::Codegen::TIR::is_sketch_method_name;
 use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
@@ -1255,6 +1256,26 @@ pub(crate) fn lower_method_call(
                 recv: Box::new(recv_t),
                 op,
                 args: targs,
+            },
+        };
+    }
+    if recv_type.as_deref() == Some(crate::Syntax::TYPE_EFFECT)
+        && is_reactive_effect_method_name(method, args.len())
+    {
+        let recv_t = lower_expr(receiver, cx, env);
+        let ty = if method == "is_active" {
+            Type::Bool
+        } else {
+            unit_type()
+        };
+        return TExpr {
+            ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::ReactiveEffectMethod {
+                    method: method.to_string(),
+                },
+                args: Vec::new(),
             },
         };
     }

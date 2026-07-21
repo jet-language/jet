@@ -203,7 +203,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // built-in constraint-layout value types.
         | "HVar" | "VVar" | "LengthVar" | "Constraint" | "LayoutHandle"
         // D-REACT1=B: opt-in reactive handle types (used bare as `Signal<T>`/`Derived<T>`).
-        | "Signal" | "Derived" | "Computed"
+        | "Signal" | "Derived" | "Computed" | "Effect"
         // D-EVENT1=D: first-party typed Event/Hook family.
         | "Event" | "Hook" | "DecisionHook" | "HookPolicy" | "HookDecision" | "HookOutcome"
         | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace"

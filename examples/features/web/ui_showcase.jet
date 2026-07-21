@@ -82,7 +82,6 @@ use core.reactive as reactive
 // — see the file-header note). `init_app`/`init_fuel` are browser-only and are
 // never reached from here; they're exercised by the fake-DOM harness test
 // (tests/web_build.rs) and by the real page (ui_showcase.html) instead.
-use core.web.devserver as devserver
 @Target(Web)
 
 @Html("ui_showcase.html")
@@ -196,7 +195,7 @@ fn boost_color() -> Color { return Color.{r: 136, g: 85, b: 238} }
 
 @Target(Js)
 fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) -> StatCard {
-    return StatCard.{label: label, value: value, color: color, x: x, y: y}
+    return StatCard.{label: ~label, value: ~value, color: ~color, x: x, y: y}
 }
 
 fn paint_stat_card(card: StatCard) {
@@ -228,7 +227,7 @@ fn init_app() -> Signal<Int> {
     paint_stat_card(stat_card("Altitude", "12,400 ft", altitude_color(), 0.0, 0.0))
     paint_stat_card(stat_card("Airspeed", "410 kt", airspeed_color(), 190.0, 0.0))
     counter_backend :: ui.null_backend()
-    ui.reactive_render(() => {
+    ui.reactive_render(take(counter_backend) () => {
         hex := to_hex(boost_color())
         node :: ui.node_color("Boosts: {boosts.get()}", 170.0, 74.0, hex)
         constraint :: ui.constraint(0.0, 0.0, 400.0, 200.0)
@@ -243,8 +242,8 @@ fn init_app() -> Signal<Int> {
 fn init_fuel() -> Signal<Int> {
     elapsed :: reactive.signal(0)
     backend :: ui.null_backend()
-    hex := to_hex(fuel_color())
-    ui.reactive_render(() => {
+    ui.reactive_render(take(backend) () => {
+        hex := to_hex(fuel_color())
         value := tween(40.0, 95.0, elapsed.get(), 600)
         pct := Int.from_float(value) ?? 0
         node :: ui.node_color("Fuel: {pct}%", 170.0, 74.0, hex)
@@ -255,10 +254,6 @@ fn init_fuel() -> Signal<Int> {
         backend.paint(node)
     })
     return elapsed
-}
-
-fn dev() {
-    devserver.app().serve()
 }
 
 fn run() {

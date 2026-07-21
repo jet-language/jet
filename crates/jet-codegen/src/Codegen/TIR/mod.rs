@@ -1958,8 +1958,8 @@ pub enum TCoreClosureKind {
     OnRollback { handle: String, closure: String },
     /// D-REACT1=B: `reactive.derived(<lambda>)` → `{root}jet_std::JetDerived::new(<closure>)`.
     ReactiveDerived { closure: String },
-    /// D-REACT1=B: `reactive.effect(<lambda>)` → `{root}jet_std::jet_reactive_effect(<closure>)`.
-    ReactiveEffect { closure: String },
+    /// D-EFFECT-LIFECYCLE1=A: `reactive.effect(<lambda>)` returns a lifecycle handle.
+    ReactiveEffect { closure: String, executable: Box<TLambda> },
     /// D-RENDERTGT2=A (c133 M2): reactive UI render loop through the backend seam.
     UiReactiveRender { closure: String, executable: Box<TLambda> },
 }
@@ -2673,6 +2673,10 @@ pub enum THandleOp {
     ReactiveGet,
     /// D-REACT1=B: `Signal.set(v)` → `(recv).set(<arg0>)` (writes + notifies).
     ReactiveSet,
+    /// D-EFFECT-LIFECYCLE1=A: Effect.unsubscribe()/is_active().
+    ReactiveEffectMethod {
+        method: String,
+    },
     /// D-EVENT1=D: Event/Hook/Subscription/EventScope/EventTrace runtime methods.
     EventMethod {
         method: String,

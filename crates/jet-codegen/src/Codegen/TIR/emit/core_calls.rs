@@ -2277,6 +2277,15 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
+        ("core.ui", "text") => {
+            format!("{}jet_ui_text(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.ui", "button") => {
+            format!("{}jet_ui_button(&({}))", cx.root_prefix, arg(0))
+        }
+        ("core.ui", "box") => {
+            format!("{}jet_ui_box(({}).clone())", cx.root_prefix, arg(0))
+        }
         ("core.ui", "key_event") => format!("{}jet_ui_key_event(&({}))", cx.root_prefix, arg(0)),
         ("core.ui", "resize_event") => format!(
             "{}jet_ui_resize_event({}, {})",

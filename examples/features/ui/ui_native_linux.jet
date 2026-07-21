@@ -42,8 +42,10 @@ fn run() {
 
             // Reactive binding: reading `clicks` subscribes this effect, so every
             // `.set()` updates the label's text in place — a live counter.
-            ui.reactive_render(() => {
-                app.set_text(count, "count: {clicks.get()}")
+            render_app :: ~app
+            render_count :: ~count
+            ui.reactive_render(take(render_app, render_count) () => {
+                render_app.set_text(render_count, "count: {clicks.get()}")
             })
 
             print("native backend: gtk4")

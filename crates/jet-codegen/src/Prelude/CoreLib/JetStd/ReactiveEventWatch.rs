@@ -6,32 +6,121 @@
     // recompute or an effect run) is on the thread-local stack subscribes that
     // observer to the signal. A `.set(v)` re-runs every subscribed observer.
     use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::rc::{Rc, Weak};
 
-    type Observer = Rc<dyn Fn()>;
+    type Observer = Rc<ReactiveObserver>;
+    type WeakObserver = Weak<ReactiveObserver>;
+    type DependencyCleanup = Box<dyn Fn()>;
+
+    struct ReactiveObserver {
+        id: u64,
+        active: std::cell::Cell<bool>,
+        running: std::cell::Cell<bool>,
+        body: RefCell<Option<Rc<dyn Fn()>>>,
+        dependencies: RefCell<Vec<DependencyCleanup>>,
+    }
+
+    impl ReactiveObserver {
+        fn new(body: Rc<dyn Fn()>) -> Observer {
+            let id = JET_REACTIVE_NEXT_OBSERVER.with(|next| {
+                let id = next.get();
+                next.set(id.saturating_add(1));
+                id
+            });
+            Rc::new(ReactiveObserver {
+                id,
+                active: std::cell::Cell::new(true),
+                running: std::cell::Cell::new(false),
+                body: RefCell::new(Some(body)),
+                dependencies: RefCell::new(Vec::new()),
+            })
+        }
+
+        fn clear_dependencies(&self) {
+            let cleanups = self.dependencies.replace(Vec::new());
+            for cleanup in cleanups {
+                cleanup();
+            }
+        }
+
+        fn run(self: &Observer) {
+            if !self.active.get() || self.running.replace(true) {
+                return;
+            }
+            self.clear_dependencies();
+            JET_REACTIVE_OBSERVERS.with(|stack| stack.borrow_mut().push(self.clone()));
+            if let Some(body) = self.body.borrow().clone() {
+                body();
+            }
+            JET_REACTIVE_OBSERVERS.with(|stack| {
+                stack.borrow_mut().pop();
+            });
+            self.running.set(false);
+        }
+
+        fn track(&self, cleanup: DependencyCleanup) {
+            self.dependencies.borrow_mut().push(cleanup);
+        }
+
+        fn dispose(&self) {
+            if self.active.replace(false) {
+                self.clear_dependencies();
+                self.body.borrow_mut().take();
+            }
+        }
+    }
+
+    impl Drop for ReactiveObserver {
+        fn drop(&mut self) {
+            let cleanups = self.dependencies.get_mut().drain(..).collect::<Vec<_>>();
+            for cleanup in cleanups {
+                cleanup();
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct JetReactiveEffect {
+        observer: Observer,
+        owners: Rc<()>,
+    }
+
+    impl JetReactiveEffect {
+        pub fn unsubscribe(&self) {
+            self.observer.dispose();
+        }
+
+        pub fn active(&self) -> bool {
+            self.observer.active.get()
+        }
+    }
+
+    impl Drop for JetReactiveEffect {
+        fn drop(&mut self) {
+            if Rc::strong_count(&self.owners) == 1 {
+                self.unsubscribe();
+            }
+        }
+    }
 
     thread_local! {
         // The stack of observers currently (re)computing. The top is the active one.
         static JET_REACTIVE_OBSERVERS: RefCell<Vec<Observer>> = const { RefCell::new(Vec::new()) };
+        static JET_REACTIVE_NEXT_OBSERVER: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
+        // Marker/UI fire-and-retain scopes have a runtime owner. Public
+        // `reactive.effect` returns its own Effect handle instead.
+        static JET_REACTIVE_ROOT_EFFECTS: RefCell<Vec<JetReactiveEffect>> = const { RefCell::new(Vec::new()) };
     }
 
     fn jet_reactive_active_observer() -> Option<Observer> {
         JET_REACTIVE_OBSERVERS.with(|s| s.borrow().last().cloned())
     }
 
-    fn jet_reactive_run_observed(obs: &Observer, body: &dyn Fn()) {
-        JET_REACTIVE_OBSERVERS.with(|s| s.borrow_mut().push(obs.clone()));
-        body();
-        JET_REACTIVE_OBSERVERS.with(|s| {
-            s.borrow_mut().pop();
-        });
-    }
-
     struct SignalCell<T> {
         value: T,
-        // Subscribers are re-run on set. Held as weak-free Rc closures; an effect or
-        // derived keeps its own observer alive, so these stay valid for the run.
-        subs: Vec<Observer>,
+        // Sources never own observers. Effect/derived/component owners retain them;
+        // weak subscriptions let owner Drop deterministically detach the graph.
+        subs: Vec<(u64, WeakObserver)>,
     }
 
     pub struct JetSignal<T> {
@@ -46,7 +135,7 @@
         }
     }
 
-    impl<T: Clone> JetSignal<T> {
+    impl<T: Clone + 'static> JetSignal<T> {
         pub fn new(initial: T) -> JetSignal<T> {
             JetSignal {
                 cell: Rc::new(RefCell::new(SignalCell {
@@ -57,9 +146,24 @@
         }
         pub fn get(&self) -> T {
             if let Some(obs) = jet_reactive_active_observer() {
-                let mut c = self.cell.borrow_mut();
-                if !c.subs.iter().any(|s| Rc::ptr_eq(s, &obs)) {
-                    c.subs.push(obs);
+                let added = {
+                    let mut c = self.cell.borrow_mut();
+                    c.subs.retain(|(_, weak)| weak.strong_count() > 0);
+                    if c.subs.iter().any(|(id, _)| *id == obs.id) {
+                        false
+                    } else {
+                        c.subs.push((obs.id, Rc::downgrade(&obs)));
+                        true
+                    }
+                };
+                if added {
+                    let weak_cell = Rc::downgrade(&self.cell);
+                    let id = obs.id;
+                    obs.track(Box::new(move || {
+                        if let Some(cell) = weak_cell.upgrade() {
+                            cell.borrow_mut().subs.retain(|(sub_id, _)| *sub_id != id);
+                        }
+                    }));
                 }
             }
             self.cell.borrow().value.clone()
@@ -68,10 +172,14 @@
             let subs = {
                 let mut c = self.cell.borrow_mut();
                 c.value = value;
-                c.subs.clone()
+                c.subs.retain(|(_, weak)| weak.strong_count() > 0);
+                c.subs
+                    .iter()
+                    .filter_map(|(_, weak)| weak.upgrade())
+                    .collect::<Vec<_>>()
             };
             for s in subs {
-                s();
+                s.run();
             }
         }
     }
@@ -104,26 +212,23 @@
             // The observer recomputes the value, then notifies the derived's own subs.
             let cell_for_obs = cell.clone();
             let compute_for_obs = compute.clone();
-            let observer: Observer = Rc::new(move || {
+            let observer = ReactiveObserver::new(Rc::new(move || {
                 let v = (compute_for_obs)();
                 let subs = {
                     let mut c = cell_for_obs.borrow_mut();
                     c.value = v;
-                    c.subs.clone()
+                    c.subs.retain(|(_, weak)| weak.strong_count() > 0);
+                    c.subs
+                        .iter()
+                        .filter_map(|(_, weak)| weak.upgrade())
+                        .collect::<Vec<_>>()
                 };
                 for s in subs {
-                    s();
+                    s.run();
                 }
-            });
+            }));
             // Run once under observation to record the source-signal dependency set.
-            jet_reactive_run_observed(&observer, &{
-                let cell = cell.clone();
-                let compute = compute.clone();
-                move || {
-                    let v = (compute)();
-                    cell.borrow_mut().value = v;
-                }
-            });
+            observer.run();
             JetDerived {
                 cell,
                 _observer: observer,
@@ -132,31 +237,46 @@
         pub fn get(&self) -> T {
             // Reading a derived inside an observer subscribes that observer to it.
             if let Some(obs) = jet_reactive_active_observer() {
-                let mut c = self.cell.borrow_mut();
-                if !c.subs.iter().any(|s| Rc::ptr_eq(s, &obs)) {
-                    c.subs.push(obs);
+                let added = {
+                    let mut c = self.cell.borrow_mut();
+                    c.subs.retain(|(_, weak)| weak.strong_count() > 0);
+                    if c.subs.iter().any(|(id, _)| *id == obs.id) {
+                        false
+                    } else {
+                        c.subs.push((obs.id, Rc::downgrade(&obs)));
+                        true
+                    }
+                };
+                if added {
+                    let weak_cell = Rc::downgrade(&self.cell);
+                    let id = obs.id;
+                    obs.track(Box::new(move || {
+                        if let Some(cell) = weak_cell.upgrade() {
+                            cell.borrow_mut().subs.retain(|(sub_id, _)| *sub_id != id);
+                        }
+                    }));
                 }
             }
             self.cell.borrow().value.clone()
         }
     }
 
-    /// `reactive.effect(body)` — run `body` now, and again whenever a signal it read
-    /// changes. The first run records the effect's dependencies; each subscribed
-    /// signal then holds an `Rc` to the observer, keeping the effect alive for as long
-    /// as a signal it reads is alive (a long-lived reactive sink). An effect that reads
-    /// no signal simply runs once.
-    pub fn jet_reactive_effect<F: Fn() + 'static>(body: F) {
-        let observer: Observer = Rc::new(body);
-        let run = observer.clone();
-        jet_reactive_run_observed(&observer, &move || {
-            run();
-        });
+    /// `reactive.effect(body)` — run `body` now, then re-run when a signal it read
+    /// changes. The returned owner detaches on `unsubscribe()` or final-handle drop.
+    pub fn jet_reactive_effect<F: Fn() + 'static>(body: F) -> JetReactiveEffect {
+        let observer = ReactiveObserver::new(Rc::new(body));
+        observer.run();
+        JetReactiveEffect { observer, owners: Rc::new(()) }
     }
 
-    /// D-REACTCORE1: `@Reactive` scope marker — alias for `jet_reactive_effect`.
+    pub fn jet_reactive_effect_rooted<F: Fn() + 'static>(body: F) {
+        let effect = jet_reactive_effect(body);
+        JET_REACTIVE_ROOT_EFFECTS.with(|effects| effects.borrow_mut().push(effect));
+    }
+
+    /// D-REACTCORE1: `@Reactive` scope marker with runtime-owned lifetime.
     pub fn jet_reactive_scope<F: Fn() + 'static>(body: F) {
-        jet_reactive_effect(body);
+        jet_reactive_effect_rooted(body);
     }
 
     // D-EVENT1: first-party typed Event/Hook family. Values are ordinary Core

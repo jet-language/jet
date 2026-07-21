@@ -1925,6 +1925,19 @@ pub fn core_fixed_sig(
             vec![(read, string.clone()), (read, float.clone()), (read, float)],
             Some(Type::Named("UiNode".to_string())),
         )),
+        // D-UITREE1=A: canonical typed constructors. These are plain Core
+        // functions returning the same UiNode tree consumed by each backend.
+        ("core.ui", "text" | "button") => Some((
+            vec![(read, string.clone())],
+            Some(Type::Named("UiNode".to_string())),
+        )),
+        ("core.ui", "box") => Some((
+            vec![(
+                read,
+                Type::List(Box::new(Type::Named("UiNode".to_string()))),
+            )],
+            Some(Type::Named("UiNode".to_string())),
+        )),
         ("core.ui", "key_event") => Some((
             vec![(read, string)],
             Some(Type::Named("InputEvent".to_string())),

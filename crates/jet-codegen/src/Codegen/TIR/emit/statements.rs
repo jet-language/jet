@@ -1182,7 +1182,7 @@ fn emit_tir_stmt(
         // D-REACTCORE1: `@Reactive { … }` — register a reactive effect at this point.
         TStmt::Reactive { closure } => {
             out.push_str(&format!(
-                "{}{}jet_std::jet_reactive_effect({});\n",
+                "{}{}jet_std::jet_reactive_effect_rooted({});\n",
                 pad, cx.root_prefix, closure
             ));
         }

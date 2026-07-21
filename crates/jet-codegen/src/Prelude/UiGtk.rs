@@ -26,6 +26,7 @@ mod jet_gtk {
     // program still runs (signals update, terminal output prints) and
     // terminates, so tests are deterministic and a display-less CI never hangs.
     use super::{
+        jet_ui_advance_focus, jet_ui_collect_focus, jet_ui_measure_tree, jet_ui_paint_tree,
         JetBackend, JetEventResult, JetInputEvent, JetPaintCmd, JetRect, JetShow, JetSize,
         JetSizeConstraint, JetUiNode,
     };
@@ -42,6 +43,7 @@ mod jet_gtk {
     type GtkCssProvider = c_void;
     type GdkDisplay = c_void;
     type GMainLoop = c_void;
+    type GClosure = c_void;
 
     const GTK_ORIENTATION_VERTICAL: c_int = 1;
     const GTK_STYLE_PROVIDER_PRIORITY_APPLICATION: c_int = 600;
@@ -77,11 +79,13 @@ mod jet_gtk {
             detailed_signal: *const c_char,
             c_handler: ClickCallback,
             data: gpointer,
-            destroy_data: gpointer,
+            destroy_data: Option<extern "C" fn(gpointer, *mut GClosure)>,
             connect_flags: c_int,
         ) -> u64;
         fn g_main_loop_new(context: gpointer, is_running: gboolean) -> *mut GMainLoop;
         fn g_main_loop_run(loop_: *mut GMainLoop);
+        fn g_main_loop_unref(loop_: *mut GMainLoop);
+        fn g_object_unref(object: gpointer);
     }
 
     /// Trampoline for a GTK "clicked" signal. `data` is a leaked
@@ -100,6 +104,25 @@ mod jet_gtk {
         }
     }
 
+    extern "C" fn jet_gtk_drop_callback(data: gpointer, _closure: *mut GClosure) {
+        if data.is_null() {
+            return;
+        }
+        // SAFETY: `on_click` allocated exactly one Box at this pointer; GTK
+        // invokes this notifier once when the signal/widget is destroyed.
+        unsafe {
+            drop(Box::from_raw(data as *mut Rc<dyn Fn()>));
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum GtkAvailability {
+        Uninitialized,
+        Ready,
+        HeadlessOptIn,
+        UnsupportedDisplay,
+    }
+
     struct GtkState {
         // Seam parity (display-free): keeps `GtkBackend` a full `JetBackend` so
         // the null/tui measure→layout→paint path is available on it too.
@@ -116,6 +139,7 @@ mod jet_gtk {
         vbox: *mut GtkWidget,
         widgets: Vec<*mut GtkWidget>,
         is_button: Vec<bool>,
+        availability: GtkAvailability,
     }
 
     impl GtkState {
@@ -132,18 +156,34 @@ mod jet_gtk {
             self.inited = true;
             if std::env::var_os("JET_UI_HEADLESS").is_some() {
                 self.display_ok = false;
+                self.availability = GtkAvailability::HeadlessOptIn;
                 return;
             }
             unsafe {
                 if gtk_init_check() == 0 {
                     self.display_ok = false;
+                    self.availability = GtkAvailability::UnsupportedDisplay;
                     return;
                 }
                 self.display_ok = true;
+                self.availability = GtkAvailability::Ready;
                 self.window = gtk_window_new();
                 self.vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
                 gtk_window_set_child(self.window, self.vbox);
                 gtk_window_set_default_size(self.window, 320, 240);
+            }
+        }
+    }
+
+    impl Drop for GtkState {
+        fn drop(&mut self) {
+            if !self.window.is_null() {
+                // SAFETY: state owns its initial GTK window reference. GTK
+                // tears down children and their signal destroy notifiers.
+                unsafe {
+                    g_object_unref(self.window as gpointer);
+                }
+                self.window = std::ptr::null_mut();
             }
         }
     }
@@ -171,6 +211,7 @@ mod jet_gtk {
                     vbox: std::ptr::null_mut(),
                     widgets: Vec::new(),
                     is_button: Vec::new(),
+                    availability: GtkAvailability::Uninitialized,
                 })),
             }
         }
@@ -305,6 +346,7 @@ mod jet_gtk {
                     );
                 }
                 gtk_widget_add_css_class(widget, cclass.as_ptr());
+                g_object_unref(provider as gpointer);
             }
         }
 
@@ -317,18 +359,17 @@ mod jet_gtk {
             if !state.display_ok || widget.is_null() {
                 return;
             }
-            // The handler outlives the loop; leak it (owned to program exit).
             let boxed: *mut Rc<dyn Fn()> = Box::into_raw(Box::new(Rc::new(handler) as Rc<dyn Fn()>));
             let signal = CString::new("clicked").unwrap();
             // SAFETY: display is live; `widget` is a GTK button; `boxed` is a
-            // leaked `Rc<dyn Fn()>` the trampoline reads back.
+            // owned callback; GTK invokes its destroy notifier at widget teardown.
             unsafe {
                 g_signal_connect_data(
                     widget as gpointer,
                     signal.as_ptr(),
                     jet_gtk_click_trampoline,
                     boxed as gpointer,
-                    std::ptr::null_mut(),
+                    Some(jet_gtk_drop_callback),
                     0,
                 );
             }
@@ -340,11 +381,14 @@ mod jet_gtk {
         pub fn present(&self, title: &str) {
             // Read what we need, then drop the borrow BEFORE the blocking loop so
             // click handlers (`set_text`, etc.) can re-borrow the state.
-            let (display_ok, window) = {
+            let (display_ok, window, availability) = {
                 let state = self.state.borrow();
-                (state.display_ok, state.window)
+                (state.display_ok, state.window, state.availability)
             };
             if !display_ok || window.is_null() {
+                if availability == GtkAvailability::UnsupportedDisplay {
+                    eprintln!("UI_UNSUPPORTED[gtk.display]: no GTK display is available; set JET_UI_HEADLESS=1 only for an explicit headless run");
+                }
                 return;
             }
             // SAFETY: display is live and `window` is a GTK window handle.
@@ -355,6 +399,7 @@ mod jet_gtk {
                 gtk_window_present(window);
                 let main_loop = g_main_loop_new(std::ptr::null_mut(), 0);
                 g_main_loop_run(main_loop);
+                g_main_loop_unref(main_loop);
             }
         }
     }
@@ -367,9 +412,7 @@ mod jet_gtk {
 
     impl JetBackend for GtkState {
         fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
-            let width = node.width.clamp(constraint.min_width, constraint.max_width);
-            let height = node.height.clamp(constraint.min_height, constraint.max_height);
-            let size = JetSize { width, height };
+            let size = jet_ui_measure_tree(node, constraint);
             self.measured = Some(size);
             size
         }
@@ -386,17 +429,24 @@ mod jet_gtk {
                 width: node.width,
                 height: node.height,
             });
-            self.commands.push(JetPaintCmd::FillRect {
-                rect: frame,
-                color: node.color.clone().unwrap_or_else(|| "#000000".to_string()),
-            });
-            self.commands.push(JetPaintCmd::Text {
-                rect: frame,
-                text: node.label.clone(),
-            });
+            jet_ui_paint_tree(node, frame, &mut self.commands);
+            let mut focus = Vec::new();
+            jet_ui_collect_focus(node, &mut focus);
+            if !focus.is_empty() {
+                self.focused_index = Some(0);
+                self.focus_nodes = focus;
+            }
         }
 
         fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
+            if let JetInputEvent::Key { code } = &event {
+                if let Some(result) =
+                    jet_ui_advance_focus(&self.focus_nodes, &mut self.focused_index, code)
+                {
+                    self.last_event = Some(result);
+                    return result;
+                }
+            }
             let result = match &event {
                 JetInputEvent::Key { code } if code.is_empty() => JetEventResult::Ignored,
                 JetInputEvent::Resize { size } if size.width <= 0.0 || size.height <= 0.0 => {

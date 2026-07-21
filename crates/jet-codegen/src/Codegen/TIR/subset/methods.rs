@@ -30,6 +30,7 @@ use crate::Codegen::TIR::is_loadable_method_name;
 use crate::Codegen::TIR::is_measurement_method_name;
 use crate::Codegen::TIR::is_process_handle_method_name;
 use crate::Codegen::TIR::is_reactive_method_name;
+use crate::Codegen::TIR::is_reactive_effect_method_name;
 use crate::Codegen::TIR::is_sketch_method_name;
 use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
@@ -515,6 +516,11 @@ pub(crate) fn method_call_in_subset(
             && args
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+    }
+    if recv_type.as_deref() == Some(crate::Syntax::TYPE_EFFECT)
+        && is_reactive_effect_method_name(method, args.len())
+    {
+        return expr_in_subset(receiver, cx, locals);
     }
     // Shape (d5b) [D-EVENT1=D]: Event/Hook handle methods. Handler arguments
     // must be literal lambdas so lowering can seed payload/result types and

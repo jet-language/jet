@@ -2081,6 +2081,60 @@ are string interpolation (S8). Write `\\d{{4}}` for "four digits".
 
 ---
 
+### `core.ui` — one typed tree across rendering backends
+
+`core.ui` keeps component meaning in one `UiNode` tree. The beginner
+constructors are `ui.text`, `ui.button`, and `ui.box`; null, TUI, browser DOM,
+and Linux GTK consume that same tree for measurement, paint, event routing,
+focus order, and accessible names.
+
+```jet
+use core.ui as ui
+
+fn run() {
+    tree :: ui.box([
+        ui.text("Flight deck"),
+        ui.button("Boost fuel"),
+    ])
+    backend :: ui.tui_backend()
+    bounds :: ui.constraint(0.0, 0.0, 80.0, 24.0)
+    size :: backend.measure(tree, bounds)
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
+}
+```
+
+| Call | Returns | Does |
+|------|---------|------|
+| `ui.text(text)` | `UiNode` | static text with a label role and accessible name |
+| `ui.button(label)` | `UiNode` | keyboard-focusable button node |
+| `ui.box(children)` | `UiNode` | vertical container for one typed child list |
+| `ui.node(label, width, height)` | `UiNode` | low-level custom/decorative node |
+| `ui.node_role(label, width, height, role)` | `UiNode` | low-level node with an explicit role |
+| `ui.node_color(label, width, height, color)` | `UiNode` | styled text node with a `#RRGGBB` fill and accessible name |
+| `ui.null_backend()` / `ui.tui_backend()` | backend | in-memory/DOM-selected or terminal renderer |
+| `ui.gtk_backend()` | `GtkBackend` | Linux GTK4 renderer; needs a real display unless `JET_UI_HEADLESS=1` |
+| `backend.measure/layout/paint(...)` | mixed | run the shared tree through the selected renderer |
+| `backend.on_event(ui.key_event("Tab"))` | `EventResult` | advance the backend's interactive focus order |
+| `ui.reactive_render(() => { ... })` | — | repaint from signals read by the body |
+
+Backend capability is explicit rather than silently emulated:
+
+| Backend | Tree / layout / paint | Focus + accessible names | Native window | Hot reload / package |
+|---------|-----------------------|--------------------------|---------------|----------------------|
+| Browser DOM | yes | yes | browser-owned | `jet dev` / web build |
+| TUI | yes | yes | terminal-owned | no / terminal binary |
+| Linux GTK4 | yes | yes | yes | no / native binary |
+| Null/in-memory | yes | deterministic test model | no | no |
+| macOS, Windows, iOS, Android | unsupported | unsupported | unsupported | unsupported |
+
+An unavailable GTK display reports `UI_UNSUPPORTED` instead of silently
+pretending to render. `JET_UI_HEADLESS=1` is the explicit CI/test opt-in. The
+other native/mobile rows are deliberately reported as unsupported until real
+backends, accessibility-tree proof, and packaging exist.
+
+---
+
 ### `core.reactive` — signals, derived values, effects (D-REACT1)
 
 `use core.reactive as reactive`. Reactivity is an **opt-in library**, not core
@@ -2095,13 +2149,16 @@ explicit reactive values:
   the D-SIGNAL1 canonical alias (type name `Computed<T>`). `.get()` reflects the
   latest computation.
 - **effect** — a side effect. `reactive.effect(() => { … })` runs the body now,
-  and again whenever a signal it read changes. **`@Reactive { … }`** (D-REACTCORE1)
-  is sugar for the same scope — the compiler lowers it to `jet_reactive_effect`.
+  and again whenever a signal it read changes, and returns an `Effect`. Call
+  `.unsubscribe()` to detach it idempotently and `.is_active()` to inspect its
+  state. Dropping the final handle detaches it too. **`@Reactive { … }`** (D-REACTCORE1)
+  creates the same effect with a runtime-owned lifetime.
   **`@Reactive fn`** wraps the whole function body the same way (unit return only).
 
 Dependency tracking is **explicit-by-read**: any `.get()` evaluated inside a
 derived or effect body subscribes that derived/effect to the signal. A `.set(v)`
-re-runs every subscriber.
+re-runs every subscriber. Each re-run replaces the prior dependency set, so a
+conditional effect stops listening to signals from branches it no longer reads.
 
 ```jet
 use core.reactive as reactive
@@ -2112,7 +2169,9 @@ fn run() {
     total :: reactive.derived(() => (price.get() * qty.get()))
     print(total.get())                       // 200
 
-    reactive.effect(() => print(total.get()))  // prints 200 now
+    effect := reactive.effect(() => {          // prints 200 now
+        print(total.get())
+    })
     price.set(150)                             // effect re-runs → 300
     qty.set(3)                                 // effect re-runs → 450
     print(total.get())                         // 450
@@ -2124,8 +2183,10 @@ fn run() {
 | `reactive.signal(initial)` | `Signal<T>` | a mutable reactive source holding `T` |
 | `reactive.derived(() => expr)` | `Derived<T>` / `Computed<T>` | a value recomputed from the signals it reads |
 | `reactive.computed(() => expr)` | `Computed<T>` | canonical alias for `derived` (D-SIGNAL1) |
-| `reactive.effect(() => { … })` | — | a side effect re-run when a read signal changes |
-| `@Reactive { … }` | — | explicit reactive effect scope (lowers like `reactive.effect`) |
+| `reactive.effect(() => { … })` | `Effect` | a retained side effect with explicit lifecycle |
+| `effect.unsubscribe()` | — | detach idempotently |
+| `effect.is_active()` | `Bool` | whether the effect remains subscribed |
+| `@Reactive { … }` | `Effect` (runtime-owned) | explicit reactive effect scope |
 | `sig.get()` / `der.get()` | `T` | read the current value (and subscribe, inside a derived/effect) |
 | `sig.set(v)` | — | write a new value and re-run subscribers |
 

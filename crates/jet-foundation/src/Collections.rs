@@ -174,6 +174,11 @@ pub fn builtin_method_return(
         Type::Apply { name, args } if name == crate::Syntax::TYPE_COMPUTED => {
             derived_method_return(args, method, arg_count)
         }
+        Type::Named(name) if name == crate::Syntax::TYPE_EFFECT => match (method, arg_count) {
+            ("unsubscribe", 0) => Some(None),
+            ("is_active", 0) => Some(Some(Type::Bool)),
+            _ => None,
+        },
         // D-EVENT1=D: compiler-known Event/Hook family; methods are ordinary
         // library calls with typed handlers/payloads.
         Type::Apply { name, args } if name == crate::Syntax::TYPE_EVENT => {
@@ -1459,7 +1464,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             }
         }
         Type::Named(n)
-            if n == crate::Syntax::TYPE_SUBSCRIPTION
+            if n == crate::Syntax::TYPE_EFFECT
+                || n == crate::Syntax::TYPE_SUBSCRIPTION
                 || n == crate::Syntax::TYPE_EVENT_SCOPE
                 || n == crate::Syntax::TYPE_EVENT_TRACE =>
         {

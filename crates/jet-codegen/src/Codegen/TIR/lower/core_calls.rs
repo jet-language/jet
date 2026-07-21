@@ -240,7 +240,8 @@ pub(crate) fn lower_core_closure_call(
         ("jet.reactive", "effect") => {
             let lam = lam_at(0)?;
             let closure = render_lambda_str(lam, cx, env);
-            TCoreClosureKind::ReactiveEffect { closure }
+            let executable = Box::new(lower_lambda(lam, cx, env));
+            TCoreClosureKind::ReactiveEffect { closure, executable }
         }
         // D-SIGNAL1: `computed` is a canonical alias for `derived`.
         ("jet.reactive", "computed") => {

@@ -651,6 +651,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             // D-STYLESHAPE1=A (c134 Phase 3/7 wiring): a typed-Color-backed node —
             // the paint pipeline's fill color is no longer hardcoded.
             "node_color",
+            // D-UITREE1=A: one typed component tree for every backend.
+            "text",
+            "box",
+            "button",
         ],
         // D-FLAGSHIP-WEBAPI1=A: browser events and storage. The intermediate
         // `storage` module exists so `web.storage.local.get(...)` resolves as a

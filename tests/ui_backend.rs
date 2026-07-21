@@ -81,3 +81,45 @@ fn tui_backend_reactive_render_loop() {
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// D-UITREE1: typed constructors form one tree consumed unchanged by null and
+/// TUI backends. Painting the tree also derives one shared focus order.
+#[test]
+fn typed_component_tree_has_backend_parity() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping typed UI tree test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_ui_tree_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"use core.ui as ui
+fn run() {
+    tree := ui.box([ui.text("Title"), ui.button("Save")])
+    limit := ui.constraint(0.0, 0.0, 80.0, 24.0)
+
+    null := ui.null_backend()
+    size := null.measure(tree, limit)
+    null.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    null.paint(tree)
+    print(null.focused_label())
+    null.on_event(ui.key_event("Tab"))
+    print(null.focused_label())
+    loop command; null.commands() { print(command) }
+
+    tui := ui.tui_backend()
+    tui.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    tui.paint(tree)
+    print(tui.focused_label())
+    loop line; tui.frame_lines() { print(line) }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "ui_typed_tree", src);
+    assert_eq!(code, 0, "typed tree failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "Save\nSave\ntext({x:0,y:0,w:8,h:1}, Title)\nfill({x:0,y:1,w:8,h:1}, #000000)\ntext({x:0,y:1,w:8,h:1}, Save)\nSave\nTitle\nSave\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

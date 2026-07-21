@@ -1049,6 +1049,11 @@ impl Cx {
                 format!("{}JetDevServer", self.root_prefix)
             }
             Type::Named(name)
+                if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetReactiveEffect", self.root_prefix)
+            }
+            Type::Named(name)
                 if name == Syntax::TYPE_SUBSCRIPTION && !self.type_names.contains(name) =>
             {
                 format!("{}jet_std::JetSubscription", self.root_prefix)

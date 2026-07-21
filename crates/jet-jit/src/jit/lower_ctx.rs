@@ -2664,6 +2664,9 @@ impl LowerCtx<'_, '_> {
             THandleOp::MathMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::ReactiveGet => Err("jit handle method unsupported".to_string()),
             THandleOp::ReactiveSet => Err("jit handle method unsupported".to_string()),
+            THandleOp::ReactiveEffectMethod { .. } => {
+                Err("jit handle method unsupported".to_string())
+            }
             THandleOp::EventMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::WatchMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::MeasurementMethod { .. } => Err("jit handle method unsupported".to_string()),

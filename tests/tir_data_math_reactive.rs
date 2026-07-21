@@ -198,7 +198,7 @@ fn run() {
     n := reactive.signal(1)
     doubled := reactive.derived(() => (n.get() * 2))
     print(doubled.get())
-    reactive.effect(() => {
+    effect := reactive.effect(() => {
         print(doubled.get())
     })
     n.set(5)
@@ -256,4 +256,61 @@ fn run() {
     let (code, stdout) = build_and_run("tir_reactive_string", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "hello, world\nhello, jet\n");
+}
+
+/// Each effect run owns exactly its current dependency set. Switching branches
+/// must detach the old signal, not leave a stale subscription behind.
+#[test]
+fn reactive_effect_replaces_stale_dependencies() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.reactive as reactive
+fn run() {
+    choose_left := reactive.signal(true)
+    left := reactive.signal(1)
+    right := reactive.signal(10)
+    effect := reactive.effect(() => {
+        if choose_left.get() {
+            print(left.get())
+        } else {
+            print(right.get())
+        }
+    })
+    choose_left.set(false)
+    left.set(2)
+    right.set(11)
+}
+";
+    let (code, stdout) = build_and_run("tir_reactive_effect_stale_deps", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n10\n11\n");
+}
+
+/// D-EFFECT-LIFECYCLE1=A: effects are retained values with the same explicit
+/// lifecycle vocabulary as event subscriptions. Cleanup is idempotent.
+#[test]
+fn reactive_effect_unsubscribe_and_activity() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+use core.reactive as reactive
+fn run() {
+    value := reactive.signal(1)
+    effect := reactive.effect(() => {
+        print(value.get())
+    })
+    print(effect.is_active())
+    value.set(2)
+    effect.unsubscribe()
+    print(effect.is_active())
+    effect.unsubscribe()
+    value.set(3)
+}
+";
+    let (code, stdout) = build_and_run("tir_reactive_effect_lifecycle", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\ntrue\n2\nfalse\n");
 }

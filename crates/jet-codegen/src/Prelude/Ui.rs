@@ -52,6 +52,15 @@ impl JetAriaRole {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum JetUiNodeKind {
+    Custom,
+    Text,
+    Box,
+    Button,
+    TextInput,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct JetUiNode {
     /// Also the accessible name (WAI-ARIA accname model — one field serves
     /// both display and accessibility; no separate name field).
@@ -64,6 +73,9 @@ pub struct JetUiNode {
     /// `#RRGGBB` string, matching `JetPaintCmd::FillRect`'s existing color
     /// representation. `None` falls back to the default fill (`#000000`).
     pub color: Option<String>,
+    /// D-UITREE1=A: every renderer consumes this same typed node kind/tree.
+    pub kind: JetUiNodeKind,
+    pub children: Vec<JetUiNode>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -121,6 +133,77 @@ pub trait JetBackend {
     fn layout(&mut self, node: &JetUiNode, frame: JetRect);
     fn paint(&mut self, node: &JetUiNode);
     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult;
+}
+
+fn jet_ui_measure_tree(node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
+    let natural = if node.kind == JetUiNodeKind::Box {
+        JetSize {
+            width: node
+                .children
+                .iter()
+                .map(|child| child.width)
+                .fold(0.0_f64, f64::max),
+            height: node.children.iter().map(|child| child.height).sum(),
+        }
+    } else {
+        JetSize {
+            width: node.width,
+            height: node.height,
+        }
+    };
+    JetSize {
+        width: natural
+            .width
+            .clamp(constraint.min_width, constraint.max_width),
+        height: natural
+            .height
+            .clamp(constraint.min_height, constraint.max_height),
+    }
+}
+
+fn jet_ui_collect_focus(node: &JetUiNode, out: &mut Vec<JetUiNode>) {
+    if node.role.as_ref().is_some_and(JetAriaRole::is_interactive) {
+        out.push(node.clone());
+    }
+    for child in &node.children {
+        jet_ui_collect_focus(child, out);
+    }
+}
+
+fn jet_ui_visit_tree(node: &JetUiNode, frame: JetRect, visit: &mut dyn FnMut(&JetUiNode, JetRect)) {
+    if node.kind == JetUiNodeKind::Box {
+        let mut y = frame.y;
+        for child in &node.children {
+            let child_frame = JetRect {
+                x: frame.x,
+                y,
+                width: frame.width,
+                height: child.height,
+            };
+            jet_ui_visit_tree(child, child_frame, visit);
+            y += child.height;
+        }
+    } else {
+        visit(node, frame);
+    }
+}
+
+fn jet_ui_paint_tree(node: &JetUiNode, frame: JetRect, commands: &mut Vec<JetPaintCmd>) {
+    jet_ui_visit_tree(node, frame, &mut |leaf, leaf_frame| {
+        if leaf.kind != JetUiNodeKind::Text {
+            commands.push(JetPaintCmd::FillRect {
+                rect: leaf_frame,
+                color: leaf
+                    .color
+                    .clone()
+                    .unwrap_or_else(|| "#000000".to_string()),
+            });
+        }
+        commands.push(JetPaintCmd::Text {
+            rect: leaf_frame,
+            text: leaf.label.clone(),
+        });
+    });
 }
 
 #[derive(Clone)]
@@ -210,9 +293,7 @@ impl Default for JetNullBackend {
 
 impl JetBackend for JetNullBackendState {
     fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
-        let width = node.width.clamp(constraint.min_width, constraint.max_width);
-        let height = node.height.clamp(constraint.min_height, constraint.max_height);
-        let size = JetSize { width, height };
+        let size = jet_ui_measure_tree(node, constraint);
         self.measured = Some(size);
         size
     }
@@ -229,14 +310,13 @@ impl JetBackend for JetNullBackendState {
             width: node.width,
             height: node.height,
         });
-        self.commands.push(JetPaintCmd::FillRect {
-            rect: frame,
-            color: node.color.clone().unwrap_or_else(|| "#000000".to_string()),
-        });
-        self.commands.push(JetPaintCmd::Text {
-            rect: frame,
-            text: node.label.clone(),
-        });
+        jet_ui_paint_tree(node, frame, &mut self.commands);
+        let mut focus = Vec::new();
+        jet_ui_collect_focus(node, &mut focus);
+        if !focus.is_empty() {
+            self.focused_index = Some(0);
+            self.focus_nodes = focus;
+        }
     }
 
     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
@@ -384,9 +464,7 @@ impl Default for JetTuiBackend {
 
 impl JetBackend for JetTuiBackendState {
     fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize {
-        let width = node.width.clamp(constraint.min_width, constraint.max_width);
-        let height = node.height.clamp(constraint.min_height, constraint.max_height);
-        let size = JetSize { width, height };
+        let size = jet_ui_measure_tree(node, constraint);
         self.measured = Some(size);
         size
     }
@@ -419,7 +497,15 @@ impl JetBackend for JetTuiBackendState {
                 *cell = ' ';
             }
         }
-        tui_write_label(&mut self.grid, &frame, &node.label);
+        jet_ui_visit_tree(node, frame, &mut |leaf, leaf_frame| {
+            tui_write_label(&mut self.grid, &leaf_frame, &leaf.label);
+        });
+        let mut focus = Vec::new();
+        jet_ui_collect_focus(node, &mut focus);
+        if !focus.is_empty() {
+            self.focused_index = Some(0);
+            self.focus_nodes = focus;
+        }
     }
 
     fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
@@ -459,7 +545,7 @@ impl JetBackend for JetTuiBackendState {
 
 /// D-RENDERTGT2=A (c133 M2): reactive UI render loop — re-runs the body when signals change.
 pub fn jet_ui_reactive_render<F: Fn() + 'static>(body: F) {
-    jet_std::jet_reactive_effect(body);
+    jet_std::jet_reactive_effect_rooted(body);
 }
 
 pub fn jet_ui_null() -> JetNullBackend {
@@ -508,6 +594,8 @@ pub fn jet_ui_node(label: &str, width: f64, height: f64) -> JetUiNode {
         height,
         role: None,
         color: None,
+        kind: JetUiNodeKind::Custom,
+        children: Vec::new(),
     }
 }
 
@@ -521,6 +609,14 @@ pub fn jet_ui_node_role(label: &str, width: f64, height: f64, role: JetAriaRole)
         height,
         role: Some(role),
         color: None,
+        kind: if role == JetAriaRole::Button {
+            JetUiNodeKind::Button
+        } else if role == JetAriaRole::TextInput {
+            JetUiNodeKind::TextInput
+        } else {
+            JetUiNodeKind::Custom
+        },
+        children: Vec::new(),
     }
 }
 
@@ -532,8 +628,55 @@ pub fn jet_ui_node_color(label: &str, width: f64, height: f64, color: &str) -> J
         label: label.to_string(),
         width,
         height,
-        role: None,
+        // A styled node still presents text. Keep that semantic in the
+        // canonical tree so every backend exposes the same accessible name.
+        role: Some(JetAriaRole::Label),
         color: Some(color.to_string()),
+        kind: JetUiNodeKind::Custom,
+        children: Vec::new(),
+    }
+}
+
+/// D-UITREE1=A: canonical typed beginner constructors. Component-kit source,
+/// native, web, and TUI all hand this exact tree to `JetBackend`.
+pub fn jet_ui_text(text: &str) -> JetUiNode {
+    JetUiNode {
+        label: text.to_string(),
+        width: text.chars().count() as f64,
+        height: 1.0,
+        role: Some(JetAriaRole::Label),
+        color: None,
+        kind: JetUiNodeKind::Text,
+        children: Vec::new(),
+    }
+}
+
+pub fn jet_ui_button(label: &str) -> JetUiNode {
+    JetUiNode {
+        label: label.to_string(),
+        width: label.chars().count() as f64 + 4.0,
+        height: 1.0,
+        role: Some(JetAriaRole::Button),
+        color: None,
+        kind: JetUiNodeKind::Button,
+        children: Vec::new(),
+    }
+}
+
+pub fn jet_ui_box(children: Vec<JetUiNode>) -> JetUiNode {
+    let width = children
+        .iter()
+        .map(|child| child.width)
+        .fold(0.0_f64, f64::max);
+    let height = children.iter().map(|child| child.height).sum();
+    JetUiNode {
+        label: String::new(),
+        width,
+        height,
+        role: Some(JetAriaRole::Container),
+        color: None,
+        kind: JetUiNodeKind::Box,
+        children,
     }
 }
 

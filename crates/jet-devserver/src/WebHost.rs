@@ -30,9 +30,10 @@ use crate::{content_type_for, query_param, static_path, write_response, Request}
 const PORT_RANGE: std::ops::RangeInclusive<u16> = 8080..=8089;
 
 /// How often the live-reload script in the browser polls `/__jet_dev_version`
-/// (judgment call — 400ms is fast enough to feel instant after a save,
-/// without hammering the dev server on every open tab).
-const LIVE_RELOAD_POLL_MS: u64 = 400;
+/// The browser waits 750ms after each completed request before polling again.
+/// That keeps reload responsive while leaving a real network-idle window for
+/// user interactions and browser automation.
+const LIVE_RELOAD_POLL_MS: u64 = 750;
 const CLIENT_TTL_MS: u64 = LIVE_RELOAD_POLL_MS * 4;
 
 /// D-FE-DEVSRV1 outcome D (hybrid, owner-modified 2026-07-08: pinned parity
@@ -1308,7 +1309,7 @@ fn live_reload_script() -> String {
       dismissedDiagnostic = null;
     }}
   }}
-  setInterval(function () {{
+  function poll() {{
     fetch("/__jet_dev_status?client=" + encodeURIComponent(jetDevClient), {{ cache: "no-store" }})
       .then(function (r) {{ return r.json(); }})
       .then(function (s) {{
@@ -1331,8 +1332,10 @@ fn live_reload_script() -> String {
       .catch(function () {{
         reconnectAttempt += 1;
         renderStatus({{ state: "reconnecting", message: "reconnecting · waiting for connection" }});
-      }});
-  }}, {poll_ms});
+      }})
+      .finally(function () {{ setTimeout(poll, {poll_ms}); }});
+  }}
+  setTimeout(poll, 0);
 }})();
 </script>
 "##,
@@ -1398,6 +1401,8 @@ mod tests {
         assert!(out.contains("location.reload()"));
         assert!(out.contains("recoveredConnection || v !== jetDevVersion"));
         assert!(out.contains("reconnecting · waiting for connection"));
+        assert!(!out.contains("setInterval("));
+        assert!(out.contains("finally(function () { setTimeout(poll, 750); })"));
         assert!(out.contains("position:fixed;left:12px;bottom:12px"));
         assert!(out.contains("display:none;align-items:flex-start"));
     }

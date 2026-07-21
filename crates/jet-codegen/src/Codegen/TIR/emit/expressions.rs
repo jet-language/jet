@@ -2644,6 +2644,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     a(0),
                     a(1)
                 ),
+                THandleOp::ReactiveEffectMethod { method } => match method.as_str() {
+                    "unsubscribe" => format!("({recv}).unsubscribe()"),
+                    "is_active" => format!("({recv}).active()"),
+                    _ => unreachable!("sema admitted only Effect lifecycle methods"),
+                },
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
@@ -2681,7 +2686,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("{}jet_std::JetDerived::new({})", cx.root_prefix, closure)
             }
             // D-REACT1=B: an effect re-run when a signal it read changes.
-            TCoreClosureKind::ReactiveEffect { closure } => {
+            TCoreClosureKind::ReactiveEffect { closure, .. } => {
                 format!(
                     "{}jet_std::jet_reactive_effect({})",
                     cx.root_prefix, closure

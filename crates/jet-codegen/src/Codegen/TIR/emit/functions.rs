@@ -191,7 +191,7 @@ fn emit_reactive_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent:
     let pad = "    ".repeat(indent);
     let inner = indent + 1;
     out.push_str(&format!(
-        "{}{}jet_std::jet_reactive_effect({});\n",
+        "{}{}jet_std::jet_reactive_effect_rooted({});\n",
         pad,
         cx.root_prefix,
         render_reactive_tir_closure(body, cx, inner)

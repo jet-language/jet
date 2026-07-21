@@ -260,8 +260,10 @@ fn run_web_api_harness(dir: &PathBuf) -> String {
 /// and reads every painted box back out of the fake DOM tree.
 const SHOWCASE_HARNESS: &str = r#"
 class FakeElement {
-  constructor(tag) { this.tagName = tag; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.id = ""; }
+  constructor(tag) { this.tagName = tag; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.id = ""; this.attrs = new Map(); }
   appendChild(child) { this.children.push(child); return child; }
+  setAttribute(name, value) { this.attrs.set(String(name), String(value)); }
+  getAttribute(name) { return this.attrs.get(String(name)) ?? null; }
 }
 class FakeDocument {
   constructor() { this.body = new FakeElement("body"); this._byId = new Map(); }
@@ -273,17 +275,17 @@ const origAppend = doc.body.appendChild.bind(doc.body);
 doc.body.appendChild = (el) => { if (el.id) doc._byId.set(el.id, el); return origAppend(el); };
 globalThis.document = doc;
 
-const { initApp, initFuel } = await import("./app.js");
-const boosts = initApp();
-const elapsed = initFuel();
+const { init_app, init_fuel } = await import("./app.js");
+const boosts = init_app();
+const elapsed = init_fuel();
 
 const container = doc.getElementById("jet-app");
-const boxes = () => container.children.map((c) => ({ text: c.textContent, bg: c.style.background, color: c.style.color }));
+const boxes = () => container.children.map((c) => ({ text: c.textContent, bg: c.style.background, color: c.style.color, role: c.getAttribute("role"), aria: c.getAttribute("aria-label") }));
 const find = (prefix) => boxes().find((b) => b.text.startsWith(prefix));
 
 console.log(`nodes=${container.children.length}`);
 for (const b of boxes()) {
-  console.log(`box text=${JSON.stringify(b.text)} bg=${b.bg} color=${b.color}`);
+  console.log(`box text=${JSON.stringify(b.text)} bg=${b.bg} color=${b.color} role=${b.role} aria=${JSON.stringify(b.aria)}`);
 }
 
 boosts.set(boosts.get() + 1);
@@ -307,6 +309,51 @@ fn run_showcase_harness(dir: &PathBuf) -> String {
     assert!(
         node.status.success(),
         "node showcase harness failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    String::from_utf8_lossy(&node.stdout).into_owned()
+}
+
+const TYPED_UI_TREE_HARNESS: &str = r#"
+class FakeElement {
+  constructor(tag, doc) { this.tagName = tag.toUpperCase(); this.ownerDocument = doc; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.value = ""; this.id = ""; this.attrs = new Map(); this.parent = null; }
+  appendChild(child) { child.parent = this; this.children.push(child); return child; }
+  setAttribute(name, value) { this.attrs.set(String(name), String(value)); }
+  getAttribute(name) { return this.attrs.get(String(name)) ?? null; }
+  focus() { this.ownerDocument.activeElement = this; }
+  remove() { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); }
+}
+class FakeDocument {
+  constructor() { this.activeElement = null; this._byId = new Map(); this.body = new FakeElement("body", this); }
+  createElement(tag) { return new FakeElement(tag, this); }
+  getElementById(id) { return this._byId.get(id) ?? null; }
+}
+const doc = new FakeDocument();
+const origAppend = doc.body.appendChild.bind(doc.body);
+doc.body.appendChild = (el) => { if (el.id) doc._byId.set(el.id, el); return origAppend(el); };
+globalThis.document = doc;
+
+const { render_tree } = await import("./app.js");
+render_tree(true);
+let container = doc.getElementById("jet-app");
+console.log(container.children.map((el) => `${el.tagName}:${el.getAttribute("role")}:${el.getAttribute("aria-label")}`).join("|"));
+console.log(`focus=${doc.activeElement?.getAttribute("aria-label")}`);
+render_tree(false);
+console.log(container.children.map((el) => el.tagName).join("|"));
+"#;
+
+fn run_typed_ui_tree_harness(dir: &PathBuf) -> String {
+    let harness_path = dir.join("build/typed_ui_tree_harness.mjs");
+    fs::write(&harness_path, TYPED_UI_TREE_HARNESS).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("typed_ui_tree_harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "typed UI tree harness failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&node.stdout),
         String::from_utf8_lossy(&node.stderr)
     );
@@ -1032,6 +1079,93 @@ fn web_click_counter_dom_roundtrip() {
 }
 
 #[test]
+fn web_typed_tree_a11y_focus_and_cleanup_roundtrip() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping typed web UI tree (need rustc + node)");
+        return;
+    }
+    let src = r#"@Target(Web)
+use core.ui as ui
+
+@Target(Js)
+fn render_tree(show_button: Bool) {
+    tree := ui.box([ui.text("Title")])
+    if show_button {
+        tree = ui.box([ui.text("Title"), ui.button("Save")])
+    }
+    backend := ui.null_backend()
+    size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
+}
+
+fn run() {}
+"#;
+    let dir = build_web_fixture("typed_tree", src, "tests/fixtures/web_typed_tree.jet");
+    let stdout = run_typed_ui_tree_harness(&dir);
+    assert_eq!(stdout, "SPAN:label:Title|BUTTON:button:Save\nfocus=Save\nSPAN\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_reactive_render_replaces_stale_dependencies() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web reactive dependency test (need rustc + node)");
+        return;
+    }
+    let src = r#"@Target(Web)
+use core.reactive as reactive
+use core.ui as ui
+
+fn run() {
+    choose_left := reactive.signal(true)
+    left := reactive.signal(1)
+    right := reactive.signal(10)
+    ui.reactive_render(() => {
+        if choose_left.get() { print(left.get()) } else { print(right.get()) }
+    })
+    choose_left.set(false)
+    left.set(2)
+    right.set(11)
+}
+"#;
+    let dir = build_web_fixture("reactive_stale", src, "tests/fixtures/web_reactive_stale.jet");
+    assert_eq!(run_web_app(&dir), "1\n10\n11\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_reactive_effect_lifecycle_roundtrip() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web effect lifecycle test (need rustc + node)");
+        return;
+    }
+    let src = r#"@Target(Web)
+use core.reactive as reactive
+@Target(Js)
+fn run() {
+    value := reactive.signal(1)
+    effect := reactive.effect(() => {
+        print(value.get())
+    })
+    print(effect.is_active())
+    value.set(2)
+    effect.unsubscribe()
+    print(effect.is_active())
+    effect.unsubscribe()
+    value.set(3)
+}
+"#;
+    let dir = build_web_fixture(
+        "reactive_effect_lifecycle",
+        src,
+        "tests/fixtures/web_reactive_effect_lifecycle.jet",
+    );
+    assert_eq!(run_web_app(&dir), "1\ntrue\n2\nfalse\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_events_and_storage_roundtrip() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web_build browser API (need rustc + node)");
@@ -1118,6 +1252,33 @@ fn web_showcase_dashboard_roundtrip() {
     assert_eq!(
         lines[0], "nodes=4",
         "expected 4 independently-mounted DOM boxes:\n{stdout}"
+    );
+    for label in ["Altitude: 12,400 ft", "Airspeed: 410 kt", "Boosts: 0", "Fuel: 40%"] {
+        assert!(
+            lines.iter().any(|line| {
+                line.contains(&format!("role=label aria={label:?}"))
+            }),
+            "styled card lost its accessible role/name for {label:?}:\n{stdout}"
+        );
+    }
+
+    let html = include_str!("../examples/features/web/ui_showcase.html");
+    assert!(
+        html.contains(r#"<button id="boost-btn" type="button" aria-label="Boost fuel" data-motion-state="idle">"#),
+        "showcase boost control must have stable button semantics"
+    );
+    assert!(
+        !html.contains("btn.disabled"),
+        "the click handler must not disable its own target while automation dispatches the click"
+    );
+    assert_eq!(
+        html.matches("setTimeout(frame").count(),
+        2,
+        "motion timers must begin on click and stop at completion, not keep the page permanently busy"
+    );
+    assert!(
+        html.contains(r#"btn.dataset.motionState = "complete""#),
+        "the browser needs a bounded DOM-visible motion completion oracle"
     );
 
     assert!(

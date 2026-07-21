@@ -47,7 +47,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         return true;
     }
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
-        "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
+        "Effect" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
         | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError")) {
         return true;
     }
