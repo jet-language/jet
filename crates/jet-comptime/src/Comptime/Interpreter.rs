@@ -1159,7 +1159,15 @@ impl<'a> Interp<'a> {
                             .ok_or_else(|| unsupported("this map key type", index.span()))?;
                         m.get(&k).cloned().ok_or_else(|| map_missing(*span))
                     }
-                    _ => Err(unsupported("indexing this value", *span)),
+                    other => {
+                        if let Some(result) =
+                            super::MathLayout::lane_at(&other, as_int(&i, index.span())?, *span)
+                        {
+                            result
+                        } else {
+                            Err(unsupported("indexing this value", *span))
+                        }
+                    }
                 }
             }
             Expr::Field(inner, member, span) => {
@@ -1505,6 +1513,12 @@ impl<'a> Interp<'a> {
                     return_type: None,
                 },
             ))),
+            // D-SIMD2: `#Add`/`#Mul`/`#Min`/`#Max` reduce-op marker for `v.reduce(#Op)`.
+            Expr::ReduceMarker(name, _) => Ok(CtValue::Enum {
+                type_name: "__ReduceOp__".to_string(),
+                variant: name.clone(),
+                args: Vec::new(),
+            }),
             other => Err(unsupported_expr(other)),
         }
     }

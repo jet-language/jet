@@ -72,6 +72,16 @@ pub(super) fn eval_binop(
         (BinOp::Add, BigInt(a), BigInt(b)) => Ok(BigInt(a.add(&b))),
         (BinOp::Sub, BigInt(a), BigInt(b)) => Ok(BigInt(a.sub(&b))),
         (BinOp::Mul, BigInt(a), BigInt(b)) => Ok(BigInt(a.mul(&b))),
+        // D-SIMD2 / D-LINALG1: element-wise / matmul / Mat*Vec.
+        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div), left, right)
+            if super::MathLayout::lanes(&left).is_some()
+                || super::MathLayout::lanes(&right).is_some() =>
+        {
+            match super::MathLayout::eval_binop(op, &left, &right, span) {
+                std::option::Option::Some(result) => result,
+                std::option::Option::None => Err(unsupported("this math operator", span)),
+            }
+        }
         (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), left, right)
             if matches!(
                 (&left, &right),
@@ -134,6 +144,9 @@ pub(super) fn apply_static_type_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = super::MathLayout::apply_static(type_name, method, args.clone(), span) {
+        return Some(result);
+    }
     if let (Some(target), Some(source_name)) = (
         crate::AST::numeric_type_from_name(type_name),
         crate::Syntax::numeric_conversion_source(method),
@@ -388,6 +401,9 @@ pub(super) fn apply_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(result) = super::MathLayout::apply_method(recv, method, &args, span) {
+        return result;
+    }
     if let Some(result) = super::Methods::apply_core_pure_method(recv, method, &args, span) {
         return result;
     }

@@ -1172,12 +1172,6 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                     Some((Class::Boundary, "named runtime resource boundary"))
                 } else if direct_names.contains(&entry.method) {
                     Some((Class::Covered, "comptime direct dispatch"))
-                } else if matches!(
-                    entry.method.as_str(),
-                    "consume" | "expect" | "checked" | "saturating" | "wrapping"
-                        | "F32x4" | "F64x2" | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
-                ) {
-                    Some((Class::PurePending, "direct builtin port pending"))
                 } else {
                     None
                 }
@@ -1342,7 +1336,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::DirectStatic, "String", "from_bytes").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "BigInt").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "wrapping").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "consume").class, Class::Covered);
     assert_eq!(record(&records, Surface::Value, "String", "trim").class, Class::Covered);
     for method in ["after", "before", "bytes", "slice"] {
         assert_eq!(record(&records, Surface::Value, "String", method).class, Class::Covered);
@@ -1639,14 +1635,15 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 761, 28, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 773, 16, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
+    let hash = stable_hash(&rendered);
     assert_eq!(
-        stable_hash(&rendered),
-        923950484033246765,
+        hash,
+        11888006777284523041,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

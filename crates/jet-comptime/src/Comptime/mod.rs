@@ -22,6 +22,7 @@ mod Diagnostics;
 mod EncodingLite;
 mod Interpreter;
 mod JsonInterp;
+mod MathLayout;
 mod Methods;
 mod Purity;
 mod Reflect;
