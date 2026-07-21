@@ -16,6 +16,7 @@ use jet_foundation::JetTrace::{
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
 use jet_foundation::Syntax::ARTIFACT_EXT_TRACE;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -108,6 +109,7 @@ fn run_session(action: &str, args: &[String]) -> i32 {
     let pid = child.id();
     let started = Instant::now();
     let mut last_snapshot = None;
+    let mut io_timeline = IoTimeline::default();
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -115,6 +117,7 @@ fn run_session(action: &str, args: &[String]) -> i32 {
                 if parsed.source.is_some() {
                     // Observe publishes under the program PID, not the jet host.
                     if let Some(snapshot) = poll_observe_snapshot(pid) {
+                        io_timeline.observe(&snapshot, elapsed_ns(started));
                         last_snapshot = Some(snapshot);
                     }
                 }
@@ -129,12 +132,14 @@ fn run_session(action: &str, args: &[String]) -> i32 {
         }
     };
     let wall_ns = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+    io_timeline.finish(wall_ns);
     let capture = match &parsed.source {
         Some(source) => match capture_from_source(
             source,
             last_snapshot.as_deref(),
             wall_ns,
             None,
+            Some(&io_timeline),
         ) {
             Ok(bundle) => bundle,
             // Missing/unreadable source still gets a schema-valid skeleton.
@@ -278,7 +283,7 @@ fn attach(args: &[String]) -> i32 {
     let capture = match (source.as_deref(), jet::DevServer::LiveInspect::read(pid)) {
         (Some(path), Ok(snapshot)) => {
             let (wall_ns, cpu_ns) = process_times(pid).unwrap_or((0, 0));
-            match capture_from_source(path, Some(&snapshot), wall_ns, Some(cpu_ns)) {
+            match capture_from_source(path, Some(&snapshot), wall_ns, Some(cpu_ns), None) {
                 Ok(bundle) => bundle,
                 Err(message) => {
                     eprintln!("Error [E2102]: {message}");
@@ -322,6 +327,7 @@ fn capture_from_source(
     snapshot: Option<&str>,
     wall_ns: u64,
     cpu_ns: Option<u64>,
+    io_timeline: Option<&IoTimeline>,
 ) -> Result<CaptureBundle, String> {
     let path = PathBuf::from(source_path);
     if path.extension().and_then(|e| e.to_str()) != Some("jet") {
@@ -367,8 +373,12 @@ fn capture_from_source(
     }
     // Tasks: only rows observe published. Never invent ids/parents/states.
     let mut tasks = Vec::new();
-    if let (Some(symbol), Some(snapshot)) = (symbol.as_ref(), snapshot) {
-        for observed in observe_tasks(snapshot) {
+    if let Some(symbol) = symbol.as_ref() {
+        let observed = io_timeline
+            .map(IoTimeline::tasks)
+            .or_else(|| snapshot.map(observe_tasks))
+            .unwrap_or_default();
+        for observed in observed {
             tasks.push(TraceTask {
                 id: observed.id,
                 parent: observed.parent,
@@ -397,10 +407,28 @@ fn capture_from_source(
     }
     // I/O: only blocked observe waits matching the live io classifier.
     let mut io = Vec::new();
-    if let (Some(symbol), Some(snapshot)) = (symbol.as_ref(), snapshot) {
-        for observed in observe_io(snapshot) {
+    if let Some(symbol) = symbol.as_ref() {
+        let observed = io_timeline
+            .map(|timeline| timeline.completed.clone())
+            .unwrap_or_else(|| {
+                snapshot
+                    .map(observe_io)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|io| ObservedIoSpan {
+                        end_ns: wall_ns,
+                        kind: io.kind,
+                        start_ns: wall_ns,
+                        task_id: io.task_id,
+                        wait: io.wait,
+                    })
+                    .collect()
+            });
+        for observed in observed {
             io.push(TraceIo {
+                end_ns: observed.end_ns,
                 kind: observed.kind,
+                start_ns: observed.start_ns,
                 task_id: observed.task_id,
                 wait: observed.wait,
                 symbol: symbol.clone(),
@@ -434,6 +462,7 @@ fn observe_arena_resources(snapshot: &str) -> (u64, u64) {
     (count, bytes)
 }
 
+#[derive(Clone)]
 struct ObservedTask {
     id: u64,
     parent: u64,
@@ -535,6 +564,103 @@ struct ObservedIo {
     kind: String,
     task_id: u64,
     wait: String,
+}
+
+#[derive(Clone)]
+struct ObservedIoSpan {
+    end_ns: u64,
+    kind: String,
+    start_ns: u64,
+    task_id: u64,
+    wait: String,
+}
+
+#[derive(Default)]
+struct IoTimeline {
+    active: BTreeMap<(u64, String), (String, u64)>,
+    completed: Vec<ObservedIoSpan>,
+    tasks: BTreeMap<u64, ObservedTask>,
+}
+
+impl IoTimeline {
+    const MAX_ROWS: usize = 4096;
+
+    fn observe(&mut self, snapshot: &str, now_ns: u64) {
+        let observed_tasks = observe_tasks(snapshot);
+        let current_ids = observed_tasks.iter().map(|task| task.id).collect::<BTreeSet<_>>();
+        for task in self.tasks.values_mut() {
+            if !current_ids.contains(&task.id) {
+                task.state = "done".into();
+                task.wait.clear();
+            }
+        }
+        for task in observed_tasks {
+            if self.tasks.contains_key(&task.id) || self.tasks.len() < Self::MAX_ROWS {
+                self.tasks.insert(task.id, task);
+            }
+        }
+
+        let observed_io = observe_io(snapshot);
+        let current = observed_io
+            .iter()
+            .map(|row| (row.task_id, row.wait.clone()))
+            .collect::<BTreeSet<_>>();
+        let ended = self
+            .active
+            .keys()
+            .filter(|key| !current.contains(*key))
+            .cloned()
+            .collect::<Vec<_>>();
+        for (task_id, wait) in ended {
+            if let Some((kind, start_ns)) = self.active.remove(&(task_id, wait.clone())) {
+                self.push(ObservedIoSpan {
+                    end_ns: now_ns.max(start_ns),
+                    kind,
+                    start_ns,
+                    task_id,
+                    wait,
+                });
+            }
+        }
+        for row in observed_io {
+            if self.tasks.contains_key(&row.task_id) && self.active.len() < Self::MAX_ROWS {
+                self.active
+                    .entry((row.task_id, row.wait))
+                    .or_insert((row.kind, now_ns));
+            }
+        }
+    }
+
+    fn finish(&mut self, now_ns: u64) {
+        for task in self.tasks.values_mut() {
+            task.state = "done".into();
+            task.wait.clear();
+        }
+        let active = std::mem::take(&mut self.active);
+        for ((task_id, wait), (kind, start_ns)) in active {
+            self.push(ObservedIoSpan {
+                end_ns: now_ns.max(start_ns),
+                kind,
+                start_ns,
+                task_id,
+                wait,
+            });
+        }
+    }
+
+    fn push(&mut self, span: ObservedIoSpan) {
+        if self.completed.len() < Self::MAX_ROWS {
+            self.completed.push(span);
+        }
+    }
+
+    fn tasks(&self) -> Vec<ObservedTask> {
+        self.tasks.values().cloned().collect()
+    }
+}
+
+fn elapsed_ns(started: Instant) -> u64 {
+    started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
 }
 
 /// Blocked observe tasks with real I/O waits only. Idle/time/channel scrapes omitted.

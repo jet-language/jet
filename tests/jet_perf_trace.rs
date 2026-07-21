@@ -96,7 +96,8 @@ fn assert_honest_tasks(text: &str) {
     assert!(
         tasks.contains("\"state\":\"running\"")
             || tasks.contains("\"state\":\"blocked\"")
-            || tasks.contains("\"state\":\"queued\""),
+            || tasks.contains("\"state\":\"queued\"")
+            || tasks.contains("\"state\":\"done\""),
         "missing live observe task state: {text}"
     );
     assert!(
@@ -155,6 +156,11 @@ fn assert_honest_io(text: &str) {
         io.contains("\"task_id\":"),
         "missing io task_id: {text}"
     );
+    let start = json_u64_after(io, "start_ns")
+        .unwrap_or_else(|| panic!("missing session-relative io start_ns: {text}"));
+    let end = json_u64_after(io, "end_ns")
+        .unwrap_or_else(|| panic!("missing session-relative io end_ns: {text}"));
+    assert!(end >= start, "io span runs backward: start={start} end={end} in {text}");
     assert!(
         !text.contains("\"io\":[]"),
         "empty io false-green leaked beside non-empty claim: {text}"
@@ -163,6 +169,63 @@ fn assert_honest_io(text: &str) {
         !io.contains("\"wait\":\"time sleep\"") && !io.contains("\"wait\":\"channel "),
         "non-I/O wait leaked into io: {io}"
     );
+}
+
+#[test]
+fn perf_run_keeps_completed_socket_echo_io_span() {
+    if !common::have_rustc() {
+        return;
+    }
+    let root = temp_workspace();
+    let source = root.join("socket_echo.jet");
+    fs::write(
+        &source,
+        r#"use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    server :: tasks.spawn(take(listener) () => {
+        stream :: listener.accept() ?? panic("accept")
+        message :: stream.read_text(16) ?? panic("read")
+        stream.write_all("echo:{message}".bytes()) ?? panic("write")
+    })
+    // Cross two 100 ms observe publications before completing the wait.
+    time.sleep(250)
+    client :: net.tcp_connect(address) ?? panic("connect")
+    client.write_all("ping".bytes()) ?? panic("write")
+    print(client.read_text(16) ?? panic("read"))
+    server.join()
+}
+"#,
+    )
+    .unwrap();
+    let out = root.join("socket-echo.jettrace");
+    let output = run_jet(
+        &root,
+        &[
+            "perf",
+            "run",
+            source.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "socket echo did not complete normally: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "echo:ping");
+    let text = fs::read_to_string(&out).unwrap();
+    assert_honest_io(&text);
+    assert!(text.contains("\"state\":\"done\""), "completed task not modeled: {text}");
+    let start = json_u64_after(&text[text.find("\"io\":[{").unwrap()..], "start_ns").unwrap();
+    let end = json_u64_after(&text[text.find("\"io\":[{").unwrap()..], "end_ns").unwrap();
+    assert!(end > start, "completed wait has no measured duration: {text}");
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]

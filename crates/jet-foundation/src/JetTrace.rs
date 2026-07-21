@@ -244,6 +244,10 @@ impl TraceLock {
 /// Idle scrapes and non-I/O waits are omitted by capture; verify rejects them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraceIo {
+    /// Monotonic nanoseconds from session start when capture first observed this wait.
+    pub start_ns: u64,
+    /// Monotonic nanoseconds from session start when capture last observed this wait.
+    pub end_ns: u64,
     pub kind: String,
     pub task_id: u64,
     pub wait: String,
@@ -271,7 +275,9 @@ impl TraceIo {
 
     pub fn to_json(&self) -> Result<CanonicalJson, String> {
         CanonicalJson::object([
+            ("end_ns".into(), CanonicalJson::Integer(self.end_ns.to_string())),
             ("kind".into(), CanonicalJson::String(self.kind.clone())),
+            ("start_ns".into(), CanonicalJson::Integer(self.start_ns.to_string())),
             ("symbol".into(), self.symbol.to_json()?),
             ("task_id".into(), CanonicalJson::Integer(self.task_id.to_string())),
             ("wait".into(), CanonicalJson::String(self.wait.clone())),
@@ -460,9 +466,9 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     }
     validate_samples(&fields["samples"])?;
     validate_allocations(&fields["allocations"])?;
-    validate_tasks(&fields["tasks"])?;
+    let tasks = validate_tasks(&fields["tasks"])?;
     validate_locks(&fields["locks"])?;
-    validate_io(&fields["io"])?;
+    validate_io(&fields["io"], &tasks)?;
     validate_source_identity(&fields["source_identity"])?;
     validate_capture_policy(&fields["capture_policy"])?;
     validate_toolchain(&fields["toolchain"])?;
@@ -509,11 +515,12 @@ fn validate_allocations(value: &CanonicalJson) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_tasks(value: &CanonicalJson) -> Result<(), String> {
+fn validate_tasks(value: &CanonicalJson) -> Result<BTreeMap<u64, (u64, CanonicalJson)>, String> {
     let items = match value {
         CanonicalJson::Array(items) => items,
         _ => return Err("content.tasks is not an array".into()),
     };
+    let mut tasks = BTreeMap::new();
     for (i, item) in items.iter().enumerate() {
         let label = format!("content.tasks[{i}]");
         let fields = object_keys(
@@ -521,8 +528,14 @@ fn validate_tasks(value: &CanonicalJson) -> Result<(), String> {
             &label,
             &["cancelled", "id", "parent", "state", "symbol", "wait"],
         )?;
-        unsigned(&fields["id"], &format!("{label}.id"))?;
-        unsigned(&fields["parent"], &format!("{label}.parent"))?;
+        let id = unsigned(&fields["id"], &format!("{label}.id"))?;
+        if id == 0 {
+            return Err(format!("{label}.id must be greater than zero"));
+        }
+        let parent = unsigned(&fields["parent"], &format!("{label}.parent"))?;
+        if id == parent {
+            return Err(format!("{label}.parent cannot be self"));
+        }
         let state = text(&fields["state"], &format!("{label}.state"))?;
         if !matches!(state, "running" | "queued" | "blocked" | "done") {
             return Err(format!("{label}.state must be a live observe task state"));
@@ -533,8 +546,30 @@ fn validate_tasks(value: &CanonicalJson) -> Result<(), String> {
             _ => return Err(format!("{label}.cancelled is not a boolean")),
         }
         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+        if tasks
+            .insert(id, (parent, fields["symbol"].clone()))
+            .is_some()
+        {
+            return Err(format!("{label}.id duplicates task {id}"));
+        }
     }
-    Ok(())
+    for (&id, (parent, _)) in &tasks {
+        if *parent != 0 && !tasks.contains_key(parent) {
+            return Err(format!("content.tasks task {id} has missing parent {parent}"));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        let mut current = id;
+        while let Some((next, _)) = tasks.get(&current) {
+            if *next == 0 {
+                break;
+            }
+            if !seen.insert(current) {
+                return Err(format!("content.tasks task {id} has cyclic parent causality"));
+            }
+            current = *next;
+        }
+    }
+    Ok(tasks)
 }
 
 fn validate_locks(value: &CanonicalJson) -> Result<(), String> {
@@ -584,19 +619,34 @@ fn validate_locks(value: &CanonicalJson) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_io(value: &CanonicalJson) -> Result<(), String> {
+fn validate_io(
+    value: &CanonicalJson,
+    tasks: &BTreeMap<u64, (u64, CanonicalJson)>,
+) -> Result<(), String> {
     let items = match value {
         CanonicalJson::Array(items) => items,
         _ => return Err("content.io is not an array".into()),
     };
     for (i, item) in items.iter().enumerate() {
         let label = format!("content.io[{i}]");
-        let fields = object_keys(item, &label, &["kind", "symbol", "task_id", "wait"])?;
+        let fields = object_keys(
+            item,
+            &label,
+            &["end_ns", "kind", "start_ns", "symbol", "task_id", "wait"],
+        )?;
         let kind = text(&fields["kind"], &format!("{label}.kind"))?;
         if !matches!(kind, "tcp" | "network" | "io") {
             return Err(format!("{label}.kind must be tcp, network, or io"));
         }
-        unsigned(&fields["task_id"], &format!("{label}.task_id"))?;
+        let task_id = unsigned(&fields["task_id"], &format!("{label}.task_id"))?;
+        let Some((_, task_symbol)) = tasks.get(&task_id) else {
+            return Err(format!("{label}.task_id refers to missing task {task_id}"));
+        };
+        let start_ns = unsigned(&fields["start_ns"], &format!("{label}.start_ns"))?;
+        let end_ns = unsigned(&fields["end_ns"], &format!("{label}.end_ns"))?;
+        if end_ns < start_ns {
+            return Err(format!("{label}.end_ns precedes start_ns"));
+        }
         let wait = text(&fields["wait"], &format!("{label}.wait"))?;
         if wait.is_empty() {
             return Err(format!("{label}.wait is empty (vacuous I/O row)"));
@@ -610,6 +660,9 @@ fn validate_io(value: &CanonicalJson) -> Result<(), String> {
             return Err(format!("{label}.kind does not match wait classifier"));
         }
         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+        if &fields["symbol"] != task_symbol {
+            return Err(format!("{label}.symbol does not match its task"));
+        }
     }
     Ok(())
 }
@@ -899,8 +952,18 @@ mod tests {
             path: "app.jet".into(),
             name: "run".into(),
         };
+        skeleton.tasks.push(TraceTask {
+            id: 3,
+            parent: 0,
+            state: "done".into(),
+            wait: String::new(),
+            cancelled: false,
+            symbol: symbol.clone(),
+        });
         skeleton.io.push(TraceIo {
+            end_ns: 29,
             kind: "tcp".into(),
+            start_ns: 11,
             task_id: 3,
             wait: "tcp accept".into(),
             symbol: symbol.clone(),
@@ -909,6 +972,8 @@ mod tests {
         let text = String::from_utf8(bytes.clone()).unwrap();
         assert!(text.contains("\"io\":[{"), "{text}");
         assert!(text.contains("\"kind\":\"tcp\""), "{text}");
+        assert!(text.contains("\"start_ns\":11"), "{text}");
+        assert!(text.contains("\"end_ns\":29"), "{text}");
         assert!(text.contains("\"wait\":\"tcp accept\""), "{text}");
         assert!(text.contains("\"task_id\":3"), "{text}");
         verify_jettrace(&bytes).unwrap();
@@ -917,18 +982,60 @@ mod tests {
     #[test]
     fn vacuous_io_row_is_rejected() {
         let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
+        skeleton.tasks.push(TraceTask {
+            id: 1,
+            parent: 0,
+            state: "blocked".into(),
+            wait: "time sleep".into(),
+            cancelled: false,
+            symbol: symbol.clone(),
+        });
         skeleton.io.push(TraceIo {
+            end_ns: 2,
             kind: "tcp".into(),
+            start_ns: 1,
             task_id: 1,
             wait: "time sleep".into(),
-            symbol: JetSymbolRef {
-                path: "app.jet".into(),
-                name: "run".into(),
-            },
+            symbol,
         });
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
         let err = verify_jettrace(&bytes).unwrap_err();
         assert!(err.contains("not an observe I/O wait"), "{err}");
+    }
+
+    #[test]
+    fn orphan_task_and_io_causality_are_rejected() {
+        let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
+        skeleton.tasks.push(TraceTask {
+            id: 2,
+            parent: 1,
+            state: "done".into(),
+            wait: String::new(),
+            cancelled: false,
+            symbol: symbol.clone(),
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        assert!(verify_jettrace(&bytes).unwrap_err().contains("missing parent 1"));
+
+        skeleton.tasks[0].parent = 0;
+        skeleton.io.push(TraceIo {
+            end_ns: 2,
+            kind: "tcp".into(),
+            start_ns: 1,
+            task_id: 3,
+            wait: "tcp accept".into(),
+            symbol,
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        assert!(verify_jettrace(&bytes).unwrap_err().contains("missing task 3"));
     }
 
     #[test]
