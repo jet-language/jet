@@ -163,7 +163,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TlsRootCertificates" | "TlsRootCertificatesType" | "TlsClientIdentity" | "TlsClientIdentityType"
         | "TlsClientTrust" | "TlsVersion" | "TlsPeerIdentity" | "TlsCertificate"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
-        | "HttpRequest" | "HttpResponse" | "HttpRouter"
+        | "HttpRequest" | "HttpResponse" | "HttpRouter" | "HttpClient" | "HttpClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.
         | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey"

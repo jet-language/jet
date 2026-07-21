@@ -3,10 +3,11 @@ use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::user_type_rust;
 use crate::Codegen::TIR::emit::collect_select_arms;
+use crate::Codegen::TIR::emit::emit_http_bridge_error;
+use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
 use crate::Codegen::TIR::emit_tir_call_args;
 use crate::Codegen::TIR::emit_tir_core_call;
-use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit_tir_orfallback_rhs;
 use crate::Codegen::TIR::emit_tir_str;
 use crate::Codegen::TIR::emit_tir_value_block;
@@ -1631,6 +1632,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "{}jet_tls_client_config_with_version_bounds(({}).clone(), ({}).clone(), ({}).clone())",
                     root, recv, a(0), a(1),
                 ),
+                THandleOp::HttpClientNew => {
+                    let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    format!(
+                        "JetHttpClient::new({ffi}::jet_http_client_new_impl(), {ffi}::jet_http_client_drop_impl)"
+                    )
+                }
                 THandleOp::GameSceneOnFrame => {
                     format!("{}jet_game_scene_on_frame(&mut ({}), {})", root, recv, a(0))
                 }
@@ -2136,7 +2143,47 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // "body"/"header" dispatch by arity: 0-arg=response accessor, 1-arg=request builder.
                 THandleOp::HttpClientMethod { kind, method } => {
                     let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                    if kind == "HttpBody" {
+                    if kind == "HttpClient" {
+                        let policy = |call: String| {
+                            let error = emit_http_bridge_error(ffi, "error");
+                            format!(
+                                "{{ let _client = ({}); let _next = ({call}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                recv,
+                            )
+                        };
+                        match method.as_str() {
+                            "cookies" => policy(format!(
+                                "{ffi}::jet_http_client_cookies_impl(_client.owner.handle, {})",
+                                a(0)
+                            )),
+                            "redirects" => policy(format!(
+                                "{ffi}::jet_http_client_redirects_impl(_client.owner.handle, {})",
+                                a(0)
+                            )),
+                            "protocols" => policy(format!(
+                                "{ffi}::jet_http_client_protocols_impl(_client.owner.handle, {}, {}, {})",
+                                a(0), a(1), a(2)
+                            )),
+                            "timeouts" => policy(format!(
+                                "{ffi}::jet_http_client_timeouts_impl(_client.owner.handle, {}, {}, {}, {}, {}, {}, Some({}))",
+                                a(0), a(1), a(2), a(3), a(4), a(5), a(6)
+                            )),
+                            "raw_encoding" => policy(format!(
+                                "{ffi}::jet_http_client_decompression_impl(_client.owner.handle, false)"
+                            )),
+                            "send" => {
+                                let call = format!(
+                                    "{ffi}::jet_http_client_send_with_impl(_client.owner.handle, &_r.method, &_r.url, &_r.headers.to_flat(), body.as_deref(), _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)"
+                                );
+                                let response = emit_http_response_from_bridge(call, ffi);
+                                format!(
+                                    "{{ let _client = &({}); match &_client.policy_error {{ Some(error) => Err(error.clone()), None => {{ let _r = &({}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ let _body = if _r.body_set {{ _r.body.bytes(1024 * 1024 * 1024).map(Some) }} else {{ Ok(None) }}; _body.and_then(|body| {}) }} }} }} }} }}",
+                                    recv, a(0), response
+                                )
+                            }
+                            _ => unreachable!("unknown HttpClient method {method}"),
+                        }
+                    } else if kind == "HttpBody" {
                         match method.as_str() {
                             "bytes" => format!("{}jet_http_body_bytes(&({}), {})", root, recv, a(0)),
                             "text" => format!("{}jet_http_body_text(&({}), {})", root, recv, a(0)),
@@ -2266,6 +2313,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             "cookies" => {
                                 format!("{}jet_http_response_cookies(&({}))", root, recv)
                             }
+                            "protocol" => format!(
+                                "{}jet_http_client_response_protocol(&({}))", root, recv
+                            ),
+                            "remote_address" => format!(
+                                "{}jet_http_client_response_remote_address(&({}))", root, recv
+                            ),
+                            "redirect_history" => format!(
+                                "{}jet_http_client_response_redirect_history(&({}))", root, recv
+                            ),
+                            "timings" => format!(
+                                "{}jet_http_client_response_timings(&({}))", root, recv
+                            ),
+                            "reused_connection" => format!(
+                                "{}jet_http_client_response_reused(&({}))", root, recv
+                            ),
+                            "raw_content_encoding" => format!(
+                                "{}jet_http_client_response_raw_encoding(&({}))", root, recv
+                            ),
                             _ => format!("({}).{}()", recv, method),
                         }
                     }

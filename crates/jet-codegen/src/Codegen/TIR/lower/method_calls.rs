@@ -76,6 +76,7 @@ use crate::Codegen::TIR::tir_enum_lit_prefix;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::tir_src_line_at;
 use crate::Codegen::TIR::tls_static_op;
+use crate::Codegen::TIR::http_client_static_op;
 use crate::Codegen::TIR::TModuleCallForm;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
@@ -873,6 +874,19 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
+        if let Some(op) = http_client_static_op(receiver, method, cx, &locals) {
+            return TExpr {
+                ty: Type::Named("HttpClient".to_string()),
+                kind: TExprKind::HandleMethod {
+                    recv: Box::new(TExpr {
+                        ty: unit_type(),
+                        kind: TExprKind::ConstInline("()".to_string()),
+                    }),
+                    op,
+                    args: Vec::new(),
+                },
+            };
+        }
     }
     // c109 Phase 16: an enum-variant CONSTRUCTION `Enum.Variant(args)` reaching codegen
     // as a `MethodCall` (sema never rewrites a payload variant to `Expr::EnumLit`). The
@@ -1637,11 +1651,21 @@ pub(crate) fn lower_method_call(
             ("HttpRequest", "body_len") => Type::Int,
             ("HttpRequest", "under_limit") => Type::Bool,
             ("HttpRequest", "param" | "header") => Type::Option(Box::new(Type::String)),
+            ("HttpClient", "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding") => Type::Named("HttpClient".to_string()),
+            ("HttpClient", "send") => Type::Result {
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            },
             ("HttpResponse", "header") if args.len() == 2 => Type::Named("HttpResponse".to_string()),
             ("HttpResponse", "status") => Type::Int,
             ("HttpResponse", "body") => Type::Named("HttpBody".to_string()),
             ("HttpResponse", "header") => Type::Option(Box::new(Type::String)),
             ("HttpResponse", "cookies") => Type::List(Box::new(Type::String)),
+            ("HttpResponse", "protocol" | "remote_address") => Type::String,
+            ("HttpResponse", "redirect_history") => Type::List(Box::new(Type::String)),
+            ("HttpResponse", "timings") => Type::List(Box::new(Type::Int)),
+            ("HttpResponse", "reused_connection") => Type::Bool,
+            ("HttpResponse", "raw_content_encoding") => Type::Option(Box::new(Type::String)),
             ("HttpHeaders", "first") => Type::Option(Box::new(Type::String)),
             ("HttpHeaders", "all") => Type::List(Box::new(Type::String)),
             ("HttpHeaders", "append" | "set") => Type::Result {

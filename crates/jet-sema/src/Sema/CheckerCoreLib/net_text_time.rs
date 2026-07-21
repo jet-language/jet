@@ -358,12 +358,25 @@ pub fn http_type_method_return(
             })),
             _ => None,
         },
+        Type::Named(n) if n == "HttpClient" => match (method, _args.len()) {
+            ("cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding", _) => mk("HttpClient"),
+            ("send", 1) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            })),
+            _ => None,
+        },
         Type::Named(n) if n == "HttpResponse" => match method {
             "status" => mk_int(),
             "body" => mk("HttpBody"),
             "header" if _args.len() == 1 => mk_opt_str(),
             "header" => mk("HttpResponse"),
             "cookies" => Some(Some(Type::List(Box::new(Type::String)))),
+            "protocol" | "remote_address" => mk_str(),
+            "redirect_history" => Some(Some(Type::List(Box::new(Type::String)))),
+            "timings" => Some(Some(Type::List(Box::new(Type::Int)))),
+            "reused_connection" => Some(Some(Type::Bool)),
+            "raw_content_encoding" => mk_opt_str(),
             _ => None,
         },
         Type::Named(n) if n == "HttpMux" => match method {

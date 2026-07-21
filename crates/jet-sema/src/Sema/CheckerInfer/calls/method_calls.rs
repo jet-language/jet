@@ -278,6 +278,17 @@ impl<'a> Checker<'a> {
                             *recv_type_out = Some("TlsClientConfigType".to_string());
                             return Some(Type::Named("TlsClientConfig".to_string()));
                         }
+                        if ns == "core.http.client" && leaf == "Client" && method == "new" {
+                            if !args.is_empty() {
+                                self.diags
+                                    .push(wrong_core_arity("Client.new", 0, args.len(), span));
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
+                                }
+                            }
+                            *recv_type_out = Some("HttpClientType".to_string());
+                            return Some(Type::Named("HttpClient".to_string()));
+                        }
                         if ns == "core.tls" && leaf == "RootCertificates" && method == "from_pem" {
                             if args.len() != 1 {
                                 self.diags.push(wrong_core_arity("RootCertificates.from_pem", 1, args.len(), span));
@@ -2007,6 +2018,30 @@ impl<'a> Checker<'a> {
                         },
                         &mut args[1],
                     );
+                } else if matches!(&recv_ty, Type::Named(name) if name == "HttpClient") {
+                    let want = match method {
+                        "cookies" | "redirects" | "send" => 1,
+                        "protocols" => 3,
+                        "timeouts" => 7,
+                        "raw_encoding" => 0,
+                        _ => args.len(),
+                    };
+                    if args.len() != want {
+                        self.diags.push(wrong_core_arity(method, want, args.len(), span));
+                    }
+                    let expected = match method {
+                        "cookies" | "protocols" => Some(Type::Bool),
+                        "redirects" | "timeouts" => Some(Type::Int),
+                        "send" => Some(Type::Named("HttpRequest".to_string())),
+                        _ => None,
+                    };
+                    for (index, arg) in args.iter_mut().enumerate() {
+                        if let Some(expected) = &expected {
+                            self.expect_core_arg(method, index, expected, arg);
+                        } else {
+                            self.infer(&mut arg.expr);
+                        }
+                    }
                 } else {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);

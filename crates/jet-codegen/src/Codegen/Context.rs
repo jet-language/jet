@@ -493,6 +493,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "NetReady" => Some("JetNetReady"),
         "HttpRequest" => Some("JetHttpRequest"),
         "HttpResponse" => Some("JetHttpResponse"),
+        "HttpClient" => Some("JetHttpClient"),
         "HttpRouter" => Some("JetHttpRouter"),
         _ => None,
     }
@@ -975,6 +976,7 @@ impl Cx {
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
             Type::Named(name) if name == "HttpRequest" => "JetHttpRequest".to_string(),
             Type::Named(name) if name == "HttpResponse" => "JetHttpResponse".to_string(),
+            Type::Named(name) if name == "HttpClient" => "JetHttpClient".to_string(),
             Type::Named(name) if name == "HttpMethod" => "JetHttpMethod".to_string(),
             Type::Named(name) if name == "HttpStatus" => "JetHttpStatus".to_string(),
             Type::Named(name) if name == "HttpVersion" => "JetHttpVersion".to_string(),

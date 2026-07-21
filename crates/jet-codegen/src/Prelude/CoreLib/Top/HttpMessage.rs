@@ -573,6 +573,12 @@ struct JetHttpResponse {
     body: JetHttpBody,
     trailers: JetHttpHeaders,
     head_content_length: Option<usize>,
+    protocol: String,
+    remote_address: String,
+    redirect_history: Vec<String>,
+    timings_ms: Vec<i64>,
+    reused_connection: bool,
+    raw_content_encoding: Option<String>,
 }
 
 type JetHttpHandler = std::sync::Arc<

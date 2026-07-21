@@ -20,6 +20,7 @@ pub enum JetHttpBridgeError {
     InvalidUrl,
     InvalidHeader,
     InvalidFraming,
+    UnsupportedEncoding,
     Resolve,
     Connect,
     Tls,
@@ -1971,6 +1972,7 @@ struct ResponseFacts {
     // dns, connect, tls, write_idle, first_byte, read_idle, total
     timings_ms: [i64; 7],
     reused_connection: bool,
+    raw_content_encoding: Option<String>,
 }
 
 fn response_facts() -> &'static Mutex<HashMap<i64, Arc<Mutex<ResponseFacts>>>> {
@@ -2026,6 +2028,19 @@ pub fn jet_http_client_response_reused_impl(handle: i64) -> bool {
         .and_then(|facts| facts.get(&handle).cloned())
         .and_then(|facts| facts.lock().ok().map(|facts| facts.reused_connection))
         .unwrap_or(false)
+}
+
+pub fn jet_http_client_response_raw_encoding_impl(handle: i64) -> Option<String> {
+    response_facts()
+        .lock()
+        .ok()
+        .and_then(|facts| facts.get(&handle).cloned())
+        .and_then(|facts| {
+            facts
+                .lock()
+                .ok()
+                .and_then(|facts| facts.raw_content_encoding.clone())
+        })
 }
 
 pub fn jet_http_client_response_facts_drop_impl(handle: i64) {
@@ -2595,7 +2610,7 @@ fn decoded_gzip(
     if encoding.eq_ignore_ascii_case("gzip") {
         Ok(true)
     } else {
-        Err(JetHttpBridgeError::Protocol)
+        Err(JetHttpBridgeError::UnsupportedEncoding)
     }
 }
 
@@ -2616,6 +2631,10 @@ fn read_h2_response(
     reused_connection: bool,
     remote_address: String,
 ) -> Result<NativeResponse, JetHttpBridgeError> {
+    if let Ok(mut response_facts) = facts.lock() {
+        response_facts.raw_content_encoding =
+            header_first(&headers, "content-encoding").map(str::to_string);
+    }
     let length = content_length(&headers)?;
     let reader = H2BodyReader {
         connection: Some(connection),
@@ -2882,6 +2901,10 @@ fn read_response(
     set_timing(&facts, 4, first_byte_ms);
     set_stream_timeouts(&mut stream, read_timeout, read_timeout, total_deadline)?;
     let (status, version, headers) = parse_status_and_headers(&head)?;
+    if let Ok(mut response_facts) = facts.lock() {
+        response_facts.raw_content_encoding =
+            header_first(&headers, "content-encoding").map(str::to_string);
+    }
     let transfer = headers
         .iter()
         .filter(|(name, _)| name == "transfer-encoding")

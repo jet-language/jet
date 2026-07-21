@@ -174,7 +174,7 @@ fn main() {
     assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), None);
     assert_eq!(bridge::jet_http_client_send_with_impl(
         root, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
-    ).unwrap_err(), bridge::JetHttpBridgeError::Protocol);
+    ).unwrap_err(), bridge::JetHttpBridgeError::UnsupportedEncoding);
 }
 "#,
     )
@@ -365,6 +365,58 @@ fn main() {
         String::from_utf8_lossy(&output.stderr)
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn public_client_policy_exposes_pool_cookie_timeouts_and_facts() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let first = request_head(&mut stream);
+        assert!(!String::from_utf8_lossy(&first)
+            .to_ascii_lowercase()
+            .contains("cookie:"));
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nSet-Cookie: session=abc; Path=/; Max-Age=60\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n",
+            )
+            .unwrap();
+        let second = request_head(&mut stream);
+        assert!(String::from_utf8_lossy(&second)
+            .to_ascii_lowercase()
+            .contains("cookie: session=abc\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+fn run() {{
+    client :: http.Client.new()
+        .cookies(true)
+        .redirects(2)
+        .protocols(false, true, false)
+        .timeouts(1000, 1000, 1000, 1000, 1000, 1000, 5000)
+        .raw_encoding()
+    first :: client.send(http.request("GET", "http://{addr}/first")) ?? panic("first")
+    _ :: first.body().bytes(8) ?? panic("first body")
+    second :: client.send(http.request("GET", "http://{addr}/second")) ?? panic("second")
+    print(second.body().text(8) ?? panic("second body"))
+    print(second.protocol())
+    print(second.redirect_history().len())
+    print(second.timings().len())
+    print(second.reused_connection())
+    print(second.raw_content_encoding() ?? "none")
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "public_client", &src);
+    server.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "ok\nHTTP/1.1\n0\n7\ntrue\nnone\n");
 }
 
 #[test]

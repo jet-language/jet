@@ -140,6 +140,23 @@ pub(crate) fn tls_static_op(
     }
 }
 
+pub(crate) fn http_client_static_op(
+    receiver: &Expr,
+    method: &str,
+    cx: &Cx,
+    locals: &HashSet<String>,
+) -> Option<THandleOp> {
+    let Expr::Field(inner, static_type, _) = receiver else { return None; };
+    let Expr::Ident(alias, _) = &**inner else { return None; };
+    if locals.contains(alias)
+        || cx.core_imports.get(alias).map(String::as_str) != Some("core.http.client")
+    {
+        return None;
+    }
+    matches!((static_type.as_str(), method), ("Client", "new"))
+        .then_some(THandleOp::HttpClientNew)
+}
+
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
 /// the subset? Reproduces `emit_router_handler` (Source/Codegen/Expression.rs): the
 /// handler (arg 1) must be either a BARE TOP-LEVEL FN name (an `Ident` not in locals —

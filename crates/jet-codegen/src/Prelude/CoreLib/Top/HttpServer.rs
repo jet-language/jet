@@ -285,6 +285,12 @@ fn jet_http_srv_response(status: i64, body: &String) -> JetHttpResponse {
             headers: JetHttpHeaders::new(),
             trailers: JetHttpHeaders::new(),
             head_content_length: None,
+            protocol: "HTTP/1.1".to_string(),
+            remote_address: String::new(),
+            redirect_history: Vec::new(),
+            timings_ms: Vec::new(),
+            reused_connection: false,
+            raw_content_encoding: None,
         };
     }
     JetHttpResponse {
@@ -294,6 +300,12 @@ fn jet_http_srv_response(status: i64, body: &String) -> JetHttpResponse {
         headers: JetHttpHeaders::new(),
         trailers: JetHttpHeaders::new(),
         head_content_length: None,
+        protocol: "HTTP/1.1".to_string(),
+        remote_address: String::new(),
+        redirect_history: Vec::new(),
+        timings_ms: Vec::new(),
+        reused_connection: false,
+        raw_content_encoding: None,
     }
 }
 

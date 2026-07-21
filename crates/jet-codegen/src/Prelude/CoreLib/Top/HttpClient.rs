@@ -4,6 +4,42 @@
 // bridge functions use only primitive types (i64, String, Vec<String>) and are
 // called through wrappers here. This is the I6-safe pattern.
 
+struct JetHttpClientOwner {
+    handle: i64,
+    drop_handle: fn(i64),
+}
+
+impl Drop for JetHttpClientOwner {
+    fn drop(&mut self) {
+        (self.drop_handle)(self.handle);
+    }
+}
+
+#[derive(Clone)]
+struct JetHttpClient {
+    owner: std::sync::Arc<JetHttpClientOwner>,
+    policy_error: Option<JetHttpError>,
+}
+
+impl JetHttpClient {
+    fn new(handle: i64, drop_handle: fn(i64)) -> Self {
+        Self {
+            owner: std::sync::Arc::new(JetHttpClientOwner { handle, drop_handle }),
+            policy_error: None,
+        }
+    }
+
+    fn policy(self, next: Result<i64, JetHttpError>, drop_handle: fn(i64)) -> Self {
+        match next {
+            Ok(handle) => Self::new(handle, drop_handle),
+            Err(error) => Self {
+                policy_error: Some(error),
+                ..self
+            },
+        }
+    }
+}
+
 fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpRequest {
     JetHttpRequest {
         method: method.clone(),
@@ -120,6 +156,12 @@ fn jet_http_client_response_new(
     headers: Vec<String>,
     body_read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHttpError>,
     body_close: fn(i64),
+    protocol: String,
+    remote_address: String,
+    redirect_history: Vec<String>,
+    timings_ms: Vec<i64>,
+    reused_connection: bool,
+    raw_content_encoding: Option<String>,
 ) -> Result<JetHttpResponse, JetHttpError> {
     let body_length = body_length
         .map(usize::try_from)
@@ -132,6 +174,12 @@ fn jet_http_client_response_new(
         headers: JetHttpHeaders::from_flat(headers).map_err(|_| JetHttpError::InvalidHeader)?,
         trailers: JetHttpHeaders::new(),
         head_content_length: None,
+        protocol,
+        remote_address,
+        redirect_history,
+        timings_ms,
+        reused_connection,
+        raw_content_encoding,
     })
 }
 fn jet_http_client_response_body(resp: &JetHttpResponse) -> JetHttpBody {
@@ -147,4 +195,23 @@ fn jet_http_response_cookies(resp: &JetHttpResponse) -> Vec<String> {
         .into_iter()
         .map(str::to_string)
         .collect()
+}
+
+fn jet_http_client_response_protocol(resp: &JetHttpResponse) -> String {
+    resp.protocol.clone()
+}
+fn jet_http_client_response_remote_address(resp: &JetHttpResponse) -> String {
+    resp.remote_address.clone()
+}
+fn jet_http_client_response_redirect_history(resp: &JetHttpResponse) -> Vec<String> {
+    resp.redirect_history.clone()
+}
+fn jet_http_client_response_timings(resp: &JetHttpResponse) -> Vec<i64> {
+    resp.timings_ms.clone()
+}
+fn jet_http_client_response_reused(resp: &JetHttpResponse) -> bool {
+    resp.reused_connection
+}
+fn jet_http_client_response_raw_encoding(resp: &JetHttpResponse) -> Option<String> {
+    resp.raw_content_encoding.clone()
 }
