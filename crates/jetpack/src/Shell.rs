@@ -317,6 +317,7 @@ fn bash_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String 
          bind -x '\"\\C-g\":__jetpack_status_glance' 2>/dev/null || true\n\
          __jetpack_help_prefill() {{ local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty) || return; [ -n \"$picked\" ] || return; READLINE_LINE=$picked; READLINE_POINT=$(printf %s \"$READLINE_LINE\" | wc -c); }}\n\
          bind -x '\"\\e?\":__jetpack_help_prefill' 2>/dev/null || true\n\
+         jet() {{ if [ \"$#\" -eq 1 ] && [ \"$1\" = '?' ]; then local picked code line; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty); code=$?; [ -n \"$picked\" ] || return $code; if IFS= read -r -e -i \"$picked\" -p \"${{PS1@P}}\" line; then [ -n \"$line\" ] || return 0; history -s -- \"$line\"; eval -- \"$line\"; return $?; fi; return 0; fi; command jet \"$@\"; }}\n\
          __jetpack_spinner() {{ local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0; while :; do if [ \"${{NO_COLOR+x}}\" = x ]; then printf '\\r%s running %s · %ss' \"${{frames:i++%10:1}}\" \"$1\" \"$(( $(date +%s) - $2 ))\" >&2; else printf '\\r\\033[{accent}m%s\\033[0m running %s · %ss' \"${{frames:i++%10:1}}\" \"$1\" \"$(( $(date +%s) - $2 ))\" >&2; fi; sleep .1; done; }}\n\
          __jetpack_preexec() {{\n\
            [ \"$__jetpack_active\" = 0 ] || return\n\
@@ -365,6 +366,7 @@ fn zsh_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
     format!(
         "[ -f \"$HOME/.zshrc\" ] && source \"$HOME/.zshrc\"\n\
          setopt prompt_subst\n\
+         setopt NO_NOMATCH\n\
          zmodload zsh/datetime\n\
          typeset -g __jetpack_build_status='never run' __jetpack_test_status='never run' __jetpack_kind='' __jetpack_command='' __jetpack_started=0 __jetpack_spinner_pid=''\n\
          __jetpack_git_status() {{ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then local branch=$(git branch --show-current 2>/dev/null); [[ -n $branch ]] || branch=detached; if git diff --quiet --ignore-submodules -- 2>/dev/null && git diff --cached --quiet --ignore-submodules -- 2>/dev/null; then print -n -- \"$branch clean\"; else print -n -- \"$branch changed\"; fi; else print -n -- 'not a git worktree'; fi; }}\n\
@@ -375,6 +377,7 @@ fn zsh_rc(label: &str, path: PromptPathMode, strip: PromptStripMode) -> String {
          __jetpack_help_prefill() {{ local picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty); [[ -n $picked ]] || return; BUFFER=$picked; CURSOR=$#BUFFER; zle redisplay; }}\n\
          zle -N __jetpack_help_prefill 2>/dev/null || true\n\
          bindkey '^[?' __jetpack_help_prefill 2>/dev/null || true\n\
+         jet() {{ if [[ $# -eq 1 && $1 == '?' ]]; then local picked; picked=$(JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty) || return; [[ -n $picked ]] || return 0; print -z -- \"$picked\"; return 0; fi; command jet \"$@\"; }}\n\
          __jetpack_spinner() {{ local -a frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏); local i=1; while true; do if [[ ${{+NO_COLOR}} = 1 ]]; then printf '\\r%s running %s · %ss' $frames[$i] $1 $(( $EPOCHSECONDS - $2 )) >&2; else printf '\\r\\033[{accent}m%s\\033[0m running %s · %ss' $frames[$i] $1 $(( $EPOCHSECONDS - $2 )) >&2; fi; (( i = i % 10 + 1 )); sleep .1; done; }}\n\
          __jetpack_preexec() {{ case $1 in 'jet build'*) __jetpack_kind=build;; 'jet test'*) __jetpack_kind=test;; *) __jetpack_kind=''; return;; esac; __jetpack_command=$1; __jetpack_started=$EPOCHSECONDS; if [[ -t 2 ]]; then __jetpack_spinner $__jetpack_kind $__jetpack_started &!; __jetpack_spinner_pid=$!; fi; }}\n\
          __jetpack_precmd() {{ local code=$?; [[ -n $__jetpack_kind ]] || return; if [[ -n $__jetpack_spinner_pid ]]; then kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; if [[ ${{+NO_COLOR}} = 1 ]]; then printf '\\r                                        \\r' >&2; else printf '\\r\\033[2K' >&2; fi; fi; local elapsed=$(( EPOCHSECONDS - __jetpack_started )) result; [[ $code = 0 ]] && result=ok || result=\"failed ($code)\"; [[ $__jetpack_kind = build ]] && __jetpack_build_status=\"$result · ${{elapsed}}s\" || __jetpack_test_status=\"$result · ${{elapsed}}s\"; if [[ ${{+NO_COLOR}} = 1 ]]; then printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else [[ $code = 0 ]] && printf '\\033[{success}m✓\\033[0m %s ok · %ss\\n' $__jetpack_kind $elapsed || printf '\\033[{error}m✗\\033[0m %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; fi; if [[ $code != 0 ]]; then [[ ${{+NO_COLOR}} = 1 ]] && printf '%s\\n' \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\" || printf '\\033[{warn}m→\\033[0m %s\\n' \"$__jetpack_kind failed. Rerun: $__jetpack_command\"; fi; __jetpack_kind=''; __jetpack_spinner_pid=''; }}\n\
@@ -408,8 +411,10 @@ fn fish_init(label: &str, path: PromptPathMode, strip: PromptStripMode) -> Strin
          function __jetpack_status_words; printf 'build %s · test %s · git %s' \"$__jetpack_build_status\" \"$__jetpack_test_status\" (__jetpack_git_status); end; \
          function __jetpack_status_glance; echo; __jetpack_status_words; echo; commandline -f repaint; end; \
          bind \\cg __jetpack_status_glance; \
-         function __jetpack_help_prefill; set -l picked (env JET_HELP_SHELL_PREFILL=1 jet '?' </dev/tty); test -n \"$picked\"; or return; commandline -r -- \"$picked\"; commandline -C (string length -- \"$picked\"); end; \
+         function __jetpack_help_prefill; set -l picked (begin; set -lx JET_HELP_SHELL_PREFILL 1; command jet '?' </dev/tty; end); test -n \"$picked\"; or return; commandline -r -- \"$picked\"; commandline -C (string length -- \"$picked\"); end; \
          bind \\e\\? __jetpack_help_prefill; \
+         function jet; if test (count $argv) -eq 1; and test \"$argv[1]\" = '?'; set -e __jetpack_help_pending; set -l picked (begin; set -lx JET_HELP_SHELL_PREFILL 1; command jet '?' </dev/tty; end); set -l code $status; if test -n \"$picked\"; set -g __jetpack_help_pending \"$picked\"; end; return $code; end; command jet $argv; end; \
+         function __jetpack_help_postexec --on-event fish_postexec; set -q __jetpack_help_pending; or return; commandline -r -- \"$__jetpack_help_pending\"; commandline -C (string length -- \"$__jetpack_help_pending\"); set -e __jetpack_help_pending; end; \
          function __jetpack_spinner; set -l frames ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏; set -l i 1; while true; if set -q NO_COLOR; printf '\\r%s running %s · %ss' $frames[$i] $argv[1] (math (date +%s) - $argv[2]) >&2; else; printf '\\r\\033[{accent}m%s\\033[0m running %s · %ss' $frames[$i] $argv[1] (math (date +%s) - $argv[2]) >&2; end; set i (math $i % 10 + 1); sleep .1; end; end; \
          function __jetpack_preexec --on-event fish_preexec; switch $argv[1]; case \"jet build*\"; set -g __jetpack_kind build; case \"jet test*\"; set -g __jetpack_kind test; case '*'; set -g __jetpack_kind ''; return; end; set -g __jetpack_command $argv[1]; set -g __jetpack_started (date +%s); if isatty stderr; command sh -c 'while :; do if [ \"${{NO_COLOR+x}}\" = x ]; then printf \"\\r⠹ running %s · %ss\" \"$0\" \"$(( $(date +%s) - $1 ))\" >&2; else printf \"\\r\\033[{accent}m⠹\\033[0m running %s · %ss\" \"$0\" \"$(( $(date +%s) - $1 ))\" >&2; fi; sleep .1; done' $__jetpack_kind $__jetpack_started &\nset -g __jetpack_spinner_pid $last_pid; end; end; \
          function __jetpack_postexec --on-event fish_postexec; set -l code $status; test -n \"$__jetpack_kind\"; or return; if test -n \"$__jetpack_spinner_pid\"; kill $__jetpack_spinner_pid 2>/dev/null; wait $__jetpack_spinner_pid 2>/dev/null; if set -q NO_COLOR; printf '\\r                                        \\r' >&2; else; printf '\\r\\033[2K' >&2; end; end; set -l elapsed (math (date +%s) - $__jetpack_started); set -l result ok; test $code -eq 0; or set result \"failed ($code)\"; if test $__jetpack_kind = build; set -g __jetpack_build_status \"$result · \"$elapsed\"s\"; else; set -g __jetpack_test_status \"$result · \"$elapsed\"s\"; end; if set -q NO_COLOR; printf '%s %s · %ss\\n' $__jetpack_kind \"$result\" $elapsed; else if test $code -eq 0; printf '\\033[{success}m✓\\033[0m %s ok · %ss\\n' $__jetpack_kind $elapsed; else; printf '\\033[{error}m✗\\033[0m %s failed (%s) · %ss\\n' $__jetpack_kind $code $elapsed; end; if test $code -ne 0; if set -q NO_COLOR; echo \"-> $__jetpack_kind failed. Rerun: $__jetpack_command\"; else; printf '\\033[{warn}m→\\033[0m %s\\n' \"$__jetpack_kind failed. Rerun: $__jetpack_command\"; end; end; set -g __jetpack_kind ''; set -g __jetpack_spinner_pid ''; end; \
@@ -560,14 +565,23 @@ mod tests {
         assert!(bash.contains("JET_HELP_SHELL_PREFILL=1 command jet '?' </dev/tty"));
         assert!(bash.contains("READLINE_LINE=$picked"));
         assert!(bash.contains("__jetpack_help_prefill"));
+        assert!(bash.contains("jet() {"));
+        assert!(bash.contains("read -r -e -i"));
 
         let zsh = zsh_rc("web-api", PromptPathMode::Short, PromptStripMode::Off);
         assert!(zsh.contains("BUFFER=$picked"));
         assert!(zsh.contains("bindkey '^[?' __jetpack_help_prefill"));
+        assert!(zsh.contains("jet() {"));
+        assert!(zsh.contains("print -z --"));
 
         let fish = fish_init("web-api", PromptPathMode::Short, PromptStripMode::Off);
         assert!(fish.contains("commandline -r -- \"$picked\""));
         assert!(fish.contains("bind \\e\\? __jetpack_help_prefill"));
+        assert!(fish.contains("function jet;"));
+        assert!(fish.contains("command jet '?'"));
+        assert!(fish.contains("set -lx JET_HELP_SHELL_PREFILL 1"));
+        assert!(fish.contains("set -e __jetpack_help_pending"));
+        assert!(fish.contains("function __jetpack_help_postexec --on-event fish_postexec"));
 
         for rc in [&bash, &zsh, &fish] {
             assert!(!rc.contains("eval $picked"), "help selection must never execute");
@@ -582,7 +596,7 @@ mod tests {
         std::fs::write(
             &fake_jet,
             format!(
-                "#!/bin/sh\n[ \"$JET_HELP_SHELL_PREFILL\" = 1 ] || exit 9\nprintf \"printf 'JET_SELECTED_BYTES' > '{}'\"\n",
+                "#!/bin/sh\nif [ \"$JET_HELP_SHELL_PREFILL\" = 1 ]; then printf \"printf 'JET_SELECTED_BYTES' > '{}'\"; elif [ \"$1\" = --version ]; then printf 'JET_DELEGATED\\n'; else exit 9; fi\n",
                 marker.display()
             ),
         )
@@ -598,7 +612,7 @@ mod tests {
 
         let bash_file = write_temp("jetpack-help-bashrc", &bash_rc("help", PromptPathMode::Short, PromptStripMode::Off));
         let bash = format!("PATH={} bash --noprofile --rcfile {} -i", shell_single_quote(&path), bash_file.display());
-        let bash_out = pty_prefill_oracle(&bash, &marker);
+        let bash_out = pty_prefill_oracle(&bash, &marker, b"\x1b?");
         let _ = std::fs::remove_file(bash_file);
         assert!(bash_out.contains("JET_HELP_WIDGET_RETURNED"), "{bash_out}");
         assert!(marker.exists(), "bash widget did not preserve selected command:\n{bash_out}");
@@ -608,7 +622,7 @@ mod tests {
         let zdir = write_temp_dir("jetpack-help-zdotdir");
         std::fs::write(zdir.join(".zshrc"), zsh_rc("help", PromptPathMode::Short, PromptStripMode::Off)).unwrap();
         let zsh = format!("PATH={} ZDOTDIR={} zsh -d -i", shell_single_quote(&path), zdir.display());
-        let zsh_out = pty_prefill_oracle(&zsh, &marker);
+        let zsh_out = pty_prefill_oracle(&zsh, &marker, b"\x1b?");
         let _ = std::fs::remove_dir_all(zdir);
         assert!(zsh_out.contains("JET_HELP_WIDGET_RETURNED"), "{zsh_out}");
         assert!(marker.exists(), "zsh widget did not preserve selected command:\n{zsh_out}");
@@ -620,9 +634,34 @@ mod tests {
             shell_single_quote(&path),
             shell_single_quote(&fish_init("help", PromptPathMode::Short, PromptStripMode::Off))
         );
-        let fish_out = pty_prefill_oracle(&fish, &marker);
+        let fish_out = pty_prefill_oracle(&fish, &marker, b"\x1b?");
         assert!(fish_out.contains("JET_HELP_WIDGET_RETURNED"), "{fish_out}");
         assert!(marker.exists(), "fish widget did not preserve selected command:\n{fish_out}");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        std::fs::remove_file(&marker).unwrap();
+
+        let fish_literal_out = pty_prefill_oracle(&fish, &marker, b"jet ?\n");
+        assert!(fish_literal_out.contains("JET_HELP_WIDGET_RETURNED"), "{fish_literal_out}");
+        assert!(marker.exists(), "literal `jet ?` did not prefill fish:\n{fish_literal_out}");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        std::fs::remove_file(&marker).unwrap();
+
+        let bash_file = write_temp("jetpack-help-bashrc-literal", &bash_rc("help", PromptPathMode::Short, PromptStripMode::Off));
+        let bash = format!("PATH={} bash --noprofile --rcfile {} -i", shell_single_quote(&path), bash_file.display());
+        let bash_literal_out = pty_prefill_oracle(&bash, &marker, b"jet ?\n");
+        let _ = std::fs::remove_file(bash_file);
+        assert!(bash_literal_out.contains("JET_HELP_WIDGET_RETURNED"), "{bash_literal_out}");
+        assert!(marker.exists(), "literal `jet ?` did not prefill bash:\n{bash_literal_out}");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
+        std::fs::remove_file(&marker).unwrap();
+
+        let zdir = write_temp_dir("jetpack-help-zdotdir-literal");
+        std::fs::write(zdir.join(".zshrc"), zsh_rc("help", PromptPathMode::Short, PromptStripMode::Off)).unwrap();
+        let zsh = format!("PATH={} ZDOTDIR={} zsh -d -i", shell_single_quote(&path), zdir.display());
+        let zsh_literal_out = pty_prefill_oracle(&zsh, &marker, b"jet ?\n");
+        let _ = std::fs::remove_dir_all(zdir);
+        assert!(zsh_literal_out.contains("JET_HELP_WIDGET_RETURNED"), "{zsh_literal_out}");
+        assert!(marker.exists(), "literal `jet ?` did not prefill zsh:\n{zsh_literal_out}");
         assert_eq!(std::fs::read_to_string(&marker).unwrap(), "JET_SELECTED_BYTES");
     }
 
@@ -680,7 +719,7 @@ mod tests {
         String::from_utf8_lossy(&stdout).replace('\r', "")
     }
 
-    fn pty_prefill_oracle(shell_command: &str, marker: &std::path::Path) -> String {
+    fn pty_prefill_oracle(shell_command: &str, marker: &std::path::Path, trigger: &[u8]) -> String {
         let mut child = Command::new("script")
             .args(["-qec", shell_command, "/dev/null"])
             .env("NO_COLOR", "1")
@@ -694,7 +733,10 @@ mod tests {
         stdin.write_all(b"echo JET_HELP_WIDGET_START\n").unwrap();
         stdin.flush().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(250));
-        stdin.write_all(b"\x1b?").unwrap();
+        stdin.write_all(b"jet --version\n").unwrap();
+        stdin.flush().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        stdin.write_all(trigger).unwrap();
         stdin.flush().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(350));
         assert!(!marker.exists(), "help selection executed before explicit Enter");
@@ -711,6 +753,7 @@ mod tests {
             String::from_utf8_lossy(&out.stderr)
         );
         let transcript = String::from_utf8_lossy(&out.stdout).replace('\r', "");
+        assert!(transcript.contains("JET_DELEGATED"), "{transcript}");
         assert!(transcript.contains("JET_EXPLICIT_ACCEPT"), "{transcript}");
         transcript
     }

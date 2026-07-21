@@ -32,12 +32,11 @@ fn run_pty_steps(setup: &str, steps: &[&[u8]], color: &str, no_color: bool) -> S
     let mut child = command.spawn()
         .expect("util-linux script must allocate a real PTY");
     let mut stdin = child.stdin.take().unwrap();
-    for (index, keys) in steps.iter().enumerate() {
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    for keys in steps {
         stdin.write_all(keys).unwrap();
         stdin.flush().unwrap();
-        if index + 1 < steps.len() {
-            std::thread::sleep(std::time::Duration::from_millis(150));
-        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
     }
     drop(stdin);
     let out = child.wait_with_output().unwrap();
@@ -105,19 +104,25 @@ fn transcript_selected_command(transcript: &str, command: &str) -> bool {
 
 #[test]
 fn enter_expands_then_emits_prefill_without_running_it() {
-    let transcript = run_pty(b"\r\r", "never", false);
-    assert!(transcript.contains("jet run examples/features/basics/hello.jet"));
+    let transcript = run_pty(b"\r\r", "never", false).replace('\r', "");
+    assert!(
+        transcript.contains("jet run"),
+        "Enter should prefill command:\n{transcript}"
+    );
+    assert!(
+        !transcript.contains("examples/features/basics/hello.jet"),
+        "Enter prefills example, not command:\n{transcript}"
+    );
     assert!(!transcript.contains("Hello, Jet!"), "Enter executed selected command:\n{transcript}");
 }
 
 #[test]
 fn shell_prefill_mode_keeps_palette_on_tty_while_stdout_is_captured() {
     let jet = env!("CARGO_BIN_EXE_jet");
-    let picked = std::env::temp_dir().join(format!("jet-help-picked-{}", std::process::id()));
+    let picked = std::path::Path::new("/tmp").join(format!("jet-help-picked-{}", std::process::id()));
     let shell_line = format!(
-        "JET_HELP_SHELL_PREFILL=1 '{}' '?' --color=never > '{}'; printf '\\nJET_HELP_CAPTURED\\n'; cat '{}'",
+        "JET_HELP_SHELL_PREFILL=1 '{}' '?' --color=never > '{}'; printf '\\nJET_HELP_CAPTURED\\n'",
         jet.replace('\'', "'\\''"),
-        picked.display(),
         picked.display(),
     );
     let mut command = Command::new("script");
@@ -125,18 +130,30 @@ fn shell_prefill_mode_keeps_palette_on_tty_while_stdout_is_captured() {
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().expect("util-linux script must allocate a real PTY");
     let mut stdin = child.stdin.take().unwrap();
-    stdin.write_all(b"\r").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    if let Err(error) = stdin.write_all(b"\r") {
+        drop(stdin);
+        let out = child.wait_with_output().unwrap();
+        panic!(
+            "PTY closed before input ({error}):\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
     stdin.flush().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(150));
     stdin.write_all(b"\r").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(150));
     drop(stdin);
     let out = child.wait_with_output().unwrap();
+    let selected = std::fs::read_to_string(&picked).unwrap();
     let _ = std::fs::remove_file(&picked);
     assert!(out.status.success(), "PTY child failed: {}", String::from_utf8_lossy(&out.stderr));
     let transcript = String::from_utf8_lossy(&out.stdout);
     assert!(transcript.contains("command palette"), "captured stdout disabled palette:\n{transcript}");
     assert!(transcript.contains("JET_HELP_CAPTURED"), "shell did not regain control:\n{transcript}");
-    assert!(transcript.contains("jet run examples/features/basics/hello.jet"), "selection was not captured:\n{transcript}");
+    assert_eq!(selected, "jet run\n");
+    assert!(!transcript.contains("ready to copy"), "palette duplicated the shell prefill:\n{transcript}");
     assert!(!transcript.contains("Hello, Jet!"), "captured selection executed:\n{transcript}");
 }
 
@@ -252,6 +269,54 @@ fn live_shrink_redraws_categorized_view_within_new_height() {
     assert!(
         frame.lines().all(|line| visible_cols(line) <= 50),
         "shrunken frame exceeded 50 cols:\n{frame}"
+    );
+}
+
+#[test]
+fn live_narrow_resize_uses_actual_terminal_size() {
+    let setup = "stty rows 24 cols 80; (sleep 0.4; stty rows 7 cols 32 </dev/tty) &";
+    let transcript = run_pty_steps(
+        setup,
+        &[b"", b"", b"", b"\x1b[B", b"", b"q"],
+        "never",
+        false,
+    );
+    let frame = final_frame_before_cleanup(&transcript);
+    assert!(
+        cursor_up_counts(&transcript).into_iter().all(|count| count < 7),
+        "live resize moved above the terminal"
+    );
+    assert_eq!(frame.lines().count(), 7, "resized frame did not use 7 rows:\n{frame}");
+    assert!(
+        frame.lines().all(|line| visible_cols(line) <= 32),
+        "resized frame exceeded 32 cols:\n{frame}"
+    );
+}
+
+#[test]
+fn narrow_fuzzy_results_fit_actual_terminal() {
+    let transcript = run_pty_sized_steps(&[b"run", b"\x1b"], "never", false, 7, 32);
+    let frame = final_frame_before_cleanup(&transcript);
+    assert!(frame.contains("jet [run]"), "fuzzy result was not rendered:\n{frame}");
+    assert_eq!(frame.lines().count(), 7, "fuzzy frame exceeded 7 rows:\n{frame}");
+    assert!(
+        frame.lines().all(|line| visible_cols(line) <= 32),
+        "fuzzy frame exceeded 32 cols:\n{frame}"
+    );
+}
+
+#[test]
+fn short_detail_view_scrolls_without_moving_terminal() {
+    let mut keys = b"\r\t".to_vec();
+    keys.extend(std::iter::repeat_n(b"\x1b[B".as_slice(), 12).flatten());
+    let transcript = run_pty_sized_steps(&[&keys, b"\x1b", b"q"], "never", false, 8, 60);
+    assert!(
+        cursor_up_counts(&transcript).into_iter().all(|count| count < 8),
+        "detail redraw moved above the terminal"
+    );
+    assert!(
+        transcript.contains("--target") || transcript.contains("--profile") || transcript.contains("F1 reference"),
+        "detail view did not scroll to later content:\n{transcript}"
     );
 }
 

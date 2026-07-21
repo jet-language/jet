@@ -69,29 +69,29 @@ fn command_symbol(cmd: String, usage: String, summary: &str, example: Option<Str
 /// Category display order for the categorized (empty-query) view and the
 /// F1 reference's left-hand tree.
 pub const CATEGORIES: &[&str] = &[
-    "Build and run",
-    "Project/env",
+    "Build & Run",
+    "Projects & Environments",
     "Packages",
-    "jetos",
-    "Dev server",
+    "Jetos",
+    "Development Server",
     "Reference",
-    "Error codes",
+    "Error Codes",
 ];
 
 fn category_for(cmd: &str) -> &'static str {
     match cmd {
         "run" | "check" | "test" | "build" | "debug" | "bench" | "eval" | "emit" => {
-            "Build and run"
+            "Build & Run"
         }
-        "dev" | "serve" => "Dev server",
+        "dev" | "serve" => "Development Server",
         "devtools" => "Reference",
         "new" | "fmt" | "fix" | "lint" | "env" | "init" | "lock" | "config" | "toolchain" => {
-            "Project/env"
+            "Projects & Environments"
         }
         "add" | "remove" | "fetch" | "update" | "outdated" | "search" | "info" | "logs"
         | "clean" | "publish" | "yank" | "keygen" | "key" | "vendor" | "audit" | "sbom"
         | "store" | "schema" | "gc" => "Packages",
-        "os" | "image" | "bind" | "push" | "trust" | "bridge" | "services" => "jetos",
+        "os" | "image" | "bind" | "push" | "trust" | "bridge" | "services" => "Jetos",
         "semindex" | "dossier" | "impact" | "codemod" | "expand" => "Reference",
         // explain, doctor, repl, man, completions, version, upgrade, help, lsp,
         // and any future command land here — a safe default, never a crash.
@@ -185,7 +185,15 @@ fn flags_for(cmd: &str) -> Vec<(&'static str, &'static str)> {
                 .map(|(names, _)| names.split(['/', ',']).map(str::trim).any(|n| n == cmd))
                 .unwrap_or(false)
         })
-        .map(|f| (f.long, f.help))
+        .map(|f| {
+            let help = f
+                .help
+                .strip_prefix("with ")
+                .and_then(|rest| rest.split_once(':'))
+                .map(|(_, help)| help.trim())
+                .unwrap_or(f.help);
+            (f.long, help)
+        })
         .collect()
 }
 
@@ -404,6 +412,47 @@ mod tests {
     fn every_entry_has_a_real_category() {
         for e in build_index() {
             assert!(CATEGORIES.contains(&e.category), "bad category for {}", e.symbol.name);
+        }
+    }
+
+    #[test]
+    fn palette_copy_is_title_cased_and_user_facing() {
+        assert_eq!(
+            CATEGORIES,
+            &[
+                "Build & Run",
+                "Projects & Environments",
+                "Packages",
+                "Jetos",
+                "Development Server",
+                "Reference",
+                "Error Codes",
+            ]
+        );
+        let forbidden = [
+            "D-",
+            "U19",
+            "c77",
+            "E2-M",
+            "milestone",
+            "requirement",
+            "epoch",
+            "decision",
+            "ratified",
+        ];
+        for entry in build_index() {
+            let copy = std::iter::once(entry.symbol.summary.as_str())
+                .chain(entry.flags.iter().map(|(_, help)| *help))
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            for term in forbidden {
+                assert!(
+                    !copy.contains(&term.to_lowercase()),
+                    "help for `{}` exposes internal planning term `{term}`: {copy}",
+                    entry.symbol.name
+                );
+            }
         }
     }
 

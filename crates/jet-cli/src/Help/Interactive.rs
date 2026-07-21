@@ -7,8 +7,8 @@
 //! frame goes to **stderr**. The **only** thing this module ever writes to
 //! stdout is the chosen command line at Enter — so `$(jet ?)` composes
 //! cleanly, and everything else (the whole palette UI) stays out of a
-//! captured pipe. After exit, the same line is echoed to stderr again as a
-//! ready-to-copy line for a human reading the terminal.
+//! captured pipe. Shell integration places that captured line into the next
+//! editable prompt without executing it.
 
 use std::io::{self, IsTerminal, Write};
 
@@ -127,7 +127,8 @@ pub fn run(color: bool) -> io::Result<()> {
             }
             Key::Escape => match mode {
                 Mode::Detail => {
-                    mode = Mode::Results;
+                    mode = if query.is_empty() { Mode::Categorized } else { Mode::Results };
+                    res_scroll = 0;
                 }
                 Mode::Reference => {
                     alt = None; // Drop restores the normal screen.
@@ -152,8 +153,14 @@ pub fn run(color: bool) -> io::Result<()> {
                 }
             }
             Key::Tab => match mode {
-                Mode::Categorized if cat_entry.is_some() => mode = Mode::Detail,
-                Mode::Results if !hits.is_empty() => mode = Mode::Detail,
+                Mode::Categorized if cat_entry.is_some() => {
+                    mode = Mode::Detail;
+                    res_scroll = 0;
+                }
+                Mode::Results if !hits.is_empty() => {
+                    mode = Mode::Detail;
+                    res_scroll = 0;
+                }
                 Mode::Detail => mode = if query.is_empty() { Mode::Categorized } else { Mode::Results },
                 _ => {}
             },
@@ -202,6 +209,12 @@ pub fn run(color: bool) -> io::Result<()> {
             Key::Down if matches!(mode, Mode::Results | Mode::Detail) && result_code(&hits, res_selected).is_some() => {
                 res_scroll = res_scroll.saturating_add(1);
             }
+            Key::Up if matches!(mode, Mode::Detail) => {
+                res_scroll = res_scroll.saturating_sub(1);
+            }
+            Key::Down if matches!(mode, Mode::Detail) => {
+                res_scroll = res_scroll.saturating_add(1);
+            }
             Key::Up => move_selection(&mut mode, &mut cat_selected, &mut cat_entry, &hits, &mut res_selected, &index, &mut ref_category, &mut ref_entry, -1),
             Key::Down => move_selection(&mut mode, &mut cat_selected, &mut cat_entry, &hits, &mut res_selected, &index, &mut ref_category, &mut ref_entry, 1),
             Key::Left if matches!(mode, Mode::Categorized) => cat_entry = None,
@@ -215,8 +228,9 @@ pub fn run(color: bool) -> io::Result<()> {
                     ref_entry = index.iter().position(|x| x.symbol.identity == e.symbol.identity);
                 }
             }
-            Key::Enter => {
-                if matches!(mode, Mode::Categorized) && cat_entry.is_none() {
+            key @ (Key::Enter | Key::EscapeEnter) => {
+                let want_example = matches!(key, Key::EscapeEnter);
+                if !want_example && matches!(mode, Mode::Categorized) && cat_entry.is_none() {
                     cat_entry = Some(0);
                     (width, height) = terminal_size();
                     frame = render_current(&mode, &index, cat_selected, cat_entry, &query, &hits, res_selected, res_scroll, ref_category, ref_entry, &ref_query, ref_scroll, width, height, color);
@@ -228,18 +242,22 @@ pub fn run(color: bool) -> io::Result<()> {
                 {
                     continue;
                 }
-                let command = current_command(&mode, &index, cat_selected, cat_entry, &hits, res_selected, ref_entry);
+                let command = current_prefill(
+                    &mode,
+                    &index,
+                    cat_selected,
+                    cat_entry,
+                    &hits,
+                    res_selected,
+                    ref_entry,
+                    want_example,
+                );
                 drop(alt);
                 drop(_guard);
                 if let Some(cmd) = command {
-                    // Ratified "prefilled, never runs": the command is the
-                    // ONLY thing this app ever writes to stdout, so
-                    // `$(jet ?)` composes; the human-readable copy lands on
-                    // stderr after the terminal is restored.
+                    // Shell widgets capture this one line and replace their
+                    // editable buffer. They never execute it.
                     println!("{}", cmd);
-                    eprintln!();
-                    eprintln!("ready to copy:");
-                    eprintln!("  {}", cmd);
                 }
                 return Ok(());
             }
@@ -349,7 +367,11 @@ fn render_current(
         Mode::Detail => {
             let entry = current_entry(cat_selected, cat_entry, hits, res_selected, index);
             match entry {
-                Some(e) => Render::render_detail(e, width, color),
+                Some(e) => Render::render_lines_viewport(
+                    &Render::render_detail(e, width, color),
+                    height,
+                    res_scroll,
+                ),
                 None => Render::render_result_list(hits, query, width, color, Some(res_selected), Some(height)),
             }
         }
@@ -392,7 +414,7 @@ fn current_entry<'a>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn current_command(
+fn current_prefill(
     mode: &Mode,
     index: &[Entry],
     cat_selected: usize,
@@ -400,15 +422,22 @@ fn current_command(
     hits: &[Hit],
     res_selected: usize,
     ref_entry: Option<usize>,
+    want_example: bool,
 ) -> Option<String> {
-    match mode {
-        Mode::Reference => ref_entry.map(|i| prefill_for(&index[i])),
+    let entry = match mode {
+        Mode::Reference => ref_entry.map(|i| &index[i]),
         Mode::Results | Mode::Detail => match hits.get(res_selected) {
-            Some(Hit::Command { entry, .. }) => Some(prefill_for(entry)),
-            Some(Hit::Code(_)) => None,
-            None => None,
+            Some(Hit::Command { entry, .. }) => {
+                index.iter().find(|e| e.symbol.identity == entry.symbol.identity)
+            }
+            Some(Hit::Code(_)) | None => None,
         },
-        Mode::Categorized => selected_category_index(index, cat_selected, cat_entry).map(|i| prefill_for(&index[i])),
+        Mode::Categorized => selected_category_index(index, cat_selected, cat_entry).map(|i| &index[i]),
+    }?;
+    if want_example {
+        prefill_example(entry).or_else(|| Some(prefill_command(entry)))
+    } else {
+        Some(prefill_command(entry))
     }
 }
 
@@ -448,14 +477,13 @@ fn terminal_size() -> (usize, usize) {
             Some((parts.next()?.parse::<usize>().ok()?, parts.next()?.parse::<usize>().ok()?))
         });
     let (rows, cols) = size.unwrap_or((24, crate::Term::terminal_width()));
-    (cols.clamp(50, 160), rows.max(8))
+    (cols.clamp(24, 160), rows.max(5))
 }
 
-fn prefill_for(entry: &Entry) -> String {
-    entry
-        .symbol
-        .examples
-        .first()
-        .cloned()
-        .unwrap_or_else(|| format!("jet {}", entry.symbol.name))
+fn prefill_command(entry: &Entry) -> String {
+    format!("jet {}", entry.symbol.name)
+}
+
+fn prefill_example(entry: &Entry) -> Option<String> {
+    entry.symbol.examples.first().cloned()
 }

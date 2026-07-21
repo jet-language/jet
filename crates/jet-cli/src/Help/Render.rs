@@ -227,9 +227,9 @@ pub fn render_categorized(
     out.push_str(&top(width, "jet ? — command palette", color));
     out.push('\n');
     let hint = if color {
-        theme.dim("type to search · ↑↓ move · ⏎ prefill · ⇥ detail · F1 reference")
+        theme.dim("type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1")
     } else {
-        "type to search · ↑↓ move · ⏎ prefill · ⇥ detail · F1 reference".to_string()
+        "type to search · ↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1".to_string()
     };
     out.push_str(&selected_row(width, &hint, false, color));
     out.push('\n');
@@ -239,7 +239,7 @@ pub fn render_categorized(
     let mut selected_header = None;
     for (ci, cat) in super::CATEGORIES.iter().enumerate() {
         let entries: Vec<&Entry> = index.iter().filter(|e| &e.category == cat).collect();
-        if entries.is_empty() && *cat != "Error codes" {
+        if entries.is_empty() && *cat != "Error Codes" {
             continue;
         }
         let is_expanded = ci == selected_category && expanded;
@@ -257,7 +257,7 @@ pub fn render_categorized(
         }
         body.push((label, ci == selected_category && !is_expanded));
         if is_expanded {
-            if *cat == "Error codes" {
+            if *cat == "Error Codes" {
                 let tip = if color {
                     theme.dim("type an E-code, such as E0102, for verbatim help")
                 } else {
@@ -342,8 +342,15 @@ pub fn render_result_list(
         Hit::Command { entry, .. } => entry.symbol.examples.first(),
         Hit::Code(_) => None,
     });
+    let show_footer = height.is_none_or(|height| height >= 6);
+    let show_lower_rule = height.is_none_or(|height| height >= 7);
+    let show_example = example.is_some() && height.is_none_or(|height| height >= 8);
+    let fixed_rows = 4
+        + usize::from(show_footer)
+        + usize::from(show_lower_rule)
+        + usize::from(show_example);
     let visible_hits = height
-        .map(|height| height.saturating_sub(6 + usize::from(example.is_some())).max(1))
+        .map(|height| height.saturating_sub(fixed_rows).max(1))
         .unwrap_or(hits.len());
     let selected_index = selected.unwrap_or(0).min(hits.len().saturating_sub(1));
     let start = selected_index
@@ -371,9 +378,12 @@ pub fn render_result_list(
         }
         out.push('\n');
     }
-    out.push_str(&mid(width, color));
-    out.push('\n');
-    if let Some(ex) = example {
+    if show_lower_rule {
+        out.push_str(&mid(width, color));
+        out.push('\n');
+    }
+    if show_example {
+        let ex = example.unwrap();
         let ex_line = if color {
             format!(
                 "{} {}",
@@ -386,13 +396,15 @@ pub fn render_result_list(
         out.push_str(&selected_row(width, &ex_line, false, color));
         out.push('\n');
     }
-    let footer = if color {
-        theme.dim("↑↓ move · ⏎ prefill shell · ⇥ detail · F1 reference")
-    } else {
-        "↑↓ move · ⏎ prefill shell · ⇥ detail · F1 reference".to_string()
-    };
-    out.push_str(&selected_row(width, &footer, false, color));
-    out.push('\n');
+    if show_footer {
+        let footer = if color {
+            theme.dim("↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1")
+        } else {
+            "↑↓ · ⏎ command · Alt+⏎ example · ⇥ detail · F1".to_string()
+        };
+        out.push_str(&selected_row(width, &footer, false, color));
+        out.push('\n');
+    }
     out.push_str(&bottom(width, color));
     out
 }
@@ -443,16 +455,11 @@ pub fn render_detail(entry: &Entry, width: usize, color: bool) -> String {
     }
     out.push_str(&mid(width, color));
     out.push('\n');
-    let prefill = entry
-        .symbol
-        .examples
-        .first()
-        .cloned()
-        .unwrap_or_else(|| format!("jet {}", entry.symbol.name));
+    let command = format!("jet {}", entry.symbol.name);
     let footer = if color {
-        theme.dim(&format!("⏎ prefill: {} · F1 open in reference", prefill))
+        theme.dim(&format!("⏎ {command} · Alt+⏎ example · F1 open in reference"))
     } else {
-        format!("prefill: {} · F1 open in reference", prefill)
+        format!("⏎ {command} · Alt+⏎ example · F1 open in reference")
     };
     out.push_str(&selected_row(width, &footer, false, color));
     out.push('\n');
@@ -482,6 +489,19 @@ pub fn render_text_viewport(text: &str, width: usize, height: usize, scroll: usi
     let start = scroll.min(max_start);
     (0..height)
         .map(|offset| rows.get(start + offset).cloned().unwrap_or_else(|| " ".to_string()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Height-bounded view over text whose lines are already width-bounded.
+pub fn render_lines_viewport(text: &str, height: usize, scroll: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let height = height.max(1);
+    let start = scroll.min(lines.len().saturating_sub(height));
+    lines
+        .into_iter()
+        .skip(start)
+        .take(height)
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -541,8 +561,8 @@ pub fn render_reference(
     color: bool,
     query: &str,
 ) -> String {
-    let width = w(width).max(50);
-    let height = height.max(6);
+    let width = w(width);
+    let height = height.max(3);
     let left_width = (width / 3).max(18);
     let right_width = width - left_width - 2;
 
@@ -597,7 +617,7 @@ pub fn render_reference(
         lines.push(format!("{}{}{}{}", theme.border("│"), l, theme.border("│"), r));
     }
     lines.push(pad(
-        &theme.dim("↑↓ move · → into · ⏎ prefill shell · Esc back to overlay"),
+        &theme.dim("↑↓ · → into · ⏎ command · Alt+⏎ example · Esc back"),
         width,
     ));
     lines.join("\n")
@@ -729,6 +749,22 @@ mod tests {
     }
 
     #[test]
+    fn result_list_drops_optional_rows_to_fit_short_terminals() {
+        let index = build_index();
+        let hits = super::super::search(&index, "run");
+        assert!(hits.first().is_some_and(|hit| match hit {
+            Hit::Command { entry, .. } => !entry.symbol.examples.is_empty(),
+            Hit::Code(_) => false,
+        }));
+
+        for height in 5..=7 {
+            let out = render_result_list(&hits, "run", 32, false, Some(0), Some(height));
+            assert_eq!(out.lines().count(), height, "{height}-row output:\n{out}");
+            assert!(out.lines().all(|line| cols(line) <= 32), "{height}-row output:\n{out}");
+        }
+    }
+
+    #[test]
     fn code_page_is_verbatim_from_explain() {
         let ex = crate::Explain::lookup("E0102").unwrap();
         assert_eq!(render_code_page(&ex, false), crate::Explain::render(&ex, false));
@@ -749,7 +785,7 @@ mod tests {
         let out = render_reference(&index, 0, index.first(), 80, 12, false, "run");
         assert!(out.starts_with("jet ? reference"));
         assert!(out.contains("search: run"));
-        assert!(out.contains("Esc back to overlay"));
+        assert!(out.contains("Esc back"));
         assert_eq!(out.lines().count(), 12);
         assert!(out.lines().all(|line| cols(line) == 80));
 
@@ -759,7 +795,7 @@ mod tests {
         let colored = render_reference(&index, 0, selected, 80, 12, true, "run");
         assert!(colored.contains("\x1b[1;96mjet ?\x1b[0m"), "{colored}");
         assert!(colored.contains("\x1b[48;5;24;97;1m"), "{colored}");
-        assert!(colored.contains("\x1b[2;37m↑↓ move"), "{colored}");
+        assert!(colored.contains("\x1b[2;37m↑↓ ·"), "{colored}");
         assert!(colored.lines().all(|line| cols(line) == 80));
     }
 
