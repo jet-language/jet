@@ -267,7 +267,9 @@ pub fn run(color: bool) -> io::Result<()> {
                         eprintln!(
                             "not inserted into the prompt — install once, then open a new shell:"
                         );
-                        eprintln!("  jet env hook bash >> ~/.bashrc   # or zsh / fish");
+                        eprintln!("  jet env hook bash >> ~/.bashrc");
+                        eprintln!("  jet env hook zsh  >> ~/.zshrc");
+                        eprintln!("  jet env hook fish | source");
                         eprintln!("then: jet ?  or  Alt-?");
                     }
                 }
