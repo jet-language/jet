@@ -2582,6 +2582,23 @@ fn content_length(headers: &[(String, String)]) -> Result<Option<usize>, JetHttp
     Ok(found)
 }
 
+fn decoded_gzip(
+    headers: &[(String, String)],
+    decompress: bool,
+) -> Result<bool, JetHttpBridgeError> {
+    let Some(encoding) = header_first(headers, "content-encoding") else {
+        return Ok(false);
+    };
+    if !decompress || encoding.eq_ignore_ascii_case("identity") {
+        return Ok(false);
+    }
+    if encoding.eq_ignore_ascii_case("gzip") {
+        Ok(true)
+    } else {
+        Err(JetHttpBridgeError::Protocol)
+    }
+}
+
 fn read_h2_response(
     connection: Arc<Mutex<H2Connection>>,
     stream_id: u32,
@@ -2615,9 +2632,7 @@ fn read_h2_response(
         total_deadline,
         permit: Some(permit),
     };
-    let encoded_gzip = decompress
-        && header_first(&headers, "content-encoding")
-            .is_some_and(|value| value.eq_ignore_ascii_case("gzip"));
+    let encoded_gzip = decoded_gzip(&headers, decompress)?;
     let reader: Box<dyn Read + Send> = if encoded_gzip {
         Box::new(GzipReader::new(reader))
     } else {
@@ -2914,9 +2929,7 @@ fn read_response(
         read_timeout,
         total_deadline,
     };
-    let encoded_gzip = decompress
-        && header_first(&headers, "content-encoding")
-            .is_some_and(|value| value.eq_ignore_ascii_case("gzip"));
+    let encoded_gzip = decoded_gzip(&headers, decompress)?;
     let reader: Box<dyn Read + Send> = if encoded_gzip {
         Box::new(GzipReader::new(reader))
     } else {
@@ -3143,86 +3156,73 @@ impl Read for ResponseBodyReader {
     }
 }
 
-struct GzipReader<R> {
-    inner: Option<R>,
-    decoded: Vec<u8>,
-    cursor: usize,
-    error: bool,
+const GZIP_COMPRESSED_LIMIT: usize = 64 * 1024 * 1024;
+const GZIP_DECODED_LIMIT: usize = 8 * 1024 * 1024;
+
+fn invalid_gzip() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid gzip body")
 }
 
-impl<R> GzipReader<R> {
+struct GzipBits<R> {
+    inner: R,
+    current: u8,
+    remaining: u8,
+    compressed: usize,
+}
+
+impl<R: Read> GzipBits<R> {
     fn new(inner: R) -> Self {
         Self {
-            inner: Some(inner),
-            decoded: Vec::new(),
-            cursor: 0,
-            error: false,
+            inner,
+            current: 0,
+            remaining: 0,
+            compressed: 0,
         }
     }
-}
 
-impl<R: Read> Read for GzipReader<R> {
-    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
-        if self.error {
+    fn next_byte(&mut self) -> std::io::Result<u8> {
+        if self.compressed == GZIP_COMPRESSED_LIMIT {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "invalid gzip body",
+                "gzip body too large",
             ));
         }
-        if let Some(mut inner) = self.inner.take() {
-            let mut compressed = Vec::new();
-            inner
-                .by_ref()
-                .take(64 * 1024 * 1024 + 1)
-                .read_to_end(&mut compressed)?;
-            if compressed.len() > 64 * 1024 * 1024 {
-                self.error = true;
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "gzip body too large",
-                ));
-            }
-            match gzip_decompress(&compressed, 8 * 1024 * 1024 + 1) {
-                Ok(decoded) => self.decoded = decoded,
-                Err(()) => {
-                    self.error = true;
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "invalid gzip body",
-                    ));
-                }
-            }
-        }
-        let count = out
-            .len()
-            .min(self.decoded.len().saturating_sub(self.cursor));
-        out[..count].copy_from_slice(&self.decoded[self.cursor..self.cursor + count]);
-        self.cursor += count;
-        Ok(count)
+        let mut byte = [0];
+        self.inner.read_exact(&mut byte)?;
+        self.compressed += 1;
+        Ok(byte[0])
     }
-}
 
-struct BitReader<'a> {
-    bytes: &'a [u8],
-    bit: usize,
-}
-
-impl<'a> BitReader<'a> {
-    fn bits(&mut self, count: usize) -> Result<u32, ()> {
-        if self.bit.checked_add(count).ok_or(())? > self.bytes.len() * 8 {
-            return Err(());
-        }
+    fn bits(&mut self, count: usize) -> std::io::Result<u32> {
         let mut value = 0;
         for offset in 0..count {
-            value |=
-                u32::from((self.bytes[(self.bit + offset) / 8] >> ((self.bit + offset) % 8)) & 1)
-                    << offset;
+            if self.remaining == 0 {
+                self.current = self.next_byte()?;
+                self.remaining = 8;
+            }
+            value |= u32::from(self.current & 1) << offset;
+            self.current >>= 1;
+            self.remaining -= 1;
         }
-        self.bit += count;
         Ok(value)
     }
+
     fn align(&mut self) {
-        self.bit = (self.bit + 7) & !7;
+        self.remaining = 0;
+    }
+
+    fn aligned_byte(&mut self) -> std::io::Result<u8> {
+        self.align();
+        self.next_byte()
+    }
+
+    fn ensure_eof(&mut self) -> std::io::Result<()> {
+        self.align();
+        let mut byte = [0];
+        match self.inner.read(&mut byte)? {
+            0 => Ok(()),
+            _ => Err(invalid_gzip()),
+        }
     }
 }
 
@@ -3281,7 +3281,7 @@ impl Huffman {
         Ok(Self { symbols, max })
     }
 
-    fn decode(&self, bits: &mut BitReader<'_>) -> Result<u16, ()> {
+    fn decode<R: Read>(&self, bits: &mut GzipBits<R>) -> std::io::Result<u16> {
         let mut code = 0;
         for length in 1..=self.max {
             code |= bits.bits(1)? << (length - 1);
@@ -3293,7 +3293,7 @@ impl Huffman {
                 return Ok(*symbol);
             }
         }
-        Err(())
+        Err(invalid_gzip())
     }
 }
 
@@ -3309,7 +3309,7 @@ fn fixed_trees() -> Result<(Huffman, Huffman), ()> {
     ))
 }
 
-fn dynamic_trees(bits: &mut BitReader<'_>) -> Result<(Huffman, Huffman), ()> {
+fn dynamic_trees<R: Read>(bits: &mut GzipBits<R>) -> std::io::Result<(Huffman, Huffman)> {
     let literal_count = bits.bits(5)? as usize + 257;
     let distance_count = bits.bits(5)? as usize + 1;
     let code_count = bits.bits(4)? as usize + 4;
@@ -3320,13 +3320,13 @@ fn dynamic_trees(bits: &mut BitReader<'_>) -> Result<(Huffman, Huffman), ()> {
     for index in 0..code_count {
         code_lengths[order[index]] = bits.bits(3)? as u8;
     }
-    let code_tree = Huffman::from_lengths(&code_lengths)?;
+    let code_tree = Huffman::from_lengths(&code_lengths).map_err(|_| invalid_gzip())?;
     let mut lengths = Vec::with_capacity(literal_count + distance_count);
     while lengths.len() < literal_count + distance_count {
         match code_tree.decode(bits)? {
             value @ 0..=15 => lengths.push(value as u8),
             16 => {
-                let prior = *lengths.last().ok_or(())?;
+                let prior = *lengths.last().ok_or_else(invalid_gzip)?;
                 let repeat = bits.bits(2)? as usize + 3;
                 lengths.extend(std::iter::repeat(prior).take(repeat));
             }
@@ -3338,168 +3338,262 @@ fn dynamic_trees(bits: &mut BitReader<'_>) -> Result<(Huffman, Huffman), ()> {
                 let repeat = bits.bits(7)? as usize + 11;
                 lengths.extend(std::iter::repeat(0).take(repeat));
             }
-            _ => return Err(()),
+            _ => return Err(invalid_gzip()),
         }
         if lengths.len() > literal_count + distance_count {
-            return Err(());
+            return Err(invalid_gzip());
         }
     }
     Ok((
-        Huffman::from_lengths(&lengths[..literal_count])?,
-        Huffman::from_lengths(&lengths[literal_count..])?,
+        Huffman::from_lengths(&lengths[..literal_count]).map_err(|_| invalid_gzip())?,
+        Huffman::from_lengths(&lengths[literal_count..]).map_err(|_| invalid_gzip())?,
     ))
 }
 
-fn inflate(bytes: &[u8], limit: usize) -> Result<Vec<u8>, ()> {
-    const LENGTH_BASE: [usize; 29] = [
-        3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115,
-        131, 163, 195, 227, 258,
-    ];
-    const LENGTH_EXTRA: [usize; 29] = [
-        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
-    ];
-    const DIST_BASE: [usize; 30] = [
-        1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
-        2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
-    ];
-    const DIST_EXTRA: [usize; 30] = [
-        0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12,
-        13, 13,
-    ];
-    let mut bits = BitReader { bytes, bit: 0 };
-    let mut out = Vec::new();
-    loop {
-        let final_block = bits.bits(1)? != 0;
-        match bits.bits(2)? {
-            0 => {
-                bits.align();
-                let length = bits.bits(16)? as usize;
-                if bits.bits(16)? as u16 != !(length as u16) {
-                    return Err(());
-                }
-                if out.len().checked_add(length).ok_or(())? > limit {
-                    return Err(());
-                }
-                for _ in 0..length {
-                    out.push(bits.bits(8)? as u8);
-                }
-            }
-            kind @ 1..=2 => {
-                let (literal_tree, distance_tree) = if kind == 1 {
-                    fixed_trees()?
-                } else {
-                    dynamic_trees(&mut bits)?
-                };
-                loop {
-                    match literal_tree.decode(&mut bits)? {
-                        literal @ 0..=255 => {
-                            if out.len() == limit {
-                                return Err(());
-                            }
-                            out.push(literal as u8);
-                        }
-                        256 => break,
-                        symbol @ 257..=285 => {
-                            let index = symbol as usize - 257;
-                            let length =
-                                LENGTH_BASE[index] + bits.bits(LENGTH_EXTRA[index])? as usize;
-                            let distance_symbol = distance_tree.decode(&mut bits)? as usize;
-                            if distance_symbol >= DIST_BASE.len() {
-                                return Err(());
-                            }
-                            let distance = DIST_BASE[distance_symbol]
-                                + bits.bits(DIST_EXTRA[distance_symbol])? as usize;
-                            if distance == 0
-                                || distance > out.len()
-                                || out.len().checked_add(length).ok_or(())? > limit
-                            {
-                                return Err(());
-                            }
-                            for _ in 0..length {
-                                let byte = out[out.len() - distance];
-                                out.push(byte);
-                            }
-                        }
-                        _ => return Err(()),
-                    }
-                }
-            }
-            _ => return Err(()),
-        }
-        if final_block {
-            return Ok(out);
-        }
-    }
+const LENGTH_BASE: [usize; 29] = [
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131,
+    163, 195, 227, 258,
+];
+const LENGTH_EXTRA: [usize; 29] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+];
+const DIST_BASE: [usize; 30] = [
+    1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537,
+    2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+];
+const DIST_EXTRA: [usize; 30] = [
+    0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+    13,
+];
+
+enum InflateBlock {
+    GzipHeader,
+    DeflateHeader,
+    Stored(usize),
+    Huffman {
+        literals: Huffman,
+        distances: Huffman,
+    },
+    Trailer,
+    Done,
 }
 
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = !0u32;
-    for &byte in bytes {
-        crc ^= u32::from(byte);
+struct GzipReader<R> {
+    bits: GzipBits<R>,
+    block: InflateBlock,
+    final_block: bool,
+    window: VecDeque<u8>,
+    copy_distance: usize,
+    copy_remaining: usize,
+    crc: u32,
+    decoded: usize,
+    failed: bool,
+}
+
+impl<R: Read> GzipReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            bits: GzipBits::new(inner),
+            block: InflateBlock::GzipHeader,
+            final_block: false,
+            window: VecDeque::with_capacity(32 * 1024),
+            copy_distance: 0,
+            copy_remaining: 0,
+            crc: !0,
+            decoded: 0,
+            failed: false,
+        }
+    }
+
+    fn record(&mut self, byte: u8) -> std::io::Result<u8> {
+        if self.decoded == GZIP_DECODED_LIMIT {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "gzip decoded body too large",
+            ));
+        }
+        self.crc ^= u32::from(byte);
         for _ in 0..8 {
-            crc = if crc & 1 != 0 {
-                crc >> 1 ^ 0xedb8_8320
+            self.crc = if self.crc & 1 != 0 {
+                self.crc >> 1 ^ 0xedb8_8320
             } else {
-                crc >> 1
+                self.crc >> 1
             };
         }
+        if self.window.len() == 32 * 1024 {
+            self.window.pop_front();
+        }
+        self.window.push_back(byte);
+        self.decoded += 1;
+        Ok(byte)
     }
-    !crc
+
+    fn read_gzip_header(&mut self) -> std::io::Result<()> {
+        let mut header = [0; 10];
+        for byte in &mut header {
+            *byte = self.bits.aligned_byte()?;
+        }
+        if header[..3] != [0x1f, 0x8b, 8] || header[3] & 0xe0 != 0 {
+            return Err(invalid_gzip());
+        }
+        let flags = header[3];
+        if flags & 4 != 0 {
+            let length = usize::from(u16::from_le_bytes([
+                self.bits.aligned_byte()?,
+                self.bits.aligned_byte()?,
+            ]));
+            for _ in 0..length {
+                self.bits.aligned_byte()?;
+            }
+        }
+        for flag in [8, 16] {
+            if flags & flag != 0 {
+                while self.bits.aligned_byte()? != 0 {}
+            }
+        }
+        if flags & 2 != 0 {
+            self.bits.aligned_byte()?;
+            self.bits.aligned_byte()?;
+        }
+        Ok(())
+    }
+
+    fn trailer(&mut self) -> std::io::Result<()> {
+        self.bits.align();
+        let mut crc = [0; 4];
+        let mut size = [0; 4];
+        for byte in &mut crc {
+            *byte = self.bits.aligned_byte()?;
+        }
+        for byte in &mut size {
+            *byte = self.bits.aligned_byte()?;
+        }
+        if u32::from_le_bytes(crc) != !self.crc || u32::from_le_bytes(size) != self.decoded as u32 {
+            return Err(invalid_gzip());
+        }
+        self.bits.ensure_eof()
+    }
+
+    fn next_decoded(&mut self) -> std::io::Result<Option<u8>> {
+        loop {
+            if self.copy_remaining != 0 {
+                if self.copy_distance == 0 || self.copy_distance > self.window.len() {
+                    return Err(invalid_gzip());
+                }
+                let byte = self.window[self.window.len() - self.copy_distance];
+                self.copy_remaining -= 1;
+                return self.record(byte).map(Some);
+            }
+            match &mut self.block {
+                InflateBlock::GzipHeader => {
+                    self.read_gzip_header()?;
+                    self.block = InflateBlock::DeflateHeader;
+                }
+                InflateBlock::DeflateHeader => {
+                    self.final_block = self.bits.bits(1)? != 0;
+                    self.block = match self.bits.bits(2)? {
+                        0 => {
+                            self.bits.align();
+                            let length = self.bits.bits(16)? as u16;
+                            if self.bits.bits(16)? as u16 != !length {
+                                return Err(invalid_gzip());
+                            }
+                            InflateBlock::Stored(usize::from(length))
+                        }
+                        1 => {
+                            let (literals, distances) =
+                                fixed_trees().map_err(|_| invalid_gzip())?;
+                            InflateBlock::Huffman {
+                                literals,
+                                distances,
+                            }
+                        }
+                        2 => {
+                            let (literals, distances) = dynamic_trees(&mut self.bits)?;
+                            InflateBlock::Huffman {
+                                literals,
+                                distances,
+                            }
+                        }
+                        _ => return Err(invalid_gzip()),
+                    };
+                }
+                InflateBlock::Stored(remaining) => {
+                    if *remaining == 0 {
+                        self.block = if self.final_block {
+                            InflateBlock::Trailer
+                        } else {
+                            InflateBlock::DeflateHeader
+                        };
+                        continue;
+                    }
+                    *remaining -= 1;
+                    let byte = self.bits.bits(8)? as u8;
+                    return self.record(byte).map(Some);
+                }
+                InflateBlock::Huffman {
+                    literals,
+                    distances,
+                } => match literals.decode(&mut self.bits)? {
+                    literal @ 0..=255 => return self.record(literal as u8).map(Some),
+                    256 => {
+                        self.block = if self.final_block {
+                            InflateBlock::Trailer
+                        } else {
+                            InflateBlock::DeflateHeader
+                        };
+                    }
+                    symbol @ 257..=285 => {
+                        let index = symbol as usize - 257;
+                        self.copy_remaining =
+                            LENGTH_BASE[index] + self.bits.bits(LENGTH_EXTRA[index])? as usize;
+                        let distance_symbol = distances.decode(&mut self.bits)? as usize;
+                        if distance_symbol >= DIST_BASE.len() {
+                            return Err(invalid_gzip());
+                        }
+                        self.copy_distance = DIST_BASE[distance_symbol]
+                            + self.bits.bits(DIST_EXTRA[distance_symbol])? as usize;
+                    }
+                    _ => return Err(invalid_gzip()),
+                },
+                InflateBlock::Trailer => {
+                    self.trailer()?;
+                    self.block = InflateBlock::Done;
+                    return Ok(None);
+                }
+                InflateBlock::Done => return Ok(None),
+            }
+        }
+    }
 }
 
-fn gzip_decompress(bytes: &[u8], limit: usize) -> Result<Vec<u8>, ()> {
-    if bytes.len() < 18 || bytes[..3] != [0x1f, 0x8b, 8] {
-        return Err(());
-    }
-    let flags = bytes[3];
-    if flags & 0xe0 != 0 {
-        return Err(());
-    }
-    let mut cursor = 10usize;
-    let mut skip_z = |cursor: &mut usize| -> Result<(), ()> {
-        while *cursor < bytes.len() && bytes[*cursor] != 0 {
-            *cursor += 1;
+impl<R: Read> Read for GzipReader<R> {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        if self.failed {
+            return Err(invalid_gzip());
         }
-        if *cursor == bytes.len() {
-            return Err(());
+        if out.is_empty() {
+            return Ok(0);
         }
-        *cursor += 1;
-        Ok(())
-    };
-    if flags & 4 != 0 {
-        if cursor + 2 > bytes.len() {
-            return Err(());
+        let mut written = 0;
+        while written < out.len() {
+            match self.next_decoded() {
+                Ok(Some(byte)) => {
+                    out[written] = byte;
+                    written += 1;
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    self.failed = true;
+                    if written == 0 {
+                        return Err(error);
+                    }
+                    break;
+                }
+            }
         }
-        let length = usize::from(u16::from_le_bytes([bytes[cursor], bytes[cursor + 1]]));
-        cursor += 2;
-        cursor = cursor
-            .checked_add(length)
-            .filter(|end| *end <= bytes.len())
-            .ok_or(())?;
+        Ok(written)
     }
-    if flags & 8 != 0 {
-        skip_z(&mut cursor)?;
-    }
-    if flags & 16 != 0 {
-        skip_z(&mut cursor)?;
-    }
-    if flags & 2 != 0 {
-        cursor = cursor
-            .checked_add(2)
-            .filter(|end| *end <= bytes.len())
-            .ok_or(())?;
-    }
-    if cursor + 8 > bytes.len() {
-        return Err(());
-    }
-    let trailer = bytes.len() - 8;
-    let out = inflate(&bytes[cursor..trailer], limit)?;
-    let expected_crc = u32::from_le_bytes(bytes[trailer..trailer + 4].try_into().map_err(|_| ())?);
-    let expected_size = u32::from_le_bytes(bytes[trailer + 4..].try_into().map_err(|_| ())?);
-    if crc32(&out) != expected_crc || out.len() as u32 != expected_size {
-        return Err(());
-    }
-    Ok(out)
 }
 
 const HPACK_STATIC: [(&str, &str); 61] = [

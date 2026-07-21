@@ -95,6 +95,128 @@ fn run() {{
 }
 
 #[test]
+fn gzip_decoding_streams_before_the_response_finishes() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let signal = TcpListener::bind("127.0.0.1:0").unwrap();
+    let signal_addr = signal.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        request_head(&mut stream);
+        let prefix = [
+            0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0, 0, // gzip header
+            0x00, 0x05, 0x00, 0xfa, 0xff, b'h', b'e', b'l', b'l', b'o',
+        ];
+        let suffix = [
+            0x01, 0x05, 0x00, 0xfa, 0xff, b'w', b'o', b'r', b'l', b'd', // final block
+            0xad, 0x20, 0xeb, 0xf9, 0x0a, 0, 0, 0, // CRC32 + size
+        ];
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            prefix.len() + suffix.len()
+        )
+        .unwrap();
+        stream.write_all(&prefix).unwrap();
+        stream.flush().unwrap();
+
+        signal.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match signal.accept() {
+                Ok(_) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "decoder buffered the unfinished gzip response"
+                    );
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("gzip signal accept failed: {error}"),
+            }
+        }
+        stream.write_all(&suffix).unwrap();
+        drop(stream);
+        let (mut stream, _) = listener.accept().unwrap();
+        request_head(&mut stream);
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Encoding: br\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            )
+            .unwrap();
+    });
+
+    let dir = std::env::temp_dir().join(format!("jet_http_client_gzip_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let shown = dir.join("seed.jet");
+    let source = "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+    fs::write(&shown, source).unwrap();
+    let link = jet::compile_with_path(source, shown.to_str().unwrap())
+        .unwrap()
+        .ffi
+        .expect("HTTP client bridge");
+    let harness = dir.join("gzip_stream.rs");
+    let bin = dir.join("gzip_stream");
+    fs::write(
+        &harness,
+        r#"
+fn main() {
+    let url = std::env::args().nth(1).unwrap();
+    let signal = std::env::args().nth(2).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let response = bridge::jet_http_client_send_with_impl(
+        root, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), Some(b"hello".to_vec()));
+    std::net::TcpStream::connect(signal).unwrap();
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), Some(b"world".to_vec()));
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), None);
+    assert_eq!(bridge::jet_http_client_send_with_impl(
+        root, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+    ).unwrap_err(), bridge::JetHttpBridgeError::Protocol);
+}
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "bridge gzip harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin)
+        .arg(format!("http://{addr}/gzip"))
+        .arg(signal_addr.to_string())
+        .output()
+        .unwrap();
+    let server_result = server.join();
+    assert!(
+        output.status.success(),
+        "bridge gzip harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    server_result.unwrap();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn unread_body_is_not_reused() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
