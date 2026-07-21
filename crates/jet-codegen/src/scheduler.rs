@@ -458,6 +458,32 @@ pub fn jet_scheduler_task_cancelled() -> bool {
         .unwrap_or(false)
 }
 
+pub fn jet_scheduler_wait_point_cancelled() -> bool {
+    jet_scheduler_task_cancelled() && !jet_scheduler_shielded()
+}
+
+thread_local! {
+    static JET_BLOCKING_WAIT_COMPENSATION: std::cell::RefCell<Vec<Option<Arc<AtomicBool>>>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+pub fn jet_scheduler_blocking_wait_enter() {
+    let token = current_task_control().map(|_| {
+        let done=Arc::new(AtomicBool::new(false));
+        let worker_done=done.clone();
+        let sched=scheduler();
+        thread::Builder::new().name("jet-blocking-compensation".into()).spawn(move||sched.compensation_loop(worker_done)).unwrap_or_else(|_|jet_scheduler_fatal("could not start scheduler compensation worker"));
+        done
+    });
+    JET_BLOCKING_WAIT_COMPENSATION.with(|stack|stack.borrow_mut().push(token));
+}
+
+pub fn jet_scheduler_blocking_wait_leave() {
+    if let Some(Some(done))=JET_BLOCKING_WAIT_COMPENSATION.with(|stack|stack.borrow_mut().pop()) {
+        done.store(true,Ordering::Release);
+        scheduler().notify.notify_all();
+    }
+}
+
 // ── M2: timer sleep (park/wake, not thread::sleep on pool workers) ───────────
 
 struct TimerEntry {
@@ -1044,6 +1070,13 @@ impl Scheduler {
                 .notify
                 .wait_timeout(g, Duration::from_millis(10))
                 .unwrap();
+        }
+    }
+
+    fn compensation_loop(self:&Arc<Self>,done:Arc<AtomicBool>){
+        while !done.load(Ordering::Acquire){
+            if let Some(job)=self.take_work(0){self.live.fetch_add(1,Ordering::Relaxed);job();self.live.fetch_sub(1,Ordering::Relaxed);self.notify.notify_one();continue}
+            let guard=self.global.lock().unwrap();let _=self.notify.wait_timeout(guard,Duration::from_millis(2)).unwrap();
         }
     }
 

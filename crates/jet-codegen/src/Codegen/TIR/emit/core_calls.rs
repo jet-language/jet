@@ -1295,7 +1295,7 @@ pub(crate) fn emit_tir_core_call(
         ),
         ("jet.crypto", "password_hash") => {
             format!(
-                "{}(&({}), jet_scheduler_task_cancelled, jet_task_deliver_cancel)",
+                "{}(&({}), jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)",
                 regex_fn("jet_crypto_password_hash_typed_cancel_impl"),
                 arg(0)
             )
@@ -1307,7 +1307,7 @@ pub(crate) fn emit_tir_core_call(
             arg(1)
         ),
         ("jet.crypto", "password_verify") => format!(
-            "{}(&({}), &({}), jet_scheduler_task_cancelled, jet_task_deliver_cancel)",
+            "{}(&({}), &({}), jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)",
             regex_fn("jet_crypto_password_verify_typed_cancel_impl"),
             arg(0),
             arg(1)
@@ -1408,7 +1408,7 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}), &({}), {})", regex_fn("jet_crypto_expert_x25519_impl"), arg(0), arg(1), reject_all_zero)
         }
         ("core.crypto.expert", "hkdf_sha256") => format!("{}(&({}), &({}), &({}), {})", regex_fn("jet_crypto_expert_hkdf_sha256_impl"), arg(0), arg(1), arg(2), arg(3)),
-        ("core.crypto.expert", "argon2id") => format!("{}(&({}), &({}), {}, {}, {}, {}, jet_scheduler_task_cancelled, jet_task_deliver_cancel)", regex_fn("jet_crypto_expert_argon2id_cancel_impl"), arg(0), arg(1), arg(2), arg(3), arg(4), arg(5)),
+        ("core.crypto.expert", "argon2id") => format!("{}(&({}), &({}), {}, {}, {}, {}, jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)", regex_fn("jet_crypto_expert_argon2id_cancel_impl"), arg(0), arg(1), arg(2), arg(3), arg(4), arg(5)),
         ("core.crypto.expert", "secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_secret_bytes_impl"), arg(0)),
         ("core.crypto.expert", "signing_key_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_signing_key_bytes_impl"), arg(0)),
         ("core.crypto.expert", "x25519_secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_x25519_secret_bytes_impl"), arg(0)),
@@ -1460,9 +1460,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.vault", "export_to_recipients") =>
             format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_export_to_recipients_impl"), vault_rust(), arg(0), arg(1)),
         ("core.vault", "export_to_passphrase") =>
-            format!("{}::<{}>(&({}), &({}), jet_scheduler_task_cancelled, jet_task_deliver_cancel)", regex_fn("jet_vault_export_to_passphrase_cancel_impl"), vault_rust(), arg(0), arg(1)),
+            format!("{}::<{}>(&({}), &({}), jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)", regex_fn("jet_vault_export_to_passphrase_cancel_impl"), vault_rust(), arg(0), arg(1)),
         ("core.vault", "prepare_import_wrapped") =>
-            format!("{}::<{}>(&({}), ({}).clone(), ({}).clone(), jet_scheduler_task_cancelled, jet_task_deliver_cancel)", regex_fn("jet_vault_prepare_import_wrapped_cancel_impl"), vault_rust(), arg(0), arg(1), arg(2)),
+            format!("{}::<{}>(&({}), ({}).clone(), ({}).clone(), jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)", regex_fn("jet_vault_prepare_import_wrapped_cancel_impl"), vault_rust(), arg(0), arg(1), arg(2)),
         ("core.vault", "authorize_wrapped_import") =>
             format!("{}::<{}>(&({}), &({}))", regex_fn("jet_vault_authorize_wrapped_import_impl"), vault_rust(), arg(0), arg(1)),
         ("core.vault", "commit_import_wrapped") =>

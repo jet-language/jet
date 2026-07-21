@@ -1,3 +1,4 @@
+use jet_codegen::scheduler::*;
 include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 include!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
 include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
@@ -109,8 +110,8 @@ mod vault_key_wrap_tests {
         });
         let one = jvkw_export_to_recipients::<JetSigningKey>(signing_origin.clone(), Zeroizing(signing_bytes.clone()), signing_public, 1_700_000_000_123, &vec![recipients[0].clone()]).unwrap();
         let sixteen = jvkw_export_to_recipients::<JetX25519SecretKey>(x25519_origin.clone(), Zeroizing(x25519_bytes.clone()), x25519_public, 1_700_000_000_123, &recipients).unwrap();
-        let pass_signing = jvkw_export_to_passphrase::<JetSigningKey>(signing_origin, Zeroizing(signing_bytes), signing_public, 1_700_000_000_123, &passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel).unwrap();
-        let pass_x25519 = jvkw_export_to_passphrase::<JetX25519SecretKey>(x25519_origin, Zeroizing(x25519_bytes), x25519_public, 1_700_000_000_123, &passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel).unwrap();
+        let pass_signing = jvkw_export_to_passphrase::<JetSigningKey>(signing_origin, Zeroizing(signing_bytes), signing_public, 1_700_000_000_123, &passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel,jet_pwhash_wait_noop,jet_pwhash_wait_noop).unwrap();
+        let pass_x25519 = jvkw_export_to_passphrase::<JetX25519SecretKey>(x25519_origin, Zeroizing(x25519_bytes), x25519_public, 1_700_000_000_123, &passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel,jet_pwhash_wait_noop,jet_pwhash_wait_noop).unwrap();
         let hashes: Vec<String> = [&one, &sixteen, &pass_signing, &pass_x25519].into_iter()
             .map(|wrapped| hex_bytes(&vault_hash(&[&wrapped.bytes()])))
             .collect();
@@ -169,6 +170,9 @@ mod vault_key_wrap_tests {
         jet_vault_keywrap_reset_test_crypto_counts();
         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "copy", wrapped.clone(), JetVaultKeyUnlock::Recipient(&wrong)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
         assert_eq!(jet_vault_keywrap_test_recipient_open_count(), 1, "no-match executes exactly one dummy X25519/HKDF/AEAD path");
+        assert_eq!(jet_vault_keywrap_test_x25519_count(), 1);
+        assert_eq!(jet_vault_keywrap_test_hkdf_count(), 2);
+        assert_eq!(jet_vault_keywrap_test_aead_count(), 1);
         let phrase = Secret(b"sixteen-byte passphrase".to_vec());
         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "copy", wrapped.clone(), JetVaultKeyUnlock::Passphrase(&phrase)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetX25519SecretKey>(&root, "copy", wrapped.clone(), JetVaultKeyUnlock::Recipient(&recipient)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
@@ -188,7 +192,7 @@ mod vault_key_wrap_tests {
         let recipient = jet_crypto_x25519_generate_impl().unwrap();
         let public = jet_crypto_x25519_public_typed_impl(&recipient);
         let wrapped = jet_vault_export_to_recipients_at(&root, &reference, &vec![public]).unwrap();
-        let expected_export = format!("JVLA1 action=export mode=recipient outcome=BearerCopy key_type=1 origin_repo={} origin_name=72656c65617365 origin_generation={} origin_id={} origin_hash={} destination=- bearer_copy=true source_revocation_recall=false mutation=true", vault_uuid_hex(&reference.repo_uuid), reference.generation, hex_bytes(&reference.opaque_id), hex_bytes(&reference.record_hash));
+        let expected_export = format!("JVLA1 action=export mode=recipient outcome=BearerCopy key_type=1 origin_repo={} origin_name=72656c65617365 origin_generation={} origin_id={} origin_hash={} destination=- bearer_copy=true source_revocation_recall=false mutation=false", vault_uuid_hex(&reference.repo_uuid), reference.generation, hex_bytes(&reference.opaque_id), hex_bytes(&reference.record_hash));
         assert_eq!(std::fs::read_to_string(root.join(".jet/vault-audit")).unwrap().lines().last().unwrap(), expected_export);
         let revision = decoded_store(&root).revision;
         let existing = import::<JetSigningKey>(&root, "ignored", wrapped.clone(), JetVaultKeyUnlock::Recipient(&recipient)).unwrap();
@@ -274,7 +278,9 @@ mod vault_key_wrap_tests {
         assert_eq!(jet_vault_export_to_passphrase_at(&root, &reference, &weak).unwrap_err(), JetVaultKeyWrapError::WeakPassphrase);
         jet_crypto_entropy_set_test_provider(|_| JetCryptoEntropyStep::Failed);
         let recipient = JetX25519PublicKey([9; 32]);
+        let audit_before = std::fs::read_to_string(root.join(".jet/vault-audit")).unwrap_or_default();
         assert_eq!(jet_vault_export_to_recipients_at(&root, &reference, &vec![recipient]).unwrap_err(), JetVaultKeyWrapError::EntropyUnavailable);
+        assert_eq!(std::fs::read_to_string(root.join(".jet/vault-audit")).unwrap_or_default(), audit_before, "failed export records no BearerCopy success");
         jet_crypto_entropy_clear_test_provider();
 
         let phrase = Secret(b"sixteen-byte passphrase".to_vec());
@@ -283,6 +289,7 @@ mod vault_key_wrap_tests {
         jet_vault_keywrap_reset_test_crypto_counts();
         assert_eq!(jet_vault_prepare_import_wrapped_at::<JetSigningKey>(&root, "wrong", wrapped.clone(), JetVaultKeyUnlock::Passphrase(&wrong_phrase)).unwrap_err(), JetVaultKeyWrapError::OpenFailed);
         assert_eq!(jet_vault_keywrap_test_passphrase_open_count(), 1, "wrong passphrase executes one admitted Argon2 class");
+        assert_eq!(jet_pwhash_test_runs(), 1, "counter sits on actual Argon2 backend invocation");
         let shown = format!("{wrapped:?} {wrapped}");
         assert!(shown.contains("mode:passphrase"));
         assert!(shown.contains("type:signing"));
@@ -330,9 +337,20 @@ mod vault_key_wrap_tests {
         );
         assert_eq!(jet_vault_keywrap_test_recipient_open_count(), 0);
         assert_eq!(jet_vault_keywrap_test_passphrase_open_count(), 0);
+        assert_eq!(jet_vault_keywrap_test_x25519_count(), 0);
+        assert_eq!(jet_vault_keywrap_test_hkdf_count(), 0);
+        assert_eq!(jet_vault_keywrap_test_aead_count(), 0);
+        assert_eq!(jet_pwhash_test_runs(), 0);
         jet_vault_clear_test_authorizer();
         std::fs::remove_dir_all(source).unwrap();
         std::fs::remove_dir_all(destination).unwrap();
+    }
+
+    #[test]
+    fn provider_platform_allowlist_is_exact() {
+        assert!(jvkw_provider_platform_supported("linux","gnu","64","x86_64"));
+        assert!(jvkw_provider_platform_supported("linux","gnu","64","aarch64"));
+        for target in [("linux","musl","64","x86_64"),("linux","gnu","32","x86"),("linux","gnu","64","riscv64"),("none","","64","x86_64")] { assert!(!jvkw_provider_platform_supported(target.0,target.1,target.2,target.3),"unsupported target admitted: {target:?}"); }
     }
 
     #[test]
@@ -391,5 +409,39 @@ mod vault_key_wrap_tests {
         jet_pwhash_test_set_budget(weight - 1_024);
         assert!(matches!(jet_pwhash_test_run(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), None), Err(JetPwhashRunError::ResourceUnavailable)));
         assert_eq!(jet_pwhash_test_snapshot(), (0, 0, before_exhaustion), "budget exhaustion allocates no Argon2 arena");
+    }
+
+    #[test]
+    fn pwhash_wait_compensates_one_worker_and_arbitrates_cancel_with_shield() {
+        std::env::set_var("JET_SCHEDULER_THREADS", "1");
+        let held_entered=std::sync::Arc::new(std::sync::Barrier::new(2));
+        let held_release=std::sync::Arc::new(std::sync::Barrier::new(2));
+        let held=jet_scheduler_spawn({let entered=held_entered.clone();let release=held_release.clone();move||jet_pwhash_test_run_with(jet_crypto_never_cancelled,Some((entered,release)),None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave)});
+        held_entered.wait();
+        let(progress_tx,progress_rx)=std::sync::mpsc::channel();
+        let progress=jet_scheduler_spawn(move||progress_tx.send(()).unwrap());
+        progress_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("compensation worker must run unrelated task while sole configured worker waits");
+        held_release.wait();
+        assert!(held.join().is_ok());progress.join();
+
+        let race_entered=std::sync::Arc::new(std::sync::Barrier::new(2));
+        let race_release=std::sync::Arc::new(std::sync::Barrier::new(2));
+        let race_control=JetTaskControl::new();
+        let race=jet_scheduler_spawn_with_control({let entered=race_entered.clone();let release=race_release.clone();move||jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,None,Some((entered,release)),jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave)},race_control.clone());
+        race_entered.wait();race_control.cancel();race_release.wait();
+        assert!(matches!(race.join(),Err(JetPwhashRunError::Cancelled)),"cancellation observed before final return beats completed success");
+
+        let shield_entered=std::sync::Arc::new(std::sync::Barrier::new(2));
+        let shield_release=std::sync::Arc::new(std::sync::Barrier::new(2));
+        let shield_completed=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shield_after=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let(exit_tx,exit_rx)=std::sync::mpsc::channel();
+        struct ExitNotice(std::sync::mpsc::Sender<()>);impl Drop for ExitNotice{fn drop(&mut self){let _=self.0.send(());}}
+        let shield_control=JetTaskControl::new();
+        let _shield=jet_scheduler_spawn_with_control({let entered=shield_entered.clone();let release=shield_release.clone();let completed=shield_completed.clone();let after=shield_after.clone();move||{let _exit=ExitNotice(exit_tx);jet_scheduler_shield_enter();let result=jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,Some((entered,release)),None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave);assert!(result.is_ok());completed.store(true,std::sync::atomic::Ordering::SeqCst);jet_scheduler_shield_leave();after.store(true,std::sync::atomic::Ordering::SeqCst);}},shield_control.clone());
+        shield_entered.wait();shield_control.cancel();shield_release.wait();
+        exit_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("shielded task must exit at deferred cancellation");
+        assert!(shield_completed.load(std::sync::atomic::Ordering::SeqCst),"shielded KDF completes before deferred cancellation lands");
+        assert!(!shield_after.load(std::sync::atomic::Ordering::SeqCst),"deferred cancellation lands at shield exit");
     }
 }

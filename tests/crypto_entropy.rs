@@ -34,7 +34,7 @@ edition = "2021"
 
 [dependencies]
 aes-gcm = "0.10"
-argon2 = "0.5"
+argon2 = { version = "=0.5.3", default-features = false, features = ["alloc", "password-hash"] }
 blake3 = "1"
 chacha20poly1305 = "0.10"
 ed25519-dalek = "2"

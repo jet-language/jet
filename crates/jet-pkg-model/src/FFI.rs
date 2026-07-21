@@ -952,7 +952,7 @@ mod net_tls_close_tests {
 const FEATURED_DEPS: &[(&str, &str)] = &[
     (
         "argon2",
-        "{ version = \"0.5\", features = [\"zeroize\"] }",
+        "{ version = \"=0.5.3\", default-features = false, features = [\"alloc\", \"password-hash\"] }",
     ),
     (
         "rusqlite",
@@ -992,7 +992,7 @@ pub const CHACHA_POLY_CRATE_SPEC: (&str, &str) = ("chacha20poly1305", "0.10");
 pub const ED25519_CRATE_SPEC: (&str, &str) = ("ed25519-dalek", "2");
 
 /// The `argon2` crate version backing `core.crypto.password_hash` (D-PWHASH1).
-pub const ARGON2_CRATE_SPEC: (&str, &str) = ("argon2", "0.5");
+pub const ARGON2_CRATE_SPEC: (&str, &str) = ("argon2", "=0.5.3");
 
 /// The `sha2` crate version backing SHA-512 + HKDF-SHA256 (D-CRYPTO-SUITE1).
 pub const SHA2_CRATE_SPEC: (&str, &str) = ("sha2", "0.10");

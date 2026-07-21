@@ -202,11 +202,17 @@ thread_local! {
     static JVKW_TEST_TIME: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
     static JVKW_RECIPIENT_OPEN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static JVKW_PASSPHRASE_OPEN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static JVKW_X25519_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static JVKW_HKDF_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static JVKW_AEAD_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 #[cfg(test)] pub fn jet_vault_keywrap_set_test_time(value: Option<u64>) { JVKW_TEST_TIME.with(|slot| slot.set(value)); }
 #[cfg(test)] pub fn jet_vault_keywrap_test_recipient_open_count() -> usize { JVKW_RECIPIENT_OPEN_COUNT.with(|slot| slot.get()) }
 #[cfg(test)] pub fn jet_vault_keywrap_test_passphrase_open_count() -> usize { JVKW_PASSPHRASE_OPEN_COUNT.with(|slot| slot.get()) }
-#[cfg(test)] pub fn jet_vault_keywrap_reset_test_crypto_counts() { JVKW_RECIPIENT_OPEN_COUNT.with(|slot| slot.set(0)); JVKW_PASSPHRASE_OPEN_COUNT.with(|slot| slot.set(0)); }
+#[cfg(test)] pub fn jet_vault_keywrap_test_x25519_count() -> usize { JVKW_X25519_COUNT.with(|slot| slot.get()) }
+#[cfg(test)] pub fn jet_vault_keywrap_test_hkdf_count() -> usize { JVKW_HKDF_COUNT.with(|slot| slot.get()) }
+#[cfg(test)] pub fn jet_vault_keywrap_test_aead_count() -> usize { JVKW_AEAD_COUNT.with(|slot| slot.get()) }
+#[cfg(test)] pub fn jet_vault_keywrap_reset_test_crypto_counts() { JVKW_RECIPIENT_OPEN_COUNT.with(|slot| slot.set(0)); JVKW_PASSPHRASE_OPEN_COUNT.with(|slot| slot.set(0)); JVKW_X25519_COUNT.with(|slot| slot.set(0)); JVKW_HKDF_COUNT.with(|slot| slot.set(0)); JVKW_AEAD_COUNT.with(|slot| slot.set(0)); JET_PWHASH_TEST_RUNS.store(0,std::sync::atomic::Ordering::SeqCst); }
 fn jvkw_now_ms() -> Result<u64, JetVaultKeyWrapError> {
     #[cfg(test)] if let Some(value) = JVKW_TEST_TIME.with(|slot| slot.get()) { return Ok(value); }
     u64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_| JetVaultKeyWrapError::Internal { incident_id: "jvkw-clock" })?.as_millis())
@@ -245,13 +251,11 @@ fn jvkw_common(
     Ok(())
 }
 
-fn jvkw_source<T: JetVaultKey>(root: &std::path::Path, reference: &JetVaultKeyRef<T>, mode: JetVaultKeyWrapMode) -> Result<(JetVaultOrigin, Zeroizing<Vec<u8>>, [u8; 32]), JetVaultKeyWrapError> {
+fn jvkw_source<T: JetVaultKey>(root: &std::path::Path, reference: &JetVaultKeyRef<T>) -> Result<(JetVaultOrigin, Zeroizing<Vec<u8>>, [u8; 32]), JetVaultKeyWrapError> {
     let (store, _, _) = vault_read_contents_at(root)?;
     let record = vault_find(&store, reference)?;
     if record.status == JetVaultKeyStatus::Revoked { return Err(JetVaultKeyWrapError::Vault(JetVaultError::Revoked)); }
     let origin = JetVaultOrigin { repo_uuid: reference.repo_uuid, name: reference.name.clone(), generation: reference.generation, opaque_id: reference.opaque_id, record_hash: reference.record_hash };
-    let mode = match mode { JetVaultKeyWrapMode::Recipient => "recipient", JetVaultKeyWrapMode::Passphrase => "passphrase" };
-    vault_audit_append_at(root, "export", mode, "BearerCopy", T::TAG, &origin, None)?;
     let key = Zeroizing(record.key.clone());
     let typed = T::from_bytes(key.0.clone()).map_err(JetVaultKeyWrapError::Vault)?;
     let public: [u8; 32] = typed.public_bytes().try_into().map_err(|_| JetVaultKeyWrapError::Internal { incident_id: "jvkw-public" })?;
@@ -277,9 +281,11 @@ pub fn jet_vault_export_to_recipients_at<T: JetVaultKey>(
     reference: &JetVaultKeyRef<T>,
     recipients: &Vec<JetX25519PublicKey>,
 ) -> Result<JetWrappedVaultKey, JetVaultKeyWrapError> {
+    jvkw_provider_preflight(root)?;
     if !(1..=16).contains(&recipients.len()) { return Err(JetVaultKeyWrapError::InvalidLength); }
-    let (origin, key, public) = jvkw_source(root, reference, JetVaultKeyWrapMode::Recipient)?;
-    jvkw_export_to_recipients::<T>(origin, key, public, jvkw_now_ms()?, recipients)
+    let (origin, key, public) = jvkw_source(root, reference)?;
+    let wrapped=jvkw_export_to_recipients::<T>(origin.clone(), key, public, jvkw_now_ms()?, recipients)?;
+    vault_audit_append_at(root,"export","recipient","BearerCopy",T::TAG,&origin,None)?;Ok(wrapped)
 }
 
 fn jvkw_export_to_recipients<T: JetVaultKey>(
@@ -324,10 +330,10 @@ fn jvkw_export_to_recipients<T: JetVaultKey>(
     jvkw_seal_payload(header, &backup_key.0, &payload_nonce.0, &key.0, &public)
 }
 
-fn jvkw_argon(password: &Secret, salt: &[u8; 16], cancelled: fn() -> bool, cancel_outcome: fn()) -> Result<Zeroizing<[u8; 32]>, JetVaultKeyWrapError> {
+fn jvkw_argon(password: &Secret, salt: &[u8; 16], cancelled: fn() -> bool, cancel_outcome: fn(),wait_enter:fn(),wait_leave:fn()) -> Result<Zeroizing<[u8; 32]>, JetVaultKeyWrapError> {
     if !(16..=1_048_576).contains(&password.0.len()) { return Err(JetVaultKeyWrapError::WeakPassphrase); }
     let params = argon2::Params::new(65_536, 3, 1, Some(32)).map_err(|_| JetVaultKeyWrapError::Internal { incident_id: "jvkw-argon-params" })?;
-    let output = match jet_crypto_argon2id_run(&password.0, salt, params, cancelled) {
+    let output = match jet_crypto_argon2id_run(&password.0, salt, params, cancelled,wait_enter,wait_leave) {
         Ok(output) => output,
         Err(JetPwhashRunError::Cancelled) => { cancel_outcome(); return Err(JetVaultKeyWrapError::Internal { incident_id: "cancel-returned" }); }
         Err(JetPwhashRunError::ResourceUnavailable) => return Err(JetVaultKeyWrapError::ResourceUnavailable),
@@ -341,7 +347,7 @@ pub fn jet_vault_export_to_passphrase_at<T: JetVaultKey>(
     reference: &JetVaultKeyRef<T>,
     passphrase: &Secret,
 ) -> Result<JetWrappedVaultKey, JetVaultKeyWrapError> {
-    jet_vault_export_to_passphrase_at_with_cancel(root, reference, passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel)
+    jet_vault_export_to_passphrase_at_with_cancel(root, reference, passphrase, jet_crypto_never_cancelled, jet_crypto_ignore_cancel,jet_pwhash_wait_noop,jet_pwhash_wait_noop)
 }
 
 fn jet_vault_export_to_passphrase_at_with_cancel<T: JetVaultKey>(
@@ -350,10 +356,14 @@ fn jet_vault_export_to_passphrase_at_with_cancel<T: JetVaultKey>(
     passphrase: &Secret,
     cancelled: fn() -> bool,
     cancel_outcome: fn(),
+    wait_enter:fn(),
+    wait_leave:fn(),
 ) -> Result<JetWrappedVaultKey, JetVaultKeyWrapError> {
+    jvkw_provider_preflight(root)?;
     if !(16..=1_048_576).contains(&passphrase.0.len()) { return Err(JetVaultKeyWrapError::WeakPassphrase); }
-    let (origin, key, public) = jvkw_source(root, reference, JetVaultKeyWrapMode::Passphrase)?;
-    jvkw_export_to_passphrase::<T>(origin, key, public, jvkw_now_ms()?, passphrase, cancelled, cancel_outcome)
+    let (origin, key, public) = jvkw_source(root, reference)?;
+    let wrapped=jvkw_export_to_passphrase::<T>(origin.clone(), key, public, jvkw_now_ms()?, passphrase, cancelled, cancel_outcome,wait_enter,wait_leave)?;
+    vault_audit_append_at(root,"export","passphrase","BearerCopy",T::TAG,&origin,None)?;Ok(wrapped)
 }
 
 fn jvkw_export_to_passphrase<T: JetVaultKey>(
@@ -364,12 +374,14 @@ fn jvkw_export_to_passphrase<T: JetVaultKey>(
     passphrase: &Secret,
     cancelled: fn() -> bool,
     cancel_outcome: fn(),
+    wait_enter:fn(),
+    wait_leave:fn(),
 ) -> Result<JetWrappedVaultKey, JetVaultKeyWrapError> {
     let mut salt = jvkw_random::<16>()?;
     let mut payload_nonce = jvkw_random::<24>()?;
     let mut export_id = jvkw_random::<16>()?;
     if export_id.0 == [0; 16] { return Err(JetVaultKeyWrapError::Internal { incident_id: "jvkw-zero-random" }); }
-    let mut backup_key = jvkw_argon(passphrase, &salt.0, cancelled, cancel_outcome)?;
+    let mut backup_key = jvkw_argon(passphrase, &salt.0, cancelled, cancel_outcome,wait_enter,wait_leave)?;
     let header_len = 122usize.checked_add(origin.name.len()).and_then(|value| value.checked_add(28)).ok_or(JetVaultKeyWrapError::InvalidLength)?;
     let mut header = jvkw_fixed(JetVaultKeyWrapMode::Passphrase, T::TAG, header_len)?;
     jvkw_common(&mut header, origin.repo_uuid, &origin.name, origin.generation, origin.opaque_id, origin.record_hash, created_unix_ms, &export_id.0, &payload_nonce.0)?;
@@ -390,12 +402,16 @@ fn jvkw_open_recipient(parsed: &JvkwParsed, bytes: &[u8], identity: &JetX25519Se
     let stanza_at = stanzas_at + index * JVKW_RECIPIENT_STANZA_LEN;
     let recipient_public: [u8; 32] = bytes[stanza_at..stanza_at + 32].try_into().unwrap();
     #[cfg(test)] JVKW_RECIPIENT_OPEN_COUNT.with(|slot| slot.set(slot.get() + 1));
+    #[cfg(test)] JVKW_X25519_COUNT.with(|slot| slot.set(slot.get() + 1));
     let mut shared = Zeroizing(x25519_checked(private.0, ephemeral).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
     let mut key_info = b"JVKW1 recipient key".to_vec(); key_info.extend_from_slice(&parsed.export_id); key_info.extend_from_slice(&ephemeral); key_info.extend_from_slice(&recipient_public);
     let mut nonce_info = b"JVKW1 recipient nonce".to_vec(); nonce_info.extend_from_slice(&parsed.export_id); nonce_info.extend_from_slice(&ephemeral); nonce_info.extend_from_slice(&recipient_public);
+    #[cfg(test)] JVKW_HKDF_COUNT.with(|slot| slot.set(slot.get() + 1));
     let mut kek = Zeroizing(hkdf32(&shared.0, &salt, &key_info).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
+    #[cfg(test)] JVKW_HKDF_COUNT.with(|slot| slot.set(slot.get() + 1));
     let mut nonce = Zeroizing(hkdf24(&shared.0, &salt, &nonce_info).map_err(|_| JetVaultKeyWrapError::OpenFailed)?);
     let mut aad = b"JVKW1 recipient aad".to_vec(); aad.extend_from_slice(&bytes[..stanzas_at]); aad.extend_from_slice(&recipient_public);
+    #[cfg(test)] JVKW_AEAD_COUNT.with(|slot| slot.set(slot.get() + 1));
     let opened = XChaCha20Poly1305::new_from_slice(&kek.0).map_err(|_| JetVaultKeyWrapError::OpenFailed)?
         .decrypt(XNonce::from_slice(&nonce.0), Payload { msg: &bytes[stanza_at + 32..stanza_at + 80], aad: &aad })
         .map_err(|_| JetVaultKeyWrapError::OpenFailed)?;
@@ -405,14 +421,14 @@ fn jvkw_open_recipient(parsed: &JvkwParsed, bytes: &[u8], identity: &JetX25519Se
     Ok(Zeroizing(backup))
 }
 
-fn jvkw_open<T: JetVaultKey>(wrapped: &JetWrappedVaultKey, unlock: JetVaultKeyUnlock<'_>, cancelled: fn() -> bool, cancel_outcome: fn()) -> Result<(JvkwParsed, Zeroizing<Vec<u8>>, [u8; 32]), JetVaultKeyWrapError> {
+fn jvkw_open<T: JetVaultKey>(wrapped: &JetWrappedVaultKey, unlock: JetVaultKeyUnlock<'_>, cancelled: fn() -> bool, cancel_outcome: fn(),wait_enter:fn(),wait_leave:fn()) -> Result<(JvkwParsed, Zeroizing<Vec<u8>>, [u8; 32]), JetVaultKeyWrapError> {
     let parsed = jvkw_parse(&wrapped.bytes)?;
     let mut backup_key = match (parsed.mode, unlock) {
         (JetVaultKeyWrapMode::Recipient, JetVaultKeyUnlock::Recipient(identity)) => jvkw_open_recipient(&parsed, &wrapped.bytes, identity)?,
         (JetVaultKeyWrapMode::Passphrase, JetVaultKeyUnlock::Passphrase(passphrase)) => {
             let JvkwModeHeader::Passphrase { salt } = parsed.mode_header else { return Err(JetVaultKeyWrapError::OpenFailed); };
             #[cfg(test)] JVKW_PASSPHRASE_OPEN_COUNT.with(|slot| slot.set(slot.get() + 1));
-            jvkw_argon(passphrase, &salt, cancelled, cancel_outcome).map_err(|error| if error == JetVaultKeyWrapError::WeakPassphrase { error } else if error == JetVaultKeyWrapError::ResourceUnavailable { error } else { JetVaultKeyWrapError::OpenFailed })?
+            jvkw_argon(passphrase, &salt, cancelled, cancel_outcome,wait_enter,wait_leave).map_err(|error| if error == JetVaultKeyWrapError::WeakPassphrase { error } else if error == JetVaultKeyWrapError::ResourceUnavailable { error } else { JetVaultKeyWrapError::OpenFailed })?
         }
         _ => return Err(JetVaultKeyWrapError::OpenFailed),
     };
@@ -461,12 +477,13 @@ pub fn jet_vault_prepare_import_wrapped_at<T: JetVaultKey>(
     wrapped: JetWrappedVaultKey,
     unlock: JetVaultKeyUnlock<'_>,
 ) -> Result<JetVaultWrappedImportPlan<T>, JetVaultKeyWrapError> {
-    jet_vault_prepare_import_wrapped_at_with_cancel(root, name, wrapped, unlock, jet_crypto_never_cancelled, jet_crypto_ignore_cancel)
+    jet_vault_prepare_import_wrapped_at_with_cancel(root, name, wrapped, unlock, jet_crypto_never_cancelled, jet_crypto_ignore_cancel,jet_pwhash_wait_noop,jet_pwhash_wait_noop)
 }
 
+#[cfg(test)] fn jvkw_provider_platform_supported(os:&str,env:&str,width:&str,arch:&str)->bool{os=="linux"&&env=="gnu"&&width=="64"&&matches!(arch,"x86_64"|"aarch64")}
 fn jvkw_provider_preflight(root: &std::path::Path) -> Result<(), JetVaultKeyWrapError> {
-    #[cfg(target_os="linux")] { drop(vault_linux_dir(root)?); Ok(()) }
-    #[cfg(not(target_os="linux"))] { let _ = root; Err(JetVaultKeyWrapError::Vault(JetVaultError::UnsupportedProvider)) }
+    #[cfg(all(target_os="linux",target_env="gnu",target_pointer_width="64",any(target_arch="x86_64",target_arch="aarch64")))] { drop(vault_linux_dir(root)?); Ok(()) }
+    #[cfg(not(all(target_os="linux",target_env="gnu",target_pointer_width="64",any(target_arch="x86_64",target_arch="aarch64"))))] { let _ = root; Err(JetVaultKeyWrapError::Vault(JetVaultError::UnsupportedProvider)) }
 }
 
 fn jet_vault_prepare_import_wrapped_at_with_cancel<T: JetVaultKey>(
@@ -476,11 +493,13 @@ fn jet_vault_prepare_import_wrapped_at_with_cancel<T: JetVaultKey>(
     unlock: JetVaultKeyUnlock<'_>,
     cancelled: fn() -> bool,
     cancel_outcome: fn(),
+    wait_enter:fn(),
+    wait_leave:fn(),
 ) -> Result<JetVaultWrappedImportPlan<T>, JetVaultKeyWrapError> {
     jvkw_provider_preflight(root)?;
     jet_vault_validate_name(name)?;
     let wrapped_hash = vault_hash(&[b"JVKW1 wrapped bytes", &wrapped.bytes]);
-    let (parsed, key, public) = jvkw_open::<T>(&wrapped, unlock, cancelled, cancel_outcome)?;
+    let (parsed, key, public) = jvkw_open::<T>(&wrapped, unlock, cancelled, cancel_outcome,wait_enter,wait_leave)?;
     let public_key_hash = vault_hash(&[b"JVLT2 public key", &[T::TAG], &public]);
     let key_digest = vault_key_digest(T::TAG, &key.0);
     let (mut store, start_hash, provider_hash, start_kind) = vault_read_at(root)?;
@@ -571,7 +590,7 @@ pub fn jet_vault_commit_import_wrapped_at<T: JetVaultKey>(
 
 pub fn jet_vault_export_to_recipients_impl<T: JetVaultKey>(reference: &JetVaultKeyRef<T>, recipients: &Vec<JetX25519PublicKey>) -> Result<JetWrappedVaultKey, JetVaultKeyWrapError> { jet_vault_export_to_recipients_at(&vault_cwd(), reference, recipients) }
 pub fn jet_vault_export_to_passphrase_impl<T: JetVaultKey>(reference: &JetVaultKeyRef<T>, passphrase: &Secret) -> Result<JetWrappedVaultKey, JetVaultKeyWrapError> { jet_vault_export_to_passphrase_at(&vault_cwd(), reference, passphrase) }
-pub fn jet_vault_export_to_passphrase_cancel_impl<T: JetVaultKey>(reference: &JetVaultKeyRef<T>, passphrase: &Secret, cancelled: fn() -> bool, cancel_outcome: fn()) -> Result<JetWrappedVaultKey, JetVaultKeyWrapError> { jet_vault_export_to_passphrase_at_with_cancel(&vault_cwd(), reference, passphrase, cancelled, cancel_outcome) }
+pub fn jet_vault_export_to_passphrase_cancel_impl<T: JetVaultKey>(reference: &JetVaultKeyRef<T>, passphrase: &Secret, cancelled: fn() -> bool, cancel_outcome: fn(),wait_enter:fn(),wait_leave:fn()) -> Result<JetWrappedVaultKey, JetVaultKeyWrapError> { jet_vault_export_to_passphrase_at_with_cancel(&vault_cwd(), reference, passphrase, cancelled, cancel_outcome,wait_enter,wait_leave) }
 pub fn jet_vault_prepare_import_wrapped_impl<T: JetVaultKey>(name: &String, wrapped: JetWrappedVaultKey, unlock: JetVaultKeyUnlock<'_>) -> Result<JetVaultWrappedImportPlan<T>, JetVaultKeyWrapError> { jet_vault_prepare_import_wrapped_at(&vault_cwd(), name, wrapped, unlock) }
-pub fn jet_vault_prepare_import_wrapped_cancel_impl<T: JetVaultKey>(name: &String, wrapped: JetWrappedVaultKey, unlock: JetVaultKeyUnlock<'_>, cancelled: fn() -> bool, cancel_outcome: fn()) -> Result<JetVaultWrappedImportPlan<T>, JetVaultKeyWrapError> { jet_vault_prepare_import_wrapped_at_with_cancel(&vault_cwd(), name, wrapped, unlock, cancelled, cancel_outcome) }
+pub fn jet_vault_prepare_import_wrapped_cancel_impl<T: JetVaultKey>(name: &String, wrapped: JetWrappedVaultKey, unlock: JetVaultKeyUnlock<'_>, cancelled: fn() -> bool, cancel_outcome: fn(),wait_enter:fn(),wait_leave:fn()) -> Result<JetVaultWrappedImportPlan<T>, JetVaultKeyWrapError> { jet_vault_prepare_import_wrapped_at_with_cancel(&vault_cwd(), name, wrapped, unlock, cancelled, cancel_outcome,wait_enter,wait_leave) }
 pub fn jet_vault_commit_import_wrapped_impl<T: JetVaultKey>(write: JetVaultWrite<T>, plan: JetVaultWrappedImportPlan<T>) -> Result<JetVaultKeyRef<T>, JetVaultKeyWrapError> { jet_vault_commit_import_wrapped_at(&vault_cwd(), write, plan) }

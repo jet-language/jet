@@ -317,6 +317,12 @@ mod tests {
         assert!(jet_crypto_verify_typed_impl(jet_crypto_signing_public_impl(&signing), &message, signature).unwrap());
         let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
         assert!(jet_crypto_password_verify_typed_impl(&secret, &stored).unwrap());
+        let wrong_algorithm=JetPasswordHash(stored.0.replacen("$argon2id$","$argon2i$",1));
+        assert!(matches!(jet_crypto_password_verify_typed_impl(&secret,&wrong_algorithm),Err(JetCryptoError::InvalidEncoding{..})));
+        assert!(matches!(jet_crypto_password_parse_impl(wrong_algorithm.0),Err(JetCryptoError::InvalidEncoding{..})));
+        let wrong_version=JetPasswordHash(stored.0.replacen("$v=19$","$v=16$",1));
+        assert!(matches!(jet_crypto_password_verify_typed_impl(&secret,&wrong_version),Err(JetCryptoError::InvalidEncoding{..})));
+        assert!(matches!(jet_crypto_password_parse_impl(wrong_version.0),Err(JetCryptoError::InvalidEncoding{..})));
         let wrong = jet_crypto_secret_from_text_impl("wrong".to_string());
         let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
         assert!(!jet_crypto_password_verify_typed_impl(&wrong, &stored).unwrap());

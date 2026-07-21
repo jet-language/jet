@@ -493,7 +493,7 @@ fn vault_audit_append_at(root:&std::path::Path,action:&str,mode:&str,outcome:&st
     let(user,_)=vault_authority_identity()?;
     if !metadata.is_file()||metadata.uid()!=user||metadata.permissions().mode()&0o077!=0{return Err(JetVaultError::UnsupportedProvider)}
     let destination=destination.map(|name|hex_bytes(name.as_bytes())).unwrap_or_else(||"-".into());
-    writeln!(file,"JVLA1 action={action} mode={mode} outcome={outcome} key_type={key_type} origin_repo={} origin_name={} origin_generation={} origin_id={} origin_hash={} destination={} bearer_copy={} source_revocation_recall=false mutation={}",vault_uuid_hex(&origin.repo_uuid),hex_bytes(origin.name.as_bytes()),origin.generation,hex_bytes(&origin.opaque_id),hex_bytes(&origin.record_hash),destination,action=="export",outcome!="AlreadyPresent").map_err(|_|JetVaultError::Io{operation:"audit",redacted_path:"<vault-audit>"})?;
+    writeln!(file,"JVLA1 action={action} mode={mode} outcome={outcome} key_type={key_type} origin_repo={} origin_name={} origin_generation={} origin_id={} origin_hash={} destination={} bearer_copy={} source_revocation_recall=false mutation=false",vault_uuid_hex(&origin.repo_uuid),hex_bytes(origin.name.as_bytes()),origin.generation,hex_bytes(&origin.opaque_id),hex_bytes(&origin.record_hash),destination,action=="export").map_err(|_|JetVaultError::Io{operation:"audit",redacted_path:"<vault-audit>"})?;
     file.sync_all().map_err(|_|JetVaultError::Io{operation:"audit",redacted_path:"<vault-audit>"})?;
     dir.sync_all().map_err(|_|JetVaultError::Io{operation:"audit",redacted_path:"<vault-dir>"})
 }
