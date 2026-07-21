@@ -81,6 +81,33 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
     assert_eq!(aot_stderr, "");
     assert_eq!(aot_stdout, expected);
 
+    let helper = jetpack::FFI::cached_crypto_helper_path();
+    let cache_root = helper
+        .ancestors()
+        .nth(4)
+        .expect("crypto helper lives below its FFI cache root");
+    let manifest = std::fs::read_to_string(cache_root.join("Cargo.toml"))
+        .expect("actual emitted crypto bridge manifest exists");
+    let dependencies = manifest
+        .split_once("[dependencies]\n")
+        .expect("crypto bridge has dependencies")
+        .1;
+    assert_eq!(
+        dependencies,
+        concat!(
+            "aes-gcm = { version = \"=0.10.3\", default-features = false, features = [\"aes\", \"alloc\"] }\n",
+            "argon2 = { version = \"=0.5.3\", default-features = false, features = [\"alloc\", \"password-hash\"] }\n",
+            "blake3 = { version = \"=1.8.5\", default-features = false, features = [\"std\"] }\n",
+            "chacha20poly1305 = { version = \"=0.10.1\", default-features = false, features = [\"alloc\"] }\n",
+            "ed25519-dalek = { version = \"=2.2.0\", default-features = false, features = [\"fast\", \"std\", \"zeroize\"] }\n",
+            "hkdf = { version = \"=0.12.4\", default-features = false, features = [] }\n",
+            "sha2 = { version = \"=0.10.9\", default-features = false, features = [\"std\"] }\n",
+            "subtle = { version = \"=2.6.1\", default-features = false, features = [\"i128\", \"std\"] }\n",
+            "x25519-dalek = { version = \"=2.0.1\", default-features = false, features = [\"alloc\", \"precomputed-tables\", \"zeroize\"] }\n",
+        ),
+        "generated crypto dependencies must be exact and feature-minimal",
+    );
+
     let dev = match dev_iteration(path, false, false) {
         RunOutcome::Ran {
             stdout,

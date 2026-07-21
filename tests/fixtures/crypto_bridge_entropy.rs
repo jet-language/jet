@@ -504,30 +504,43 @@ mod tests {
     }
 
     #[test]
-    fn argon2id_dependency_matches_rfc_9106_vector() {
-        // RFC 9106 section 5.3, including its secret and associated data.
-        let params = argon2::ParamsBuilder::new()
+    fn argon2id_rfc_and_expert_known_answers_kill_argon2i_mutation() {
+        // RFC 9106 section 5.3, including its secret and associated data, runs
+        // through the same queued worker that serves Jet's expert surface.
+        let rfc = jet_pwhash_rfc9106_test_run().expect("canonical Argon2id worker");
+        let rfc_expected = decode_hex(
+            "0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659",
+        );
+        assert_eq!(rfc.bytes(), rfc_expected);
+        let rfc_params = argon2::ParamsBuilder::new()
             .m_cost(32)
             .t_cost(3)
             .p_cost(4)
             .data(argon2::AssociatedData::new(&[0x04; 12]).unwrap())
             .build()
             .unwrap();
-        let engine = argon2::Argon2::new_with_secret(
+        let mut argon2i = [0u8; 32];
+        argon2::Argon2::new_with_secret(
             &[0x03; 8],
-            argon2::Algorithm::Argon2id,
+            argon2::Algorithm::Argon2i,
             argon2::Version::V0x13,
-            params,
+            rfc_params,
         )
+        .unwrap()
+        .hash_password_into(&[0x01; 32], &[0x02; 16], &mut argon2i)
         .unwrap();
-        let mut actual = [0u8; 32];
-        engine
-            .hash_password_into(&[0x01; 32], &[0x02; 16], &mut actual)
-            .unwrap();
-        assert_eq!(
-            actual.to_vec(),
-            decode_hex("0d640df58d78766c08c037a34a8b53c9d01ef0452d75b65eb52520e96b01e659")
+        assert_ne!(argon2i.as_slice(), rfc_expected, "Argon2i mutation must fail the RFC oracle");
+
+        // A public expert KAT independently proves the policy seam reaches the
+        // same worker instead of a direct dependency-only test path.
+        let password = jet_crypto_secret_from_text_impl("password".to_string());
+        let salt = b"somesalt".to_vec();
+        let actual = jet_crypto_expert_argon2id_impl(&password, &salt, 65_536, 2, 1, 32)
+            .expect("canonical expert Argon2id worker");
+        let expected = decode_hex(
+            "09316115d5cf24ed5a15a31a3ba326e5cf32edc24702987c02b6566f61913cf7",
         );
+        assert_eq!(jet_crypto_expert_secret_bytes_impl(&actual), expected);
     }
 
     #[test]
@@ -880,12 +893,36 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn jetc_v2_rejects_oversize_source_before_staging() {
+    fn jetc_v2_streams_exact_max_and_rejects_oversize_before_staging() {
         use std::io::{Read, Seek, SeekFrom, Write};
 
         let root = test_dir("oversize-source");
-        let source = root.join("oversize.bin");
-        let destination = root.join("oversize.jetc");
+        let recipient = jet_crypto_x25519_generate_impl().unwrap();
+        let public = jet_crypto_x25519_public_typed_impl(&recipient);
+
+        let exact = root.join("exact-max.bin");
+        let exact_destination = root.join("exact-max.jetc");
+        let mut sparse = std::fs::File::create(&exact).unwrap();
+        sparse.write_all(b"exact-max-source").unwrap();
+        sparse.set_len(JETC_V2_MAX_PLAINTEXT).unwrap();
+        drop(sparse);
+        assert_eq!(std::fs::metadata(&exact).unwrap().len(), JETC_V2_MAX_PLAINTEXT);
+        arm_eof_after("seal-source-read", 1);
+        assert_eq!(
+            jet_crypto_file_seal_impl(
+                vec![public.clone()],
+                &exact.to_string_lossy().into_owned(),
+                &exact_destination.to_string_lossy().into_owned(),
+                never_cancelled,
+            ),
+            Err(JetFileCryptoError::SourceIo),
+        );
+        assert!(jet_crypto_file_io_test_hits() >= 2, "exact maximum must enter bounded streaming");
+        jet_crypto_clear_file_io_test_fault();
+        assert!(!exact_destination.exists());
+
+        let source = root.join("over-max.bin");
+        let destination = root.join("over-max.jetc");
         let mut sparse = std::fs::File::create(&source).unwrap();
         sparse.write_all(b"oversize-source").unwrap();
         sparse.seek(SeekFrom::Start(JETC_V2_MAX_PLAINTEXT)).unwrap();
@@ -893,10 +930,9 @@ mod tests {
         drop(sparse);
         assert_eq!(std::fs::metadata(&source).unwrap().len(), JETC_V2_MAX_PLAINTEXT + 1);
 
-        let recipient = jet_crypto_x25519_generate_impl().unwrap();
         arm_oversize_boundary_trap();
         assert_eq!(jet_crypto_file_seal_impl(
-            vec![jet_crypto_x25519_public_typed_impl(&recipient)],
+            vec![public],
             &source.to_string_lossy().into_owned(),
             &destination.to_string_lossy().into_owned(),
             cancel_at_boundary,

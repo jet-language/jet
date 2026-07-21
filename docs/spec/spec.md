@@ -2491,9 +2491,10 @@ exit, and publish with atomic no-overwrite semantics only after authentication
 and durable staging. Identity, framing, recipient, and authentication failures
 from safe open collapse to `FileCryptoError.OpenFailed`; no failure publishes a
 partial destination. The current native bridge supplies this runtime on Linux.
-Non-Linux filesystem runtime and platform-matrix proof remain tracked only by
-#526. The ratified Windows delete-on-close and rename implementation remains
-required before cross-platform completion.
+Other targets fail closed and do not claim JETC filesystem support. The
+ratified Windows delete-on-close and rename implementation remains required
+before any future cross-platform completion claim; it is not part of #526's
+entropy-adapter work.
 
 ### HTTPS client default (D-TLS1)
 

@@ -951,8 +951,28 @@ mod net_tls_close_tests {
 /// These are emitted verbatim as the right-hand side of the `name = …` line.
 const FEATURED_DEPS: &[(&str, &str)] = &[
     (
+        "aes-gcm",
+        "{ version = \"=0.10.3\", default-features = false, features = [\"aes\", \"alloc\"] }",
+    ),
+    (
         "argon2",
         "{ version = \"=0.5.3\", default-features = false, features = [\"alloc\", \"password-hash\"] }",
+    ),
+    (
+        "blake3",
+        "{ version = \"=1.8.5\", default-features = false, features = [\"std\"] }",
+    ),
+    (
+        "chacha20poly1305",
+        "{ version = \"=0.10.1\", default-features = false, features = [\"alloc\"] }",
+    ),
+    (
+        "ed25519-dalek",
+        "{ version = \"=2.2.0\", default-features = false, features = [\"fast\", \"std\", \"zeroize\"] }",
+    ),
+    (
+        "hkdf",
+        "{ version = \"=0.12.4\", default-features = false, features = [] }",
     ),
     (
         "rusqlite",
@@ -967,8 +987,20 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
         "{ version = \"0.23\", default-features = false, features = [\"ring\", \"std\", \"tls12\"] }",
     ),
     (
+        "sha2",
+        "{ version = \"=0.10.9\", default-features = false, features = [\"std\"] }",
+    ),
+    (
+        "subtle",
+        "{ version = \"=2.6.1\", default-features = false, features = [\"i128\", \"std\"] }",
+    ),
+    (
         "wasmtime",
         "{ version = \"26\", features = [\"component-model\"] }",
+    ),
+    (
+        "x25519-dalek",
+        "{ version = \"=2.0.1\", default-features = false, features = [\"alloc\", \"precomputed-tables\", \"zeroize\"] }",
     ),
 ];
 
@@ -983,31 +1015,31 @@ const ARCHIVE_RUNTIME: &str =
 const DB_RUNTIME: &str = include_str!("Prelude/Db.rs");
 
 /// The `aes-gcm` crate version backing `core.crypto` envelope (D-DEP-CRYPTO1).
-pub const AES_GCM_CRATE_SPEC: (&str, &str) = ("aes-gcm", "0.10");
+pub const AES_GCM_CRATE_SPEC: (&str, &str) = ("aes-gcm", "=0.10.3");
 
 /// The `chacha20poly1305` crate version backing `core.crypto` envelope (D-DEP-CRYPTO1).
-pub const CHACHA_POLY_CRATE_SPEC: (&str, &str) = ("chacha20poly1305", "0.10");
+pub const CHACHA_POLY_CRATE_SPEC: (&str, &str) = ("chacha20poly1305", "=0.10.1");
 
 /// The `ed25519-dalek` crate version backing `core.crypto.sign/verify` (D-DEP-CRYPTO1).
-pub const ED25519_CRATE_SPEC: (&str, &str) = ("ed25519-dalek", "2");
+pub const ED25519_CRATE_SPEC: (&str, &str) = ("ed25519-dalek", "=2.2.0");
 
 /// The `argon2` crate version backing `core.crypto.password_hash` (D-PWHASH1).
 pub const ARGON2_CRATE_SPEC: (&str, &str) = ("argon2", "=0.5.3");
 
 /// The `sha2` crate version backing SHA-512 + HKDF-SHA256 (D-CRYPTO-SUITE1).
-pub const SHA2_CRATE_SPEC: (&str, &str) = ("sha2", "0.10");
+pub const SHA2_CRATE_SPEC: (&str, &str) = ("sha2", "=0.10.9");
 
 /// The `blake3` crate version backing `core.crypto.blake3_bytes` (D-CRYPTO-SUITE1).
-pub const BLAKE3_CRATE_SPEC: (&str, &str) = ("blake3", "1");
+pub const BLAKE3_CRATE_SPEC: (&str, &str) = ("blake3", "=1.8.5");
 
 /// The `hkdf` crate version backing `core.crypto.hkdf_sha256` (D-CRYPTO-SUITE1).
-pub const HKDF_CRATE_SPEC: (&str, &str) = ("hkdf", "0.12");
+pub const HKDF_CRATE_SPEC: (&str, &str) = ("hkdf", "=0.12.4");
 
 /// The `x25519-dalek` crate version backing key agreement (D-CRYPTO-SUITE1).
-pub const X25519_CRATE_SPEC: (&str, &str) = ("x25519-dalek", "2");
+pub const X25519_CRATE_SPEC: (&str, &str) = ("x25519-dalek", "=2.0.1");
 
 /// Constant-time byte equality helper (D-CRYPTO-SUITE1).
-pub const SUBTLE_CRATE_SPEC: (&str, &str) = ("subtle", "2");
+pub const SUBTLE_CRATE_SPEC: (&str, &str) = ("subtle", "=2.6.1");
 
 /// Hand-written crypto runtime emitted into the bridge crate when `core.crypto`
 /// seal/open/sign/verify is used (D-CRYPTOENV1, D-DEP-CRYPTO1).

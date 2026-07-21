@@ -371,6 +371,7 @@ struct JetPwhashJob {
     params: argon2::Params,
     password: std::sync::Mutex<Option<Zeroizing<Vec<u8>>>>,
     salt: std::sync::Mutex<Option<Zeroizing<Vec<u8>>>>,
+    #[cfg(test)] secret: std::sync::Mutex<Option<Zeroizing<Vec<u8>>>>,
     cancelled: std::sync::atomic::AtomicBool,
     result: std::sync::Mutex<Option<Result<Zeroizing<Vec<u8>>, JetPwhashRunError>>>,
     ready: std::sync::Condvar,
@@ -456,6 +457,7 @@ fn jet_pwhash_worker(pool: std::sync::Arc<JetPwhashPool>) {
         let result = {
             let password = job.password.lock().unwrap().take().unwrap();
             let salt = job.salt.lock().unwrap().take().unwrap();
+            #[cfg(test)] let secret = job.secret.lock().unwrap().take();
             let mut output_bytes=Vec::new();
             let mut block_bytes=Vec::new();
             let allocated=output_bytes.try_reserve_exact(job.params.output_len().unwrap_or(32)).and_then(|_|block_bytes.try_reserve_exact(job.params.block_count()));
@@ -464,8 +466,14 @@ fn jet_pwhash_worker(pool: std::sync::Arc<JetPwhashPool>) {
                 block_bytes.resize(job.params.block_count(),argon2::Block::default());
                 let mut output=Zeroizing(output_bytes);
                 let mut blocks=JetPwhashBlocks(block_bytes);
-                let engine = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, job.params.clone());
-                let derived = engine.hash_password_into_with_memory(&password.0, &salt.0, &mut output.0, &mut blocks.0);
+                #[cfg(test)]
+                let engine = match secret.as_ref() {
+                    Some(secret) => argon2::Argon2::new_with_secret(secret.bytes(), argon2::Algorithm::Argon2id, argon2::Version::V0x13, job.params.clone()).map_err(|_| ()),
+                    None => Ok(argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, job.params.clone())),
+                };
+                #[cfg(not(test))]
+                let engine: Result<argon2::Argon2<'_>, ()> = Ok(argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, job.params.clone()));
+                let derived = engine.and_then(|engine| engine.hash_password_into_with_memory(&password.0, &salt.0, &mut output.0, &mut blocks.0).map_err(|_| ()));
                 drop(blocks);
                 if job.cancelled.load(std::sync::atomic::Ordering::Acquire) {Err(JetPwhashRunError::Cancelled)}else if derived.is_err(){Err(JetPwhashRunError::Backend)}else{Ok(output)}
             }
@@ -489,6 +497,7 @@ fn jet_crypto_argon2id_run_with<F>(
     wait_leave: fn(),
     #[cfg(test)] pause: Option<(std::sync::Arc<std::sync::Barrier>, std::sync::Arc<std::sync::Barrier>)>,
     #[cfg(test)] final_pause: Option<(std::sync::Arc<std::sync::Barrier>, std::sync::Arc<std::sync::Barrier>)>,
+    #[cfg(test)] secret: Option<&[u8]>,
 ) -> Result<Zeroizing<Vec<u8>>, JetPwhashRunError>
 where F: Fn() -> bool {
     let weight_kib = jet_pwhash_weight_kib(params.m_cost() as usize, password.len())?;
@@ -506,6 +515,7 @@ where F: Fn() -> bool {
             id, weight_kib, params,
             password: std::sync::Mutex::new(Some(Zeroizing(password_copy))),
             salt: std::sync::Mutex::new(Some(Zeroizing(salt_copy))),
+            #[cfg(test)] secret: std::sync::Mutex::new(secret.map(|bytes| Zeroizing(bytes.to_vec()))),
             cancelled: std::sync::atomic::AtomicBool::new(false),
             result: std::sync::Mutex::new(None), ready: std::sync::Condvar::new(),
             #[cfg(test)] pause,
@@ -527,6 +537,7 @@ where F: Fn() -> bool {
             if let Some(removed) = removed {
                 drop(removed.password.lock().unwrap().take());
                 drop(removed.salt.lock().unwrap().take());
+                #[cfg(test)] drop(removed.secret.lock().unwrap().take());
                 *removed.result.lock().unwrap() = Some(Err(JetPwhashRunError::Cancelled));
                 removed.ready.notify_one();
                 pool.ready.notify_all();
@@ -550,7 +561,7 @@ where F: Fn() -> bool {
 }
 
 fn jet_crypto_argon2id_run(password: &[u8], salt: &[u8], params: argon2::Params, cancelled: fn() -> bool,wait_enter:fn(),wait_leave:fn()) -> Result<Zeroizing<Vec<u8>>, JetPwhashRunError> {
-    jet_crypto_argon2id_run_with(password, salt, params, cancelled,wait_enter,wait_leave,#[cfg(test)] None,#[cfg(test)] None)
+    jet_crypto_argon2id_run_with(password, salt, params, cancelled,wait_enter,wait_leave,#[cfg(test)] None,#[cfg(test)] None,#[cfg(test)] None)
 }
 
 #[cfg(test)]
@@ -558,9 +569,11 @@ fn jet_pwhash_test_set_budget(kib:usize){JET_PWHASH_TEST_BUDGET_KIB.store(kib,st
 #[cfg(test)]
 fn jet_pwhash_test_snapshot()->(usize,usize,usize){let pool=jet_pwhash_pool().unwrap();let state=pool.state.lock().unwrap();(state.used_kib,state.queue.len(),JET_PWHASH_TEST_RUNS.load(std::sync::atomic::Ordering::SeqCst))}
 #[cfg(test)]
-fn jet_pwhash_test_run(cancelled:std::sync::Arc<std::sync::atomic::AtomicBool>,pause:Option<(std::sync::Arc<std::sync::Barrier>,std::sync::Arc<std::sync::Barrier>)>)->Result<Zeroizing<Vec<u8>>,JetPwhashRunError>{let params=argon2::Params::new(8_192,1,1,Some(16)).unwrap();jet_crypto_argon2id_run_with(b"sixteen-byte-key",b"sixteen-byte-salt",params,move||cancelled.load(std::sync::atomic::Ordering::SeqCst),jet_pwhash_wait_noop,jet_pwhash_wait_noop,pause,None)}
+fn jet_pwhash_test_run(cancelled:std::sync::Arc<std::sync::atomic::AtomicBool>,pause:Option<(std::sync::Arc<std::sync::Barrier>,std::sync::Arc<std::sync::Barrier>)>)->Result<Zeroizing<Vec<u8>>,JetPwhashRunError>{let params=argon2::Params::new(8_192,1,1,Some(16)).unwrap();jet_crypto_argon2id_run_with(b"sixteen-byte-key",b"sixteen-byte-salt",params,move||cancelled.load(std::sync::atomic::Ordering::SeqCst),jet_pwhash_wait_noop,jet_pwhash_wait_noop,pause,None,None)}
 #[cfg(test)]
-fn jet_pwhash_test_run_with(cancelled:fn()->bool,pause:Option<(std::sync::Arc<std::sync::Barrier>,std::sync::Arc<std::sync::Barrier>)>,final_pause:Option<(std::sync::Arc<std::sync::Barrier>,std::sync::Arc<std::sync::Barrier>)>,wait_enter:fn(),wait_leave:fn())->Result<Zeroizing<Vec<u8>>,JetPwhashRunError>{let params=argon2::Params::new(8_192,1,1,Some(16)).unwrap();jet_crypto_argon2id_run_with(b"sixteen-byte-key",b"sixteen-byte-salt",params,cancelled,wait_enter,wait_leave,pause,final_pause)}
+fn jet_pwhash_test_run_with(cancelled:fn()->bool,pause:Option<(std::sync::Arc<std::sync::Barrier>,std::sync::Arc<std::sync::Barrier>)>,final_pause:Option<(std::sync::Arc<std::sync::Barrier>,std::sync::Arc<std::sync::Barrier>)>,wait_enter:fn(),wait_leave:fn())->Result<Zeroizing<Vec<u8>>,JetPwhashRunError>{let params=argon2::Params::new(8_192,1,1,Some(16)).unwrap();jet_crypto_argon2id_run_with(b"sixteen-byte-key",b"sixteen-byte-salt",params,cancelled,wait_enter,wait_leave,pause,final_pause,None)}
+#[cfg(test)]
+fn jet_pwhash_rfc9106_test_run()->Result<Zeroizing<Vec<u8>>,JetPwhashRunError>{let params=argon2::ParamsBuilder::new().m_cost(32).t_cost(3).p_cost(4).data(argon2::AssociatedData::new(&[0x04;12]).unwrap()).build().unwrap();jet_crypto_argon2id_run_with(&[0x01;32],&[0x02;16],params,jet_crypto_never_cancelled,jet_pwhash_wait_noop,jet_pwhash_wait_noop,None,None,Some(&[0x03;8]))}
 #[cfg(test)]
 fn jet_pwhash_test_runs()->usize{JET_PWHASH_TEST_RUNS.load(std::sync::atomic::Ordering::SeqCst)}
 #[cfg(test)]
