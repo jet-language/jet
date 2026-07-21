@@ -985,18 +985,60 @@ fn jet_http2_request(
         }
     }
     let method = method.ok_or_else(|| "HTTP/2 method is missing".to_string())?;
-    let path = path.ok_or_else(|| "HTTP/2 path is missing".to_string())?;
-    if !matches!(scheme.as_deref(), Some("http" | "https")) { return Err("HTTP/2 scheme is invalid".to_string()); }
-    if let Some(authority) = authority {
-        jet_http_parse_authority(&authority).ok_or_else(|| "HTTP/2 authority is invalid".to_string())?;
-        if regular.get("host").is_some_and(|host| !host.eq_ignore_ascii_case(&authority)) {
-            return Err("HTTP/2 authority does not match host".to_string());
-        }
-        if regular.get("host").is_none() { regular.append("host", &authority).map_err(|_| "HTTP/2 authority is invalid".to_string())?; }
+    if !JetHttpHeaders::valid_name(&method) {
+        return Err("HTTP/2 request target is invalid".to_string());
     }
-    if !JetHttpHeaders::valid_name(&method)
-        || !(jet_http_path_query_valid(&path) || method == "OPTIONS" && path == "*")
-    { return Err("HTTP/2 request target is invalid".to_string()); }
+    let path = if method == "CONNECT" {
+        // RFC 9113 §8.5: CONNECT omits :scheme and :path; :authority is the target.
+        if path.is_some() {
+            return Err("HTTP/2 CONNECT must omit :path".to_string());
+        }
+        if scheme.is_some() {
+            return Err("HTTP/2 CONNECT must omit :scheme".to_string());
+        }
+        let authority = authority.ok_or_else(|| "HTTP/2 CONNECT requires :authority".to_string())?;
+        if jet_http_trim_ows(&authority) != authority {
+            return Err("HTTP/2 authority is invalid".to_string());
+        }
+        let parsed = jet_http_parse_authority(&authority)
+            .ok_or_else(|| "HTTP/2 authority is invalid".to_string())?;
+        if let Some(host) = regular.get("host") {
+            let host = jet_http_parse_authority(host)
+                .ok_or_else(|| "HTTP/2 authority does not match host".to_string())?;
+            if parsed.host != host.host || parsed.port != host.port {
+                return Err("HTTP/2 authority does not match host".to_string());
+            }
+        } else {
+            regular
+                .append("host", &jet_http_format_authority(&parsed))
+                .map_err(|_| "HTTP/2 authority is invalid".to_string())?;
+        }
+        jet_http_format_authority(&parsed)
+    } else {
+        let path = path.ok_or_else(|| "HTTP/2 path is missing".to_string())?;
+        if !matches!(scheme.as_deref(), Some("http" | "https")) {
+            return Err("HTTP/2 scheme is invalid".to_string());
+        }
+        if let Some(authority) = authority {
+            jet_http_parse_authority(&authority)
+                .ok_or_else(|| "HTTP/2 authority is invalid".to_string())?;
+            if regular
+                .get("host")
+                .is_some_and(|host| !host.eq_ignore_ascii_case(&authority))
+            {
+                return Err("HTTP/2 authority does not match host".to_string());
+            }
+            if regular.get("host").is_none() {
+                regular
+                    .append("host", &authority)
+                    .map_err(|_| "HTTP/2 authority is invalid".to_string())?;
+            }
+        }
+        if !(jet_http_path_query_valid(&path) || method == "OPTIONS" && path == "*") {
+            return Err("HTTP/2 request target is invalid".to_string());
+        }
+        path
+    };
     let mut content_length = None;
     for value in regular.all("content-length") {
         content_length = Some(jet_http_parse_content_length(value, content_length).map_err(|error| error.to_string())?);

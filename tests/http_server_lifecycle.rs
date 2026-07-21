@@ -220,6 +220,18 @@ fn h2_request_headers(method: u8, path: &str) -> Vec<u8> {
     headers
 }
 
+fn h2_literal_header(name_index: u8, value: &str) -> Vec<u8> {
+    let mut headers = vec![name_index, value.len() as u8];
+    headers.extend_from_slice(value.as_bytes());
+    headers
+}
+
+fn h2_connect_headers(authority: &str) -> Vec<u8> {
+    let mut headers = h2_literal_header(0x02, "CONNECT");
+    headers.extend_from_slice(&h2_literal_header(0x01, authority));
+    headers
+}
+
 fn h2_read_frame(stream: &mut std::net::TcpStream) -> (u8, u8, u32, Vec<u8>) {
     use std::io::Read;
     let mut header = [0u8; 9];
@@ -1522,6 +1534,211 @@ fn connect_authority_form_matches_host_before_routing() {
     let report = server.join().expect("server join");
     assert_eq!(report.user_accepted, 20);
     assert_eq!(report.user_completed, 20);
+}
+
+#[test]
+fn http2_connect_omits_path_and_routes_authority() {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn empty_body() -> JetHttpBody {
+        JetHttpBody::from_bytes(Vec::new())
+    }
+
+    for (authority, expected) in [
+        ("example.com:443", "example.com:443"),
+        ("EXAMPLE.COM:443", "example.com:443"),
+        ("percent%2dname.example:8443", "percent%2Dname.example:8443"),
+        ("[::1]:443", "[::1]:443"),
+        ("[v1.fe80::a]:80", "[v1.fe80::a]:80"),
+        ("example.com", "example.com"),
+    ] {
+        let (request, _) = jet_http2_request(
+            vec![
+                (":method".into(), "CONNECT".into()),
+                (":authority".into(), authority.into()),
+            ],
+            empty_body(),
+        )
+        .unwrap_or_else(|error| panic!("valid CONNECT rejected for {authority}: {error}"));
+        assert_eq!(request.method, "CONNECT");
+        assert_eq!(request.path, expected, "authority {authority}");
+        assert_eq!(request.headers.get("host").map(String::as_str), Some(expected));
+    }
+
+    let with_host = jet_http2_request(
+        vec![
+            (":method".into(), "CONNECT".into()),
+            (":authority".into(), "Example.COM:443".into()),
+            ("host".into(), "example.com:443".into()),
+        ],
+        empty_body(),
+    )
+    .expect("matching host");
+    assert_eq!(with_host.0.path, "example.com:443");
+
+    for (label, headers) in [
+        (
+            "with :path",
+            vec![
+                (":method".into(), "CONNECT".into()),
+                (":authority".into(), "example.com:443".into()),
+                (":path".into(), "/".into()),
+            ],
+        ),
+        (
+            "with :scheme",
+            vec![
+                (":method".into(), "CONNECT".into()),
+                (":authority".into(), "example.com:443".into()),
+                (":scheme".into(), "https".into()),
+            ],
+        ),
+        (
+            "missing :authority",
+            vec![(":method".into(), "CONNECT".into())],
+        ),
+        (
+            "host mismatch",
+            vec![
+                (":method".into(), "CONNECT".into()),
+                (":authority".into(), "example.com:443".into()),
+                ("host".into(), "other.com:443".into()),
+            ],
+        ),
+        (
+            "port mismatch",
+            vec![
+                (":method".into(), "CONNECT".into()),
+                (":authority".into(), "example.com:443".into()),
+                ("host".into(), "example.com".into()),
+            ],
+        ),
+        (
+            "malformed authority",
+            vec![
+                (":method".into(), "CONNECT".into()),
+                (":authority".into(), "user@example.com:443".into()),
+            ],
+        ),
+        (
+            "GET without :path",
+            vec![
+                (":method".into(), "GET".into()),
+                (":scheme".into(), "https".into()),
+                (":authority".into(), "example.com".into()),
+            ],
+        ),
+    ] {
+        let error = jet_http2_request(headers, empty_body())
+            .err()
+            .unwrap_or_else(|| panic!("accepted invalid CONNECT case: {label}"));
+        assert!(
+            error.contains("CONNECT")
+                || error.contains("path is missing")
+                || error.contains("authority")
+                || error.contains("host"),
+            "{label}: {error}"
+        );
+    }
+
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    jet_http_mux_add(&mux, "CONNECT", "/:authority", move |req| {
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &req.path)
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut client = std::net::TcpStream::connect(addr).unwrap();
+    let (mut server, _) = listener.accept().unwrap();
+    let options = JetHttpServerOptions::safe();
+    let worker = std::thread::spawn(move || {
+        jet_http2_serve(
+            &mut server,
+            &mux,
+            &options,
+            &std::sync::atomic::AtomicBool::new(false),
+            None,
+            None,
+        )
+    });
+
+    client.write_all(JET_HTTP2_PREFACE).unwrap();
+    client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+    client
+        .write_all(&h2_frame(1, 0x5, 1, &h2_connect_headers("EXAMPLE.COM:443")))
+        .unwrap();
+    client.flush().unwrap();
+
+    let mut saw_headers = false;
+    let mut body = Vec::new();
+    loop {
+        let (kind, flags, stream, payload) = h2_read_frame(&mut client);
+        if kind == 4 && flags & 0x1 == 0 {
+            client.write_all(&h2_frame(4, 0x1, 0, &[])).unwrap();
+            continue;
+        }
+        if kind == 1 && stream == 1 {
+            saw_headers = true;
+            let decoded = jet_http2_decode_headers(&mut JetHttp2Hpack::new(), &payload).unwrap();
+            assert!(
+                decoded.iter().any(|(name, value)| name == ":status" && value == "200"),
+                "CONNECT missing 200: {decoded:?}"
+            );
+            if flags & 0x1 != 0 {
+                break;
+            }
+            continue;
+        }
+        if kind == 0 && stream == 1 {
+            body.extend_from_slice(&payload);
+            if flags & 0x1 != 0 {
+                break;
+            }
+        }
+    }
+    assert!(saw_headers, "CONNECT response headers missing");
+    assert_eq!(String::from_utf8(body).unwrap(), "example.com:443");
+    assert_eq!(calls.load(Ordering::Acquire), 1);
+    client.write_all(&h2_frame(7, 0, 0, &[0; 8])).unwrap();
+    client.flush().unwrap();
+    assert!(worker.join().unwrap().is_ok());
+
+    let mux = jet_http_mux_new();
+    jet_http_mux_add(&mux, "CONNECT", "/:authority", |_| {
+        jet_http_srv_response(200, &"no".to_string())
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut client = std::net::TcpStream::connect(addr).unwrap();
+    let (mut server, _) = listener.accept().unwrap();
+    let options = JetHttpServerOptions::safe();
+    let worker = std::thread::spawn(move || {
+        jet_http2_serve(
+            &mut server,
+            &mux,
+            &options,
+            &std::sync::atomic::AtomicBool::new(false),
+            None,
+            None,
+        )
+    });
+    client.write_all(JET_HTTP2_PREFACE).unwrap();
+    client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+    let mut bad = h2_connect_headers("example.com:443");
+    bad.extend_from_slice(&h2_literal_header(0x04, "/tunnel"));
+    client.write_all(&h2_frame(1, 0x5, 1, &bad)).unwrap();
+    client.flush().unwrap();
+    let result = worker.join().unwrap();
+    assert!(
+        result
+            .as_ref()
+            .err()
+            .is_some_and(|error| error.contains("CONNECT must omit :path")),
+        "CONNECT with :path survived: {result:?}"
+    );
 }
 
 #[test]
