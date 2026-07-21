@@ -13,6 +13,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 const HTTP_CLIENT_DEFAULT_REDIRECTS: u32 = 10;
 const HTTP_UPLOAD_CHUNK: usize = 64 * 1024;
+/// Cap for buffering a streaming upload so 307/308 can replay it. Matches the
+/// former `Body.bytes(1GiB)` send ceiling; oversize fails closed.
+const HTTP_UPLOAD_REPLAY_CAP: usize = 1024 * 1024 * 1024;
 
 /// Private, typed transport failures. Generated code exhaustively projects these
 /// to the public closed HttpError without carrying backend prose across the seam.
@@ -1036,9 +1039,7 @@ impl H2Connection {
                 if pending.is_empty() && !finished {
                     match body_read()? {
                         Some(chunk) if !chunk.is_empty() => {
-                            if let Some(buffer) = tee.as_mut() {
-                                buffer.extend_from_slice(&chunk);
-                            }
+                            tee_upload_chunk(tee, &chunk)?;
                             pending = chunk;
                         }
                         Some(_) => {}
@@ -2003,7 +2004,11 @@ fn send_following_redirects_upload(
                 custom_roots,
             )?
         } else if let Some(ref mut read) = body_stream {
-            let mut tee = Some(Vec::new());
+            // Only buffer when a later redirect may need to replay the body
+            // (307/308 on replayable methods with redirect_limit > 0). Otherwise
+            // stream once with no tee — redirects(0) never replays.
+            let mut tee = (redirect_limit > 0 && replayable(method.as_str(), true))
+                .then(Vec::new);
             let chunked = stream_len.is_none();
             let has_body = true;
             let response = send_once_upload(
@@ -2891,6 +2896,21 @@ fn encode_request(
     Ok(out)
 }
 
+fn tee_upload_chunk(tee: &mut Option<Vec<u8>>, chunk: &[u8]) -> Result<(), JetHttpBridgeError> {
+    let Some(buffer) = tee.as_mut() else {
+        return Ok(());
+    };
+    let new_len = buffer
+        .len()
+        .checked_add(chunk.len())
+        .ok_or(JetHttpBridgeError::ResourceUnavailable)?;
+    if new_len > HTTP_UPLOAD_REPLAY_CAP {
+        return Err(JetHttpBridgeError::ResourceUnavailable);
+    }
+    buffer.extend_from_slice(chunk);
+    Ok(())
+}
+
 fn write_upload_body(
     stream: &mut HttpStream,
     chunked: bool,
@@ -2906,9 +2926,7 @@ fn write_upload_body(
         if chunk.is_empty() {
             continue;
         }
-        if let Some(buffer) = tee.as_mut() {
-            buffer.extend_from_slice(&chunk);
-        }
+        tee_upload_chunk(tee, &chunk).map_err(|error| (error, wrote_any))?;
         if chunked {
             let framing = format!("{:x}\r\n", chunk.len());
             write_request(stream, framing.as_bytes()).map_err(|(error, wrote)| (error, wrote_any || wrote))?;

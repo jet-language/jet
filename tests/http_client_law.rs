@@ -1052,3 +1052,307 @@ fn run() {{
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn unknown_length_upload_uses_h1_chunked_transfer_encoding() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_upload_chunked_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("upload.fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success(),
+        "mkfifo failed"
+    );
+    let accepted = Arc::new(AtomicBool::new(false));
+    let accepted_flag = accepted.clone();
+    let seen_chunked = Arc::new(AtomicBool::new(false));
+    let seen_flag = seen_chunked.clone();
+    let body_len = 96 * 1024usize;
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accepted_flag.store(true, Ordering::SeqCst);
+        let head = request_head(&mut stream);
+        assert!(head.starts_with(b"POST /chunked HTTP/1.1\r\n"));
+        let head_text = String::from_utf8_lossy(&head).to_ascii_lowercase();
+        assert!(
+            head_text.contains("transfer-encoding: chunked"),
+            "missing chunked transfer: {head_text}"
+        );
+        assert!(
+            !head_text.contains("content-length:"),
+            "unexpected content-length: {head_text}"
+        );
+        let mut got = 0usize;
+        let mut buf = [0u8; 4096];
+        let mut pending = Vec::new();
+        loop {
+            let read = stream.read(&mut buf).unwrap();
+            assert_ne!(read, 0, "chunked upload ended early at {got}");
+            pending.extend_from_slice(&buf[..read]);
+            while let Some(line_end) = pending.windows(2).position(|window| window == b"\r\n") {
+                let line = String::from_utf8_lossy(&pending[..line_end]).to_string();
+                pending.drain(..line_end + 2);
+                let size = usize::from_str_radix(line.trim(), 16).expect("chunk size");
+                if size == 0 {
+                    assert!(pending.starts_with(b"\r\n") || pending.is_empty() || pending == b"\r\n");
+                    stream
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                        .unwrap();
+                    return got;
+                }
+                while pending.len() < size + 2 {
+                    let read = stream.read(&mut buf).unwrap();
+                    assert_ne!(read, 0, "chunked body truncated at {got}");
+                    pending.extend_from_slice(&buf[..read]);
+                }
+                assert_eq!(&pending[size..size + 2], b"\r\n");
+                got += size;
+                pending.drain(..size + 2);
+                if got >= 64 * 1024 {
+                    seen_flag.store(true, Ordering::SeqCst);
+                }
+            }
+        }
+    });
+    let fifo_writer = fifo.clone();
+    let writer = std::thread::spawn(move || {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .open(&fifo_writer)
+            .unwrap();
+        let first = vec![b'a'; 32 * 1024];
+        file.write_all(&first).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !accepted.load(Ordering::SeqCst) {
+            assert!(
+                Instant::now() < deadline,
+                "client buffered the chunked upload before connecting"
+            );
+            std::thread::yield_now();
+        }
+        let rest = vec![b'b'; body_len - first.len()];
+        file.write_all(&rest).unwrap();
+    });
+    let fifo_path = fifo
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let src = format!(
+        r#"
+use core.http.client as http
+use core.http as message
+use core.files as files
+fn run() {{
+    input :: files.open("{fifo_path}") ?? panic("open")
+    body :: message.Body.reader(^input) ?? panic("reader")
+    req :: http.request("POST", "http://{addr}/chunked").body(body).redirects(0)
+    resp :: req.send() ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "upload_chunked", &src);
+    let got = server.join().unwrap();
+    writer.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "ok\n");
+    assert_eq!(got, body_len);
+    assert!(
+        seen_chunked.load(Ordering::SeqCst),
+        "server never saw a streamed chunked upload boundary"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn h2_upload_streams_data_frames_before_body_eof() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_upload_h2_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("upload.fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success(),
+        "mkfifo failed"
+    );
+    let accepted = Arc::new(AtomicBool::new(false));
+    let accepted_flag = accepted.clone();
+    let seen_data = Arc::new(AtomicBool::new(false));
+    let seen_flag = seen_data.clone();
+    let body_len = 40 * 1024usize;
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accepted_flag.store(true, Ordering::SeqCst);
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut preface = [0; 24];
+        stream.read_exact(&mut preface).unwrap();
+        assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+        assert_eq!(read_h2_frame(&mut stream).0, 4);
+        write_h2_frame(&mut stream, 4, 0, 0, &[]);
+        let mut got = 0usize;
+        let mut end = false;
+        while !end {
+            let frame = read_h2_frame(&mut stream);
+            if frame.0 == 6 && frame.1 & 1 == 0 {
+                write_h2_frame(&mut stream, 6, 1, 0, &frame.3);
+                continue;
+            }
+            if frame.0 == 1 {
+                continue;
+            }
+            if frame.0 == 0 {
+                got += frame.3.len();
+                if got >= 16 * 1024 {
+                    seen_flag.store(true, Ordering::SeqCst);
+                }
+                if frame.1 & 1 != 0 {
+                    end = true;
+                }
+            }
+        }
+        assert_eq!(got, body_len);
+        write_h2_frame(&mut stream, 1, 4, 1, &[0x88, 0x0f, 0x0d, 0x01, b'2']);
+        write_h2_frame(&mut stream, 0, 1, 1, b"ok");
+        let _ = read_h2_frame(&mut stream);
+        got
+    });
+    let fifo_writer = fifo.clone();
+    let writer = std::thread::spawn(move || {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .open(&fifo_writer)
+            .unwrap();
+        let first = vec![b'x'; 8 * 1024];
+        file.write_all(&first).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !accepted.load(Ordering::SeqCst) {
+            assert!(
+                Instant::now() < deadline,
+                "H2 client buffered the upload before connecting"
+            );
+            std::thread::yield_now();
+        }
+        let rest = vec![b'y'; body_len - first.len()];
+        file.write_all(&rest).unwrap();
+    });
+
+    let shown = dir.join("seed.jet");
+    let source = "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+    fs::write(&shown, source).unwrap();
+    let link = jet::compile_with_path(source, shown.to_str().unwrap())
+        .unwrap()
+        .ffi
+        .expect("HTTP client bridge");
+    let harness = dir.join("h2_upload.rs");
+    let bin = dir.join("h2_upload");
+    let fifo_path = fifo.display().to_string();
+    fs::write(
+        &harness,
+        format!(
+            r#"
+use std::io::Read;
+fn main() {{
+    let url = std::env::args().nth(1).unwrap();
+    let path = std::env::args().nth(2).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
+    let mut file = std::fs::File::open(path).unwrap();
+    let mut offset = 0usize;
+    let total = {body_len}usize;
+    let mut body_read = || -> Result<Option<Vec<u8>>, bridge::JetHttpBridgeError> {{
+        if offset >= total {{
+            return Ok(None);
+        }}
+        let want = (64 * 1024).min(total - offset);
+        let mut chunk = vec![0; want];
+        let mut filled = 0usize;
+        while filled < want {{
+            let read = file.read(&mut chunk[filled..]).map_err(|_| bridge::JetHttpBridgeError::Io)?;
+            if read == 0 {{
+                break;
+            }}
+            filled += read;
+        }}
+        if filled == 0 {{
+            return Ok(None);
+        }}
+        chunk.truncate(filled);
+        offset += filled;
+        Ok(Some(chunk))
+    }};
+    let response = bridge::jet_http_client_send_with_stream_impl(
+        client, "POST", &url, &[], Some(total as i64), true, &mut body_read,
+        None, None, None, None, Some(0), None, &[], &[], &[],
+    ).unwrap();
+    assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 8).unwrap(), Some(b"ok".to_vec()));
+    assert_eq!(bridge::jet_http_client_response_protocol_impl(response.1), "HTTP/2");
+}}
+"#,
+        ),
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "bridge H2 upload harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin)
+        .arg(format!("http://{addr}/h2"))
+        .arg(&fifo_path)
+        .output()
+        .unwrap();
+    let got = server.join().unwrap();
+    writer.join().unwrap();
+    assert!(
+        output.status.success(),
+        "bridge H2 upload harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(got, body_len);
+    assert!(
+        seen_data.load(Ordering::SeqCst),
+        "server never saw streamed H2 DATA before EOF"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
