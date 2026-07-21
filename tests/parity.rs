@@ -98,10 +98,18 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // `inner_join`/`left_join` and Packet B's `pivot_sum` route through the
     // interpreter because their closure arguments need live `Interp` access.
     //
-    // core.archive / core.compress.*: zip/tar and gzip/zstd need hand-rolled
-    // (I6) compression ports or are ambient byte-stream I/O — named boundaries,
-    // not PurePending port gaps. See core_boundary().
-    //
+    // core.archive / core.compress.*: AOT is pure [U8]→[U8] (hand-rolled /
+    // FFI byte transforms), not ambient FS. Still need an honest comptime
+    // port — keep PurePending, do not wash as Boundary.
+    ("core.archive", "tar_add"),
+    ("core.archive", "tar_get"),
+    ("core.archive", "tar_names_json"),
+    ("core.archive", "zip_compress"),
+    ("core.archive", "zip_decompress"),
+    ("core.compress.gzip", "compress"),
+    ("core.compress.gzip", "decompress"),
+    ("core.compress.zstd", "compress"),
+    ("core.compress.zstd", "decompress"),
     // core.crypto.expert / core.crypto.random: security-sensitive — needs a
     // careful, independently-reviewed port (AEAD ciphers, CSPRNG), not a
     // quick approximation that could silently diverge from the audited AOT
@@ -958,9 +966,6 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     if matches!(module, "core.os" | "core.raylib" | "core.ui" | "core.term" | "core.web" | "core.web.storage.local" | "core.web.storage.session" | "core.tasks" | "core.watcher" | "core.web.devserver" | "core.uuid") {
         return Some("named ambient/native boundary");
     }
-    if module == "core.archive" || module.starts_with("core.compress.") {
-        return Some("named archive/compress boundary");
-    }
     if module == "core.testing"
         && matches!(method, "corpus" | "fixture" | "golden" | "snap" | "temp_dir")
     {
@@ -1002,18 +1007,13 @@ fn value_boundary(owner: &str) -> Option<&'static str> {
     if matches!(owner, "Secret" | "WrappedVaultKey") {
         return Some("named native/security boundary");
     }
-    // Reactive / decision / pool handles need a live runtime graph — same
-    // class as Task/Event (already named). REPL marks core.reactive native-only.
+    // True reactive / decision handles need a live runtime graph. Pool is
+    // D-MEM1/D-POOLID-API1 (generational arena) and Solver is D-SOLVER-LIB1
+    // (seeded pure-ish state) — those stay PurePending until ported, not
+    // washed as reactive boundaries.
     if matches!(
         owner,
-        "Signal"
-            | "Shared"
-            | "Effect"
-            | "Computed"
-            | "Derived"
-            | "Pool"
-            | "DecisionHook"
-            | "Solver"
+        "Signal" | "Shared" | "Effect" | "Computed" | "Derived" | "DecisionHook"
     ) {
         return Some("named reactive runtime boundary");
     }
@@ -1589,12 +1589,12 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     for method in ["tar_add", "zip_compress"] {
         assert_eq!(
             record(&records, Surface::Fixed, "core.archive", method).class,
-            Class::Boundary
+            Class::PurePending
         );
     }
     assert_eq!(
         record(&records, Surface::Fixed, "core.compress.gzip", "compress").class,
-        Class::Boundary
+        Class::PurePending
     );
     assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.game", "run").class, Class::Boundary);
@@ -1609,32 +1609,23 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             Class::Covered
         );
     }
-    for owner in [
-        "Signal",
-        "Shared",
-        "Effect",
-        "Computed",
-        "Derived",
-        "Pool",
-        "DecisionHook",
-        "Solver",
-    ] {
+    for owner in ["Signal", "Shared", "Effect", "Computed", "Derived", "DecisionHook"] {
         assert_eq!(
             record(&records, Surface::Value, owner, match owner {
                 "Signal" => "get",
                 "Shared" => "read",
                 "Effect" => "unsubscribe",
                 "Computed" | "Derived" => "get",
-                "Pool" => "ids",
                 "DecisionHook" => "run",
-                "Solver" => "status",
                 _ => unreachable!(),
             })
             .class,
             Class::Boundary
         );
     }
-    assert_eq!(record(&records, Surface::DirectStatic, "Solver", "new").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Value, "Pool", "ids").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::Value, "Solver", "status").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::DirectStatic, "Solver", "new").class, Class::PurePending);
     assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class, Class::Boundary);
@@ -1648,14 +1639,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 761, 12, 405));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 761, 28, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        10217150490898244180,
+        923950484033246765,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
