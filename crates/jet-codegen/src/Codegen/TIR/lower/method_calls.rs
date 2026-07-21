@@ -1652,7 +1652,7 @@ pub(crate) fn lower_method_call(
             ("HttpRequest", "body_len") => Type::Int,
             ("HttpRequest", "under_limit") => Type::Bool,
             ("HttpRequest", "param" | "header") => Type::Option(Box::new(Type::String)),
-            ("HttpClient", "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade") => Type::Named("HttpClient".to_string()),
+            ("HttpClient", "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries") => Type::Named("HttpClient".to_string()),
             ("HttpClient", "send") => Type::Result {
                 ok: Box::new(Type::Named("HttpResponse".to_string())),
                 err: Box::new(Type::Named("HttpError".to_string())),

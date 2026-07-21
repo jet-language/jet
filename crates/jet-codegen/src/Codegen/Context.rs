@@ -496,6 +496,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "HttpClient" => Some("JetHttpClient"),
         "HttpProxy" => Some("JetHttpProxy"),
         "HttpRedirectPolicy" => Some("JetHttpRedirectPolicy"),
+        "HttpRetryPolicy" => Some("JetHttpRetryPolicy"),
         "HttpRouter" => Some("JetHttpRouter"),
         _ => None,
     }
@@ -526,6 +527,7 @@ impl Cx {
             (Some("core.auth"), "AuthError") => Some("AuthError"),
             (Some("core.http.client"), "Proxy") => Some("HttpProxy"),
             (Some("core.http.client"), "RedirectPolicy") => Some("HttpRedirectPolicy"),
+            (Some("core.http.client"), "RetryPolicy") => Some("HttpRetryPolicy"),
             (Some("core.tls"), "TlsVersion") => Some("TlsVersion"),
             (Some("core.tls"), "RootCertificates") => Some("TlsRootCertificates"),
             (Some("core.tls"), "ClientIdentity") => Some("TlsClientIdentity"),
@@ -983,6 +985,7 @@ impl Cx {
             Type::Named(name) if name == "HttpClient" => "JetHttpClient".to_string(),
             Type::Named(name) if name == "HttpProxy" => "JetHttpProxy".to_string(),
             Type::Named(name) if name == "HttpRedirectPolicy" => "JetHttpRedirectPolicy".to_string(),
+            Type::Named(name) if name == "HttpRetryPolicy" => "JetHttpRetryPolicy".to_string(),
             Type::Named(name) if name == "HttpMethod" => "JetHttpMethod".to_string(),
             Type::Named(name) if name == "HttpStatus" => "JetHttpStatus".to_string(),
             Type::Named(name) if name == "HttpVersion" => "JetHttpVersion".to_string(),
@@ -2082,6 +2085,18 @@ pub(crate) fn build_cx_items(
     cx.enum_variants
         .insert("HttpRedirectPolicy".to_string(), http_redirect_policy);
     cx.cloneable.insert("HttpRedirectPolicy".to_string());
+    let http_retry_policy = vec![
+        ("None".to_string(), VariantPayload::Unit),
+        ("Safe".to_string(), VariantPayload::Unit),
+        ("Idempotent".to_string(), VariantPayload::Unit),
+    ];
+    for (variant, _) in &http_retry_policy {
+        cx.variant_owner
+            .insert(variant.clone(), "HttpRetryPolicy".to_string());
+    }
+    cx.enum_variants
+        .insert("HttpRetryPolicy".to_string(), http_retry_policy);
+    cx.cloneable.insert("HttpRetryPolicy".to_string());
     let mut http_errors = [
         "InvalidMethod",
         "InvalidUrl",

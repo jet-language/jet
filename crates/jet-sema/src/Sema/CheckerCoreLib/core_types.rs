@@ -239,7 +239,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName" | "HttpHeaderValue"
-        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
+        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -722,6 +722,13 @@ pub(crate) fn core_http_variants(
                 ]),
             ),
         );
+        return Some(variants);
+    }
+    if enum_name == "HttpRetryPolicy" {
+        // D-HTTP-CLIENT2=A: `.None` / `.Safe` / `.Idempotent`.
+        for name in ["None", "Safe", "Idempotent"] {
+            variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+        }
         return Some(variants);
     }
     if enum_name != "HttpError" {

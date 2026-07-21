@@ -516,6 +516,11 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
+            if resolved_type == "HttpRetryPolicy"
+                && matches!(variant.as_str(), "None" | "Safe" | "Idempotent")
+            {
+                return args.is_empty();
+            }
             // D-TERM1 (ratified 2026-06-22): `Key` is a core prelude enum, not in
             // the user registry, but is always covered — all payloads are scalar/Char.
             let key_type = crate::Syntax::TYPE_KEY;

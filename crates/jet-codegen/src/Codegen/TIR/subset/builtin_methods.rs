@@ -245,7 +245,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" | "send"
         ),
         Some("HttpResponse") => matches!(method, "status" | "body" | "header" | "cookies" | "protocol" | "remote_address" | "redirect_history" | "timings" | "reused_connection" | "raw_content_encoding"),
-        Some("HttpClient") => matches!(method, "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "send"),
+        Some("HttpClient") => matches!(method, "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries" | "send"),
         Some("HttpHeaders") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
         Some("HttpBody") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
         Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"),

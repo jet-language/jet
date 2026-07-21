@@ -2020,7 +2020,7 @@ impl<'a> Checker<'a> {
                     );
                 } else if matches!(&recv_ty, Type::Named(name) if name == "HttpClient") {
                     let want = match method {
-                        "cookies" | "redirects" | "send" | "proxy" | "tls" | "allow_http_downgrade" => 1,
+                        "cookies" | "redirects" | "send" | "proxy" | "tls" | "allow_http_downgrade" | "retries" => 1,
                         "protocols" => 3,
                         "timeouts" => 7,
                         "raw_encoding" => 0,
@@ -2033,6 +2033,7 @@ impl<'a> Checker<'a> {
                         "cookies" | "protocols" | "allow_http_downgrade" => Some(Type::Bool),
                         "timeouts" => Some(Type::Int),
                         "redirects" => Some(Type::Named("HttpRedirectPolicy".to_string())),
+                        "retries" => Some(Type::Named("HttpRetryPolicy".to_string())),
                         "send" => Some(Type::Named("HttpRequest".to_string())),
                         "proxy" => Some(Type::Named("HttpProxy".to_string())),
                         "tls" => Some(Type::Named("TlsClientConfig".to_string())),

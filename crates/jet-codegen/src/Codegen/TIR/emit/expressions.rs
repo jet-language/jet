@@ -2201,6 +2201,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 "{ffi}::jet_http_client_allow_http_downgrade_impl(_client.owner.handle, {})",
                                 a(0)
                             )),
+                            "retries" => {
+                                let error = emit_http_bridge_error(ffi, "error");
+                                format!(
+                                    "{{ let _client = ({recv}); let _policy = &({arg}); let _mode = match _policy {{ JetHttpRetryPolicy::None => 0_i64, JetHttpRetryPolicy::Safe => 1_i64, JetHttpRetryPolicy::Idempotent => 2_i64, }}; let _next = {ffi}::jet_http_client_retries_impl(_client.owner.handle, _mode).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    recv = recv,
+                                    arg = a(0),
+                                    ffi = ffi,
+                                    error = error,
+                                )
+                            },
                             "send" => {
                                 let call = format!(
                                     "{ffi}::jet_http_client_send_with_stream_impl(_client.owner.handle, &_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.dns_timeout_ms, _r.tls_timeout_ms, _r.write_timeout_ms, _r.first_byte_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)"

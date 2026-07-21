@@ -2312,3 +2312,254 @@ fn run() {{
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(stdout, "timeout\n");
 }
+
+#[test]
+fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
+    use std::net::Shutdown;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let url = format!("http://{addr}/");
+    let puts = Arc::new(AtomicUsize::new(0));
+    let puts_observed = puts.clone();
+    let server = std::thread::spawn(move || {
+        // 1) Default Safe: warm + stale GET reconnects once.
+        let (mut stream, _) = listener.accept().unwrap();
+        assert!(request_head(&mut stream).starts_with(b"GET /warm HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nw")
+            .unwrap();
+        let _ = stream.shutdown(Shutdown::Both);
+        drop(stream);
+
+        let (mut stream, _) = listener.accept().unwrap();
+        assert!(request_head(&mut stream).starts_with(b"GET /retry HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok")
+            .unwrap();
+        let _ = stream.shutdown(Shutdown::Both);
+        drop(stream);
+
+        // 2) Safe: warm + POST fails on stale socket without dialing again.
+        let (mut stream, _) = listener.accept().unwrap();
+        assert!(request_head(&mut stream).starts_with(b"GET /warm2 HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nx")
+            .unwrap();
+        let _ = stream.shutdown(Shutdown::Both);
+        drop(stream);
+
+        // 3) retries(.None): warm + stale GET fails without reconnect.
+        let (mut stream, _) = listener.accept().unwrap();
+        let head = request_head(&mut stream);
+        assert!(
+            head.starts_with(b"GET /warm3 HTTP/1.1\r\n"),
+            "POST must not dial a retry; next live request is warm3, got {}",
+            String::from_utf8_lossy(&head)
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\ny")
+            .unwrap();
+        let _ = stream.shutdown(Shutdown::Both);
+        drop(stream);
+
+        // 4) Safe denies PUT retry (no dial); Idempotent opts in.
+        let (mut stream, _) = listener.accept().unwrap();
+        let head = request_head(&mut stream);
+        assert!(
+            head.starts_with(b"GET /warm4 HTTP/1.1\r\n"),
+            "retries(.None) must not reconnect; next is warm4, got {}",
+            String::from_utf8_lossy(&head)
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nz")
+            .unwrap();
+        let _ = stream.shutdown(Shutdown::Both);
+        drop(stream);
+
+        let (mut stream, _) = listener.accept().unwrap();
+        let head = request_head(&mut stream);
+        assert!(
+            head.starts_with(b"GET /warm5 HTTP/1.1\r\n"),
+            "Safe must not dial PUT retry; next is warm5, got {}",
+            String::from_utf8_lossy(&head)
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nq")
+            .unwrap();
+        let _ = stream.shutdown(Shutdown::Both);
+        drop(stream);
+
+        let (mut stream, _) = listener.accept().unwrap();
+        puts_observed.fetch_add(1, Ordering::Relaxed);
+        assert!(request_head(&mut stream).starts_with(b"PUT /allowed HTTP/1.1\r\n"));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+    });
+
+    let dir = std::env::temp_dir().join(format!("jet_http_retry_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let shown = dir.join("seed.jet");
+    let source = "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"http://127.0.0.1/\") }\n";
+    fs::write(&shown, source).unwrap();
+    let link = jet::compile_with_path(source, shown.to_str().unwrap())
+        .unwrap()
+        .ffi
+        .expect("HTTP client bridge");
+    let harness = dir.join("retry.rs");
+    let bin = dir.join("retry");
+    fs::write(
+        &harness,
+        r#"
+fn send(
+    client: i64,
+    method: &str,
+    url: &String,
+    body: Option<&[u8]>,
+) -> Result<(i64, i64, Option<i64>, Vec<String>), bridge::JetHttpBridgeError> {
+    bridge::jet_http_client_send_with_impl(
+        client,
+        method,
+        url,
+        &[],
+        body,
+        Some(2000),
+        Some(2000),
+        Some(2000),
+        Some(2000),
+        Some(2000),
+        Some(2000),
+        Some(2000),
+        Some(2000),
+        None,
+        None,
+        &[],
+        &[],
+        &[],
+    )
+}
+
+fn drain(handle: i64) -> Vec<u8> {
+    let mut out = Vec::new();
+    while let Some(chunk) = bridge::jet_http_client_body_read_impl(handle, 64).unwrap() {
+        out.extend_from_slice(&chunk);
+    }
+    bridge::jet_http_client_response_facts_drop_impl(handle);
+    out
+}
+
+fn main() {
+    let base = std::env::args().nth(1).unwrap();
+    let root = bridge::jet_http_client_new_impl();
+    let safe = bridge::jet_http_client_protocols_impl(root, false, true, false).unwrap();
+    bridge::jet_http_client_drop_impl(root);
+    let safe = bridge::jet_http_client_timeouts_impl(
+        safe, 2000, 2000, 2000, 2000, 2000, 2000, Some(2000),
+    )
+    .unwrap();
+
+    let warm = format!("{base}warm");
+    let first = send(safe, "GET", &warm, None).unwrap();
+    assert_eq!(drain(first.1), b"w");
+
+    let retry = format!("{base}retry");
+    let second = send(safe, "GET", &retry, None).unwrap();
+    assert!(!bridge::jet_http_client_response_reused_impl(second.1));
+    assert_eq!(drain(second.1), b"ok");
+
+    let warm2 = format!("{base}warm2");
+    let third = send(safe, "GET", &warm2, None).unwrap();
+    assert_eq!(drain(third.1), b"x");
+    let post = format!("{base}unsafe");
+    assert!(send(safe, "POST", &post, Some(b"nope")).is_err());
+
+    let none_root = bridge::jet_http_client_new_impl();
+    let none = bridge::jet_http_client_protocols_impl(none_root, false, true, false).unwrap();
+    bridge::jet_http_client_drop_impl(none_root);
+    let none = bridge::jet_http_client_retries_impl(none, 0).unwrap();
+    let none = bridge::jet_http_client_timeouts_impl(
+        none, 2000, 2000, 2000, 2000, 2000, 2000, Some(2000),
+    )
+    .unwrap();
+    let warm3 = format!("{base}warm3");
+    let fourth = send(none, "GET", &warm3, None).unwrap();
+    assert_eq!(drain(fourth.1), b"y");
+    let again = format!("{base}again");
+    assert!(send(none, "GET", &again, None).is_err());
+    bridge::jet_http_client_drop_impl(none);
+
+    let warm4 = format!("{base}warm4");
+    let fifth = send(safe, "GET", &warm4, None).unwrap();
+    assert_eq!(drain(fifth.1), b"z");
+    let denied = format!("{base}denied");
+    assert!(send(safe, "PUT", &denied, None).is_err());
+    bridge::jet_http_client_drop_impl(safe);
+
+    let id_root = bridge::jet_http_client_new_impl();
+    let idem = bridge::jet_http_client_protocols_impl(id_root, false, true, false).unwrap();
+    bridge::jet_http_client_drop_impl(id_root);
+    let idem = bridge::jet_http_client_retries_impl(idem, 2).unwrap();
+    let idem = bridge::jet_http_client_timeouts_impl(
+        idem, 2000, 2000, 2000, 2000, 2000, 2000, Some(2000),
+    )
+    .unwrap();
+    let warm5 = format!("{base}warm5");
+    let sixth = send(idem, "GET", &warm5, None).unwrap();
+    assert_eq!(drain(sixth.1), b"q");
+    let allowed = format!("{base}allowed");
+    let seventh = send(idem, "PUT", &allowed, None).unwrap();
+    assert_eq!(drain(seventh.1), b"ok");
+    bridge::jet_http_client_drop_impl(idem);
+}
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "retry harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin).arg(&url).output().unwrap();
+    server.join().unwrap();
+    assert!(
+        output.status.success(),
+        "retry harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(puts.load(Ordering::Relaxed), 1, "only Idempotent PUT should dial");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn public_client_retries_method_typechecks() {
+    let src = r#"
+use core.http.client as http
+fn run() {
+    _ :: http.Client.new()
+        .retries(.Idempotent)
+        .retries(.Safe)
+        .retries(.None)
+}
+"#;
+    let (code, _stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "retries_type", src);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+}

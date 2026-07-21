@@ -265,6 +265,23 @@ fn default_origin_limits() -> &'static Arc<OriginLimits> {
     LIMITS.get_or_init(|| Arc::new(OriginLimits::default()))
 }
 
+/// D-HTTP-CLIENT2: automatic connection retries are bounded (max one) and never
+/// keyed off response status. Default `Safe` covers GET/HEAD/OPTIONS/TRACE;
+/// `.retries(.Idempotent)` opts in PUT/DELETE; `None` disables. POST/PATCH never
+/// auto-retry.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RetryPolicy {
+    None,
+    Safe,
+    Idempotent,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self::Safe
+    }
+}
+
 #[derive(Clone)]
 struct ClientPolicy {
     redirect_limit: u32,
@@ -273,6 +290,7 @@ struct ClientPolicy {
     /// (D-HTTP-CLIENT2). When false, strip credentials on every redirect hop.
     same_origin_credentials: bool,
     allow_http_downgrade: bool,
+    retry_policy: RetryPolicy,
     proxy: Option<String>,
     use_environment_proxy: bool,
     cookies: bool,
@@ -301,6 +319,7 @@ impl Default for ClientPolicy {
             redirect_limit: HTTP_CLIENT_DEFAULT_REDIRECTS,
             same_origin_credentials: true,
             allow_http_downgrade: false,
+            retry_policy: RetryPolicy::Safe,
             proxy: None,
             use_environment_proxy: true,
             cookies: false,
@@ -441,6 +460,17 @@ pub fn jet_http_client_allow_http_downgrade_impl(
     allow: bool,
 ) -> Result<i64, JetHttpBridgeError> {
     clone_client_with(id, |policy| policy.allow_http_downgrade = allow)
+}
+
+/// `mode`: 0 = None, 1 = Safe, 2 = Idempotent (D-HTTP-CLIENT2).
+pub fn jet_http_client_retries_impl(id: i64, mode: i64) -> Result<i64, JetHttpBridgeError> {
+    let retry_policy = match mode {
+        0 => RetryPolicy::None,
+        1 => RetryPolicy::Safe,
+        2 => RetryPolicy::Idempotent,
+        _ => return Err(JetHttpBridgeError::Internal),
+    };
+    clone_client_with(id, |policy| policy.retry_policy = retry_policy)
 }
 
 pub fn jet_http_client_proxy_from_environment_impl(id: i64) -> Result<i64, JetHttpBridgeError> {
@@ -650,6 +680,7 @@ pub fn jet_http_client_send_with_impl(
         explicit_redirect_limit,
         handle.policy.same_origin_credentials,
         handle.policy.allow_http_downgrade,
+        handle.policy.retry_policy,
         configured_proxy,
         handle.policy.http2,
         handle.policy.http11,
@@ -2034,6 +2065,7 @@ pub fn jet_http_client_send_stream_impl(
         explicit_redirect_limit,
         true,
         false,
+        RetryPolicy::Safe,
         proxy,
         true,
         true,
@@ -2126,6 +2158,7 @@ pub fn jet_http_client_send_with_stream_impl(
         explicit_redirect_limit,
         handle.policy.same_origin_credentials,
         handle.policy.allow_http_downgrade,
+        handle.policy.retry_policy,
         configured_proxy,
         handle.policy.http2,
         handle.policy.http11,
@@ -2194,6 +2227,7 @@ pub fn jet_http_client_send_impl(
         explicit_redirect_limit,
         true,
         false,
+        RetryPolicy::Safe,
         proxy,
         true,
         true,
@@ -2261,6 +2295,7 @@ fn send_following_redirects(
     explicit_redirect_limit: bool,
     same_origin_credentials: bool,
     allow_http_downgrade: bool,
+    retry_policy: RetryPolicy,
     explicit_proxy: Option<&str>,
     http2: bool,
     http11: bool,
@@ -2291,6 +2326,7 @@ fn send_following_redirects(
         explicit_redirect_limit,
         same_origin_credentials,
         allow_http_downgrade,
+        retry_policy,
         explicit_proxy,
         http2,
         http11,
@@ -2323,6 +2359,7 @@ fn send_following_redirects_upload(
     explicit_redirect_limit: bool,
     same_origin_credentials: bool,
     allow_http_downgrade: bool,
+    retry_policy: RetryPolicy,
     explicit_proxy: Option<&str>,
     http2: bool,
     http11: bool,
@@ -2382,11 +2419,12 @@ fn send_following_redirects_upload(
                 http11,
                 h2c,
                 tls,
+                retry_policy,
             )?
         } else if let Some(ref mut read) = body_stream {
             // Buffer only when a later redirect may need the body again (307/308
             // preserve method+body for non-safe methods). Connection-retry
-            // `replayable()` excludes POST and must not gate this tee.
+            // policy excludes POST and must not gate this tee.
             // redirects(0) and bodyless/safe methods stream with no tee.
             let mut tee = (redirect_limit > 0 && redirect_may_replay_body(method.as_str()))
                 .then(Vec::new);
@@ -2419,6 +2457,7 @@ fn send_following_redirects_upload(
                 http11,
                 h2c,
                 tls,
+                retry_policy,
             )?;
             body = tee;
             body_stream = None;
@@ -2447,6 +2486,7 @@ fn send_following_redirects_upload(
                 http11,
                 h2c,
                 tls,
+                retry_policy,
             )?
         };
         if let Some(jar) = &jar {
@@ -2802,6 +2842,7 @@ fn send_once(
     http11: bool,
     h2c: bool,
     tls: TlsSettings<'_>,
+    retry_policy: RetryPolicy,
 ) -> Result<NativeResponse, JetHttpBridgeError> {
     let body_len = body.map(|bytes| bytes.len());
     let has_body = body.is_some();
@@ -2836,6 +2877,7 @@ fn send_once(
         http11,
         h2c,
         tls,
+        retry_policy,
     )
 }
 
@@ -2866,6 +2908,7 @@ fn send_once_upload(
     http11: bool,
     h2c: bool,
     tls: TlsSettings<'_>,
+    retry_policy: RetryPolicy,
 ) -> Result<NativeResponse, JetHttpBridgeError> {
     if method.is_empty() || !method.bytes().all(http_token_byte) {
         return Err(JetHttpBridgeError::InvalidHeader);
@@ -3054,7 +3097,7 @@ fn send_once_upload(
     )?;
     let write_started = Instant::now();
     if let Err((error, wrote_any)) = write_request(&mut stream, &request) {
-        if reused && !wrote_any && replayable(method, has_body) {
+        if reused && !wrote_any && connection_retry_allowed(retry_policy, method) {
             let mut fresh = connect(
                 &dns,
                 &facts,
@@ -3077,6 +3120,7 @@ fn send_once_upload(
             )?;
             write_request(&mut fresh, &request).map_err(|(error, _)| error)?;
             stream = fresh;
+            reused = false;
         } else {
             return Err(error);
         }
@@ -3091,18 +3135,71 @@ fn send_once_upload(
         .peer_addr()
         .map(|address| address.to_string())
         .unwrap_or_default();
-    let mut response = read_response(
+    let mut response = match read_response(
         stream,
-        key,
-        pool,
+        key.clone(),
+        pool.clone(),
         method == "HEAD",
         decompress,
-        facts,
+        facts.clone(),
         request_started,
         read_timeout,
         total_deadline,
         permit,
-    )?;
+    ) {
+        Ok(response) => response,
+        // Stale pooled socket may accept the request write then EOF on first
+        // byte. Safe/idempotent bodyless methods reconnect once (max one).
+        Err(error)
+            if reused
+                && !has_body
+                && matches!(error, JetHttpBridgeError::Io)
+                && connection_retry_allowed(retry_policy, method) =>
+        {
+            let mut fresh = connect(
+                &dns,
+                &facts,
+                url,
+                proxy,
+                dns_timeout,
+                connect_timeout,
+                tls_timeout,
+                total_deadline,
+                false,
+                true,
+                false,
+                tls,
+            )?;
+            set_stream_timeouts(
+                &mut fresh,
+                first_byte_timeout,
+                write_timeout,
+                total_deadline,
+            )?;
+            write_request(&mut fresh, &request).map_err(|(error, _)| error)?;
+            let permit = limits.acquire(key.clone(), total_deadline)?;
+            let remote_address = fresh
+                .peer_addr()
+                .map(|address| address.to_string())
+                .unwrap_or_default();
+            let mut response = read_response(
+                fresh,
+                key,
+                pool,
+                method == "HEAD",
+                decompress,
+                facts,
+                request_started,
+                read_timeout,
+                total_deadline,
+                permit,
+            )?;
+            response.reused_connection = false;
+            response.remote_address = remote_address;
+            return Ok(response);
+        }
+        Err(error) => return Err(error),
+    };
     response.reused_connection = reused;
     response.remote_address = remote_address;
     Ok(response)
@@ -3129,11 +3226,14 @@ fn http_token_byte(byte: u8) -> bool {
         )
 }
 
-fn replayable(method: &str, _has_body: bool) -> bool {
-    matches!(
-        method,
-        "GET" | "HEAD" | "PUT" | "DELETE" | "OPTIONS" | "TRACE"
-    )
+fn connection_retry_allowed(policy: RetryPolicy, method: &str) -> bool {
+    match policy {
+        RetryPolicy::None => false,
+        RetryPolicy::Safe => matches!(method, "GET" | "HEAD" | "OPTIONS" | "TRACE"),
+        RetryPolicy::Idempotent => {
+            matches!(method, "GET" | "HEAD" | "PUT" | "DELETE" | "OPTIONS" | "TRACE")
+        }
+    }
 }
 
 /// Methods whose body can survive a 307/308 follow. 301/302/303 rewrite POST to

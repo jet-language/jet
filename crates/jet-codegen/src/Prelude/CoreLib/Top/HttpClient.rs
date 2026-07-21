@@ -20,6 +20,16 @@ enum JetHttpRedirectPolicy {
     },
 }
 
+/// D-HTTP-CLIENT2=A: stale-pool connection retry policy for `Client.retries`.
+/// Default unset is Safe (GET/HEAD/OPTIONS/TRACE), max one attempt, never
+/// status-based. Idempotent opts in PUT/DELETE; None disables.
+#[derive(Clone)]
+enum JetHttpRetryPolicy {
+    None,
+    Safe,
+    Idempotent,
+}
+
 struct JetHttpClientOwner {
     handle: i64,
     drop_handle: fn(i64),
