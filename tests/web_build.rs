@@ -1508,3 +1508,75 @@ fn web_wasm_string_param_export_hostile_roundtrip() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn web_wasm_list_int_export_hostile_roundtrip() {
+    // D-JSBIND1 / criterion #3: [Int] export params+returns as packed (ptr,len)
+    // u64 over little-endian i64 payload; JS BigInt64Array + free. Hostile:
+    // empty, zero, signed, mixed.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm list-int (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_list.jet");
+    let dir = build_web_fixture("wasm_list", src, "examples/features/web/web_wasm_list.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("fn jet_abi_list_i64_ret(v: Vec<i64>) -> u64"),
+        "list-int return helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("fn jet_abi_list_i64_arg(packed: u64) -> Vec<i64>"),
+        "list-int arg helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) -> u32"),
+        "list-int alloc export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_free(ptr: u32, len: u32)"),
+        "list-int free export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("let user_xs = jet_abi_list_i64_arg(user_xs)")
+            || wasm.contains("let xs = jet_abi_list_i64_arg(xs)"),
+        "export wrapper must unpack [Int] param:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_list_i64_ret(jet_wasm_")
+            && wasm.contains("-> u64 "),
+        "export must pack [Int] return as u64:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("&user_xs") || wasm.contains("&xs"),
+        "wrapper must pass borrowed Vec into jet_wasm_*:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("marshalAbi(") && js.contains("\"list-int\""),
+        "JS bridge must marshal [Int] params:\n{js}"
+    );
+    assert!(
+        js.contains("unmarshalAbi(raw, \"list-int\", wasm)"),
+        "JS bridge must unmarshal [Int] returns:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_list_i64_alloc")
+            && runtime.contains("jet_abi_list_i64_free")
+            && runtime.contains("BigInt64Array"),
+        "runtime missing list-int ABI encode/decode:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_list.out");
+    assert_eq!(stdout, expected);
+    assert!(
+        stdout.contains("-1,2,-3"),
+        "signed ints lost in [Int] roundtrip:\n{stdout:?}"
+    );
+    assert!(
+        stdout.contains("42,0,-7,99"),
+        "mixed ints lost in [Int] roundtrip:\n{stdout:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

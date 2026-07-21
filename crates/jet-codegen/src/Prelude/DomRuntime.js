@@ -482,7 +482,8 @@ export async function instantiateWasm(wasmPath, imports = {}) {
 }
 
 /** D-JSBIND1=A: marshal ABI-safe values at the JS/WASM boundary.
- *  String params: TextEncoder → jet_abi_string_alloc → packed u64 (ptr<<32)|len. */
+ *  String params: TextEncoder → jet_abi_string_alloc → packed u64 (ptr<<32)|len.
+ *  [Int] params: BigInt64Array → jet_abi_list_i64_alloc → packed u64 (ptr<<32)|len. */
 export function marshalAbi(value, kind, wasm) {
   if (kind === "string") {
     const bytes = new TextEncoder().encode(String(value ?? ""));
@@ -492,7 +493,14 @@ export function marshalAbi(value, kind, wasm) {
     return (BigInt(ptr) << 32n) | BigInt(bytes.length);
   }
   if (kind === "list-int") {
-    return Array.isArray(value) ? value.map((x) => Number(x)) : [];
+    const arr = Array.isArray(value) ? value : [];
+    if (arr.length === 0) return 0n;
+    const ptr = wasm.jet_abi_list_i64_alloc(arr.length);
+    const view = new BigInt64Array(wasm.memory.buffer, ptr, arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      view[i] = BigInt(arr[i]);
+    }
+    return (BigInt(ptr) << 32n) | BigInt(arr.length);
   }
   if (kind === "struct-point") {
     return { x: Number(value?.x ?? 0), y: Number(value?.y ?? 0) };
@@ -501,7 +509,8 @@ export function marshalAbi(value, kind, wasm) {
 }
 
 /** D-JSBIND1=A: read ABI-safe return values from WASM.
- *  String returns are packed u64 (ptr<<32)|len; ownership frees via jet_abi_string_free. */
+ *  String returns are packed u64 (ptr<<32)|len; ownership frees via jet_abi_string_free.
+ *  [Int] returns are packed u64 (ptr<<32)|len; ownership frees via jet_abi_list_i64_free. */
 export function unmarshalAbi(value, kind, wasm) {
   if (kind === "string") {
     const packed = typeof value === "bigint" ? value : BigInt(value);
@@ -512,7 +521,13 @@ export function unmarshalAbi(value, kind, wasm) {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   }
   if (kind === "list-int") {
-    return Array.isArray(value) ? value.map((x) => Number(x)) : [];
+    const packed = typeof value === "bigint" ? value : BigInt(value);
+    const ptr = Number(packed >> 32n);
+    const len = Number(packed & 0xffffffffn);
+    const view = new BigInt64Array(wasm.memory.buffer, ptr, len);
+    const out = Array.from(view, (x) => Number(x));
+    wasm.jet_abi_list_i64_free(ptr, len);
+    return out;
   }
   if (typeof value === "bigint") {
     return Number(value);
