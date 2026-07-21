@@ -1195,9 +1195,9 @@ const LINALG_DECLS: &str = r#"fn linalg_view() -> String {
     w: F32x4 :: F32x4(10.0, 20.0, 30.0, 40.0)
     added: F32x4 :: v + w
     d: F64x2 :: F64x2.from_array([1.5, 2.5])
-    return "{sum.to_array()}|{a.dot(b)}|{crossed.to_array()}|{Vec3(0.0, 3.0, 4.0).length()}|{Vec3(0.0, 3.0, 4.0).normalize().to_array()}|{scaled.to_array()}|{scale.matmul(scale).to_array()}|{added.to_array()}|{(v * w).to_array()}|{F32x4.splat(7.0).to_array()}|{v[2]}|{v.sum()}|{v.reduce(@Max)}|{v.reduce(@Mul)}|{(d + d).to_array()}|{d.sum()}"
+    return "{sum.to_array()}|{a.dot(b)}|{crossed.to_array()}|{Vec3(0.0, 3.0, 4.0).length()}|{Vec3(0.0, 3.0, 4.0).normalize().to_array()}|{scaled.to_array()}|{scale.matmul(scale).to_array()}|{added.to_array()}|{(v * w).to_array()}|{F32x4.splat(7.0).to_array()}|{v[2]}|{v.sum()}|{v.product()}|{v.min()}|{v.max()}|{v.reduce(@Max)}|{v.reduce(@Mul)}|{(d + d).to_array()}|{d.sum()}|{d.product()}|{d.min()}|{d.max()}"
 }"#;
-const LINALG_EXPECTED: &str = "[5.0, 7.0, 9.0]|32.0|[-3.0, 6.0, -3.0]|5.0|[0.0, 0.6, 0.8]|[2.0, 4.0, 6.0]|[4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0]|[11.0, 22.0, 33.0, 44.0]|[10.0, 40.0, 90.0, 160.0]|[7.0, 7.0, 7.0, 7.0]|3.0|10.0|4.0|24.0|[3.0, 5.0]|4.0";
+const LINALG_EXPECTED: &str = "[5.0, 7.0, 9.0]|32.0|[-3.0, 6.0, -3.0]|5.0|[0.0, 0.6, 0.8]|[2.0, 4.0, 6.0]|[4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0]|[11.0, 22.0, 33.0, 44.0]|[10.0, 40.0, 90.0, 160.0]|[7.0, 7.0, 7.0, 7.0]|3.0|10.0|24.0|1.0|4.0|4.0|24.0|[3.0, 5.0]|4.0|3.75|1.5|2.5";
 
 const OVERFLOW_DECLS: &str = r#"fn overflow_view() -> String {
     hi: U8 :: 200
@@ -1248,4 +1248,37 @@ fn public_transcript_covers_linalg_overflow_and_expect_exactly() {
     // constructs the wrapper and `consume` discards it — prove via REPL only.
     let values = exact_values(&[EXPECT_DECLS, "expect_view()"]);
     assert_eq!(values, [format!("\"{EXPECT_EXPECTED}\" : String")]);
+}
+
+const SOLVER_FN: &str = r#"fn solver_view() -> String {
+    ok_solver := solve.Solver.new(7)
+    ok_solver.require(true)
+    ok_solver.require(1 == 1)
+    bad := solve.Solver.new(42)
+    bad.require(true)
+    bad.require(false)
+    bad.require(true)
+    return "{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}"
+}"#;
+const SOLVER_DECLS: &str = "use core.solve as solve\nfn solver_view() -> String {\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(true)\n    return \"{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
+const SOLVER_EXPECTED: &str = "ok|0|failed|1";
+
+#[test]
+fn rustc_backed_solver_matches_aot_comptime_and_dev_tiers() {
+    let source = parity_source("solver_view()", SOLVER_DECLS);
+    assert_eq!(
+        check_aot_comptime("solver/require-status", &source),
+        SOLVER_EXPECTED
+    );
+    check_dev_tiers("solver-require-status", &source, SOLVER_EXPECTED);
+}
+
+#[test]
+fn public_transcript_covers_solver_exactly() {
+    let values = exact_values(&[
+        "use core.solve as solve",
+        SOLVER_FN,
+        "solver_view()",
+    ]);
+    assert_eq!(values, [format!("\"{SOLVER_EXPECTED}\" : String")]);
 }

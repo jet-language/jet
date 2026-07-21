@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use crate::AST::{CtFloat, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 
-use crate::Comptime::Builtins::as_int;
+use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::Methods::as_float;
 use crate::Comptime::Value::CtValue;
@@ -252,6 +252,9 @@ pub(super) fn evaluate_method(
         ("CountMinSketch", "count", 1) => cms_count(recv, args, span),
         ("TDigest", "quantile", 1) => tdigest_quantile(recv, args, span),
         ("ReservoirSampler", "sample", 0) => reservoir_sample(recv, span),
+        // D-SOLVER-LIB1=A: finite solver queries (`.require` mutates in dispatch).
+        ("Solver", "failure_count", 0) => solver_failure_count(recv, span),
+        ("Solver", "status", 0) => solver_status(recv, span),
         _ => return None,
     };
     Some(result)
@@ -276,6 +279,34 @@ pub(super) fn sketch_add(
     Some(result.map(|updated| (CtValue::Unit, updated)))
 }
 
+/// D-SOLVER-LIB1=A: `solver.require(ok)` — returns `(Unit, updated_receiver)`.
+pub(super) fn solver_require(
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
+    let CtValue::Struct { type_name, .. } = recv else {
+        return None;
+    };
+    if type_name != crate::Syntax::SOLVER_TYPE {
+        return None;
+    }
+    Some(solver_require_update(recv, args, span).map(|updated| (CtValue::Unit, updated)))
+}
+
+/// D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — same seed/checked/failures layout as AOT.
+pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
+    let seed = as_int(one(args, 0, "Solver", "new", span)?, span)?;
+    Ok(structure(
+        crate::Syntax::SOLVER_TYPE,
+        vec![
+            ("seed", CtValue::Int(seed)),
+            ("checked", CtValue::Int(0)),
+            ("failures", CtValue::Int(0)),
+        ],
+    ))
+}
+
 pub(super) fn display(value: &CtValue) -> Option<String> {
     match value {
         CtValue::Struct { type_name, .. } if type_name == "HyperLogLog" => {
@@ -293,6 +324,11 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                 return None;
             };
             Some(format!("ReservoirSampler(n={count})"))
+        }
+        CtValue::Struct { type_name, .. } if type_name == crate::Syntax::SOLVER_TYPE => {
+            let failures = int_field(value, crate::Syntax::SOLVER_TYPE, "failures", Span::new(0, 0)).ok()?;
+            let status = if failures == 0 { "ok" } else { "failed" };
+            Some(format!("Solver(status: {status}, failures: {failures})"))
         }
         _ => {
             let CtValue::Float(measured) = field(value, "Measurement", "value")? else {
@@ -2885,6 +2921,42 @@ fn reservoir_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue
 
 fn reservoir_sample(recv: &CtValue, span: Span) -> EvalResult {
     value_field(recv, "ReservoirSampler", "reservoir", span)
+}
+
+// ── D-SOLVER-LIB1=A: mirrors AOT jet_solver_* in MathRandomTime.rs ──────────
+
+fn solver_require_update(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+    let seed = int_field(recv, crate::Syntax::SOLVER_TYPE, "seed", span)?;
+    let checked = int_field(recv, crate::Syntax::SOLVER_TYPE, "checked", span)?;
+    let failures = int_field(recv, crate::Syntax::SOLVER_TYPE, "failures", span)?;
+    let ok = as_bool(one(args, 0, "Solver", "require", span)?, span)?;
+    Ok(structure(
+        crate::Syntax::SOLVER_TYPE,
+        vec![
+            ("seed", CtValue::Int(seed)),
+            ("checked", CtValue::Int(checked + 1)),
+            (
+                "failures",
+                CtValue::Int(if ok { failures } else { failures + 1 }),
+            ),
+        ],
+    ))
+}
+
+fn solver_failure_count(recv: &CtValue, span: Span) -> EvalResult {
+    Ok(CtValue::Int(int_field(
+        recv,
+        crate::Syntax::SOLVER_TYPE,
+        "failures",
+        span,
+    )?))
+}
+
+fn solver_status(recv: &CtValue, span: Span) -> EvalResult {
+    let failures = int_field(recv, crate::Syntax::SOLVER_TYPE, "failures", span)?;
+    Ok(CtValue::Str(
+        if failures == 0 { "ok" } else { "failed" }.to_string(),
+    ))
 }
 
 #[cfg(test)]

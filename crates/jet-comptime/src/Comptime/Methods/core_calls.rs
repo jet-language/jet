@@ -30,6 +30,21 @@ pub(in super::super) fn sketch_add(
     core_pure_parity::sketch_add(recv, args, span)
 }
 
+pub(in super::super) fn solver_require(
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
+    core_pure_parity::solver_require(recv, args, span)
+}
+
+pub(in super::super) fn solver_new(
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    core_pure_parity::solver_new(args, span)
+}
+
 pub(super) fn display_core_pure_value(value: &CtValue) -> Option<String> {
     core_pure_parity::display(value)
 }

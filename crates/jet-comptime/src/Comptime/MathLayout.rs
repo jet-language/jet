@@ -283,6 +283,20 @@ pub(super) fn apply_method(
             name,
             reduce_op(name, &vals, "sum").unwrap_or(0.0),
         )),
+        // AOT exposes product/min/max as named methods; same reduce_op as
+        // `reduce(#Mul/#Min/#Max)` so comptime/REPL stay byte-identical.
+        ("product", 0) => Ok(float_value(
+            name,
+            reduce_op(name, &vals, "product").unwrap_or(0.0),
+        )),
+        ("min", 0) => Ok(float_value(
+            name,
+            reduce_op(name, &vals, "Min").unwrap_or(0.0),
+        )),
+        ("max", 0) => Ok(float_value(
+            name,
+            reduce_op(name, &vals, "Max").unwrap_or(0.0),
+        )),
         ("reduce", 1) => {
             let op = match &args[0] {
                 CtValue::Enum { variant, .. } => variant.as_str(),

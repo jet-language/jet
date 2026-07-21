@@ -1008,9 +1008,8 @@ fn value_boundary(owner: &str) -> Option<&'static str> {
         return Some("named native/security boundary");
     }
     // True reactive / decision handles need a live runtime graph. Pool is
-    // D-MEM1/D-POOLID-API1 (generational arena) and Solver is D-SOLVER-LIB1
-    // (seeded pure-ish state) — those stay PurePending until ported, not
-    // washed as reactive boundaries.
+    // D-MEM1/D-POOLID-API1 (generational arena) and stays PurePending until
+    // ported. Solver (D-SOLVER-LIB1) is ported in CorePureParity + dispatch.
     if matches!(
         owner,
         "Signal" | "Shared" | "Effect" | "Computed" | "Derived" | "DecisionHook"
@@ -1620,8 +1619,10 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         );
     }
     assert_eq!(record(&records, Surface::Value, "Pool", "ids").class, Class::PurePending);
-    assert_eq!(record(&records, Surface::Value, "Solver", "status").class, Class::PurePending);
-    assert_eq!(record(&records, Surface::DirectStatic, "Solver", "new").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::Value, "Solver", "status").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "Solver", "new").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Solver", "require").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Solver", "failure_count").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class, Class::Boundary);
@@ -1635,7 +1636,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 773, 16, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 777, 12, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1643,7 +1644,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        11888006777284523041,
+        6456568292006822851,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

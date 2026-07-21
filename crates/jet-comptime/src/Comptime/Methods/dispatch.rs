@@ -22,7 +22,7 @@ use super::super::Interpreter::{Flow, Interp};
 use super::super::Value::CtValue;
 use super::core_calls::{
     apply_core_call, apply_impure_core_call, as_bytes, as_float, display_core_pure_value,
-    shuffle_ct_list, sketch_add, with_ambient_rng,
+    shuffle_ct_list, sketch_add, solver_new, solver_require, with_ambient_rng,
 };
 use super::repl_process::{apply_repl_fs_call, pin_repl_command, repl_effect_request};
 
@@ -1505,6 +1505,31 @@ impl<'a> Interp<'a> {
                 }
             }
         }
+        // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — module-field sentinel constructor.
+        if method == "new" {
+            let solver_ctor = match receiver {
+                Expr::Ident(type_name, _) if type_name == crate::Syntax::SOLVER_TYPE => true,
+                Expr::Field(base, type_name, _)
+                    if type_name == crate::Syntax::SOLVER_TYPE
+                        && matches!(
+                            base.as_ref(),
+                            Expr::Ident(alias, _)
+                                if self.core_imports.get(alias).map(String::as_str)
+                                    == Some("core.solve")
+                        ) =>
+                {
+                    true
+                }
+                _ => false,
+            };
+            if solver_ctor {
+                let mut argv = Vec::with_capacity(args.len());
+                for a in args {
+                    argv.push(self.eval(&a.expr, scope)?);
+                }
+                return solver_new(&argv, span);
+            }
+        }
         // D-SHAPE-CONVERT1=A: numeric-backed distinct/unit conversion is the
         // existing distinct constructor with destination-owned spelling.
         if let Expr::Ident(type_name, _) = receiver {
@@ -1687,6 +1712,14 @@ impl<'a> Interp<'a> {
                         )],
                     })),
                 });
+            }
+            // D-SOLVER-LIB1=A: bare `Solver.new(seed)` (same state as `solve.Solver.new`).
+            if type_name == crate::Syntax::SOLVER_TYPE && method == "new" {
+                let mut argv = Vec::with_capacity(args.len());
+                for a in args {
+                    argv.push(self.eval(&a.expr, scope)?);
+                }
+                return solver_new(&argv, span);
             }
             // Only intercept known built-in type names; user struct names use normal path.
             let is_builtin_type = crate::AST::numeric_type_from_name(type_name).is_some()
@@ -3269,6 +3302,20 @@ impl<'a> Interp<'a> {
                     scope,
                 )?;
                 return Ok(value);
+            }
+            // D-SOLVER-LIB1=A: `solver.require(ok)` records a Bool constraint in place.
+            (CtValue::Struct { type_name, .. }, "require")
+                if type_name == crate::Syntax::SOLVER_TYPE =>
+            {
+                if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                    return Err(unsupported("Solver method on a temporary value", span));
+                }
+                let Some(result) = solver_require(&recv, &argv, span) else {
+                    return Err(unsupported("`Solver.require`", span));
+                };
+                let (ret, updated) = result?;
+                self.write_back(receiver, updated, scope)?;
+                return Ok(ret);
             }
             _ => {}
         }
