@@ -1284,15 +1284,17 @@ Epoch 3 (D-ADAPT-PROVIDER1=A). Automatic adaptive scheduling is declined
 ### `core.text` — Unicode text algorithms
 
 `String` stays small. `core.text` owns Unicode-heavy operations and tooling may
-insert these calls from String contexts.
+insert these calls from String contexts. Results are pinned to Unicode 16.0.0;
+they do not inherit the host Rust, OS, locale, or terminal Unicode version.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `nfc/nfd/nfkc/nfkd(text)` | `String` | Normalize text for comparison or storage |
 | `casefold(text)` / `caseless_eq(a,b)` | `String` / `Bool` | Locale-free caseless matching |
-| `lower/upper(text)` | `String` | Unicode case mapping |
+| `lower/upper(text)` | `String` | Full locale-free Unicode case mapping, including contextual final sigma |
 | `graphemes/words/sentences(text)` | `[String]` | Segmentation helpers |
-| `width(text)` | `Int` | Terminal display columns, including wide CJK/emoji floor |
+| `display_width(text)` | `Int` | Portable terminal columns: Ambiguous narrow, controls zero |
+| `display_width(text, policy: TextWidth)` | `Int ? TextError` | Same algorithm with Ambiguous narrow/wide and controls zero/reject policy |
 | `is_alphabetic/is_numeric/is_whitespace/is_ascii(text)` | `Bool` | Unicode classification over the whole string |
 | `scalar_count/byte_count/scalars(text)` | `Int` / `[String]` | UTF-8/scalar facts |
 | `splitn/rsplitn(text, sep, n)` | `[String]` | Bounded split helpers |
@@ -1301,8 +1303,29 @@ insert these calls from String contexts.
 | `starts_any/ends_any(text, parts)` | `Bool` | Prefix/suffix combinators |
 | `char_indices(text)` | `[String]` | `"byte:scalar"` debug view |
 
-Locale collation and language-specific sorting are not in v1 core; those need
-locale data, not a hidden ASCII fallback.
+The units are intentionally separate: `byte_count` counts UTF-8 bytes,
+`scalar_count`/`scalars` count Unicode scalar values, `graphemes` returns UAX
+#29 extended grapheme clusters, and `display_width` counts terminal columns.
+`String.len()` is not documentation for any of those four units.
+
+`TextWidth.{ ambiguous: .Narrow | .Wide, controls: .Zero | .Reject }` changes
+only disputed terminal choices. Both forms segment extended grapheme clusters
+first. Wide/Fullwidth and emoji-presentation clusters use two columns; flags,
+keycaps, and valid emoji ZWJ sequences are charged once; combining and
+default-ignorable-only clusters use zero. Defaults never inspect locale or
+environment (D-TEXTWIDTH1=B).
+
+| Unicode 16 audit lane | Shipped proof |
+|-----------------------|---------------|
+| Data ownership | Official UCD inputs, Unicode license, and SHA-256 manifest are checked in under `tests/data/unicode`; `gen-unicode-tables.mjs --check` proves byte-identical std-only regeneration. Generated tables are embedded; programs perform no file or network lookup. |
+| Normalization and casing | Full `NormalizationTest.txt` and default/full `CaseFolding.txt`, plus every UnicodeData/SpecialCasing scalar mapping, run against the comptime engine; one end-to-end fixture compares the same hostile values with AOT. |
+| Segmentation | Full Unicode 16 GraphemeBreakTest, WordBreakTest, and SentenceBreakTest corpora cover emoji ZWJ, RI, Hangul, combining marks, Hebrew punctuation, and abbreviations. |
+| Shared consumers | AOT, comptime/interpreter, diagnostics, public classification/trim/padding, and regex Unicode classes use the pinned tables. Unsupported comptime regex syntax returns E0956 rather than silently using a host fallback. |
+| Complexity | Normalization uses stable linear CCC counting rather than insertion sort; large descending-combining and segmentation inputs are regression-tested. |
+
+Locale collation, locale-sensitive casing, and language-specific sorting are
+not v1 core. They require explicit i18n locale data; Jet does not substitute
+ASCII or the host locale.
 
 ---
 

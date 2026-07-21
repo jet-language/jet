@@ -1092,7 +1092,7 @@ mod jet_std {
         match matcher {
             RegexMatcher::Literal(expected) => {
                 if flags.case_insensitive {
-                    expected.to_lowercase().to_string() == ch.to_lowercase().to_string()
+                    super::jet_text_simple_fold(*expected as u32) == super::jet_text_simple_fold(ch as u32)
                 } else {
                     *expected == ch
                 }
@@ -1106,16 +1106,16 @@ mod jet_std {
         let yes = class.items.iter().any(|item| match item {
             RegexClassItem::Char(c) => {
                 if flags.case_insensitive {
-                    c.to_lowercase().to_string() == ch.to_lowercase().to_string()
+                    super::jet_text_simple_fold(*c as u32) == super::jet_text_simple_fold(ch as u32)
                 } else {
                     *c == ch
                 }
             }
             RegexClassItem::Range(a, b) => {
                 if flags.case_insensitive {
-                    let lc = ch.to_lowercase().next().unwrap_or(ch);
-                    let la = a.to_lowercase().next().unwrap_or(*a);
-                    let lb = b.to_lowercase().next().unwrap_or(*b);
+                    let lc = char::from_u32(super::jet_text_simple_fold(ch as u32)).unwrap_or(ch);
+                    let la = char::from_u32(super::jet_text_simple_fold(*a as u32)).unwrap_or(*a);
+                    let lb = char::from_u32(super::jet_text_simple_fold(*b as u32)).unwrap_or(*b);
                     la <= lc && lc <= lb
                 } else {
                     *a <= ch && ch <= *b
@@ -1123,11 +1123,11 @@ mod jet_std {
             }
             RegexClassItem::Digit => ch.is_ascii_digit(),
             RegexClassItem::Word => ch == '_' || ch.is_ascii_alphanumeric(),
-            RegexClassItem::Space => ch.is_whitespace(),
-            RegexClassItem::UnicodeLetter => ch.is_alphabetic(),
-            RegexClassItem::UnicodeNumber => ch.is_numeric(),
-            RegexClassItem::UnicodeAlphabetic => ch.is_alphabetic(),
-            RegexClassItem::UnicodeWhitespace => ch.is_whitespace(),
+            RegexClassItem::Space => super::jet_text_whitespace(ch as u32),
+            RegexClassItem::UnicodeLetter => super::jet_text_letter(ch as u32),
+            RegexClassItem::UnicodeNumber => super::jet_text_numeric(ch as u32),
+            RegexClassItem::UnicodeAlphabetic => super::jet_text_alphabetic(ch as u32),
+            RegexClassItem::UnicodeWhitespace => super::jet_text_whitespace(ch as u32),
         });
         if class.negated {
             !yes

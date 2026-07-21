@@ -425,47 +425,234 @@ fn line_col(src: &str, offset: usize) -> (usize, usize) {
     (line, col)
 }
 
-/// Terminal display width of a string (std-only, invariant I6): combining
-/// marks take no column; East Asian wide/fullwidth chars and emoji take two.
-pub fn display_width(s: &str) -> usize {
-    s.chars().map(display_char_width).sum()
+fn unicode_range_value(table: &[(u32, u32, u8)], cp: u32) -> u8 {
+    table
+        .binary_search_by(|&(start, end, _)| {
+            if cp < start {
+                std::cmp::Ordering::Greater
+            } else if cp > end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .map(|at| table[at].2)
+        .unwrap_or(0)
 }
 
-/// Terminal display width of one Unicode scalar.
-pub fn display_char_width(c: char) -> usize {
-    let cp = c as u32;
-    // Combining marks and zero-width characters.
-    if matches!(
+fn unicode_range_contains(table: &[(u32, u32)], cp: u32) -> bool {
+    table
+        .binary_search_by(|&(start, end)| {
+            if cp < start {
+                std::cmp::Ordering::Greater
+            } else if cp > end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
+}
+
+fn unicode_general_category(cp: u32) -> u8 {
+    unicode_range_value(
+        crate::generated::UnicodeTables::UNICODE_GENERAL_CATEGORY,
         cp,
-        0x0300..=0x036F      // combining diacritics
-        | 0x1AB0..=0x1AFF    // combining diacritics extended
-        | 0x1DC0..=0x1DFF    // combining diacritics supplement
-        | 0x20D0..=0x20FF    // combining marks for symbols
-        | 0xFE00..=0xFE0F    // variation selectors
-        | 0xFE20..=0xFE2F    // combining half marks
-        | 0x200B..=0x200F    // zero-width space/joiners/marks
-    ) {
+    )
+}
+
+fn unicode_grapheme_class(cp: u32) -> u8 {
+    unicode_range_value(
+        crate::generated::UnicodeTables::UNICODE_GRAPHEME_BREAK,
+        cp,
+    )
+}
+
+fn unicode_grapheme_break(previous: u8, current: u8) -> bool {
+    const CR: u8 = 1;
+    const LF: u8 = 2;
+    const CONTROL: u8 = 3;
+    const EXTEND: u8 = 4;
+    const ZWJ: u8 = 5;
+    const PREPEND: u8 = 7;
+    const SPACING_MARK: u8 = 8;
+    const L: u8 = 9;
+    const V: u8 = 10;
+    const T: u8 = 11;
+    const LV: u8 = 12;
+    const LVT: u8 = 13;
+
+    if previous == CR && current == LF {
+        return false;
+    }
+    if matches!(previous, CR | LF | CONTROL) || matches!(current, CR | LF | CONTROL) {
+        return true;
+    }
+    if previous == L && matches!(current, L | V | LV | LVT) {
+        return false;
+    }
+    if matches!(previous, LV | V) && matches!(current, V | T) {
+        return false;
+    }
+    if matches!(previous, LVT | T) && current == T {
+        return false;
+    }
+    !matches!(current, EXTEND | ZWJ | SPACING_MARK) && previous != PREPEND
+}
+
+fn diagnostic_graphemes(s: &str) -> Vec<&str> {
+    const ZWJ: u8 = 5;
+    const RI: u8 = 6;
+    const EXTEND: u8 = 4;
+    const INCB_LINKER: u8 = 1;
+    const INCB_CONSONANT: u8 = 2;
+    const INCB_EXTEND: u8 = 3;
+
+    let chars: Vec<(usize, char)> = s.char_indices().collect();
+    let Some(&(_, first)) = chars.first() else {
+        return Vec::new();
+    };
+    let is_pictographic = |cp| {
+        unicode_range_contains(
+            crate::generated::UnicodeTables::UNICODE_EXTENDED_PICTOGRAPHIC,
+            cp,
+        )
+    };
+    let incb = |cp| {
+        unicode_range_value(crate::generated::UnicodeTables::UNICODE_INCB, cp)
+    };
+    let mut starts = vec![0];
+    let mut ri_run = usize::from(unicode_grapheme_class(first as u32) == RI);
+    let mut saw_pictographic = is_pictographic(first as u32);
+    let mut incb_pending = incb(first as u32) == INCB_CONSONANT;
+    let mut incb_linker = false;
+    for index in 1..chars.len() {
+        let (_, previous) = chars[index - 1];
+        let (byte, current) = chars[index];
+        let previous_class = unicode_grapheme_class(previous as u32);
+        let current_class = unicode_grapheme_class(current as u32);
+        let is_break = if previous_class == ZWJ
+            && saw_pictographic
+            && is_pictographic(current as u32)
+        {
+            false
+        } else if previous_class == RI && current_class == RI {
+            ri_run % 2 == 0
+        } else if incb_pending
+            && incb_linker
+            && incb(current as u32) == INCB_CONSONANT
+        {
+            false
+        } else {
+            unicode_grapheme_break(previous_class, current_class)
+        };
+        if is_break {
+            starts.push(byte);
+        }
+        ri_run = if current_class == RI { ri_run + 1 } else { 0 };
+        saw_pictographic = if matches!(current_class, EXTEND | ZWJ) {
+            saw_pictographic
+        } else {
+            is_pictographic(current as u32)
+        };
+        match incb(current as u32) {
+            INCB_CONSONANT => {
+                incb_pending = true;
+                incb_linker = false;
+            }
+            INCB_LINKER if incb_pending => incb_linker = true,
+            INCB_EXTEND | INCB_LINKER => {}
+            _ => {
+                incb_pending = false;
+                incb_linker = false;
+            }
+        }
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| &s[*start..starts.get(index + 1).copied().unwrap_or(s.len())])
+        .collect()
+}
+
+fn diagnostic_cluster_width(cluster: &str) -> usize {
+    let codepoints: Vec<char> = cluster.chars().collect();
+    let Some(&base) = codepoints.first() else {
+        return 0;
+    };
+    if unicode_general_category(base as u32) == 0 {
         return 0;
     }
-    // East Asian Wide / Fullwidth, plus common emoji blocks.
-    if matches!(
+    let keycap = matches!(
+        codepoints.as_slice(),
+        ['0'..='9' | '#' | '*', '\u{20E3}']
+            | ['0'..='9' | '#' | '*', '\u{FE0F}', '\u{20E3}']
+    );
+    let ri_pair = codepoints.len() >= 2
+        && unicode_grapheme_class(codepoints[0] as u32) == 6
+        && unicode_grapheme_class(codepoints[1] as u32) == 6;
+    let emoji_style = cluster.contains('\u{FE0F}')
+        && codepoints.iter().any(|c| {
+            unicode_range_contains(
+                crate::generated::UnicodeTables::UNICODE_EMOJI,
+                *c as u32,
+            )
+        });
+    let wide = codepoints.iter().any(|c| {
+        unicode_range_value(
+            crate::generated::UnicodeTables::UNICODE_EAST_ASIAN_WIDTH,
+            *c as u32,
+        ) == 2
+            || unicode_range_contains(
+                crate::generated::UnicodeTables::UNICODE_EMOJI_PRESENTATION,
+                *c as u32,
+            )
+    });
+    if keycap || ri_pair || emoji_style || wide {
+        return 2;
+    }
+    if codepoints.iter().all(|c| {
+        matches!(unicode_general_category(*c as u32), 2 | 3)
+            || unicode_range_contains(
+                crate::generated::UnicodeTables::UNICODE_DEFAULT_IGNORABLE,
+                *c as u32,
+            )
+    }) {
+        return 0;
+    }
+    1
+}
+
+/// Terminal display width using the pinned Unicode release and core.text's
+/// portable-default grapheme-cluster policy (D-TEXTWIDTH1=B).
+pub fn display_width(s: &str) -> usize {
+    diagnostic_graphemes(s)
+        .into_iter()
+        .map(diagnostic_cluster_width)
+        .sum()
+}
+
+/// Portable-default width of one Unicode scalar from the same pinned tables.
+pub fn display_char_width(c: char) -> usize {
+    let cp = c as u32;
+    if unicode_general_category(cp) == 0
+        || matches!(unicode_general_category(cp), 2 | 3)
+        || unicode_range_contains(
+            crate::generated::UnicodeTables::UNICODE_DEFAULT_IGNORABLE,
+            cp,
+        )
+    {
+        return 0;
+    }
+    if unicode_range_value(
+        crate::generated::UnicodeTables::UNICODE_EAST_ASIAN_WIDTH,
         cp,
-        0x1100..=0x115F      // Hangul Jamo
-        | 0x2E80..=0x303E    // CJK radicals, punctuation
-        | 0x3041..=0x33FF    // kana, CJK symbols
-        | 0x3400..=0x4DBF    // CJK ext A
-        | 0x4E00..=0x9FFF    // CJK unified
-        | 0xA000..=0xA4CF    // Yi
-        | 0xAC00..=0xD7A3    // Hangul syllables
-        | 0xF900..=0xFAFF    // CJK compatibility
-        | 0xFE30..=0xFE4F    // CJK compatibility forms
-        | 0xFF00..=0xFF60    // fullwidth forms
-        | 0xFFE0..=0xFFE6    // fullwidth signs
-        | 0x1F300..=0x1F64F  // emoji & pictographs
-        | 0x1F680..=0x1F6FF  // transport emoji
-        | 0x1F900..=0x1FAFF  // supplemental emoji
-        | 0x20000..=0x3FFFD  // CJK ext B+
-    ) {
+    ) == 2
+        || unicode_range_contains(
+            crate::generated::UnicodeTables::UNICODE_EMOJI_PRESENTATION,
+            cp,
+        )
+    {
         return 2;
     }
     1
@@ -475,4 +662,20 @@ pub fn display_char_width(c: char) -> usize {
 pub fn render_all(file: &str, src: &str, diags: &[Diagnostic]) -> String {
     let rendered: Vec<String> = diags.iter().map(|d| d.render(file, src)).collect();
     rendered.join("\n")
+}
+
+#[cfg(test)]
+mod unicode_display_width_tests {
+    use super::*;
+
+    #[test]
+    fn diagnostics_use_pinned_grapheme_display_width() {
+        assert_eq!(display_width("e\u{301}"), 1);
+        assert_eq!(display_width("🇺🇸"), 2);
+        assert_eq!(display_width("👨‍👩‍👧‍👦"), 2);
+        assert_eq!(display_width("1️⃣"), 2);
+        assert_eq!(display_width("©️"), 2);
+        assert_eq!(display_width("\u{301}\u{200D}"), 0);
+        assert_eq!(display_width("界"), 2);
+    }
 }

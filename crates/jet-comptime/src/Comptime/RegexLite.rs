@@ -479,7 +479,7 @@ fn class_matches(class: &Class, ch: char) -> bool {
         ClassItem::Range(a, b) => *a <= ch && ch <= *b,
         ClassItem::Digit => ch.is_ascii_digit(),
         ClassItem::Word => ch == '_' || ch.is_ascii_alphanumeric(),
-        ClassItem::Space => ch.is_whitespace(),
+        ClassItem::Space => super::TextLite::whitespace(ch as u32),
     });
     if class.negated {
         !yes

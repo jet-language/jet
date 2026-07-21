@@ -235,6 +235,17 @@ pub(super) fn core_call_args_in_subset(
             label_ok && expr_in_subset(&a.expr, cx, locals)
         });
     }
+    if module == "core.text" && method == "display_width" {
+        return matches!(args.len(), 1 | 2)
+            && args.iter().enumerate().all(|(idx, arg)| {
+                let label_ok = if idx == 1 {
+                    arg.label.as_ref().map(|(label, _)| label.as_str()) == Some("policy")
+                } else {
+                    arg.label.is_none()
+                };
+                label_ok && expr_in_subset(&arg.expr, cx, locals)
+            });
+    }
     args.iter()
         .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
 }

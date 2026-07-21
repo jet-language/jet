@@ -1,11 +1,10 @@
 //! D-BIGINT1-adjacent card #392 gap fix: `core.text` module functions
 //! (`use core.text as text; text.trim(s)`, etc). Ported verbatim from AOT's
-//! hand-rolled prelude implementation
+//! generated-prelude implementation
 //! (`crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs::jet_text_*`) so
-//! comptime/REPL tier-0 matches AOT byte-for-byte (R12 parity) — these are
-//! house-style approximations of Unicode NFC/NFD/casefold/segmentation
-//! (no external crate, I6), not full Unicode Standard algorithms; both tiers
-//! share the same approximation, so they still agree with each other.
+//! comptime/REPL tier-0 matches AOT byte-for-byte (R12 parity). Both consume
+//! checksum-pinned Unicode 16.0.0 tables; no host Unicode version leaks into
+//! normalization, casing, segmentation, width, or public classification.
 
 // Card #298: table-driven NFC/NFD/NFKC/NFKD + full case folding, mirroring
 // the AOT twin byte-for-byte (R12 parity) — see
@@ -86,16 +85,46 @@ fn expand_char(cp: u32, compat: bool, seq: &mut Vec<u32>) {
 }
 
 fn canonical_order(seq: &mut [u32]) {
-    for i in 1..seq.len() {
-        let cls = ccc(seq[i]);
-        if cls == 0 {
-            continue;
+    // Stable counting sort each non-starter run by its u8 combining class.
+    // Avoids insertion sort's quadratic path on hostile descending marks.
+    let mut start = 0usize;
+    while start < seq.len() {
+        if ccc(seq[start]) == 0 {
+            start += 1;
         }
-        let mut j = i;
-        while j > 0 && ccc(seq[j - 1]) > cls {
-            seq.swap(j - 1, j);
-            j -= 1;
+        let mut end = start;
+        let mut ordered = true;
+        let mut previous = 0u8;
+        while end < seq.len() {
+            let class = ccc(seq[end]);
+            if class == 0 {
+                break;
+            }
+            ordered &= class >= previous;
+            previous = class;
+            end += 1;
         }
+        if !ordered {
+            let mut counts = [0usize; 256];
+            for &cp in &seq[start..end] {
+                counts[ccc(cp) as usize] += 1;
+            }
+            let mut offsets = [0usize; 256];
+            let mut next = start;
+            for class in 1..256 {
+                offsets[class] = next;
+                next += counts[class];
+            }
+            let mut sorted = vec![0u32; end - start];
+            for &cp in &seq[start..end] {
+                let class = ccc(cp) as usize;
+                let at = offsets[class] - start;
+                sorted[at] = cp;
+                offsets[class] += 1;
+            }
+            seq[start..end].copy_from_slice(&sorted);
+        }
+        start = end;
     }
 }
 
@@ -186,6 +215,24 @@ fn fold_lookup(cp: u32) -> Option<&'static [u32]> {
     Some(&UNICODE_FOLD_POOL[start as usize..(start + len) as usize])
 }
 
+fn mapping_lookup(
+    cp: u32,
+    index: &'static [(u32, u32, u32)],
+    pool: &'static [u32],
+) -> Option<&'static [u32]> {
+    let at = index.binary_search_by_key(&cp, |&(c, _, _)| c).ok()?;
+    let (_, start, len) = index[at];
+    Some(&pool[start as usize..(start + len) as usize])
+}
+
+fn append_mapping(out: &mut String, cp: u32, index: &'static [(u32, u32, u32)], pool: &'static [u32]) {
+    if let Some(mapped) = mapping_lookup(cp, index, pool) {
+        out.extend(mapped.iter().filter_map(|&mapped_cp| char::from_u32(mapped_cp)));
+    } else if let Some(ch) = char::from_u32(cp) {
+        out.push(ch);
+    }
+}
+
 pub(super) fn casefold(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -203,10 +250,67 @@ pub(super) fn casefold(s: &str) -> String {
     out
 }
 
-// caseless_eq = full case fold + NFD compare (AOT doc contract): normalize
-// each side to NFD, then apply full case folding, then compare.
+fn property(table: &[(u32, u32)], cp: u32) -> bool {
+    bsearch_pair(table, cp)
+}
+
+pub(super) fn alphabetic(cp: u32) -> bool {
+    property(UNICODE_ALPHABETIC, cp)
+}
+
+pub(super) fn numeric(cp: u32) -> bool {
+    property(UNICODE_NUMERIC, cp)
+}
+
+pub(super) fn whitespace(cp: u32) -> bool {
+    property(UNICODE_WHITE_SPACE, cp)
+}
+
+fn is_cased(cp: u32) -> bool {
+    property(UNICODE_CASED, cp)
+}
+
+fn is_case_ignorable(cp: u32) -> bool {
+    property(UNICODE_CASE_IGNORABLE, cp)
+}
+
+fn final_sigma(chars: &[char], at: usize) -> bool {
+    let before = chars[..at]
+        .iter()
+        .rev()
+        .find(|ch| !is_case_ignorable(**ch as u32))
+        .is_some_and(|ch| is_cased(*ch as u32));
+    let after = chars[at + 1..]
+        .iter()
+        .find(|ch| !is_case_ignorable(**ch as u32))
+        .is_some_and(|ch| is_cased(*ch as u32));
+    before && !after
+}
+
+pub(super) fn lower(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    for (at, &ch) in chars.iter().enumerate() {
+        if ch == '\u{03A3}' && final_sigma(&chars, at) {
+            out.push('\u{03C2}');
+        } else {
+            append_mapping(&mut out, ch as u32, UNICODE_LOWER_INDEX, UNICODE_LOWER_POOL);
+        }
+    }
+    out
+}
+
+pub(super) fn upper(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        append_mapping(&mut out, ch as u32, UNICODE_UPPER_INDEX, UNICODE_UPPER_POOL);
+    }
+    out
+}
+
+// Unicode Default Caseless Matching: NFD(toCasefold(NFD(text))).
 pub(super) fn caseless_eq(a: &str, b: &str) -> bool {
-    casefold(&nfd(a)) == casefold(&nfd(b))
+    nfd(&casefold(&nfd(a))) == nfd(&casefold(&nfd(b)))
 }
 
 // Card #298: real UAX#29 grapheme/word/sentence segmentation over the
@@ -259,6 +363,32 @@ fn is_ext_pictographic(cp: u32) -> bool {
 }
 fn is_emoji_presentation(cp: u32) -> bool {
     bsearch_pair(UNICODE_EMOJI_PRESENTATION, cp)
+}
+fn is_emoji(cp: u32) -> bool {
+    bsearch_pair(UNICODE_EMOJI, cp)
+}
+fn is_default_ignorable(cp: u32) -> bool {
+    bsearch_pair(UNICODE_DEFAULT_IGNORABLE, cp)
+}
+fn general_category(cp: u32) -> u8 {
+    UNICODE_GENERAL_CATEGORY
+        .binary_search_by(|&(start, end, _)| {
+            if cp < start {
+                std::cmp::Ordering::Greater
+            } else if cp > end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .map(|at| UNICODE_GENERAL_CATEGORY[at].2)
+        .unwrap_or(8)
+}
+fn is_control(cp: u32) -> bool {
+    general_category(cp) == 0
+}
+fn is_zero_width_scalar(cp: u32) -> bool {
+    matches!(general_category(cp), 2 | 3) || is_default_ignorable(cp)
 }
 /// East Asian Width: 0=narrow(N/Na/H) 1=Ambiguous 2=wide(W/F).
 fn eaw_class(cp: u32) -> u8 {
@@ -579,7 +709,7 @@ pub(super) fn word_segments(s: &str) -> Vec<String> {
 pub(super) fn words(s: &str) -> Vec<String> {
     word_segments(s)
         .into_iter()
-        .filter(|w| w.chars().any(|c| c.is_alphanumeric()))
+        .filter(|w| w.chars().any(|c| alphabetic(c as u32) || numeric(c as u32)))
         .collect()
 }
 
@@ -742,11 +872,11 @@ pub(super) fn sentences(s: &str) -> Vec<String> {
     sentence_segments(s)
         .into_iter()
         .filter_map(|seg| {
-            let t = seg.trim();
+            let t = trim(&seg);
             if t.is_empty() {
                 None
             } else {
-                Some(t.to_string())
+                Some(t)
             }
         })
         .collect()
@@ -759,6 +889,10 @@ pub(super) fn sentences(s: &str) -> Vec<String> {
 // components inside a cluster cost 0 (only the cluster total is charged);
 // controls cost 0 unless the policy asks to `.Reject` them (a TextError).
 fn cluster_is_wide(cluster: &str) -> bool {
+    let codepoints: Vec<char> = cluster.chars().collect();
+    let keycap = matches!(codepoints.as_slice(),
+        ['0'..='9' | '#' | '*', '\u{20E3}']
+        | ['0'..='9' | '#' | '*', '\u{FE0F}', '\u{20E3}']);
     let mut chars = cluster.chars();
     let ri_pair = if let Some(a) = chars.next() {
         if grapheme_class(a as u32) == GB_RI {
@@ -769,7 +903,10 @@ fn cluster_is_wide(cluster: &str) -> bool {
     } else {
         false
     };
-    ri_pair
+    let emoji_style = cluster.contains('\u{FE0F}') && cluster.chars().any(|c| is_emoji(c as u32));
+    keycap
+        || ri_pair
+        || emoji_style
         || cluster
             .chars()
             .any(|c| eaw_class(c as u32) == 2 || is_emoji_presentation(c as u32))
@@ -780,7 +917,7 @@ fn cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: bool) -> 
         Some(c) => c,
         None => return Ok(0),
     };
-    if base == '\0' || base.is_control() {
+    if is_control(base as u32) {
         return if controls_reject {
             Err(format!("control character U+{:04X} rejected by TextWidth policy", base as u32))
         } else {
@@ -789,6 +926,9 @@ fn cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: bool) -> 
     }
     if cluster_is_wide(cluster) {
         return Ok(2);
+    }
+    if cluster.chars().all(|c| is_zero_width_scalar(c as u32)) {
+        return Ok(0);
     }
     if eaw_class(base as u32) == 1 {
         return Ok(if ambiguous_wide { 2 } else { 1 });
@@ -816,13 +956,25 @@ pub(super) fn display_width_policy(
 }
 
 pub(super) fn is_alphabetic(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_alphabetic())
+    !s.is_empty() && s.chars().all(|c| alphabetic(c as u32))
 }
 pub(super) fn is_numeric(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_numeric())
+    !s.is_empty() && s.chars().all(|c| numeric(c as u32))
 }
 pub(super) fn is_whitespace(s: &str) -> bool {
-    !s.is_empty() && s.chars().all(|c| c.is_whitespace())
+    !s.is_empty() && s.chars().all(|c| whitespace(c as u32))
+}
+
+pub(super) fn trim_start(s: &str) -> String {
+    s.trim_start_matches(|c| whitespace(c as u32)).to_string()
+}
+
+pub(super) fn trim_end(s: &str) -> String {
+    s.trim_end_matches(|c| whitespace(c as u32)).to_string()
+}
+
+pub(super) fn trim(s: &str) -> String {
+    s.trim_matches(|c| whitespace(c as u32)).to_string()
 }
 
 pub(super) fn splitn(s: &str, pat: &str, n: i64) -> Vec<String> {
@@ -836,34 +988,34 @@ pub(super) fn rsplitn(s: &str, pat: &str, n: i64) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn pad_start(s: &str, w: i64, fill: &str) -> String {
-    let mut out = String::new();
-    let f = fill.chars().next().unwrap_or(' ');
-    for _ in 0..(w - display_width_default(s)).max(0) {
-        out.push(f);
+fn fill_columns(fill: &str, columns: i64) -> String {
+    let Some(unit) = graphemes(fill).into_iter().next() else {
+        return " ".repeat(columns.max(0) as usize);
+    };
+    let width = display_width_default(&unit);
+    if width <= 0 || width > columns {
+        return " ".repeat(columns.max(0) as usize);
     }
+    let repeats = columns / width;
+    let remainder = columns % width;
+    format!("{}{}", unit.repeat(repeats as usize), " ".repeat(remainder as usize))
+}
+
+pub(super) fn pad_start(s: &str, w: i64, fill: &str) -> String {
+    let mut out = fill_columns(fill, (w - display_width_default(s)).max(0));
     out.push_str(s);
     out
 }
 pub(super) fn pad_end(s: &str, w: i64, fill: &str) -> String {
     let mut out = s.to_string();
-    let f = fill.chars().next().unwrap_or(' ');
-    for _ in 0..(w - display_width_default(s)).max(0) {
-        out.push(f);
-    }
+    out.push_str(&fill_columns(fill, (w - display_width_default(s)).max(0)));
     out
 }
 pub(super) fn center(s: &str, w: i64, fill: &str) -> String {
     let gap = (w - display_width_default(s)).max(0);
     let left = gap / 2;
     let right = gap - left;
-    let f = fill.chars().next().unwrap_or(' ');
-    format!(
-        "{}{}{}",
-        f.to_string().repeat(left as usize),
-        s,
-        f.to_string().repeat(right as usize)
-    )
+    format!("{}{}{}", fill_columns(fill, left), s, fill_columns(fill, right))
 }
 
 pub(super) fn starts_any(s: &str, prefixes: &[String]) -> bool {
@@ -1044,5 +1196,185 @@ mod break_conformance {
         let (lines_checked, assertions) = run_corpus(corpus, |s| super::sentence_segments(s), "SentenceBreakTest");
         assert!(lines_checked > 100, "expected the full corpus, only saw {lines_checked} lines");
         println!("SentenceBreakTest.txt 16.0.0: {lines_checked} lines, {assertions} conformance assertions, all passed");
+    }
+}
+
+#[cfg(test)]
+mod unicode_property_conformance {
+    use std::collections::BTreeMap;
+    use std::time::{Duration, Instant};
+
+    fn cps(field: &str) -> String {
+        field
+            .split_whitespace()
+            .filter_map(|hex| u32::from_str_radix(hex, 16).ok())
+            .filter_map(char::from_u32)
+            .collect()
+    }
+
+    fn range(field: &str) -> Option<(u32, u32)> {
+        if let Some((start, end)) = field.split_once("..") {
+            Some((u32::from_str_radix(start.trim(), 16).ok()?, u32::from_str_radix(end.trim(), 16).ok()?))
+        } else {
+            let cp = u32::from_str_radix(field.trim(), 16).ok()?;
+            Some((cp, cp))
+        }
+    }
+
+    fn has(ranges: &[(u32, u32)], cp: u32) -> bool {
+        ranges
+            .binary_search_by(|&(start, end)| {
+                if cp < start {
+                    std::cmp::Ordering::Greater
+                } else if cp > end {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .is_ok()
+    }
+
+    #[test]
+    fn case_folding_txt_16_0_0_full_default() {
+        let corpus = include_str!("../../../../tests/data/unicode/ucd/CaseFolding.txt");
+        let mut checked = 0usize;
+        for raw in corpus.lines() {
+            let line = raw.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                continue;
+            }
+            let fields: Vec<_> = line.split(';').map(str::trim).collect();
+            if fields.len() < 3 || !matches!(fields[1], "C" | "F") {
+                continue;
+            }
+            let input = cps(fields[0]);
+            assert_eq!(super::casefold(&input), cps(fields[2]), "CaseFolding mismatch: {raw}");
+            checked += 1;
+        }
+        assert!(checked > 1500, "expected full/default CaseFolding corpus, saw {checked}");
+    }
+
+    #[test]
+    fn unicode_data_and_special_casing_16_0_0() {
+        let mut lower = BTreeMap::<u32, String>::new();
+        let mut upper = BTreeMap::<u32, String>::new();
+        let unicode_data = include_str!("../../../../tests/data/unicode/ucd/UnicodeData.txt");
+        for raw in unicode_data.lines() {
+            let fields: Vec<_> = raw.split(';').collect();
+            if fields.len() < 14 {
+                continue;
+            }
+            let cp = u32::from_str_radix(fields[0], 16).unwrap();
+            if !fields[12].is_empty() {
+                upper.insert(cp, cps(fields[12]));
+            }
+            if !fields[13].is_empty() {
+                lower.insert(cp, cps(fields[13]));
+            }
+        }
+        let special = include_str!("../../../../tests/data/unicode/ucd/SpecialCasing.txt");
+        for raw in special.lines() {
+            let line = raw.split('#').next().unwrap_or("").trim();
+            if line.is_empty() {
+                continue;
+            }
+            let fields: Vec<_> = line.split(';').map(str::trim).collect();
+            if fields.len() < 5 || !fields[4].is_empty() {
+                continue;
+            }
+            let cp = u32::from_str_radix(fields[0], 16).unwrap();
+            lower.insert(cp, cps(fields[1]));
+            upper.insert(cp, cps(fields[3]));
+        }
+        for cp in 0..=0x10ffff {
+            let Some(ch) = char::from_u32(cp) else { continue };
+            let input = ch.to_string();
+            let expected_lower = lower.get(&cp).cloned().unwrap_or_else(|| input.clone());
+            let expected_upper = upper.get(&cp).cloned().unwrap_or_else(|| input.clone());
+            assert_eq!(super::lower(&input), expected_lower, "lowercase mismatch for U+{cp:04X}");
+            assert_eq!(super::upper(&input), expected_upper, "uppercase mismatch for U+{cp:04X}");
+        }
+        assert_eq!(super::lower("ΟΣ"), "ος", "Final_Sigma context");
+        assert_eq!(super::lower("ΟΣΑ"), "οσα", "non-final sigma context");
+        assert_eq!(super::lower("ÁΣ"), "áς", "case-ignorable context");
+    }
+
+    #[test]
+    fn unicode_16_classification_tables_match_official_inputs() {
+        let derived = include_str!("../../../../tests/data/unicode/ucd/DerivedCoreProperties.txt");
+        let alphabetic: Vec<_> = derived
+            .lines()
+            .filter_map(|raw| {
+                let line = raw.split('#').next()?.trim();
+                let (field, property) = line.split_once(';')?;
+                (property.trim() == "Alphabetic").then(|| range(field).unwrap())
+            })
+            .collect();
+        let props = include_str!("../../../../tests/data/unicode/ucd/PropList.txt");
+        let whitespace: Vec<_> = props
+            .lines()
+            .filter_map(|raw| {
+                let line = raw.split('#').next()?.trim();
+                let (field, property) = line.split_once(';')?;
+                (property.trim() == "White_Space").then(|| range(field).unwrap())
+            })
+            .collect();
+        let unicode_data = include_str!("../../../../tests/data/unicode/ucd/UnicodeData.txt");
+        let numeric: Vec<_> = unicode_data
+            .lines()
+            .filter_map(|raw| {
+                let fields: Vec<_> = raw.split(';').collect();
+                (fields.len() > 2 && matches!(fields[2], "Nd" | "Nl" | "No"))
+                    .then(|| {
+                        let cp = u32::from_str_radix(fields[0], 16).unwrap();
+                        (cp, cp)
+                    })
+            })
+            .collect();
+        for cp in 0..=0x10ffff {
+            if char::from_u32(cp).is_none() {
+                continue;
+            }
+            assert_eq!(super::alphabetic(cp), has(&alphabetic, cp), "Alphabetic U+{cp:04X}");
+            assert_eq!(super::numeric(cp), has(&numeric, cp), "Numeric U+{cp:04X}");
+            assert_eq!(super::whitespace(cp), has(&whitespace, cp), "White_Space U+{cp:04X}");
+        }
+    }
+
+    #[test]
+    fn display_width_terminal_corpus() {
+        assert_eq!(super::display_width_default("A·界"), 4);
+        assert_eq!(super::display_width_policy("·", true, false), Ok(2));
+        assert_eq!(super::display_width_default("🇺🇸"), 2);
+        assert_eq!(super::display_width_default("👨‍👩‍👧‍👦"), 2);
+        assert_eq!(super::display_width_default("1️⃣"), 2);
+        assert_eq!(super::display_width_default("1⃣"), 2);
+        assert_eq!(super::display_width_default("©️"), 2);
+        assert_eq!(super::display_width_default("́‍"), 0);
+        assert_eq!(super::display_width_default("\u{0}"), 0);
+        assert!(super::display_width_policy("x\n", false, true).is_err());
+        assert_eq!(super::display_width_default(&super::pad_start("x", 4, "界")), 4);
+        assert_eq!(super::display_width_default(&super::center("x", 4, "界")), 4);
+    }
+
+    #[test]
+    fn adversarial_unicode_algorithms_remain_linear_in_practice() {
+        let mut combining = String::from("a");
+        for _ in 0..4096 {
+            combining.push('\u{0315}');
+            combining.push('\u{0300}');
+        }
+        let started = Instant::now();
+        assert_eq!(super::nfd(&combining).chars().count(), 8193);
+        assert_eq!(super::graphemes(&combining).len(), 1);
+        assert_eq!(super::display_width_default(&combining), 1);
+        assert!(started.elapsed() < Duration::from_secs(5), "adversarial Unicode path exceeded linearity budget");
+
+        let text = "Word. ".repeat(32768);
+        let started = Instant::now();
+        assert_eq!(super::words(&text).len(), 32768);
+        assert_eq!(super::sentences(&text).len(), 32768);
+        assert!(started.elapsed() < Duration::from_secs(5), "segmentation exceeded linearity budget");
     }
 }

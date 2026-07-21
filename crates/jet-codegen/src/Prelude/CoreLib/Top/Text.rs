@@ -52,10 +52,10 @@ fn jet_text_unicode_is_ascii(s: &String) -> bool {
     s.is_ascii()
 }
 fn jet_text_unicode_lower(s: &String) -> String {
-    s.to_lowercase()
+    jet_text_lower(s)
 }
 fn jet_text_unicode_upper(s: &String) -> String {
-    s.to_uppercase()
+    jet_text_upper(s)
 }
 fn jet_text_unicode_scalars(s: &String) -> Vec<String> {
     s.chars().map(|c| c.to_string()).collect()
@@ -137,17 +137,39 @@ fn jet_text_expand_char(cp: u32, compat: bool, seq: &mut Vec<u32>) {
 }
 
 fn jet_text_canonical_order(seq: &mut [u32]) {
-    // Stable insertion-sort of adjacent nonzero-ccc runs (UAX#15 canonical ordering).
-    for i in 1..seq.len() {
-        let cls = jet_text_ccc(seq[i]);
-        if cls == 0 {
-            continue;
+    // Stable linear counting sort of each non-starter run by u8 CCC.
+    let mut start = 0usize;
+    while start < seq.len() {
+        if jet_text_ccc(seq[start]) == 0 { start += 1; }
+        let mut end = start;
+        let mut ordered = true;
+        let mut previous = 0u8;
+        while end < seq.len() {
+            let class = jet_text_ccc(seq[end]);
+            if class == 0 { break; }
+            ordered &= class >= previous;
+            previous = class;
+            end += 1;
         }
-        let mut j = i;
-        while j > 0 && jet_text_ccc(seq[j - 1]) > cls {
-            seq.swap(j - 1, j);
-            j -= 1;
+        if !ordered {
+            let mut counts = [0usize; 256];
+            for &cp in &seq[start..end] { counts[jet_text_ccc(cp) as usize] += 1; }
+            let mut offsets = [0usize; 256];
+            let mut next = start;
+            for class in 1..256 {
+                offsets[class] = next;
+                next += counts[class];
+            }
+            let mut sorted = vec![0u32; end - start];
+            for &cp in &seq[start..end] {
+                let class = jet_text_ccc(cp) as usize;
+                let at = offsets[class] - start;
+                sorted[at] = cp;
+                offsets[class] += 1;
+            }
+            seq[start..end].copy_from_slice(&sorted);
         }
+        start = end;
     }
 }
 
@@ -233,6 +255,27 @@ fn jet_text_fold_lookup(cp: u32) -> Option<&'static [u32]> {
     let (_, start, len) = UNICODE_FOLD_INDEX[idx];
     Some(&UNICODE_FOLD_POOL[start as usize..(start + len) as usize])
 }
+fn jet_text_mapping_lookup(
+    cp: u32,
+    index: &'static [(u32, u32, u32)],
+    pool: &'static [u32],
+) -> Option<&'static [u32]> {
+    let at = index.binary_search_by_key(&cp, |&(c, _, _)| c).ok()?;
+    let (_, start, len) = index[at];
+    Some(&pool[start as usize..(start + len) as usize])
+}
+fn jet_text_append_mapping(
+    out: &mut String,
+    cp: u32,
+    index: &'static [(u32, u32, u32)],
+    pool: &'static [u32],
+) {
+    if let Some(mapped) = jet_text_mapping_lookup(cp, index, pool) {
+        out.extend(mapped.iter().filter_map(|&mapped_cp| char::from_u32(mapped_cp)));
+    } else if let Some(ch) = char::from_u32(cp) {
+        out.push(ch);
+    }
+}
 fn jet_text_casefold(s: &String) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -249,10 +292,56 @@ fn jet_text_casefold(s: &String) -> String {
     }
     out
 }
-// caseless_eq = full case fold + NFD compare (AOT doc contract): normalize
-// each side to NFD, then apply full case folding, then compare byte-for-byte.
+fn jet_text_simple_fold(cp: u32) -> u32 {
+    UNICODE_SIMPLE_FOLD
+        .binary_search_by_key(&cp, |&(source, _)| source)
+        .map(|at| UNICODE_SIMPLE_FOLD[at].1)
+        .unwrap_or(cp)
+}
+fn jet_text_property(table: &[(u32, u32)], cp: u32) -> bool {
+    jet_text_bsearch_pair(table, cp)
+}
+fn jet_text_alphabetic(cp: u32) -> bool { jet_text_property(UNICODE_ALPHABETIC, cp) }
+fn jet_text_numeric(cp: u32) -> bool { jet_text_property(UNICODE_NUMERIC, cp) }
+fn jet_text_whitespace(cp: u32) -> bool { jet_text_property(UNICODE_WHITE_SPACE, cp) }
+fn jet_text_letter(cp: u32) -> bool { jet_text_property(UNICODE_LETTER, cp) }
+fn jet_text_is_cased(cp: u32) -> bool { jet_text_property(UNICODE_CASED, cp) }
+fn jet_text_is_case_ignorable(cp: u32) -> bool { jet_text_property(UNICODE_CASE_IGNORABLE, cp) }
+fn jet_text_final_sigma(chars: &[char], at: usize) -> bool {
+    let before = chars[..at]
+        .iter()
+        .rev()
+        .find(|ch| !jet_text_is_case_ignorable(**ch as u32))
+        .is_some_and(|ch| jet_text_is_cased(*ch as u32));
+    let after = chars[at + 1..]
+        .iter()
+        .find(|ch| !jet_text_is_case_ignorable(**ch as u32))
+        .is_some_and(|ch| jet_text_is_cased(*ch as u32));
+    before && !after
+}
+fn jet_text_lower(s: &String) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    for (at, &ch) in chars.iter().enumerate() {
+        if ch == '\u{03A3}' && jet_text_final_sigma(&chars, at) {
+            out.push('\u{03C2}');
+        } else {
+            jet_text_append_mapping(&mut out, ch as u32, UNICODE_LOWER_INDEX, UNICODE_LOWER_POOL);
+        }
+    }
+    out
+}
+fn jet_text_upper(s: &String) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        jet_text_append_mapping(&mut out, ch as u32, UNICODE_UPPER_INDEX, UNICODE_UPPER_POOL);
+    }
+    out
+}
+// Unicode Default Caseless Matching: NFD(toCasefold(NFD(text))).
 fn jet_text_caseless_eq(a: &String, b: &String) -> bool {
-    jet_text_casefold(&jet_text_nfd(a)) == jet_text_casefold(&jet_text_nfd(b))
+    jet_text_nfd(&jet_text_casefold(&jet_text_nfd(a)))
+        == jet_text_nfd(&jet_text_casefold(&jet_text_nfd(b)))
 }
 // Card #298: real UAX#29 grapheme/word/sentence segmentation over the
 // generated break-property tables, mirroring the comptime twin byte-for-byte
@@ -285,6 +374,22 @@ fn jet_text_word_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_WORD_BRE
 fn jet_text_sentence_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_SENTENCE_BREAK, cp) }
 fn jet_text_is_ext_pictographic(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_EXTENDED_PICTOGRAPHIC, cp) }
 fn jet_text_is_emoji_presentation(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_EMOJI_PRESENTATION, cp) }
+fn jet_text_is_emoji(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_EMOJI, cp) }
+fn jet_text_is_default_ignorable(cp: u32) -> bool { jet_text_bsearch_pair(UNICODE_DEFAULT_IGNORABLE, cp) }
+fn jet_text_general_category(cp: u32) -> u8 {
+    UNICODE_GENERAL_CATEGORY
+        .binary_search_by(|&(start, end, _)| {
+            if cp < start { std::cmp::Ordering::Greater }
+            else if cp > end { std::cmp::Ordering::Less }
+            else { std::cmp::Ordering::Equal }
+        })
+        .map(|at| UNICODE_GENERAL_CATEGORY[at].2)
+        .unwrap_or(8)
+}
+fn jet_text_is_control(cp: u32) -> bool { jet_text_general_category(cp) == 0 }
+fn jet_text_is_zero_width_scalar(cp: u32) -> bool {
+    matches!(jet_text_general_category(cp), 2 | 3) || jet_text_is_default_ignorable(cp)
+}
 /// East Asian Width: 0=narrow(N/Na/H) 1=Ambiguous 2=wide(W/F).
 fn jet_text_eaw_class(cp: u32) -> u8 { jet_text_bsearch_triple(UNICODE_EAST_ASIAN_WIDTH, cp) }
 /// Indic_Conjunct_Break (GB9c): 0=None 1=Linker 2=Consonant 3=Extend.
@@ -479,7 +584,10 @@ fn jet_text_word_segments(s: &String) -> Vec<String> {
 }
 
 fn jet_text_words(s: &String) -> Vec<String> {
-    jet_text_word_segments(s).into_iter().filter(|w| w.chars().any(|c| c.is_alphanumeric())).collect()
+    jet_text_word_segments(s)
+        .into_iter()
+        .filter(|w| w.chars().any(|c| jet_text_alphabetic(c as u32) || jet_text_numeric(c as u32)))
+        .collect()
 }
 
 // ---- SB1-SB11 sentence boundaries -------------------------------------------
@@ -587,23 +695,28 @@ fn jet_text_sentence_segments(s: &String) -> Vec<String> {
 fn jet_text_sentences(s: &String) -> Vec<String> {
     jet_text_sentence_segments(s)
         .into_iter()
-        .filter_map(|seg| { let t = seg.trim(); if t.is_empty() { None } else { Some(t.to_string()) } })
+        .filter_map(|seg| { let t = jet_text_trim(&seg); if t.is_empty() { None } else { Some(t) } })
         .collect()
 }
 
 // ---- D-TEXTWIDTH1=B: portable-default + explicit-policy display width ------
 fn jet_text_cluster_is_wide(cluster: &str) -> bool {
+    let codepoints: Vec<char> = cluster.chars().collect();
+    let keycap = matches!(codepoints.as_slice(),
+        ['0'..='9' | '#' | '*', '\u{20E3}']
+        | ['0'..='9' | '#' | '*', '\u{FE0F}', '\u{20E3}']);
     let mut chars = cluster.chars();
     let ri_pair = if let Some(a) = chars.next() {
         if jet_text_grapheme_class(a as u32) == JET_GB_RI {
             matches!(chars.next(), Some(b) if jet_text_grapheme_class(b as u32) == JET_GB_RI)
         } else { false }
     } else { false };
-    ri_pair || cluster.chars().any(|c| jet_text_eaw_class(c as u32) == 2 || jet_text_is_emoji_presentation(c as u32))
+    let emoji_style = cluster.contains('\u{FE0F}') && cluster.chars().any(|c| jet_text_is_emoji(c as u32));
+    keycap || ri_pair || emoji_style || cluster.chars().any(|c| jet_text_eaw_class(c as u32) == 2 || jet_text_is_emoji_presentation(c as u32))
 }
 fn jet_text_cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: bool) -> Result<i64, String> {
     let base = match cluster.chars().next() { Some(c) => c, None => return Ok(0) };
-    if base == '\0' || base.is_control() {
+    if jet_text_is_control(base as u32) {
         return if controls_reject {
             Err(format!("control character U+{:04X} rejected by TextWidth policy", base as u32))
         } else {
@@ -611,6 +724,7 @@ fn jet_text_cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: 
         };
     }
     if jet_text_cluster_is_wide(cluster) { return Ok(2); }
+    if cluster.chars().all(|c| jet_text_is_zero_width_scalar(c as u32)) { return Ok(0); }
     if jet_text_eaw_class(base as u32) == 1 { return Ok(if ambiguous_wide { 2 } else { 1 }); }
     Ok(1)
 }
@@ -630,34 +744,45 @@ fn jet_text_display_width(s: &String, policy: &jet_std::TextWidth) -> Result<i64
     jet_text_display_width_policy(s, ambiguous_wide, controls_reject)
         .map_err(|message| jet_std::TextError { message })
 }
-fn jet_text_is_alphabetic(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| c.is_alphabetic()) }
-fn jet_text_is_numeric(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| c.is_numeric()) }
-fn jet_text_is_whitespace(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| c.is_whitespace()) }
+fn jet_text_is_alphabetic(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_alphabetic(c as u32)) }
+fn jet_text_is_numeric(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_numeric(c as u32)) }
+fn jet_text_is_whitespace(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_whitespace(c as u32)) }
+fn jet_text_trim_start(s: &String) -> String { s.trim_start_matches(|c| jet_text_whitespace(c as u32)).to_string() }
+fn jet_text_trim_end(s: &String) -> String { s.trim_end_matches(|c| jet_text_whitespace(c as u32)).to_string() }
+fn jet_text_trim(s: &String) -> String { s.trim_matches(|c| jet_text_whitespace(c as u32)).to_string() }
 fn jet_text_splitn(s: &String, pat: &String, n: i64) -> Vec<String> {
     s.splitn(n.max(0) as usize, pat).map(|x| x.to_string()).collect()
 }
 fn jet_text_rsplitn(s: &String, pat: &String, n: i64) -> Vec<String> {
     s.rsplitn(n.max(0) as usize, pat).map(|x| x.to_string()).collect()
 }
+fn jet_text_fill_columns(fill: &String, columns: i64) -> String {
+    let Some(unit) = jet_text_graphemes(fill).into_iter().next() else {
+        return " ".repeat(columns.max(0) as usize);
+    };
+    let width = jet_text_display_width_default(&unit);
+    if width <= 0 || width > columns {
+        return " ".repeat(columns.max(0) as usize);
+    }
+    let repeats = columns / width;
+    let remainder = columns % width;
+    format!("{}{}", unit.repeat(repeats as usize), " ".repeat(remainder as usize))
+}
 fn jet_text_pad_start(s: &String, width: i64, fill: &String) -> String {
-    let mut out = String::new();
-    let f = fill.chars().next().unwrap_or(' ');
-    for _ in 0..(width - jet_text_display_width_default(s)).max(0) { out.push(f); }
+    let mut out = jet_text_fill_columns(fill, (width - jet_text_display_width_default(s)).max(0));
     out.push_str(s);
     out
 }
 fn jet_text_pad_end(s: &String, width: i64, fill: &String) -> String {
     let mut out = s.clone();
-    let f = fill.chars().next().unwrap_or(' ');
-    for _ in 0..(width - jet_text_display_width_default(s)).max(0) { out.push(f); }
+    out.push_str(&jet_text_fill_columns(fill, (width - jet_text_display_width_default(s)).max(0)));
     out
 }
 fn jet_text_center(s: &String, width: i64, fill: &String) -> String {
     let gap = (width - jet_text_display_width_default(s)).max(0);
     let left = gap / 2;
     let right = gap - left;
-    let f = fill.chars().next().unwrap_or(' ');
-    format!("{}{}{}", f.to_string().repeat(left as usize), s, f.to_string().repeat(right as usize))
+    format!("{}{}{}", jet_text_fill_columns(fill, left), s, jet_text_fill_columns(fill, right))
 }
 fn jet_text_starts_any(s: &String, prefixes: &Vec<String>) -> bool {
     prefixes.iter().any(|p| s.starts_with(p))

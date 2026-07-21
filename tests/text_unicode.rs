@@ -1,0 +1,247 @@
+//! Card #298: pinned Unicode regeneration and end-to-end text behavior.
+
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+
+mod common;
+
+#[test]
+fn pinned_unicode_tables_regenerate_byte_identically() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let checksums = Command::new("sha256sum")
+        .args(["--check", "SHA256SUMS"])
+        .current_dir(root.join("tests/data/unicode"))
+        .output()
+        .expect("verify vendored Unicode inputs");
+    assert!(
+        checksums.status.success(),
+        "vendored Unicode checksum mismatch:\n{}{}",
+        String::from_utf8_lossy(&checksums.stdout),
+        String::from_utf8_lossy(&checksums.stderr),
+    );
+    let output = Command::new("node")
+        .args([
+            "scripts/agent/gen-unicode-tables.mjs",
+            "--check",
+            "tests/data/unicode/ucd",
+        ])
+        .current_dir(root)
+        .output()
+        .expect("run pinned Unicode generator");
+    assert!(
+        output.status.success(),
+        "pinned Unicode tables do not regenerate byte-identically:\n{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+#[test]
+fn aot_prelude_passes_full_unicode_corpora() {
+    if !common::have_rustc() {
+        eprintln!("note: rustc not found; skipping AOT Unicode corpus proof");
+        return;
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs")).unwrap();
+    let start = text.find("// ── core.text.unicode helpers").expect("Unicode AOT block start");
+    let end = text.find("fn jet_std_fs_read").expect("Unicode AOT block end");
+    let unicode_block = &text[start..end];
+    let root_text = root.to_string_lossy().replace('\\', "\\\\");
+    let suffix = r#"
+fn cps(field: &str) -> String {
+    field.split_whitespace()
+        .filter_map(|hex| u32::from_str_radix(hex, 16).ok())
+        .filter_map(char::from_u32)
+        .collect()
+}
+
+fn parse_break(line: &str) -> Option<(String, Vec<String>)> {
+    let mut full = String::new();
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut any = false;
+    for token in line.split_whitespace() {
+        match token {
+            "÷" => if !current.is_empty() { segments.push(std::mem::take(&mut current)); },
+            "×" => {},
+            hex => {
+                let ch = char::from_u32(u32::from_str_radix(hex, 16).ok()?)?;
+                full.push(ch);
+                current.push(ch);
+                any = true;
+            }
+        }
+    }
+    if !current.is_empty() { segments.push(current); }
+    any.then_some((full, segments))
+}
+
+fn check_break(corpus: &str, segment: impl Fn(&String) -> Vec<String>) -> usize {
+    let mut checked = 0;
+    for raw in corpus.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        let Some((full, expected)) = parse_break(line) else { continue };
+        assert_eq!(segment(&full), expected, "break mismatch: {raw}");
+        checked += 1;
+    }
+    checked
+}
+
+fn main() {
+    let normalization = include_str!("__ROOT__/tests/data/unicode/NormalizationTest.txt");
+    let mut normalization_lines = 0;
+    for raw in normalization.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() || line.starts_with('@') { continue; }
+        let fields: Vec<_> = line.split(';').collect();
+        if fields.len() < 5 { continue; }
+        let c1 = cps(fields[0]); let c2 = cps(fields[1]); let c3 = cps(fields[2]);
+        let c4 = cps(fields[3]); let c5 = cps(fields[4]);
+        for input in [&c1, &c2, &c3] {
+            assert_eq!(jet_text_nfc(input), c2); assert_eq!(jet_text_nfd(input), c3);
+        }
+        for input in [&c4, &c5] {
+            assert_eq!(jet_text_nfc(input), c4); assert_eq!(jet_text_nfd(input), c5);
+        }
+        for input in [&c1, &c2, &c3, &c4, &c5] {
+            assert_eq!(jet_text_nfkc(input), c4); assert_eq!(jet_text_nfkd(input), c5);
+        }
+        normalization_lines += 1;
+    }
+    let folding = include_str!("__ROOT__/tests/data/unicode/ucd/CaseFolding.txt");
+    let mut fold_lines = 0;
+    for raw in folding.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() { continue; }
+        let fields: Vec<_> = line.split(';').map(str::trim).collect();
+        if fields.len() < 3 || !matches!(fields[1], "C" | "F") { continue; }
+        assert_eq!(jet_text_casefold(&cps(fields[0])), cps(fields[2]), "fold mismatch: {raw}");
+        fold_lines += 1;
+    }
+    let mut lower = std::collections::BTreeMap::<u32, String>::new();
+    let mut upper = std::collections::BTreeMap::<u32, String>::new();
+    for raw in include_str!("__ROOT__/tests/data/unicode/ucd/UnicodeData.txt").lines() {
+        let fields: Vec<_> = raw.split(';').collect();
+        if fields.len() < 14 { continue; }
+        let cp = u32::from_str_radix(fields[0], 16).unwrap();
+        if !fields[12].is_empty() { upper.insert(cp, cps(fields[12])); }
+        if !fields[13].is_empty() { lower.insert(cp, cps(fields[13])); }
+    }
+    for raw in include_str!("__ROOT__/tests/data/unicode/ucd/SpecialCasing.txt").lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() { continue; }
+        let fields: Vec<_> = line.split(';').map(str::trim).collect();
+        if fields.len() < 5 || !fields[4].is_empty() { continue; }
+        let cp = u32::from_str_radix(fields[0], 16).unwrap();
+        lower.insert(cp, cps(fields[1])); upper.insert(cp, cps(fields[3]));
+    }
+    let mut casing_scalars = 0;
+    for cp in 0..=0x10ffff {
+        let Some(ch) = char::from_u32(cp) else { continue };
+        let input = ch.to_string();
+        assert_eq!(jet_text_lower(&input), lower.get(&cp).cloned().unwrap_or_else(|| input.clone()));
+        assert_eq!(jet_text_upper(&input), upper.get(&cp).cloned().unwrap_or_else(|| input.clone()));
+        casing_scalars += 1;
+    }
+    assert_eq!(jet_text_lower(&"ΟΣ".to_string()), "ος");
+    let grapheme = check_break(
+        include_str!("__ROOT__/tests/data/unicode/GraphemeBreakTest.txt"),
+        jet_text_graphemes,
+    );
+    let word = check_break(
+        include_str!("__ROOT__/tests/data/unicode/WordBreakTest.txt"),
+        jet_text_word_segments,
+    );
+    let sentence = check_break(
+        include_str!("__ROOT__/tests/data/unicode/SentenceBreakTest.txt"),
+        jet_text_sentence_segments,
+    );
+    assert!(normalization_lines > 15000 && fold_lines > 1500);
+    assert!(grapheme > 500 && word > 500 && sentence > 100);
+    println!("{normalization_lines} {fold_lines} {casing_scalars} {grapheme} {word} {sentence}");
+}
+"#
+    .replace("__ROOT__", &root_text);
+    let mut harness = format!(
+        "include!(r#\"{}/crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs\"#);\n",
+        root_text
+    );
+    harness.push_str(
+        "mod jet_std {\n#[derive(Clone,Copy)] pub enum TextWidthAmbiguous { Narrow, Wide }\n\
+         #[derive(Clone,Copy)] pub enum TextWidthControls { Zero, Reject }\n\
+         pub struct TextWidth { pub ambiguous: TextWidthAmbiguous, pub controls: TextWidthControls }\n\
+         pub struct TextError { pub message: String }\n}\n",
+    );
+    harness.push_str(unicode_block);
+    harness.push_str(&suffix);
+    let dir = common::unique_tmp("jet_unicode_aot_corpora");
+    fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("unicode_aot.rs");
+    let binary = dir.join("unicode_aot");
+    fs::write(&source, harness).unwrap();
+    let compiled = Command::new("rustc")
+        .args(["--edition=2021", "-O"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(compiled.status.success(), "AOT Unicode harness rejected:\n{}", String::from_utf8_lossy(&compiled.stderr));
+    let ran = Command::new(&binary).output().unwrap();
+    assert!(ran.status.success(), "AOT Unicode corpus failed:\n{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "19965 1557 1112064 1093 1826 512\n");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unicode_text_behavior_matches_comptime_and_aot() {
+    if !common::have_rustc() {
+        eprintln!("note: rustc not found; skipping Unicode text AOT/comptime proof");
+        return;
+    }
+    let source = r#"
+use core.text as text
+use core.regex as re
+
+comptime folded = text.casefold("Straßeİς")
+comptime lowered = text.lower("ΟΣ")
+comptime uppered = text.upper("ßև")
+comptime keycap = text.display_width("1️⃣")
+comptime emoji = text.display_width("©️")
+comptime ignorable = text.display_width("́‍")
+comptime classes = text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ")
+comptime regex_space = re.is_match("\\s", " ") ?? false
+
+fn run() {
+    runtime_folded :: text.casefold("Straßeİς")
+    runtime_lowered :: text.lower("ΟΣ")
+    runtime_uppered :: text.upper("ßև")
+    runtime_keycap :: text.display_width("1️⃣")
+    runtime_emoji :: text.display_width("©️")
+    runtime_ignorable :: text.display_width("́‍")
+    runtime_classes :: text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ")
+    runtime_regex_space :: re.is_match("\\s", " ") ?? false
+    regex_alpha :: re.is_match("\\p{{Alphabetic}}+", "Ж") ?? false
+    regex_number :: re.is_match("\\p{{Number}}+", "٣") ?? false
+    regex_whitespace :: re.is_match("\\p{{White_Space}}+", " ") ?? false
+    insensitive :: re.compile_with("k", re.flags(true, false, false)) ?? panic("regex")
+    print("{folded}|{runtime_folded}")
+    print("{lowered}|{runtime_lowered}")
+    print("{uppered}|{runtime_uppered}")
+    print("{keycap}|{runtime_keycap}")
+    print("{emoji}|{runtime_emoji}")
+    print("{ignorable}|{runtime_ignorable}")
+    print("{classes}|{runtime_classes}")
+    print("{regex_space}|{runtime_regex_space}")
+    print(regex_alpha && regex_number && regex_whitespace && insensitive.is_match("K"))
+}
+"#;
+    let (code, stdout, stderr) = common::build_and_run("jet_text_unicode", "parity", source);
+    assert_eq!(code, 0, "Unicode parity fixture failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "strassei̇σ|strassei̇σ\nος|ος\nSSԵՒ|SSԵՒ\n2|2\n2|2\n0|0\ntrue|true\ntrue|true\ntrue\n"
+    );
+}

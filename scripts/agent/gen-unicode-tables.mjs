@@ -5,10 +5,11 @@
 // committed to the repo. No external crates (I6): plain Node + plain Rust.
 //
 // Usage:
-//   node scripts/agent/gen-unicode-tables.mjs <ucd-dir>
+//   node scripts/agent/gen-unicode-tables.mjs [--check] [ucd-dir]
 //
 // <ucd-dir> must contain (fetched from https://www.unicode.org/Public/16.0.0/ucd/):
-//   UnicodeData.txt, CaseFolding.txt, CompositionExclusions.txt,
+//   UnicodeData.txt, CaseFolding.txt, SpecialCasing.txt, PropList.txt,
+//   CompositionExclusions.txt,
 //   DerivedNormalizationProps.txt, EastAsianWidth.txt, emoji/emoji-data.txt,
 //   auxiliary/GraphemeBreakProperty.txt, auxiliary/WordBreakProperty.txt,
 //   auxiliary/SentenceBreakProperty.txt, DerivedCoreProperties.txt (GB9c's
@@ -39,17 +40,15 @@ const PINNED_SHA256 = {
   "auxiliary/SentenceBreakProperty.txt": "20aab5eca3842c7a27cc6756d74488a4a5f744c8dca2948ec1128f26a60d1f79",
   // GB9c (Indic conjunct clusters — Unicode 15+): Indic_Conjunct_Break.
   "DerivedCoreProperties.txt": "39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd",
+  "PropList.txt": "53d614508e2a0b2305a8aa21cd60d993de9326cdf65993660dfcce4503548583",
 };
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
-const ucdDir = process.argv[2];
-if (!ucdDir) {
-  console.error("usage: gen-unicode-tables.mjs <ucd-dir>");
-  process.exit(1);
-}
+const checkOnly = process.argv[2] === "--check";
+const ucdDir = process.argv[checkOnly ? 3 : 2] ?? "tests/data/unicode/ucd";
 
 function readChecked(rel) {
   const p = path.join(ucdDir, rel);
@@ -74,23 +73,46 @@ const unicodeData = readChecked("UnicodeData.txt");
 const ccc = []; // [cp, ccc] nonzero only, sorted (file is cp-sorted already)
 const canonDecomp = new Map(); // cp -> [u32...] (no <tag>)
 const compatDecomp = new Map(); // cp -> [u32...] (any decomposition, tag or not)
-const generalCategory = []; // [cp, gcTagIndex]
+const simpleLower = new Map(); // cp -> [u32...], overridden by SpecialCasing
+const simpleUpper = new Map(); // cp -> [u32...], overridden by SpecialCasing
+const generalCategory = []; // [start,end,gcTagIndex]
+const letterRanges = []; // General_Category L*
+const numericRanges = []; // General_Category Nd/Nl/No
 const GC_TAGS = ["Cc", "Cf", "Mn", "Me", "Mc", "Zs", "Zl", "Zp", "Other"];
 function gcTag(gc) {
   const i = GC_TAGS.indexOf(gc);
   return i === -1 ? GC_TAGS.length - 1 : i;
 }
 
+let pendingRange = null;
 for (const raw of unicodeData.split("\n")) {
   if (!raw) continue;
   const f = raw.split(";");
-  if (f.length < 6) continue;
+  if (f.length < 14) continue;
   const cp = parseInt(f[0], 16);
+  const name = f[1];
   const gc = f[2];
+  if (name.endsWith(", First>")) {
+    pendingRange = [cp, gc];
+    continue;
+  }
+  if (name.endsWith(", Last>")) {
+    if (!pendingRange || pendingRange[1] !== gc) throw new Error(`malformed UnicodeData range at ${raw}`);
+    const [start] = pendingRange;
+    generalCategory.push([start, cp, gcTag(gc)]);
+    if (gc.startsWith("L")) letterRanges.push([start, cp]);
+    if (["Nd", "Nl", "No"].includes(gc)) numericRanges.push([start, cp]);
+    pendingRange = null;
+    continue;
+  }
   const cccVal = parseInt(f[3], 10) || 0;
   const decomp = f[5].trim();
   if (cccVal !== 0) ccc.push([cp, cccVal]);
-  generalCategory.push([cp, gcTag(gc)]);
+  generalCategory.push([cp, cp, gcTag(gc)]);
+  if (gc.startsWith("L")) letterRanges.push([cp, cp]);
+  if (["Nd", "Nl", "No"].includes(gc)) numericRanges.push([cp, cp]);
+  if (f[12]) simpleUpper.set(cp, [parseInt(f[12], 16)]);
+  if (f[13]) simpleLower.set(cp, [parseInt(f[13], 16)]);
   if (decomp) {
     const tagged = decomp.startsWith("<");
     let rest = decomp;
@@ -100,11 +122,27 @@ for (const raw of unicodeData.split("\n")) {
     if (!tagged) canonDecomp.set(cp, cps);
   }
 }
+if (pendingRange) throw new Error("unterminated UnicodeData First/Last range");
+
+// Unconditional rows are locale-free full mappings. Conditional rows are
+// locale/context rules; v1 applies the one language-neutral condition,
+// Final_Sigma, in Text.rs/TextLite.rs and intentionally excludes tr/az/lt.
+const specialCasing = readChecked("SpecialCasing.txt");
+for (const raw of specialCasing.split("\n")) {
+  const line = stripComment(raw).trim();
+  if (!line) continue;
+  const f = line.split(";").map((x) => x.trim());
+  if (f.length < 5 || f[4] !== "") continue;
+  const cp = parseInt(f[0], 16);
+  simpleLower.set(cp, f[1].split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16)));
+  simpleUpper.set(cp, f[3].split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16)));
+}
 
 // ---- CompositionExclusions / DerivedNormalizationProps ---------------------
 // Full_Composition_Exclusion (DerivedNormalizationProps.txt) is the complete
 // authoritative exclusion set (primary exclusions + singleton + non-starter
 // decomposables); it supersedes CompositionExclusions.txt alone.
+readChecked("CompositionExclusions.txt");
 const dnp = readChecked("DerivedNormalizationProps.txt");
 const fullCompositionExclusion = []; // [start,end]
 for (const raw of dnp.split("\n")) {
@@ -133,16 +171,17 @@ function inExclusion(cp) {
 // (Turkic) are excluded (locale-free default fold per D-TEXTUNICODE1).
 const caseFolding = readChecked("CaseFolding.txt");
 const caseFold = new Map(); // cp -> [u32...]
+const simpleCaseFold = new Map(); // cp -> one u32 (C+S)
 for (const raw of caseFolding.split("\n")) {
   const line = stripComment(raw).trim();
   if (!line) continue;
   const f = line.split(";").map((x) => x.trim());
   if (f.length < 3) continue;
   const status = f[1];
-  if (status !== "C" && status !== "F") continue;
   const cp = parseInt(f[0], 16);
   const mapping = f[2].split(/\s+/).filter(Boolean).map((x) => parseInt(x, 16));
-  caseFold.set(cp, mapping);
+  if (status === "C" || status === "F") caseFold.set(cp, mapping);
+  if ((status === "C" || status === "S") && mapping.length === 1) simpleCaseFold.set(cp, mapping[0]);
 }
 
 // ---- EastAsianWidth.txt ------------------------------------------------------
@@ -173,6 +212,7 @@ for (const raw of eaw.split("\n")) {
 const emojiData = readChecked("emoji/emoji-data.txt");
 const extPictographic = [];
 const emojiPresentation = [];
+const emoji = [];
 for (const raw of emojiData.split("\n")) {
   const line = stripComment(raw).trim();
   if (!line) continue;
@@ -185,6 +225,7 @@ for (const raw of emojiData.split("\n")) {
   else a = b = parseInt(range, 16);
   if (prop === "Extended_Pictographic") extPictographic.push([a, b]);
   if (prop === "Emoji_Presentation") emojiPresentation.push([a, b]);
+  if (prop === "Emoji") emoji.push([a, b]);
 }
 
 // ---- auxiliary/*BreakProperty.txt -------------------------------------------
@@ -207,6 +248,15 @@ function parseBreakProperty(text) {
 const graphemeProp = parseBreakProperty(readChecked("auxiliary/GraphemeBreakProperty.txt"));
 const wordProp = parseBreakProperty(readChecked("auxiliary/WordBreakProperty.txt"));
 const sentenceProp = parseBreakProperty(readChecked("auxiliary/SentenceBreakProperty.txt"));
+const derivedCoreProperties = readChecked("DerivedCoreProperties.txt");
+const derivedCoreProp = parseBreakProperty(derivedCoreProperties);
+const alphabeticRanges = derivedCoreProp.filter(([, , p]) => p === "Alphabetic").map(([a, b]) => [a, b]);
+const casedRanges = derivedCoreProp.filter(([, , p]) => p === "Cased").map(([a, b]) => [a, b]);
+const caseIgnorableRanges = derivedCoreProp.filter(([, , p]) => p === "Case_Ignorable").map(([a, b]) => [a, b]);
+const defaultIgnorableRanges = derivedCoreProp.filter(([, , p]) => p === "Default_Ignorable_Code_Point").map(([a, b]) => [a, b]);
+const whiteSpaceRanges = parseBreakProperty(readChecked("PropList.txt"))
+  .filter(([, , p]) => p === "White_Space")
+  .map(([a, b]) => [a, b]);
 
 // ---- DerivedCoreProperties.txt: Indic_Conjunct_Break (GB9c) -----------------
 // `<range> ; InCB; <Value> # comment` lines only; everything else in the file
@@ -227,7 +277,7 @@ function parseInCB(text) {
   }
   return out;
 }
-const incbProp = parseInCB(readChecked("DerivedCoreProperties.txt"));
+const incbProp = parseInCB(derivedCoreProperties);
 
 // ---- derive: canonical composition pairs ------------------------------------
 // pair (c1,c2) -> composed, only from canonical (untagged) 2-codepoint
@@ -269,9 +319,19 @@ function mergeTaggedRanges(ranges) {
   }
   return out;
 }
+function mergePairRanges(ranges) {
+  const sorted = [...ranges].sort((x, y) => x[0] - y[0]);
+  const out = [];
+  for (const [a, b] of sorted) {
+    const last = out[out.length - 1];
+    if (last && last[1] + 1 === a) last[1] = b;
+    else out.push([a, b]);
+  }
+  return out;
+}
 
 const cccRanges = mergeRangesSameTag(ccc);
-const gcRanges = mergeRangesSameTag(generalCategory);
+const gcRanges = mergeTaggedRanges(generalCategory);
 const eawMerged = mergeTaggedRanges(eawRanges);
 
 // ---- break-property enum tag encodings --------------------------------------
@@ -331,16 +391,30 @@ for (const cp of [...caseFold.keys()].sort((a, b) => a - b)) {
   foldIndex.push([cp, start, seq.length]);
 }
 
+function mappingPool(map) {
+  const pool = [];
+  const index = [];
+  for (const cp of [...map.keys()].sort((a, b) => a - b)) {
+    const seq = map.get(cp);
+    const start = pool.length;
+    pool.push(...seq);
+    index.push([cp, start, seq.length]);
+  }
+  return { pool, index };
+}
+const lower = mappingPool(simpleLower);
+const upper = mappingPool(simpleUpper);
+
 const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 // Source: scripts/agent/gen-unicode-tables.mjs against pinned Unicode 16.0.0 UCD.
 // Regenerate: node scripts/agent/gen-unicode-tables.mjs <ucd-dir-with-checksummed-files>
-// Three siblings emitted from one run, byte-identical data (R12 parity):
-//   jet-foundation (compiler-internal module), jet-comptime (own module),
-//   jet-codegen (AOT prelude — spliced flat into the emitted user program,
+// Two copies emitted from one run, byte-identical data (R12 parity):
+//   jet-foundation (also consumed by jet-comptime), and jet-codegen
+//   (AOT prelude — spliced flat into the emitted user program,
 //   so this copy carries no inner #![...] attribute: it is not a crate root).
 `;
-// jet-foundation / jet-comptime are proper standalone module files: safe to
-// carry an inner attribute. The jet-codegen copy is concatenated flat into
+// jet-foundation is a proper standalone module file: safe to carry an inner
+// attribute. The jet-codegen copy is concatenated flat into
 // other prelude text (see Codegen/mod.rs CORELIB_PRELUDE_PARTS) — no mod
 // wrapper, so an inner `#![...]` attribute there would not be at a crate/mod
 // root and is illegal; leave unused-item warnings alone (I2 only forbids
@@ -349,6 +423,8 @@ const MODULE_HEADER = HEADER_COMMENT + "#![allow(dead_code)]\n";
 const FLAT_HEADER = HEADER_COMMENT;
 
 const body = `
+pub const UNICODE_VERSION: &str = "16.0.0";
+
 pub static UNICODE_DECOMP_POOL: &[u32] = &[${pool.join(",")}];
 // (codepoint, pool_start, pool_len, is_canonical: 1/0)
 pub static UNICODE_DECOMP_INDEX: &[(u32,u32,u32,u8)] = &[${decompIndex
@@ -361,11 +437,30 @@ pub static UNICODE_FOLD_INDEX: &[(u32,u32,u32)] = &[${foldIndex
   .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
   .join(",")}];
 
+pub static UNICODE_LOWER_POOL: &[u32] = &[${lower.pool.join(",")}];
+pub static UNICODE_LOWER_INDEX: &[(u32,u32,u32)] = &[${lower.index
+  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
+  .join(",")}];
+pub static UNICODE_UPPER_POOL: &[u32] = &[${upper.pool.join(",")}];
+pub static UNICODE_UPPER_INDEX: &[(u32,u32,u32)] = &[${upper.index
+  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
+  .join(",")}];
+// Default simple case fold (C+S rows), used by one-scalar regex matching.
+pub static UNICODE_SIMPLE_FOLD: &[(u32,u32)] = &[${fmtU32Pairs([...simpleCaseFold.entries()].sort((a, b) => a[0] - b[0]))}];
+
 // (start, end, canonical_combining_class)
 pub static UNICODE_CCC: &[(u32,u32,u8)] = &[${fmtU32Triples(cccRanges)}];
 
 // (start, end, general_category_tag) tags: ${GC_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
 pub static UNICODE_GENERAL_CATEGORY: &[(u32,u32,u8)] = &[${fmtU32Triples(gcRanges)}];
+
+pub static UNICODE_LETTER: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(letterRanges))}];
+pub static UNICODE_NUMERIC: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(numericRanges))}];
+pub static UNICODE_ALPHABETIC: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(alphabeticRanges))}];
+pub static UNICODE_WHITE_SPACE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(whiteSpaceRanges))}];
+pub static UNICODE_CASED: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(casedRanges))}];
+pub static UNICODE_CASE_IGNORABLE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(caseIgnorableRanges))}];
+pub static UNICODE_DEFAULT_IGNORABLE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(defaultIgnorableRanges))}];
 
 // composition exclusions (Full_Composition_Exclusion, DerivedNormalizationProps.txt)
 pub static UNICODE_COMPOSITION_EXCLUSIONS: &[(u32,u32)] = &[${fmtU32Pairs(fullCompositionExclusion)}];
@@ -380,6 +475,7 @@ pub static UNICODE_EAST_ASIAN_WIDTH: &[(u32,u32,u8)] = &[${fmtU32Triples(eawMerg
 
 pub static UNICODE_EXTENDED_PICTOGRAPHIC: &[(u32,u32)] = &[${fmtU32Pairs(extPictographic)}];
 pub static UNICODE_EMOJI_PRESENTATION: &[(u32,u32)] = &[${fmtU32Pairs(emojiPresentation)}];
+pub static UNICODE_EMOJI: &[(u32,u32)] = &[${fmtU32Pairs(emoji)}];
 
 // Grapheme_Cluster_Break tags: ${GRAPHEME_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
 pub static UNICODE_GRAPHEME_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(graphemeRanges)}];
@@ -401,7 +497,13 @@ const outPaths = [
 ];
 for (const [rel, text] of outPaths) {
   const full = path.join(process.cwd(), rel);
-  writeFileSync(full, text);
-  console.log(`wrote ${rel} (${text.length} bytes)`);
+  if (checkOnly) {
+    const current = readFileSync(full, "utf8");
+    if (current !== text) throw new Error(`${rel} is stale; regenerate from pinned Unicode 16.0.0`);
+    console.log(`ok ${rel} (${text.length} bytes)`);
+  } else {
+    writeFileSync(full, text);
+    console.log(`wrote ${rel} (${text.length} bytes)`);
+  }
 }
-console.log("done.");
+console.log(checkOnly ? "Unicode tables are byte-identical." : "done.");

@@ -1155,8 +1155,8 @@ pub(crate) fn emit_tir_core_call(
         ("core.text", "caseless_eq") => {
             format!("{}(&({}), &({}))", helper("jet_text_caseless_eq"), arg(0), arg(1))
         }
-        ("core.text", "lower") => format!("({}).to_lowercase()", arg(0)),
-        ("core.text", "upper") => format!("({}).to_uppercase()", arg(0)),
+        ("core.text", "lower") => format!("{}(&({}))", helper("jet_text_lower"), arg(0)),
+        ("core.text", "upper") => format!("{}(&({}))", helper("jet_text_upper"), arg(0)),
         ("core.text", "graphemes") => format!("{}(&({}))", helper("jet_text_graphemes"), arg(0)),
         ("core.text", "words") => format!("{}(&({}))", helper("jet_text_words"), arg(0)),
         ("core.text", "sentences") => format!("{}(&({}))", helper("jet_text_sentences"), arg(0)),
@@ -1182,9 +1182,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.text", "rsplitn") => {
             format!("{}(&({}), &({}), {})", helper("jet_text_rsplitn"), arg(0), arg(1), arg(2))
         }
-        ("core.text", "trim") => format!("({}).trim().to_string()", arg(0)),
-        ("core.text", "trim_start") => format!("({}).trim_start().to_string()", arg(0)),
-        ("core.text", "trim_end") => format!("({}).trim_end().to_string()", arg(0)),
+        ("core.text", "trim") => format!("{}(&({}))", helper("jet_text_trim"), arg(0)),
+        ("core.text", "trim_start") => format!("{}(&({}))", helper("jet_text_trim_start"), arg(0)),
+        ("core.text", "trim_end") => format!("{}(&({}))", helper("jet_text_trim_end"), arg(0)),
         ("core.text", "pad_start") => {
             format!("{}(&({}), {}, &({}))", helper("jet_text_pad_start"), arg(0), arg(1), arg(2))
         }

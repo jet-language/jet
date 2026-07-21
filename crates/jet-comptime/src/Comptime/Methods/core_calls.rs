@@ -858,8 +858,8 @@ pub(super) fn apply_core_call(
             one(0)?,
             span,
         )?))),
-        ("core.text", "lower") => Ok(CtValue::Str(as_string(one(0)?, span)?.to_lowercase())),
-        ("core.text", "upper") => Ok(CtValue::Str(as_string(one(0)?, span)?.to_uppercase())),
+        ("core.text", "lower") => Ok(CtValue::Str(super::super::TextLite::lower(as_string(one(0)?, span)?))),
+        ("core.text", "upper") => Ok(CtValue::Str(super::super::TextLite::upper(as_string(one(0)?, span)?))),
         ("core.text", "caseless_eq") => Ok(CtValue::Bool(super::super::TextLite::caseless_eq(
             as_string(one(0)?, span)?,
             as_string(one(1)?, span)?,
@@ -946,13 +946,13 @@ pub(super) fn apply_core_call(
                     .collect(),
             ))
         }
-        ("core.text", "trim") => Ok(CtValue::Str(as_string(one(0)?, span)?.trim().to_string())),
-        ("core.text", "trim_start") => Ok(CtValue::Str(
-            as_string(one(0)?, span)?.trim_start().to_string(),
-        )),
-        ("core.text", "trim_end") => Ok(CtValue::Str(
-            as_string(one(0)?, span)?.trim_end().to_string(),
-        )),
+        ("core.text", "trim") => Ok(CtValue::Str(super::super::TextLite::trim(as_string(one(0)?, span)?))),
+        ("core.text", "trim_start") => Ok(CtValue::Str(super::super::TextLite::trim_start(
+            as_string(one(0)?, span)?,
+        ))),
+        ("core.text", "trim_end") => Ok(CtValue::Str(super::super::TextLite::trim_end(
+            as_string(one(0)?, span)?,
+        ))),
         ("core.text", "pad_start") => {
             let s = as_string(one(0)?, span)?.to_string();
             let w = as_int(one(1)?, span)?;
@@ -1713,10 +1713,10 @@ pub(super) fn apply_core_call(
             Ok(CtValue::Bool(as_string(one(0)?, span)?.is_ascii()))
         }
         ("core.text.unicode", "lower") => {
-            Ok(CtValue::Str(as_string(one(0)?, span)?.to_lowercase()))
+            Ok(CtValue::Str(super::super::TextLite::lower(as_string(one(0)?, span)?)))
         }
         ("core.text.unicode", "upper") => {
-            Ok(CtValue::Str(as_string(one(0)?, span)?.to_uppercase()))
+            Ok(CtValue::Str(super::super::TextLite::upper(as_string(one(0)?, span)?)))
         }
         ("core.text.unicode", "scalars") => Ok(CtValue::List(
             as_string(one(0)?, span)?

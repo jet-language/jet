@@ -2,13 +2,23 @@
 use core.text as text
 
 fn run() {
+    sample :: "é👍"
+    print("bytes: {text.byte_count(sample)}")
+    print("scalars: {text.scalar_count(sample)}")
+    print("graphemes: {text.graphemes(sample).len()}")
+    print("columns: {text.display_width(sample)}")
     print(text.caseless_eq("Straße", "STRASSE"))
     print(text.nfc("é") == "é")
     print(text.nfkc("ﬃ"))
-    print(text.graphemes("é👍").len())
+    print(text.lower("ΟΣ"))
+    print(text.upper("ßև"))
     print(text.words("Hi, κόσμε 123.").len())
     print(text.sentences("One. Two!").len())
-    print(text.display_width("表a"))
+    print(text.display_width("1️⃣"))
+    print(text.display_width("©️"))
+    print(text.display_width("́‍"))
+    cjk :: TextWidth.{ ambiguous: .Wide, controls: .Reject }
+    print(text.display_width("·", policy: cjk) ?? -1)
     print(text.is_alphabetic("Ж"))
     print(text.is_numeric("٣"))
     print(text.pad_start("7", 3, "0"))
