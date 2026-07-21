@@ -223,9 +223,12 @@ fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc) -> bool {
     };
     flattened_web_params(tir)
         .iter().all(|(_, ty)| ty_supported(ty).is_some())
-        // Owned strings can stay inside an internal Rust/Wasm parameter list,
-        // but this emitter has no string return representation yet.
-        && f.return_type.as_ref().map(|ty| wasm_export_ty(ty).is_some()).unwrap_or(true)
+        // D-JSBIND1: String returns cross the export boundary as packed
+        // (ptr,len) u64; owned String params stay internal-only for now.
+        && f.return_type
+            .as_ref()
+            .map(|ty| matches!(ty, Type::String) || wasm_export_ty(ty).is_some())
+            .unwrap_or(true)
 }
 
 fn web_wasm_stmts_supported(
@@ -648,6 +651,32 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         out.push_str("#[no_mangle]\npub extern \"C\" fn jet_wasm_nop() {}\n");
         return Ok(out);
     }
+    let need_string_abi = wasm_funcs.iter().any(|f| {
+        let export = f.marker == Some(WebPartitionMarker::WasmExport)
+            || (f.key == "run"
+                && f.bucket == WebBucket::Wasm
+                && bundle.modules[bundle.entry].html_path.is_none());
+        export && matches!(f.return_type.as_ref(), Some(Type::String))
+    });
+    if need_string_abi {
+        // D-JSBIND1=A: UTF-8 ownership transfer — packed u64 (ptr<<32)|len,
+        // JS copies then calls jet_abi_string_free.
+        out.push_str(
+            "fn jet_abi_string_ret(s: String) -> u64 {\n\
+             \x20   let boxed = s.into_bytes().into_boxed_slice();\n\
+             \x20   let len = boxed.len() as u32;\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   ((ptr as u64) << 32) | (len as u64)\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_string_free(ptr: u32, len: u32) {\n\
+             \x20   if ptr == 0 { return; }\n\
+             \x20   unsafe {\n\
+             \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));\n\
+             \x20   }\n\
+             }\n\n",
+        );
+    }
     let mut emitted_structs = std::collections::HashSet::new();
     for f in &wasm_funcs {
         for reconstruction in &f.tir.web_param_reconstructions {
@@ -673,8 +702,11 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
 }
 
 fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String, funcs: &[FuncWeb]) -> WebEmitResult<()> {
+    let string_ret = matches!(f.return_type.as_ref(), Some(Type::String));
     let reconstructed_export = export && !f.tir.web_param_reconstructions.is_empty();
-    if reconstructed_export {
+    // String returns cannot be `extern "C"` Rust String — wrap as packed u64.
+    let wrapped_export = export && (reconstructed_export || string_ret);
+    if wrapped_export {
         out.push_str(&format!(
             "#[no_mangle]\npub extern \"C\" fn {}(",
             wasm_export_symbol(&f.key)
@@ -687,7 +719,9 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
             .ok_or_else(|| web_emit_error(f))?;
         out.push_str(&params.join(", "));
         out.push(')');
-        if let Some(ret) = &f.return_type {
+        if string_ret {
+            out.push_str(" -> u64 ");
+        } else if let Some(ret) = &f.return_type {
             out.push_str(&format!(" -> {} ", wasm_ty(ret).ok_or_else(|| web_emit_error(f))?));
         }
         out.push_str("{\n");
@@ -710,7 +744,12 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
             .map(|(name, _, _)| name.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        if f.return_type.is_some() {
+        if string_ret {
+            out.push_str(&format!(
+                "    return jet_abi_string_ret(jet_wasm_{}({args}));\n",
+                f.key
+            ));
+        } else if f.return_type.is_some() {
             out.push_str(&format!("    return jet_wasm_{}({args});\n", f.key));
         } else {
             out.push_str(&format!("    jet_wasm_{}({args});\n", f.key));
@@ -718,7 +757,7 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
         out.push_str("}\n\n");
     }
 
-    if export && !reconstructed_export {
+    if export && !wrapped_export {
         out.push_str(&format!(
             "#[no_mangle]\npub extern \"C\" fn {}(",
             wasm_export_symbol(&f.key)
@@ -855,7 +894,8 @@ fn wasm_emit_expr(
                 let TIR::TStrPart::Lit(text) = part else { return Err(()) };
                 value.push_str(text);
             }
-            json_quote(&value)
+            // Owned String — export returns and Jet String locals need String, not &str.
+            format!("{}.to_string()", json_quote(&value))
         }
         TIR::TExprKind::Local(name) => name.clone(),
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
@@ -943,7 +983,20 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
                 "  const raw = wasm.{sym}({});\n",
                 call_args.join(", ")
             ));
-            out.push_str("  return jetDom.unmarshalAbi(raw, \"scalar\");\n");
+            let ret_kind = match f.return_type.as_ref() {
+                Some(Type::String) => "string",
+                Some(Type::List(inner)) if matches!(**inner, Type::Int | Type::IntN { .. }) => {
+                    "list-int"
+                }
+                _ => "scalar",
+            };
+            if ret_kind == "string" {
+                out.push_str("  return jetDom.unmarshalAbi(raw, \"string\", wasm);\n");
+            } else {
+                out.push_str(&format!(
+                    "  return jetDom.unmarshalAbi(raw, \"{ret_kind}\");\n"
+                ));
+            }
             out.push_str("}\n\n");
         }
     }

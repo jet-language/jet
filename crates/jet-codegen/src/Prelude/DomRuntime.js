@@ -492,8 +492,17 @@ export function marshalAbi(value, kind) {
   return value;
 }
 
-/** D-JSBIND1=A: read ABI-safe return values from WASM. */
-export function unmarshalAbi(value, kind) {
+/** D-JSBIND1=A: read ABI-safe return values from WASM.
+ *  String returns are packed u64 (ptr<<32)|len; ownership frees via jet_abi_string_free. */
+export function unmarshalAbi(value, kind, wasm) {
+  if (kind === "string") {
+    const packed = typeof value === "bigint" ? value : BigInt(value);
+    const ptr = Number(packed >> 32n);
+    const len = Number(packed & 0xffffffffn);
+    const bytes = new Uint8Array(wasm.memory.buffer, ptr, len).slice();
+    wasm.jet_abi_string_free(ptr, len);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  }
   if (kind === "list-int") {
     return Array.isArray(value) ? value.map((x) => Number(x)) : [];
   }

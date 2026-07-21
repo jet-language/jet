@@ -1399,3 +1399,53 @@ fn web_wasm_range_loop_bridge_roundtrip() {
     assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn web_wasm_string_export_hostile_roundtrip() {
+    // D-JSBIND1 / criterion #3: String export returns as packed (ptr,len) u64;
+    // JS copies UTF-8 then frees. Hostile: empty, interior NUL, non-ASCII.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm string (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_string.jet");
+    let dir = build_web_fixture("wasm_string", src, "examples/features/web/web_wasm_string.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("fn jet_abi_string_ret(s: String) -> u64"),
+        "string return helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_string_free(ptr: u32, len: u32)"),
+        "string free export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("-> u64 ")
+            && wasm.contains("jet_abi_string_ret(jet_wasm_")
+            && wasm.contains("pub extern \"C\" fn jet_export_"),
+        "export must pack String as u64:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("unmarshalAbi(raw, \"string\", wasm)"),
+        "JS bridge must unmarshal String returns:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_string_free") && runtime.contains("TextDecoder"),
+        "runtime missing string ABI decode/free:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_string.out");
+    assert_eq!(stdout, expected);
+    // Explicit byte-level hostility: tab + newline survived the ABI.
+    assert!(
+        stdout.as_bytes().contains(&b'\t'),
+        "TAB byte was lost in String roundtrip:\n{stdout:?}"
+    );
+    assert!(
+        stdout.contains("emoji🌍"),
+        "Unicode scalar was lost:\n{stdout}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
