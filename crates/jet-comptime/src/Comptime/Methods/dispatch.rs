@@ -1672,7 +1672,27 @@ impl<'a> Interp<'a> {
                             | "group_mean" | "inner_join" | "left_join",
                     )
                 ) {
-                    return self.eval_data_call(method, argv, type_args, span);
+                    // Schema (and empty containers) need the arg's static type —
+                    // binding for idents, resolved_ret for nested `data.table(...)`.
+                    let arg0_ty = args.first().and_then(|a| match &a.expr {
+                        Expr::Ident(name, _) => self.binding_types.get(name).cloned(),
+                        Expr::MethodCall {
+                            resolved_ret: Some(ty),
+                            ..
+                        } => Some(ty.clone()),
+                        _ => None,
+                    });
+                    // Call-site return type covers REPL turns where prior binding
+                    // types aren't on this Interp (fresh per turn) but sema still
+                    // wrote `Table<T>` / `Series<T>` onto this MethodCall.
+                    return self.eval_data_call(
+                        method,
+                        argv,
+                        type_args,
+                        arg0_ty.as_ref(),
+                        resolved_ret,
+                        span,
+                    );
                 }
                 // D-ENC-CBOR-SURFACE1: encoding a Codable value needs its
                 // declared field types. CtValue intentionally erases `[U8]`

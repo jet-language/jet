@@ -2547,3 +2547,38 @@ fn repl_core_data_lazy_plans_and_typed_joins() {
         "left join unmatched row missing: {out}"
     );
 }
+
+#[test]
+fn repl_core_data_schema_empty_table_and_series_law() {
+    let inputs = &[
+        "use core.data as data",
+        "struct Ticket { team: String minutes: Float }",
+        "empty_rows: [Ticket] := []",
+        "empty_table :: data.table(empty_rows)",
+        "data.schema(empty_table)",
+        "data.schema(data.series([1.0, 2.0]))",
+        "t :: Ticket.{team: \"Core\", minutes: 4.0}",
+        "data.schema(data.series([t]))",
+        "empty_tickets: [Ticket] := []",
+        "data.schema(data.series(empty_tickets))",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        !out.contains("E0956"),
+        "core.data schema should dispatch at comptime, got: {out}"
+    );
+    assert!(
+        out.contains("DataColumn(name: team, type_name: String)")
+            && out.contains("DataColumn(name: minutes, type_name: Float)"),
+        "empty Table<Ticket> must keep static columns: {out}"
+    );
+    assert!(
+        out.contains("DataColumn(name: value, type_name: Float)"),
+        "Series<Float> must be one value column: {out}"
+    );
+    let ticket_value_hits = out.matches("DataColumn(name: value, type_name: Ticket)").count();
+    assert!(
+        ticket_value_hits >= 2,
+        "non-empty and empty Series<Ticket> both need value:Ticket (not expanded fields): {out}"
+    );
+}

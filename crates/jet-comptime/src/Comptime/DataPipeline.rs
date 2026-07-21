@@ -58,10 +58,60 @@ fn expect_struct<'a>(v: &'a CtValue, type_name: &str, what: &str, span: Span) ->
     }
 }
 
+fn data_schema_elem_ty(arg_ty: &Type) -> Option<&Type> {
+    match arg_ty {
+        Type::List(inner) => Some(inner.as_ref()),
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "Table" | "Series" | "LazyFrame") && args.len() == 1 =>
+        {
+            Some(&args[0])
+        }
+        _ => None,
+    }
+}
+
+fn data_schema_expand_struct(arg_ty: &Type) -> bool {
+    !matches!(arg_ty, Type::Apply { name, .. } if name == "Series")
+}
+
+fn data_column(name: &str, type_name: &str) -> CtValue {
+    ct_struct(
+        "DataColumn",
+        vec![
+            ("name", CtValue::Str(name.to_string())),
+            ("type_name", CtValue::Str(type_name.to_string())),
+        ],
+    )
+}
+
+fn list_elem_type_name(
+    arg0_ty: Option<&Type>,
+    call_ret: Option<&Type>,
+    items: &[CtValue],
+) -> String {
+    if let Some(Type::List(inner)) = arg0_ty {
+        return inner.name();
+    }
+    if let Some(elem) = call_ret.and_then(data_schema_elem_ty) {
+        return elem.name();
+    }
+    items
+        .first()
+        .map(ct_value_type_name)
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+fn container_elem_type_name(recv: &CtValue, type_name: &str) -> Option<String> {
+    match struct_field(recv, type_name, "elem_type") {
+        Some(CtValue::Str(name)) if !name.is_empty() && name != "Unknown" => Some(name.clone()),
+        _ => None,
+    }
+}
+
 fn ct_value_type_name(v: &CtValue) -> String {
     match v {
         CtValue::Int(_) => "Int".to_string(),
-        CtValue::Float(value) => value.jet_type().show(),
+        CtValue::Float(value) => value.jet_type().name(),
         CtValue::Bool(_) => "Bool".to_string(),
         CtValue::Char(_) => "Char".to_string(),
         CtValue::Str(_) => "String".to_string(),
@@ -132,6 +182,8 @@ impl<'a> Interp<'a> {
         method: &str,
         mut argv: Vec<CtValue>,
         type_args: &[Type],
+        arg0_ty: Option<&Type>,
+        call_ret: Option<&Type>,
         span: Span,
     ) -> Result<CtValue, Diagnostic> {
         match method {
@@ -166,12 +218,14 @@ impl<'a> Interp<'a> {
             }
             "table" => {
                 let rows = expect_list(&argv[0], "table", span)?.clone();
+                let elem_type = list_elem_type_name(arg0_ty, call_ret, &rows);
                 Ok(ct_struct(
                     "Table",
                     vec![
                         ("rows", CtValue::List(rows)),
                         ("missing", CtValue::Int(0)),
                         ("plan", CtValue::List(vec![CtValue::Str("table".to_string())])),
+                        ("elem_type", CtValue::Str(elem_type)),
                     ],
                 ))
             }
@@ -181,7 +235,15 @@ impl<'a> Interp<'a> {
             }
             "series" => {
                 let values = expect_list(&argv[0], "series", span)?.clone();
-                Ok(ct_struct("Series", vec![("values", CtValue::List(values)), ("missing", CtValue::Int(0))]))
+                let elem_type = list_elem_type_name(arg0_ty, call_ret, &values);
+                Ok(ct_struct(
+                    "Series",
+                    vec![
+                        ("values", CtValue::List(values)),
+                        ("missing", CtValue::Int(0)),
+                        ("elem_type", CtValue::Str(elem_type)),
+                    ],
+                ))
             }
             "values" => {
                 let (values, ..) = expect_struct(&argv[0], "Series", "values", span)?;
@@ -191,6 +253,10 @@ impl<'a> Interp<'a> {
                 let recv = argv.first().ok_or_else(|| {
                     unsupported("`data.schema()`: missing argument", span)
                 })?;
+                let expand = match recv {
+                    CtValue::Struct { type_name, .. } if type_name == "Series" => false,
+                    _ => arg0_ty.map(data_schema_expand_struct).unwrap_or(true),
+                };
                 let sample = match recv {
                     CtValue::List(xs) => xs.first(),
                     CtValue::Struct { type_name, .. }
@@ -211,50 +277,72 @@ impl<'a> Interp<'a> {
                     }
                 };
                 let columns = match sample {
+                    Some(value) if !expand => {
+                        // Series law: one `value` column even when the element is a struct.
+                        vec![data_column("value", &ct_value_type_name(value))]
+                    }
                     Some(CtValue::Struct { type_name, fields }) => {
                         if let Some(def) = self.structs.get(type_name.as_str()) {
                             def.fields
                                 .iter()
-                                .map(|f| {
-                                    ct_struct(
-                                        "DataColumn",
-                                        vec![
-                                            ("name", CtValue::Str(f.name.clone())),
-                                            ("type_name", CtValue::Str(f.ty.name())),
-                                        ],
-                                    )
-                                })
+                                .map(|f| data_column(&f.name, &f.ty.name()))
                                 .collect()
                         } else {
                             // ponytail: fall back to runtime field names when the
                             // struct def is out of the comptime registry.
                             fields
                                 .iter()
-                                .map(|(name, value)| {
-                                    ct_struct(
-                                        "DataColumn",
-                                        vec![
-                                            ("name", CtValue::Str(name.clone())),
-                                            (
-                                                "type_name",
-                                                CtValue::Str(ct_value_type_name(value)),
-                                            ),
-                                        ],
-                                    )
-                                })
+                                .map(|(name, value)| data_column(name, &ct_value_type_name(value)))
                                 .collect()
                         }
                     }
-                    Some(value) => vec![ct_struct(
-                        "DataColumn",
-                        vec![
-                            ("name", CtValue::Str("value".to_string())),
-                            ("type_name", CtValue::Str(ct_value_type_name(value))),
-                        ],
-                    )],
-                    // ponytail: empty containers have no sample row; AOT still
-                    // emits the static type schema. Non-empty paths match AOT.
-                    None => Vec::new(),
+                    Some(value) => vec![data_column("value", &ct_value_type_name(value))],
+                    // Empty containers: match AOT — schema is type-driven.
+                    None => {
+                        let from_arg = arg0_ty.and_then(data_schema_elem_ty);
+                        let from_stored = match recv {
+                            CtValue::Struct { type_name, .. }
+                                if type_name == "Table"
+                                    || type_name == "Series"
+                                    || type_name == "LazyFrame" =>
+                            {
+                                container_elem_type_name(recv, type_name)
+                            }
+                            _ => None,
+                        };
+                        match from_arg {
+                            Some(elem) if !expand => {
+                                vec![data_column("value", &elem.name())]
+                            }
+                            Some(Type::Named(struct_name)) => {
+                                if let Some(def) = self.structs.get(struct_name.as_str()) {
+                                    def.fields
+                                        .iter()
+                                        .map(|f| data_column(&f.name, &f.ty.name()))
+                                        .collect()
+                                } else {
+                                    vec![data_column("value", struct_name)]
+                                }
+                            }
+                            Some(elem) => vec![data_column("value", &elem.name())],
+                            None => match from_stored {
+                                Some(name) if !expand => {
+                                    vec![data_column("value", &name)]
+                                }
+                                Some(name) => {
+                                    if let Some(def) = self.structs.get(name.as_str()) {
+                                        def.fields
+                                            .iter()
+                                            .map(|f| data_column(&f.name, &f.ty.name()))
+                                            .collect()
+                                    } else {
+                                        vec![data_column("value", &name)]
+                                    }
+                                }
+                                None => Vec::new(),
+                            },
+                        }
+                    }
                 };
                 Ok(CtValue::List(columns))
             }
@@ -265,6 +353,9 @@ impl<'a> Interp<'a> {
             }
             "lazy" => {
                 let (rows, missing, plan) = expect_struct(&argv[0], "Table", "lazy", span)?;
+                let elem_type = container_elem_type_name(&argv[0], "Table")
+                    .or_else(|| arg0_ty.and_then(data_schema_elem_ty).map(|t| t.name()))
+                    .unwrap_or_else(|| "Unknown".to_string());
                 Ok(ct_struct(
                     "LazyFrame",
                     vec![
@@ -272,6 +363,7 @@ impl<'a> Interp<'a> {
                         ("missing", CtValue::Int(missing)),
                         ("plan", CtValue::List(plan.cloned().unwrap_or_default())),
                         ("operations", CtValue::List(Vec::new())),
+                        ("elem_type", CtValue::Str(elem_type)),
                     ],
                 ))
             }
@@ -294,6 +386,8 @@ impl<'a> Interp<'a> {
                     "DataLazyOperation",
                     vec![("kind", CtValue::Str(kind.to_string())), ("function", f)],
                 ));
+                let elem_type = container_elem_type_name(&argv[0], "LazyFrame")
+                    .unwrap_or_else(|| "Unknown".to_string());
                 Ok(ct_struct(
                     "LazyFrame",
                     vec![
@@ -301,6 +395,7 @@ impl<'a> Interp<'a> {
                         ("missing", CtValue::Int(missing)),
                         ("plan", CtValue::List(plan)),
                         ("operations", CtValue::List(operations)),
+                        ("elem_type", CtValue::Str(elem_type)),
                     ],
                 ))
             }
@@ -309,9 +404,16 @@ impl<'a> Interp<'a> {
                 let rows = self.materialize_lazy(&argv[0], span)?;
                 let mut plan = plan.cloned().unwrap_or_default();
                 plan.push(CtValue::Str("collect".to_string()));
+                let elem_type = container_elem_type_name(&argv[0], "LazyFrame")
+                    .unwrap_or_else(|| list_elem_type_name(None, None, &rows));
                 Ok(ct_struct(
                     "Table",
-                    vec![("rows", CtValue::List(rows)), ("missing", CtValue::Int(missing)), ("plan", CtValue::List(plan))],
+                    vec![
+                        ("rows", CtValue::List(rows)),
+                        ("missing", CtValue::Int(missing)),
+                        ("plan", CtValue::List(plan)),
+                        ("elem_type", CtValue::Str(elem_type)),
+                    ],
                 ))
             }
             "plan" => {

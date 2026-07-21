@@ -1612,7 +1612,9 @@ field is a Jet field error before codegen.
 
 `Table<T>` and `LazyFrame<T>` keep typed rows; `Series<T>` keeps typed values.
 `data.schema` returns `[DataColumn]` with `.name` and `.type_name` for each
-column of a table row type, or a single `value` column for a series element type.
+column of a table/lazy row type, or a single `value` column for a series element
+type (including when that element is itself a struct). Empty tables and series
+still report the static element model — schema is type-driven, not sample-driven.
 Missing values are ordinary Jet optionals (`T?`) inside a series, not a second
 sentinel type. `DataGroup` fields: `.key: String`, `.count: Int`, `.sum: Float`,
 `.mean: Float`. `DataJoin<L, R>` fields are `.left: L` and `.right: R`; the

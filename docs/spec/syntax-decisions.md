@@ -2518,11 +2518,13 @@ index, not a substitute for that law.
 - **D-DATAFRAME1=A**: `core.data` exposes typed `Table`/`Series<T>`, schema,
   typed rows, lazy query plans, joins, windows, missing values, and plotting.
   Eager helpers and lazy plans share the same operations. Current shipped floor:
-  typed CSV rows, `Table<T>`/`Series<T>` wrappers, `data.schema` column metadata,
-  `LazyFrame<T>` plans with deferred typed filter/sort plans with explicit collect
-  and plan audit output, optional-series missing counts, typed-lambda eager
-  `filter`/`sort_by`, group stats, stable typed inner/left joined rows, pivot
-  sums, rolling means, distribution summaries, and deterministic text/SVG plots.
+  typed CSV rows, `Table<T>`/`Series<T>` wrappers, type-driven `data.schema`
+  (empty tables still report the row model; series always expose one `value`
+  column), `LazyFrame<T>` plans with deferred typed filter/sort plans with
+  explicit collect and plan audit output, optional-series missing counts,
+  typed-lambda eager `filter`/`sort_by`, group stats, stable typed inner/left
+  joined rows, pivot sums, rolling means, distribution summaries, and
+  deterministic text/SVG plots.
 - **D-STDLIBLEDGER1=C**: Core docs track built modules only. Missing domains
   are implicit; Jet does not maintain a have/have-not ledger of unbuilt or
   declined stdlib domains.

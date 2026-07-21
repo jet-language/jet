@@ -6278,6 +6278,66 @@ fn run() {
 }
 
 #[test]
+fn core_data_schema_empty_table_and_series_law() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping core.data empty schema test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_data_schema_empty_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "data_schema_empty",
+        r#"
+use core.data as data
+
+@Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    empty_rows: [Ticket] := []
+    empty_table :: data.table(empty_rows)
+    loop c; data.schema(empty_table) {
+        print("empty:{c.name}:{c.type_name}")
+    }
+
+    nums :: data.series([1.0, 2.0])
+    loop c; data.schema(nums) {
+        print("float:{c.name}:{c.type_name}")
+    }
+
+    tickets :: data.series([Ticket.{team: "Core", minutes: 4.0}])
+    loop c; data.schema(tickets) {
+        print("struct:{c.name}:{c.type_name}")
+    }
+
+    empty_tickets: [Ticket] := []
+    empty_series :: data.series(empty_tickets)
+    loop c; data.schema(empty_series) {
+        print("empty_series:{c.name}:{c.type_name}")
+    }
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "core.data empty schema program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "empty:team:String\nempty:minutes:Float\nfloat:value:Float\nstruct:value:Ticket\nempty_series:value:Ticket\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn io_input_reads_a_line_from_stdin() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
