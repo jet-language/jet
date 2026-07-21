@@ -68,7 +68,37 @@ fn analyze_via_jetpack(
     wasm_path: &str,
     snapshot: &TypedSnapshot,
 ) -> Result<AnalyzeResponse, ProtocolError> {
+    let host = compiler_extension_host_path()?;
+    let mut command = Command::new(&host);
+    command.arg(HOST_SUBCOMMAND).arg(wasm_path);
+    analyze_via_host_command(
+        command,
+        snapshot,
+        Duration::from_millis(HOST_PROCESS_TIMEOUT_MS),
+    )
+}
+
+fn analyze_via_host_command(
+    command: Command,
+    snapshot: &TypedSnapshot,
+    timeout: Duration,
+) -> Result<AnalyzeResponse, ProtocolError> {
     let request = snapshot.encode()?;
+    let response = run_host_process(
+        command,
+        request,
+        snapshot.limits.max_response_bytes,
+        timeout,
+    )?;
+    decode_and_validate_response(snapshot, &response)
+}
+
+fn run_host_process(
+    mut command: Command,
+    request: Vec<u8>,
+    max_response: usize,
+    timeout: Duration,
+) -> Result<Vec<u8>, ProtocolError> {
     if request.len() > MAX_SNAPSHOT_BYTES {
         return Err(ProtocolError::new(format!(
             "compiler-extension snapshot exceeds IPC limit ({} > {MAX_SNAPSHOT_BYTES})",
@@ -76,22 +106,12 @@ fn analyze_via_jetpack(
         )));
     }
 
-    let host = compiler_extension_host_path()?;
-    let mut child = Command::new(&host)
-        .arg(HOST_SUBCOMMAND)
-        .arg(wasm_path)
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| {
-            ProtocolError::new(format!(
-                "couldn't start compiler-extension host `{}`: {e}",
-                host.file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("jetpack")
-            ))
-        })?;
+        .map_err(|e| ProtocolError::new(format!("couldn't start compiler-extension host: {e}")))?;
 
     let mut stdin = child
         .stdin
@@ -111,11 +131,10 @@ fn analyze_via_jetpack(
         drop(stdin);
         result
     });
-    let max_response = snapshot.limits.max_response_bytes;
     let stdout_reader = thread::spawn(move || read_bounded(stdout, max_response));
     let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_HOST_STDERR_BYTES));
 
-    let deadline = Instant::now() + Duration::from_millis(HOST_PROCESS_TIMEOUT_MS);
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -129,7 +148,8 @@ fn analyze_via_jetpack(
                 let _ = stdout_reader.join();
                 let _ = stderr_reader.join();
                 return Err(ProtocolError::new(format!(
-                    "compiler-extension host timed out after {HOST_PROCESS_TIMEOUT_MS}ms"
+                    "compiler-extension host timed out after {}ms",
+                    timeout.as_millis()
                 )));
             }
             Err(e) => {
@@ -179,7 +199,7 @@ fn analyze_via_jetpack(
     write_result.map_err(|e| {
         ProtocolError::new(format!("couldn't send snapshot to compiler-extension host: {e}"))
     })?;
-    decode_and_validate_response(snapshot, &stdout)
+    Ok(stdout)
 }
 
 fn read_bounded(
@@ -201,7 +221,11 @@ fn compiler_extension_host_path() -> Result<PathBuf, ProtocolError> {
     let exe = std::env::current_exe().map_err(|e| {
         ProtocolError::new(format!("couldn't resolve compiler executable: {e}"))
     })?;
-    compiler_extension_host_candidates(&exe)
+    compiler_extension_host_path_for(&exe)
+}
+
+fn compiler_extension_host_path_for(exe: &Path) -> Result<PathBuf, ProtocolError> {
+    compiler_extension_host_candidates(exe)
         .into_iter()
         .find(|candidate| candidate.is_file())
         .ok_or_else(|| {
@@ -374,14 +398,130 @@ fn host_failure(message: &str, span: Option<Span>) -> Diagnostic {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, Once};
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static HOST_BUILD: Once = Once::new();
 
     fn fixture_wasm(name: &str) -> PathBuf {
+        ensure_jetpack_host_built();
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../jet-pkg-model/fixtures/compiler_extension")
             .join(name)
+    }
+
+    fn ensure_jetpack_host_built() {
+        HOST_BUILD.call_once(|| {
+            let status = Command::new(env!("CARGO"))
+                .args(["build", "-p", "jetpack-bin", "--bin", "jetpack"])
+                .current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+                .status()
+                .expect("start jetpack compiler-extension host build");
+            assert!(status.success(), "build jetpack compiler-extension host");
+        });
+    }
+
+    #[test]
+    fn missing_sibling_never_falls_back_to_path() {
+        let dir = tempfile_dir();
+        let exe = dir.join("debug/deps/jet-driver-test");
+        let candidates = compiler_extension_host_candidates(&exe);
+        assert_eq!(
+            candidates,
+            vec![
+                dir.join(format!("debug/deps/jetpack{}", std::env::consts::EXE_SUFFIX)),
+                dir.join(format!("debug/jetpack{}", std::env::consts::EXE_SUFFIX)),
+            ]
+        );
+        let err = compiler_extension_host_path_for(&exe).expect_err("missing sibling must fail");
+        assert!(err.message.contains("missing beside the Jet compiler"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn oversized_ipc_request_is_rejected_before_spawn() {
+        let command = Command::new("this-host-must-not-run");
+        let err = run_host_process(
+            command,
+            vec![0; MAX_SNAPSHOT_BYTES + 1],
+            1,
+            Duration::from_millis(10),
+        )
+        .expect_err("oversized request must fail before spawn");
+        assert!(err.message.contains("snapshot exceeds IPC limit"));
+        assert!(!err.message.contains("couldn't start"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn oversized_ipc_response_is_rejected() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "head -c 300000 /dev/zero", "compiler-extension-host"]);
+        let err = run_host_process(
+            command,
+            b"snapshot".to_vec(),
+            128,
+            Duration::from_secs(1),
+        )
+        .expect_err("oversized response must fail");
+        assert_eq!(
+            err.message,
+            "compiler-extension host response exceeds IPC limit (128 bytes)"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn timeout_kills_and_reaps_host_process() {
+        let dir = tempfile_dir();
+        let pid_file = dir.join("host.pid");
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("printf '%s' \"$$\" > \"$1\"; exec sleep 60")
+            .arg("compiler-extension-host")
+            .arg(&pid_file);
+        let err = run_host_process(
+            command,
+            b"snapshot".to_vec(),
+            128,
+            Duration::from_millis(100),
+        )
+        .expect_err("stuck host must time out");
+        assert_eq!(err.message, "compiler-extension host timed out after 100ms");
+        let pid = std::fs::read_to_string(&pid_file).expect("host must record pid");
+        let alive = Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("probe host pid");
+        assert!(!alive.success(), "timed-out host pid {pid} must be reaped");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn nonzero_host_stderr_is_sanitized_before_e1402() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "printf 'rustc error[E0123] leaked\\nsecond line\\n' >&2; exit 9",
+            "compiler-extension-host",
+        ]);
+        let err = run_host_process(
+            command,
+            b"snapshot".to_vec(),
+            128,
+            Duration::from_secs(1),
+        )
+        .expect_err("nonzero host must fail");
+        assert!(err.message.contains("rustc error[E0123]"));
+        let sanitized = sanitize_host_message(&err.message);
+        assert_eq!(sanitized, "compiler-extension failed with an internal message");
+        let diagnostic = host_failure(&sanitized, None);
+        assert_eq!(diagnostic.code, "E1402");
+        assert!(!message_exposes_rustc(&diagnostic.what));
     }
 
     #[test]

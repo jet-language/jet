@@ -48,14 +48,14 @@ pub fn test_worker_count(cap: usize) -> usize {
 
 /// Locate the `jetpack` binary for integration tests.
 ///
-/// `jetpack` moved to its own workspace package (`crates/jetpack`, card
-/// #367 / D-PRODUCT-SPLIT1=C), so Cargo no longer sets
+/// `jetpack` moved to its own binary workspace package (`crates/jetpack-bin`,
+/// card #367 / D-PRODUCT-SPLIT1=C), so Cargo no longer sets
 /// `CARGO_BIN_EXE_jetpack` for tests compiled under the root `jet` package.
 /// Fall back to the freshly built debug binary next to `target/debug/jet`,
 /// building it on demand if it isn't there yet.
 pub fn jetpack_bin() -> &'static PathBuf {
     static BIN: OnceLock<PathBuf> = OnceLock::new();
-    BIN.get_or_init(|| resolve_or_build_bin("jetpack", "jetpack", "jetpack"))
+    BIN.get_or_init(|| resolve_or_build_bin("jetpack", "jetpack-bin", "jetpack"))
 }
 
 /// Locate the `jetos` binary for integration tests. Same story as
