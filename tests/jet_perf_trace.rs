@@ -1,5 +1,5 @@
 //! D-PERFSESSION1=D: `jet perf` writes/reads a versioned `.jettrace`.
-//! C1: skeleton command family. C2 slice: attach captures wall/alloc with
+//! C1: command family + verify. C2: run/attach capture wall/alloc with
 //! Jet symbol identity from the observe live snapshot.
 
 use std::fs;
@@ -115,34 +115,32 @@ fn perf_attach_view_compare_export_share_one_jettrace_truth() {
 fn perf_run_accepts_base_surface_and_writes_jettrace_before_driver() {
     let root = temp_workspace();
     let missing = root.join("missing.jet");
+    let out = root.join("missing.jettrace");
     let output = run_jet(
         &root,
-        &["perf", "run", missing.to_str().unwrap(), "--", "--port", "9"],
+        &[
+            "perf",
+            "run",
+            missing.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+            "--",
+            "--port",
+            "9",
+        ],
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("trace:"),
-        "expected jettrace write before driver failure: {stderr}"
+        "expected jettrace write after base driver: {stderr}"
     );
-    let trace_line = stderr
-        .lines()
-        .find(|line| line.starts_with("trace: "))
-        .unwrap();
-    let path = PathBuf::from(trace_line.trim_start_matches("trace: ").trim());
-    assert!(path.is_file(), "trace path missing: {}", path.display());
-    assert!(
-        path.extension().and_then(|e| e.to_str()) == Some("jettrace")
-            || path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.ends_with(".jettrace")),
-        "expected .jettrace path, got {}",
-        path.display()
-    );
-    let text = fs::read_to_string(&path).unwrap();
+    assert!(out.is_file(), "trace path missing: {}", out.display());
+    let text = fs::read_to_string(&out).unwrap();
     assert!(text.contains("\"schema\":\"jet.trace\""), "{text}");
     assert!(text.contains("\"command\":\"run\""), "{text}");
     assert!(text.contains("--port"), "{text}");
+    // Missing source cannot attribute samples; skeleton domains stay empty.
+    assert!(text.contains("\"samples\":[]"), "{text}");
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -155,6 +153,69 @@ fn perf_help_lists_family() {
     for verb in ["run", "test", "bench", "attach", "view", "compare", "export"] {
         assert!(stdout.contains(verb), "missing {verb} in {stdout}");
     }
+}
+
+#[test]
+fn perf_run_captures_wall_and_alloc_into_jettrace() {
+    if !common::have_rustc() {
+        return;
+    }
+    let root = temp_workspace();
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join("session.jet");
+    fs::write(
+        &source,
+        r#"use core.mem as mem
+use core.time as time
+
+fn run() {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    print("READY")
+    time.sleep(500)
+}
+"#,
+    )
+    .unwrap();
+
+    let out = root.join("run-capture.jettrace");
+    let output = run_jet(
+        &root,
+        &[
+            "perf",
+            "run",
+            source.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "perf run failed: status={:?} stderr={stderr}",
+        output.status.code()
+    );
+    assert!(stderr.contains("trace:"), "{stderr}");
+    assert!(out.is_file(), "missing {}", out.display());
+    let text = fs::read_to_string(&out).unwrap();
+    assert!(text.contains("\"domain\":\"wall\""), "{text}");
+    assert!(text.contains("\"duration_ns\":"), "{text}");
+    assert!(text.contains("\"allocations\":[{"), "{text}");
+    assert!(text.contains("\"source_identity\":[{"), "{text}");
+    assert!(text.contains("\"name\":\"run\""), "{text}");
+    assert!(text.contains("session.jet"), "{text}");
+    assert!(!text.contains("\"samples\":[]"), "samples still empty: {text}");
+    assert!(!text.contains("\"allocations\":[]"), "allocations still empty: {text}");
+
+    let view = run_jet(&root, &["perf", "view", out.to_str().unwrap()]);
+    let stdout = String::from_utf8_lossy(&view.stdout);
+    assert!(view.status.success(), "{}", String::from_utf8_lossy(&view.stderr));
+    assert!(stdout.contains("sample wall"), "{stdout}");
+    assert!(stdout.contains("alloc count="), "{stdout}");
+    assert!(stdout.contains("session.jet#run"), "{stdout}");
+    assert!(stdout.contains("command run"), "{stdout}");
+
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]

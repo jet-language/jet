@@ -1,10 +1,11 @@
 //! D-PERFSESSION1=D: `jet perf` family over one versioned `.jettrace` truth.
 //!
-//! `run`/`test`/`bench` write a schema-identified skeleton then return control
-//! so main can strip `perf` and execute the exact base-intent driver path.
+//! `run`/`test`/`bench` spawn the exact base-intent driver (`jet run|test|bench …`)
+//! with observe enabled, poll live facts while the child runs, then write one
+//! `.jettrace` with wall/alloc samples before exiting with the child's code.
 //! `attach`/`view`/`compare`/`export` share the same artifact verify seam.
-//! Attach reuses the observe live snapshot (D-OBSERVE-LIVE1) to capture wall/
-//! CPU and arena allocation facts attributed to a Jet source symbol.
+//! Capture reuses the observe live snapshot (D-OBSERVE-LIVE1) attributed to a
+//! Jet source symbol.
 
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, trace_id, verify_jettrace, CapturePolicy,
@@ -17,13 +18,12 @@ use jet_foundation::Syntax::ARTIFACT_EXT_TRACE;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const USAGE: &str = "usage: jet perf <run|test|bench|attach|view|compare|export> …";
 
 pub(crate) enum Outcome {
-    /// Skeleton written; caller strips `perf` and continues as the base intent.
-    ForwardBase,
     Exit(i32),
 }
 
@@ -50,17 +50,7 @@ pub(crate) fn run(raw: &[String]) -> Outcome {
         return Outcome::Exit(2);
     };
     match action {
-        "run" | "test" | "bench" => match write_session_trace(action, &raw[1..], None, CaptureBundle::empty()) {
-            Ok(path) => {
-                eprintln!("trace: {}", path.display());
-                Outcome::ForwardBase
-            }
-            Err(message) => {
-                eprintln!("Error [E2102]: {message}");
-                eprintln!(" Fix: {USAGE}");
-                Outcome::Exit(2)
-            }
-        },
+        "run" | "test" | "bench" => Outcome::Exit(run_session(action, &raw[2..])),
         "attach" => Outcome::Exit(attach(&raw[2..])),
         "view" => Outcome::Exit(view(&raw[2..])),
         "compare" => Outcome::Exit(compare(&raw[2..])),
@@ -72,6 +62,149 @@ pub(crate) fn run(raw: &[String]) -> Outcome {
             Outcome::Exit(2)
         }
     }
+}
+
+/// Spawn exact base intent with observe, capture while live, write `.jettrace`.
+fn run_session(action: &str, args: &[String]) -> i32 {
+    let parsed = match parse_session_args(args) {
+        Ok(parsed) => parsed,
+        Err(message) => {
+            eprintln!("Error [E2102]: {message}");
+            eprintln!(" Fix: jet perf {action} <file.jet> [--out <path.jettrace>]");
+            return 2;
+        }
+    };
+    let exe = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("Error [E2102]: cannot resolve jet executable: {error}");
+            return 2;
+        }
+    };
+    let mut child_argv = vec![action.to_string()];
+    child_argv.extend(parsed.child_args.iter().cloned());
+
+    let mut child = match Command::new(&exe)
+        .args(&child_argv)
+        .env("JET_OBSERVE", "1")
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            eprintln!("Error [E2102]: cannot start `jet {action}`: {error}");
+            return 2;
+        }
+    };
+    let pid = child.id();
+    let started = Instant::now();
+    let mut last_snapshot = None;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if parsed.source.is_some() {
+                    // Observe publishes under the program PID, not the jet host.
+                    if let Some(snapshot) = poll_observe_snapshot(pid) {
+                        last_snapshot = Some(snapshot);
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(error) => {
+                eprintln!("Error [E2102]: cannot wait for `jet {action}`: {error}");
+                let _ = child.kill();
+                let _ = child.wait();
+                return 2;
+            }
+        }
+    };
+    let wall_ns = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+    let capture = match &parsed.source {
+        Some(source) => match capture_from_source(
+            source,
+            last_snapshot.as_deref(),
+            wall_ns.max(1),
+            None,
+        ) {
+            Ok(bundle) => bundle,
+            // Missing/unreadable source still gets a schema-valid skeleton.
+            Err(_) => CaptureBundle::empty(),
+        },
+        None => CaptureBundle::empty(),
+    };
+    let mut argv = vec![action.to_string()];
+    argv.extend(args.iter().cloned());
+    match write_session_trace(action, &argv, parsed.out.as_deref(), capture) {
+        Ok(path) => eprintln!("trace: {}", path.display()),
+        Err(message) => {
+            eprintln!("Error [E2102]: {message}");
+            return 2;
+        }
+    }
+    status.code().unwrap_or(1)
+}
+
+struct SessionArgs {
+    out: Option<String>,
+    source: Option<String>,
+    /// Base-intent argv after the action name (perf-only flags stripped).
+    child_args: Vec<String>,
+}
+
+fn parse_session_args(args: &[String]) -> Result<SessionArgs, String> {
+    let mut out = None;
+    let mut source = None;
+    let mut child_args = Vec::new();
+    let mut i = 0usize;
+    let mut passthrough = false;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if passthrough {
+            child_args.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+        if arg == "--" {
+            passthrough = true;
+            child_args.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--out=") {
+            out = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "--out" {
+            let Some(value) = args.get(i + 1) else {
+                return Err("`--out` needs a path".into());
+            };
+            out = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            child_args.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+        if source.is_none()
+            && (arg.ends_with(".jet")
+                || Path::new(arg).extension().and_then(|e| e.to_str()) == Some("jet"))
+        {
+            source = Some(arg.to_string());
+        }
+        child_args.push(args[i].clone());
+        i += 1;
+    }
+    Ok(SessionArgs {
+        out,
+        source,
+        child_args,
+    })
 }
 
 fn attach(args: &[String]) -> i32 {
@@ -136,13 +269,16 @@ fn attach(args: &[String]) -> i32 {
     }
 
     let capture = match (source.as_deref(), jet::DevServer::LiveInspect::read(pid)) {
-        (Some(path), Ok(snapshot)) => match capture_from_observe(pid, path, &snapshot) {
-            Ok(bundle) => bundle,
-            Err(message) => {
-                eprintln!("Error [E2102]: {message}");
-                return 2;
+        (Some(path), Ok(snapshot)) => {
+            let (wall_ns, cpu_ns) = process_times(pid).unwrap_or((0, 0));
+            match capture_from_source(path, Some(&snapshot), wall_ns.max(1), Some(cpu_ns)) {
+                Ok(bundle) => bundle,
+                Err(message) => {
+                    eprintln!("Error [E2102]: {message}");
+                    return 2;
+                }
             }
-        },
+        }
         (Some(_), Err(message)) => {
             eprintln!("Error [E2102]: {message}");
             eprintln!(" Fix: start the program with `jet run --observe`, then attach");
@@ -174,10 +310,15 @@ fn attach(args: &[String]) -> i32 {
     }
 }
 
-fn capture_from_observe(pid: u32, source_path: &str, snapshot: &str) -> Result<CaptureBundle, String> {
+fn capture_from_source(
+    source_path: &str,
+    snapshot: Option<&str>,
+    wall_ns: u64,
+    cpu_ns: Option<u64>,
+) -> Result<CaptureBundle, String> {
     let path = PathBuf::from(source_path);
     if path.extension().and_then(|e| e.to_str()) != Some("jet") {
-        return Err(format!("`--source` must be a `.jet` file, got `{source_path}`"));
+        return Err(format!("source path must be a `.jet` file, got `{source_path}`"));
     }
     let bytes = fs::read(&path).map_err(|e| format!("cannot read source {source_path}: {e}"))?;
     let sha256 = SHA256::sha256_hex(&bytes);
@@ -186,28 +327,31 @@ fn capture_from_observe(pid: u32, source_path: &str, snapshot: &str) -> Result<C
         path: path_text.clone(),
         name: "run".into(),
     };
-    let (wall_ns, cpu_ns) = process_times(pid).unwrap_or((0, 0));
-    let (alloc_count, alloc_bytes) = observe_arena_resources(snapshot);
     let mut samples = Vec::new();
     samples.push(TraceSample {
         domain: "wall".into(),
         duration_ns: wall_ns.max(1),
         symbol: symbol.clone(),
     });
-    if cpu_ns > 0 {
+    if let Some(cpu_ns) = cpu_ns.filter(|ns| *ns > 0) {
         samples.push(TraceSample {
             domain: "cpu".into(),
             duration_ns: cpu_ns,
             symbol: symbol.clone(),
         });
     }
-    Ok(CaptureBundle {
-        samples,
-        allocations: vec![TraceAllocation {
+    let mut allocations = Vec::new();
+    if let Some(snapshot) = snapshot {
+        let (alloc_count, alloc_bytes) = observe_arena_resources(snapshot);
+        allocations.push(TraceAllocation {
             count: alloc_count,
             bytes: alloc_bytes,
-            symbol,
-        }],
+            symbol: symbol.clone(),
+        });
+    }
+    Ok(CaptureBundle {
+        samples,
+        allocations,
         source_identity: vec![SourceIdentity {
             path: path_text,
             sha256,
@@ -224,6 +368,76 @@ fn observe_arena_resources(snapshot: &str) -> (u64, u64) {
     let count = json_u64(resources, "arena_allocations").unwrap_or(0);
     let bytes = json_u64(resources, "arena_bytes").unwrap_or(0);
     (count, bytes)
+}
+
+/// `jet run` hosts compile then exec; observe publishes under the program PID.
+fn poll_observe_snapshot(root_pid: u32) -> Option<String> {
+    let mut stack = vec![root_pid];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut best = None;
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        if let Ok(snapshot) = jet::DevServer::LiveInspect::read(pid) {
+            if snapshot.contains("\"arena_allocations\":") {
+                return Some(snapshot);
+            }
+            best = Some(snapshot);
+        }
+        stack.extend(process_children(pid));
+    }
+    best
+}
+
+fn process_children(pid: u32) -> Vec<u32> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        let mut kids = std::collections::BTreeSet::new();
+        if let Ok(entries) = fs::read_dir(format!("/proc/{pid}/task")) {
+            for entry in entries.flatten() {
+                if let Ok(text) = fs::read_to_string(entry.path().join("children")) {
+                    for value in text.split_whitespace() {
+                        if let Ok(child) = value.parse::<u32>() {
+                            kids.insert(child);
+                        }
+                    }
+                }
+            }
+        }
+        if !kids.is_empty() {
+            return kids.into_iter().collect();
+        }
+        let Ok(entries) = fs::read_dir("/proc") else {
+            return Vec::new();
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(child) = name.to_str().and_then(|s| s.parse::<u32>().ok()) else {
+                continue;
+            };
+            let Ok(stat) = fs::read_to_string(format!("/proc/{child}/stat")) else {
+                continue;
+            };
+            let Some(fields) = stat.rsplit_once(") ").map(|(_, tail)| tail) else {
+                continue;
+            };
+            let mut parts = fields.split_whitespace();
+            let _state = parts.next();
+            let Some(ppid) = parts.next().and_then(|v| v.parse::<u32>().ok()) else {
+                continue;
+            };
+            if ppid == pid {
+                kids.insert(child);
+            }
+        }
+        kids.into_iter().collect()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = pid;
+        Vec::new()
+    }
 }
 
 fn json_u64(object: &str, key: &str) -> Option<u64> {
