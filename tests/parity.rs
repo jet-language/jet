@@ -93,7 +93,7 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // stddev/quantile/rolling_mean/describe/status) and plot rendering
     // (bar_text/bar_svg) are PORTED (card #392 pass 3, `DataLite.rs`). The
     // generic call-site-typed table/lazy-pipeline half (D-DATA-SURFACE1) —
-    // table/rows/series/values/schema/missing_count/csv/count/lazy/lazy_filter/
+    // table/rows/series/values/schema/missing_count/csv/json/count/lazy/lazy_filter/
     // lazy_sort_by/collect/plan/filter/sort_by/group_count/group_sum/
     // group_mean — is PORTED too (card #392 pass 5, `DataPipeline.rs`):
     // `Table<T>`/`Series<T>`/`LazyFrame<T>` are plain `CtValue::Struct`
@@ -1290,7 +1290,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (496, 148, 486, 49));
+    assert_eq!((fixed, direct_static, value, bespoke), (497, 148, 486, 49));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1530,6 +1530,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Bespoke, "core.data", "left_join").class, Class::Covered);
     assert_eq!(record(&records, Surface::Bespoke, "core.data", "pivot_sum").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.data", "schema").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Fixed, "core.data", "json").class, Class::Covered);
     assert_eq!(
         record(&records, Surface::Fixed, "core.testing", "fake_rng").class,
         Class::Covered
@@ -1551,14 +1552,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_179, 734, 78, 367));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_180, 735, 78, 367));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        16970973268195887904,
+        4240199477429075616,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

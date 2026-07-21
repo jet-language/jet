@@ -91,6 +91,7 @@ pub(super) fn status_rows() -> Vec<(&'static str, &'static str, &'static str)> {
         ("core.data.lazy", "native", "native"),
         ("core.data.missing", "native", "native"),
         ("core.data.schema", "native", "native"),
+        ("core.data.json", "native", "native"),
         (
             "py.* / r.* / gpu.*",
             "bridge-ready",

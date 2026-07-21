@@ -788,9 +788,9 @@ impl<'a> Checker<'a> {
                     };
                     return Some(result_ty(decode_result, decode_error_ty()));
                 }
-                // D-DATA-SURFACE1=A: the beginner facade reuses typed CSV decoding,
+                // D-DATA-SURFACE1=A: the beginner facade reuses typed CSV/JSON decoding,
                 // then keeps table/stat selectors as ordinary typed Jet lambdas.
-                ("core.data", "csv") if !type_args.is_empty() => {
+                ("core.data", "csv" | "json") if !type_args.is_empty() => {
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     }

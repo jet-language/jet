@@ -6278,6 +6278,55 @@ fn run() {
 }
 
 #[test]
+fn core_data_json_ingest_and_select() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping core.data json test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_data_json_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "data_json",
+        r#"
+use core.data as data
+
+@Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+fn run() {
+    raw :: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]"
+    rows :: data.json<Ticket>(raw) ?? panic("bad json")
+    table :: data.table(rows)
+    cols :: data.schema(table)
+    loop c; cols {
+        print("{c.name}:{c.type_name}")
+    }
+    selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)
+    print("selected:{data.count(selected)}")
+    loop t; selected {
+        print("{t.team}:{t.minutes}")
+    }
+    print("{data.status()[6].step}:{data.status()[6].path}")
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "core.data json program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "team:String\nminutes:Float\nselected:2\nTools:5.0\nCore:8.0\ncore.data.json:native\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn core_data_schema_empty_table_and_series_law() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

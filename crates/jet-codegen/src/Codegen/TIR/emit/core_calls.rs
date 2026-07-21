@@ -829,6 +829,15 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
+        // Array-of-objects JSON → `[T]`, reusing encoding.json's Decode path (I8).
+        ("core.data", "json") => {
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_json_decode"),
+                enc_target_rust(ret_ty, cx),
+                arg(0)
+            )
+        }
         ("core.data", "count") => format!("{}(&({}))", helper("jet_data_count"), arg(0)),
         ("core.data", "table") => format!("{}(&({}))", helper("jet_data_table"), arg(0)),
         ("core.data", "rows") => format!("{}(&({}))", helper("jet_data_rows"), arg(0)),

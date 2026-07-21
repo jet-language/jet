@@ -2607,3 +2607,36 @@ fn repl_core_data_table_echo_hides_elem_type() {
         "elem_type is comptime-only metadata; must not leak into REPL echo: {out}"
     );
 }
+
+#[test]
+fn repl_core_data_json_ingest_and_select() {
+    let inputs = &[
+        "use core.data as data",
+        "struct Ticket { team: String minutes: Float }",
+        r#"raw :: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]""#,
+        r#"rows :: data.json<Ticket>(raw) ?? panic("bad json")"#,
+        "table :: data.table(rows)",
+        "data.schema(table)",
+        "selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)",
+        "data.count(selected)",
+        "data.status()[6]",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        !out.contains("E0956"),
+        "core.data json should dispatch at comptime, got: {out}"
+    );
+    assert!(
+        out.contains("DataColumn(name: team, type_name: String)")
+            && out.contains("DataColumn(name: minutes, type_name: Float)"),
+        "json table schema missing: {out}"
+    );
+    assert!(
+        out.contains("2 : Int"),
+        "selected count missing: {out}"
+    );
+    assert!(
+        out.contains("DataStatus(step: core.data.json") && out.contains("path: native"),
+        "json status row missing: {out}"
+    );
+}

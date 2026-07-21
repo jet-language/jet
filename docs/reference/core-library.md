@@ -1580,14 +1580,16 @@ abstraction, `T?` for absence, and `DataTree` for parsed dynamic input. Writing
 ### `core.data` — typed tables, series, status, plots
 
 D-DATA-SURFACE1 makes `core.data` the beginner facade for typed tables,
-series, stats, CSV, and plots. The first slice is in-memory and deterministic:
+series, stats, CSV/JSON ingest, and plots. The first slice is in-memory and deterministic:
 `data.csv<T>(text)` decodes CSV into `[T]` using the same `@[Codable]` model as
-`core.encoding.csv.decode<T>`. Selectors are typed lambdas, so a misspelled row
-field is a Jet field error before codegen.
+`core.encoding.csv.decode<T>`. `data.json<T>(text)` decodes a JSON array of objects
+into `[T]` via the same Decode path as `core.encoding.json.decode<[T]>`. Selectors are typed
+lambdas, so a misspelled row field is a Jet field error before codegen.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|
 | `csv<T>(text)` | `[T] ? DecodeError` | Header-mapped typed CSV rows |
+| `json<T>(text)` | `[T] ? DecodeError` | Typed rows from a JSON array of objects |
 | `table(rows)` / `rows(table)` | `Table<T>` / `[T]` | Wrap and unwrap the typed in-memory table model |
 | `series(values)` / `values(series)` | `Series<T>` / `[T]` | Wrap and unwrap typed series values |
 | `schema(table_or_series)` | `[DataColumn]` | Column names and Jet type names for the row/value model |

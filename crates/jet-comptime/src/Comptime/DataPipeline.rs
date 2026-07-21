@@ -1,11 +1,11 @@
 //! Card #392 pass 5: `core.data`'s typed table/lazy pipeline
-//! (`table`/`rows`/`series`/`values`/`schema`/`missing_count`/`csv`/`count`/`lazy`/
+//! (`table`/`rows`/`series`/`values`/`schema`/`missing_count`/`csv`/`json`/`count`/`lazy`/
 //! `lazy_filter`/`lazy_sort_by`/`collect`/`plan`/`filter`/`sort_by`/
 //! `group_count`/`group_sum`/`group_mean`) at comptime. Mirrors
 //! `Codegen/Prelude/CoreLib/Top/EncodingTraits.rs`'s `jet_data_*` helpers
 //! byte-for-byte (R12) — `Table<T>`/`Series<T>`/`LazyFrame<T>` are plain
 //! `CtValue::Struct` wrappers (`rows`/`missing`/`plan` or `values`/`missing`)
-//! since `CtValue` is already dynamically typed, so (unlike `csv<T>`) none of
+//! since `CtValue` is already dynamically typed, so (unlike `csv<T>`/`json<T>`) none of
 //! these need the call-site type argument at runtime — only ordinary Jet
 //! lambdas over rows, applied through the same `call_closure` path
 //! `list.map`/`.filter`/`.sort_by` already use.
@@ -196,6 +196,23 @@ impl<'a> Interp<'a> {
                     _ => return Err(unsupported("`data.csv()`: expected a string argument", span)),
                 };
                 self.eval_typed_csv_decode("decode", &text, ty, span)
+            }
+            "json" => {
+                let Some(ty) = type_args.first() else {
+                    return Err(unsupported("`data.json<T>()` needs a type argument", span));
+                };
+                let text = match argv.first() {
+                    Some(CtValue::Str(s)) => s.clone(),
+                    _ => return Err(unsupported("`data.json()`: expected a string argument", span)),
+                };
+                // Array-of-objects → `[T]`, same Decode model as `encoding.json.decode<[T]>`.
+                self.eval_typed_decode(
+                    "core.encoding.json",
+                    "decode",
+                    &text,
+                    &Type::List(Box::new(ty.clone())),
+                    span,
+                )
             }
             "count" => {
                 let recv = argv.first().ok_or_else(|| unsupported("`data.count()`: missing argument", span))?;
