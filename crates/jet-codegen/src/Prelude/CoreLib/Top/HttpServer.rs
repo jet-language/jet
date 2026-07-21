@@ -83,13 +83,17 @@ struct JetHttpDeflateTable {
 }
 
 impl JetHttpDeflateTable {
-    fn new(lengths: &[u8]) -> Result<Self, JetHttpReadError> {
+    fn new(lengths: &[u8], require_complete: bool) -> Result<Self, JetHttpReadError> {
         let max_bits = usize::from(lengths.iter().copied().max().unwrap_or(0));
         if max_bits > 15 {
             return Err(jet_http_gzip_invalid());
         }
         if max_bits == 0 {
-            return Ok(Self { entries: Vec::new(), max_bits: 0 });
+            return if require_complete {
+                Err(jet_http_gzip_invalid())
+            } else {
+                Ok(Self { entries: Vec::new(), max_bits: 0 })
+            };
         }
         let mut counts = [0usize; 16];
         for &length in lengths {
@@ -101,6 +105,9 @@ impl JetHttpDeflateTable {
             if left < 0 {
                 return Err(jet_http_gzip_invalid());
             }
+        }
+        if left > 0 && (require_complete || max_bits != 1) {
+            return Err(jet_http_gzip_invalid());
         }
         let mut next = [0usize; 16];
         let mut code = 0usize;
@@ -168,7 +175,10 @@ fn jet_http_deflate_tables(
         literals[144..256].fill(9);
         literals[256..280].fill(7);
         literals[280..].fill(8);
-        return Ok((JetHttpDeflateTable::new(&literals)?, JetHttpDeflateTable::new(&[5; 32])?));
+        return Ok((
+            JetHttpDeflateTable::new(&literals, false)?,
+            JetHttpDeflateTable::new(&[5; 32], false)?,
+        ));
     }
     if kind != 2 {
         return Err(jet_http_gzip_invalid());
@@ -184,7 +194,7 @@ fn jet_http_deflate_tables(
     for index in 0..code_count {
         code_lengths[ORDER[index]] = bits.read(3)? as u8;
     }
-    let code_table = JetHttpDeflateTable::new(&code_lengths)?;
+    let code_table = JetHttpDeflateTable::new(&code_lengths, true)?;
     let total = literal_count + distance_count;
     let mut lengths = Vec::with_capacity(total);
     while lengths.len() < total {
@@ -219,8 +229,8 @@ fn jet_http_deflate_tables(
         return Err(jet_http_gzip_invalid());
     }
     Ok((
-        JetHttpDeflateTable::new(&lengths[..literal_count])?,
-        JetHttpDeflateTable::new(&lengths[literal_count..])?,
+        JetHttpDeflateTable::new(&lengths[..literal_count], false)?,
+        JetHttpDeflateTable::new(&lengths[literal_count..], false)?,
     ))
 }
 
@@ -3169,11 +3179,23 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpRequest, JetHttpReadError> {
         status: 400,
         message: "request headers are incomplete",
     })?;
+    if sep > 32 * 1024 {
+        return Err(JetHttpReadError {
+            status: 431,
+            message: "request headers are too large",
+        });
+    }
     let header_part = &raw[..sep];
     let head = jet_http_validate_headers(header_part)?;
     let encoded_body = &raw[sep + 4..];
     let body = match head.framing {
         JetHttpRequestFraming::ContentLength(content_length) => {
+            if content_length > JET_HTTP_MAX_BODY_BYTES {
+                return Err(JetHttpReadError {
+                    status: 413,
+                    message: "request body is too large",
+                });
+            }
             if encoded_body.len() != content_length {
                 return Err(JetHttpReadError {
                     status: 400,

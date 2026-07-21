@@ -85,20 +85,21 @@ fn jet_http_server_tls_session_limited(
         let between = request_index > 0;
         let idle = if between { IDLE_TIMEOUT } else { HEADER_TIMEOUT };
         let started = std::time::Instant::now();
-        let mut reading_body = false;
-        let request = loop {
+        let mut framing = JetHttpTlsMessageState::new();
+        let (request, rejected) = loop {
             if between && pending.is_empty() && should_stop() {
                 return Ok(());
             }
-            if let Some(end) = jet_http_tls_message_end(&pending, MAX_BODY_BYTES)? {
-                break pending.drain(..end).collect::<Vec<u8>>();
+            match framing.advance(&pending, MAX_HEADER_BYTES, MAX_BODY_BYTES) {
+                JetHttpTlsMessageStatus::Complete(end) => {
+                    break (pending.drain(..end).collect::<Vec<u8>>(), false);
+                }
+                JetHttpTlsMessageStatus::Reject => {
+                    break (std::mem::take(&mut pending), true);
+                }
+                JetHttpTlsMessageStatus::Pending => {}
             }
-            if pending.len() > MAX_HEADER_BYTES
-                && jet_http_tls_header_end(&pending).is_none()
-            {
-                return Err("TLS request headers are too large".to_string());
-            }
-            let deadline = if reading_body {
+            let deadline = if framing.reading_body() {
                 started + BODY_TIMEOUT
             } else if pending.is_empty() && between {
                 started + idle
@@ -129,13 +130,7 @@ fn jet_http_server_tls_session_limited(
                     )
                 }
                 Ok(n) => {
-                    if jet_http_tls_header_end(&pending).is_some() {
-                        reading_body = true;
-                    }
                     pending.extend_from_slice(&buf[..n]);
-                    if jet_http_tls_header_end(&pending).is_some() {
-                        reading_body = true;
-                    }
                 }
                 Err(error)
                     if matches!(
@@ -152,7 +147,7 @@ fn jet_http_server_tls_session_limited(
             }
         };
 
-        let force_close = request_index + 1 == max_requests;
+        let force_close = rejected || request_index + 1 == max_requests;
         // Match plaintext: once shutdown is set, do not start another keep-alive
         // request even if bytes already arrived on the socket.
         if request_index > 0 && should_stop() {
@@ -197,87 +192,284 @@ pub fn jet_http_server_tls_handle_impl(
     )
 }
 
-fn jet_http_tls_header_end(raw: &[u8]) -> Option<usize> {
-    raw.windows(4).position(|window| window == b"\r\n\r\n")
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JetHttpTlsMessageStatus {
+    Pending,
+    Complete(usize),
+    Reject,
 }
 
-fn jet_http_tls_message_end(raw: &[u8], max_body: usize) -> Result<Option<usize>, String> {
-    let Some(header_end) = jet_http_tls_header_end(raw) else {
-        return Ok(None);
-    };
-    let headers = std::str::from_utf8(&raw[..header_end])
-        .map_err(|_| "TLS request headers are not valid UTF-8".to_string())?;
-    let mut content_length = None;
-    let mut chunked = false;
-    for line in headers.lines().skip(1) {
-        let Some((name, value)) = line.split_once(':') else {
-            continue;
-        };
-        let value = value.trim_start_matches(|c| matches!(c, ' ' | '\t'));
-        if name.eq_ignore_ascii_case("content-length") {
-            let parsed = value
-                .parse::<usize>()
-                .map_err(|_| "TLS content-length is malformed".to_string())?;
-            if content_length.is_some_and(|old| old != parsed) {
-                return Err("TLS conflicting content-length headers".to_string());
-            }
-            content_length = Some(parsed);
-        } else if name.eq_ignore_ascii_case("transfer-encoding") {
-            chunked = value.split(',').any(|part| part.trim().eq_ignore_ascii_case("chunked"));
+enum JetHttpTlsBodyState {
+    Headers,
+    ContentLength(usize),
+    Chunked {
+        body_start: usize,
+        state: JetHttpTlsChunkState,
+    },
+}
+
+struct JetHttpTlsMessageState {
+    header_scan: usize,
+    #[cfg(test)]
+    inspected: usize,
+    body: JetHttpTlsBodyState,
+}
+
+impl JetHttpTlsMessageState {
+    fn new() -> Self {
+        Self {
+            header_scan: 0,
+            #[cfg(test)]
+            inspected: 0,
+            body: JetHttpTlsBodyState::Headers,
         }
     }
-    let body_start = header_end + 4;
-    if chunked {
-        return jet_http_tls_chunked_end(&raw[body_start..], max_body)
-            .map(|end| end.map(|body_end| body_start + body_end));
+
+    fn reading_body(&self) -> bool {
+        !matches!(self.body, JetHttpTlsBodyState::Headers)
+    }
+
+    #[cfg(test)]
+    fn inspected(&self) -> usize {
+        self.inspected
+            + match &self.body {
+                JetHttpTlsBodyState::Chunked { state, .. } => state.inspected,
+                _ => 0,
+            }
+    }
+
+    fn advance(
+        &mut self,
+        raw: &[u8],
+        max_header: usize,
+        max_body: usize,
+    ) -> JetHttpTlsMessageStatus {
+        if matches!(self.body, JetHttpTlsBodyState::Headers) {
+            let start = self.header_scan.saturating_sub(3);
+            let found = raw.get(start..).and_then(|tail| {
+                tail.windows(4)
+                    .position(|window| window == b"\r\n\r\n")
+            });
+            #[cfg(test)]
+            {
+                self.inspected = self.inspected.saturating_add(match found {
+                    Some(position) => position + 1,
+                    None => raw.len().saturating_sub(start).saturating_sub(3),
+                });
+            }
+            let Some(position) = found else {
+                self.header_scan = raw.len();
+                return if raw.len() > max_header.saturating_add(4) {
+                    JetHttpTlsMessageStatus::Reject
+                } else {
+                    JetHttpTlsMessageStatus::Pending
+                };
+            };
+            let header_end = start + position;
+            if header_end > max_header {
+                return JetHttpTlsMessageStatus::Reject;
+            }
+            self.body = match jet_http_tls_body_state(&raw[..header_end], header_end + 4, max_body) {
+                Some(body) => body,
+                None => return JetHttpTlsMessageStatus::Reject,
+            };
+        }
+        match &mut self.body {
+            JetHttpTlsBodyState::Headers => JetHttpTlsMessageStatus::Pending,
+            JetHttpTlsBodyState::ContentLength(end) => {
+                if raw.len() >= *end {
+                    JetHttpTlsMessageStatus::Complete(*end)
+                } else {
+                    JetHttpTlsMessageStatus::Pending
+                }
+            }
+            JetHttpTlsBodyState::Chunked { body_start, state } => {
+                match state.advance(&raw[*body_start..], max_body) {
+                    JetHttpTlsMessageStatus::Complete(end) => {
+                        JetHttpTlsMessageStatus::Complete(*body_start + end)
+                    }
+                    status => status,
+                }
+            }
+        }
+    }
+}
+
+fn jet_http_tls_body_state(
+    header: &[u8],
+    body_start: usize,
+    max_body: usize,
+) -> Option<JetHttpTlsBodyState> {
+    let header = std::str::from_utf8(header).ok()?;
+    let mut lines = header.split("\r\n");
+    lines.next()?;
+    let mut content_length = None;
+    let mut transfer_encoding = None;
+    for line in lines {
+        let (name, value) = line.split_once(':')?;
+        let value = value.trim_matches(|character| matches!(character, ' ' | '\t'));
+        if name.eq_ignore_ascii_case("content-length") {
+            for value in value.split(',') {
+                let value = value.trim_matches(|character| matches!(character, ' ' | '\t'));
+                if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return None;
+                }
+                let parsed = value.bytes().try_fold(0usize, |length, byte| {
+                    length.checked_mul(10)?.checked_add(usize::from(byte - b'0'))
+                })?;
+                if content_length.is_some_and(|old| old != parsed) {
+                    return None;
+                }
+                content_length = Some(parsed);
+            }
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
+            if transfer_encoding.replace(value).is_some() {
+                return None;
+            }
+        }
+    }
+    if transfer_encoding.is_some() && content_length.is_some() {
+        return None;
+    }
+    if let Some(encoding) = transfer_encoding {
+        if !encoding.eq_ignore_ascii_case("chunked") {
+            return None;
+        }
+        return Some(JetHttpTlsBodyState::Chunked {
+            body_start,
+            state: JetHttpTlsChunkState::new(),
+        });
     }
     let length = content_length.unwrap_or(0);
     if length > max_body {
-        return Err("TLS request body is too large".to_string());
+        return None;
     }
-    let end = body_start + length;
-    Ok((raw.len() >= end).then_some(end))
+    Some(JetHttpTlsBodyState::ContentLength(body_start.checked_add(length)?))
 }
 
-fn jet_http_tls_chunked_end(body: &[u8], max_body: usize) -> Result<Option<usize>, String> {
-    let mut cursor = 0usize;
-    let mut decoded = 0usize;
-    loop {
-        let Some(line_len) = body[cursor..]
-            .windows(2)
-            .position(|bytes| bytes == b"\r\n")
-        else {
-            return Ok(None);
-        };
-        let line_end = cursor + line_len;
-        let size_text = std::str::from_utf8(&body[cursor..line_end])
-            .map_err(|_| "TLS chunk size is malformed".to_string())?;
-        let size_text = size_text.split(';').next().unwrap_or(size_text).trim();
-        let size = usize::from_str_radix(size_text, 16)
-            .map_err(|_| "TLS chunk size is malformed".to_string())?;
-        cursor = line_end + 2;
-        if size == 0 {
-            if body.len().saturating_sub(cursor) < 2 {
-                return Ok(None);
-            }
-            if &body[cursor..cursor + 2] != b"\r\n" {
-                return Err("TLS request trailers are not supported".to_string());
-            }
-            return Ok(Some(cursor + 2));
+#[derive(Clone, Copy)]
+enum JetHttpTlsChunkPhase {
+    Size,
+    Data(usize),
+    FinalCrlf,
+}
+
+struct JetHttpTlsChunkState {
+    cursor: usize,
+    search: usize,
+    decoded: usize,
+    framing: usize,
+    #[cfg(test)]
+    inspected: usize,
+    phase: JetHttpTlsChunkPhase,
+}
+
+impl JetHttpTlsChunkState {
+    const MAX_FRAMING: usize = 32 * 1024;
+
+    fn new() -> Self {
+        Self {
+            cursor: 0,
+            search: 0,
+            decoded: 0,
+            framing: 0,
+            #[cfg(test)]
+            inspected: 0,
+            phase: JetHttpTlsChunkPhase::Size,
         }
-        decoded = decoded
-            .checked_add(size)
-            .ok_or_else(|| "TLS request body is too large".to_string())?;
-        if decoded > max_body {
-            return Err("TLS request body is too large".to_string());
-        }
-        if body.len().saturating_sub(cursor) < size + 2 {
-            return Ok(None);
-        }
-        cursor += size;
-        if &body[cursor..cursor + 2] != b"\r\n" {
-            return Err("TLS chunk data is not followed by CRLF".to_string());
-        }
-        cursor += 2;
     }
+
+    fn add_framing(&mut self, amount: usize) -> bool {
+        self.framing = self.framing.saturating_add(amount);
+        self.framing <= Self::MAX_FRAMING
+    }
+
+    fn advance(&mut self, body: &[u8], max_body: usize) -> JetHttpTlsMessageStatus {
+        loop {
+            match self.phase {
+                JetHttpTlsChunkPhase::Size => {
+                    let start = self.search.saturating_sub(1).max(self.cursor);
+                    let found = body.get(start..).and_then(|tail| {
+                        tail.windows(2).position(|window| window == b"\r\n")
+                    });
+                    #[cfg(test)]
+                    {
+                        self.inspected = self.inspected.saturating_add(match found {
+                            Some(position) => position + 1,
+                            None => body.len().saturating_sub(start).saturating_sub(1),
+                        });
+                    }
+                    let Some(position) = found else {
+                        self.search = body.len();
+                        return if self
+                            .framing
+                            .saturating_add(body.len().saturating_sub(self.cursor))
+                            > Self::MAX_FRAMING
+                        {
+                            JetHttpTlsMessageStatus::Reject
+                        } else {
+                            JetHttpTlsMessageStatus::Pending
+                        };
+                    };
+                    let line_end = start + position;
+                    if !self.add_framing(line_end - self.cursor + 2) {
+                        return JetHttpTlsMessageStatus::Reject;
+                    }
+                    let Some(size) = jet_http_tls_chunk_size(&body[self.cursor..line_end]) else {
+                        return JetHttpTlsMessageStatus::Reject;
+                    };
+                    self.cursor = line_end + 2;
+                    if size == 0 {
+                        self.phase = JetHttpTlsChunkPhase::FinalCrlf;
+                    } else {
+                        let Some(decoded) = self.decoded.checked_add(size) else {
+                            return JetHttpTlsMessageStatus::Reject;
+                        };
+                        if decoded > max_body {
+                            return JetHttpTlsMessageStatus::Reject;
+                        }
+                        self.decoded = decoded;
+                        let Some(end) = self.cursor.checked_add(size) else {
+                            return JetHttpTlsMessageStatus::Reject;
+                        };
+                        self.phase = JetHttpTlsChunkPhase::Data(end);
+                    }
+                }
+                JetHttpTlsChunkPhase::Data(end) => {
+                    let Some(crlf) = body.get(end..end.saturating_add(2)) else {
+                        return JetHttpTlsMessageStatus::Pending;
+                    };
+                    if crlf != b"\r\n" || !self.add_framing(2) {
+                        return JetHttpTlsMessageStatus::Reject;
+                    }
+                    self.cursor = end + 2;
+                    self.search = self.cursor;
+                    self.phase = JetHttpTlsChunkPhase::Size;
+                }
+                JetHttpTlsChunkPhase::FinalCrlf => {
+                    let Some(crlf) = body.get(self.cursor..self.cursor.saturating_add(2)) else {
+                        return JetHttpTlsMessageStatus::Pending;
+                    };
+                    if crlf != b"\r\n" || !self.add_framing(2) {
+                        return JetHttpTlsMessageStatus::Reject;
+                    }
+                    return JetHttpTlsMessageStatus::Complete(self.cursor + 2);
+                }
+            }
+        }
+    }
+}
+
+fn jet_http_tls_chunk_size(line: &[u8]) -> Option<usize> {
+    let digits = line.iter().take_while(|byte| byte.is_ascii_hexdigit()).count();
+    let rest = line[digits..]
+        .iter()
+        .find(|byte| !matches!(byte, b' ' | b'\t'));
+    if digits == 0 || rest.is_some_and(|byte| *byte != b';') {
+        return None;
+    }
+    line[..digits].iter().try_fold(0usize, |size, byte| {
+        let digit = (*byte as char).to_digit(16)? as usize;
+        size.checked_mul(16)?.checked_add(digit)
+    })
 }

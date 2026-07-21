@@ -106,6 +106,22 @@ include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 mod http_server_tls_runtime {
     include!("../crates/jet-pkg-model/src/Prelude/HttpServerTls.rs");
+
+    pub fn framing_probe(raw: &[u8]) -> (u8, usize, usize) {
+        let mut state = JetHttpTlsMessageState::new();
+        for end in 0..=raw.len() {
+            match state.advance(&raw[..end], 32 * 1024, 1024 * 1024) {
+                JetHttpTlsMessageStatus::Pending => {}
+                JetHttpTlsMessageStatus::Complete(message_end) => {
+                    return (1, message_end, state.inspected());
+                }
+                JetHttpTlsMessageStatus::Reject => {
+                    return (2, end, state.inspected());
+                }
+            }
+        }
+        (0, raw.len(), state.inspected())
+    }
 }
 
 static HTTP_BODY_CLOSES: std::sync::atomic::AtomicUsize =
@@ -1129,6 +1145,55 @@ fn gzip_content_encoding_is_transparent_bounded_and_strict() {
         request
     }
 
+    fn dynamic_empty_gzip(complete_code_tree: bool) -> Vec<u8> {
+        fn bits(output: &mut Vec<u8>, cursor: &mut usize, value: u32, count: usize) {
+            for offset in 0..count {
+                if *cursor / 8 == output.len() {
+                    output.push(0);
+                }
+                output[*cursor / 8] |= ((value >> offset) as u8 & 1) << (*cursor % 8);
+                *cursor += 1;
+            }
+        }
+
+        const ORDER: [usize; 18] = [
+            16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1,
+        ];
+        let mut deflate = Vec::new();
+        let mut cursor = 0usize;
+        bits(&mut deflate, &mut cursor, 1, 1); // final block
+        bits(&mut deflate, &mut cursor, 2, 2); // dynamic Huffman
+        bits(&mut deflate, &mut cursor, 0, 5); // 257 literal codes
+        bits(&mut deflate, &mut cursor, 0, 5); // one distance code
+        bits(&mut deflate, &mut cursor, 14, 4); // 18 code-length codes
+        for symbol in ORDER {
+            let length = if symbol == 18 {
+                if complete_code_tree { 1 } else { 2 }
+            } else if matches!(symbol, 0 | 1) {
+                2
+            } else {
+                0
+            };
+            bits(&mut deflate, &mut cursor, length, 3);
+        }
+        let (repeat_code, repeat_bits, one_code) = if complete_code_tree {
+            (0, 1, 3)
+        } else {
+            (1, 2, 2)
+        };
+        bits(&mut deflate, &mut cursor, repeat_code, repeat_bits);
+        bits(&mut deflate, &mut cursor, 127, 7); // 138 zero lengths
+        bits(&mut deflate, &mut cursor, repeat_code, repeat_bits);
+        bits(&mut deflate, &mut cursor, 107, 7); // 118 zero lengths
+        bits(&mut deflate, &mut cursor, one_code, 2); // end-of-block length 1
+        bits(&mut deflate, &mut cursor, one_code, 2); // distance length 1
+        bits(&mut deflate, &mut cursor, 0, 1); // end-of-block symbol
+        let mut gzip = vec![31, 139, 8, 0, 0, 0, 0, 0, 0, 3];
+        gzip.extend(deflate);
+        gzip.extend([0; 8]); // empty body CRC32 and ISIZE
+        gzip
+    }
+
     let stored = [
         31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 1, 3, 0, 252, 255, b'a', b'b', b'c',
         194, 65, 36, 53, 3, 0, 0, 0,
@@ -1137,6 +1202,14 @@ fn gzip_content_encoding_is_transparent_bounded_and_strict() {
     let dynamic = jet_http_gzip_decode(GZIP_DYNAMIC, 300).unwrap();
     assert_eq!(dynamic.len(), 300);
     assert!(dynamic.starts_with(b"# AGENTS.md"));
+    assert_eq!(jet_http_gzip_decode(&dynamic_empty_gzip(true), 0).unwrap(), b"");
+    assert_eq!(
+        jet_http_gzip_decode(&dynamic_empty_gzip(false), 0)
+            .unwrap_err()
+            .status,
+        400,
+        "an incomplete dynamic code-length tree must not be accepted",
+    );
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("address");
@@ -3965,6 +4038,84 @@ fn h2_try_read_frame(stream: &mut std::net::TcpStream) -> Option<(u8, u8, u32, V
         u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff,
         payload,
     ))
+}
+
+#[test]
+fn tls_chunk_framing_scan_is_incremental_and_bounded() {
+    let valid = b"POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1 ; name=value\r\nx\r\n0\r\n\r\n";
+    let (status, end, inspected) = http_server_tls_runtime::framing_probe(valid);
+    assert_eq!((status, end), (1, valid.len()));
+    assert!(inspected <= valid.len() * 4, "valid scan was not linear: {inspected}");
+    let repeated_length =
+        b"POST / HTTP/1.1\r\nHost: local\r\nContent-Length: 1, 1\r\n\r\nx";
+    assert_eq!(
+        http_server_tls_runtime::framing_probe(repeated_length).0,
+        1,
+        "valid repeated Content-Length was rejected",
+    );
+
+    let mut hostile = b"POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+    hostile.extend(std::iter::repeat_n(b'f', 32 * 1024 + 1));
+    let (status, consumed, inspected) = http_server_tls_runtime::framing_probe(&hostile);
+    assert_eq!(status, 2, "unbounded chunk-size line was not rejected");
+    assert!(consumed <= hostile.len());
+    assert!(inspected <= consumed * 4, "hostile scan was not linear: {inspected}/{consumed}");
+}
+
+#[test]
+fn tls_oversized_content_length_chunk_and_framing_return_413() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    jet_http_mux_add(&mux, "POST", "/", move |_| {
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"unexpected".to_string())
+    });
+    let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
+    let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
+    let server = jet_http_server_bind_tls(
+        &"127.0.0.1:0".to_string(),
+        mux,
+        JetHttpServerTls { cert_pem: cert, key_pem: key },
+        |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
+        |cert, key, stream, on_request, should_stop| {
+            http_server_tls_runtime::jet_http_server_tls_session_impl(
+                cert,
+                key,
+                stream,
+                on_request,
+                should_stop,
+            )
+        },
+    )
+    .expect("bind rustls tls");
+    let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
+        .expect("addr")
+        .parse()
+        .expect("parse");
+    let serving = server.clone();
+    let serve = std::thread::spawn(move || jet_http_server_serve(&serving));
+
+    let mut requests = vec![
+        b"POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1048577\r\n\r\n".to_vec(),
+        b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n100001\r\n".to_vec(),
+    ];
+    let mut long_line =
+        b"POST / HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n".to_vec();
+    long_line.extend(std::iter::repeat_n(b'f', 32 * 1024 + 1));
+    requests.push(long_line);
+    for request in requests {
+        let started = std::time::Instant::now();
+        let mut client = rustls_fixture_client(addr);
+        let response = rustls_exchange(&mut client, &request);
+        assert!(response.starts_with("HTTP/1.1 413 Payload Too Large"), "{response}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+    assert_eq!(calls.load(Ordering::Acquire), 0, "oversized TLS body reached handler");
+    let _ = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 200 }).expect("shutdown");
+    let _ = serve.join().expect("serve join");
 }
 
 
