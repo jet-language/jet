@@ -73,11 +73,7 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.time", "now"),
     ("core.time", "now_utc"),
     ("core.time", "today"),
-    ("core.time", "utc"),
     ("core.time", "local_time"),
-    ("core.time", "zoned"),
-    ("core.time", "zoned_local"),
-    ("core.time", "zone"),
     ("core.time", "instant"),
     ("core.time", "sleep"),
     ("core.time", "start"),
@@ -987,7 +983,7 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     {
         return Some("named I/O handle boundary");
     }
-    if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "utc" | "local_time" | "zoned" | "zoned_local" | "zone" | "instant" | "sleep" | "start") {
+    if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "local_time" | "instant" | "sleep" | "start") {
         return Some("named clock boundary");
     }
     if matches!(
@@ -1290,7 +1286,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (495, 147, 483, 49));
+    assert_eq!((fixed, direct_static, value, bespoke), (495, 148, 486, 49));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1503,6 +1499,24 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     for method in ["to_timestamp", "to_unix_ms", "to_string"] {
         assert_eq!(record(&records, Surface::Value, "DateTime", method).class, Class::Covered);
     }
+    assert_eq!(record(&records, Surface::Value, "DateTime", "in_zone").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Zone", "name").class, Class::Covered);
+    for method in [
+        "add_duration",
+        "add_period",
+        "date",
+        "format",
+        "offset_seconds",
+        "time",
+        "to_datetime",
+        "to_string",
+        "zone",
+    ] {
+        assert_eq!(record(&records, Surface::Value, "ZonedDateTime", method).class, Class::Covered);
+    }
+    for method in ["utc", "zone", "zoned", "zoned_local"] {
+        assert_eq!(record(&records, Surface::Fixed, "core.time", method).class, Class::Covered);
+    }
     for method in [
         "date",
         "format",
@@ -1550,14 +1564,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_174, 733, 74, 367));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 748, 67, 363));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        14766545749149204126,
+        3127679427168958324,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

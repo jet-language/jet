@@ -39,6 +39,13 @@ pub(super) fn evaluate(
         ("core.time", "from_unix_ms") => datetime_from_unix_ms(args, span),
         ("core.time", "parse_rfc3339") => datetime_parse(args, span),
         ("core.time", "parse_time") => local_time_parse(args, span),
+        // Pure zone constructors: UTC is deterministic. Named IANA zones need a
+        // host TZif database (filesystem), so comptime keeps UTC aliases only and
+        // returns `Err` for everything else — same shape as AOT without tzdb.
+        ("core.time", "utc") => Ok(zone_utc()),
+        ("core.time", "zone") => zone_named(args, span),
+        ("core.time", "zoned") => zoned_from_datetime(args, span),
+        ("core.time", "zoned_local") => zoned_from_local(args, span),
         ("core.science.measurement", "from") => measurement(args, span),
         ("core.time.date", "new") => date_new_call(args, span),
         ("core.time.date", "parse") => date_parse_call(args, span),
@@ -175,6 +182,46 @@ pub(super) fn evaluate_method(
                 Ok(DateTime { seconds }.value())
             })
         }
+        ("DateTime", "in_zone", 1) => datetime_from_value(recv, span).and_then(|date_time| {
+            Ok(ZonedDateTime {
+                instant: date_time,
+                zone: zone_from_value(&args[0], span)?,
+            }
+            .value())
+        }),
+        ("Zone", "name", 0) => string_field(recv, "Zone", "name", span),
+        ("ZonedDateTime", "date", 0) => zoned_from_value(recv, span).map(|zoned| zoned.date().value()),
+        ("ZonedDateTime", "time", 0) => zoned_from_value(recv, span).map(|zoned| zoned.time().value()),
+        ("ZonedDateTime", "offset_seconds", 0) => {
+            zoned_from_value(recv, span).map(|zoned| CtValue::Int(zoned.offset_seconds()))
+        }
+        ("ZonedDateTime", "to_datetime", 0) => {
+            zoned_from_value(recv, span).map(|zoned| zoned.instant.value())
+        }
+        ("ZonedDateTime", "zone", 0) => zoned_from_value(recv, span).map(|zoned| zoned.zone.value()),
+        ("ZonedDateTime", "to_string", 0) => {
+            zoned_from_value(recv, span).map(|zoned| CtValue::Str(zoned.to_string_fmt()))
+        }
+        ("ZonedDateTime", "format", 1) => zoned_from_value(recv, span).and_then(|zoned| {
+            Ok(CtValue::Str(format_zoned_pattern(
+                string_arg(args, 0, span)?,
+                zoned,
+            )))
+        }),
+        ("ZonedDateTime", "add_duration", 1) => zoned_from_value(recv, span).and_then(|zoned| {
+            let millis = int_field(&args[0], crate::Syntax::DURATION_TYPE, "ms", span)?;
+            Ok(ZonedDateTime {
+                instant: DateTime {
+                    seconds: zoned.instant.seconds.saturating_add(millis.div_euclid(1_000)),
+                },
+                zone: zoned.zone,
+            }
+            .value())
+        }),
+        ("ZonedDateTime", "add_period", 1) => zoned_from_value(recv, span).and_then(|zoned| {
+            let date = date_add_period(zoned.date(), &args[0], span)?;
+            Ok(ZonedDateTime::from_local(date, zoned.time(), zoned.zone).value())
+        }),
         ("Period", "to_string", 0) => period_string(recv, span).map(CtValue::Str),
         ("Measurement", "value" | "uncertainty", 0) => {
             value_field(recv, "Measurement", method, span)
@@ -663,6 +710,178 @@ impl DateTime {
     fn value(self) -> CtValue {
         datetime_value(self.seconds)
     }
+}
+
+#[derive(Clone)]
+struct Zone {
+    name: String,
+    offset: i64,
+}
+
+impl Zone {
+    fn utc() -> Self {
+        Self {
+            name: "UTC".to_string(),
+            offset: 0,
+        }
+    }
+
+    fn parse_name(name: &str) -> Result<Self, String> {
+        if name == "UTC" || name == "Etc/UTC" || name == "Z" {
+            return Ok(Self::utc());
+        }
+        Err(format!(
+            "unknown IANA time zone: {name}; comptime supports UTC/Etc/UTC/Z only (host TZif databases are a named ambient boundary)"
+        ))
+    }
+
+    fn value(self) -> CtValue {
+        structure(
+            "Zone",
+            vec![
+                ("name", CtValue::Str(self.name)),
+                ("offset", CtValue::Int(self.offset)),
+            ],
+        )
+    }
+}
+
+#[derive(Clone)]
+struct ZonedDateTime {
+    instant: DateTime,
+    zone: Zone,
+}
+
+impl ZonedDateTime {
+    fn from_local(date: Date, time: LocalTime, zone: Zone) -> Self {
+        let local_secs = utc_seconds(date, time);
+        Self {
+            instant: DateTime {
+                seconds: local_secs.saturating_sub(zone.offset),
+            },
+            zone,
+        }
+    }
+
+    fn offset_seconds(&self) -> i64 {
+        self.zone.offset
+    }
+
+    fn local_instant(&self) -> DateTime {
+        DateTime {
+            seconds: self.instant.seconds.saturating_add(self.zone.offset),
+        }
+    }
+
+    fn date(&self) -> Date {
+        self.local_instant().date()
+    }
+
+    fn time(&self) -> LocalTime {
+        self.local_instant().time()
+    }
+
+    fn to_string_fmt(&self) -> String {
+        format!(
+            "{} {} {} ({})",
+            self.date().to_string_fmt(),
+            self.time().to_string_fmt(),
+            self.zone.name,
+            offset_string(self.offset_seconds())
+        )
+    }
+
+    fn value(self) -> CtValue {
+        structure(
+            "ZonedDateTime",
+            vec![("instant", self.instant.value()), ("zone", self.zone.value())],
+        )
+    }
+}
+
+fn zone_utc() -> CtValue {
+    Zone::utc().value()
+}
+
+fn zone_named(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(match Zone::parse_name(string_arg(args, 0, span)?) {
+        Ok(zone) => CtValue::ResOk(Box::new(zone.value())),
+        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+    })
+}
+
+fn zone_from_value(value: &CtValue, span: Span) -> Result<Zone, Diagnostic> {
+    Ok(Zone {
+        name: match field(value, "Zone", "name") {
+            Some(CtValue::Str(name)) => name.clone(),
+            _ => {
+                return Err(unsupported("malformed Zone.name value", span));
+            }
+        },
+        offset: int_field(value, "Zone", "offset", span)?,
+    })
+}
+
+fn zoned_from_value(value: &CtValue, span: Span) -> Result<ZonedDateTime, Diagnostic> {
+    let instant = match field(value, "ZonedDateTime", "instant") {
+        Some(instant) => datetime_from_value(instant, span)?,
+        None => {
+            return Err(unsupported("malformed ZonedDateTime.instant value", span));
+        }
+    };
+    let zone = match field(value, "ZonedDateTime", "zone") {
+        Some(zone) => zone_from_value(zone, span)?,
+        None => {
+            return Err(unsupported("malformed ZonedDateTime.zone value", span));
+        }
+    };
+    Ok(ZonedDateTime { instant, zone })
+}
+
+fn zoned_from_datetime(args: &[CtValue], span: Span) -> EvalResult {
+    let instant = datetime_from_value(
+        args.get(0)
+            .ok_or_else(|| unsupported("time.zoned expects a DateTime", span))?,
+        span,
+    )?;
+    let zone = zone_from_value(
+        args.get(1)
+            .ok_or_else(|| unsupported("time.zoned expects a Zone", span))?,
+        span,
+    )?;
+    Ok(ZonedDateTime { instant, zone }.value())
+}
+
+fn zoned_from_local(args: &[CtValue], span: Span) -> EvalResult {
+    let date = date_from_value(
+        args.get(0)
+            .ok_or_else(|| unsupported("time.zoned_local expects a LocalDate", span))?,
+        "LocalDate",
+        span,
+    )?;
+    let time = local_time_from_value(
+        args.get(1)
+            .ok_or_else(|| unsupported("time.zoned_local expects a LocalTime", span))?,
+        span,
+    )?;
+    let zone = zone_from_value(
+        args.get(2)
+            .ok_or_else(|| unsupported("time.zoned_local expects a Zone", span))?,
+        span,
+    )?;
+    Ok(ZonedDateTime::from_local(date, time, zone).value())
+}
+
+fn offset_string(offset: i64) -> String {
+    let sign = if offset < 0 { '-' } else { '+' };
+    let abs = offset.abs();
+    format!("{sign}{:02}:{:02}", abs / 3_600, (abs / 60) % 60)
+}
+
+fn format_zoned_pattern(pattern: &str, zoned: ZonedDateTime) -> String {
+    let mut output = format_time_pattern(pattern, zoned.date(), zoned.time());
+    output = output.replace("VV", &zoned.zone.name);
+    output.replace("XXX", &offset_string(zoned.offset_seconds()))
 }
 
 fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date, Diagnostic> {
