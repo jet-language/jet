@@ -408,10 +408,7 @@ const upper = mappingPool(simpleUpper);
 const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 // Source: scripts/agent/gen-unicode-tables.mjs against pinned Unicode 16.0.0 UCD.
 // Regenerate: node scripts/agent/gen-unicode-tables.mjs <ucd-dir-with-checksummed-files>
-// Two copies emitted from one run, byte-identical data (R12 parity):
-//   jet-foundation (also consumed by jet-comptime), and jet-codegen
-//   (AOT prelude — spliced flat into the emitted user program,
-//   so this copy carries no inner #![...] attribute: it is not a crate root).
+// Foundation modules and AOT-prelude copies are emitted from this one run.
 `;
 // jet-foundation is a proper standalone module file: safe to carry an inner
 // attribute. The jet-codegen copy is concatenated flat into
@@ -422,20 +419,8 @@ const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 const MODULE_HEADER = HEADER_COMMENT + "#![allow(dead_code)]\n";
 const FLAT_HEADER = HEADER_COMMENT;
 
-const body = `
-pub const UNICODE_VERSION: &str = "16.0.0";
-
-pub static UNICODE_DECOMP_POOL: &[u32] = &[${pool.join(",")}];
-// (codepoint, pool_start, pool_len, is_canonical: 1/0)
-pub static UNICODE_DECOMP_INDEX: &[(u32,u32,u32,u8)] = &[${decompIndex
-  .map(([cp, s, l, c]) => `(0x${cp.toString(16).toUpperCase()},${s},${l},${c})`)
-  .join(",")}];
-
-pub static UNICODE_FOLD_POOL: &[u32] = &[${foldPool.join(",")}];
-// (codepoint, pool_start, pool_len)
-pub static UNICODE_FOLD_INDEX: &[(u32,u32,u32)] = &[${foldIndex
-  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
-  .join(",")}];
+const stringBody = `
+pub const UNICODE_STRING_VERSION: &str = "16.0.0";
 
 pub static UNICODE_LOWER_POOL: &[u32] = &[${lower.pool.join(",")}];
 pub static UNICODE_LOWER_INDEX: &[(u32,u32,u32)] = &[${lower.index
@@ -445,47 +430,9 @@ pub static UNICODE_UPPER_POOL: &[u32] = &[${upper.pool.join(",")}];
 pub static UNICODE_UPPER_INDEX: &[(u32,u32,u32)] = &[${upper.index
   .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
   .join(",")}];
-// Default simple case fold (C+S rows), used by one-scalar regex matching.
-pub static UNICODE_SIMPLE_FOLD: &[(u32,u32)] = &[${fmtU32Pairs([...simpleCaseFold.entries()].sort((a, b) => a[0] - b[0]))}];
-
-// (start, end, canonical_combining_class)
-pub static UNICODE_CCC: &[(u32,u32,u8)] = &[${fmtU32Triples(cccRanges)}];
-
-// (start, end, general_category_tag) tags: ${GC_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
-pub static UNICODE_GENERAL_CATEGORY: &[(u32,u32,u8)] = &[${fmtU32Triples(gcRanges)}];
-
-pub static UNICODE_LETTER: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(letterRanges))}];
-pub static UNICODE_NUMERIC: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(numericRanges))}];
-pub static UNICODE_ALPHABETIC: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(alphabeticRanges))}];
 pub static UNICODE_WHITE_SPACE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(whiteSpaceRanges))}];
 pub static UNICODE_CASED: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(casedRanges))}];
 pub static UNICODE_CASE_IGNORABLE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(caseIgnorableRanges))}];
-pub static UNICODE_DEFAULT_IGNORABLE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(defaultIgnorableRanges))}];
-
-// composition exclusions (Full_Composition_Exclusion, DerivedNormalizationProps.txt)
-pub static UNICODE_COMPOSITION_EXCLUSIONS: &[(u32,u32)] = &[${fmtU32Pairs(fullCompositionExclusion)}];
-
-// canonical composition pairs (c1, c2) -> composed, sorted by (c1,c2)
-pub static UNICODE_COMPOSE_PAIRS: &[(u32,u32,u32)] = &[${composePairs
-  .map(([a, b, c]) => `(0x${a.toString(16).toUpperCase()},0x${b.toString(16).toUpperCase()},0x${c.toString(16).toUpperCase()})`)
-  .join(",")}];
-
-// East Asian Width: 0=narrow(N/Na/H) 1=Ambiguous 2=wide(W/F)
-pub static UNICODE_EAST_ASIAN_WIDTH: &[(u32,u32,u8)] = &[${fmtU32Triples(eawMerged)}];
-
-pub static UNICODE_EXTENDED_PICTOGRAPHIC: &[(u32,u32)] = &[${fmtU32Pairs(extPictographic)}];
-pub static UNICODE_EMOJI_PRESENTATION: &[(u32,u32)] = &[${fmtU32Pairs(emojiPresentation)}];
-pub static UNICODE_EMOJI: &[(u32,u32)] = &[${fmtU32Pairs(emoji)}];
-
-// Grapheme_Cluster_Break tags: ${GRAPHEME_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
-pub static UNICODE_GRAPHEME_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(graphemeRanges)}];
-// Word_Break tags: ${WORD_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
-pub static UNICODE_WORD_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(wordRanges)}];
-// Sentence_Break tags: ${SENTENCE_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
-pub static UNICODE_SENTENCE_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(sentenceRanges)}];
-
-// Indic_Conjunct_Break (GB9c) tags: ${INCB_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
-pub static UNICODE_INCB: &[(u32,u32,u8)] = &[${fmtU32Triples(incbRanges)}];
 
 fn jet_unicode_contains(table: &[(u32, u32)], cp: u32) -> bool {
     table
@@ -578,12 +525,71 @@ pub fn jet_unicode_trim(s: &str) -> String {
 }
 `;
 
-const moduleOut = MODULE_HEADER + body;
-const flatOut = FLAT_HEADER + body;
+const tablesBody = `
+pub const UNICODE_VERSION: &str = "16.0.0";
+
+pub static UNICODE_DECOMP_POOL: &[u32] = &[${pool.join(",")}];
+// (codepoint, pool_start, pool_len, is_canonical: 1/0)
+pub static UNICODE_DECOMP_INDEX: &[(u32,u32,u32,u8)] = &[${decompIndex
+  .map(([cp, s, l, c]) => `(0x${cp.toString(16).toUpperCase()},${s},${l},${c})`)
+  .join(",")}];
+
+pub static UNICODE_FOLD_POOL: &[u32] = &[${foldPool.join(",")}];
+// (codepoint, pool_start, pool_len)
+pub static UNICODE_FOLD_INDEX: &[(u32,u32,u32)] = &[${foldIndex
+  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
+  .join(",")}];
+
+// Default simple case fold (C+S rows), used by one-scalar regex matching.
+pub static UNICODE_SIMPLE_FOLD: &[(u32,u32)] = &[${fmtU32Pairs([...simpleCaseFold.entries()].sort((a, b) => a[0] - b[0]))}];
+
+// (start, end, canonical_combining_class)
+pub static UNICODE_CCC: &[(u32,u32,u8)] = &[${fmtU32Triples(cccRanges)}];
+
+// (start, end, general_category_tag) tags: ${GC_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_GENERAL_CATEGORY: &[(u32,u32,u8)] = &[${fmtU32Triples(gcRanges)}];
+
+pub static UNICODE_LETTER: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(letterRanges))}];
+pub static UNICODE_NUMERIC: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(numericRanges))}];
+pub static UNICODE_ALPHABETIC: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(alphabeticRanges))}];
+pub static UNICODE_DEFAULT_IGNORABLE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(defaultIgnorableRanges))}];
+
+// composition exclusions (Full_Composition_Exclusion, DerivedNormalizationProps.txt)
+pub static UNICODE_COMPOSITION_EXCLUSIONS: &[(u32,u32)] = &[${fmtU32Pairs(fullCompositionExclusion)}];
+
+// canonical composition pairs (c1, c2) -> composed, sorted by (c1,c2)
+pub static UNICODE_COMPOSE_PAIRS: &[(u32,u32,u32)] = &[${composePairs
+  .map(([a, b, c]) => `(0x${a.toString(16).toUpperCase()},0x${b.toString(16).toUpperCase()},0x${c.toString(16).toUpperCase()})`)
+  .join(",")}];
+
+// East Asian Width: 0=narrow(N/Na/H) 1=Ambiguous 2=wide(W/F)
+pub static UNICODE_EAST_ASIAN_WIDTH: &[(u32,u32,u8)] = &[${fmtU32Triples(eawMerged)}];
+
+pub static UNICODE_EXTENDED_PICTOGRAPHIC: &[(u32,u32)] = &[${fmtU32Pairs(extPictographic)}];
+pub static UNICODE_EMOJI_PRESENTATION: &[(u32,u32)] = &[${fmtU32Pairs(emojiPresentation)}];
+pub static UNICODE_EMOJI: &[(u32,u32)] = &[${fmtU32Pairs(emoji)}];
+
+// Grapheme_Cluster_Break tags: ${GRAPHEME_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_GRAPHEME_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(graphemeRanges)}];
+// Word_Break tags: ${WORD_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_WORD_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(wordRanges)}];
+// Sentence_Break tags: ${SENTENCE_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_SENTENCE_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(sentenceRanges)}];
+
+// Indic_Conjunct_Break (GB9c) tags: ${INCB_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
+pub static UNICODE_INCB: &[(u32,u32,u8)] = &[${fmtU32Triples(incbRanges)}];
+`;
+
+const stringModuleOut = MODULE_HEADER + stringBody;
+const stringFlatOut = FLAT_HEADER + stringBody;
+const tablesModuleOut = MODULE_HEADER + tablesBody;
+const tablesFlatOut = FLAT_HEADER + tablesBody;
 
 const outPaths = [
-  ["crates/jet-foundation/src/generated/UnicodeTables.rs", moduleOut],
-  ["crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", flatOut],
+  ["crates/jet-foundation/src/generated/UnicodeString.rs", stringModuleOut],
+  ["crates/jet-foundation/src/generated/UnicodeTables.rs", tablesModuleOut],
+  ["crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", stringFlatOut],
+  ["crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", tablesFlatOut],
 ];
 for (const [rel, text] of outPaths) {
   const full = path.join(process.cwd(), rel);

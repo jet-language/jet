@@ -13,7 +13,7 @@
 // jet-foundation (this crate already depends on it; no duplicate table
 // copy needed here — only the AOT prelude, which cannot depend on the
 // compiler's own crates, carries a textual duplicate).
-use jet_foundation::generated::UnicodeTables::*;
+use jet_foundation::generated::{UnicodeString::*, UnicodeTables::*};
 
 const HANGUL_SBASE: u32 = 0xAC00;
 const HANGUL_LBASE: u32 = 0x1100;

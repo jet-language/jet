@@ -17,15 +17,15 @@ pub fn string_len_chars(s: &str) -> i64 {
 }
 
 pub fn string_trim(s: &str) -> String {
-    jet_foundation::generated::UnicodeTables::jet_unicode_trim(s)
+    jet_foundation::generated::UnicodeString::jet_unicode_trim(s)
 }
 
 pub fn string_to_upper(s: &str) -> String {
-    jet_foundation::generated::UnicodeTables::jet_unicode_upper(s)
+    jet_foundation::generated::UnicodeString::jet_unicode_upper(s)
 }
 
 pub fn string_to_lower(s: &str) -> String {
-    jet_foundation::generated::UnicodeTables::jet_unicode_lower(s)
+    jet_foundation::generated::UnicodeString::jet_unicode_lower(s)
 }
 
 pub fn string_replace(s: &str, from: &str, to: &str) -> String {

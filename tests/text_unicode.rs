@@ -38,6 +38,56 @@ fn pinned_unicode_tables_regenerate_byte_identically() {
 }
 
 #[test]
+fn generated_rust_emits_only_the_unicode_tier_the_program_needs() {
+    let hello = jet::compile(r#"fn run() { print("hello") }"#).expect("hello compiles");
+    assert_eq!(
+        hello.rust.matches("pub const UNICODE_STRING_VERSION").count(),
+        1,
+        "the always-on Unicode string prelude must be emitted exactly once",
+    );
+    assert_eq!(
+        hello.rust.matches("pub fn jet_unicode_trim_view").count(),
+        1,
+        "the always-on Unicode string helpers must be emitted exactly once",
+    );
+    assert!(
+        !hello.rust.contains("UNICODE_DECOMP_POOL"),
+        "a trivial program must not carry the core.text Unicode tables",
+    );
+    assert!(
+        hello.rust.len() < 350_000,
+        "trivial generated Rust grew to {} bytes",
+        hello.rust.len(),
+    );
+
+    let text = jet::compile(
+        r#"use core.text as text
+fn run() { print(text.nfc("é")) }"#,
+    )
+    .expect("core.text program compiles");
+    assert_eq!(
+        text.rust.matches("pub const UNICODE_STRING_VERSION").count(),
+        1,
+        "core.text must not duplicate the always-on Unicode string prelude",
+    );
+    assert_eq!(
+        text.rust.matches("pub fn jet_unicode_trim_view").count(),
+        1,
+        "core.text must not duplicate the always-on Unicode string helpers",
+    );
+    assert_eq!(
+        text.rust.matches("pub const UNICODE_VERSION").count(),
+        1,
+        "core.text Unicode tables must be emitted exactly once",
+    );
+    assert_eq!(
+        text.rust.matches("pub static UNICODE_DECOMP_POOL").count(),
+        1,
+        "core.text normalization tables must be emitted exactly once",
+    );
+}
+
+#[test]
 fn aot_prelude_passes_full_unicode_corpora() {
     if !common::have_rustc() {
         eprintln!("note: rustc not found; skipping AOT Unicode corpus proof");
@@ -165,8 +215,9 @@ fn main() {
 "#
     .replace("__ROOT__", &root_text);
     let mut harness = format!(
-        "include!(r#\"{}/crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs\"#);\n",
-        root_text
+        "include!(r#\"{0}/crates/jet-codegen/src/Prelude/Core/UnicodeString.rs\"#);\n\
+         include!(r#\"{0}/crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs\"#);\n",
+        root_text,
     );
     harness.push_str(
         "mod jet_std {\n#[derive(Clone,Copy)] pub enum TextWidthAmbiguous { Narrow, Wide }\n\
