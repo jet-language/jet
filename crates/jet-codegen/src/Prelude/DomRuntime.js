@@ -481,8 +481,16 @@ export async function instantiateWasm(wasmPath, imports = {}) {
   return instance;
 }
 
-/** D-JSBIND1=A: marshal ABI-safe values at the JS/WASM boundary. */
-export function marshalAbi(value, kind) {
+/** D-JSBIND1=A: marshal ABI-safe values at the JS/WASM boundary.
+ *  String params: TextEncoder → jet_abi_string_alloc → packed u64 (ptr<<32)|len. */
+export function marshalAbi(value, kind, wasm) {
+  if (kind === "string") {
+    const bytes = new TextEncoder().encode(String(value ?? ""));
+    if (bytes.length === 0) return 0n;
+    const ptr = wasm.jet_abi_string_alloc(bytes.length);
+    new Uint8Array(wasm.memory.buffer, ptr, bytes.length).set(bytes);
+    return (BigInt(ptr) << 32n) | BigInt(bytes.length);
+  }
   if (kind === "list-int") {
     return Array.isArray(value) ? value.map((x) => Number(x)) : [];
   }

@@ -984,7 +984,10 @@ fn run() { print(summarize(4)) }
     let wasm = &out.web.expect("web artifacts").wasm_rust;
     assert!(wasm.contains("if (user_total > 10)"), "TIR if was not emitted:\n{wasm}");
     assert!(wasm.contains("println!(\"{}\""), "TIR print was not emitted:\n{wasm}");
-    assert!(wasm.contains("user_text: String"), "internal owned String parameter was rejected:\n{wasm}");
+    assert!(
+        wasm.contains("user_text: &String") || wasm.contains("user_text: String"),
+        "internal String parameter was rejected:\n{wasm}"
+    );
 }
 
 #[test]
@@ -1442,6 +1445,62 @@ fn web_wasm_string_export_hostile_roundtrip() {
     assert!(
         stdout.as_bytes().contains(&b'\t'),
         "TAB byte was lost in String roundtrip:\n{stdout:?}"
+    );
+    assert!(
+        stdout.contains("emoji🌍"),
+        "Unicode scalar was lost:\n{stdout}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_string_param_export_hostile_roundtrip() {
+    // D-JSBIND1: String *params* into @WasmExport — JS TextEncoder + alloc,
+    // packed u64, Wasm jet_abi_string_arg ownership. Hostile empty/tab/emoji.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm string param (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_string_param.jet");
+    let dir = build_web_fixture(
+        "wasm_string_param",
+        src,
+        "examples/features/web/web_wasm_string_param.jet",
+    );
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_string_alloc(len: u32) -> u32"),
+        "string alloc export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("fn jet_abi_string_arg(packed: u64) -> String"),
+        "string arg helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("let user_s = jet_abi_string_arg(user_s)")
+            || wasm.contains("let s = jet_abi_string_arg(s)"),
+        "export wrapper must unpack String param:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("&user_s") || wasm.contains("&s"),
+        "wrapper must pass borrowed String into jet_wasm_*:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("marshalAbi(") && js.contains("\"string\""),
+        "JS bridge must marshal String params:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_string_alloc") && runtime.contains("TextEncoder"),
+        "runtime missing string ABI encode/alloc:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_string_param.out");
+    assert_eq!(stdout, expected);
+    assert!(
+        stdout.as_bytes().contains(&b'\t'),
+        "TAB byte was lost in String param roundtrip:\n{stdout:?}"
     );
     assert!(
         stdout.contains("emoji🌍"),
