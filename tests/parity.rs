@@ -1005,6 +1005,9 @@ fn value_boundary(owner: &str) -> Option<&'static str> {
     if owner == "Instant" {
         return Some("named clock boundary");
     }
+    if matches!(owner, "Secret" | "WrappedVaultKey") {
+        return Some("named native/security boundary");
+    }
     matches!(owner, "Task" | "Receiver" | "Sender" | "Event" | "AsyncEvent" | "DispatchReport" | "Hook" | "Subscription" | "EventScope" | "EventTrace" | "WatchHandle" | "WatchSet" | "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash")
         .then_some("named runtime/native handle boundary")
 }
@@ -1323,7 +1326,11 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         );
     }
     assert_eq!(record(&records, Surface::DirectStatic, "Bag", "new").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_bytes").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::DirectStatic, "WrappedVaultKey", "from_bytes").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Value, "WrappedVaultKey", "bytes").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::DirectStatic, "String", "from_bytes").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "BigInt").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::PurePending);
@@ -1577,14 +1584,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 756, 57, 365));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 757, 52, 369));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        11351262486098323257,
+        7491554902038655417,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
