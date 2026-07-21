@@ -488,13 +488,13 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
             _ => return Err(format!("content.{key} is not an array")),
         }
     }
+    let limits = validate_capture_policy(&fields["capture_policy"])?;
     validate_samples(&fields["samples"])?;
     validate_allocations(&fields["allocations"])?;
-    let tasks = validate_tasks(&fields["tasks"])?;
+    let tasks = validate_tasks(&fields["tasks"], limits.task_rows)?;
     validate_locks(&fields["locks"])?;
-    validate_io(&fields["io"], &tasks)?;
+    validate_io(&fields["io"], &tasks, limits.io_rows)?;
     validate_source_identity(&fields["source_identity"])?;
-    validate_capture_policy(&fields["capture_policy"])?;
     validate_toolchain(&fields["toolchain"])?;
     Ok(())
 }
@@ -541,12 +541,13 @@ fn validate_allocations(value: &CanonicalJson) -> Result<(), String> {
 
 fn validate_tasks(
     value: &CanonicalJson,
+    row_limit: Option<usize>,
 ) -> Result<BTreeMap<u64, (u64, String, String, CanonicalJson)>, String> {
     let items = match value {
         CanonicalJson::Array(items) => items,
         _ => return Err("content.tasks is not an array".into()),
     };
-    if items.len() > TRACE_TASK_ROW_LIMIT as usize {
+    if row_limit.is_some_and(|limit| items.len() > limit) {
         return Err("content.tasks exceeds capture_policy.task_row_limit".into());
     }
     let mut tasks = BTreeMap::new();
@@ -659,12 +660,13 @@ fn validate_locks(value: &CanonicalJson) -> Result<(), String> {
 fn validate_io(
     value: &CanonicalJson,
     tasks: &BTreeMap<u64, (u64, String, String, CanonicalJson)>,
+    row_limit: Option<usize>,
 ) -> Result<(), String> {
     let items = match value {
         CanonicalJson::Array(items) => items,
         _ => return Err("content.io is not an array".into()),
     };
-    if items.len() > TRACE_IO_ROW_LIMIT as usize {
+    if row_limit.is_some_and(|limit| items.len() > limit) {
         return Err("content.io exceeds capture_policy.io_row_limit".into());
     }
     for (i, item) in items.iter().enumerate() {
@@ -755,23 +757,53 @@ fn unsigned(value: &CanonicalJson, label: &str) -> Result<u64, String> {
     }
 }
 
-fn validate_capture_policy(value: &CanonicalJson) -> Result<(), String> {
-    let fields = object_keys(
-        value,
-        "capture_policy",
-        &[
-            "allowlist",
-            "default_exclusions",
-            "io_row_limit",
-            "io_rows_truncated",
-            "schema",
-            "task_row_limit",
-            "task_rows_truncated",
-        ],
-    )?;
-    if fields["schema"] != CanonicalJson::Integer(CAPTURE_POLICY_SCHEMA.into()) {
-        return Err("unsupported capture_policy schema".into());
-    }
+#[derive(Clone, Copy)]
+struct CaptureLimits {
+    io_rows: Option<usize>,
+    task_rows: Option<usize>,
+}
+
+fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, String> {
+    let schema = match value {
+        CanonicalJson::Object(fields) => fields.get("schema"),
+        _ => return Err("capture_policy is not an object".into()),
+    };
+    let (fields, limits) = match schema {
+        Some(CanonicalJson::Integer(schema)) if schema == "1" => (
+            object_keys(
+                value,
+                "capture_policy",
+                &["allowlist", "default_exclusions", "schema"],
+            )?,
+            // Schema 1 declared neither limits nor truncation. Absence remains
+            // unknown/unbounded legacy semantics; never normalize it to false.
+            CaptureLimits {
+                io_rows: None,
+                task_rows: None,
+            },
+        ),
+        Some(CanonicalJson::Integer(schema)) if schema == CAPTURE_POLICY_SCHEMA => (
+            object_keys(
+                value,
+                "capture_policy",
+                &[
+                    "allowlist",
+                    "default_exclusions",
+                    "io_row_limit",
+                    "io_rows_truncated",
+                    "schema",
+                    "task_row_limit",
+                    "task_rows_truncated",
+                ],
+            )?,
+            CaptureLimits {
+                io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
+                task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
+            },
+        ),
+        Some(CanonicalJson::Integer(_)) => return Err("unsupported capture_policy schema".into()),
+        _ => return Err("capture_policy schema is not an integer".into()),
+    };
     let exclusions = match &fields["default_exclusions"] {
         CanonicalJson::Array(items) => items,
         _ => return Err("capture_policy.default_exclusions is not an array".into()),
@@ -783,16 +815,18 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<(), String> {
     if exclusions != &expected {
         return Err("capture_policy.default_exclusions does not match D-PERFSESSION1 defaults".into());
     }
-    if unsigned(&fields["io_row_limit"], "capture_policy.io_row_limit")?
-        != TRACE_IO_ROW_LIMIT
-        || unsigned(&fields["task_row_limit"], "capture_policy.task_row_limit")?
-            != TRACE_TASK_ROW_LIMIT
-    {
-        return Err("capture_policy row limits do not match this schema".into());
-    }
-    for key in ["io_rows_truncated", "task_rows_truncated"] {
-        if !matches!(fields[key], CanonicalJson::Bool(_)) {
-            return Err(format!("capture_policy.{key} is not a boolean"));
+    if limits.task_rows.is_some() {
+        if unsigned(&fields["io_row_limit"], "capture_policy.io_row_limit")?
+            != TRACE_IO_ROW_LIMIT
+            || unsigned(&fields["task_row_limit"], "capture_policy.task_row_limit")?
+                != TRACE_TASK_ROW_LIMIT
+        {
+            return Err("capture_policy row limits do not match this schema".into());
+        }
+        for key in ["io_rows_truncated", "task_rows_truncated"] {
+            if !matches!(fields[key], CanonicalJson::Bool(_)) {
+                return Err(format!("capture_policy.{key} is not a boolean"));
+            }
         }
     }
     match &fields["allowlist"] {
@@ -808,7 +842,7 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<(), String> {
         }
         _ => return Err("capture_policy.allowlist is not an array".into()),
     }
-    Ok(())
+    Ok(limits)
 }
 
 fn validate_toolchain(value: &CanonicalJson) -> Result<(), String> {
@@ -1161,6 +1195,34 @@ mod tests {
                 .unwrap_err()
                 .contains("exceeds capture_policy.task_row_limit")
         );
+    }
+
+    #[test]
+    fn legacy_capture_policy_v1_keeps_unknown_limit_semantics() {
+        let mut content = sample_skeleton().content_json().unwrap();
+        let CanonicalJson::Object(fields) = &mut content else {
+            unreachable!()
+        };
+        let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+            unreachable!()
+        };
+        for key in [
+            "io_row_limit",
+            "io_rows_truncated",
+            "task_row_limit",
+            "task_rows_truncated",
+        ] {
+            policy.remove(key);
+        }
+        policy.insert("schema".into(), CanonicalJson::Integer("1".into()));
+        let bytes = jettrace_artifact(content).bytes();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("\"capture_policy\":{\"allowlist\":[]"), "{text}");
+        assert!(text.contains("\"schema\":1},\"command\""), "{text}");
+        assert!(!text.contains("row_limit"), "legacy limits were fabricated: {text}");
+        assert!(!text.contains("rows_truncated"), "legacy truncation was fabricated: {text}");
+        assert!(text.contains("\"version\":1"), "outer version changed: {text}");
+        verify_jettrace(&bytes).unwrap();
     }
 
     #[test]

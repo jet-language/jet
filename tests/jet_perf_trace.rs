@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use jet_foundation::JetTrace::{jettrace_artifact, trace_id, verify_jettrace};
+use jet_foundation::PerformanceBudget::CanonicalJson;
+
 mod common;
 
 fn jet() -> PathBuf {
@@ -323,6 +326,59 @@ fn perf_attach_view_compare_export_share_one_jettrace_truth() {
         String::from_utf8_lossy(&bad.stderr)
     );
 
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn perf_view_reads_hash_valid_legacy_capture_policy_v1() {
+    let root = temp_workspace();
+    let modern_path = root.join("modern.jettrace");
+    let attach = run_jet(
+        &root,
+        &[
+            "perf",
+            "attach",
+            &std::process::id().to_string(),
+            "--out",
+            modern_path.to_str().unwrap(),
+        ],
+    );
+    assert!(attach.status.success(), "{}", String::from_utf8_lossy(&attach.stderr));
+    let modern_bytes = fs::read(&modern_path).unwrap();
+    let modern = verify_jettrace(&modern_bytes).unwrap();
+    let modern_id = trace_id(&modern).unwrap().to_string();
+
+    let parsed = CanonicalJson::parse_canonical(&modern_bytes).unwrap();
+    let CanonicalJson::Object(mut wrapper) = parsed else {
+        panic!("modern trace wrapper is not an object")
+    };
+    let mut content = wrapper.remove("content").unwrap();
+    let CanonicalJson::Object(fields) = &mut content else {
+        panic!("modern trace content is not an object")
+    };
+    let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+        panic!("modern capture policy is not an object")
+    };
+    for key in [
+        "io_row_limit",
+        "io_rows_truncated",
+        "task_row_limit",
+        "task_rows_truncated",
+    ] {
+        policy.remove(key);
+    }
+    policy.insert("schema".into(), CanonicalJson::Integer("1".into()));
+    let legacy_bytes = jettrace_artifact(content).bytes();
+    let legacy = verify_jettrace(&legacy_bytes).unwrap();
+    assert_ne!(trace_id(&legacy).unwrap(), modern_id, "legacy trace_id was not recomputed");
+
+    let legacy_path = root.join("legacy-v1.jettrace");
+    fs::write(&legacy_path, legacy_bytes).unwrap();
+    let view = run_jet(&root, &["perf", "view", legacy_path.to_str().unwrap()]);
+    let stdout = String::from_utf8_lossy(&view.stdout);
+    assert!(view.status.success(), "{}", String::from_utf8_lossy(&view.stderr));
+    assert!(stdout.contains("schema jet.trace v1"), "{stdout}");
+    assert!(stdout.contains("command attach"), "{stdout}");
     let _ = fs::remove_dir_all(&root);
 }
 
