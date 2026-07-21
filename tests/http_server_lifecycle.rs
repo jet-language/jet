@@ -3169,6 +3169,22 @@ fn server_enforces_and_releases_per_ip_connection_capacity() {
 fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_capacity() {
     use std::io::Write;
 
+    const CHILD: &str = "JET_HTTP2_BLOCKING_BODY_TEST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_capacity",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("JET_SCHEDULER_THREADS", "1")
+            .status()
+            .expect("spawn isolated HTTP/2 blocking-body test");
+        assert!(status.success(), "isolated HTTP/2 blocking-body test failed");
+        return;
+    }
+
     struct BlockingBody {
         started: Option<std::sync::mpsc::Sender<()>>,
         wake: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
@@ -3191,7 +3207,6 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
         }
     }
 
-    std::env::set_var("JET_SCHEDULER_THREADS", "1");
     let mux = jet_http_mux_new();
     jet_http_mux_add(&mux, "POST", "/slow-body", |request| {
         let body = request.body.bytes(64).unwrap();
