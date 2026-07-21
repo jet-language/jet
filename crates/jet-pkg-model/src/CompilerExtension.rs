@@ -145,8 +145,8 @@ pub struct ResourceLimits {
     pub max_edits: usize,
     /// Max raw response payload bytes.
     pub max_response_bytes: usize,
-    /// Declared wall-clock budget for one `analyze` (ms). Host may enforce
-    /// via epoch interruption; validation always checks the declared value.
+    /// Wall-clock budget for one `analyze` (ms). Host enforces via wasmtime
+    /// epoch interruption; validation always checks the declared value.
     pub timeout_ms: u64,
 }
 
@@ -1329,11 +1329,21 @@ mod tests {
             "runtime must apply fuel limits"
         );
         assert!(
+            runtime.contains("epoch_interruption"),
+            "runtime must enable wall-clock epoch interruption"
+        );
+        assert!(
+            runtime.contains("set_epoch_deadline") && runtime.contains("increment_epoch"),
+            "runtime must arm and tick the epoch deadline on analyze"
+        );
+        assert!(
             runtime.contains("StoreLimitsBuilder"),
             "runtime must apply memory/table StoreLimits"
         );
         assert!(
-            runtime.contains("10_000_000") && runtime.contains("16777216"),
+            runtime.contains("10_000_000")
+                && runtime.contains("16777216")
+                && runtime.contains("2_000"),
             "runtime defaults must mirror ResourceLimits::v1_defaults"
         );
     }

@@ -6,9 +6,10 @@
 //! - one custom-lint finding analyze → validate → stage → accept round-trip
 //! - crash / malformed / incompatible / fuel-exhaust guests fail closed
 //!   (Jet `E:` wires, no process abort, no rustc leak, no auto-commit)
+//! - wall-clock epoch `timeout_ms` interrupts a looping guest fail-closed
 //!
 //! Driver post-sema wire lives in `jet-driver::CompilerExtensionHook`.
-//! Wall-clock epoch `timeout_ms` and nondeterminism policy remain open.
+//! Nondeterminism policy remains open.
 
 #![allow(non_snake_case)]
 
@@ -18,9 +19,11 @@ use jet_pkg_model::CompilerExtension::{
     TypeFact,
 };
 use jet_pkg_model::CompilerExtensionHost::{
-    jet_compiler_extension_analyze, jet_compiler_extension_close, jet_compiler_extension_load,
+    jet_compiler_extension_analyze, jet_compiler_extension_analyze_with_limits,
+    jet_compiler_extension_close, jet_compiler_extension_load,
 };
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -178,6 +181,52 @@ fn fuel_exhaustion_times_out_fail_closed() {
             || err.message.to_ascii_lowercase().contains("fuel"),
         "expected fuel/trap failure, got: {}",
         err.message
+    );
+    assert_jet_owned(&err);
+    assert!(session.staged().is_none());
+    assert!(!session.is_committed());
+    assert!(session.close(jet_compiler_extension_close));
+}
+
+#[test]
+fn wall_clock_timeout_ms_epoch_interrupt_fail_closed() {
+    // Huge fuel so the wall-clock epoch path wins over fuel exhaustion.
+    // Short timeout keeps the live proof fast while still observing sleep.
+    const HUGE_FUEL: u64 = u64::MAX / 4;
+    const TIMEOUT_MS: u64 = 50;
+
+    let snap = sample_snapshot();
+    let handle = load_guest("fuel_loop.wasm").expect("load loop guest");
+    let mut session = ExtensionSession::new();
+    session.on_loaded(handle).unwrap();
+
+    let start = Instant::now();
+    let wire = jet_compiler_extension_analyze_with_limits(
+        handle,
+        &snap.encode().unwrap(),
+        HUGE_FUEL,
+        TIMEOUT_MS,
+    );
+    let elapsed = start.elapsed();
+    let err = parse_analyze_result(&wire).expect_err("loop must hit wall-clock timeout");
+    let lower = err.message.to_ascii_lowercase();
+    assert!(
+        lower.contains("interrupt") || lower.contains("epoch") || lower.contains("trapped"),
+        "expected epoch interrupt trap, got: {}",
+        err.message
+    );
+    assert!(
+        !lower.contains("fuel"),
+        "timeout proof must not be a fuel miss: {}",
+        err.message
+    );
+    assert!(
+        elapsed >= Duration::from_millis(TIMEOUT_MS.saturating_sub(10)),
+        "epoch interrupt fired too early ({elapsed:?}); expected ~{TIMEOUT_MS}ms wall budget"
+    );
+    assert!(
+        elapsed < Duration::from_millis(2_000),
+        "epoch interrupt took too long ({elapsed:?}); wall path should not wait full v1 default"
     );
     assert_jet_owned(&err);
     assert!(session.staged().is_none());

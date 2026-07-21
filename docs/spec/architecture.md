@@ -283,7 +283,9 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
 
 - **Defaults:** fuel `10_000_000`, memory `16 MiB`, table `10_000`, findings
   `256`, edits `64`, response `256 KiB`, wall budget `timeout_ms=2000`.
-  Loader applies fuel + `StoreLimits`; snapshot declares the same caps.
+  Loader applies fuel + `StoreLimits`; each `analyze` arms wasmtime epoch
+  interruption and ticks the engine after `timeout_ms` (fail-closed interrupt
+  trap). Snapshot declares the same caps.
 - **Trust:** v1 admits only `untrusted` components (zero host imports).
 - **Lifecycle:** `ExtensionSession` Idle → Loaded → Closed. `stage_response`
   validates without commit; `rollback` discards staged output only (an
@@ -295,14 +297,14 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   loads real `compiler-extension-v1` component fixtures under
   `crates/jet-pkg-model/fixtures/compiler_extension/` through the same
   `Prelude/CompilerExtension.rs` host. Proves one custom-lint finding
-  round-trip plus fail-closed crash / malformed / incompatible / fuel-exhaust
-  guests (Jet-owned `E:` wires; no rustc leak; no auto-commit).
+  round-trip, fail-closed crash / malformed / incompatible / fuel-exhaust
+  guests, and wall-clock epoch `timeout_ms` interrupt (Jet-owned `E:` wires;
+  no rustc leak; no auto-commit).
 - **Post-sema driver wire:** when `JET_COMPILER_EXTENSION` names a component
   path (expert env registration — no new user syntax until a spelling ballot),
   `jet-driver::CompilerExtensionHook` freezes a typed snapshot after sema,
   runs `CompilerExtension::analyze_wasm_component`, and maps findings to
-  `L1401` or host failures to `E1402`. Wall-clock epoch `timeout_ms`
-  enforcement and nondeterminism policy remain open.
+  `L1401` or host failures to `E1402`. Nondeterminism policy remains open.
 
 ## Rules
 
