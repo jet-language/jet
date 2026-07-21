@@ -435,7 +435,7 @@ Client surface:
 |-------------------|---------|--------------|
 | `client.get(url)` / `client.post(url, body)` | `HttpClientResp ? String` | One-shot request helpers |
 | `client.request(method, url)` | `HttpClientReq` | Start a typed request builder; malformed or unsupported URLs fail with a stable Jet error before transport |
-| `req.header(name, value)` / `.body(text)` | `HttpClientReq` | Add headers or a string body |
+| `req.header(name, value)` / `.body(text|Body)` | `HttpClientReq` | Add headers or a string/`Body` upload; `Body.reader` streams in 64 KiB wire chunks without materializing through `Body.bytes(1GiB)` first |
 | `req.form(name, value)` / `.multipart_text(name, value)` | `HttpClientReq` | Encode form or text multipart fields; multipart names percent-encode quotes and line breaks, and bounded RFC-valid boundary selection avoids every supplied name and value |
 | `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or a redirect limit from 0 through 4,294,967,295; unset follows at most 10, and out-of-range limits fail before transport |
 | `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` | `HttpClientReq` | Set nonnegative global/per-phase deadlines; negative milliseconds fail before transport |
@@ -444,8 +444,9 @@ Client surface:
 | `resp.status()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, text body, headers, and Set-Cookie values |
 
 The compatibility text response path accepts at most 8 MiB of transfer-decoded
-bytes and rejects non-UTF-8 data. The byte-native streaming `Body` API remains
-open.
+bytes and rejects non-UTF-8 data. Client uploads and response downloads share the
+byte-native streaming `Body` API; unknown-length uploads use HTTP/1.1 chunked
+transfer encoding.
 
 Server surface:
 
@@ -479,7 +480,7 @@ Card 301 audit state:
 | Persistent connections | Partial: the dependency-free plain HTTP/1.x server preserves pipelined request boundaries, responds sequentially in wire order, idles for at most 60 seconds, stops keep-alive reuse promptly during shutdown, and closes after 1,000 requests; TLS persistence and HTTP/2 remain open |
 | HTTP/1 response framing | Partial: only HTTP/1.0 and HTTP/1.1 requests reach handlers; unsupported versions close with 505. `server.response` preserves status integers 100–599 and converts every out-of-range value to a generic 500 before headers or body reach the wire. HEAD preserves the corresponding selected representation's Content-Length and metadata without sending body bytes, including error responses and pipelines. Statuses 1xx/204/304 publish neither body bytes nor Content-Length; 205 publishes canonical `Reset Content`, `Content-Length: 0`, and no body bytes regardless of handler or HEAD metadata. Streaming, trailers, and HTTP/2 remain open. |
 | `Expect: 100-continue` | Shipped for plain HTTP/1.1: one interim response follows successful framing/size validation, Content-Length oversize fails with 413 before upload, unsupported or repeated expectations fail with 417 before dispatch, and final pipelined responses remain ordered; the separate TLS serving path remains open |
-| Bounded streaming bodies | Not shipped: request and response bodies are still buffered `String` values rather than D-HTTP-CORE2 streaming byte bodies with backpressure |
+| Bounded streaming bodies | Partial: client uploads stream in 64 KiB chunks from `Body` (including `Body.reader`) without `Body.bytes(1GiB)` materialization before connect; response downloads already stream through the same `Body` model. Server request bodies and remaining backpressure edges stay open under D-HTTP-CORE2. |
 | Transparent Content-Encoding decoding | Not shipped: gzip and other content-coding support remains open under D-DEP-HTTP2=B; the compatibility text cap applies only after HTTP transfer framing is decoded |
 | Graceful shutdown | Not shipped: `serve_once*` is a deterministic test entrypoint, not the D-HTTP-SERVER2 drain/cancel/report lifecycle |
 | Pooling and HTTP/2 | Not shipped: the current request-scoped bridge does not implement D-HTTP-CLIENT2's shared `Client` pool or native HTTP/2 transport |

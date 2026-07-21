@@ -12,6 +12,7 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 const HTTP_CLIENT_DEFAULT_REDIRECTS: u32 = 10;
+const HTTP_UPLOAD_CHUNK: usize = 64 * 1024;
 
 /// Private, typed transport failures. Generated code exhaustively projects these
 /// to the public closed HttpError without carrying backend prose across the seam.
@@ -995,7 +996,10 @@ impl H2Connection {
         method: &str,
         url: &ParsedUrl,
         headers: &[(String, String)],
-        body: Option<&[u8]>,
+        body_len: Option<usize>,
+        has_body: bool,
+        body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+        tee: &mut Option<Vec<u8>>,
         decompress: bool,
         facts: &Arc<Mutex<ResponseFacts>>,
     ) -> Result<u32, JetHttpBridgeError> {
@@ -1006,10 +1010,10 @@ impl H2Connection {
             .checked_add(2)
             .filter(|id| *id <= 0x7fff_ffff)
             .ok_or(JetHttpBridgeError::Protocol)?;
-        let block = hpack_request(method, url, headers, body, decompress)?;
+        let block = hpack_request(method, url, headers, body_len, decompress)?;
         self.stream_send_windows
             .insert(stream, self.initial_send_window);
-        let end_stream = body.is_none_or(|body| body.is_empty());
+        let end_stream = !has_body || body_len == Some(0);
         h2_write_frame(
             &mut self.io,
             1,
@@ -1017,9 +1021,10 @@ impl H2Connection {
             stream,
             &block,
         )?;
-        if let Some(body) = body.filter(|body| !body.is_empty()) {
-            let mut offset = 0usize;
-            while offset < body.len() {
+        if has_body && body_len != Some(0) {
+            let mut pending = Vec::new();
+            let mut finished = false;
+            while !finished || !pending.is_empty() {
                 while self.connection_send_window <= 0
                     || self.stream_send_windows.get(&stream).copied().unwrap_or(0) <= 0
                 {
@@ -1028,8 +1033,28 @@ impl H2Connection {
                         self.pending.push_back(frame);
                     }
                 }
-                let count = (body.len() - offset)
+                if pending.is_empty() && !finished {
+                    match body_read()? {
+                        Some(chunk) if !chunk.is_empty() => {
+                            if let Some(buffer) = tee.as_mut() {
+                                buffer.extend_from_slice(&chunk);
+                            }
+                            pending = chunk;
+                        }
+                        Some(_) => {}
+                        None => finished = true,
+                    }
+                }
+                if pending.is_empty() {
+                    if finished {
+                        h2_write_frame(&mut self.io, 0, 1, stream, &[])?;
+                    }
+                    break;
+                }
+                let count = pending
+                    .len()
                     .min(self.max_frame)
+                    .min(HTTP_UPLOAD_CHUNK)
                     .min(self.connection_send_window as usize)
                     .min(self.stream_send_windows[&stream] as usize);
                 self.connection_send_window -= count as i64;
@@ -1037,15 +1062,12 @@ impl H2Connection {
                     .stream_send_windows
                     .get_mut(&stream)
                     .ok_or(JetHttpBridgeError::Protocol)? -= count as i64;
-                let flags = if offset + count == body.len() { 1 } else { 0 };
-                h2_write_frame(
-                    &mut self.io,
-                    0,
-                    flags,
-                    stream,
-                    &body[offset..offset + count],
-                )?;
-                offset += count;
+                let chunk = pending.drain(..count).collect::<Vec<_>>();
+                let flags = if finished && pending.is_empty() { 1 } else { 0 };
+                h2_write_frame(&mut self.io, 0, flags, stream, &chunk)?;
+                if flags == 1 {
+                    break;
+                }
             }
         }
         self.stream_send_windows.remove(&stream);
@@ -1569,6 +1591,177 @@ pub fn jet_http_client_post_impl(
 
 /// Perform a generic HTTP request.
 /// headers_flat: alternating [key, value, key, value, ...]
+
+pub fn jet_http_client_send_stream_impl(
+    method: &str,
+    url: &String,
+    headers_flat: &[String],
+    body_len: Option<i64>,
+    has_user_body: bool,
+    body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+    timeout_ms: Option<i64>,
+    connect_timeout_ms: Option<i64>,
+    read_timeout_ms: Option<i64>,
+    total_timeout_ms: Option<i64>,
+    redirects: Option<i64>,
+    proxy: Option<&str>,
+    cookies_flat: &[String],
+    form_flat: &[String],
+    multipart_flat: &[String],
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+    let default_timeout = validated_timeout("timeout", timeout_ms.unwrap_or(30_000))?;
+    let connect_timeout = connect_timeout_ms
+        .map(|milliseconds| validated_timeout("connect timeout", milliseconds))
+        .transpose()?
+        .unwrap_or(default_timeout);
+    let read_timeout = read_timeout_ms
+        .map(|milliseconds| validated_timeout("read timeout", milliseconds))
+        .transpose()?
+        .unwrap_or(default_timeout);
+    let total_timeout = total_timeout_ms
+        .map(|milliseconds| validated_timeout("total timeout", milliseconds))
+        .transpose()?;
+    let redirects = redirects
+        .map(|limit| u32::try_from(limit).map_err(|_| JetHttpBridgeError::Redirect))
+        .transpose()?;
+    let explicit_redirect_limit = redirects.is_some();
+    let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
+    let (headers, form_body) = if has_user_body {
+        prepare_request_parts(headers_flat, None, cookies_flat, &[], &[])
+    } else {
+        prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat)
+    };
+    let stream_len = if has_user_body {
+        body_len.and_then(|value| usize::try_from(value).ok())
+    } else {
+        form_body.as_ref().map(Vec::len)
+    };
+    let total_deadline = total_timeout.map(|timeout| Instant::now() + timeout);
+    send_following_redirects_upload(
+        default_client_pool().clone(),
+        0,
+        default_dns_cache().clone(),
+        default_origin_limits().clone(),
+        None,
+        true,
+        method,
+        url,
+        headers,
+        form_body,
+        if has_user_body { Some(body_read) } else { None },
+        stream_len,
+        default_timeout,
+        connect_timeout,
+        default_timeout,
+        default_timeout,
+        read_timeout,
+        default_timeout,
+        total_deadline,
+        redirect_limit,
+        explicit_redirect_limit,
+        proxy,
+        true,
+        true,
+        false,
+        true,
+        &[],
+    )
+}
+
+pub fn jet_http_client_send_with_stream_impl(
+    id: i64,
+    method: &str,
+    url: &String,
+    headers_flat: &[String],
+    body_len: Option<i64>,
+    has_user_body: bool,
+    body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+    timeout_ms: Option<i64>,
+    connect_timeout_ms: Option<i64>,
+    read_timeout_ms: Option<i64>,
+    total_timeout_ms: Option<i64>,
+    redirects: Option<i64>,
+    proxy: Option<&str>,
+    cookies_flat: &[String],
+    form_flat: &[String],
+    multipart_flat: &[String],
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+    let handle = client_handles()
+        .lock()
+        .map_err(|_| JetHttpBridgeError::Internal)?
+        .get(&id)
+        .cloned()
+        .ok_or(JetHttpBridgeError::Internal)?;
+    let default_timeout = timeout_ms
+        .map(|value| validated_timeout("timeout", value))
+        .transpose()?;
+    let connect = connect_timeout_ms
+        .map(|value| validated_timeout("connect timeout", value))
+        .transpose()?
+        .or(default_timeout)
+        .unwrap_or(handle.policy.connect_timeout);
+    let read = read_timeout_ms
+        .map(|value| validated_timeout("read timeout", value))
+        .transpose()?
+        .or(default_timeout)
+        .unwrap_or(handle.policy.read_timeout);
+    let write = default_timeout.unwrap_or(handle.policy.write_timeout);
+    let total = total_timeout_ms
+        .map(|value| validated_timeout("total timeout", value))
+        .transpose()?
+        .or(handle.policy.total_timeout)
+        .map(|duration| Instant::now() + duration);
+    let (redirect_limit, explicit_redirect_limit) = match redirects {
+        Some(value) => (
+            u32::try_from(value).map_err(|_| JetHttpBridgeError::Redirect)?,
+            true,
+        ),
+        None => (handle.policy.redirect_limit, false),
+    };
+    let (headers, form_body) = if has_user_body {
+        prepare_request_parts(headers_flat, None, cookies_flat, &[], &[])
+    } else {
+        prepare_request_parts(headers_flat, None, cookies_flat, form_flat, multipart_flat)
+    };
+    let stream_len = if has_user_body {
+        body_len.and_then(|value| usize::try_from(value).ok())
+    } else {
+        form_body.as_ref().map(Vec::len)
+    };
+    let configured_proxy = proxy
+        .or(handle.policy.proxy.as_deref())
+        .or((!handle.policy.use_environment_proxy).then_some(""));
+    send_following_redirects_upload(
+        handle.shared.pool.clone(),
+        handle.namespace,
+        handle.shared.dns.clone(),
+        handle.shared.limits.clone(),
+        handle.policy.cookies.then(|| handle.shared.jar.clone()),
+        handle.policy.decompress,
+        method,
+        url,
+        headers,
+        form_body,
+        if has_user_body { Some(body_read) } else { None },
+        stream_len,
+        handle.policy.dns_timeout,
+        connect,
+        handle.policy.tls_timeout,
+        handle.policy.first_byte_timeout,
+        read,
+        write,
+        total,
+        redirect_limit,
+        explicit_redirect_limit,
+        configured_proxy,
+        handle.policy.http2,
+        handle.policy.http11,
+        handle.policy.h2c,
+        handle.policy.system_roots,
+        &handle.policy.custom_roots,
+    )
+}
+
 pub fn jet_http_client_send_impl(
     method: &str,
     url: &String,
@@ -1679,8 +1872,68 @@ fn send_following_redirects(
     decompress: bool,
     original_method: &str,
     original_url: &str,
-    mut headers: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
     original_body: Option<Vec<u8>>,
+    dns_timeout: Duration,
+    connect_timeout: Duration,
+    tls_timeout: Duration,
+    first_byte_timeout: Duration,
+    read_timeout: Duration,
+    write_timeout: Duration,
+    total_deadline: Option<Instant>,
+    redirect_limit: u32,
+    explicit_redirect_limit: bool,
+    explicit_proxy: Option<&str>,
+    http2: bool,
+    http11: bool,
+    h2c: bool,
+    system_roots: bool,
+    custom_roots: &[Vec<u8>],
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+    send_following_redirects_upload(
+        pool,
+        namespace,
+        dns,
+        limits,
+        jar,
+        decompress,
+        original_method,
+        original_url,
+        headers,
+        original_body,
+        None,
+        None,
+        dns_timeout,
+        connect_timeout,
+        tls_timeout,
+        first_byte_timeout,
+        read_timeout,
+        write_timeout,
+        total_deadline,
+        redirect_limit,
+        explicit_redirect_limit,
+        explicit_proxy,
+        http2,
+        http11,
+        h2c,
+        system_roots,
+        custom_roots,
+    )
+}
+
+fn send_following_redirects_upload(
+    pool: Arc<Mutex<ClientPool>>,
+    namespace: i64,
+    dns: Arc<Mutex<DnsCache>>,
+    limits: Arc<OriginLimits>,
+    jar: Option<Arc<Mutex<CookieJar>>>,
+    decompress: bool,
+    original_method: &str,
+    original_url: &str,
+    mut headers: Vec<(String, String)>,
+    mut body: Option<Vec<u8>>,
+    mut body_stream: Option<&mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>>,
+    stream_len: Option<usize>,
     dns_timeout: Duration,
     connect_timeout: Duration,
     tls_timeout: Duration,
@@ -1699,7 +1952,6 @@ fn send_following_redirects(
 ) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
     let mut method = original_method.to_string();
     let mut url = original_url.to_string();
-    let mut body = original_body;
     let mut visited = std::collections::HashSet::new();
     let mut redirect_history = Vec::new();
     let started = Instant::now();
@@ -1724,31 +1976,95 @@ fn send_following_redirects(
                 request_headers.push(("cookie".to_string(), cookie));
             }
         }
-        let response = send_once(
-            pool.clone(),
-            namespace,
-            dns.clone(),
-            limits.clone(),
-            &method,
-            &parsed,
-            &request_headers,
-            body.as_deref(),
-            dns_timeout,
-            connect_timeout,
-            tls_timeout,
-            first_byte_timeout,
-            read_timeout,
-            write_timeout,
-            total_deadline,
-            proxy.as_ref(),
-            decompress,
-            started,
-            http2,
-            http11,
-            h2c,
-            system_roots,
-            custom_roots,
-        )?;
+        let response = if let Some(ref bytes) = body {
+            send_once(
+                pool.clone(),
+                namespace,
+                dns.clone(),
+                limits.clone(),
+                &method,
+                &parsed,
+                &request_headers,
+                Some(bytes.as_slice()),
+                dns_timeout,
+                connect_timeout,
+                tls_timeout,
+                first_byte_timeout,
+                read_timeout,
+                write_timeout,
+                total_deadline,
+                proxy.as_ref(),
+                decompress,
+                started,
+                http2,
+                http11,
+                h2c,
+                system_roots,
+                custom_roots,
+            )?
+        } else if let Some(ref mut read) = body_stream {
+            let mut tee = Some(Vec::new());
+            let chunked = stream_len.is_none();
+            let has_body = true;
+            let response = send_once_upload(
+                pool.clone(),
+                namespace,
+                dns.clone(),
+                limits.clone(),
+                &method,
+                &parsed,
+                &request_headers,
+                stream_len,
+                chunked,
+                has_body,
+                read,
+                &mut tee,
+                dns_timeout,
+                connect_timeout,
+                tls_timeout,
+                first_byte_timeout,
+                read_timeout,
+                write_timeout,
+                total_deadline,
+                proxy.as_ref(),
+                decompress,
+                started,
+                http2,
+                http11,
+                h2c,
+                system_roots,
+                custom_roots,
+            )?;
+            body = tee;
+            body_stream = None;
+            response
+        } else {
+            send_once(
+                pool.clone(),
+                namespace,
+                dns.clone(),
+                limits.clone(),
+                &method,
+                &parsed,
+                &request_headers,
+                None,
+                dns_timeout,
+                connect_timeout,
+                tls_timeout,
+                first_byte_timeout,
+                read_timeout,
+                write_timeout,
+                total_deadline,
+                proxy.as_ref(),
+                decompress,
+                started,
+                http2,
+                http11,
+                h2c,
+                system_roots,
+                custom_roots,
+            )?
+        };
         if let Some(jar) = &jar {
             if let Ok(mut jar) = jar.lock() {
                 for value in response
@@ -2100,6 +2416,72 @@ fn send_once(
     system_roots: bool,
     custom_roots: &[Vec<u8>],
 ) -> Result<NativeResponse, JetHttpBridgeError> {
+    let body_len = body.map(|bytes| bytes.len());
+    let has_body = body.is_some();
+    let mut offset = 0usize;
+    let bytes = body.unwrap_or(&[]);
+    let mut tee = None;
+    let mut read = slice_body_reader(bytes, &mut offset);
+    send_once_upload(
+        pool,
+        namespace,
+        dns,
+        limits,
+        method,
+        url,
+        headers,
+        body_len,
+        false,
+        has_body,
+        &mut read,
+        &mut tee,
+        dns_timeout,
+        connect_timeout,
+        tls_timeout,
+        first_byte_timeout,
+        read_timeout,
+        write_timeout,
+        total_deadline,
+        proxy,
+        decompress,
+        request_started,
+        http2,
+        http11,
+        h2c,
+        system_roots,
+        custom_roots,
+    )
+}
+
+fn send_once_upload(
+    pool: Arc<Mutex<ClientPool>>,
+    namespace: i64,
+    dns: Arc<Mutex<DnsCache>>,
+    limits: Arc<OriginLimits>,
+    method: &str,
+    url: &ParsedUrl,
+    headers: &[(String, String)],
+    body_len: Option<usize>,
+    chunked: bool,
+    has_body: bool,
+    body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+    tee: &mut Option<Vec<u8>>,
+    dns_timeout: Duration,
+    connect_timeout: Duration,
+    tls_timeout: Duration,
+    first_byte_timeout: Duration,
+    read_timeout: Duration,
+    write_timeout: Duration,
+    total_deadline: Option<Instant>,
+    proxy: Option<&ParsedUrl>,
+    decompress: bool,
+    request_started: Instant,
+    http2: bool,
+    http11: bool,
+    h2c: bool,
+    system_roots: bool,
+    custom_roots: &[Vec<u8>],
+) -> Result<NativeResponse, JetHttpBridgeError> {
     if method.is_empty() || !method.bytes().all(http_token_byte) {
         return Err(JetHttpBridgeError::InvalidHeader);
     }
@@ -2219,8 +2601,17 @@ fn send_once(
                 write_timeout,
                 total_deadline,
             )?;
-            let stream_id =
-                connection.start_request(method, url, headers, body, decompress, &facts)?;
+            let stream_id = connection.start_request(
+                method,
+                url,
+                headers,
+                body_len,
+                has_body,
+                body_read,
+                tee,
+                decompress,
+                &facts,
+            )?;
             let remote_address = connection
                 .io
                 .peer_addr()
@@ -2271,7 +2662,7 @@ fn send_once(
             remote_address,
         );
     }
-    let request = encode_request(method, url, proxy, headers, body, decompress)?;
+    let request = encode_request(method, url, proxy, headers, body_len, chunked, decompress)?;
     set_stream_timeouts(
         &mut stream,
         first_byte_timeout,
@@ -2280,7 +2671,7 @@ fn send_once(
     )?;
     let write_started = Instant::now();
     if let Err((error, wrote_any)) = write_request(&mut stream, &request) {
-        if reused && !wrote_any && replayable(method, body) {
+        if reused && !wrote_any && replayable(method, has_body) {
             let mut fresh = connect(
                 &dns,
                 &facts,
@@ -2305,6 +2696,11 @@ fn send_once(
             write_request(&mut fresh, &request).map_err(|(error, _)| error)?;
             stream = fresh;
         } else {
+            return Err(error);
+        }
+    }
+    if has_body {
+        if let Err((error, _)) = write_upload_body(&mut stream, chunked, &mut *body_read, tee) {
             return Err(error);
         }
     }
@@ -2351,11 +2747,11 @@ fn http_token_byte(byte: u8) -> bool {
         )
 }
 
-fn replayable(method: &str, body: Option<&[u8]>) -> bool {
+fn replayable(method: &str, _has_body: bool) -> bool {
     matches!(
         method,
         "GET" | "HEAD" | "PUT" | "DELETE" | "OPTIONS" | "TRACE"
-    ) && body.is_none_or(|_| true)
+    )
 }
 
 fn connect(
@@ -2452,7 +2848,8 @@ fn encode_request(
     url: &ParsedUrl,
     proxy: Option<&ParsedUrl>,
     headers: &[(String, String)],
-    body: Option<&[u8]>,
+    body_len: Option<usize>,
+    chunked: bool,
     decompress: bool,
 ) -> Result<Vec<u8>, JetHttpBridgeError> {
     let target = if proxy.is_some() && url.scheme == "http" {
@@ -2464,10 +2861,12 @@ fn encode_request(
     let mut has_length = false;
     let mut has_connection = false;
     let mut has_accept_encoding = false;
+    let mut has_transfer = false;
     for (name, value) in headers {
         has_length |= name.eq_ignore_ascii_case("content-length");
         has_connection |= name.eq_ignore_ascii_case("connection");
         has_accept_encoding |= name.eq_ignore_ascii_case("accept-encoding");
+        has_transfer |= name.eq_ignore_ascii_case("transfer-encoding");
         out.extend_from_slice(name.as_bytes());
         out.extend_from_slice(b": ");
         out.extend_from_slice(value.as_bytes());
@@ -2479,16 +2878,67 @@ fn encode_request(
     if !has_connection {
         out.extend_from_slice(b"Connection: keep-alive\r\n");
     }
-    if let Some(body) = body {
+    if chunked {
+        if !has_transfer {
+            out.extend_from_slice(b"Transfer-Encoding: chunked\r\n");
+        }
+    } else if let Some(length) = body_len {
         if !has_length {
-            out.extend_from_slice(format!("Content-Length: {}\r\n", body.len()).as_bytes());
+            out.extend_from_slice(format!("Content-Length: {length}\r\n").as_bytes());
         }
     }
     out.extend_from_slice(b"\r\n");
-    if let Some(body) = body {
-        out.extend_from_slice(body);
-    }
     Ok(out)
+}
+
+fn write_upload_body(
+    stream: &mut HttpStream,
+    chunked: bool,
+    mut body_read: impl FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+    tee: &mut Option<Vec<u8>>,
+) -> Result<(), (JetHttpBridgeError, bool)> {
+    let mut wrote_any = false;
+    loop {
+        let chunk = body_read().map_err(|error| (error, wrote_any))?;
+        let Some(chunk) = chunk else {
+            break;
+        };
+        if chunk.is_empty() {
+            continue;
+        }
+        if let Some(buffer) = tee.as_mut() {
+            buffer.extend_from_slice(&chunk);
+        }
+        if chunked {
+            let framing = format!("{:x}\r\n", chunk.len());
+            write_request(stream, framing.as_bytes()).map_err(|(error, wrote)| (error, wrote_any || wrote))?;
+            wrote_any = true;
+            write_request(stream, &chunk).map_err(|(error, _)| (error, true))?;
+            write_request(stream, b"\r\n").map_err(|(error, _)| (error, true))?;
+        } else {
+            write_request(stream, &chunk).map_err(|(error, wrote)| (error, wrote_any || wrote))?;
+            wrote_any = true;
+        }
+    }
+    if chunked {
+        write_request(stream, b"0\r\n\r\n").map_err(|(error, wrote)| (error, wrote_any || wrote))?;
+    }
+    Ok(())
+}
+
+fn slice_body_reader<'a>(
+    bytes: &'a [u8],
+    offset: &'a mut usize,
+) -> impl FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError> + 'a {
+    move || {
+        if *offset >= bytes.len() {
+            return Ok(None);
+        }
+        let end = (*offset + HTTP_UPLOAD_CHUNK).min(bytes.len());
+        let chunk = bytes[*offset..end].to_vec();
+        *offset = end;
+        Ok(Some(chunk))
+    }
 }
 
 fn write_request(stream: &mut HttpStream, bytes: &[u8]) -> Result<(), (JetHttpBridgeError, bool)> {
@@ -3799,7 +4249,7 @@ fn hpack_request(
     method: &str,
     url: &ParsedUrl,
     headers: &[(String, String)],
-    body: Option<&[u8]>,
+    body_len: Option<usize>,
     decompress: bool,
 ) -> Result<Vec<u8>, JetHttpBridgeError> {
     let mut out = Vec::new();
@@ -3843,9 +4293,9 @@ fn hpack_request(
     if decompress && !has_accept_encoding {
         hpack_literal(&mut out, "accept-encoding", "gzip", false);
     }
-    if let Some(body) = body {
+    if let Some(length) = body_len {
         if !has_length {
-            hpack_literal(&mut out, "content-length", &body.len().to_string(), false);
+            hpack_literal(&mut out, "content-length", &length.to_string(), false);
         }
     }
     Ok(out)

@@ -82,6 +82,23 @@ fn jet_http_client_request_body(mut req: JetHttpRequest, body: &String) -> JetHt
     req
 }
 
+fn jet_http_client_request_body_stream(mut req: JetHttpRequest, body: JetHttpBody) -> JetHttpRequest {
+    req.body = body;
+    req.body_set = true;
+    req
+}
+
+fn jet_http_client_body_upload(
+    req: &JetHttpRequest,
+) -> Result<(Option<i64>, bool, Option<JetHttpBodyChunks>), JetHttpError> {
+    if !req.body_set {
+        return Ok((None, false, None));
+    }
+    let length = req.body.length().map(|length| length as i64);
+    let chunks = req.body.chunks(64 * 1024)?;
+    Ok((length, true, Some(chunks)))
+}
+
 fn jet_http_client_request_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
     req.timeout_ms = Some(ms);
     req

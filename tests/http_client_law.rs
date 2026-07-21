@@ -949,3 +949,106 @@ fn main() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn upload_streams_before_the_body_source_finishes() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_upload_stream_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let fifo = dir.join("upload.fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success(),
+        "mkfifo failed"
+    );
+    let accepted = Arc::new(AtomicBool::new(false));
+    let accepted_flag = accepted.clone();
+    let seen_first_chunk = Arc::new(AtomicBool::new(false));
+    let seen_flag = seen_first_chunk.clone();
+    let body_len = 200 * 1024usize;
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accepted_flag.store(true, Ordering::SeqCst);
+        let head = request_head(&mut stream);
+        assert!(head.starts_with(b"POST /upload HTTP/1.1\r\n"));
+        let head_text = String::from_utf8_lossy(&head);
+        assert!(
+            head_text
+                .to_ascii_lowercase()
+                .contains(&format!("content-length: {body_len}")),
+            "missing content-length: {head_text}"
+        );
+        let mut got = 0usize;
+        let mut buf = [0u8; 4096];
+        while got < body_len {
+            let read = stream.read(&mut buf).unwrap();
+            assert_ne!(read, 0, "upload ended early at {got}");
+            got += read;
+            if got >= 64 * 1024 {
+                seen_flag.store(true, Ordering::SeqCst);
+            }
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+        got
+    });
+    let fifo_writer = fifo.clone();
+    let writer = std::thread::spawn(move || {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .open(&fifo_writer)
+            .unwrap();
+        let first = vec![b'a'; 32 * 1024];
+        file.write_all(&first).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !accepted.load(Ordering::SeqCst) {
+            assert!(
+                Instant::now() < deadline,
+                "client buffered the upload before connecting"
+            );
+            std::thread::yield_now();
+        }
+        let rest = vec![b'b'; body_len - first.len()];
+        file.write_all(&rest).unwrap();
+    });
+    let fifo_path = fifo
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    let src = format!(
+        r#"
+use core.http.client as http
+use core.http as message
+use core.files as files
+fn run() {{
+    input :: files.open("{fifo_path}") ?? panic("open")
+    body :: message.Body.reader(^input, {body_len}) ?? panic("reader")
+    req :: http.request("POST", "http://{addr}/upload").body(body).redirects(0)
+    resp :: req.send() ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+}}
+"#
+    );
+    let (code, stdout, stderr) = common::build_and_run("jet_http_client_law", "upload_stream", &src);
+    let got = server.join().unwrap();
+    writer.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "ok\n");
+    assert_eq!(got, body_len);
+    assert!(
+        seen_first_chunk.load(Ordering::SeqCst),
+        "server never saw a 64KiB upload boundary"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
