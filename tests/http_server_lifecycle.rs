@@ -364,7 +364,7 @@ fn live_server_body_starts_before_the_large_slow_upload_finishes() {
         jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux).unwrap();
     });
 
-    let length = 2 * 1024 * 1024;
+    let length = 512 * 1024;
     let mut stream = std::net::TcpStream::connect(addr).unwrap();
     write!(
         stream,
@@ -1828,6 +1828,7 @@ fn bounded_admission_returns_503_and_shutdown_drains_accepted_work() {
         read_idle_timeout: std::time::Duration::from_secs(1),
         read_body_timeout: std::time::Duration::from_secs(1),
         shutdown_grace: std::time::Duration::from_secs(1),
+        ..JetHttpServerOptions::safe()
     };
     let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server"));
     let slow = std::thread::spawn(move || request(addr, b"GET /slow HTTP/1.1\r\nHost: local\r\n\r\n"));
@@ -1865,6 +1866,7 @@ fn timeout_for(partial: &'static [u8]) -> JetHttpReadError {
         read_idle_timeout: std::time::Duration::from_millis(40),
         read_body_timeout: std::time::Duration::from_millis(40),
         shutdown_grace: std::time::Duration::from_millis(40),
+        ..JetHttpServerOptions::safe()
     };
     let error = jet_http_srv_read_with_limits(&mut stream, &options).expect_err("timeout");
     client.join().expect("client");
@@ -1898,6 +1900,7 @@ fn shutdown_grace_cancels_straggler_socket_and_returns_bounded_report() {
         read_idle_timeout: std::time::Duration::from_secs(1),
         read_body_timeout: std::time::Duration::from_secs(1),
         shutdown_grace: std::time::Duration::from_millis(30),
+        ..JetHttpServerOptions::safe()
     };
     let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server"));
     let mut client = std::net::TcpStream::connect(addr).expect("connect");
@@ -2127,4 +2130,237 @@ fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
     });
     assert_eq!(reply_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("route registration deadlocked").unwrap().status, 200);
     assert_eq!(jet_http_mux_dispatch(&reentrant, request("/added")).unwrap().status, 201);
+}
+
+#[test]
+fn server_safe_defaults_static_files_ranges_and_access_events_are_bounded() {
+    let options = JetHttpServerOptions::safe();
+    assert_eq!(options.max_body_bytes, 1024 * 1024);
+    assert_eq!(options.max_connections, 10_000);
+    assert_eq!(options.max_connections_per_ip, 256);
+    assert_eq!(options.write_idle_timeout, std::time::Duration::from_secs(30));
+
+    let root = std::env::temp_dir().join(format!(
+        "jet-http-static-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+    ));
+    std::fs::create_dir_all(root.join("nested")).unwrap();
+    std::fs::write(root.join("nested/data.bin"), [0, 1, 2, 0xff, 4, 5]).unwrap();
+    std::fs::write(root.join("index.html"), b"index").unwrap();
+
+    let request = |path: &str, range: Option<&str>| {
+        let mut headers = JetHttpHeaders::new();
+        if let Some(range) = range { headers.append("range", range).unwrap(); }
+        JetHttpRequest::server("GET", path.to_string(), Vec::new(), headers)
+    };
+    let full = jet_http_srv_static_files(&request("/nested/data.bin", None), &root).unwrap();
+    assert_eq!(full.status, 200);
+    let etag = full.headers.get("etag").unwrap().clone();
+    let last_modified = full.headers.get("last-modified").unwrap().clone();
+    assert_eq!(full.body.bytes(64).unwrap(), vec![0, 1, 2, 0xff, 4, 5]);
+    assert_eq!(full.headers.get("accept-ranges"), Some(&"bytes".to_string()));
+    assert!(full.headers.get("etag").is_some());
+
+    let partial = jet_http_srv_static_files(&request("/nested/data.bin", Some("bytes=2-4")), &root).unwrap();
+    assert_eq!(partial.status, 206);
+    assert_eq!(partial.body.bytes(64).unwrap(), vec![2, 0xff, 4]);
+    assert_eq!(partial.headers.get("content-range"), Some(&"bytes 2-4/6".to_string()));
+    assert_eq!(jet_http_srv_static_files(&request("/nested/data.bin", Some("bytes=0-1,4-5")), &root).unwrap().status, 416);
+    assert_eq!(jet_http_srv_static_files(&request("/../secret", None), &root).unwrap().status, 404);
+    assert_eq!(jet_http_srv_static_files(&request("/nested", None), &root).unwrap().status, 404);
+    assert_eq!(jet_http_srv_static_files(&request("/", None), &root).unwrap().body.bytes(64).unwrap(), b"index");
+    for (name, value) in [("if-none-match", etag.as_str()), ("if-modified-since", last_modified.as_str())] {
+        let mut headers = JetHttpHeaders::new();
+        headers.append(name, value).unwrap();
+        let conditional = JetHttpRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), headers);
+        assert_eq!(jet_http_srv_static_files(&conditional, &root).unwrap().status, 304);
+    }
+    let mut headers = JetHttpHeaders::new();
+    headers.append("range", "bytes=1-2").unwrap();
+    headers.append("if-range", "\"stale\"").unwrap();
+    let stale_range = JetHttpRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), headers);
+    let stale_range = jet_http_srv_static_files(&stale_range, &root).unwrap();
+    assert_eq!(stale_range.status, 200);
+    assert_eq!(stale_range.body.bytes(64).unwrap().len(), 6);
+
+    let mut headers = JetHttpHeaders::new();
+    headers.append("authorization", "Bearer private").unwrap();
+    headers.append("cookie", "session=private").unwrap();
+    headers.append("x-request-id", "req-7").unwrap();
+    let mut req = JetHttpRequest::server("GET", "/users/7?token=private".to_string(), Vec::new(), headers);
+    req.route_template = Some("/users/:id".to_string());
+    let event = jet_http_srv_access_event(&req, 201, 12, 3, "127.0.0.1:9", "HTTP/2", true);
+    assert_eq!(event.request_id, "req-7");
+    assert_eq!(event.path, "/users/7");
+    assert_eq!(event.route_template, "/users/:id");
+    assert_eq!(event.status, 201);
+    assert_eq!(event.bytes, 12);
+    assert_eq!(event.duration_ms, 3);
+    assert_eq!(event.protocol, "HTTP/2");
+    assert!(event.tls);
+    let shown = event.to_string();
+    assert!(!shown.contains("private") && !shown.contains("authorization") && !shown.contains("cookie"));
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn server_enforces_and_releases_per_ip_connection_capacity() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mux = jet_http_mux_new();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = std::sync::Arc::new(std::sync::Mutex::new(release_rx));
+    jet_http_mux_add(&mux, "GET", "/hold", move |_| {
+        entered_tx.send(()).unwrap();
+        release_rx.lock().unwrap().recv().unwrap();
+        jet_http_srv_response(200, &"released".to_string())
+    });
+    jet_http_mux_add(&mux, "GET", "/ok", |_| jet_http_srv_response(200, &"ok".to_string()));
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop = shutdown.clone();
+    let options = JetHttpServerOptions {
+        workers: 2,
+        admission_queue: 2,
+        max_connections: 2,
+        max_connections_per_ip: 1,
+        ..JetHttpServerOptions::safe()
+    };
+    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, stop, None).unwrap());
+    let held = std::thread::spawn(move || request(addr, b"GET /hold HTTP/1.1\r\nHost: local\r\n\r\n"));
+    entered_rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+    let rejected = request(addr, b"GET /ok HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
+    assert!(rejected.starts_with("HTTP/1.1 503 Service Unavailable"), "{rejected}");
+    release_tx.send(()).unwrap();
+    assert!(held.join().unwrap().contains("released"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    let accepted = loop {
+        let response = request(addr, b"GET /ok HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
+        if response.contains("200 OK") || std::time::Instant::now() >= deadline { break response; }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    };
+    assert!(accepted.contains("200 OK"), "capacity was not released: {accepted}");
+    shutdown.store(true, std::sync::atomic::Ordering::Release);
+    let report = server.join().unwrap();
+    assert_eq!(report.user_accepted, 2);
+    assert_eq!(report.user_overloaded, 1);
+}
+
+#[test]
+fn native_http2_routes_huffman_headers_and_enforces_stream_framing() {
+    use std::io::{Read, Write};
+
+    fn frame(kind: u8, flags: u8, stream: u32, payload: &[u8]) -> Vec<u8> {
+        let len = payload.len();
+        let mut out = vec![(len >> 16) as u8, (len >> 8) as u8, len as u8, kind, flags];
+        out.extend_from_slice(&(stream & 0x7fff_ffff).to_be_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    let mux = jet_http_mux_new();
+    jet_http_mux_add(&mux, "GET", "/", |_| jet_http_srv_response(200, &"h2-ok".to_string()));
+    jet_http_mux_add(&mux, "GET", "/large", |_| {
+        let mut response = jet_http_srv_response(200, &String::new());
+        response.body = JetHttpBody::from_bytes(vec![7; 70_000]);
+        response
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop = shutdown.clone();
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), stop, None).unwrap()
+    });
+
+    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+    stream.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").unwrap();
+    stream.write_all(&frame(4, 0, 0, &[])).unwrap();
+    // RFC 7541 C.4.1: GET http://www.example.com/ with a Huffman authority.
+    stream.write_all(&frame(1, 0x5, 1, &[0x82, 0x86, 0x84, 0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff])).unwrap();
+    stream.flush().unwrap();
+    let mut wire = Vec::new();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while !wire.windows(5).any(|part| part == b"h2-ok") && std::time::Instant::now() < deadline {
+        let mut chunk = [0; 4096];
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(read) => wire.extend_from_slice(&chunk[..read]),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => break,
+            Err(error) => panic!("HTTP/2 response read failed: {error}"),
+        }
+    }
+    assert!(wire.windows(5).any(|part| part == b"h2-ok"), "HTTP/2 DATA missing: {wire:02x?}");
+    assert!(wire.windows(9).any(|header| header[3] == 4), "server SETTINGS missing");
+    assert!(wire.windows(9).any(|header| header[3] == 1 && header[8] == 1), "stream-1 HEADERS missing");
+
+    let large_headers = [
+        0x82, 0x86, 0x04, 0x06, b'/', b'l', b'a', b'r', b'g', b'e',
+        0x41, 0x05, b'l', b'o', b'c', b'a', b'l',
+    ];
+    stream.write_all(&frame(1, 0x5, 3, &large_headers)).unwrap();
+    stream.flush().unwrap();
+    let mut received = 0usize;
+    while received < 65_000 {
+        let mut header = [0u8; 9];
+        stream.read_exact(&mut header).unwrap();
+        let length = (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+        let mut payload = vec![0; length];
+        stream.read_exact(&mut payload).unwrap();
+        if header[3] == 0 && u32::from_be_bytes(header[5..9].try_into().unwrap()) == 3 {
+            assert!(payload.iter().all(|byte| *byte == 7));
+            received += payload.len();
+        }
+    }
+    assert!(received < 70_000, "server ignored HTTP/2 flow control");
+    stream.write_all(&frame(8, 0, 0, &70_000u32.to_be_bytes())).unwrap();
+    stream.write_all(&frame(8, 0, 3, &70_000u32.to_be_bytes())).unwrap();
+    stream.flush().unwrap();
+    let mut ended = false;
+    while !ended {
+        let mut header = [0u8; 9];
+        stream.read_exact(&mut header).unwrap();
+        let length = (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+        let mut payload = vec![0; length];
+        stream.read_exact(&mut payload).unwrap();
+        if header[3] == 0 && u32::from_be_bytes(header[5..9].try_into().unwrap()) == 3 {
+            received += payload.len();
+            ended = header[4] & 0x1 != 0;
+        }
+    }
+    assert_eq!(received, 70_000);
+    // Dynamic index 62 reuses stream 3's incrementally indexed :authority.
+    stream.write_all(&frame(1, 0x5, 5, &[0x82, 0x86, 0x84, 0xbe])).unwrap();
+    stream.flush().unwrap();
+    let mut reused = Vec::new();
+    while !reused.windows(5).any(|part| part == b"h2-ok") {
+        let mut header = [0u8; 9];
+        stream.read_exact(&mut header).unwrap();
+        let length = (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+        let mut payload = vec![0; length];
+        stream.read_exact(&mut payload).unwrap();
+        reused.extend(payload);
+    }
+
+    shutdown.store(true, std::sync::atomic::Ordering::Release);
+    drop(stream);
+    let report = server.join().unwrap();
+    assert_eq!(report.user_accepted, 1);
+
+    let mux = jet_http_mux_new();
+    let (mut client, mut server) = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = std::net::TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        (client, server)
+    };
+    client.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").unwrap();
+    client.write_all(&frame(0, 0, 0, b"illegal stream-zero data")).unwrap();
+    client.flush().unwrap();
+    server.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+    assert!(jet_http2_serve(&mut server, &mux, &std::sync::atomic::AtomicBool::new(false)).is_err());
 }

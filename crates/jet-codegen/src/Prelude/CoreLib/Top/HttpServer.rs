@@ -4,7 +4,7 @@
 
 const JET_HTTP_KEEPALIVE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const JET_HTTP_MAX_REQUESTS_PER_CONNECTION: usize = 1000;
-const JET_HTTP_MAX_BODY_BYTES: usize = 1024 * 1024 * 1024;
+const JET_HTTP_MAX_BODY_BYTES: usize = 1024 * 1024;
 const JET_HTTP_MAX_CHUNK_FRAMING_BYTES: usize = 32 * 1024;
 
 type JetHttpMiddleware = std::sync::Arc<dyn Fn(JetHttpHandler) -> JetHttpHandler + Send + Sync>;
@@ -61,16 +61,18 @@ struct JetHttpChunkState {
     framing_len: usize,
     chunks: Vec<(usize, usize)>,
     phase: JetHttpChunkPhase,
+    limit: usize,
 }
 
 impl JetHttpChunkState {
-    fn new() -> Self {
+    fn new(limit: usize) -> Self {
         Self {
             cursor: 0,
             decoded_len: 0,
             framing_len: 0,
             chunks: Vec::new(),
             phase: JetHttpChunkPhase::Size,
+            limit,
         }
     }
 
@@ -114,7 +116,7 @@ impl JetHttpChunkState {
                             status: 413,
                             message: "request body is too large",
                         })?;
-                        if self.decoded_len > JET_HTTP_MAX_BODY_BYTES {
+                        if self.decoded_len > self.limit {
                             return Err(JetHttpReadError {
                                 status: 413,
                                 message: "request body is too large",
@@ -173,7 +175,11 @@ struct JetHttpServerOptions {
     read_header_timeout: std::time::Duration,
     read_idle_timeout: std::time::Duration,
     read_body_timeout: std::time::Duration,
+    write_idle_timeout: std::time::Duration,
     shutdown_grace: std::time::Duration,
+    max_body_bytes: usize,
+    max_connections: usize,
+    max_connections_per_ip: usize,
 }
 
 impl JetHttpServerOptions {
@@ -184,7 +190,11 @@ impl JetHttpServerOptions {
             read_header_timeout: std::time::Duration::from_secs(5),
             read_idle_timeout: std::time::Duration::from_secs(30),
             read_body_timeout: std::time::Duration::from_secs(30),
+            write_idle_timeout: std::time::Duration::from_secs(30),
             shutdown_grace: std::time::Duration::from_secs(30),
+            max_body_bytes: JET_HTTP_MAX_BODY_BYTES,
+            max_connections: 10_000,
+            max_connections_per_ip: 256,
         }
     }
 }
@@ -388,12 +398,14 @@ fn jet_http_server_run_listener(
     use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
 
     listener.set_nonblocking(true).map_err(|error| format!("http listener setup failed: {error}"))?;
-    let (tx, rx): (SyncSender<std::net::TcpStream>, Receiver<std::net::TcpStream>) =
+    let (tx, rx): (SyncSender<(std::net::TcpStream, std::net::IpAddr)>, Receiver<(std::net::TcpStream, std::net::IpAddr)>) =
         std::sync::mpsc::sync_channel(options.admission_queue);
     let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
     let active = std::sync::Arc::new(std::sync::Mutex::new(Vec::<std::net::TcpStream>::new()));
     let completed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let force_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let connection_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let per_ip = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::<std::net::IpAddr, usize>::new()));
     let mut workers = Vec::new();
     for _ in 0..options.workers.max(1) {
         let worker_rx = rx.clone();
@@ -403,27 +415,36 @@ fn jet_http_server_run_listener(
         let worker_completed = completed.clone();
         let worker_force_cancel = force_cancel.clone();
         let worker_shutdown = shutdown.clone();
+        let worker_connection_count = connection_count.clone();
+        let worker_per_ip = per_ip.clone();
         workers.push(std::thread::spawn(move || loop {
             let received = worker_rx.lock().unwrap().recv();
-            let Ok(mut stream) = received else { break };
+            let Ok((mut stream, peer_ip)) = received else { break };
             if worker_force_cancel.load(Ordering::Acquire) {
                 let _ = stream.shutdown(std::net::Shutdown::Both);
-                continue;
+            } else {
+                if let Ok(tracked) = stream.try_clone() { worker_active.lock().unwrap().push(tracked); }
+                jet_http_server_handle_stream(&mut stream, &worker_mux, &worker_options, &worker_shutdown);
+                worker_completed.fetch_add(1, Ordering::Relaxed);
+                worker_active.lock().unwrap().retain(|tracked| tracked.peer_addr().ok() != stream.peer_addr().ok());
             }
-            if let Ok(tracked) = stream.try_clone() { worker_active.lock().unwrap().push(tracked); }
-            jet_http_server_handle_stream(&mut stream, &worker_mux, &worker_options, &worker_shutdown);
-            worker_completed.fetch_add(1, Ordering::Relaxed);
-            worker_active.lock().unwrap().retain(|tracked| tracked.peer_addr().ok() != stream.peer_addr().ok());
+            worker_connection_count.fetch_sub(1, Ordering::AcqRel);
+            let mut counts = worker_per_ip.lock().unwrap();
+            if let Some(count) = counts.get_mut(&peer_ip) {
+                *count -= 1;
+                if *count == 0 { counts.remove(&peer_ip); }
+            }
         }));
     }
 
     let mut report = JetHttpShutdownReport::default();
     while !shutdown.load(Ordering::Acquire) {
         match listener.accept() {
-            Ok((mut stream, _)) => match tx.try_send(stream) {
-                Ok(()) => report.user_accepted += 1,
-                Err(TrySendError::Full(returned)) => {
-                    stream = returned;
+            Ok((mut stream, peer)) => {
+                let peer_ip = peer.ip();
+                let globally_full = connection_count.load(Ordering::Acquire) >= options.max_connections;
+                let ip_full = per_ip.lock().unwrap().get(&peer_ip).copied().unwrap_or(0) >= options.max_connections_per_ip;
+                if globally_full || ip_full {
                     report.user_overloaded += 1;
                     let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(10)));
                     let mut discard = [0u8; 8192];
@@ -431,8 +452,38 @@ fn jet_http_server_run_listener(
                     let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     let _ = stream.flush();
                     let _ = stream.shutdown(std::net::Shutdown::Write);
+                    continue;
                 }
-                Err(TrySendError::Disconnected(_)) => break,
+                connection_count.fetch_add(1, Ordering::AcqRel);
+                *per_ip.lock().unwrap().entry(peer_ip).or_insert(0) += 1;
+                match tx.try_send((stream, peer_ip)) {
+                    Ok(()) => report.user_accepted += 1,
+                    Err(TrySendError::Full((mut stream, peer_ip))) => {
+                        connection_count.fetch_sub(1, Ordering::AcqRel);
+                        let mut counts = per_ip.lock().unwrap();
+                        if let Some(count) = counts.get_mut(&peer_ip) {
+                            *count -= 1;
+                            if *count == 0 { counts.remove(&peer_ip); }
+                        }
+                        drop(counts);
+                        report.user_overloaded += 1;
+                        let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(10)));
+                        let mut discard = [0u8; 8192];
+                        let _ = stream.read(&mut discard);
+                        let _ = stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        let _ = stream.flush();
+                        let _ = stream.shutdown(std::net::Shutdown::Write);
+                    }
+                    Err(TrySendError::Disconnected((_stream, peer_ip))) => {
+                        connection_count.fetch_sub(1, Ordering::AcqRel);
+                        let mut counts = per_ip.lock().unwrap();
+                        if let Some(count) = counts.get_mut(&peer_ip) {
+                            *count -= 1;
+                            if *count == 0 { counts.remove(&peer_ip); }
+                        }
+                        break;
+                    }
+                }
             },
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(2)),
             Err(error) => return Err(format!("http accept failed: {error}")),
@@ -471,6 +522,15 @@ fn jet_http_server_handle_stream(
     use std::io::Write;
     use std::sync::atomic::Ordering;
 
+    let _ = stream.set_write_timeout(Some(options.write_idle_timeout));
+    if jet_http2_is_preface(stream, options.read_header_timeout) {
+        if jet_http2_serve(stream, mux, shutdown).is_err() {
+            let _ = jet_http2_write_frame(stream, 7, 0, 0, &[0, 0, 0, 0, 0, 0, 0, 1]);
+            let _ = std::io::Write::flush(stream);
+        }
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        return;
+    }
     for request_index in 0..JET_HTTP_MAX_REQUESTS_PER_CONNECTION {
         if request_index > 0 && shutdown.load(Ordering::Acquire) {
             return;
@@ -535,6 +595,549 @@ fn jet_http_srv_finish_close(stream: &mut std::net::TcpStream) {
     }
 }
 
+const JET_HTTP2_PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+const JET_HTTP2_MAX_FRAME: usize = 16 * 1024;
+const JET_HTTP2_MAX_HEADER_LIST: usize = 32 * 1024;
+static JET_HTTP2_HUFFMAN: std::sync::OnceLock<std::collections::HashMap<(u8, u32), u8>> = std::sync::OnceLock::new();
+const JET_HTTP2_HUFFMAN_LENGTHS: [u8; 256] = [
+    13, 23, 28, 28, 28, 28, 28, 28, 28, 24, 30, 28, 28, 30, 28, 28,
+    28, 28, 28, 28, 28, 28, 30, 28, 28, 28, 28, 28, 28, 28, 28, 28,
+    6, 10, 10, 12, 13, 6, 8, 11, 10, 10, 8, 11, 8, 6, 6, 6,
+    5, 5, 5, 6, 6, 6, 6, 6, 6, 6, 7, 8, 15, 6, 12, 10,
+    13, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+    7, 7, 7, 7, 7, 7, 7, 7, 8, 7, 8, 13, 19, 13, 14, 6,
+    15, 5, 6, 5, 6, 5, 6, 6, 6, 5, 7, 7, 6, 6, 6, 5,
+    6, 7, 6, 5, 5, 6, 7, 7, 7, 7, 7, 15, 11, 14, 13, 28,
+    20, 22, 20, 20, 22, 22, 22, 23, 22, 23, 23, 23, 23, 23, 24, 23,
+    24, 24, 22, 23, 24, 23, 23, 23, 23, 21, 22, 23, 22, 23, 23, 24,
+    22, 21, 20, 22, 22, 23, 23, 21, 23, 22, 22, 24, 21, 22, 23, 23,
+    21, 21, 22, 21, 23, 22, 23, 23, 20, 22, 22, 22, 23, 22, 22, 23,
+    26, 26, 20, 19, 22, 23, 22, 25, 26, 26, 26, 27, 27, 26, 24, 25,
+    19, 21, 26, 27, 27, 26, 27, 24, 21, 21, 26, 26, 28, 27, 27, 27,
+    20, 24, 20, 21, 22, 21, 21, 23, 22, 22, 25, 25, 24, 24, 26, 23,
+    26, 27, 26, 26, 27, 27, 27, 27, 27, 28, 27, 27, 27, 27, 27, 26,
+];
+
+struct JetHttp2Frame {
+    kind: u8,
+    flags: u8,
+    stream: u32,
+    payload: Vec<u8>,
+}
+
+fn jet_http2_is_preface(stream: &std::net::TcpStream, timeout: std::time::Duration) -> bool {
+    let started = std::time::Instant::now();
+    let _ = stream.set_read_timeout(Some(timeout));
+    let mut bytes = [0u8; 24];
+    while started.elapsed() < timeout {
+        match stream.peek(&mut bytes) {
+            Ok(read) if read > 0 => {
+                if bytes[..read] != JET_HTTP2_PREFACE[..read] { return false; }
+                if read == bytes.len() { return true; }
+            }
+            Ok(_) => return false,
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => return false,
+            Err(_) => return false,
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    false
+}
+
+fn jet_http2_read_frame(reader: &mut impl std::io::Read) -> Result<JetHttp2Frame, String> {
+    let mut header = [0u8; 9];
+    reader.read_exact(&mut header).map_err(|error| {
+        if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
+            "HTTP/2 read timed out".to_string()
+        } else { "HTTP/2 frame header ended early".to_string() }
+    })?;
+    let length = (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+    if length > JET_HTTP2_MAX_FRAME { return Err("HTTP/2 frame exceeds the advertised maximum".to_string()); }
+    if header[5] & 0x80 != 0 { return Err("HTTP/2 reserved stream bit is set".to_string()); }
+    let stream = u32::from_be_bytes([header[5], header[6], header[7], header[8]]);
+    let mut payload = vec![0; length];
+    reader.read_exact(&mut payload).map_err(|error| {
+        if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
+            "HTTP/2 frame payload timed out".to_string()
+        } else { "HTTP/2 frame payload ended early".to_string() }
+    })?;
+    Ok(JetHttp2Frame { kind: header[3], flags: header[4], stream, payload })
+}
+
+fn jet_http2_write_frame(
+    writer: &mut impl std::io::Write,
+    kind: u8,
+    flags: u8,
+    stream: u32,
+    payload: &[u8],
+) -> Result<(), String> {
+    if payload.len() > 0x00ff_ffff { return Err("HTTP/2 frame payload is too large".to_string()); }
+    let length = payload.len();
+    let stream = (stream & 0x7fff_ffff).to_be_bytes();
+    let header = [
+        (length >> 16) as u8, (length >> 8) as u8, length as u8, kind, flags,
+        stream[0], stream[1], stream[2], stream[3],
+    ];
+    writer.write_all(&header).and_then(|()| writer.write_all(payload))
+        .map_err(|_| "HTTP/2 write failed".to_string())
+}
+
+fn jet_http2_integer(input: &[u8], cursor: &mut usize, prefix: u8) -> Result<usize, String> {
+    let first = *input.get(*cursor).ok_or_else(|| "HPACK integer ended early".to_string())?;
+    *cursor += 1;
+    let mask = (1u16 << prefix) as u8 - 1;
+    let mut value = usize::from(first & mask);
+    if value < usize::from(mask) { return Ok(value); }
+    let mut shift = 0;
+    loop {
+        let byte = *input.get(*cursor).ok_or_else(|| "HPACK integer ended early".to_string())?;
+        *cursor += 1;
+        if shift >= usize::BITS as usize || usize::from(byte & 0x7f) > (usize::MAX - value) >> shift {
+            return Err("HPACK integer overflow".to_string());
+        }
+        value += usize::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 { return Ok(value); }
+        shift += 7;
+    }
+}
+
+fn jet_http2_huffman(input: &[u8]) -> Result<String, String> {
+    let table = JET_HTTP2_HUFFMAN.get_or_init(|| {
+        let mut entries = std::collections::HashMap::with_capacity(256);
+        let mut symbols = (0u16..256).collect::<Vec<_>>();
+        symbols.sort_by_key(|symbol| (JET_HTTP2_HUFFMAN_LENGTHS[*symbol as usize], *symbol));
+        let mut code = 0u32;
+        let mut prior = 0u8;
+        for symbol in symbols {
+            let length = JET_HTTP2_HUFFMAN_LENGTHS[symbol as usize];
+            code <<= u32::from(length - prior);
+            entries.insert((length, code), symbol as u8);
+            code += 1;
+            prior = length;
+        }
+        entries
+    });
+    let mut output = Vec::new();
+    let mut code = 0u32;
+    let mut length = 0u8;
+    for byte in input {
+        for shift in (0..8).rev() {
+            code = (code << 1) | u32::from((byte >> shift) & 1);
+            length += 1;
+            if let Some(symbol) = table.get(&(length, code)) {
+                output.push(*symbol);
+                code = 0;
+                length = 0;
+            } else if length == 30 {
+                return Err("HPACK Huffman code is invalid".to_string());
+            }
+        }
+    }
+    if length > 7 || code != (1u32 << length) - 1 { return Err("HPACK Huffman padding is invalid".to_string()); }
+    String::from_utf8(output).map_err(|_| "HPACK string is not UTF-8".to_string())
+}
+
+fn jet_http2_string(input: &[u8], cursor: &mut usize) -> Result<String, String> {
+    let huffman = input.get(*cursor).is_some_and(|byte| byte & 0x80 != 0);
+    let length = jet_http2_integer(input, cursor, 7)?;
+    let end = cursor.checked_add(length).ok_or_else(|| "HPACK string length overflow".to_string())?;
+    let bytes = input.get(*cursor..end).ok_or_else(|| "HPACK string ended early".to_string())?;
+    *cursor = end;
+    if huffman { jet_http2_huffman(bytes) } else {
+        std::str::from_utf8(bytes).map(str::to_string).map_err(|_| "HPACK string is not UTF-8".to_string())
+    }
+}
+
+fn jet_http2_static(index: usize) -> Option<(&'static str, &'static str)> {
+    const NAMES: [&str; 47] = [
+        "accept-charset", "accept-encoding", "accept-language", "accept-ranges", "accept",
+        "access-control-allow-origin", "age", "allow", "authorization", "cache-control",
+        "content-disposition", "content-encoding", "content-language", "content-length",
+        "content-location", "content-range", "content-type", "cookie", "date", "etag", "expect",
+        "expires", "from", "host", "if-match", "if-modified-since", "if-none-match", "if-range",
+        "if-unmodified-since", "last-modified", "link", "location", "max-forwards",
+        "proxy-authenticate", "proxy-authorization", "range", "referer", "refresh", "retry-after",
+        "server", "set-cookie", "strict-transport-security", "transfer-encoding", "user-agent",
+        "vary", "via", "www-authenticate",
+    ];
+    match index {
+        1 => Some((":authority", "")), 2 => Some((":method", "GET")), 3 => Some((":method", "POST")),
+        4 => Some((":path", "/")), 5 => Some((":path", "/index.html")),
+        6 => Some((":scheme", "http")), 7 => Some((":scheme", "https")),
+        8 => Some((":status", "200")), 9 => Some((":status", "204")), 10 => Some((":status", "206")),
+        11 => Some((":status", "304")), 12 => Some((":status", "400")), 13 => Some((":status", "404")),
+        14 => Some((":status", "500")),
+        15..=61 => Some((NAMES[index - 15], if index == 16 { "gzip, deflate" } else { "" })),
+        _ => None,
+    }
+}
+
+struct JetHttp2Hpack {
+    dynamic: Vec<(String, String)>,
+    dynamic_size: usize,
+    max_size: usize,
+}
+
+impl JetHttp2Hpack {
+    fn new() -> Self { Self { dynamic: Vec::new(), dynamic_size: 0, max_size: 4096 } }
+
+    fn field(&self, index: usize) -> Option<(String, String)> {
+        jet_http2_static(index).map(|(name, value)| (name.to_string(), value.to_string()))
+            .or_else(|| self.dynamic.get(index.checked_sub(62)?).cloned())
+    }
+
+    fn resize(&mut self, size: usize) -> Result<(), String> {
+        if size > 4096 { return Err("HPACK dynamic table size exceeds server limit".to_string()); }
+        self.max_size = size;
+        while self.dynamic_size > self.max_size {
+            let Some((name, value)) = self.dynamic.pop() else { break };
+            self.dynamic_size -= name.len() + value.len() + 32;
+        }
+        Ok(())
+    }
+
+    fn insert(&mut self, name: String, value: String) {
+        let size = name.len() + value.len() + 32;
+        if size > self.max_size {
+            self.dynamic.clear();
+            self.dynamic_size = 0;
+            return;
+        }
+        while self.dynamic_size + size > self.max_size {
+            let Some((old_name, old_value)) = self.dynamic.pop() else { break };
+            self.dynamic_size -= old_name.len() + old_value.len() + 32;
+        }
+        self.dynamic.insert(0, (name, value));
+        self.dynamic_size += size;
+    }
+}
+
+fn jet_http2_decode_headers(decoder: &mut JetHttp2Hpack, block: &[u8]) -> Result<Vec<(String, String)>, String> {
+    let mut headers = Vec::new();
+    let mut cursor = 0;
+    let mut allow_size_update = true;
+    let mut list_size = 0usize;
+    while cursor < block.len() {
+        let byte = block[cursor];
+        if byte & 0x80 != 0 {
+            let index = jet_http2_integer(block, &mut cursor, 7)?;
+            let (name, value) = decoder.field(index).ok_or_else(|| "HPACK index is invalid".to_string())?;
+            list_size = list_size.saturating_add(name.len() + value.len() + 32);
+            headers.push((name, value));
+            allow_size_update = false;
+        } else if byte & 0xe0 == 0x20 {
+            if !allow_size_update { return Err("HPACK table size update follows a header".to_string()); }
+            let size = jet_http2_integer(block, &mut cursor, 5)?;
+            decoder.resize(size)?;
+        } else {
+            let indexed = byte & 0x40 != 0;
+            let prefix = if indexed { 6 } else { 4 };
+            let name_index = jet_http2_integer(block, &mut cursor, prefix)?;
+            let name = if name_index == 0 { jet_http2_string(block, &mut cursor)? }
+                else { decoder.field(name_index).map(|field| field.0).ok_or_else(|| "HPACK name index is invalid".to_string())? };
+            let value = jet_http2_string(block, &mut cursor)?;
+            list_size = list_size.saturating_add(name.len() + value.len() + 32);
+            if indexed { decoder.insert(name.clone(), value.clone()); }
+            headers.push((name, value));
+            allow_size_update = false;
+        }
+        if list_size > JET_HTTP2_MAX_HEADER_LIST {
+            return Err("HTTP/2 header list is too large".to_string());
+        }
+        if headers.len() > 100 { return Err("HTTP/2 request has too many headers".to_string()); }
+    }
+    Ok(headers)
+}
+
+fn jet_http2_encode_integer(output: &mut Vec<u8>, value: usize, prefix: u8, bits: u8) {
+    let mask = (1usize << prefix) - 1;
+    if value < mask { output.push(bits | value as u8); return; }
+    output.push(bits | mask as u8);
+    let mut rest = value - mask;
+    while rest >= 128 { output.push((rest as u8 & 0x7f) | 0x80); rest >>= 7; }
+    output.push(rest as u8);
+}
+
+fn jet_http2_encode_string(output: &mut Vec<u8>, value: &str) {
+    jet_http2_encode_integer(output, value.len(), 7, 0);
+    output.extend_from_slice(value.as_bytes());
+}
+
+fn jet_http2_encode_response_headers(response: &JetHttpResponse, length: usize) -> Vec<u8> {
+    let mut output = Vec::new();
+    let status_index = match response.status { 200 => Some(8), 204 => Some(9), 206 => Some(10), 304 => Some(11), 400 => Some(12), 404 => Some(13), 500 => Some(14), _ => None };
+    if let Some(index) = status_index { jet_http2_encode_integer(&mut output, index, 7, 0x80); }
+    else {
+        jet_http2_encode_integer(&mut output, 8, 4, 0);
+        jet_http2_encode_string(&mut output, &response.status.to_string());
+    }
+    jet_http2_encode_integer(&mut output, 28, 4, 0);
+    jet_http2_encode_string(&mut output, &length.to_string());
+    for (name, value) in &response.headers {
+        if matches!(name.to_ascii_lowercase().as_str(), "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding" | "upgrade") { continue; }
+        jet_http2_encode_integer(&mut output, 0, 4, 0);
+        jet_http2_encode_string(&mut output, &name.to_ascii_lowercase());
+        jet_http2_encode_string(&mut output, value);
+    }
+    output
+}
+
+fn jet_http2_request(headers: Vec<(String, String)>, body: Vec<u8>) -> Result<JetHttpRequest, String> {
+    let mut method = None;
+    let mut path = None;
+    let mut scheme = None;
+    let mut authority = None;
+    let mut regular = JetHttpHeaders::new();
+    let mut saw_regular = false;
+    for (name, value) in headers {
+        if name.bytes().any(|byte| byte.is_ascii_uppercase()) { return Err("HTTP/2 header name contains uppercase".to_string()); }
+        if name.starts_with(':') {
+            if saw_regular { return Err("HTTP/2 pseudo-header follows regular headers".to_string()); }
+            let slot = match name.as_str() { ":method" => &mut method, ":path" => &mut path, ":scheme" => &mut scheme, ":authority" => &mut authority, _ => return Err("HTTP/2 pseudo-header is invalid".to_string()) };
+            if slot.replace(value).is_some() { return Err("HTTP/2 pseudo-header is duplicated".to_string()); }
+        } else {
+            saw_regular = true;
+            if matches!(name.as_str(), "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding" | "upgrade") { return Err("HTTP/2 connection-specific header is forbidden".to_string()); }
+            if name == "te" && !value.eq_ignore_ascii_case("trailers") { return Err("HTTP/2 TE value is invalid".to_string()); }
+            regular.append(&name, &value).map_err(|_| "HTTP/2 header is invalid".to_string())?;
+        }
+    }
+    let method = method.ok_or_else(|| "HTTP/2 method is missing".to_string())?;
+    let path = path.ok_or_else(|| "HTTP/2 path is missing".to_string())?;
+    if !matches!(scheme.as_deref(), Some("http" | "https")) { return Err("HTTP/2 scheme is invalid".to_string()); }
+    if let Some(authority) = authority {
+        jet_http_parse_authority(&authority).ok_or_else(|| "HTTP/2 authority is invalid".to_string())?;
+        if regular.get("host").is_some_and(|host| !host.eq_ignore_ascii_case(&authority)) {
+            return Err("HTTP/2 authority does not match host".to_string());
+        }
+        if regular.get("host").is_none() { regular.append("host", &authority).map_err(|_| "HTTP/2 authority is invalid".to_string())?; }
+    }
+    if !JetHttpHeaders::valid_name(&method)
+        || !(jet_http_path_query_valid(&path) || method == "OPTIONS" && path == "*")
+    { return Err("HTTP/2 request target is invalid".to_string()); }
+    let mut content_length = None;
+    for value in regular.all("content-length") {
+        content_length = Some(jet_http_parse_content_length(value, content_length).map_err(|error| error.to_string())?);
+    }
+    if content_length.is_some_and(|length| length != body.len()) { return Err("HTTP/2 body does not match content-length".to_string()); }
+    Ok(JetHttpRequest::server(&method, path, body, regular))
+}
+
+struct JetHttp2Outgoing {
+    body: Vec<u8>,
+    offset: usize,
+}
+
+fn jet_http2_start_response(
+    stream: &mut std::net::TcpStream,
+    stream_id: u32,
+    response: JetHttpResponse,
+) -> Result<Option<JetHttp2Outgoing>, String> {
+    let body_forbidden = (100..200).contains(&response.status) || matches!(response.status, 204 | 304);
+    let body = if body_forbidden { Vec::new() } else { response.body.bytes(JET_HTTP_MAX_BODY_BYTES).map_err(|error| error.to_string())? };
+    let headers = jet_http2_encode_response_headers(&response, body.len());
+    jet_http2_write_frame(stream, 1, 0x4 | if body.is_empty() { 0x1 } else { 0 }, stream_id, &headers)?;
+    std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())
+        .map(|()| (!body.is_empty()).then_some(JetHttp2Outgoing { body, offset: 0 }))
+}
+
+fn jet_http2_flush_body(
+    stream: &mut std::net::TcpStream,
+    stream_id: u32,
+    outgoing: &mut JetHttp2Outgoing,
+    connection_window: &mut i64,
+    stream_window: &mut i64,
+    max_frame: usize,
+) -> Result<bool, String> {
+    while outgoing.offset < outgoing.body.len() && *connection_window > 0 && *stream_window > 0 {
+        let length = (outgoing.body.len() - outgoing.offset)
+            .min(max_frame).min(*connection_window as usize).min(*stream_window as usize);
+        let end = outgoing.offset + length == outgoing.body.len();
+        jet_http2_write_frame(stream, 0, if end { 0x1 } else { 0 }, stream_id,
+            &outgoing.body[outgoing.offset..outgoing.offset + length])?;
+        outgoing.offset += length;
+        *connection_window -= length as i64;
+        *stream_window -= length as i64;
+    }
+    std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())?;
+    Ok(outgoing.offset == outgoing.body.len())
+}
+
+fn jet_http2_dispatch(
+    mux: &JetHttpMux,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+) -> Result<JetHttpResponse, String> {
+    let request = jet_http2_request(headers, body)?;
+    Ok(jet_http_mux_dispatch(mux, request)
+        .unwrap_or_else(|_| jet_http_srv_response(500, &"500 Internal Server Error".to_string())))
+}
+
+fn jet_http2_queue_response(
+    stream: &mut std::net::TcpStream,
+    stream_id: u32,
+    response: JetHttpResponse,
+    outgoing: &mut std::collections::BTreeMap<u32, JetHttp2Outgoing>,
+    stream_windows: &mut std::collections::BTreeMap<u32, i64>,
+    connection_window: &mut i64,
+    initial_window: i64,
+    max_frame: usize,
+) -> Result<(), String> {
+    let Some(mut response) = jet_http2_start_response(stream, stream_id, response)? else { return Ok(()) };
+    let window = stream_windows.entry(stream_id).or_insert(initial_window);
+    if !jet_http2_flush_body(stream, stream_id, &mut response, connection_window, window, max_frame)? {
+        outgoing.insert(stream_id, response);
+    }
+    Ok(())
+}
+
+fn jet_http2_serve(
+    stream: &mut std::net::TcpStream,
+    mux: &JetHttpMux,
+    shutdown: &std::sync::atomic::AtomicBool,
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+    use std::sync::atomic::Ordering;
+    let mut preface = [0u8; 24];
+    stream.read_exact(&mut preface).map_err(|_| "HTTP/2 preface ended early".to_string())?;
+    if &preface != JET_HTTP2_PREFACE { return Err("HTTP/2 preface is invalid".to_string()); }
+    let settings = [0, 3, 0, 0, 0, 100, 0, 4, 0, 0, 0xff, 0xff, 0, 6, 0, 0, 0x80, 0];
+    jet_http2_write_frame(stream, 4, 0, 0, &settings)?;
+    stream.flush().map_err(|_| "HTTP/2 settings write failed".to_string())?;
+    stream.set_read_timeout(Some(std::time::Duration::from_millis(20)))
+        .map_err(|_| "HTTP/2 read timeout setup failed".to_string())?;
+    let mut requests = std::collections::BTreeMap::<u32, (Vec<(String, String)>, Vec<u8>)>::new();
+    let mut outgoing = std::collections::BTreeMap::<u32, JetHttp2Outgoing>::new();
+    let mut stream_windows = std::collections::BTreeMap::<u32, i64>::new();
+    let mut decoder = JetHttp2Hpack::new();
+    let mut last_stream = 0u32;
+    let mut connection_send_window = 65_535i64;
+    let mut initial_send_window = 65_535i64;
+    let mut peer_max_frame = JET_HTTP2_MAX_FRAME;
+    let mut connection_receive_window = 65_535i64;
+    let mut stream_receive_windows = std::collections::BTreeMap::<u32, i64>::new();
+    let mut saw_client_settings = false;
+    while !shutdown.load(Ordering::Acquire) {
+        let frame = match jet_http2_read_frame(stream) {
+            Ok(frame) => frame,
+            Err(error) if error == "HTTP/2 read timed out" => continue,
+            Err(error) if error.contains("ended early") => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        if !saw_client_settings && !(frame.kind == 4 && frame.stream == 0 && frame.flags & 0x1 == 0) {
+            return Err("HTTP/2 client SETTINGS must be the first frame".to_string());
+        }
+        match frame.kind {
+            0 => {
+                if frame.stream == 0 { return Err("HTTP/2 DATA uses stream zero".to_string()); }
+                let entry = requests.get_mut(&frame.stream).ok_or_else(|| "HTTP/2 DATA has no open request".to_string())?;
+                let padding = if frame.flags & 0x8 != 0 { usize::from(*frame.payload.first().ok_or_else(|| "HTTP/2 padded DATA is empty".to_string())?) + 1 } else { 0 };
+                if padding > frame.payload.len() { return Err("HTTP/2 DATA padding is invalid".to_string()); }
+                let data = &frame.payload[padding.min(1)..frame.payload.len() - padding.saturating_sub(1)];
+                connection_receive_window -= data.len() as i64;
+                let receive_window = stream_receive_windows.entry(frame.stream).or_insert(65_535);
+                *receive_window -= data.len() as i64;
+                if connection_receive_window < 0 || *receive_window < 0 { return Err("HTTP/2 receive flow-control window exceeded".to_string()); }
+                entry.1.extend_from_slice(data);
+                if entry.1.len() > JET_HTTP_MAX_BODY_BYTES { return Err("HTTP/2 request body is too large".to_string()); }
+                if !data.is_empty() {
+                    let increment = (data.len() as u32).to_be_bytes();
+                    jet_http2_write_frame(stream, 8, 0, 0, &increment)?;
+                    jet_http2_write_frame(stream, 8, 0, frame.stream, &increment)?;
+                    connection_receive_window += data.len() as i64;
+                    *receive_window += data.len() as i64;
+                }
+                if frame.flags & 0x1 != 0 {
+                    let (headers, body) = requests.remove(&frame.stream).unwrap();
+                    let response = jet_http2_dispatch(mux, headers, body)?;
+                    jet_http2_queue_response(stream, frame.stream, response, &mut outgoing, &mut stream_windows,
+                        &mut connection_send_window, initial_send_window, peer_max_frame)?;
+                }
+            }
+            1 => {
+                if frame.stream == 0 || frame.stream % 2 == 0 || frame.stream <= last_stream { return Err("HTTP/2 HEADERS stream id is invalid".to_string()); }
+                if requests.len() + outgoing.len() >= 100 { return Err("HTTP/2 concurrent stream limit exceeded".to_string()); }
+                last_stream = frame.stream;
+                let mut offset = 0usize;
+                let padding = if frame.flags & 0x8 != 0 { offset = 1; usize::from(*frame.payload.first().ok_or_else(|| "HTTP/2 padded HEADERS is empty".to_string())?) } else { 0 };
+                if frame.flags & 0x20 != 0 { offset += 5; }
+                if offset + padding > frame.payload.len() { return Err("HTTP/2 HEADERS padding is invalid".to_string()); }
+                let mut block = frame.payload[offset..frame.payload.len() - padding].to_vec();
+                if frame.flags & 0x4 == 0 {
+                    loop {
+                        let continuation = jet_http2_read_frame(stream)?;
+                        if continuation.kind != 9 || continuation.stream != frame.stream { return Err("HTTP/2 header block was interrupted".to_string()); }
+                        block.extend_from_slice(&continuation.payload);
+                        if block.len() > JET_HTTP2_MAX_HEADER_LIST { return Err("HTTP/2 header block is too large".to_string()); }
+                        if continuation.flags & 0x4 != 0 { break; }
+                    }
+                }
+                let headers = jet_http2_decode_headers(&mut decoder, &block)?;
+                stream_receive_windows.insert(frame.stream, 65_535);
+                stream_windows.insert(frame.stream, initial_send_window);
+                if frame.flags & 0x1 != 0 {
+                    let response = jet_http2_dispatch(mux, headers, Vec::new())?;
+                    jet_http2_queue_response(stream, frame.stream, response, &mut outgoing, &mut stream_windows,
+                        &mut connection_send_window, initial_send_window, peer_max_frame)?;
+                } else { requests.insert(frame.stream, (headers, Vec::new())); }
+            }
+            2 if frame.stream != 0 && frame.payload.len() == 5 => {}
+            3 if frame.stream != 0 && frame.payload.len() == 4 => { requests.remove(&frame.stream); }
+            4 => {
+                if frame.stream != 0 || frame.payload.len() % 6 != 0 || frame.flags & 0x1 != 0 && !frame.payload.is_empty() { return Err("HTTP/2 SETTINGS is malformed".to_string()); }
+                if frame.flags & 0x1 == 0 {
+                    saw_client_settings = true;
+                    for setting in frame.payload.chunks_exact(6) {
+                        let id = u16::from_be_bytes([setting[0], setting[1]]);
+                        let value = u32::from_be_bytes([setting[2], setting[3], setting[4], setting[5]]);
+                        match id {
+                            2 if value > 1 => return Err("HTTP/2 ENABLE_PUSH setting is invalid".to_string()),
+                            4 if value > 0x7fff_ffff => return Err("HTTP/2 initial window is invalid".to_string()),
+                            4 => {
+                                let change = i64::from(value) - initial_send_window;
+                                initial_send_window = i64::from(value);
+                                for window in stream_windows.values_mut() { *window += change; }
+                            }
+                            5 if !(16_384..=16_777_215).contains(&value) => return Err("HTTP/2 maximum frame size is invalid".to_string()),
+                            5 => peer_max_frame = value as usize,
+                            _ => {}
+                        }
+                    }
+                    jet_http2_write_frame(stream, 4, 0x1, 0, &[])?;
+                }
+            }
+            6 => {
+                if frame.stream != 0 || frame.payload.len() != 8 { return Err("HTTP/2 PING is malformed".to_string()); }
+                if frame.flags & 0x1 == 0 { jet_http2_write_frame(stream, 6, 0x1, 0, &frame.payload)?; }
+            }
+            7 => {
+                if frame.stream != 0 || frame.payload.len() < 8 { return Err("HTTP/2 GOAWAY is malformed".to_string()); }
+                return Ok(());
+            }
+            8 => {
+                if frame.payload.len() != 4 { return Err("HTTP/2 WINDOW_UPDATE is malformed".to_string()); }
+                let increment = u32::from_be_bytes(frame.payload[..4].try_into().unwrap()) & 0x7fff_ffff;
+                if increment == 0 { return Err("HTTP/2 WINDOW_UPDATE is malformed".to_string()); }
+                let window = if frame.stream == 0 { &mut connection_send_window }
+                    else { stream_windows.get_mut(&frame.stream).ok_or_else(|| "HTTP/2 WINDOW_UPDATE uses an idle stream".to_string())? };
+                *window = window.checked_add(i64::from(increment)).filter(|value| *value <= 0x7fff_ffff)
+                    .ok_or_else(|| "HTTP/2 flow-control window overflow".to_string())?;
+                let ids = if frame.stream == 0 { outgoing.keys().copied().collect::<Vec<_>>() } else { vec![frame.stream] };
+                for id in ids {
+                    let Some(mut body) = outgoing.remove(&id) else { continue };
+                    let stream_window = stream_windows.get_mut(&id).ok_or_else(|| "HTTP/2 response stream lost its window".to_string())?;
+                    if !jet_http2_flush_body(stream, id, &mut body, &mut connection_send_window, stream_window, peer_max_frame)? {
+                        outgoing.insert(id, body);
+                    }
+                }
+            }
+            9 => return Err("HTTP/2 CONTINUATION has no open header block".to_string()),
+            _ => {}
+        }
+    }
+    jet_http2_write_frame(stream, 7, 0, 0, &[0, 0, 0, 0, 0, 0, 0, 0])
+}
+
 struct JetHttpContinueReader<R> {
     inner: R,
     stream: Option<std::net::TcpStream>,
@@ -556,6 +1159,8 @@ struct JetHttpChunkedSocketReader {
     need_crlf: bool,
     done: bool,
     framing: usize,
+    decoded: usize,
+    limit: usize,
 }
 
 impl JetHttpChunkedSocketReader {
@@ -607,6 +1212,9 @@ impl std::io::Read for JetHttpChunkedSocketReader {
                 self.need_crlf = false;
             }
             self.remaining = self.next_size()?;
+            self.decoded = self.decoded.checked_add(self.remaining)
+                .filter(|decoded| *decoded <= self.limit)
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::OutOfMemory, "request body is too large"))?;
             if self.remaining == 0 {
                 let mut final_crlf = [0u8; 2];
                 self.read_exact_framing(&mut final_crlf)?;
@@ -738,7 +1346,7 @@ fn jet_http_srv_read_streaming(
     };
     let body = match head.framing {
         JetHttpRequestFraming::ContentLength(length) => {
-            if length > JET_HTTP_MAX_BODY_BYTES {
+            if length > options.max_body_bytes {
                 return Err(JetHttpReadError { status: 413, message: "request body is too large" });
             }
             JetHttpBody::reader(JetHttpContinueReader { inner: body_stream.take(length as u64), stream: continue_stream }, Some(length))
@@ -751,6 +1359,8 @@ fn jet_http_srv_read_streaming(
                     need_crlf: false,
                     done: false,
                     framing: 0,
+                    decoded: 0,
+                    limit: options.max_body_bytes,
                 },
                 stream: continue_stream,
             },
@@ -843,7 +1453,7 @@ fn jet_http_srv_read_buffered(
     let mut buf = [0u8; 8192];
     let mut reading_body = false;
     let mut continue_sent = false;
-    let mut chunked = JetHttpChunkState::new();
+    let mut chunked = JetHttpChunkState::new(options.max_body_bytes);
     let started = std::time::Instant::now();
     let mut header_deadline = (!keep_alive || !pending.is_empty()).then(|| started + options.read_header_timeout);
     let mut idle_deadline = started
@@ -866,7 +1476,7 @@ fn jet_http_srv_read_buffered(
             let body_start = header_end + 4;
             let request_end = match head.framing {
                 JetHttpRequestFraming::ContentLength(content_len) => {
-                    if content_len > JET_HTTP_MAX_BODY_BYTES {
+                    if content_len > options.max_body_bytes {
                         return Err(JetHttpReadError { status: 413, message: "request body is too large" });
                     }
                     let request_end = body_start + content_len;
@@ -1295,7 +1905,7 @@ fn jet_http_chunk_size(line: &[u8]) -> Result<usize, JetHttpReadError> {
 }
 
 fn jet_http_decode_chunked_body(body: &[u8]) -> Result<Vec<u8>, JetHttpReadError> {
-    let mut state = JetHttpChunkState::new();
+    let mut state = JetHttpChunkState::new(JET_HTTP_MAX_BODY_BYTES);
     let end = state.advance(body)?.ok_or(JetHttpReadError {
         status: 400,
         message: "request ended before its chunked framing was complete",
@@ -1811,13 +2421,11 @@ fn jet_http_srv_sse(data: &String) -> JetHttpResponse {
 }
 
 fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHttpResponse, String> {
-    std::fs::read_to_string(path)
+    std::fs::read(path)
         .map(|body| {
-            jet_http_srv_response_header(
-                jet_http_srv_response(200, &body),
-                &"content-type".to_string(),
-                mime,
-            )
+            let mut response = jet_http_srv_response(200, &String::new());
+            response.body = JetHttpBody::from_bytes(body);
+            jet_http_srv_response_header(response, &"content-type".to_string(), mime)
         })
         .map_err(|e| format!("static file `{}` failed: {}", path, e))
 }
@@ -1827,40 +2435,231 @@ fn jet_http_srv_static_file_range(
     path: &String,
     mime: &String,
 ) -> Result<JetHttpResponse, String> {
-    let body =
-        std::fs::read_to_string(path).map_err(|e| format!("static file `{}` failed: {}", path, e))?;
+    let body = std::fs::read(path).map_err(|e| format!("static file `{}` failed: {}", path, e))?;
     let Some(range) = jet_http_srv_req_header(req, &"range".to_string()) else {
-        return Ok(jet_http_srv_response_header(
-            jet_http_srv_response(200, &body),
-            &"content-type".to_string(),
-            mime,
-        ));
+        let mut response = jet_http_srv_response(200, &String::new());
+        response.body = JetHttpBody::from_bytes(body);
+        return Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime));
     };
-    let Some(spec) = range.strip_prefix("bytes=") else {
+    let Some((start, end)) = jet_http_static_range(&range, body.len()) else {
         return Ok(jet_http_srv_response(416, &"range not satisfiable".to_string()));
     };
-    let (start_s, end_s) = spec.split_once('-').unwrap_or((spec, ""));
-    let start = start_s.parse::<usize>().unwrap_or(0);
-    let end = if end_s.is_empty() {
-        body.len().saturating_sub(1)
-    } else {
-        end_s.parse::<usize>().unwrap_or(body.len().saturating_sub(1))
-    };
-    if start >= body.len() || end < start {
-        return Ok(jet_http_srv_response(416, &"range not satisfiable".to_string()));
-    }
-    let capped = std::cmp::min(end + 1, body.len());
-    let part = body[start..capped].to_string();
+    let part = body[start..=end].to_vec();
+    let mut response = jet_http_srv_response(206, &String::new());
+    response.body = JetHttpBody::from_bytes(part);
     let resp = jet_http_srv_response_header(
-        jet_http_srv_response(206, &part),
+        response,
         &"content-type".to_string(),
         mime,
     );
     Ok(jet_http_srv_response_header(
         resp,
         &"content-range".to_string(),
-        &format!("bytes {}-{}/{}", start, capped - 1, body.len()),
+        &format!("bytes {}-{}/{}", start, end, body.len()),
     ))
+}
+
+fn jet_http_static_range(value: &str, len: usize) -> Option<(usize, usize)> {
+    let spec = value.strip_prefix("bytes=")?;
+    if len == 0 || spec.contains(',') { return None; }
+    let (first, last) = spec.split_once('-')?;
+    match (first.is_empty(), last.is_empty()) {
+        (true, true) => None,
+        (true, false) => {
+            let suffix = last.parse::<usize>().ok()?;
+            (suffix > 0).then_some((len.saturating_sub(suffix), len - 1))
+        }
+        (false, true) => {
+            let start = first.parse::<usize>().ok()?;
+            (start < len).then_some((start, len - 1))
+        }
+        (false, false) => {
+            let start = first.parse::<usize>().ok()?;
+            let end = last.parse::<usize>().ok()?.min(len - 1);
+            (start < len && start <= end).then_some((start, end))
+        }
+    }
+}
+
+fn jet_http_static_mime(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(std::ffi::OsStr::to_str).unwrap_or("").to_ascii_lowercase().as_str() {
+        "css" => "text/css; charset=utf-8",
+        "gif" => "image/gif",
+        "html" | "htm" => "text/html; charset=utf-8",
+        "jpeg" | "jpg" => "image/jpeg",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "json" => "application/json",
+        "png" => "image/png",
+        "svg" => "image/svg+xml",
+        "txt" => "text/plain; charset=utf-8",
+        "wasm" => "application/wasm",
+        _ => "application/octet-stream",
+    }
+}
+
+fn jet_http_days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let yoe = year - era * 400;
+    let shifted_month = month + if month > 2 { -3 } else { 9 };
+    let doy = (153 * shifted_month + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+fn jet_http_civil_from_days(days: i64) -> (i64, i64, i64) {
+    let days = days + 719_468;
+    let era = days.div_euclid(146_097);
+    let doe = days - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    (year, month, day)
+}
+
+fn jet_http_date(seconds: i64) -> String {
+    const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let days = seconds.div_euclid(86_400);
+    let within = seconds.rem_euclid(86_400);
+    let (year, month, day) = jet_http_civil_from_days(days);
+    format!("{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
+        WEEKDAYS[(days + 4).rem_euclid(7) as usize], day, MONTHS[(month - 1) as usize], year,
+        within / 3600, within / 60 % 60, within % 60)
+}
+
+fn jet_http_date_parse(value: &str) -> Option<i64> {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let parts = value.split_ascii_whitespace().collect::<Vec<_>>();
+    if parts.len() != 6 || !parts[0].ends_with(',') || parts[5] != "GMT" { return None; }
+    let day = parts[1].parse::<i64>().ok()?;
+    let month = MONTHS.iter().position(|month| *month == parts[2])? as i64 + 1;
+    let year = parts[3].parse::<i64>().ok()?;
+    let time = parts[4].split(':').map(str::parse::<i64>).collect::<Result<Vec<_>, _>>().ok()?;
+    if time.len() != 3 || !(0..24).contains(&time[0]) || !(0..60).contains(&time[1]) || !(0..60).contains(&time[2]) { return None; }
+    let seconds = jet_http_days_from_civil(year, month, day).checked_mul(86_400)?
+        .checked_add(time[0] * 3600 + time[1] * 60 + time[2])?;
+    (jet_http_date(seconds) == value).then_some(seconds)
+}
+
+fn jet_http_srv_static_files(
+    req: &JetHttpRequest,
+    root: &std::path::Path,
+) -> Result<JetHttpResponse, String> {
+    let not_found = || Ok(jet_http_srv_empty_response(404));
+    if !matches!(req.method.as_str(), "GET" | "HEAD") { return Ok(jet_http_srv_empty_response(405)); }
+    let root = match std::fs::canonicalize(root) { Ok(root) => root, Err(_) => return not_found() };
+    let path = req.path.split('?').next().unwrap_or(&req.path);
+    let mut candidate = root.clone();
+    for segment in path.split('/').filter(|segment| !segment.is_empty()) {
+        let Ok(segment) = jet_http_route_decode_segment(segment) else { return not_found() };
+        if segment == "." || segment == ".." || segment.contains(std::path::MAIN_SEPARATOR) { return not_found(); }
+        candidate.push(segment);
+        let Ok(metadata) = std::fs::symlink_metadata(&candidate) else { return not_found() };
+        if metadata.file_type().is_symlink() { return not_found(); }
+    }
+    if candidate.is_dir() {
+        candidate.push("index.html");
+        let Ok(metadata) = std::fs::symlink_metadata(&candidate) else { return not_found() };
+        if metadata.file_type().is_symlink() { return not_found(); }
+    }
+    let Ok(canonical) = std::fs::canonicalize(&candidate) else { return not_found() };
+    if !canonical.starts_with(&root) { return not_found(); }
+    let Ok(metadata) = canonical.metadata() else { return not_found() };
+    if !metadata.is_file() { return not_found(); }
+    let body = std::fs::read(&canonical).map_err(|_| "static file read failed".to_string())?;
+    let modified_seconds = metadata.modified().ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs() as i64).unwrap_or(0);
+    let last_modified = jet_http_date(modified_seconds);
+    let etag = format!("\"{:x}-{:x}\"", body.len(), modified_seconds);
+    if req.headers.all("if-none-match").iter().any(|value| *value == &etag || *value == "*") {
+        let mut response = jet_http_srv_empty_response(304);
+        response.headers.append("etag", &etag).expect("generated ETag is valid");
+        response.headers.append("last-modified", &last_modified).expect("generated date is valid");
+        return Ok(response);
+    }
+    if req.headers.get("if-none-match").is_none()
+        && req.headers.get("if-modified-since").and_then(|value| jet_http_date_parse(value)).is_some_and(|since| modified_seconds <= since)
+    {
+        let mut response = jet_http_srv_empty_response(304);
+        response.headers.append("etag", &etag).expect("generated ETag is valid");
+        response.headers.append("last-modified", &last_modified).expect("generated date is valid");
+        return Ok(response);
+    }
+    let range = req.headers.get("range").cloned().filter(|_| {
+        req.headers.get("if-range").is_none_or(|value| value == &etag || value == &last_modified)
+    });
+    let (status, bytes, content_range) = if let Some(range) = range {
+        let Some((start, end)) = jet_http_static_range(&range, body.len()) else {
+            let mut response = jet_http_srv_empty_response(416);
+            response.headers.append("content-range", &format!("bytes */{}", body.len())).expect("generated range is valid");
+            return Ok(response);
+        };
+        (206, body[start..=end].to_vec(), Some(format!("bytes {start}-{end}/{}", body.len())))
+    } else {
+        (200, body, None)
+    };
+    let mut response = jet_http_srv_empty_response(status);
+    response.body = JetHttpBody::from_bytes(bytes);
+    response.headers.append("content-type", jet_http_static_mime(&canonical)).expect("static MIME is valid");
+    response.headers.append("accept-ranges", "bytes").expect("static header is valid");
+    response.headers.append("etag", &etag).expect("generated ETag is valid");
+    response.headers.append("last-modified", &last_modified).expect("generated date is valid");
+    if let Some(content_range) = content_range {
+        response.headers.append("content-range", &content_range).expect("generated range is valid");
+    }
+    Ok(response)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetHttpAccessEvent {
+    request_id: String,
+    method: String,
+    path: String,
+    route_template: String,
+    status: i64,
+    bytes: i64,
+    duration_ms: i64,
+    peer: String,
+    protocol: String,
+    tls: bool,
+}
+
+impl std::fmt::Display for JetHttpAccessEvent {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(output, "request_id={} method={} path={} route={} status={} bytes={} duration_ms={} peer={} protocol={} tls={}",
+            self.request_id, self.method, self.path, self.route_template, self.status,
+            self.bytes, self.duration_ms, self.peer, self.protocol, self.tls)
+    }
+}
+
+fn jet_http_srv_access_event(
+    req: &JetHttpRequest,
+    status: i64,
+    bytes: i64,
+    duration_ms: i64,
+    peer: &str,
+    protocol: &str,
+    tls: bool,
+) -> JetHttpAccessEvent {
+    let path = req.path.split('?').next().unwrap_or(&req.path).to_string();
+    JetHttpAccessEvent {
+        request_id: req.headers.get("x-request-id").cloned().unwrap_or_default(),
+        method: req.method.clone(),
+        route_template: req.route_template.clone().unwrap_or_else(|| path.clone()),
+        path,
+        status,
+        bytes,
+        duration_ms,
+        peer: peer.to_string(),
+        protocol: protocol.to_string(),
+        tls,
+    }
 }
 
 fn jet_http_srv_access_log(req: &JetHttpRequest, status: i64) -> String {
