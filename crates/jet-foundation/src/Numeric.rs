@@ -367,7 +367,9 @@ impl CtDecimal {
     }
 
     fn normalize(mut self) -> Self {
-        // Trailing fractional zeros are insignificant; drop them with scale.
+        // Same law as AOT `JetDecimal::normalize` (CommonTypes.rs): trailing
+        // fractional zeros drop with scale. Digits-only pop silently shifts
+        // the radix point and violates D-DECIMAL1 / R12.
         while self.scale > 0 && self.digits.len() > 1 && self.digits.last() == Some(&0) {
             self.digits.pop();
             self.scale -= 1;

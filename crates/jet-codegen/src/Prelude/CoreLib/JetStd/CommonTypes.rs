@@ -729,11 +729,16 @@
         }
 
         fn normalize(mut self) -> Self {
-            while self.digits.len() > 1 && self.digits.last() == Some(&0) {
+            // Trailing fractional zeros are insignificant; drop them with scale.
+            // Popping digits without `scale -= 1` silently shifts the radix point
+            // (`"10.50"` → 1.05) and breaks D-DECIMAL1 / R12 vs comptime.
+            while self.scale > 0 && self.digits.len() > 1 && self.digits.last() == Some(&0) {
                 self.digits.pop();
+                self.scale -= 1;
             }
             if self.digits == [0] {
                 self.negative = false;
+                self.scale = 0;
             }
             self
         }
