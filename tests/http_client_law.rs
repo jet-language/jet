@@ -1614,24 +1614,96 @@ fn run() {{
 
 #[test]
 fn public_client_tls_custom_only_trust() {
-    let ca = fs::canonicalize("tests/fixtures/tls/smtp.ca.cert.pem").unwrap();
-    let src = format!(
+    use std::process::{Command, Stdio};
+
+    let probe = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let ca = root.join("tests/fixtures/tls/smtp.ca.cert.pem");
+    let wrong_ca = root.join("tests/fixtures/tls/localhost.cert.pem");
+    let cert = root.join("tests/fixtures/tls/smtp.server.cert.pem");
+    let key = root.join("tests/fixtures/tls/smtp.server.key.pem");
+    let mut server = Command::new("openssl")
+        .args([
+            "s_server",
+            "-quiet",
+            "-www",
+            "-accept",
+            &port.to_string(),
+            "-cert",
+        ])
+        .arg(&cert)
+        .arg("-key")
+        .arg(&key)
+        .arg("-CAfile")
+        .arg(&ca)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("openssl s_server");
+    std::thread::sleep(Duration::from_millis(250));
+
+    let empty_src = r#"
+use core.tls as tls
+fn run() {
+    empty: [U8] :: []
+    if tls.RootCertificates.from_pem(empty) == {
+        Ok(_) -> print("empty-ok")
+        Err(_) -> print("empty-fail")
+    }
+}
+"#;
+    let (empty_code, empty_out, empty_err) =
+        common::build_and_run("jet_http_client_law", "public_tls_empty_root", empty_src);
+    assert_eq!(empty_code, 0, "stderr:\n{empty_err}");
+    assert_eq!(empty_out, "empty-fail\n");
+
+    let wrong_src = format!(
         r#"
 use core.http.client as http
 use core.tls as tls
 use core.files as fs
 fn run() {{
-    ca :: fs.read_bytes("{ca}") ?? panic("ca")
-    roots :: tls.RootCertificates.from_pem(ca) ?? panic("roots")
+    pem :: fs.read_bytes("{wrong}") ?? panic("wrong ca")
+    roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
     cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
-    _ :: http.Client.new().tls(cfg)
-    print("ok")
+    client :: http.Client.new().tls(cfg).protocols(false, true, false)
+    if client.send(http.request("GET", "https://localhost:{port}/")) == {{
+        Ok(_) -> print("ok")
+        Err(_) -> print("tls-fail")
+    }}
 }}
 "#,
-        ca = ca.display()
+        wrong = wrong_ca.display(),
+        port = port
     );
-    let (code, stdout, stderr) =
-        common::build_and_run("jet_http_client_law", "public_tls_policy", &src);
-    assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(stdout, "ok\n");
+    let (wrong_code, wrong_out, wrong_err) =
+        common::build_and_run("jet_http_client_law", "public_tls_wrong_root", &wrong_src);
+    assert_eq!(wrong_code, 0, "stderr:\n{wrong_err}");
+    assert_eq!(wrong_out, "tls-fail\n");
+
+    let pass_src = format!(
+        r#"
+use core.http.client as http
+use core.tls as tls
+use core.files as fs
+fn run() {{
+    pem :: fs.read_bytes("{ca}") ?? panic("ca")
+    roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+    cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
+    client :: http.Client.new().tls(cfg).protocols(false, true, false)
+    resp :: client.send(http.request("GET", "https://localhost:{port}/")) ?? panic("send")
+    print(resp.status())
+}}
+"#,
+        ca = ca.display(),
+        port = port
+    );
+    let (pass_code, pass_out, pass_err) =
+        common::build_and_run("jet_http_client_law", "public_tls_custom_only", &pass_src);
+    let _ = server.kill();
+    let _ = server.wait();
+    assert_eq!(pass_code, 0, "stderr:\n{pass_err}");
+    assert_eq!(pass_out, "200\n");
 }
