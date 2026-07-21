@@ -291,11 +291,21 @@ fn jet_encoding_validate_limits(
     }
 }
 
+// D-ENCSTREAM-SURFACE1=A codec-owned live heap ceiling.
+fn jet_encoding_codec_heap_ceiling(limits: &jet_std::EncodingLimits) -> usize {
+    (limits.buffer_bytes as usize)
+        .saturating_add(limits.max_item_bytes as usize)
+        .saturating_add(limits.max_expansion_bytes as usize)
+        .saturating_add((limits.max_depth as usize).saturating_mul(256))
+        .saturating_add(65_536)
+}
+
 fn jet_enc_json_reader(
     input: JetFileReader,
     limits: jet_std::EncodingLimits,
 ) -> Result<jet_std::JSONReader, jet_std::EncodingError> {
     jet_encoding_validate_limits(&limits)?;
+    let allocation_budget = Some(JetJsonAllocationBudget::new(jet_encoding_codec_heap_ceiling(&limits)));
     Ok(jet_std::JSONReader {
         input,
         limits,
@@ -310,7 +320,7 @@ fn jet_enc_json_reader(
         terminal: None,
         eof: false,
         record_mode: false,
-        allocation_budget: None,
+        allocation_budget,
     })
 }
 
@@ -392,7 +402,7 @@ impl jet_std::JSONReader {
             self.offset,
             self.line,
             self.column,
-            "JSON string allocation exceeded the bounded record resource limit",
+            "JSON string allocation exceeded the bounded codec heap ceiling",
         )
     }
 
@@ -409,6 +419,32 @@ impl jet_std::JSONReader {
 
     fn release_key_heap(&self, bytes: usize) {
         if let Some(budget) = &self.allocation_budget { budget.release(bytes); }
+    }
+
+    fn frame_allocation_error(&self) -> jet_std::EncodingError {
+        jet_encoding_error(
+            jet_std::EncodingErrorKind::Limit,
+            self.offset,
+            self.line,
+            self.column,
+            "JSON reader frame allocation exceeded the bounded codec heap ceiling",
+        )
+    }
+
+    fn reserve_read_frame(&mut self) -> Result<(), jet_std::EncodingError> {
+        if self.frames.len() < self.frames.capacity() {
+            return Ok(());
+        }
+        let old = self.frames.capacity();
+        let next = if old == 0 { 1 } else { old.saturating_mul(2).max(self.frames.len().saturating_add(1)) };
+        let growth = next.saturating_sub(old).saturating_mul(std::mem::size_of::<JetJsonReadFrame>());
+        if growth > 0 && self.allocation_budget.as_ref().is_some_and(|budget| !budget.charge(growth)) {
+            return Err(self.frame_allocation_error());
+        }
+        if self.frames.try_reserve_exact(next.saturating_sub(self.frames.len())).is_err() {
+            return Err(self.frame_allocation_error());
+        }
+        Ok(())
     }
 
     fn fill(&mut self) -> Result<Option<u8>, jet_std::EncodingError> {
@@ -598,11 +634,13 @@ impl jet_std::JSONReader {
             b'"' => { self.lookahead = Some(b'"'); self.offset -= 1; self.total -= 1; self.column -= 1; Ok(jet_std::DataEvent::Text(self.read_string()?)) }
             b'[' => {
                 if self.frames.len() as i64 >= self.limits.max_depth { return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset - 1, self.line, self.column.saturating_sub(1), format!("max_depth {} exceeded", self.limits.max_depth))); }
+                self.reserve_read_frame()?;
                 self.frames.push(JetJsonReadFrame::ArrayValueOrEnd { first: true, index: 0 });
                 Ok(jet_std::DataEvent::ArrayStart)
             }
             b'{' => {
                 if self.frames.len() as i64 >= self.limits.max_depth { return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset - 1, self.line, self.column.saturating_sub(1), format!("max_depth {} exceeded", self.limits.max_depth))); }
+                self.reserve_read_frame()?;
                 self.frames.push(JetJsonReadFrame::ObjectKeyOrEnd { first: true });
                 Ok(jet_std::DataEvent::ObjectStart)
             }
@@ -1332,11 +1370,7 @@ impl jet_std::JSONLReader {
 
         let mut root = None;
         let mut frames = Vec::new();
-        let heap_limit = (self.json.limits.buffer_bytes as usize)
-            .saturating_add(self.json.limits.max_item_bytes as usize)
-            .saturating_add((self.json.limits.max_depth as usize).saturating_mul(256))
-            .saturating_add(65_536);
-        let allocation = JetJsonAllocationBudget::new(heap_limit);
+        let allocation = JetJsonAllocationBudget::new(jet_encoding_codec_heap_ceiling(&self.json.limits));
         self.json.allocation_budget = Some(allocation.clone());
         let mut heap = JetJsonlHeapBudget {
             allocation,

@@ -1286,6 +1286,7 @@ fn run() {{
     near_limits.buffer_bytes = 4096
     near_limits.max_depth = 1
     near_limits.max_item_bytes = 100000
+    near_limits.max_expansion_bytes = 0
     near_input :: files.open("{near_string_path}") ?? panic("near string open")
     near_reader :: jsonl.reader(^near_input, near_limits) ?? panic("near string reader")
     near_result :: near_reader.next()
@@ -1375,8 +1376,95 @@ fn run() {{
     );
     let (code, stdout, stderr) = build_and_run(&dir, "jsonl_heap", &source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert_eq!(stdout, "true\n$[0]\nJSON string allocation exceeded the bounded record resource limit\ntrue\n0\n$[0]\ntrue\ntrue\n$[0][63]\ntrue\ntrue\n$[0][\"key0073\"]\ntrue\n");
+    assert_eq!(stdout, "true\n$[0]\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n0\n$[0]\ntrue\ntrue\n$[0][63]\ntrue\ntrue\n$[0][\"key0073\"]\ntrue\n");
     assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn json_stream_drop_and_codec_heap_ceiling_are_enforced() {
+    let dir = std::env::temp_dir().join(format!("jet_json_stream_drop_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let partial_path = dir.join("partial.json");
+    let reopen_path = dir.join("reopen.json");
+    let heap_path = dir.join("heap.json");
+    let key = "k".repeat(100_000);
+    fs::write(&heap_path, format!("{{\"{key}\":0}}")).unwrap();
+    let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+    let reopen = reopen_path.to_string_lossy().replace('\\', "\\\\");
+    let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn write_unfinished(path: String) {{
+    output :: files.create(path) ?? panic("create partial")
+    writer :: json.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
+    writer.flush() ?? panic("flush")
+    // no finish — Drop must close the handle without claiming success
+}}
+
+fn run() {{
+    write_unfinished("{partial}")
+    // Handle closed by Drop: a new writer can own the path again.
+    reopen_out :: files.create("{reopen}") ?? panic("reopen create")
+    reopen_writer :: json.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
+    reopen_writer.finish() ?? panic("reopen finish")
+    print(true)
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 100000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{heap}") ?? panic("heap open")
+    reader :: json.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 4 {{
+        result :: reader.next()
+        if result == {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("heap-not-latched") }}
+                    Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "json_stream_drop_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "true\n100003\n$\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
+    );
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "[7");
+    assert_eq!(fs::read_to_string(&reopen_path).unwrap(), "null");
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("json_stream_drop_heap.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("JSON stream drop/heap default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "[7");
     let _ = fs::remove_dir_all(&dir);
 }
 
