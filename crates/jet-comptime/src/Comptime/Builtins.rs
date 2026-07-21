@@ -72,6 +72,44 @@ pub(super) fn eval_binop(
         (BinOp::Add, BigInt(a), BigInt(b)) => Ok(BigInt(a.add(&b))),
         (BinOp::Sub, BigInt(a), BigInt(b)) => Ok(BigInt(a.sub(&b))),
         (BinOp::Mul, BigInt(a), BigInt(b)) => Ok(BigInt(a.mul(&b))),
+        // D-SIMD2 / D-LINALG1: element-wise / matmul / Mat*Vec.
+        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div), left, right)
+            if super::MathLayout::lanes(&left).is_some()
+                || super::MathLayout::lanes(&right).is_some() =>
+        {
+            match super::MathLayout::eval_binop(op, &left, &right, span) {
+                std::option::Option::Some(result) => result,
+                std::option::Option::None => Err(unsupported("this math operator", span)),
+            }
+        }
+        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), left, right)
+            if matches!(
+                (&left, &right),
+                (
+                    CtValue::Struct {
+                        type_name: left_name,
+                        ..
+                    },
+                    CtValue::Struct {
+                        type_name: right_name,
+                        ..
+                    }
+                ) if left_name == crate::Syntax::TYPE_DECIMAL
+                    && right_name == crate::Syntax::TYPE_DECIMAL
+            ) =>
+        {
+            let left = crate::Numeric::CtDecimal::from_value(&left)
+                .map_err(|error| unsupported(&error, span))?;
+            let right = crate::Numeric::CtDecimal::from_value(&right)
+                .map_err(|error| unsupported(&error, span))?;
+            let out = match op {
+                BinOp::Add => left.add(&right),
+                BinOp::Sub => left.sub(&right),
+                BinOp::Mul => left.mul(&right),
+                _ => unreachable!("decimal binop guard"),
+            };
+            Ok(out.to_value())
+        }
         (BinOp::Eq, a, b) => Ok(Bool(a == b)),
         (BinOp::Ne, a, b) => Ok(Bool(a != b)),
         (BinOp::Lt, a, b) => cmp(a, b, span).map(|o| Bool(o == std::cmp::Ordering::Less)),
@@ -106,6 +144,9 @@ pub(super) fn apply_static_type_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = super::MathLayout::apply_static(type_name, method, args.clone(), span) {
+        return Some(result);
+    }
     if let (Some(target), Some(source_name)) = (
         crate::AST::numeric_type_from_name(type_name),
         crate::Syntax::numeric_conversion_source(method),
@@ -209,6 +250,46 @@ pub(super) fn apply_static_type_method(
                     "cannot parse `{}` as a float",
                     s
                 )))),
+            }))
+        }
+        ("String", "from_bytes") => {
+            let bytes = match args.into_iter().next() {
+                Some(CtValue::Bytes(bytes)) => bytes,
+                Some(CtValue::List(items)) => {
+                    let mut bytes = Vec::with_capacity(items.len());
+                    for item in items {
+                        let CtValue::Int(n) = item else {
+                            return Some(Err(unsupported(
+                                "String.from_bytes expects a [U8] byte list",
+                                span,
+                            )));
+                        };
+                        if !(0..=255).contains(&n) {
+                            return Some(Err(unsupported(
+                                "String.from_bytes expects bytes in 0..255",
+                                span,
+                            )));
+                        }
+                        bytes.push(n as u8);
+                    }
+                    bytes
+                }
+                _ => {
+                    return Some(Err(unsupported(
+                        "String.from_bytes with a non-bytes argument",
+                        span,
+                    )))
+                }
+            };
+            Some(Ok(match String::from_utf8(bytes) {
+                Ok(text) => CtValue::ResOk(Box::new(CtValue::Str(text))),
+                Err(error) => CtValue::ResErr(Box::new(CtValue::Struct {
+                    type_name: "Utf8Error".to_string(),
+                    fields: vec![(
+                        "message".to_string(),
+                        CtValue::Str(error.to_string()),
+                    )],
+                })),
             }))
         }
         _ => None,
@@ -320,6 +401,9 @@ pub(super) fn apply_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(result) = super::MathLayout::apply_method(recv, method, &args, span) {
+        return result;
+    }
     if let Some(result) = super::Methods::apply_core_pure_method(recv, method, &args, span) {
         return result;
     }

@@ -655,6 +655,31 @@ fn repl_f32_exact_transcript() {
 }
 
 #[test]
+fn repl_zoned_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/zoned.txt"));
+}
+
+#[test]
+fn repl_decimal_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/decimal.txt"));
+}
+
+#[test]
+fn repl_string_from_bytes_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/string_from_bytes.txt"));
+}
+
+#[test]
+fn repl_sketch_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/sketch.txt"));
+}
+
+#[test]
+fn repl_archive_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/archive.txt"));
+}
+
+#[test]
 fn strict_transcript_rejects_unexpected_trailing_output() {
     assert!(
         std::panic::catch_unwind(|| run_transcript_file_strict("> 1 + 1")).is_err(),

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use crate::AST::{CtFloat, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 
-use crate::Comptime::Builtins::as_int;
+use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::Methods::as_float;
 use crate::Comptime::Value::CtValue;
@@ -39,10 +39,23 @@ pub(super) fn evaluate(
         ("core.time", "from_unix_ms") => datetime_from_unix_ms(args, span),
         ("core.time", "parse_rfc3339") => datetime_parse(args, span),
         ("core.time", "parse_time") => local_time_parse(args, span),
+        // Pure zone constructors: UTC is deterministic. Named IANA zones need a
+        // host TZif database (filesystem), so comptime keeps UTC aliases only and
+        // returns `Err` for everything else — same shape as AOT without tzdb.
+        ("core.time", "utc") => Ok(zone_utc()),
+        ("core.time", "zone") => zone_named(args, span),
+        ("core.time", "zoned") => zoned_from_datetime(args, span),
+        ("core.time", "zoned_local") => zoned_from_local(args, span),
+        ("core.math", "decimal") => decimal_from_str(args, span),
         ("core.science.measurement", "from") => measurement(args, span),
         ("core.time.date", "new") => date_new_call(args, span),
         ("core.time.date", "parse") => date_parse_call(args, span),
         ("core.time.datetime", "from_timestamp") => datetime_from_timestamp(args, span),
+        // D-APPROX1=A: sketch constructors — same algorithms as AOT Jet* sketches.
+        ("core.sketch.hll", "new") => Ok(hll_new()),
+        ("core.sketch.tdigest", "new") => Ok(tdigest_new()),
+        ("core.sketch.cms", "new") => Ok(cms_new()),
+        ("core.sketch.reservoir", "new") => reservoir_new(args, span),
         _ => return None,
     };
     Some(result)
@@ -175,6 +188,58 @@ pub(super) fn evaluate_method(
                 Ok(DateTime { seconds }.value())
             })
         }
+        ("DateTime", "in_zone", 1) => datetime_from_value(recv, span).and_then(|date_time| {
+            Ok(ZonedDateTime {
+                instant: date_time,
+                zone: zone_from_value(&args[0], span)?,
+            }
+            .value())
+        }),
+        ("Zone", "name", 0) => string_field(recv, "Zone", "name", span),
+        ("Decimal", "to_string", 0) => decimal_from_value(recv, span)
+            .map(|decimal| CtValue::Str(decimal.to_string_rep())),
+        ("Decimal", "add" | "sub" | "mul", 1) => decimal_from_value(recv, span).and_then(|left| {
+            let right = decimal_from_value(&args[0], span)?;
+            let out = match method {
+                "add" => left.add(&right),
+                "sub" => left.sub(&right),
+                "mul" => left.mul(&right),
+                _ => unreachable!("decimal method guard"),
+            };
+            Ok(out.to_value())
+        }),
+        ("ZonedDateTime", "date", 0) => zoned_from_value(recv, span).map(|zoned| zoned.date().value()),
+        ("ZonedDateTime", "time", 0) => zoned_from_value(recv, span).map(|zoned| zoned.time().value()),
+        ("ZonedDateTime", "offset_seconds", 0) => {
+            zoned_from_value(recv, span).map(|zoned| CtValue::Int(zoned.offset_seconds()))
+        }
+        ("ZonedDateTime", "to_datetime", 0) => {
+            zoned_from_value(recv, span).map(|zoned| zoned.instant.value())
+        }
+        ("ZonedDateTime", "zone", 0) => zoned_from_value(recv, span).map(|zoned| zoned.zone.value()),
+        ("ZonedDateTime", "to_string", 0) => {
+            zoned_from_value(recv, span).map(|zoned| CtValue::Str(zoned.to_string_fmt()))
+        }
+        ("ZonedDateTime", "format", 1) => zoned_from_value(recv, span).and_then(|zoned| {
+            Ok(CtValue::Str(format_zoned_pattern(
+                string_arg(args, 0, span)?,
+                zoned,
+            )))
+        }),
+        ("ZonedDateTime", "add_duration", 1) => zoned_from_value(recv, span).and_then(|zoned| {
+            let millis = int_field(&args[0], crate::Syntax::DURATION_TYPE, "ms", span)?;
+            Ok(ZonedDateTime {
+                instant: DateTime {
+                    seconds: zoned.instant.seconds.saturating_add(millis.div_euclid(1_000)),
+                },
+                zone: zoned.zone,
+            }
+            .value())
+        }),
+        ("ZonedDateTime", "add_period", 1) => zoned_from_value(recv, span).and_then(|zoned| {
+            let date = date_add_period(zoned.date(), &args[0], span)?;
+            Ok(ZonedDateTime::from_local(date, zoned.time(), zoned.zone).value())
+        }),
         ("Period", "to_string", 0) => period_string(recv, span).map(CtValue::Str),
         ("Measurement", "value" | "uncertainty", 0) => {
             value_field(recv, "Measurement", method, span)
@@ -182,19 +247,99 @@ pub(super) fn evaluate_method(
         ("Measurement", "add" | "sub" | "mul" | "div", 1) => {
             measurement_arithmetic(recv, method, &args[0], span)
         }
+        // D-APPROX1=A: non-mutating sketch queries (mutations write back in dispatch).
+        ("HyperLogLog", "count", 0) => hll_count(recv, span),
+        ("CountMinSketch", "count", 1) => cms_count(recv, args, span),
+        ("TDigest", "quantile", 1) => tdigest_quantile(recv, args, span),
+        ("ReservoirSampler", "sample", 0) => reservoir_sample(recv, span),
+        // D-SOLVER-LIB1=A: finite solver queries (`.require` mutates in dispatch).
+        ("Solver", "failure_count", 0) => solver_failure_count(recv, span),
+        ("Solver", "status", 0) => solver_status(recv, span),
         _ => return None,
     };
     Some(result)
 }
 
+/// D-APPROX1=A: mutating sketch `.add` — returns `(Unit, updated_receiver)`.
+pub(super) fn sketch_add(
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
+    let CtValue::Struct { type_name, .. } = recv else {
+        return None;
+    };
+    let result = match type_name.as_str() {
+        "HyperLogLog" => hll_add(recv, args, span),
+        "TDigest" => tdigest_add(recv, args, span),
+        "CountMinSketch" => cms_add(recv, args, span),
+        "ReservoirSampler" => reservoir_add(recv, args, span),
+        _ => return None,
+    };
+    Some(result.map(|updated| (CtValue::Unit, updated)))
+}
+
+/// D-SOLVER-LIB1=A: `solver.require(ok)` — returns `(Unit, updated_receiver)`.
+pub(super) fn solver_require(
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
+    let CtValue::Struct { type_name, .. } = recv else {
+        return None;
+    };
+    if type_name != crate::Syntax::SOLVER_TYPE {
+        return None;
+    }
+    Some(solver_require_update(recv, args, span).map(|updated| (CtValue::Unit, updated)))
+}
+
+/// D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — same seed/checked/failures layout as AOT.
+pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
+    let seed = as_int(one(args, 0, "Solver", "new", span)?, span)?;
+    Ok(structure(
+        crate::Syntax::SOLVER_TYPE,
+        vec![
+            ("seed", CtValue::Int(seed)),
+            ("checked", CtValue::Int(0)),
+            ("failures", CtValue::Int(0)),
+        ],
+    ))
+}
+
 pub(super) fn display(value: &CtValue) -> Option<String> {
-    let CtValue::Float(measured) = field(value, "Measurement", "value")? else {
-        return None;
-    };
-    let CtValue::Float(uncertainty) = field(value, "Measurement", "uncertainty")? else {
-        return None;
-    };
-    Some(format!("{measured:?} ± {uncertainty:?}"))
+    match value {
+        CtValue::Struct { type_name, .. } if type_name == "HyperLogLog" => {
+            let CtValue::Int(n) = hll_count(value, Span::new(0, 0)).ok()? else {
+                return None;
+            };
+            Some(format!("HyperLogLog(count={n})"))
+        }
+        CtValue::Struct { type_name, .. } if type_name == "TDigest" => Some("TDigest".to_string()),
+        CtValue::Struct { type_name, .. } if type_name == "CountMinSketch" => {
+            Some("CountMinSketch".to_string())
+        }
+        CtValue::Struct { type_name, .. } if type_name == "ReservoirSampler" => {
+            let CtValue::Int(count) = field(value, "ReservoirSampler", "count")? else {
+                return None;
+            };
+            Some(format!("ReservoirSampler(n={count})"))
+        }
+        CtValue::Struct { type_name, .. } if type_name == crate::Syntax::SOLVER_TYPE => {
+            let failures = int_field(value, crate::Syntax::SOLVER_TYPE, "failures", Span::new(0, 0)).ok()?;
+            let status = if failures == 0 { "ok" } else { "failed" };
+            Some(format!("Solver(status: {status}, failures: {failures})"))
+        }
+        _ => {
+            let CtValue::Float(measured) = field(value, "Measurement", "value")? else {
+                return None;
+            };
+            let CtValue::Float(uncertainty) = field(value, "Measurement", "uncertainty")? else {
+                return None;
+            };
+            Some(format!("{measured:?} ± {uncertainty:?}"))
+        }
+    }
 }
 
 fn one<'a>(
@@ -663,6 +808,189 @@ impl DateTime {
     fn value(self) -> CtValue {
         datetime_value(self.seconds)
     }
+}
+
+#[derive(Clone)]
+struct Zone {
+    name: String,
+    offset: i64,
+}
+
+impl Zone {
+    fn utc() -> Self {
+        Self {
+            name: "UTC".to_string(),
+            offset: 0,
+        }
+    }
+
+    fn parse_name(name: &str) -> Result<Self, String> {
+        if name == "UTC" || name == "Etc/UTC" || name == "Z" {
+            return Ok(Self::utc());
+        }
+        Err(format!(
+            "unknown IANA time zone: {name}; comptime supports UTC/Etc/UTC/Z only (host TZif databases are a named ambient boundary)"
+        ))
+    }
+
+    fn value(self) -> CtValue {
+        structure(
+            "Zone",
+            vec![
+                ("name", CtValue::Str(self.name)),
+                ("offset", CtValue::Int(self.offset)),
+            ],
+        )
+    }
+}
+
+#[derive(Clone)]
+struct ZonedDateTime {
+    instant: DateTime,
+    zone: Zone,
+}
+
+impl ZonedDateTime {
+    fn from_local(date: Date, time: LocalTime, zone: Zone) -> Self {
+        let local_secs = utc_seconds(date, time);
+        Self {
+            instant: DateTime {
+                seconds: local_secs.saturating_sub(zone.offset),
+            },
+            zone,
+        }
+    }
+
+    fn offset_seconds(&self) -> i64 {
+        self.zone.offset
+    }
+
+    fn local_instant(&self) -> DateTime {
+        DateTime {
+            seconds: self.instant.seconds.saturating_add(self.zone.offset),
+        }
+    }
+
+    fn date(&self) -> Date {
+        self.local_instant().date()
+    }
+
+    fn time(&self) -> LocalTime {
+        self.local_instant().time()
+    }
+
+    fn to_string_fmt(&self) -> String {
+        format!(
+            "{} {} {} ({})",
+            self.date().to_string_fmt(),
+            self.time().to_string_fmt(),
+            self.zone.name,
+            offset_string(self.offset_seconds())
+        )
+    }
+
+    fn value(self) -> CtValue {
+        structure(
+            "ZonedDateTime",
+            vec![("instant", self.instant.value()), ("zone", self.zone.value())],
+        )
+    }
+}
+
+fn zone_utc() -> CtValue {
+    Zone::utc().value()
+}
+
+fn decimal_from_str(args: &[CtValue], span: Span) -> EvalResult {
+    match crate::Numeric::CtDecimal::from_str(string_arg(args, 0, span)?) {
+        Ok(decimal) => Ok(decimal.to_value()),
+        Err(error) => Err(unsupported(&error, span)),
+    }
+}
+
+fn decimal_from_value(value: &CtValue, span: Span) -> Result<crate::Numeric::CtDecimal, Diagnostic> {
+    crate::Numeric::CtDecimal::from_value(value).map_err(|error| unsupported(&error, span))
+}
+
+fn zone_named(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(match Zone::parse_name(string_arg(args, 0, span)?) {
+        Ok(zone) => CtValue::ResOk(Box::new(zone.value())),
+        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+    })
+}
+
+fn zone_from_value(value: &CtValue, span: Span) -> Result<Zone, Diagnostic> {
+    Ok(Zone {
+        name: match field(value, "Zone", "name") {
+            Some(CtValue::Str(name)) => name.clone(),
+            _ => {
+                return Err(unsupported("malformed Zone.name value", span));
+            }
+        },
+        offset: int_field(value, "Zone", "offset", span)?,
+    })
+}
+
+fn zoned_from_value(value: &CtValue, span: Span) -> Result<ZonedDateTime, Diagnostic> {
+    let instant = match field(value, "ZonedDateTime", "instant") {
+        Some(instant) => datetime_from_value(instant, span)?,
+        None => {
+            return Err(unsupported("malformed ZonedDateTime.instant value", span));
+        }
+    };
+    let zone = match field(value, "ZonedDateTime", "zone") {
+        Some(zone) => zone_from_value(zone, span)?,
+        None => {
+            return Err(unsupported("malformed ZonedDateTime.zone value", span));
+        }
+    };
+    Ok(ZonedDateTime { instant, zone })
+}
+
+fn zoned_from_datetime(args: &[CtValue], span: Span) -> EvalResult {
+    let instant = datetime_from_value(
+        args.get(0)
+            .ok_or_else(|| unsupported("time.zoned expects a DateTime", span))?,
+        span,
+    )?;
+    let zone = zone_from_value(
+        args.get(1)
+            .ok_or_else(|| unsupported("time.zoned expects a Zone", span))?,
+        span,
+    )?;
+    Ok(ZonedDateTime { instant, zone }.value())
+}
+
+fn zoned_from_local(args: &[CtValue], span: Span) -> EvalResult {
+    let date = date_from_value(
+        args.get(0)
+            .ok_or_else(|| unsupported("time.zoned_local expects a LocalDate", span))?,
+        "LocalDate",
+        span,
+    )?;
+    let time = local_time_from_value(
+        args.get(1)
+            .ok_or_else(|| unsupported("time.zoned_local expects a LocalTime", span))?,
+        span,
+    )?;
+    let zone = zone_from_value(
+        args.get(2)
+            .ok_or_else(|| unsupported("time.zoned_local expects a Zone", span))?,
+        span,
+    )?;
+    Ok(ZonedDateTime::from_local(date, time, zone).value())
+}
+
+fn offset_string(offset: i64) -> String {
+    let sign = if offset < 0 { '-' } else { '+' };
+    let abs = offset.abs();
+    format!("{sign}{:02}:{:02}", abs / 3_600, (abs / 60) % 60)
+}
+
+fn format_zoned_pattern(pattern: &str, zoned: ZonedDateTime) -> String {
+    let mut output = format_time_pattern(pattern, zoned.date(), zoned.time());
+    output = output.replace("VV", &zoned.zone.name);
+    output.replace("XXX", &offset_string(zoned.offset_seconds()))
 }
 
 fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date, Diagnostic> {
@@ -2274,6 +2602,361 @@ fn percent_encode(value: &str) -> Result<String, EmailError> {
         }
     }
     Ok(output)
+}
+
+// ── D-APPROX1=A: core.sketch — mirrors AOT Jet* sketches in Prelude/Core.rs ──
+
+const CMS_COLS: usize = 256;
+const HLL_REGS: usize = 256;
+const TDIGEST_DELTA: f64 = 100.0;
+
+fn fnv1a(data: &[u8]) -> u64 {
+    let mut hash: u64 = 14695981039346656037;
+    for &b in data {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    hash
+}
+
+fn fnv1a_h2(data: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325u64.wrapping_add(0xdeadbeef);
+    for &b in data {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    hash
+}
+
+fn hll_new() -> CtValue {
+    structure(
+        "HyperLogLog",
+        vec![(
+            "registers",
+            CtValue::List((0..HLL_REGS).map(|_| CtValue::Int(0)).collect()),
+        )],
+    )
+}
+
+fn hll_registers(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
+    let CtValue::List(regs) = field(value, "HyperLogLog", "registers")
+        .ok_or_else(|| unsupported("malformed HyperLogLog.registers value", span))?
+    else {
+        return Err(unsupported("malformed HyperLogLog.registers value", span));
+    };
+    regs.iter()
+        .map(|reg| match reg {
+            CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
+            _ => Err(unsupported("malformed HyperLogLog register", span)),
+        })
+        .collect()
+}
+
+fn hll_value(registers: Vec<u8>) -> CtValue {
+    structure(
+        "HyperLogLog",
+        vec![(
+            "registers",
+            CtValue::List(registers.into_iter().map(|n| CtValue::Int(n as i64)).collect()),
+        )],
+    )
+}
+
+fn hll_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let item = string_arg(args, 0, span)?;
+    let mut regs = hll_registers(recv, span)?;
+    let h = fnv1a(item.as_bytes());
+    let reg = (h & 0xFF) as usize;
+    let rest = h >> 8;
+    let lz = if rest == 0 {
+        57u8
+    } else {
+        rest.leading_zeros() as u8 + 1
+    };
+    if lz > regs[reg] {
+        regs[reg] = lz;
+    }
+    Ok(hll_value(regs))
+}
+
+fn hll_count(recv: &CtValue, span: Span) -> EvalResult {
+    let regs = hll_registers(recv, span)?;
+    let m = regs.len() as f64;
+    let zeros = regs.iter().filter(|&&v| v == 0).count();
+    let estimate = if zeros > 0 {
+        m * (m / zeros as f64).ln()
+    } else {
+        let sum: f64 = regs.iter().map(|&v| 2f64.powi(-(v as i32))).sum();
+        let alpha = 0.7213 / (1.0 + 1.079 / m);
+        alpha * m * m / sum
+    };
+    Ok(CtValue::Int(estimate.round() as i64))
+}
+
+fn tdigest_new() -> CtValue {
+    structure("TDigest", vec![("centroids", CtValue::List(Vec::new()))])
+}
+
+fn tdigest_centroids(value: &CtValue, span: Span) -> Result<Vec<(f64, f64)>, Diagnostic> {
+    let CtValue::List(items) = field(value, "TDigest", "centroids")
+        .ok_or_else(|| unsupported("malformed TDigest.centroids value", span))?
+    else {
+        return Err(unsupported("malformed TDigest.centroids value", span));
+    };
+    items
+        .iter()
+        .map(|item| match item {
+            CtValue::List(pair) if pair.len() == 2 => {
+                Ok((as_float(&pair[0], span)?, as_float(&pair[1], span)?))
+            }
+            _ => Err(unsupported("malformed TDigest centroid", span)),
+        })
+        .collect()
+}
+
+fn tdigest_value(centroids: Vec<(f64, f64)>) -> CtValue {
+    structure(
+        "TDigest",
+        vec![(
+            "centroids",
+            CtValue::List(
+                centroids
+                    .into_iter()
+                    .map(|(mean, weight)| {
+                        CtValue::List(vec![
+                            CtValue::Float(CtFloat::f64(mean)),
+                            CtValue::Float(CtFloat::f64(weight)),
+                        ])
+                    })
+                    .collect(),
+            ),
+        )],
+    )
+}
+
+fn tdigest_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let v = float_arg(args, 0, span)?;
+    let mut cs = tdigest_centroids(recv, span)?;
+    let idx = cs.partition_point(|&(m, _)| m < v);
+    cs.insert(idx, (v, 1.0));
+    let total: f64 = cs.iter().map(|(_, w)| w).sum();
+    let mut merged: Vec<(f64, f64)> = Vec::with_capacity(cs.len());
+    let mut cum = 0.0f64;
+    for &(mean, weight) in cs.iter() {
+        if merged.is_empty() {
+            merged.push((mean, weight));
+            cum += weight;
+            continue;
+        }
+        let last = merged.last_mut().unwrap();
+        let q = cum / total;
+        let limit = 4.0 * total * q * (1.0 - q) / TDIGEST_DELTA;
+        if last.1 + weight <= limit.max(1.0) {
+            let new_w = last.1 + weight;
+            last.0 = (last.0 * last.1 + mean * weight) / new_w;
+            last.1 = new_w;
+        } else {
+            merged.push((mean, weight));
+            cum += weight;
+        }
+    }
+    Ok(tdigest_value(merged))
+}
+
+fn tdigest_quantile(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+    let q = float_arg(args, 0, span)?;
+    let cs = tdigest_centroids(recv, span)?;
+    if cs.is_empty() {
+        return Ok(CtValue::Float(CtFloat::f64(0.0)));
+    }
+    let total: f64 = cs.iter().map(|(_, w)| w).sum();
+    let target = q * total;
+    let mut cum = 0.0f64;
+    for &(mean, weight) in cs.iter() {
+        cum += weight;
+        if cum >= target {
+            return Ok(CtValue::Float(CtFloat::f64(mean)));
+        }
+    }
+    Ok(CtValue::Float(CtFloat::f64(cs.last().unwrap().0)))
+}
+
+fn cms_new() -> CtValue {
+    structure(
+        "CountMinSketch",
+        vec![(
+            "rows",
+            CtValue::List(
+                (0..4)
+                    .map(|_| {
+                        CtValue::List((0..CMS_COLS).map(|_| CtValue::Int(0)).collect())
+                    })
+                    .collect(),
+            ),
+        )],
+    )
+}
+
+fn cms_rows(value: &CtValue, span: Span) -> Result<[[u32; CMS_COLS]; 4], Diagnostic> {
+    let CtValue::List(rows) = field(value, "CountMinSketch", "rows")
+        .ok_or_else(|| unsupported("malformed CountMinSketch.rows value", span))?
+    else {
+        return Err(unsupported("malformed CountMinSketch.rows value", span));
+    };
+    if rows.len() != 4 {
+        return Err(unsupported("malformed CountMinSketch.rows value", span));
+    }
+    let mut out = [[0u32; CMS_COLS]; 4];
+    for (row_idx, row) in rows.iter().enumerate() {
+        let CtValue::List(cols) = row else {
+            return Err(unsupported("malformed CountMinSketch row", span));
+        };
+        if cols.len() != CMS_COLS {
+            return Err(unsupported("malformed CountMinSketch row", span));
+        }
+        for (col_idx, cell) in cols.iter().enumerate() {
+            let CtValue::Int(n) = cell else {
+                return Err(unsupported("malformed CountMinSketch cell", span));
+            };
+            if !(0..=u32::MAX as i64).contains(n) {
+                return Err(unsupported("malformed CountMinSketch cell", span));
+            }
+            out[row_idx][col_idx] = *n as u32;
+        }
+    }
+    Ok(out)
+}
+
+fn cms_value(rows: [[u32; CMS_COLS]; 4]) -> CtValue {
+    structure(
+        "CountMinSketch",
+        vec![(
+            "rows",
+            CtValue::List(
+                rows.into_iter()
+                    .map(|row| {
+                        CtValue::List(row.into_iter().map(|n| CtValue::Int(n as i64)).collect())
+                    })
+                    .collect(),
+            ),
+        )],
+    )
+}
+
+fn cms_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let key = string_arg(args, 0, span)?;
+    let bytes = key.as_bytes();
+    let h1 = fnv1a(bytes);
+    let h2 = fnv1a_h2(bytes);
+    let mut tbl = cms_rows(recv, span)?;
+    for row in 0..4usize {
+        let col = ((h1.wrapping_add(h2.wrapping_mul(row as u64 + 1))) & 0xFF) as usize;
+        tbl[row][col] = tbl[row][col].saturating_add(1);
+    }
+    Ok(cms_value(tbl))
+}
+
+fn cms_count(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+    let key = string_arg(args, 0, span)?;
+    let bytes = key.as_bytes();
+    let h1 = fnv1a(bytes);
+    let h2 = fnv1a_h2(bytes);
+    let tbl = cms_rows(recv, span)?;
+    let min = (0..4usize)
+        .map(|row| {
+            let col = ((h1.wrapping_add(h2.wrapping_mul(row as u64 + 1))) & 0xFF) as usize;
+            tbl[row][col]
+        })
+        .min()
+        .unwrap();
+    Ok(CtValue::Int(min as i64))
+}
+
+fn reservoir_new(args: &[CtValue], span: Span) -> EvalResult {
+    let capacity = int_arg(args, 0, span)?.max(1);
+    Ok(structure(
+        "ReservoirSampler",
+        vec![
+            ("capacity", CtValue::Int(capacity)),
+            ("count", CtValue::Int(0)),
+            ("rng", CtValue::Int(0xdeadbeef_cafebabeu64 as i64)),
+            ("reservoir", CtValue::List(Vec::new())),
+        ],
+    ))
+}
+
+fn reservoir_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let item = string_arg(args, 0, span)?.to_string();
+    let capacity = int_field(recv, "ReservoirSampler", "capacity", span)? as usize;
+    let mut count = int_field(recv, "ReservoirSampler", "count", span)? as u64;
+    let mut rng = int_field(recv, "ReservoirSampler", "rng", span)? as u64;
+    let CtValue::List(mut reservoir) = value_field(recv, "ReservoirSampler", "reservoir", span)?
+    else {
+        return Err(unsupported("malformed ReservoirSampler.reservoir value", span));
+    };
+    count += 1;
+    if reservoir.len() < capacity {
+        reservoir.push(CtValue::Str(item));
+    } else {
+        let mut x = rng;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        rng = x;
+        let j = (x % count) as usize;
+        if j < capacity {
+            reservoir[j] = CtValue::Str(item);
+        }
+    }
+    Ok(structure(
+        "ReservoirSampler",
+        vec![
+            ("capacity", CtValue::Int(capacity as i64)),
+            ("count", CtValue::Int(count as i64)),
+            ("rng", CtValue::Int(rng as i64)),
+            ("reservoir", CtValue::List(reservoir)),
+        ],
+    ))
+}
+
+fn reservoir_sample(recv: &CtValue, span: Span) -> EvalResult {
+    value_field(recv, "ReservoirSampler", "reservoir", span)
+}
+
+// ── D-SOLVER-LIB1=A: mirrors AOT jet_solver_* in MathRandomTime.rs ──────────
+
+fn solver_require_update(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+    let seed = int_field(recv, crate::Syntax::SOLVER_TYPE, "seed", span)?;
+    let checked = int_field(recv, crate::Syntax::SOLVER_TYPE, "checked", span)?;
+    let failures = int_field(recv, crate::Syntax::SOLVER_TYPE, "failures", span)?;
+    let ok = as_bool(one(args, 0, "Solver", "require", span)?, span)?;
+    Ok(structure(
+        crate::Syntax::SOLVER_TYPE,
+        vec![
+            ("seed", CtValue::Int(seed)),
+            ("checked", CtValue::Int(checked + 1)),
+            (
+                "failures",
+                CtValue::Int(if ok { failures } else { failures + 1 }),
+            ),
+        ],
+    ))
+}
+
+fn solver_failure_count(recv: &CtValue, span: Span) -> EvalResult {
+    Ok(CtValue::Int(int_field(
+        recv,
+        crate::Syntax::SOLVER_TYPE,
+        "failures",
+        span,
+    )?))
+}
+
+fn solver_status(recv: &CtValue, span: Span) -> EvalResult {
+    let failures = int_field(recv, crate::Syntax::SOLVER_TYPE, "failures", span)?;
+    Ok(CtValue::Str(
+        if failures == 0 { "ok" } else { "failed" }.to_string(),
+    ))
 }
 
 #[cfg(test)]

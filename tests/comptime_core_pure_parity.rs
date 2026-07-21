@@ -1183,3 +1183,158 @@ fn rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpr
         true,
     );
 }
+
+const LINALG_DECLS: &str = r#"fn linalg_view() -> String {
+    a: Vec3 :: Vec3(1.0, 2.0, 3.0)
+    b: Vec3 :: Vec3(4.0, 5.0, 6.0)
+    sum: Vec3 :: a + b
+    crossed: Vec3 :: a.cross(b)
+    scale: Mat3 :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+    scaled: Vec3 :: scale * Vec3(1.0, 2.0, 3.0)
+    v: F32x4 :: F32x4(1.0, 2.0, 3.0, 4.0)
+    w: F32x4 :: F32x4(10.0, 20.0, 30.0, 40.0)
+    added: F32x4 :: v + w
+    d: F64x2 :: F64x2.from_array([1.5, 2.5])
+    return "{sum.to_array()}|{a.dot(b)}|{crossed.to_array()}|{Vec3(0.0, 3.0, 4.0).length()}|{Vec3(0.0, 3.0, 4.0).normalize().to_array()}|{scaled.to_array()}|{scale.matmul(scale).to_array()}|{added.to_array()}|{(v * w).to_array()}|{F32x4.splat(7.0).to_array()}|{v[2]}|{v.sum()}|{v.product()}|{v.min()}|{v.max()}|{v.reduce(@Max)}|{v.reduce(@Mul)}|{(d + d).to_array()}|{d.sum()}|{d.product()}|{d.min()}|{d.max()}"
+}"#;
+const LINALG_EXPECTED: &str = "[5.0, 7.0, 9.0]|32.0|[-3.0, 6.0, -3.0]|5.0|[0.0, 0.6, 0.8]|[2.0, 4.0, 6.0]|[4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0]|[11.0, 22.0, 33.0, 44.0]|[10.0, 40.0, 90.0, 160.0]|[7.0, 7.0, 7.0, 7.0]|3.0|10.0|24.0|1.0|4.0|4.0|24.0|[3.0, 5.0]|4.0|3.75|1.5|2.5";
+
+const OVERFLOW_DECLS: &str = r#"fn overflow_view() -> String {
+    hi: U8 :: 200
+    lo: U8 :: 100
+    fallback: U8 :: 0
+    wrapped :: wrapping(hi + lo)
+    saturated :: saturating(hi + lo)
+    checked_miss :: checked(hi + lo) ?? fallback
+    scratch :: 1
+    consume(scratch)
+    return "{wrapped}|{saturated}|{checked_miss}"
+}"#;
+const OVERFLOW_EXPECTED: &str = "44|255|0";
+const EXPECT_DECLS: &str = r#"fn expect_view() -> String {
+    holder :: expect("ok")
+    consume(holder)
+    return "expect-ok"
+}"#;
+const EXPECT_EXPECTED: &str = "expect-ok";
+
+#[test]
+fn rustc_backed_linalg_simd_matches_all_execution_tiers_exactly() {
+    let source = parity_source("linalg_view()", LINALG_DECLS);
+    assert_eq!(
+        check_aot_comptime("linalg/simd-direct", &source),
+        LINALG_EXPECTED
+    );
+    check_dev_tiers("linalg-simd-direct", &source, LINALG_EXPECTED);
+}
+
+#[test]
+fn rustc_backed_overflow_opt_and_consume_match_aot_comptime() {
+    let source = parity_source("overflow_view()", OVERFLOW_DECLS);
+    assert_eq!(
+        check_aot_comptime("overflow/opt-ins", &source),
+        OVERFLOW_EXPECTED
+    );
+    check_dev_tiers("overflow-opt-ins", &source, OVERFLOW_EXPECTED);
+}
+
+#[test]
+fn public_transcript_covers_linalg_overflow_and_expect_exactly() {
+    let values = exact_values(&[LINALG_DECLS, "linalg_view()"]);
+    assert_eq!(values, [format!("\"{LINALG_EXPECTED}\" : String")]);
+    let values = exact_values(&[OVERFLOW_DECLS, "overflow_view()"]);
+    assert_eq!(values, [format!("\"{OVERFLOW_EXPECTED}\" : String")]);
+    // `expect` is test-harness-shaped in AOT (JetExpect + snapshot); comptime
+    // constructs the wrapper and `consume` discards it — prove via REPL only.
+    let values = exact_values(&[EXPECT_DECLS, "expect_view()"]);
+    assert_eq!(values, [format!("\"{EXPECT_EXPECTED}\" : String")]);
+}
+
+const SOLVER_FN: &str = r#"fn solver_view() -> String {
+    ok_solver := solve.Solver.new(7)
+    ok_solver.require(true)
+    ok_solver.require(1 == 1)
+    bad := solve.Solver.new(42)
+    bad.require(true)
+    bad.require(false)
+    bad.require(true)
+    return "{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}"
+}"#;
+const SOLVER_DECLS: &str = "use core.solve as solve\nfn solver_view() -> String {\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(true)\n    return \"{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
+const SOLVER_EXPECTED: &str = "ok|0|failed|1";
+
+#[test]
+fn rustc_backed_solver_matches_aot_comptime_and_dev_tiers() {
+    let source = parity_source("solver_view()", SOLVER_DECLS);
+    assert_eq!(
+        check_aot_comptime("solver/require-status", &source),
+        SOLVER_EXPECTED
+    );
+    check_dev_tiers("solver-require-status", &source, SOLVER_EXPECTED);
+}
+
+#[test]
+fn public_transcript_covers_solver_exactly() {
+    let values = exact_values(&[
+        "use core.solve as solve",
+        SOLVER_FN,
+        "solver_view()",
+    ]);
+    assert_eq!(values, [format!("\"{SOLVER_EXPECTED}\" : String")]);
+}
+
+const ARCHIVE_DECLS: &str = r#"use core.archive as archive
+fn archive_view() -> String {
+    bytes: [U8] :: [72, 101, 108, 108, 111]
+    zipped :: archive.zip_compress("hello.txt", bytes)
+    empty: [U8] :: []
+    tarred := archive.tar_add(empty, "hello.txt", bytes)
+    tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116])
+    zip_bytes :: archive.zip_decompress(zipped)
+    tar_bytes :: archive.tar_get(tarred, "quote\"slash\\.txt")
+    return "{zip_bytes}|{tar_bytes}|{archive.tar_names_json(tarred)}|{archive.tar_get(tarred, "missing").len()}"
+}"#;
+const ARCHIVE_EXPECTED: &str =
+    "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0";
+const ARCHIVE_INVALID_TAR_NAME_DECLS: &str = r#"use core.archive as archive
+fn invalid_tar_name_view(name: String) -> String {
+    empty: [U8] :: []
+    valid :: archive.tar_add(empty, "keep.txt", [1])
+    attempted :: archive.tar_add(valid, name, [2])
+    return "{archive.tar_names_json(attempted)}|{archive.tar_get(attempted, "keep.txt")}|{archive.tar_get(attempted, name)}"
+}"#;
+const ARCHIVE_INVALID_TAR_NAME_EXPECTED: &str = "[\"keep.txt\"]|[1]|[]";
+
+#[test]
+fn rustc_backed_archive_matches_aot_comptime_and_dev_tiers() {
+    let source = parity_source("archive_view()", ARCHIVE_DECLS);
+    assert_eq!(
+        check_aot_comptime("archive/all-pure-calls", &source),
+        ARCHIVE_EXPECTED
+    );
+    check_dev_tiers("archive-all-pure-calls", &source, ARCHIVE_EXPECTED);
+}
+
+#[test]
+fn archive_rejects_invalid_tar_names_across_aot_comptime_and_forced_interpreter() {
+    for (label, name) in [
+        ("empty", "\"\""),
+        ("parent", "\"../x\""),
+        ("absolute", "\"/x\""),
+    ] {
+        let source = parity_source(
+            &format!("invalid_tar_name_view({name})"),
+            ARCHIVE_INVALID_TAR_NAME_DECLS,
+        );
+        assert_eq!(
+            check_aot_comptime(&format!("archive/invalid-tar-name/{label}"), &source),
+            ARCHIVE_INVALID_TAR_NAME_EXPECTED,
+        );
+        check_dev_tiers_with_boundary(
+            &format!("archive-invalid-tar-name-{label}"),
+            &source,
+            ARCHIVE_INVALID_TAR_NAME_EXPECTED,
+            true,
+        );
+    }
+}

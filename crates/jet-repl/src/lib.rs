@@ -1332,9 +1332,6 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     if t.contains("core.net") {
         return Some("network sockets (`core.net`)");
     }
-    if t.contains("core.archive") || t.contains("jet.archive") {
-        return Some("`core.archive`");
-    }
     if import != Some("core.reactive.loadable")
         && (t.contains("core.reactive") || t.contains("jet.reactive"))
     {

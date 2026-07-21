@@ -73,11 +73,7 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.time", "now"),
     ("core.time", "now_utc"),
     ("core.time", "today"),
-    ("core.time", "utc"),
     ("core.time", "local_time"),
-    ("core.time", "zoned"),
-    ("core.time", "zoned_local"),
-    ("core.time", "zone"),
     ("core.time", "instant"),
     ("core.time", "sleep"),
     ("core.time", "start"),
@@ -102,14 +98,9 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // `inner_join`/`left_join` and Packet B's `pivot_sum` route through the
     // interpreter because their closure arguments need live `Interp` access.
     //
-    // core.archive / core.compress.*: zip/tar and gzip/zstd — needs a hand-rolled
-    // (I6) compression implementation ported into the interpreter, not a
-    // one-line Rust std call.
-    ("core.archive", "tar_add"),
-    ("core.archive", "tar_get"),
-    ("core.archive", "tar_names_json"),
-    ("core.archive", "zip_compress"),
-    ("core.archive", "zip_decompress"),
+    // core.compress.*: AOT is a pure [U8]→[U8] byte transform, not ambient
+    // FS. Still needs an honest comptime port — keep PurePending, do not wash
+    // as Boundary. core.archive is interpreter-resident (card #392 C4).
     ("core.compress.gzip", "compress"),
     ("core.compress.gzip", "decompress"),
     ("core.compress.zstd", "compress"),
@@ -224,20 +215,11 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.watcher", "set"),
     ("core.web.devserver", "app"),
     ("core.web.devserver", "for_app"),
-    // Misc small surfaces, each its own small future card.
-    ("core.args", "spec"),
-    ("core.game", "run"),
-    ("core.math", "decimal"),
-    ("core.testing", "corpus"),
-    ("core.testing", "fixture"),
-    ("core.testing", "golden"),
-    ("core.testing", "snap"),
-    ("core.testing", "temp_dir"),
-    // Opaque mutable handles still pending.
-    ("core.sketch.cms", "new"),
-    ("core.sketch.hll", "new"),
-    ("core.sketch.reservoir", "new"),
-    ("core.sketch.tdigest", "new"),
+    // Misc ambient/runtime surfaces — named boundaries (see core_boundary).
+    // core.math.decimal PORTED (card #392 C4) — see CtDecimal + CorePureParity.
+    // core.testing fixture/snap/golden/corpus/temp_dir: filesystem effects —
+    // named boundaries (fake_rng/fake_clock already Covered).
+    // core.sketch.* PORTED (card #392 C4) — see CorePureParity sketch helpers.
     // core.url: PORTED (card #392 pass 3) — see `UrlLite.rs` + `Methods.rs`'s
     // `("core.url", ...)` arms, ported verbatim from `JetUrl`/`jet_url_*`
     // (`UrlMime.rs` + `MathRandomTime.rs`).
@@ -979,6 +961,14 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     if matches!(module, "core.os" | "core.raylib" | "core.ui" | "core.term" | "core.web" | "core.web.storage.local" | "core.web.storage.session" | "core.tasks" | "core.watcher" | "core.web.devserver" | "core.uuid") {
         return Some("named ambient/native boundary");
     }
+    if module == "core.testing"
+        && matches!(method, "corpus" | "fixture" | "golden" | "snap" | "temp_dir")
+    {
+        return Some("named testing filesystem boundary");
+    }
+    if matches!((module, method), ("core.args", "spec") | ("core.game", "run")) {
+        return Some("named ambient runtime boundary");
+    }
     if matches!(module, "core.event" | "core.http.client" | "core.http.server" | "core.mem" | "core.scope") {
         return Some("named runtime/native boundary");
     }
@@ -987,7 +977,7 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     {
         return Some("named I/O handle boundary");
     }
-    if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "utc" | "local_time" | "zoned" | "zoned_local" | "zone" | "instant" | "sleep" | "start") {
+    if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "local_time" | "instant" | "sleep" | "start") {
         return Some("named clock boundary");
     }
     if matches!(
@@ -1009,6 +999,18 @@ fn value_boundary(owner: &str) -> Option<&'static str> {
     if owner == "Instant" {
         return Some("named clock boundary");
     }
+    if matches!(owner, "Secret" | "WrappedVaultKey") {
+        return Some("named native/security boundary");
+    }
+    // True reactive / decision handles need a live runtime graph. Pool is
+    // D-MEM1/D-POOLID-API1 (generational arena) and stays PurePending until
+    // ported. Solver (D-SOLVER-LIB1) is ported in CorePureParity + dispatch.
+    if matches!(
+        owner,
+        "Signal" | "Shared" | "Effect" | "Computed" | "Derived" | "DecisionHook"
+    ) {
+        return Some("named reactive runtime boundary");
+    }
     matches!(owner, "Task" | "Receiver" | "Sender" | "Event" | "AsyncEvent" | "DispatchReport" | "Hook" | "Subscription" | "EventScope" | "EventTrace" | "WatchHandle" | "WatchSet" | "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash")
         .then_some("named runtime/native handle boundary")
 }
@@ -1017,6 +1019,8 @@ fn value_method_boundary(owner: &str, method: &str) -> Option<&'static str> {
     match (owner, method) {
         ("List" | "FixedList", "view") => Some("named E0214 retired spelling boundary"),
         ("FixedList", "insert") => Some("named E0964 fixed-length boundary"),
+        ("Float", "origin") => Some("named float-debug tracking boundary"),
+        ("Stopwatch", "elapsed_millis") => Some("named clock boundary"),
         _ => None,
     }
 }
@@ -1162,12 +1166,6 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                     Some((Class::Boundary, "named runtime resource boundary"))
                 } else if direct_names.contains(&entry.method) {
                     Some((Class::Covered, "comptime direct dispatch"))
-                } else if matches!(
-                    entry.method.as_str(),
-                    "consume" | "expect" | "checked" | "saturating" | "wrapping" | "Decimal"
-                        | "F32x4" | "F64x2" | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
-                ) {
-                    Some((Class::PurePending, "direct builtin port pending"))
                 } else {
                     None
                 }
@@ -1194,6 +1192,14 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                                 | "trailing_zeros"
                         )
                             && ct_values.contains(&("Int".to_string(), entry.method.clone()))
+                    }
+                    // D-FLOATW1: CtFloat preserves F32 width, so Float method
+                    // dispatch is honest coverage for the F32 surface.
+                    "F32" => {
+                        matches!(
+                            entry.method.as_str(),
+                            "is_nan" | "is_infinite" | "is_finite" | "to_string"
+                        ) && ct_values.contains(&("Float".to_string(), entry.method.clone()))
                     }
                     _ => false,
                 };
@@ -1290,7 +1296,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (495, 147, 483, 49));
+    assert_eq!((fixed, direct_static, value, bespoke), (495, 148, 486, 49));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1317,25 +1323,31 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         );
     }
     assert_eq!(record(&records, Surface::DirectStatic, "Bag", "new").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_bytes").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::DirectStatic, "WrappedVaultKey", "from_bytes").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Value, "WrappedVaultKey", "bytes").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::DirectStatic, "String", "from_bytes").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "BigInt").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::PurePending);
-    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "wrapping").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "consume").class, Class::Covered);
     assert_eq!(record(&records, Surface::Value, "String", "trim").class, Class::Covered);
     for method in ["after", "before", "bytes", "slice"] {
         assert_eq!(record(&records, Surface::Value, "String", method).class, Class::Covered);
     }
     for method in ["is_nan", "is_infinite", "is_finite"] {
         assert_eq!(record(&records, Surface::Value, "Float", method).class, Class::Covered);
-        assert_eq!(record(&records, Surface::Value, "F32", method).class, Class::PurePending);
+        assert_eq!(record(&records, Surface::Value, "F32", method).class, Class::Covered);
     }
-    // CtValue::Float currently erases F32's width. Do not infer coverage from
-    // Float dispatch until comptime preserves f32 rounding across stored values.
-    assert_eq!(record(&records, Surface::Value, "F32", "to_string").class, Class::PurePending);
+    // D-FLOATW1: F32 width is preserved in CtFloat, so F32.to_string shares Float display.
+    assert_eq!(record(&records, Surface::Value, "F32", "to_string").class, Class::Covered);
     for owner in ["I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
         assert_eq!(record(&records, Surface::Value, owner, "to_string").class, Class::Covered);
     }
-    assert_eq!(record(&records, Surface::Value, "Float", "origin").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::Value, "Float", "origin").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Value, "Stopwatch", "elapsed_millis").class, Class::Boundary);
     for owner in ["Int", "I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
         for method in [
             "count_ones",
@@ -1347,6 +1359,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         }
     }
     assert_eq!(record(&records, Surface::Value, "BigInt", "to_string").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Decimal", "to_string").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Decimal", "add").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Fixed, "core.math", "decimal").class, Class::Covered);
     for method in ["add", "add_new", "clear", "each", "has_key"] {
         assert_eq!(record(&records, Surface::Value, "Map", method).class, Class::Covered);
     }
@@ -1503,6 +1518,24 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     for method in ["to_timestamp", "to_unix_ms", "to_string"] {
         assert_eq!(record(&records, Surface::Value, "DateTime", method).class, Class::Covered);
     }
+    assert_eq!(record(&records, Surface::Value, "DateTime", "in_zone").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Zone", "name").class, Class::Covered);
+    for method in [
+        "add_duration",
+        "add_period",
+        "date",
+        "format",
+        "offset_seconds",
+        "time",
+        "to_datetime",
+        "to_string",
+        "zone",
+    ] {
+        assert_eq!(record(&records, Surface::Value, "ZonedDateTime", method).class, Class::Covered);
+    }
+    for method in ["utc", "zone", "zoned", "zoned_local"] {
+        assert_eq!(record(&records, Surface::Fixed, "core.time", method).class, Class::Covered);
+    }
     for method in [
         "date",
         "format",
@@ -1537,6 +1570,60 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         record(&records, Surface::Fixed, "core.testing", "fake_clock").class,
         Class::Covered
     );
+    for method in ["corpus", "fixture", "golden", "snap", "temp_dir"] {
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.testing", method).class,
+            Class::Boundary
+        );
+    }
+    for method in [
+        "tar_add",
+        "tar_get",
+        "tar_names_json",
+        "zip_compress",
+        "zip_decompress",
+    ] {
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.archive", method).class,
+            Class::Covered
+        );
+    }
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.compress.gzip", "compress").class,
+        Class::PurePending
+    );
+    assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Fixed, "core.game", "run").class, Class::Boundary);
+    for (module, method) in [
+        ("core.sketch.hll", "new"),
+        ("core.sketch.tdigest", "new"),
+        ("core.sketch.cms", "new"),
+        ("core.sketch.reservoir", "new"),
+    ] {
+        assert_eq!(
+            record(&records, Surface::Bespoke, module, method).class,
+            Class::Covered
+        );
+    }
+    for owner in ["Signal", "Shared", "Effect", "Computed", "Derived", "DecisionHook"] {
+        assert_eq!(
+            record(&records, Surface::Value, owner, match owner {
+                "Signal" => "get",
+                "Shared" => "read",
+                "Effect" => "unsubscribe",
+                "Computed" | "Derived" => "get",
+                "DecisionHook" => "run",
+                _ => unreachable!(),
+            })
+            .class,
+            Class::Boundary
+        );
+    }
+    assert_eq!(record(&records, Surface::Value, "Pool", "ids").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::Value, "Solver", "status").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "Solver", "new").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Solver", "require").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Solver", "failure_count").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class, Class::Boundary);
@@ -1550,14 +1637,15 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_174, 733, 74, 367));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 782, 7, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
+    let hash = stable_hash(&rendered);
     assert_eq!(
-        stable_hash(&rendered),
-        14766545749149204126,
+        hash,
+        14096273572204797594,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
