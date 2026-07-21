@@ -588,6 +588,10 @@ pub fn jet_http_client_send_with_impl(
     connect_timeout_ms: Option<i64>,
     read_timeout_ms: Option<i64>,
     total_timeout_ms: Option<i64>,
+    dns_timeout_ms: Option<i64>,
+    tls_timeout_ms: Option<i64>,
+    write_timeout_ms: Option<i64>,
+    first_byte_timeout_ms: Option<i64>,
     redirects: Option<i64>,
     proxy: Option<&str>,
     cookies_flat: &[String],
@@ -600,25 +604,17 @@ pub fn jet_http_client_send_with_impl(
         .get(&id)
         .cloned()
         .ok_or(JetHttpBridgeError::Internal)?;
-    let default_timeout = timeout_ms
-        .map(|value| validated_timeout("timeout", value))
-        .transpose()?;
-    let connect = connect_timeout_ms
-        .map(|value| validated_timeout("connect timeout", value))
-        .transpose()?
-        .or(default_timeout)
-        .unwrap_or(handle.policy.connect_timeout);
-    let read = read_timeout_ms
-        .map(|value| validated_timeout("read timeout", value))
-        .transpose()?
-        .or(default_timeout)
-        .unwrap_or(handle.policy.read_timeout);
-    let write = default_timeout.unwrap_or(handle.policy.write_timeout);
-    let total = compose_total_deadline(
-        total_timeout_ms
-            .map(|value| validated_timeout("total timeout", value))
-            .transpose()?
-            .or(handle.policy.total_timeout),
+    let phases = resolve_request_phase_timeouts(
+        timeout_ms,
+        connect_timeout_ms,
+        read_timeout_ms,
+        total_timeout_ms,
+        dns_timeout_ms,
+        tls_timeout_ms,
+        write_timeout_ms,
+        first_byte_timeout_ms,
+        &handle.policy,
+        false,
     )?;
     let (redirect_limit, explicit_redirect_limit) = match redirects {
         Some(value) => (
@@ -643,13 +639,13 @@ pub fn jet_http_client_send_with_impl(
         url,
         headers,
         body,
-        handle.policy.dns_timeout,
-        connect,
-        handle.policy.tls_timeout,
-        handle.policy.first_byte_timeout,
-        read,
-        write,
-        total,
+        phases.dns,
+        phases.connect,
+        phases.tls,
+        phases.first_byte,
+        phases.read,
+        phases.write,
+        phases.total,
         redirect_limit,
         explicit_redirect_limit,
         handle.policy.same_origin_credentials,
@@ -1841,6 +1837,76 @@ fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, JetHttpB
     Ok(Duration::from_millis(milliseconds))
 }
 
+struct PhaseTimeouts {
+    dns: Duration,
+    connect: Duration,
+    tls: Duration,
+    write: Duration,
+    first_byte: Duration,
+    read: Duration,
+    total: Option<Instant>,
+}
+
+fn resolve_phase_timeout(
+    explicit: Option<i64>,
+    name: &str,
+    blanket: Option<Duration>,
+    policy: Duration,
+) -> Result<Duration, JetHttpBridgeError> {
+    if let Some(ms) = explicit {
+        return validated_timeout(name, ms);
+    }
+    Ok(blanket.unwrap_or(policy))
+}
+
+fn resolve_request_phase_timeouts(
+    blanket_ms: Option<i64>,
+    connect_ms: Option<i64>,
+    read_ms: Option<i64>,
+    total_ms: Option<i64>,
+    dns_ms: Option<i64>,
+    tls_ms: Option<i64>,
+    write_ms: Option<i64>,
+    first_byte_ms: Option<i64>,
+    policy: &ClientPolicy,
+    oneshot_default: bool,
+) -> Result<PhaseTimeouts, JetHttpBridgeError> {
+    let blanket = if oneshot_default {
+        Some(validated_timeout(
+            "timeout",
+            blanket_ms.unwrap_or(30_000),
+        )?)
+    } else {
+        blanket_ms
+            .map(|value| validated_timeout("timeout", value))
+            .transpose()?
+    };
+    let total = compose_total_deadline(match total_ms {
+        Some(ms) => Some(validated_timeout("total timeout", ms)?),
+        None if oneshot_default => None,
+        None => policy.total_timeout,
+    })?;
+    Ok(PhaseTimeouts {
+        dns: resolve_phase_timeout(dns_ms, "DNS timeout", blanket, policy.dns_timeout)?,
+        connect: resolve_phase_timeout(
+            connect_ms,
+            "connect timeout",
+            blanket,
+            policy.connect_timeout,
+        )?,
+        tls: resolve_phase_timeout(tls_ms, "TLS timeout", blanket, policy.tls_timeout)?,
+        write: resolve_phase_timeout(write_ms, "write timeout", blanket, policy.write_timeout)?,
+        first_byte: resolve_phase_timeout(
+            first_byte_ms,
+            "first byte timeout",
+            blanket,
+            policy.first_byte_timeout,
+        )?,
+        read: resolve_phase_timeout(read_ms, "read timeout", blanket, policy.read_timeout)?,
+        total,
+    })
+}
+
 /// Perform an HTTP GET. Returns (status_code, body, headers_flat) where headers_flat
 /// is alternating [key, value, key, value, ...].
 pub fn jet_http_client_get_impl(
@@ -1850,6 +1916,10 @@ pub fn jet_http_client_get_impl(
         "GET",
         url,
         &[],
+        None,
+        None,
+        None,
+        None,
         None,
         None,
         None,
@@ -1879,6 +1949,10 @@ pub fn jet_http_client_post_impl(
         None,
         None,
         None,
+        None,
+        None,
+        None,
+        None,
         &[],
         &[],
         &[],
@@ -1899,24 +1973,28 @@ pub fn jet_http_client_send_stream_impl(
     connect_timeout_ms: Option<i64>,
     read_timeout_ms: Option<i64>,
     total_timeout_ms: Option<i64>,
+    dns_timeout_ms: Option<i64>,
+    tls_timeout_ms: Option<i64>,
+    write_timeout_ms: Option<i64>,
+    first_byte_timeout_ms: Option<i64>,
     redirects: Option<i64>,
     proxy: Option<&str>,
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
 ) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
-    let default_timeout = validated_timeout("timeout", timeout_ms.unwrap_or(30_000))?;
-    let connect_timeout = connect_timeout_ms
-        .map(|milliseconds| validated_timeout("connect timeout", milliseconds))
-        .transpose()?
-        .unwrap_or(default_timeout);
-    let read_timeout = read_timeout_ms
-        .map(|milliseconds| validated_timeout("read timeout", milliseconds))
-        .transpose()?
-        .unwrap_or(default_timeout);
-    let total_timeout = total_timeout_ms
-        .map(|milliseconds| validated_timeout("total timeout", milliseconds))
-        .transpose()?;
+    let phases = resolve_request_phase_timeouts(
+        timeout_ms,
+        connect_timeout_ms,
+        read_timeout_ms,
+        total_timeout_ms,
+        dns_timeout_ms,
+        tls_timeout_ms,
+        write_timeout_ms,
+        first_byte_timeout_ms,
+        &ClientPolicy::default(),
+        true,
+    )?;
     let redirects = redirects
         .map(|limit| u32::try_from(limit).map_err(|_| JetHttpBridgeError::Redirect))
         .transpose()?;
@@ -1932,7 +2010,6 @@ pub fn jet_http_client_send_stream_impl(
     } else {
         form_body.as_ref().map(Vec::len)
     };
-    let total_deadline = compose_total_deadline(total_timeout)?;
     send_following_redirects_upload(
         default_client_pool().clone(),
         0,
@@ -1946,13 +2023,13 @@ pub fn jet_http_client_send_stream_impl(
         form_body,
         if has_user_body { Some(body_read) } else { None },
         stream_len,
-        default_timeout,
-        connect_timeout,
-        default_timeout,
-        default_timeout,
-        read_timeout,
-        default_timeout,
-        total_deadline,
+        phases.dns,
+        phases.connect,
+        phases.tls,
+        phases.first_byte,
+        phases.read,
+        phases.write,
+        phases.total,
         redirect_limit,
         explicit_redirect_limit,
         true,
@@ -1977,6 +2054,10 @@ pub fn jet_http_client_send_with_stream_impl(
     connect_timeout_ms: Option<i64>,
     read_timeout_ms: Option<i64>,
     total_timeout_ms: Option<i64>,
+    dns_timeout_ms: Option<i64>,
+    tls_timeout_ms: Option<i64>,
+    write_timeout_ms: Option<i64>,
+    first_byte_timeout_ms: Option<i64>,
     redirects: Option<i64>,
     proxy: Option<&str>,
     cookies_flat: &[String],
@@ -1989,25 +2070,17 @@ pub fn jet_http_client_send_with_stream_impl(
         .get(&id)
         .cloned()
         .ok_or(JetHttpBridgeError::Internal)?;
-    let default_timeout = timeout_ms
-        .map(|value| validated_timeout("timeout", value))
-        .transpose()?;
-    let connect = connect_timeout_ms
-        .map(|value| validated_timeout("connect timeout", value))
-        .transpose()?
-        .or(default_timeout)
-        .unwrap_or(handle.policy.connect_timeout);
-    let read = read_timeout_ms
-        .map(|value| validated_timeout("read timeout", value))
-        .transpose()?
-        .or(default_timeout)
-        .unwrap_or(handle.policy.read_timeout);
-    let write = default_timeout.unwrap_or(handle.policy.write_timeout);
-    let total = compose_total_deadline(
-        total_timeout_ms
-            .map(|value| validated_timeout("total timeout", value))
-            .transpose()?
-            .or(handle.policy.total_timeout),
+    let phases = resolve_request_phase_timeouts(
+        timeout_ms,
+        connect_timeout_ms,
+        read_timeout_ms,
+        total_timeout_ms,
+        dns_timeout_ms,
+        tls_timeout_ms,
+        write_timeout_ms,
+        first_byte_timeout_ms,
+        &handle.policy,
+        false,
     )?;
     let (redirect_limit, explicit_redirect_limit) = match redirects {
         Some(value) => (
@@ -2042,13 +2115,13 @@ pub fn jet_http_client_send_with_stream_impl(
         form_body,
         if has_user_body { Some(body_read) } else { None },
         stream_len,
-        handle.policy.dns_timeout,
-        connect,
-        handle.policy.tls_timeout,
-        handle.policy.first_byte_timeout,
-        read,
-        write,
-        total,
+        phases.dns,
+        phases.connect,
+        phases.tls,
+        phases.first_byte,
+        phases.read,
+        phases.write,
+        phases.total,
         redirect_limit,
         explicit_redirect_limit,
         handle.policy.same_origin_credentials,
@@ -2070,24 +2143,28 @@ pub fn jet_http_client_send_impl(
     connect_timeout_ms: Option<i64>,
     read_timeout_ms: Option<i64>,
     total_timeout_ms: Option<i64>,
+    dns_timeout_ms: Option<i64>,
+    tls_timeout_ms: Option<i64>,
+    write_timeout_ms: Option<i64>,
+    first_byte_timeout_ms: Option<i64>,
     redirects: Option<i64>,
     proxy: Option<&str>,
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
 ) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
-    let default_timeout = validated_timeout("timeout", timeout_ms.unwrap_or(30_000))?;
-    let connect_timeout = connect_timeout_ms
-        .map(|milliseconds| validated_timeout("connect timeout", milliseconds))
-        .transpose()?
-        .unwrap_or(default_timeout);
-    let read_timeout = read_timeout_ms
-        .map(|milliseconds| validated_timeout("read timeout", milliseconds))
-        .transpose()?
-        .unwrap_or(default_timeout);
-    let total_timeout = total_timeout_ms
-        .map(|milliseconds| validated_timeout("total timeout", milliseconds))
-        .transpose()?;
+    let phases = resolve_request_phase_timeouts(
+        timeout_ms,
+        connect_timeout_ms,
+        read_timeout_ms,
+        total_timeout_ms,
+        dns_timeout_ms,
+        tls_timeout_ms,
+        write_timeout_ms,
+        first_byte_timeout_ms,
+        &ClientPolicy::default(),
+        true,
+    )?;
     let redirects = redirects
         .map(|limit| u32::try_from(limit).map_err(|_| JetHttpBridgeError::Redirect))
         .transpose()?;
@@ -2095,7 +2172,6 @@ pub fn jet_http_client_send_impl(
     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
     let (headers, body) =
         prepare_request_parts(headers_flat, body, cookies_flat, form_flat, multipart_flat);
-    let total_deadline = compose_total_deadline(total_timeout)?;
     send_following_redirects(
         default_client_pool().clone(),
         0,
@@ -2107,13 +2183,13 @@ pub fn jet_http_client_send_impl(
         url,
         headers,
         body,
-        default_timeout,
-        connect_timeout,
-        default_timeout,
-        default_timeout,
-        read_timeout,
-        default_timeout,
-        total_deadline,
+        phases.dns,
+        phases.connect,
+        phases.tls,
+        phases.first_byte,
+        phases.read,
+        phases.write,
+        phases.total,
         redirect_limit,
         explicit_redirect_limit,
         true,

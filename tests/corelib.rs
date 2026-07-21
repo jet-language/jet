@@ -5308,7 +5308,7 @@ fn main() {
         "Warning".to_string(), "two".to_string(),
     ];
     let (_, body, _, headers) = bridge::jet_http_client_send_impl(
-        "GET", &url, &request_headers, None, None, None, None, None, None, None,
+        "GET", &url, &request_headers, None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap();
     assert_eq!(
@@ -5516,7 +5516,7 @@ fn main() {
         format!("before\r\n--{long_candidate}\r\n{candidates}\r\nafter"),
     ];
     let response = bridge::jet_http_client_send_impl(
-        "POST", &url, &[], None, None, None, None, None, None, None,
+        "POST", &url, &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &multipart,
     ).unwrap();
     let body = bridge::jet_http_client_body_read_impl(response.1, 8).unwrap().unwrap();
@@ -5677,7 +5677,7 @@ fn main() {
     ];
     let errors = cases.into_iter().map(|(timeout, connect, read, total)| {
         bridge::jet_http_client_send_impl(
-            "GET", &url, &[], None, timeout, connect, read, total, None, None,
+            "GET", &url, &[], None, timeout, connect, read, total, None, None, None, None, None, None,
             &[], &[], &[],
         ).err()
     }).collect::<Vec<_>>();
@@ -5685,36 +5685,36 @@ fn main() {
     let unsupported_url = url.replacen("http://", "ftp://", 1);
     let url_errors = ["http://[".to_string(), unsupported_url].map(|url| {
         bridge::jet_http_client_send_impl(
-            "GET", &url, &[], None, None, None, None, None, None, None,
+            "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None,
             &[], &[], &[],
         ).unwrap_err()
     });
     assert!(url_errors.into_iter().all(|error| matches!(error, bridge::JetHttpBridgeError::InvalidUrl)));
     let refused_url = "http://127.0.0.1:0/".to_string();
     let connection_error = bridge::jet_http_client_send_impl(
-        "GET", &refused_url, &[], None, None, None, None, None, None, None,
+        "GET", &refused_url, &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(connection_error, bridge::JetHttpBridgeError::Connect));
     let proxy_error = bridge::jet_http_client_send_impl(
-        "GET", &url, &[], None, None, None, None, None, None, Some("ftp://proxy.invalid"),
+        "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, Some("ftp://proxy.invalid"),
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(proxy_error, bridge::JetHttpBridgeError::Proxy));
     let proxy_connection_error = bridge::jet_http_client_send_impl(
-        "GET", &"https://example.invalid/".to_string(), &[], None, None, None, None, None, None,
+        "GET", &"https://example.invalid/".to_string(), &[], None, None, None, None, None, None, None, None, None, None,
         Some(url.as_str()),
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(proxy_connection_error, bridge::JetHttpBridgeError::Proxy));
     let proxy_auth_error = bridge::jet_http_client_send_impl(
-        "GET", &"https://auth.invalid/".to_string(), &[], None, None, None, None, None, None,
+        "GET", &"https://auth.invalid/".to_string(), &[], None, None, None, None, None, None, None, None, None, None,
         Some(url.as_str()),
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(proxy_auth_error, bridge::JetHttpBridgeError::Proxy));
     let io_error = bridge::jet_http_client_send_impl(
-        "GET", &format!("{url}io"), &[], None, None, None, None, None, None, None,
+        "GET", &format!("{url}io"), &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(io_error, bridge::JetHttpBridgeError::Io));
@@ -5830,36 +5830,36 @@ fn main() {
     let url = format!("{base}/redirect");
     let errors = [-1, i64::from(u32::MAX) + 1].into_iter().map(|redirects| {
         bridge::jet_http_client_send_impl(
-            "GET", &url, &[], None, None, None, None, None, Some(redirects), None,
+            "GET", &url, &[], None, None, None, None, None, None, None, None, None, Some(redirects), None,
             &[], &[], &[],
         ).err()
     }).collect::<Vec<_>>();
     assert!(errors.into_iter().all(|error| matches!(error, Some(bridge::JetHttpBridgeError::Redirect))));
     let stopped = bridge::jet_http_client_send_impl(
-        "GET", &url, &[], None, None, None, None, None, Some(0), None,
+        "GET", &url, &[], None, None, None, None, None, None, None, None, None, Some(0), None,
         &[], &[], &[],
     ).unwrap();
     let stopped_body = bridge::jet_http_client_body_read_impl(stopped.1, 16).unwrap().unwrap();
     assert_eq!((stopped.0, stopped_body.as_slice()), (302, b"redirect".as_slice()));
     let followed = bridge::jet_http_client_send_impl(
-        "GET", &url, &[], None, None, None, None, None,
+        "GET", &url, &[], None, None, None, None, None, None, None, None, None,
         Some(i64::from(u32::MAX)), None, &[], &[], &[],
     ).unwrap();
     let followed_body = bridge::jet_http_client_body_read_impl(followed.1, 8).unwrap().unwrap();
     assert_eq!((followed.0, followed_body.as_slice()), (200, b"ok".as_slice()));
     let explicit = bridge::jet_http_client_send_impl(
-        "GET", &url, &[], None, None, None, None, None, Some(1), None,
+        "GET", &url, &[], None, None, None, None, None, None, None, None, None, Some(1), None,
         &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(explicit, bridge::JetHttpBridgeError::Redirect));
     let within = bridge::jet_http_client_send_impl(
-        "GET", &format!("{base}/within/0"), &[], None, None, None, None, None,
+        "GET", &format!("{base}/within/0"), &[], None, None, None, None, None, None, None, None, None,
         None, None, &[], &[], &[],
     ).unwrap();
     let within_body = bridge::jet_http_client_body_read_impl(within.1, 8).unwrap().unwrap();
     assert_eq!((within.0, within_body.as_slice()), (200, b"ok".as_slice()));
     let over = bridge::jet_http_client_send_impl(
-        "GET", &format!("{base}/over/0"), &[], None, None, None, None, None,
+        "GET", &format!("{base}/over/0"), &[], None, None, None, None, None, None, None, None, None,
         None, None, &[], &[], &[],
     ).unwrap_err();
     assert!(matches!(over, bridge::JetHttpBridgeError::Redirect));

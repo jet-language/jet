@@ -1638,7 +1638,8 @@ pub(crate) fn lower_method_call(
         let recv_t = lower_expr(receiver, cx, env);
         let result_ty = match (kind.as_str(), method) {
             ("HttpRequest", "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
-                | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text")
+                | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
+                | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text")
                 if !args.is_empty() && !(method == "header" && args.len() == 1) => {
                     Type::Named("HttpRequest".to_string())
                 }

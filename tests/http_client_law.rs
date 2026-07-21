@@ -216,14 +216,14 @@ fn main() {
     let signal = std::env::args().nth(2).unwrap();
     let root = bridge::jet_http_client_new_impl();
     let response = bridge::jet_http_client_send_with_impl(
-        root, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        root, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
     assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), Some(b"hello".to_vec()));
     std::net::TcpStream::connect(signal).unwrap();
     assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), Some(b"world".to_vec()));
     assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), None);
     assert_eq!(bridge::jet_http_client_send_with_impl(
-        root, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        root, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap_err(), bridge::JetHttpBridgeError::UnsupportedEncoding);
 }
 "#,
@@ -355,7 +355,7 @@ fn custom_client_clones_share_pool_cookie_jar_and_transport_facts() {
         r#"
 fn send(client: i64, url: &String) -> (i64, i64, Option<i64>, Vec<String>) {
     bridge::jet_http_client_send_with_impl(
-        client, "GET", url, &[], None, None, None, None, None, None, None,
+        client, "GET", url, &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap()
 }
@@ -575,7 +575,7 @@ fn main() {
     let root = bridge::jet_http_client_new_impl();
     let client = bridge::jet_http_client_protocols_impl(root, true, false, true).unwrap();
     let warm = bridge::jet_http_client_send_with_impl(
-        client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
     assert_eq!(bridge::jet_http_client_body_read_impl(warm.1, 64).unwrap(), Some(b"w0".to_vec()));
     assert_eq!(bridge::jet_http_client_body_read_impl(warm.1, 64).unwrap(), None);
@@ -583,7 +583,7 @@ fn main() {
     let send = |barrier: std::sync::Arc<std::sync::Barrier>, url: String| std::thread::spawn(move || {
         barrier.wait();
         let response = bridge::jet_http_client_send_with_impl(
-            client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+            client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
         ).unwrap();
         let body = bridge::jet_http_client_body_read_impl(response.1, 64).unwrap().unwrap();
         assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 64).unwrap(), None);
@@ -598,7 +598,7 @@ fn main() {
     bodies.sort();
     assert_eq!(bodies, vec![b"a1".to_vec(), b"b2".to_vec()]);
     let third = bridge::jet_http_client_send_with_impl(
-        client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
     assert_eq!(bridge::jet_http_client_body_read_impl(third.1, 64).unwrap(), Some(b"c3".to_vec()));
     assert_eq!(bridge::jet_http_client_body_read_impl(third.1, 64).unwrap(), None);
@@ -761,7 +761,7 @@ fn main() {
     let client = bridge::jet_http_client_protocols_impl(rooted, true, false, false).unwrap();
     let url = format!("https://localhost:{}/tls", address.port());
     let response = bridge::jet_http_client_send_with_impl(
-        client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
     assert_eq!(bridge::jet_http_client_response_protocol_impl(response.1), "HTTP/2");
     assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 64).unwrap(), Some(b"ok".to_vec()));
@@ -898,13 +898,13 @@ fn client() -> i64 {
 fn main() {
     let url = std::env::args().nth(1).unwrap();
     println!("{:?}", bridge::jet_http_client_send_with_impl(
-        client(), "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        client(), "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap_err());
     println!("{:?}", bridge::jet_http_client_send_with_impl(
-        client(), "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        client(), "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap_err());
     let response = bridge::jet_http_client_send_with_impl(
-        client(), "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        client(), "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     ).unwrap();
     println!("{:?}", bridge::jet_http_client_body_read_impl(response.1, 64).unwrap_err());
 }
@@ -1430,7 +1430,7 @@ fn main() {{
     }};
     let response = bridge::jet_http_client_send_with_stream_impl(
         client, "POST", &url, &[], Some(total as i64), true, &mut body_read,
-        None, None, None, None, Some(0), None, &[], &[], &[],
+        None, None, None, None, None, None, None, None, Some(0), None, &[], &[], &[],
     ).unwrap();
     assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 8).unwrap(), Some(b"ok".to_vec()));
     assert_eq!(bridge::jet_http_client_response_protocol_impl(response.1), "HTTP/2");
@@ -1823,7 +1823,7 @@ fn main() {
     let client = bridge::jet_http_client_protocols_impl(rooted, false, true, false).unwrap();
     let url = format!("https://localhost:{}/from", https_addr.port());
     let denied = bridge::jet_http_client_send_with_impl(
-        client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     )
     .unwrap_err();
     assert!(matches!(denied, bridge::JetHttpBridgeError::Redirect));
@@ -1841,7 +1841,7 @@ fn main() {
     let allowed =
         bridge::jet_http_client_allow_http_downgrade_impl(allowed_proto, true).unwrap();
     let response = bridge::jet_http_client_send_with_impl(
-        allowed, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+        allowed, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     )
     .unwrap();
     assert_eq!(response.0, 200);
@@ -2078,7 +2078,9 @@ fn main() {{
     let client = bridge::jet_http_client_new_impl();
     // POST with no buffered body: 307/308 cannot replay → Redirect, must close body.
     let err = bridge::jet_http_client_send_with_impl(
-        client, "POST", &url, &[], None, None, None, None, None, Some(2), None, &[], &[], &[],
+        client, "POST", &url, &[], None,
+        None, None, None, None, None, None, None, None, Some(2), None,
+        &[], &[], &[],
     )
     .unwrap_err();
     assert!(matches!(err, bridge::JetHttpBridgeError::Redirect), "{{err:?}}");
@@ -2162,6 +2164,7 @@ fn main() {
     let err = bridge::jet_http_client_send_with_impl(
         client, "GET", &url, &[], None,
         Some(5000), Some(5000), Some(5000), Some(5000),
+        None, None, None, None,
         None, None, &[], &[], &[],
     )
     .unwrap_err();
@@ -2276,4 +2279,36 @@ fn run() {{
         assert_eq!(stdout, "ok\n1\n", "{label}");
     }
     server.join().unwrap();
+}
+
+#[test]
+fn request_first_byte_timeout_overrides_client_phase_budget() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = request_head(&mut stream);
+        std::thread::sleep(Duration::from_millis(250));
+        let _ = stream.write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate",
+        );
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+fn run() {{
+    client :: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
+    req :: http.request("GET", "http://{addr}/slow").first_byte_timeout(40)
+    if client.send(req) == {{
+        Ok(_) -> print("ok")
+        Err(_) -> print("timeout")
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "req_first_byte", &src);
+    server.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "timeout\n");
 }

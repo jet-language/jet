@@ -72,6 +72,10 @@ fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpRequest 
         connect_timeout_ms: None,
         read_timeout_ms: None,
         total_timeout_ms: None,
+        dns_timeout_ms: None,
+        tls_timeout_ms: None,
+        write_timeout_ms: None,
+        first_byte_timeout_ms: None,
         redirects: None,
         proxy: None,
         cookies: Vec::new(),
@@ -135,6 +139,29 @@ fn jet_http_client_request_read_timeout(mut req: JetHttpRequest, ms: i64) -> Jet
 
 fn jet_http_client_request_total_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
     req.total_timeout_ms = Some(ms);
+    req
+}
+
+fn jet_http_client_request_dns_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+    req.dns_timeout_ms = Some(ms);
+    req
+}
+
+fn jet_http_client_request_tls_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+    req.tls_timeout_ms = Some(ms);
+    req
+}
+
+fn jet_http_client_request_write_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+    req.write_timeout_ms = Some(ms);
+    req
+}
+
+fn jet_http_client_request_first_byte_timeout(
+    mut req: JetHttpRequest,
+    ms: i64,
+) -> JetHttpRequest {
+    req.first_byte_timeout_ms = Some(ms);
     req
 }
 

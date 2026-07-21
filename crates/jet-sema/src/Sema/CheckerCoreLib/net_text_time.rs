@@ -26,7 +26,8 @@ pub fn net_method_return(
         ("HttpRequest", "body") if n_args == 0 => Some(Some(Type::Named("HttpBody".to_string()))),
         ("HttpRequest", "header") if n_args == 1 => Some(Some(Type::Option(Box::new(str_ty.clone())))),
         ("HttpRequest", "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
-            | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text") => {
+            | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
+            | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text") => {
                 Some(Some(Type::Named("HttpRequest".to_string())))
             }
         ("HttpRequest", "send") => Some(Some(Type::Result {
@@ -347,7 +348,8 @@ pub fn http_type_method_return(
             "body" if _args.is_empty() => mk("HttpBody"),
             "param" | "header" if _args.len() == 1 => mk_opt_str(),
             "body" | "header" | "timeout" | "connect_timeout" | "read_timeout"
-            | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" => {
+            | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
+            | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" => {
                 mk("HttpRequest")
             }
             "body_len" => mk_int(),

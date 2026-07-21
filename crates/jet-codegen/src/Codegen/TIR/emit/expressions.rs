@@ -2203,7 +2203,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             )),
                             "send" => {
                                 let call = format!(
-                                    "{ffi}::jet_http_client_send_with_stream_impl(_client.owner.handle, &_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)"
+                                    "{ffi}::jet_http_client_send_with_stream_impl(_client.owner.handle, &_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.dns_timeout_ms, _r.tls_timeout_ms, _r.write_timeout_ms, _r.first_byte_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)"
                                 );
                                 let response = emit_http_response_from_bridge(call, ffi);
                                 let error = emit_http_bridge_error(ffi, "error");
@@ -2298,6 +2298,30 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 recv,
                                 a(0)
                             ),
+                            "dns_timeout" => format!(
+                                "{}jet_http_client_request_dns_timeout({}, {})",
+                                root,
+                                recv,
+                                a(0)
+                            ),
+                            "tls_timeout" => format!(
+                                "{}jet_http_client_request_tls_timeout({}, {})",
+                                root,
+                                recv,
+                                a(0)
+                            ),
+                            "write_timeout" => format!(
+                                "{}jet_http_client_request_write_timeout({}, {})",
+                                root,
+                                recv,
+                                a(0)
+                            ),
+                            "first_byte_timeout" => format!(
+                                "{}jet_http_client_request_first_byte_timeout({}, {})",
+                                root,
+                                recv,
+                                a(0)
+                            ),
                             "redirects" => format!(
                                 "{}jet_http_client_request_redirects({}, {})",
                                 root,
@@ -2334,7 +2358,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             "send" => {
                                 // call bridge with req fields; assemble JetHttpResponse
                                 let call = format!(
-                                    "{ffi}::jet_http_client_send_stream_impl(&_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)",
+                                    "{ffi}::jet_http_client_send_stream_impl(&_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.dns_timeout_ms, _r.tls_timeout_ms, _r.write_timeout_ms, _r.first_byte_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)",
                                     ffi = ffi
                                 );
                                 let response = emit_http_response_from_bridge(call, ffi);

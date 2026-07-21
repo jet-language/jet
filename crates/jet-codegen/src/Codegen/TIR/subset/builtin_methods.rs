@@ -241,6 +241,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
             method,
             "method" | "path" | "param" | "body_len" | "under_limit" | "header" | "body"
                 | "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
+                | "dns_timeout" | "tls_timeout" | "write_timeout" | "first_byte_timeout"
                 | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" | "send"
         ),
         Some("HttpResponse") => matches!(method, "status" | "body" | "header" | "cookies" | "protocol" | "remote_address" | "redirect_history" | "timings" | "reused_connection" | "raw_content_encoding"),
