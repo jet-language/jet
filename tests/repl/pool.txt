@@ -1,0 +1,23 @@
+# Tower #392 C4: Pool generational-arena methods run inside tier-0.
+> pool := Pool<String>.new()
+> first :: pool.add("first")
+> second :: pool.add("second")
+> pool.ids().len()
+2 : Int
+> pool.ids()[0] == first
+true : Bool
+> pool.remove(first) ?? "missing"
+"first" : String
+> pool.remove(first) ?? "stale"
+"stale" : String
+> replacement :: pool.add("third")
+> replacement == first
+false : Bool
+> pool.ids()[0] == replacement
+true : Bool
+> pool.remove(replacement) ?? "missing"
+"third" : String
+> pool.remove(second) ?? "missing"
+"second" : String
+> pool.ids().len()
+0 : Int

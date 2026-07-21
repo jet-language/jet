@@ -169,6 +169,20 @@ fn map_view() -> String {
     return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
 }"#;
 const MAP_EXPECTED: &str = "false|-1|2|true|false|[a, b, c, d]|[a, b, c, d]|[1, 20, 3, 4]|1|true|false|3|3|true|0";
+const POOL_DECLS: &str = r#"fn pool_view() -> String {
+    pool := Pool<String>.new()
+    first :: pool.add("first")
+    second :: pool.add("second")
+    initial :: pool.ids()
+    removed :: pool.remove(first) ?? "missing"
+    stale_remove :: pool.remove(first) ?? "stale"
+    replacement :: pool.add("third")
+    live :: pool.ids()
+    replacement_value :: pool.remove(replacement) ?? "missing"
+    second_value :: pool.remove(second) ?? "missing"
+    return "{removed}|{stale_remove}|{initial.len()}|{initial[0] == first}|{initial[1] == second}|{replacement == first}|{live.len()}|{live[0] == replacement}|{live[1] == second}|{replacement_value}|{second_value}|{pool.ids().len()}"
+}"#;
+const POOL_EXPECTED: &str = "first|stale|2|true|true|false|2|true|true|third|second|0";
 const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() -> String {
     values := [1, 2, 3, 4]
     each_seen: [Int] := []
@@ -1033,6 +1047,13 @@ fn rustc_backed_map_matches_aot_comptime_forced_interpreter_and_default_dev_fall
     // Map remains outside the resident JIT subset: forced interpreter proves
     // its comptime execution, while default dev proves the normal AOT fallback.
     check_dev_tiers_with_boundary("map", &source, MAP_EXPECTED, true);
+}
+
+#[test]
+fn rustc_backed_pool_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly() {
+    let source = parity_source("pool_view()", POOL_DECLS);
+    assert_eq!(check_aot_comptime("pool/generations", &source), POOL_EXPECTED);
+    check_dev_tiers_with_boundary("pool", &source, POOL_EXPECTED, true);
 }
 
 #[test]
