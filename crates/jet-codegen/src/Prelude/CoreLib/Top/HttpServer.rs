@@ -863,7 +863,7 @@ fn jet_http2_encode_string(output: &mut Vec<u8>, value: &str) {
     output.extend_from_slice(value.as_bytes());
 }
 
-fn jet_http2_encode_response_headers(response: &JetHttpResponse, length: usize) -> Vec<u8> {
+fn jet_http2_encode_response_headers(response: &JetHttpResponse, length: Option<usize>) -> Vec<u8> {
     let mut output = Vec::new();
     let status_index = match response.status { 200 => Some(8), 204 => Some(9), 206 => Some(10), 304 => Some(11), 400 => Some(12), 404 => Some(13), 500 => Some(14), _ => None };
     if let Some(index) = status_index { jet_http2_encode_integer(&mut output, index, 7, 0x80); }
@@ -871,8 +871,10 @@ fn jet_http2_encode_response_headers(response: &JetHttpResponse, length: usize) 
         jet_http2_encode_integer(&mut output, 8, 4, 0);
         jet_http2_encode_string(&mut output, &response.status.to_string());
     }
-    jet_http2_encode_integer(&mut output, 28, 4, 0);
-    jet_http2_encode_string(&mut output, &length.to_string());
+    if let Some(length) = length {
+        jet_http2_encode_integer(&mut output, 28, 4, 0);
+        jet_http2_encode_string(&mut output, &length.to_string());
+    }
     for (name, value) in &response.headers {
         if matches!(name.to_ascii_lowercase().as_str(), "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding" | "upgrade") { continue; }
         jet_http2_encode_integer(&mut output, 0, 4, 0);
@@ -924,21 +926,45 @@ fn jet_http2_request(headers: Vec<(String, String)>, body: Vec<u8>) -> Result<Je
 }
 
 struct JetHttp2Outgoing {
-    body: Vec<u8>,
+    chunks: JetHttpBodyChunks,
+    chunk: Vec<u8>,
     offset: usize,
+}
+
+fn jet_http2_write_header_block(
+    stream: &mut std::net::TcpStream,
+    stream_id: u32,
+    flags: u8,
+    block: &[u8],
+    max_frame: usize,
+) -> Result<(), String> {
+    if block.len() <= max_frame { return jet_http2_write_frame(stream, 1, flags | 0x4, stream_id, block); }
+    let mut chunks = block.chunks(max_frame).peekable();
+    let first = chunks.next().expect("non-empty HPACK block");
+    jet_http2_write_frame(stream, 1, flags & !0x4, stream_id, first)?;
+    while let Some(chunk) = chunks.next() {
+        jet_http2_write_frame(stream, 9, if chunks.peek().is_none() { 0x4 } else { 0 }, stream_id, chunk)?;
+    }
+    Ok(())
 }
 
 fn jet_http2_start_response(
     stream: &mut std::net::TcpStream,
     stream_id: u32,
     response: JetHttpResponse,
+    max_frame: usize,
 ) -> Result<Option<JetHttp2Outgoing>, String> {
     let body_forbidden = (100..200).contains(&response.status) || matches!(response.status, 204 | 304);
-    let body = if body_forbidden { Vec::new() } else { response.body.bytes(JET_HTTP_MAX_BODY_BYTES).map_err(|error| error.to_string())? };
-    let headers = jet_http2_encode_response_headers(&response, body.len());
-    jet_http2_write_frame(stream, 1, 0x4 | if body.is_empty() { 0x1 } else { 0 }, stream_id, &headers)?;
+    let length = if body_forbidden { Some(0) } else { response.body.length() };
+    let empty = body_forbidden || length == Some(0);
+    let headers = jet_http2_encode_response_headers(&response, length);
+    if headers.len() > JET_HTTP2_MAX_HEADER_LIST { return Err("HTTP/2 response header list is too large".to_string()); }
+    jet_http2_write_header_block(stream, stream_id, if empty { 0x1 } else { 0 }, &headers, max_frame)?;
     std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())
-        .map(|()| (!body.is_empty()).then_some(JetHttp2Outgoing { body, offset: 0 }))
+        .and_then(|()| if empty { Ok(None) } else {
+            response.body.chunks(JET_HTTP2_MAX_FRAME).map_err(|error| error.to_string())
+                .map(|chunks| Some(JetHttp2Outgoing { chunks, chunk: Vec::new(), offset: 0 }))
+        })
 }
 
 fn jet_http2_flush_body(
@@ -949,18 +975,35 @@ fn jet_http2_flush_body(
     stream_window: &mut i64,
     max_frame: usize,
 ) -> Result<bool, String> {
-    while outgoing.offset < outgoing.body.len() && *connection_window > 0 && *stream_window > 0 {
-        let length = (outgoing.body.len() - outgoing.offset)
+    loop {
+        if outgoing.offset == outgoing.chunk.len() {
+            match outgoing.chunks.next() {
+                Some(Ok(chunk)) => {
+                    outgoing.chunk = chunk;
+                    outgoing.offset = 0;
+                    if outgoing.chunk.is_empty() { continue; }
+                }
+                Some(Err(_)) => {
+                    jet_http2_write_frame(stream, 3, 0, stream_id, &2u32.to_be_bytes())?;
+                    std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())?;
+                    return Ok(true);
+                }
+                None => {
+                    jet_http2_write_frame(stream, 0, 0x1, stream_id, &[])?;
+                    std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())?;
+                    return Ok(true);
+                }
+            }
+        }
+        if *connection_window <= 0 || *stream_window <= 0 { return Ok(false); }
+        let length = (outgoing.chunk.len() - outgoing.offset)
             .min(max_frame).min(*connection_window as usize).min(*stream_window as usize);
-        let end = outgoing.offset + length == outgoing.body.len();
-        jet_http2_write_frame(stream, 0, if end { 0x1 } else { 0 }, stream_id,
-            &outgoing.body[outgoing.offset..outgoing.offset + length])?;
+        jet_http2_write_frame(stream, 0, 0, stream_id,
+            &outgoing.chunk[outgoing.offset..outgoing.offset + length])?;
         outgoing.offset += length;
         *connection_window -= length as i64;
         *stream_window -= length as i64;
     }
-    std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())?;
-    Ok(outgoing.offset == outgoing.body.len())
 }
 
 fn jet_http2_dispatch(
@@ -983,7 +1026,7 @@ fn jet_http2_queue_response(
     initial_window: i64,
     max_frame: usize,
 ) -> Result<(), String> {
-    let Some(mut response) = jet_http2_start_response(stream, stream_id, response)? else { return Ok(()) };
+    let Some(mut response) = jet_http2_start_response(stream, stream_id, response, max_frame)? else { return Ok(()) };
     let window = stream_windows.entry(stream_id).or_insert(initial_window);
     if !jet_http2_flush_body(stream, stream_id, &mut response, connection_window, window, max_frame)? {
         outgoing.insert(stream_id, response);
@@ -1034,18 +1077,19 @@ fn jet_http2_serve(
                 let padding = if frame.flags & 0x8 != 0 { usize::from(*frame.payload.first().ok_or_else(|| "HTTP/2 padded DATA is empty".to_string())?) + 1 } else { 0 };
                 if padding > frame.payload.len() { return Err("HTTP/2 DATA padding is invalid".to_string()); }
                 let data = &frame.payload[padding.min(1)..frame.payload.len() - padding.saturating_sub(1)];
-                connection_receive_window -= data.len() as i64;
+                let flow_bytes = frame.payload.len();
+                connection_receive_window -= flow_bytes as i64;
                 let receive_window = stream_receive_windows.entry(frame.stream).or_insert(65_535);
-                *receive_window -= data.len() as i64;
+                *receive_window -= flow_bytes as i64;
                 if connection_receive_window < 0 || *receive_window < 0 { return Err("HTTP/2 receive flow-control window exceeded".to_string()); }
                 entry.1.extend_from_slice(data);
                 if entry.1.len() > JET_HTTP_MAX_BODY_BYTES { return Err("HTTP/2 request body is too large".to_string()); }
-                if !data.is_empty() {
-                    let increment = (data.len() as u32).to_be_bytes();
+                if flow_bytes > 0 {
+                    let increment = (flow_bytes as u32).to_be_bytes();
                     jet_http2_write_frame(stream, 8, 0, 0, &increment)?;
                     jet_http2_write_frame(stream, 8, 0, frame.stream, &increment)?;
-                    connection_receive_window += data.len() as i64;
-                    *receive_window += data.len() as i64;
+                    connection_receive_window += flow_bytes as i64;
+                    *receive_window += flow_bytes as i64;
                 }
                 if frame.flags & 0x1 != 0 {
                     let (headers, body) = requests.remove(&frame.stream).unwrap();
