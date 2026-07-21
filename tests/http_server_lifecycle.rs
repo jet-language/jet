@@ -104,6 +104,10 @@ include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
+mod http_server_tls_runtime {
+    include!("../crates/jet-pkg-model/src/Prelude/HttpServerTls.rs");
+}
+
 static HTTP_BODY_CLOSES: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 static HTTP_BODY_READS: std::sync::atomic::AtomicUsize =
@@ -3803,28 +3807,41 @@ fn h2_try_read_frame(stream: &mut std::net::TcpStream) -> Option<(u8, u8, u32, V
 
 
 #[test]
-fn tls_slot_keep_alive_and_shutdown_share_server_api() {
+fn tls_rustls_keep_alive_and_server_shutdown() {
     use std::io::Write;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // The HTTPS path installs a JetHttpTlsConn that wraps rustls; this test proves
-    // the shared Server.bind/serve/shutdown slot stops keep-alive after shutdown
-    // without needing rustls in the lifecycle crate.
+    // Real rustls path: Server.bind(tls) → keep-alive reuse → Server.shutdown stops
+    // a third request. Plaintext JetHttpTlsConn stubs are not enough.
     let mux = jet_http_mux_new();
     let calls = std::sync::Arc::new(AtomicUsize::new(0));
     let handler_calls = calls.clone();
     jet_http_mux_add(&mux, "GET", "/", move |_| {
-        handler_calls.fetch_add(1, Ordering::AcqRel);
-        jet_http_srv_response(200, &"ok".to_string())
+        let n = handler_calls.fetch_add(1, Ordering::AcqRel) + 1;
+        jet_http_srv_response(200, &format!("ok{n}"))
     });
-    let tls_mux = mux.clone();
-    let tls_conn: JetHttpTlsConn = std::sync::Arc::new(move |mut stream, shutdown| {
-        let options = JetHttpServerOptions::safe();
-        jet_http_server_handle_stream(&mut stream, &tls_mux, &options, &shutdown, None, None);
-        Ok(())
-    });
-    let server = jet_http_server_bind_with_tls(&"127.0.0.1:0".to_string(), mux, Some(tls_conn))
-        .expect("bind tls slot");
+    let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
+    let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
+    let tls = JetHttpServerTls {
+        cert_pem: cert,
+        key_pem: key,
+    };
+    let server = jet_http_server_bind_tls(
+        &"127.0.0.1:0".to_string(),
+        mux,
+        tls,
+        |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
+        |cert, key, stream, on_request, should_stop| {
+            http_server_tls_runtime::jet_http_server_tls_session_impl(
+                cert,
+                key,
+                stream,
+                on_request,
+                should_stop,
+            )
+        },
+    )
+    .expect("bind rustls tls");
     let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
         .expect("addr")
         .parse()
@@ -3832,26 +3849,144 @@ fn tls_slot_keep_alive_and_shutdown_share_server_api() {
     let serving = server.clone();
     let serve = std::thread::spawn(move || jet_http_server_serve(&serving));
 
-    let mut client = std::net::TcpStream::connect(addr).expect("connect");
-    client
-        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
-        .unwrap();
-    client.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n").unwrap();
-    assert!(read_response(&mut client).ends_with("\r\n\r\nok"));
-    client.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n").unwrap();
-    assert!(read_response(&mut client).ends_with("\r\n\r\nok"));
+    let mut client = rustls_fixture_client(addr);
+    let first = rustls_exchange(
+        &mut client,
+        b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+    );
+    let second = rustls_exchange(
+        &mut client,
+        b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+    );
+    assert!(first.contains("\r\n\r\nok1"), "{first}");
+    assert!(second.contains("\r\n\r\nok2"), "{second}");
     assert_eq!(calls.load(Ordering::Acquire), 2);
 
     let started = std::time::Instant::now();
     let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 200 }).expect("shutdown");
-    let _ = client.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+    let _ = client.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+    let _ = client.flush();
     std::thread::sleep(std::time::Duration::from_millis(40));
     assert_eq!(
         calls.load(Ordering::Acquire),
         2,
-        "tls-slot shutdown started a keep-alive request"
+        "Server.shutdown must stop rustls keep-alive reuse without client Connection: close"
     );
     assert!(started.elapsed() < std::time::Duration::from_millis(1500), "{report:?}");
-    assert_eq!(report.user_completed, report.user_accepted, "{report:?}");
+    // One accepted TLS connection; shutdown cancels it rather than completing idle drain.
+    assert_eq!(report.user_accepted, 1, "{report:?}");
+    assert_eq!(
+        report.user_completed + report.user_cancelled,
+        report.user_accepted,
+        "{report:?}"
+    );
     let _ = serve.join().expect("serve join");
+}
+
+fn rustls_fixture_client(
+    addr: std::net::SocketAddr,
+) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
+    use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+    use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+    use rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    #[derive(Debug)]
+    struct AcceptFixture;
+    impl ServerCertVerifier for AcceptFixture {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &CertificateDer<'_>,
+            _intermediates: &[CertificateDer<'_>],
+            _server_name: &ServerName<'_>,
+            _ocsp_response: &[u8],
+            _now: UnixTime,
+        ) -> Result<ServerCertVerified, TlsError> {
+            Ok(ServerCertVerified::assertion())
+        }
+        fn verify_tls12_signature(
+            &self,
+            _message: &[u8],
+            _cert: &CertificateDer<'_>,
+            _dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, TlsError> {
+            Ok(HandshakeSignatureValid::assertion())
+        }
+        fn verify_tls13_signature(
+            &self,
+            _message: &[u8],
+            _cert: &CertificateDer<'_>,
+            _dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, TlsError> {
+            Ok(HandshakeSignatureValid::assertion())
+        }
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            rustls::crypto::ring::default_provider()
+                .signature_verification_algorithms
+                .supported_schemes()
+        }
+    }
+
+    let config = std::sync::Arc::new(
+        rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(std::sync::Arc::new(AcceptFixture))
+            .with_no_client_auth(),
+    );
+    let name = rustls::pki_types::ServerName::try_from("localhost").expect("name");
+    let conn = rustls::ClientConnection::new(config, name).expect("conn");
+    let sock = std::net::TcpStream::connect(addr).expect("connect");
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
+    sock.set_write_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
+    rustls::StreamOwned::new(conn, sock)
+}
+
+fn rustls_exchange(
+    stream: &mut rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>,
+    request: &[u8],
+) -> String {
+    use std::io::{Read, Write};
+    stream.write_all(request).expect("write");
+    stream.flush().expect("flush");
+    let mut raw = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                raw.extend_from_slice(&buf[..n]);
+                if let Some(header_end) = raw.windows(4).position(|window| window == b"\r\n\r\n") {
+                    let headers = std::str::from_utf8(&raw[..header_end]).unwrap_or("");
+                    let length = headers.lines().skip(1).find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    });
+                    if let Some(length) = length {
+                        if raw.len() >= header_end + 4 + length {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                if !raw.is_empty() {
+                    break;
+                }
+            }
+            Err(error) => panic!("read: {error}"),
+        }
+    }
+    String::from_utf8_lossy(&raw).into_owned()
 }

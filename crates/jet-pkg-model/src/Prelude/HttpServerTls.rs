@@ -42,14 +42,28 @@ pub fn jet_http_server_tls_validate_impl(
 /// One TLS connection session: handshake, then repeatedly read one buffered HTTP/1
 /// request, dispatch, and write the response until the dispatcher asks to close,
 /// idle timeout hits, or shutdown stops keep-alive reuse.
+///
+/// `on_request` receives `(raw_request, force_close)`. `force_close` is set on the
+/// final request of the 1000-request cap so the response carries `Connection: close`
+/// like the plain HTTP path.
 pub fn jet_http_server_tls_session_impl(
     cert_pem: &String,
     key_pem: &String,
     stream: TcpStream,
-    mut on_request: Box<dyn FnMut(&[u8]) -> Result<(Vec<u8>, bool), String> + Send>,
+    on_request: Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
     should_stop: Box<dyn Fn() -> bool + Send>,
 ) -> Result<(), String> {
-    const MAX_REQUESTS: usize = 1000;
+    jet_http_server_tls_session_limited(cert_pem, key_pem, stream, on_request, should_stop, 1000)
+}
+
+fn jet_http_server_tls_session_limited(
+    cert_pem: &String,
+    key_pem: &String,
+    stream: TcpStream,
+    mut on_request: Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
+    should_stop: Box<dyn Fn() -> bool + Send>,
+    max_requests: usize,
+) -> Result<(), String> {
     const MAX_HEADER_BYTES: usize = 32 * 1024;
     const MAX_BODY_BYTES: usize = 1024 * 1024;
     const HEADER_TIMEOUT: Duration = Duration::from_secs(5);
@@ -62,14 +76,15 @@ pub fn jet_http_server_tls_session_impl(
         .map_err(|_| "TLS server could not start the handshake".to_string())?;
     let mut tls = rustls::StreamOwned::new(conn, stream);
 
-    for request_index in 0..MAX_REQUESTS {
+    // Carry pipelined leftovers across requests — same law as plain HTTP/1.
+    let mut pending = Vec::new();
+    for request_index in 0..max_requests {
         if request_index > 0 && should_stop() {
             break;
         }
         let between = request_index > 0;
         let idle = if between { IDLE_TIMEOUT } else { HEADER_TIMEOUT };
         let started = std::time::Instant::now();
-        let mut pending = Vec::new();
         let mut reading_body = false;
         let request = loop {
             if between && pending.is_empty() && should_stop() {
@@ -137,14 +152,20 @@ pub fn jet_http_server_tls_session_impl(
             }
         };
 
-        let (response, keep_alive) = on_request(&request)?;
+        let force_close = request_index + 1 == max_requests;
+        // Match plaintext: once shutdown is set, do not start another keep-alive
+        // request even if bytes already arrived on the socket.
+        if request_index > 0 && should_stop() {
+            break;
+        }
+        let (response, keep_alive) = on_request(&request, force_close)?;
         tls.sock
             .set_write_timeout(Some(BODY_TIMEOUT))
             .map_err(|_| "TLS write timeout setup failed".to_string())?;
         tls.write_all(&response)
             .map_err(|_| "TLS response write failed".to_string())?;
         let _ = tls.flush();
-        if !keep_alive || should_stop() {
+        if !keep_alive || force_close || should_stop() {
             break;
         }
     }
@@ -164,7 +185,7 @@ pub fn jet_http_server_tls_handle_impl(
         cert_pem,
         key_pem,
         stream,
-        Box::new(move |raw| {
+        Box::new(move |raw, _force_close| {
             let response = handler
                 .take()
                 .ok_or_else(|| "TLS one-shot handler already consumed".to_string())?(

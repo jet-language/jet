@@ -501,12 +501,13 @@ mod http_server_tls_persist_tests {
                 &cert,
                 &key,
                 stream,
-                Box::new(move |raw| {
+                Box::new(move |raw, force_close| {
                     let n = dispatch_calls.fetch_add(1, Ordering::AcqRel) + 1;
-                    let keep = !std::str::from_utf8(raw)
-                        .unwrap_or("")
-                        .to_ascii_lowercase()
-                        .contains("connection: close");
+                    let keep = !force_close
+                        && !std::str::from_utf8(raw)
+                            .unwrap_or("")
+                            .to_ascii_lowercase()
+                            .contains("connection: close");
                     let body = format!("pong{n}");
                     let response = format!(
                         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: {}\r\n\r\n{body}",
@@ -521,21 +522,190 @@ mod http_server_tls_persist_tests {
         });
 
         let mut client = client(addr);
+        // Two keep-alive requests — neither asks for close.
         let first = exchange(
             &mut client,
             b"GET /ping HTTP/1.1\r\nHost: localhost\r\n\r\n",
         );
         let second = exchange(
             &mut client,
-            b"GET /ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            b"GET /ping HTTP/1.1\r\nHost: localhost\r\n\r\n",
         );
         assert!(first.ends_with("\r\n\r\npong1"), "{first}");
         assert!(second.ends_with("\r\n\r\npong2"), "{second}");
+        assert!(
+            first.to_ascii_lowercase().contains("connection: keep-alive"),
+            "{first}"
+        );
         assert_eq!(calls.load(Ordering::Acquire), 2);
+
+        // Stop must prevent a third keep-alive request without relying on
+        // client Connection: close.
         stop.store(true, Ordering::Release);
         let _ = client.write_all(b"GET /ping HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        let _ = client.flush();
         server.join().unwrap();
-        assert_eq!(calls.load(Ordering::Acquire), 2, "stop must prevent keep-alive reuse");
+        assert_eq!(
+            calls.load(Ordering::Acquire),
+            2,
+            "stop must prevent keep-alive reuse without client Connection: close"
+        );
+    }
+
+    fn read_one(
+        stream: &mut rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>,
+    ) -> String {
+        use std::io::Read;
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    raw.extend_from_slice(&buf[..n]);
+                    if let Some(header_end) =
+                        raw.windows(4).position(|window| window == b"\r\n\r\n")
+                    {
+                        let headers = std::str::from_utf8(&raw[..header_end]).unwrap_or("");
+                        let length = headers.lines().skip(1).find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        });
+                        if let Some(length) = length {
+                            if raw.len() >= header_end + 4 + length {
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    if !raw.is_empty() {
+                        break;
+                    }
+                }
+                Err(error) => panic!("read: {error}"),
+            }
+        }
+        String::from_utf8_lossy(&raw).into_owned()
+    }
+
+    #[test]
+    fn session_preserves_pipelined_leftover_bytes() {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (cert, key) = fixture_tls();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let server_calls = calls.clone();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let dispatch_calls = server_calls.clone();
+            jet_http_server_tls_session_impl(
+                &cert,
+                &key,
+                stream,
+                Box::new(move |raw, force_close| {
+                    let n = dispatch_calls.fetch_add(1, Ordering::AcqRel) + 1;
+                    let keep = !force_close
+                        && !std::str::from_utf8(raw)
+                            .unwrap_or("")
+                            .to_ascii_lowercase()
+                            .contains("connection: close");
+                    let body = format!("pipe{n}");
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: {}\r\n\r\n{body}",
+                        body.len(),
+                        if keep { "keep-alive" } else { "close" }
+                    );
+                    Ok((response.into_bytes(), keep))
+                }),
+                Box::new(|| false),
+            )
+            .expect("tls session");
+        });
+
+        let mut client = client(addr);
+        // One TCP write carries two full requests — leftover after the first
+        // must become the second request, not be dropped.
+        client
+            .write_all(
+                b"GET /a HTTP/1.1\r\nHost: localhost\r\n\r\nGET /b HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        client.flush().unwrap();
+
+        let first = read_one(&mut client);
+        let second = read_one(&mut client);
+        assert!(first.ends_with("\r\n\r\npipe1"), "{first}");
+        assert!(second.ends_with("\r\n\r\npipe2"), "{second}");
+        assert_eq!(calls.load(Ordering::Acquire), 2);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn session_forces_connection_close_on_request_cap() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (cert, key) = fixture_tls();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let server_calls = calls.clone();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let dispatch_calls = server_calls.clone();
+            // Cap of 2 exercises the same force_close path as production's 1000.
+            jet_http_server_tls_session_limited(
+                &cert,
+                &key,
+                stream,
+                Box::new(move |_raw, force_close| {
+                    let n = dispatch_calls.fetch_add(1, Ordering::AcqRel) + 1;
+                    let body = format!("cap{n}");
+                    let keep = !force_close;
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: {}\r\n\r\n{body}",
+                        body.len(),
+                        if keep { "keep-alive" } else { "close" }
+                    );
+                    Ok((response.into_bytes(), keep))
+                }),
+                Box::new(|| false),
+                2,
+            )
+            .expect("tls session");
+        });
+
+        let mut client = client(addr);
+        let first = exchange(
+            &mut client,
+            b"GET /one HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        );
+        let second = exchange(
+            &mut client,
+            b"GET /two HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        );
+        assert!(first.ends_with("\r\n\r\ncap1"), "{first}");
+        assert!(
+            first.to_ascii_lowercase().contains("connection: keep-alive"),
+            "first of cap must stay keep-alive: {first}"
+        );
+        assert!(second.ends_with("\r\n\r\ncap2"), "{second}");
+        assert!(
+            second.to_ascii_lowercase().contains("connection: close"),
+            "final capped request must force Connection: close: {second}"
+        );
+        assert_eq!(calls.load(Ordering::Acquire), 2);
+        server.join().unwrap();
     }
 }
 

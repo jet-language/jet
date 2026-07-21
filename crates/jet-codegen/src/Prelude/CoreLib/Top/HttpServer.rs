@@ -2676,7 +2676,7 @@ where
             &String,
             &String,
             std::net::TcpStream,
-            Box<dyn FnMut(&[u8]) -> Result<(Vec<u8>, bool), String> + Send>,
+            Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
             Box<dyn Fn() -> bool + Send>,
         ) -> Result<(), String>
         + Clone
@@ -2714,7 +2714,7 @@ where
             &String,
             &String,
             std::net::TcpStream,
-            Box<dyn FnMut(&[u8]) -> Result<(Vec<u8>, bool), String> + Send>,
+            Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
             Box<dyn Fn() -> bool + Send>,
         ) -> Result<(), String>
         + Clone
@@ -2733,7 +2733,7 @@ where
             &String,
             &String,
             std::net::TcpStream,
-            Box<dyn FnMut(&[u8]) -> Result<(Vec<u8>, bool), String> + Send>,
+            Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
             Box<dyn Fn() -> bool + Send>,
         ) -> Result<(), String>
         + Clone
@@ -2750,7 +2750,7 @@ where
             &tls_cfg.cert_pem,
             &tls_cfg.key_pem,
             stream,
-            Box::new(move |raw| {
+            Box::new(move |raw, force_close| {
                 match jet_http_srv_parse(raw) {
                     Ok(req) => {
                         let version = jet_http_srv_request_version(raw).to_string();
@@ -2762,7 +2762,9 @@ where
                             Err(JetHttpError::UnsupportedEncoding) => jet_http_srv_empty_response(415),
                             Err(_) => jet_http_srv_response(500, &"500 Internal Server Error".to_string()),
                         };
-                        let close = !keep || stop.load(std::sync::atomic::Ordering::Acquire);
+                        let close = !keep
+                            || force_close
+                            || stop.load(std::sync::atomic::Ordering::Acquire);
                         Ok((
                             jet_http_srv_format_connection(&response, &version, close).into_bytes(),
                             !close,
