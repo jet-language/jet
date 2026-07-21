@@ -100,6 +100,85 @@ fn run() -> Void ? CryptoError {
 }
 
 #[test]
+fn user_crypto_error_is_not_the_core_entry_error() {
+    let src = r#"
+enum CryptoError {
+    Internal
+}
+
+fn run() -> Void ? CryptoError {
+    return Err(.Internal)
+}
+"#;
+    let diagnostics = jet::compile(src).expect_err("user CryptoError must not gain core behavior");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0122"),
+        "expected entrypoint E0122, got {diagnostics:?}"
+    );
+}
+
+#[test]
+fn internal_crypto_error_exits_101_in_the_generated_wrapper() {
+    let src = r#"
+use core.crypto as crypto
+
+fn run() -> Void ? CryptoError {
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 0)?
+}
+"#;
+    let out = jet::compile(src).expect("CryptoError entrypoint should compile");
+    let ffi = out.ffi.as_ref().expect("core.crypto must emit its bridge");
+    let marker = "if let Err(__jet_err) = jet_runtime_boundary(|| user_run()) {";
+    let start = out.rust.find(marker).expect("generated crypto error boundary");
+    let rest = &out.rust[start..];
+    let end = rest.find("\n    }\n").expect("generated boundary close") + "\n    }".len();
+    let invocation = &rest[..end];
+    let rust = format!(r#"
+mod {ffi_name} {{
+    #[derive(Debug)]
+    pub enum JetCryptoError {{ Internal {{ incident_id: &'static str }} }}
+    impl std::fmt::Display for JetCryptoError {{
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{
+            match self {{ Self::Internal {{ incident_id }} => write!(f, "internal {{incident_id}}") }}
+        }}
+    }}
+}}
+fn jet_runtime_boundary<T>(f: impl FnOnce() -> T) -> T {{ f() }}
+fn user_run() -> Result<(), {ffi_name}::JetCryptoError> {{
+    Err({ffi_name}::JetCryptoError::Internal {{ incident_id: "test-17" }})
+}}
+fn main() {{
+    {invocation}
+}}
+"#, ffi_name = ffi.crate_name);
+    let dir = std::env::temp_dir().join(format!("jet_crypto_internal_entry_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let source = dir.join("main.rs");
+    let binary = dir.join("main");
+    std::fs::write(&source, rust).unwrap();
+    let built = std::process::Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(built.status.success(), "rustc stderr: {}", String::from_utf8_lossy(&built.stderr));
+    let output = std::process::Command::new(&binary).output().unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(output.status.code(), Some(101));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        concat!(
+            "Error [E3001]: unhandled cryptographic error\n",
+            " Why: internal test-17\n",
+            " Fix: handle the CryptoError in fn run\n",
+        )
+    );
+}
+
+#[test]
 fn fallible_void_run_can_finish_normally_after_try() {
     let src = r#"
 fn step() -> Int ? {

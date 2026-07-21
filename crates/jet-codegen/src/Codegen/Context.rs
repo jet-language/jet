@@ -903,7 +903,7 @@ impl Cx {
             Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
                 format!("{}JetAuthError", self.root_prefix)
             }
-            Type::Named(name) if matches!(name.as_str(), "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "KeyUnlock" | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError" | "KeyWrapError") => {
+            Type::Named(name) if !self.type_names.contains(name) && matches!(name.as_str(), "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "KeyUnlock" | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError" | "KeyWrapError") => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 let rust = match name.as_str() {
                     "Secret" => "Secret", "SigningKey" => "JetSigningKey", "VerifyKey" => "JetVerifyKey",

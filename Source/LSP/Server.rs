@@ -2192,6 +2192,18 @@ mod project_part_tests {
     }
 
     #[test]
+    fn e2702_lsp_never_exposes_an_absolute_path_without_a_workspace_root() {
+        let server = Server::new();
+        let file = workspace_relative_diagnostic_path(
+            &server,
+            "/private/attacker-controlled/project/src/main.jet",
+        );
+        assert_eq!(file, "main.jet");
+        assert!(!file.starts_with('/'));
+        assert_eq!(workspace_relative_diagnostic_path(&server, "src/main.jet"), "src/main.jet");
+    }
+
+    #[test]
     fn cancellation_suppresses_an_in_flight_success_response() {
         let cancelled = Arc::new(Mutex::new(std::collections::HashSet::new()));
         let rendezvous = Arc::new(std::sync::Barrier::new(2));
@@ -2866,7 +2878,15 @@ fn workspace_root_for_path(server: &Server, path: &str) -> Option<String> {
 fn workspace_relative_diagnostic_path(server: &Server, path: &str) -> String {
     let normalized = normalize_path(path);
     let Some(root) = workspace_root_for_path(server, &normalized) else {
-        return normalized;
+        let path = std::path::Path::new(&normalized);
+        return if path.is_absolute() {
+            path.file_name().map_or_else(
+                || "<source>".to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            )
+        } else {
+            normalized
+        };
     };
     std::path::Path::new(&normalized)
         .strip_prefix(&root)

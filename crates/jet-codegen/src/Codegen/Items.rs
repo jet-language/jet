@@ -631,7 +631,7 @@ pub(crate) fn emit_cli_entry_if_needed(
             output
                 .return_type
                 .as_ref()
-                .and_then(fallible_void_entry_error),
+                .and_then(|ty| fallible_void_entry_error(ty, cx)),
         )
     } else if let Some(run_fn) = run_fn {
         let params = cx.sigs.get("run").cloned().unwrap_or_else(|| {
@@ -644,7 +644,7 @@ pub(crate) fn emit_cli_entry_if_needed(
         (
             "user_run".to_string(),
             params,
-            fallible_void_entry_error_for_func(run_fn),
+            fallible_void_entry_error_for_func(run_fn, cx),
         )
     } else {
         return;
@@ -760,11 +760,13 @@ enum EntryError {
     Crypto,
 }
 
-fn fallible_void_entry_error_for_func(f: &Func) -> Option<EntryError> {
-    f.return_type.as_ref().and_then(fallible_void_entry_error)
+fn fallible_void_entry_error_for_func(f: &Func, cx: &Cx) -> Option<EntryError> {
+    f.return_type
+        .as_ref()
+        .and_then(|ty| fallible_void_entry_error(ty, cx))
 }
 
-fn fallible_void_entry_error(ty: &Type) -> Option<EntryError> {
+fn fallible_void_entry_error(ty: &Type, cx: &Cx) -> Option<EntryError> {
     let Type::Result { ok, err } = ty else {
         return None;
     };
@@ -773,7 +775,9 @@ fn fallible_void_entry_error(ty: &Type) -> Option<EntryError> {
     }
     match err.as_ref() {
         Type::Named(n) if n == crate::Syntax::TYPE_ERROR => Some(EntryError::Generic),
-        Type::Named(n) if n == "CryptoError" => Some(EntryError::Crypto),
+        Type::Named(n) if n == "CryptoError" && !cx.type_names.contains(n) => {
+            Some(EntryError::Crypto)
+        }
         _ => None,
     }
 }

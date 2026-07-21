@@ -529,7 +529,23 @@ mod vault_key_tests {
             JetVaultError::Internal { .. } => "internal",
         }).collect::<Vec<_>>();
         assert_eq!(tags, ["invalid-name", "not-found", "wrong-type", "revoked", "locked", "authority-denied", "conflict", "unsupported-provider", "invalid-encoding", "durability-unknown", "crypto", "io", "internal"]);
-        let shown = errors.iter().map(|error| format!("{error:?} {error}")).collect::<Vec<_>>().join("\n");
+        let display = errors.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(display, [
+            "invalid vault key name",
+            "vault key not found",
+            "vault key has a different type",
+            "vault key is revoked",
+            "vault is locked",
+            "vault write authority denied",
+            "vault changed since this write was prepared",
+            "vault provider is unsupported on this platform",
+            "vault store has invalid encoding",
+            "vault write visibility is known but durability is uncertain",
+            "vault cryptography failed: encrypted data could not be opened",
+            "vault read failed at <vault-store>",
+            "internal vault failure; incident vault-17",
+        ]);
+        let shown = errors.iter().zip(display).map(|(error, display)| format!("{error:?} {display}")).collect::<Vec<_>>().join("\n");
         for forbidden in ["secrets.age", "AGE-SECRET", "/home/", "hunter2", "ciphertext sentinel"] {
             assert!(!shown.contains(forbidden), "vault error leaked `{forbidden}`: {shown}");
         }

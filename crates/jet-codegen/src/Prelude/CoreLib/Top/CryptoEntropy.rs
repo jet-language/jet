@@ -13,7 +13,7 @@ pub enum JetCryptoError {
     UnsupportedAlgorithm { operation: &'static str, algorithm: String },
     OpenFailed,
     NonContributoryKey,
-    OutputLength { operation: &'static str, minimum: usize, maximum: usize, actual: usize },
+    OutputLength { operation: &'static str, minimum: usize, maximum: usize, actual: i64 },
     PasswordPolicy { reason: &'static str },
     EntropyUnavailable,
     ResourceUnavailable { resource: &'static str },
@@ -388,7 +388,7 @@ pub fn jet_crypto_entropy_bytes(count: i64) -> Result<Vec<u8>, JetCryptoEntropyE
         return Err(JetCryptoEntropyError::InvalidLength { operation: "core.crypto.random.bytes", parameter: "count", expected: "non-negative", actual: count.unsigned_abs() as usize });
     }
     if count > 1_048_576 {
-        return Err(JetCryptoEntropyError::OutputLength { operation: "core.crypto.random.bytes", minimum: 0, maximum: 1_048_576, actual: count as usize });
+        return Err(JetCryptoEntropyError::OutputLength { operation: "core.crypto.random.bytes", minimum: 0, maximum: 1_048_576, actual: count });
     }
     if count == 0 {
         return Ok(Vec::new());

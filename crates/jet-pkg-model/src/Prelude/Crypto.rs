@@ -90,6 +90,19 @@ pub enum JetFileCryptoError {
     Cancelled,
 }
 
+impl std::fmt::Display for JetFileCryptoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OpenFailed => f.write_str("encrypted file could not be opened"),
+            Self::SourceIo => f.write_str("encrypted file source I/O failed"),
+            Self::DestinationIo => f.write_str("encrypted file destination I/O failed"),
+            Self::DestinationExists => f.write_str("encrypted file destination already exists"),
+            Self::SealFailed(error) => write!(f, "encrypted file seal failed: {error}"),
+            Self::Cancelled => f.write_str("encrypted file operation was cancelled"),
+        }
+    }
+}
+
 fn invalid_length(operation: &'static str, parameter: &'static str, expected: &'static str, actual: usize) -> JetCryptoError {
     JetCryptoError::InvalidLength { operation, parameter, expected, actual }
 }
@@ -333,7 +346,7 @@ pub fn jet_crypto_blake3_typed_impl(data:&Vec<u8>)->JetDigest256 { JetDigest256(
 pub fn jet_crypto_sha512_typed_impl(data:&Vec<u8>)->JetDigest512 { JetDigest512(Sha512::digest(data).into()) }
 pub fn jet_crypto_digest256_bytes_impl(d:&JetDigest256)->Vec<u8>{d.0.to_vec()} pub fn jet_crypto_digest512_bytes_impl(d:&JetDigest512)->Vec<u8>{d.0.to_vec()}
 pub fn jet_crypto_digest256_hex_impl(d:&JetDigest256)->String{hex_encode(&d.0)} pub fn jet_crypto_digest512_hex_impl(d:&JetDigest512)->String{hex_encode(&d.0)}
-pub fn jet_crypto_hkdf_typed_impl(ikm:&Secret,salt:&Vec<u8>,info:&Vec<u8>,length:i64)->Result<Secret,JetCryptoError>{if !(0..=8160).contains(&length){return Err(JetCryptoError::OutputLength{operation:"hkdf_sha256",minimum:0,maximum:8160,actual:length.unsigned_abs() as usize})}let mut out=vec![0;length as usize];Hkdf::<sha2::Sha256>::new(Some(salt),&ikm.0).expand(info,&mut out).map_err(|_|JetCryptoError::Internal{incident_id:"hkdf-expand"})?;Ok(Secret(out))}
+pub fn jet_crypto_hkdf_typed_impl(ikm:&Secret,salt:&Vec<u8>,info:&Vec<u8>,length:i64)->Result<Secret,JetCryptoError>{if !(0..=8160).contains(&length){return Err(JetCryptoError::OutputLength{operation:"hkdf_sha256",minimum:0,maximum:8160,actual:length})}let mut out=vec![0;length as usize];Hkdf::<sha2::Sha256>::new(Some(salt),&ikm.0).expand(info,&mut out).map_err(|_|JetCryptoError::Internal{incident_id:"hkdf-expand"})?;Ok(Secret(out))}
 pub fn jet_crypto_constant_time_secret_impl(a:&Secret,b:&Secret)->bool{let max=a.0.len().max(b.0.len());let mut diff=a.0.len()^b.0.len();for i in 0..max{diff|=(a.0.get(i).copied().unwrap_or(0)^b.0.get(i).copied().unwrap_or(0))as usize;}diff==0}
 
 const JET_PWHASH_BUDGET_KIB: usize = 311_296;
@@ -588,19 +601,26 @@ fn jet_crypto_password_parse_law<'a>(text:&'a str,operation:&'static str)->Resul
     if version!=19{return Err(JetCryptoError::UnsupportedVersion{operation,version})}
     Ok(parsed)
 }
-pub fn jet_crypto_password_parse_impl(text:String)->Result<JetPasswordHash,JetCryptoError>{jet_crypto_password_parse_law(&text,"PasswordHash.parse")?;Ok(JetPasswordHash(text))}
+fn jet_crypto_password_policy(parsed:&argon2::PasswordHash<'_>,operation:&'static str)->Result<(argon2::Params,Zeroizing<Vec<u8>>),JetCryptoError>{
+    let memory=parsed.params.get_decimal("m").ok_or(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC parameters"})?;
+    let iterations=parsed.params.get_decimal("t").ok_or(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC parameters"})?;
+    let lanes=parsed.params.get_decimal("p").ok_or(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC parameters"})?;
+    let salt=parsed.salt.ok_or(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC salt"})?;
+    let expected=parsed.hash.ok_or(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC output"})?;
+    let mut salt_bytes=Zeroizing(vec![0;64]);
+    let salt_len=salt.decode_b64(&mut salt_bytes.0).map_err(|_|JetCryptoError::InvalidEncoding{operation,value_kind:"PHC salt"})?.len();
+    salt_bytes.0.truncate(salt_len);
+    if !(8_192..=262_144).contains(&memory)||!(1..=10).contains(&iterations)||!(1..=8).contains(&lanes)||memory<8*lanes||memory.checked_mul(iterations).is_none_or(|value|value>1_048_576)||!(8..=64).contains(&salt_bytes.0.len())||!(16..=64).contains(&expected.as_bytes().len()){return Err(JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})}
+    let params=argon2::Params::new(memory,iterations,lanes,Some(expected.as_bytes().len())).map_err(|_|JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})?;
+    Ok((params,salt_bytes))
+}
+pub fn jet_crypto_password_parse_impl(text:String)->Result<JetPasswordHash,JetCryptoError>{let parsed=jet_crypto_password_parse_law(&text,"PasswordHash.parse")?;jet_crypto_password_policy(&parsed,"PasswordHash.parse")?;Ok(JetPasswordHash(text))}
 pub fn jet_crypto_password_text_impl(hash:&JetPasswordHash)->String{hash.0.clone()}
 fn jet_crypto_password_verify_typed_with_cancel(password:&Secret,stored:&JetPasswordHash,cancelled:fn()->bool,cancel_outcome:fn(),wait_enter:fn(),wait_leave:fn())->Result<bool,JetCryptoError>{
     if password.0.len()>1_048_576{return Err(JetCryptoError::PasswordPolicy{reason:"password exceeds 1048576 bytes"})}
     let parsed=jet_crypto_password_parse_law(&stored.0,"password_verify")?;
-    let memory=parsed.params.get_decimal("m").ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC parameters"})?;
-    let iterations=parsed.params.get_decimal("t").ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC parameters"})?;
-    let lanes=parsed.params.get_decimal("p").ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC parameters"})?;
-    let salt=parsed.salt.ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC salt"})?;
     let expected=parsed.hash.ok_or(JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC output"})?;
-    let mut salt_bytes=Zeroizing(vec![0;64]);let salt_len=salt.decode_b64(&mut salt_bytes.0).map_err(|_|JetCryptoError::InvalidEncoding{operation:"password_verify",value_kind:"PHC salt"})?.len();salt_bytes.0.truncate(salt_len);
-    if !(8_192..=262_144).contains(&memory)||!(1..=10).contains(&iterations)||!(1..=8).contains(&lanes)||memory<8*lanes||memory.checked_mul(iterations).is_none_or(|value|value>1_048_576)||!(8..=64).contains(&salt_bytes.0.len())||!(16..=64).contains(&expected.as_bytes().len()){return Err(JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})}
-    let params=argon2::Params::new(memory,iterations,lanes,Some(expected.as_bytes().len())).map_err(|_|JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})?;
+    let (params,salt_bytes)=jet_crypto_password_policy(&parsed,"password_verify")?;
     let output=jet_pwhash_cancel_or_crypto(jet_crypto_argon2id_run(&password.0,&salt_bytes.0,params,cancelled,wait_enter,wait_leave),cancel_outcome)?;
     Ok(bool::from(output.0.ct_eq(expected.as_bytes())))
 }
@@ -653,10 +673,10 @@ pub fn jet_crypto_expert_x25519_impl(secret:&Vec<u8>,public:&Vec<u8>,reject_all_
     let mut secret=array32(secret,"expert.x25519","secret")?;let public=array32(public,"expert.x25519","public")?;let shared=x25519_dalek::x25519(secret,public);zeroize(&mut secret);if reject_all_zero&&bool::from(shared.ct_eq(&[0;32])){return Err(JetCryptoError::NonContributoryKey)}Ok(Secret(shared.to_vec()))
 }
 pub fn jet_crypto_expert_hkdf_sha256_impl(ikm:&Vec<u8>,salt:&Vec<u8>,info:&Vec<u8>,length:i64)->Result<Secret,JetCryptoError>{
-    if !(0..=8160).contains(&length){return Err(JetCryptoError::OutputLength{operation:"expert.hkdf_sha256",minimum:0,maximum:8160,actual:length.unsigned_abs() as usize})}let mut out=vec![0;length as usize];Hkdf::<sha2::Sha256>::new(Some(salt),ikm).expand(info,&mut out).map_err(|_|JetCryptoError::Internal{incident_id:"expert-hkdf-expand"})?;Ok(Secret(out))
+    if !(0..=8160).contains(&length){return Err(JetCryptoError::OutputLength{operation:"expert.hkdf_sha256",minimum:0,maximum:8160,actual:length})}let mut out=vec![0;length as usize];Hkdf::<sha2::Sha256>::new(Some(salt),ikm).expand(info,&mut out).map_err(|_|JetCryptoError::Internal{incident_id:"expert-hkdf-expand"})?;Ok(Secret(out))
 }
 fn jet_crypto_expert_argon2id_with_cancel(password:&Secret,salt:&Vec<u8>,memory_kib:i64,iterations:i64,lanes:i64,output_length:i64,cancelled:fn()->bool,cancel_outcome:fn(),wait_enter:fn(),wait_leave:fn())->Result<Secret,JetCryptoError>{
-    if password.0.len()>1_048_576{return Err(JetCryptoError::PasswordPolicy{reason:"password exceeds 1048576 bytes"})}if !(8..=64).contains(&salt.len()){return Err(invalid_length("expert.argon2id","salt","8..=64",salt.len()))}if !(8_192..=262_144).contains(&memory_kib)||!(1..=10).contains(&iterations)||!(1..=8).contains(&lanes)||memory_kib<8*lanes||memory_kib.checked_mul(iterations).is_none_or(|v|v>1_048_576){return Err(JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})}if !(16..=64).contains(&output_length){return Err(JetCryptoError::OutputLength{operation:"expert.argon2id",minimum:16,maximum:64,actual:output_length.unsigned_abs() as usize})}let params=argon2::Params::new(memory_kib as u32,iterations as u32,lanes as u32,Some(output_length as usize)).map_err(|_|JetCryptoError::PasswordPolicy{reason:"invalid Argon2id parameters"})?;let mut out=jet_pwhash_cancel_or_crypto(jet_crypto_argon2id_run(&password.0,salt,params,cancelled,wait_enter,wait_leave),cancel_outcome)?;Ok(Secret(std::mem::take(&mut out.0)))
+    if password.0.len()>1_048_576{return Err(JetCryptoError::PasswordPolicy{reason:"password exceeds 1048576 bytes"})}if !(8..=64).contains(&salt.len()){return Err(invalid_length("expert.argon2id","salt","8..=64",salt.len()))}if !(8_192..=262_144).contains(&memory_kib)||!(1..=10).contains(&iterations)||!(1..=8).contains(&lanes)||memory_kib<8*lanes||memory_kib.checked_mul(iterations).is_none_or(|v|v>1_048_576){return Err(JetCryptoError::PasswordPolicy{reason:"Argon2id parameters exceed policy"})}if !(16..=64).contains(&output_length){return Err(JetCryptoError::OutputLength{operation:"expert.argon2id",minimum:16,maximum:64,actual:output_length})}let params=argon2::Params::new(memory_kib as u32,iterations as u32,lanes as u32,Some(output_length as usize)).map_err(|_|JetCryptoError::PasswordPolicy{reason:"invalid Argon2id parameters"})?;let mut out=jet_pwhash_cancel_or_crypto(jet_crypto_argon2id_run(&password.0,salt,params,cancelled,wait_enter,wait_leave),cancel_outcome)?;Ok(Secret(std::mem::take(&mut out.0)))
 }
 pub fn jet_crypto_expert_argon2id_impl(password:&Secret,salt:&Vec<u8>,memory_kib:i64,iterations:i64,lanes:i64,output_length:i64)->Result<Secret,JetCryptoError>{jet_crypto_expert_argon2id_with_cancel(password,salt,memory_kib,iterations,lanes,output_length,jet_crypto_never_cancelled,jet_crypto_ignore_cancel,jet_pwhash_wait_noop,jet_pwhash_wait_noop)}
 pub fn jet_crypto_expert_argon2id_cancel_impl(password:&Secret,salt:&Vec<u8>,memory_kib:i64,iterations:i64,lanes:i64,output_length:i64,cancelled:fn()->bool,cancel_outcome:fn(),wait_enter:fn(),wait_leave:fn())->Result<Secret,JetCryptoError>{jet_crypto_expert_argon2id_with_cancel(password,salt,memory_kib,iterations,lanes,output_length,cancelled,cancel_outcome,wait_enter,wait_leave)}

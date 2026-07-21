@@ -87,7 +87,21 @@ mod vault_key_wrap_tests {
             JetVaultKeyWrapError::Internal { .. } => "internal",
         }).collect::<Vec<_>>();
         assert_eq!(tags, ["invalid-encoding", "unsupported-version", "unsupported-mode", "unsupported-key-type", "invalid-length", "weak-passphrase", "open-failed", "entropy-unavailable", "resource-unavailable", "vault", "internal"]);
-        let shown = errors.iter().map(|error| format!("{error:?} {error}")).collect::<Vec<_>>().join("\n");
+        let display = errors.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(display, [
+            "invalid wrapped vault key encoding",
+            "unsupported wrapped vault key version",
+            "unsupported wrapped vault key mode",
+            "unsupported wrapped vault key type",
+            "invalid wrapped vault key length",
+            "recovery passphrase must contain 16..=1048576 bytes",
+            "open failed",
+            "the operating system could not provide cryptographic randomness",
+            "cryptographic resource unavailable",
+            "vault key not found",
+            "internal key-wrap failure; incident key-wrap-17",
+        ]);
+        let shown = errors.iter().zip(display).map(|(error, display)| format!("{error:?} {display}")).collect::<Vec<_>>().join("\n");
         for forbidden in ["secrets.age", "AGE-SECRET", "/home/", "hunter2", "ciphertext sentinel"] {
             assert!(!shown.contains(forbidden), "key-wrap error leaked `{forbidden}`: {shown}");
         }

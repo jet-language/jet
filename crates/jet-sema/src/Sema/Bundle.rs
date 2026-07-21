@@ -538,12 +538,16 @@ fn unit_fact(
     })
 }
 
-fn is_fallible_void_entry_return(ty: &Type) -> bool {
+fn is_fallible_void_entry_return(ty: &Type, state: &ModuleState) -> bool {
     matches!(
         ty,
         Type::Result { ok, err }
             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::TYPE_VOID)
-                && matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERROR || n == "CryptoError")
+                && matches!(err.as_ref(), Type::Named(n)
+                    if n == Syntax::TYPE_ERROR
+                        || (n == "CryptoError"
+                            && !state.registry.contains(n)
+                            && state.core_imports.values().any(|module| module == "jet.crypto" || module == "core.crypto")))
     )
 }
 
@@ -774,7 +778,8 @@ fn resolve_output_callable(
         _ => false,
     };
     let return_ok = signature.return_type.as_ref().is_none_or(|ty| {
-        matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID) || is_fallible_void_entry_return(ty)
+        matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID)
+            || is_fallible_void_entry_return(ty, &states[target])
     });
     if !params_ok || !return_ok {
         diags.extend(contract_diags);
@@ -2540,7 +2545,7 @@ fn check_bundle_opts_for_output(
                     && run_fn
                         .return_type
                         .as_ref()
-                        .is_some_and(|ret| !is_fallible_void_entry_return(ret))
+                        .is_some_and(|ret| !is_fallible_void_entry_return(ret, entry))
                 {
                     diags.push(Diagnostic::error(
                         "E0122",

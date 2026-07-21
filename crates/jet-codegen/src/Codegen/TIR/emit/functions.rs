@@ -134,7 +134,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     } else {
         emit_tir_stmts(&tir.body, cx, out, 1);
     }
-    if is_fallible_void_return(&tir.ret) {
+    if is_fallible_void_return(&tir.ret, cx) {
         out.push_str("    Ok(())\n");
     }
     out.push_str("}\n\n");
@@ -160,12 +160,14 @@ fn add_hidden_view_generic(generics: &str) -> String {
     }
 }
 
-fn is_fallible_void_return(ret: &Option<Type>) -> bool {
+fn is_fallible_void_return(ret: &Option<Type>, cx: &Cx) -> bool {
     matches!(
         ret,
         Some(Type::Result { ok, err })
             if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_VOID)
-                && matches!(err.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_ERROR || n == "CryptoError")
+                && matches!(err.as_ref(), Type::Named(n)
+                    if n == crate::Syntax::TYPE_ERROR
+                        || (n == "CryptoError" && !cx.type_names.contains(n)))
     )
 }
 

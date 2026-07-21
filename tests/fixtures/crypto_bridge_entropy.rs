@@ -202,7 +202,18 @@ mod tests {
             ["open-failed", "seal-failed", "source-io", "destination-exists", "destination-io"]
         );
         assert_eq!(file_error_tag(&JetFileCryptoError::Cancelled), "internal-cancelled");
-        let rendered = format!("{public:?}");
+        let rendered = public.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(
+            rendered,
+            [
+                "encrypted file could not be opened",
+                "encrypted file seal failed: the operating system could not provide cryptographic randomness",
+                "encrypted file source I/O failed",
+                "encrypted file destination already exists",
+                "encrypted file destination I/O failed",
+            ]
+        );
+        let rendered = rendered.join("\n");
         for forbidden in ["hunter2", "plaintext sentinel", "ciphertext sentinel", "/home/nate"] {
             assert!(!rendered.contains(forbidden), "file error leaked `{forbidden}`: {rendered}");
         }
@@ -346,12 +357,21 @@ mod tests {
         assert!(jet_crypto_constant_time_secret_impl(&secret, &unwrapped));
         let derived = jet_crypto_hkdf_typed_impl(&secret, &vec![], &b"domain".to_vec(), 32).unwrap();
         assert!(!jet_crypto_constant_time_secret_impl(&secret, &derived));
+        assert_eq!(
+            jet_crypto_hkdf_typed_impl(&secret, &vec![], &vec![], -1).err().unwrap().to_string(),
+            "hkdf_sha256: output length must be 0..8160; got -1"
+        );
         let signing = jet_crypto_signing_generate_impl().unwrap();
         let message = b"release".to_vec();
         let signature = jet_crypto_sign_typed_impl(&signing, &message).unwrap();
         assert!(jet_crypto_verify_typed_impl(jet_crypto_signing_public_impl(&signing), &message, signature).unwrap());
         let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
         assert!(jet_crypto_password_verify_typed_impl(&secret, &stored).unwrap());
+        let weak_memory = stored.0.replacen("m=65536", "m=4096", 1);
+        assert!(matches!(
+            jet_crypto_password_parse_impl(weak_memory),
+            Err(JetCryptoError::PasswordPolicy { .. })
+        ));
         let wrong_algorithm=JetPasswordHash(stored.0.replacen("$argon2id$","$argon2i$",1));
         assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wrong_algorithm),Err(JetCryptoError::UnsupportedAlgorithm{operation:"password_verify",algorithm:"argon2i".to_string()}));
         match jet_crypto_password_parse_impl(wrong_algorithm.0) { Err(JetCryptoError::UnsupportedAlgorithm{operation,algorithm}) => { assert_eq!(operation,"PasswordHash.parse"); assert_eq!(algorithm,"argon2i"); }, _ => panic!("argon2i must remain a typed unsupported algorithm") }
@@ -407,11 +427,19 @@ mod tests {
         let okm = jet_crypto_expert_hkdf_sha256_impl(&ikm, &salt, &info, 42).unwrap();
         assert!(jet_crypto_constant_time_secret_impl(&okm, &jet_crypto_secret_from_bytes_impl(expected_okm)));
         assert!(matches!(jet_crypto_expert_hkdf_sha256_impl(&ikm, &salt, &info, 8161), Err(JetCryptoError::OutputLength { .. })));
+        assert_eq!(
+            jet_crypto_expert_hkdf_sha256_impl(&ikm, &salt, &info, -1).err().unwrap().to_string(),
+            "expert.hkdf_sha256: output length must be 0..8160; got -1"
+        );
 
         let password = jet_crypto_secret_from_text_impl("password".to_string());
         let derived = jet_crypto_expert_argon2id_impl(&password, &b"12345678".to_vec(), 8192, 1, 1, 32).unwrap();
         assert_eq!(jet_crypto_expert_secret_bytes_impl(&derived).len(), 32);
         assert!(matches!(jet_crypto_expert_argon2id_impl(&password, &b"short".to_vec(), 8192, 1, 1, 32), Err(JetCryptoError::InvalidLength { parameter: "salt", .. })));
+        assert_eq!(
+            jet_crypto_expert_argon2id_impl(&password, &b"12345678".to_vec(), 8192, 1, 1, -1).err().unwrap().to_string(),
+            "expert.argon2id: output length must be 16..64; got -1"
+        );
     }
 
     #[test]

@@ -19,12 +19,20 @@ pub(crate) use Items::{
 };
 pub(super) use Serde::expand_builtin_serde_items;
 
-fn is_fallible_void_return(ty: &Type) -> bool {
+fn is_fallible_void_return(
+    ty: &Type,
+    registry: &TypeRegistry,
+    core_imports: &HashMap<String, String>,
+) -> bool {
     matches!(
         ty,
         Type::Result { ok, err }
             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::TYPE_VOID)
-                && matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERROR || n == "CryptoError")
+                && matches!(err.as_ref(), Type::Named(n)
+                    if n == Syntax::TYPE_ERROR
+                        || (n == "CryptoError"
+                            && !registry.contains(n)
+                            && core_imports.values().any(|module| module == "jet.crypto" || module == "core.crypto")))
     )
 }
 
@@ -342,8 +350,10 @@ impl<'a> Checker<'a> {
         // exactly a bare `return;` — it just ends the stream. Never E0114.
         let is_generator =
             matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
-        let is_entry_fallible_void =
-            f.name == "run" && f.return_type.as_ref().is_some_and(is_fallible_void_return);
+        let is_entry_fallible_void = f.name == "run"
+            && f.return_type.as_ref().is_some_and(|ty| {
+                is_fallible_void_return(ty, self.registry, self.core_imports)
+            });
         if !is_generator
             && !is_entry_fallible_void
             && f.return_type.is_some()
