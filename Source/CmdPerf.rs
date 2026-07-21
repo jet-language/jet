@@ -3,12 +3,16 @@
 //! `run`/`test`/`bench` write a schema-identified skeleton then return control
 //! so main can strip `perf` and execute the exact base-intent driver path.
 //! `attach`/`view`/`compare`/`export` share the same artifact verify seam.
+//! Attach reuses the observe live snapshot (D-OBSERVE-LIVE1) to capture wall/
+//! CPU and arena allocation facts attributed to a Jet source symbol.
 
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, trace_id, verify_jettrace, CapturePolicy,
-    TraceSkeleton, TraceToolchain, TRACE_SCHEMA, TRACE_VERSION,
+    JetSymbolRef, SourceIdentity, TraceAllocation, TraceSample, TraceSkeleton, TraceToolchain,
+    TRACE_SCHEMA, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
+use jet_foundation::SHA256;
 use jet_foundation::Syntax::ARTIFACT_EXT_TRACE;
 use std::fs;
 use std::io::Write;
@@ -23,6 +27,22 @@ pub(crate) enum Outcome {
     Exit(i32),
 }
 
+struct CaptureBundle {
+    samples: Vec<TraceSample>,
+    allocations: Vec<TraceAllocation>,
+    source_identity: Vec<SourceIdentity>,
+}
+
+impl CaptureBundle {
+    fn empty() -> Self {
+        Self {
+            samples: Vec::new(),
+            allocations: Vec::new(),
+            source_identity: Vec::new(),
+        }
+    }
+}
+
 pub(crate) fn run(raw: &[String]) -> Outcome {
     let Some(action) = raw.get(1).map(String::as_str) else {
         eprintln!("Error [E2102]: `jet perf` needs a subcommand");
@@ -30,7 +50,7 @@ pub(crate) fn run(raw: &[String]) -> Outcome {
         return Outcome::Exit(2);
     };
     match action {
-        "run" | "test" | "bench" => match write_session_skeleton(action, &raw[1..], None) {
+        "run" | "test" | "bench" => match write_session_trace(action, &raw[1..], None, CaptureBundle::empty()) {
             Ok(path) => {
                 eprintln!("trace: {}", path.display());
                 Outcome::ForwardBase
@@ -57,6 +77,7 @@ pub(crate) fn run(raw: &[String]) -> Outcome {
 fn attach(args: &[String]) -> i32 {
     let mut pid = None;
     let mut out = None;
+    let mut source = None;
     let mut i = 0usize;
     while i < args.len() {
         let arg = args[i].as_str();
@@ -71,6 +92,20 @@ fn attach(args: &[String]) -> i32 {
                 return 2;
             };
             out = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--source=") {
+            source = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "--source" {
+            let Some(value) = args.get(i + 1) else {
+                eprintln!("Error [E2102]: `--source` needs a `.jet` path");
+                return 2;
+            };
+            source = Some(value.clone());
             i += 2;
             continue;
         }
@@ -91,17 +126,43 @@ fn attach(args: &[String]) -> i32 {
     }
     let Some(pid) = pid else {
         eprintln!("Error [E2102]: `jet perf attach` needs a process id");
-        eprintln!(" Fix: jet perf attach <pid>");
+        eprintln!(" Fix: jet perf attach <pid> --source <file.jet>");
         return 2;
     };
-    // Same-user observe surface: refuse foreign/missing pids with a Jet message.
     if !process_exists(pid) {
         eprintln!("Error [E2102]: process {pid} is not running or not visible to this user");
         eprintln!(" Fix: start the program with `jet run --observe`, then attach to that pid");
         return 2;
     }
-    let argv = vec!["attach".into(), pid.to_string()];
-    match write_session_skeleton("attach", &argv, out.as_deref()) {
+
+    let capture = match (source.as_deref(), jet::DevServer::LiveInspect::read(pid)) {
+        (Some(path), Ok(snapshot)) => match capture_from_observe(pid, path, &snapshot) {
+            Ok(bundle) => bundle,
+            Err(message) => {
+                eprintln!("Error [E2102]: {message}");
+                return 2;
+            }
+        },
+        (Some(_), Err(message)) => {
+            eprintln!("Error [E2102]: {message}");
+            eprintln!(" Fix: start the program with `jet run --observe`, then attach");
+            return 2;
+        }
+        (None, Ok(_)) => {
+            eprintln!("Error [E2102]: live observe snapshot found, but `--source` is required");
+            eprintln!(" Why: domain capture must attribute facts to a Jet symbol identity");
+            eprintln!(" Fix: jet perf attach {pid} --source <file.jet>");
+            return 2;
+        }
+        (None, Err(_)) => CaptureBundle::empty(),
+    };
+
+    let mut argv = vec!["attach".into(), pid.to_string()];
+    if let Some(path) = &source {
+        argv.push("--source".into());
+        argv.push(path.clone());
+    }
+    match write_session_trace("attach", &argv, out.as_deref(), capture) {
         Ok(path) => {
             eprintln!("trace: {}", path.display());
             0
@@ -110,6 +171,95 @@ fn attach(args: &[String]) -> i32 {
             eprintln!("Error [E2102]: {message}");
             2
         }
+    }
+}
+
+fn capture_from_observe(pid: u32, source_path: &str, snapshot: &str) -> Result<CaptureBundle, String> {
+    let path = PathBuf::from(source_path);
+    if path.extension().and_then(|e| e.to_str()) != Some("jet") {
+        return Err(format!("`--source` must be a `.jet` file, got `{source_path}`"));
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("cannot read source {source_path}: {e}"))?;
+    let sha256 = SHA256::sha256_hex(&bytes);
+    let path_text = source_path.to_string();
+    let symbol = JetSymbolRef {
+        path: path_text.clone(),
+        name: "run".into(),
+    };
+    let (wall_ns, cpu_ns) = process_times(pid).unwrap_or((0, 0));
+    let (alloc_count, alloc_bytes) = observe_arena_resources(snapshot);
+    let mut samples = Vec::new();
+    samples.push(TraceSample {
+        domain: "wall".into(),
+        duration_ns: wall_ns.max(1),
+        symbol: symbol.clone(),
+    });
+    if cpu_ns > 0 {
+        samples.push(TraceSample {
+            domain: "cpu".into(),
+            duration_ns: cpu_ns,
+            symbol: symbol.clone(),
+        });
+    }
+    Ok(CaptureBundle {
+        samples,
+        allocations: vec![TraceAllocation {
+            count: alloc_count,
+            bytes: alloc_bytes,
+            symbol,
+        }],
+        source_identity: vec![SourceIdentity {
+            path: path_text,
+            sha256,
+            symbols: vec![("run".into(), "fn".into())],
+        }],
+    })
+}
+
+fn observe_arena_resources(snapshot: &str) -> (u64, u64) {
+    let resources = snapshot
+        .split_once("\"resources\":")
+        .map(|(_, tail)| tail)
+        .unwrap_or("");
+    let count = json_u64(resources, "arena_allocations").unwrap_or(0);
+    let bytes = json_u64(resources, "arena_bytes").unwrap_or(0);
+    (count, bytes)
+}
+
+fn json_u64(object: &str, key: &str) -> Option<u64> {
+    let tail = object.split_once(&format!("\"{key}\":"))?.1;
+    let digits: String = tail
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
+fn process_times(pid: u32) -> Option<(u64, u64)> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        // ponytail: Linux USER_HZ is almost always 100; sysconf later if needed.
+        const CLK_TCK: u64 = 100;
+        let uptime = fs::read_to_string("/proc/uptime").ok()?;
+        let uptime_secs: f64 = uptime.split_whitespace().next()?.parse().ok()?;
+        let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let fields = stat.rsplit_once(") ")?.1;
+        let fields: Vec<&str> = fields.split_whitespace().collect();
+        let utime: u64 = fields.get(11)?.parse().ok()?;
+        let stime: u64 = fields.get(12)?.parse().ok()?;
+        let starttime: u64 = fields.get(19)?.parse().ok()?;
+        let now_ticks = (uptime_secs * CLK_TCK as f64) as u64;
+        let wall_ticks = now_ticks.saturating_sub(starttime);
+        let wall_ns = wall_ticks.saturating_mul(1_000_000_000 / CLK_TCK);
+        let cpu_ns = utime
+            .saturating_add(stime)
+            .saturating_mul(1_000_000_000 / CLK_TCK);
+        Some((wall_ns, cpu_ns))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = pid;
+        None
     }
 }
 
@@ -129,6 +279,12 @@ fn view(args: &[String]) -> i32 {
             println!("schema {TRACE_SCHEMA} v{TRACE_VERSION}");
             println!("trace {id}");
             println!("command {command}");
+            if let Some((domain, ns, symbol)) = first_sample(&trace) {
+                println!("sample {domain} {ns}ns · {symbol}");
+            }
+            if let Some((count, bytes, symbol)) = first_allocation(&trace) {
+                println!("alloc count={count} bytes={bytes} · {symbol}");
+            }
             0
         }
         Err(message) => {
@@ -180,7 +336,6 @@ fn export(args: &[String]) -> i32 {
     while i < args.len() {
         let arg = args[i].as_str();
         if arg == "--json" {
-            // Projection is always JSON today; flag reserved for future formats.
             i += 1;
             continue;
         }
@@ -207,15 +362,14 @@ fn export(args: &[String]) -> i32 {
             return 2;
         }
     };
-    // Loss-declared JSON projection of the one artifact truth.
+    let loss = if first_sample(&trace).is_some() || first_allocation(&trace).is_some() {
+        "json-envelope; domains present are wall/cpu/alloc only — no pprof/otel/chrome payloads"
+    } else {
+        "json-envelope-only; no pprof/otel/chrome payloads in skeleton"
+    };
     let projection = CanonicalJson::object([
         ("kind".into(), CanonicalJson::String("jet.trace.projection".into())),
-        (
-            "loss".into(),
-            CanonicalJson::String(
-                "json-envelope-only; no pprof/otel/chrome payloads in skeleton".into(),
-            ),
-        ),
+        ("loss".into(), CanonicalJson::String(loss.into())),
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
         ("trace".into(), trace),
         ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
@@ -225,12 +379,20 @@ fn export(args: &[String]) -> i32 {
     0
 }
 
-fn write_session_skeleton(command: &str, argv: &[String], out: Option<&str>) -> Result<PathBuf, String> {
+fn write_session_trace(
+    command: &str,
+    argv: &[String],
+    out: Option<&str>,
+    capture: CaptureBundle,
+) -> Result<PathBuf, String> {
     let skeleton = TraceSkeleton {
         command: command.into(),
         argv: argv.to_vec(),
         toolchain: current_toolchain(),
         capture_policy: CapturePolicy::default_exclusions(),
+        samples: capture.samples,
+        allocations: capture.allocations,
+        source_identity: capture.source_identity,
     };
     let bytes = build_skeleton_bytes(&skeleton)?;
     let path = match out {
@@ -243,7 +405,6 @@ fn write_session_skeleton(command: &str, argv: &[String], out: Option<&str>) -> 
         }
     }
     write_trace_file(&path, &bytes)?;
-    // Prove the on-disk bytes are the verified artifact, not a placeholder.
     let written = fs::read(&path).map_err(|e| format!("cannot re-read {}: {e}", path.display()))?;
     verify_jettrace(&written).map_err(|e| format!("wrote unverifiable jettrace: {e}"))?;
     Ok(path)
@@ -309,8 +470,6 @@ fn utc_stamp() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    // Compact UTC-ish stamp without pulling chrono: YYYYMMDDhhmmss from epoch is
-    // not calendar-true; use epoch seconds for uniqueness and keep human prefix.
     // ponytail: epoch stamp, calendar UTC when capture clock lands.
     format!("{secs}")
 }
@@ -344,4 +503,56 @@ fn toolchain_digest(trace: &CanonicalJson) -> Option<&str> {
         CanonicalJson::String(digest) => Some(digest.as_str()),
         _ => None,
     }
+}
+
+fn content_array<'a>(trace: &'a CanonicalJson, key: &str) -> Option<&'a [CanonicalJson]> {
+    let CanonicalJson::Object(fields) = trace else { return None };
+    let CanonicalJson::Object(content) = fields.get("content")? else { return None };
+    match content.get(key)? {
+        CanonicalJson::Array(items) => Some(items.as_slice()),
+        _ => None,
+    }
+}
+
+fn first_sample(trace: &CanonicalJson) -> Option<(String, String, String)> {
+    let sample = content_array(trace, "samples")?.first()?;
+    let CanonicalJson::Object(fields) = sample else { return None };
+    let domain = match fields.get("domain")? {
+        CanonicalJson::String(domain) => domain.clone(),
+        _ => return None,
+    };
+    let ns = match fields.get("duration_ns")? {
+        CanonicalJson::Integer(ns) => ns.clone(),
+        _ => return None,
+    };
+    let symbol = symbol_label(fields.get("symbol")?)?;
+    Some((domain, ns, symbol))
+}
+
+fn first_allocation(trace: &CanonicalJson) -> Option<(String, String, String)> {
+    let alloc = content_array(trace, "allocations")?.first()?;
+    let CanonicalJson::Object(fields) = alloc else { return None };
+    let count = match fields.get("count")? {
+        CanonicalJson::Integer(count) => count.clone(),
+        _ => return None,
+    };
+    let bytes = match fields.get("bytes")? {
+        CanonicalJson::Integer(bytes) => bytes.clone(),
+        _ => return None,
+    };
+    let symbol = symbol_label(fields.get("symbol")?)?;
+    Some((count, bytes, symbol))
+}
+
+fn symbol_label(value: &CanonicalJson) -> Option<String> {
+    let CanonicalJson::Object(fields) = value else { return None };
+    let path = match fields.get("path")? {
+        CanonicalJson::String(path) => path.as_str(),
+        _ => return None,
+    };
+    let name = match fields.get("name")? {
+        CanonicalJson::String(name) => name.as_str(),
+        _ => return None,
+    };
+    Some(format!("{path}#{name}"))
 }

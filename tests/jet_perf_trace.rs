@@ -1,8 +1,14 @@
-//! D-PERFSESSION1=D C1: `jet perf` writes/reads a versioned `.jettrace` skeleton.
+//! D-PERFSESSION1=D: `jet perf` writes/reads a versioned `.jettrace`.
+//! C1: skeleton command family. C2 slice: attach captures wall/alloc with
+//! Jet symbol identity from the observe live snapshot.
 
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+mod common;
 
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
@@ -17,16 +23,20 @@ fn run_jet(cwd: &Path, args: &[&str]) -> std::process::Output {
 }
 
 fn temp_workspace() -> PathBuf {
-    let root = std::env::temp_dir().join(format!(
-        "jet-perf-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let root = common::unique_tmp("jet-perf");
     fs::create_dir_all(&root).unwrap();
     root
+}
+
+struct ChildGuard(Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let pid = self.0.id();
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+        let _ = fs::remove_file(jet::DevServer::LiveInspect::snapshot_path(pid));
+    }
 }
 
 #[test]
@@ -104,8 +114,6 @@ fn perf_attach_view_compare_export_share_one_jettrace_truth() {
 #[test]
 fn perf_run_accepts_base_surface_and_writes_jettrace_before_driver() {
     let root = temp_workspace();
-    // Missing program: still proves argv acceptance + skeleton write, then the
-    // exact `jet run` driver owns the subsequent failure.
     let missing = root.join("missing.jet");
     let output = run_jet(
         &root,
@@ -147,4 +155,103 @@ fn perf_help_lists_family() {
     for verb in ["run", "test", "bench", "attach", "view", "compare", "export"] {
         assert!(stdout.contains(verb), "missing {verb} in {stdout}");
     }
+}
+
+#[test]
+fn perf_attach_captures_wall_and_alloc_with_jet_symbol_from_observe() {
+    if !common::have_rustc() {
+        return;
+    }
+    let root = temp_workspace();
+    fs::create_dir_all(&root).unwrap();
+    let source = root.join("live.jet");
+    fs::write(
+        &source,
+        r#"use core.mem as mem
+use core.time as time
+
+fn run() {
+    arena :: mem.Arena.new()
+    x :: arena.alloc(42)
+    print("READY")
+    time.sleep(30000)
+}
+"#,
+    )
+    .unwrap();
+
+    let build = run_jet(&root, &["build", source.to_str().unwrap()]);
+    assert!(
+        build.status.success(),
+        "build failed:\n{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let binary = root
+        .join("build")
+        .join(format!("live{}", std::env::consts::EXE_SUFFIX));
+    let mut child = Command::new(&binary)
+        .env("JET_OBSERVE", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut ready = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut ready)
+        .unwrap();
+    assert_eq!(
+        ready.trim(),
+        "READY",
+        "observed program did not become ready: {ready:?}"
+    );
+    let pid = child.id();
+    let _guard = ChildGuard(child);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match jet::DevServer::LiveInspect::read(pid) {
+            Ok(snapshot) if snapshot.contains("\"arena_allocations\":") => break,
+            _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
+            other => panic!("observe snapshot never became readable: {other:?}"),
+        }
+    }
+
+    let out = root.join("capture.jettrace");
+    let attach = run_jet(
+        &root,
+        &[
+            "perf",
+            "attach",
+            &pid.to_string(),
+            "--source",
+            source.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    let stderr = String::from_utf8_lossy(&attach.stderr);
+    assert!(
+        attach.status.success(),
+        "attach capture failed: status={:?} stderr={stderr}",
+        attach.status.code()
+    );
+    assert!(out.is_file(), "missing {}", out.display());
+    let text = fs::read_to_string(&out).unwrap();
+    assert!(text.contains("\"domain\":\"wall\""), "{text}");
+    assert!(text.contains("\"duration_ns\":"), "{text}");
+    assert!(text.contains("\"allocations\":[{"), "{text}");
+    assert!(text.contains("\"source_identity\":[{"), "{text}");
+    assert!(text.contains("\"name\":\"run\""), "{text}");
+    assert!(text.contains("live.jet"), "{text}");
+    assert!(!text.contains("\"samples\":[]"), "samples still empty: {text}");
+    assert!(!text.contains("\"allocations\":[]"), "allocations still empty: {text}");
+
+    let view = run_jet(&root, &["perf", "view", out.to_str().unwrap()]);
+    let stdout = String::from_utf8_lossy(&view.stdout);
+    assert!(view.status.success(), "{}", String::from_utf8_lossy(&view.stderr));
+    assert!(stdout.contains("sample wall"), "{stdout}");
+    assert!(stdout.contains("alloc count="), "{stdout}");
+    assert!(stdout.contains("live.jet#run"), "{stdout}");
+
+    let _ = fs::remove_dir_all(&root);
 }

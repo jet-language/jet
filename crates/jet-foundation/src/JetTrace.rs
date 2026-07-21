@@ -81,19 +81,115 @@ impl CapturePolicy {
     }
 }
 
+/// Jet source symbol attribution for a captured fact (path + entry name).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetSymbolRef {
+    pub path: String,
+    pub name: String,
+}
+
+impl JetSymbolRef {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("name".into(), CanonicalJson::String(self.name.clone())),
+            ("path".into(), CanonicalJson::String(self.path.clone())),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceSample {
+    pub domain: String,
+    pub duration_ns: u64,
+    pub symbol: JetSymbolRef,
+}
+
+impl TraceSample {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("domain".into(), CanonicalJson::String(self.domain.clone())),
+            ("duration_ns".into(), CanonicalJson::Integer(self.duration_ns.to_string())),
+            ("symbol".into(), self.symbol.to_json()?),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceAllocation {
+    pub count: u64,
+    pub bytes: u64,
+    pub symbol: JetSymbolRef,
+}
+
+impl TraceAllocation {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("bytes".into(), CanonicalJson::Integer(self.bytes.to_string())),
+            ("count".into(), CanonicalJson::Integer(self.count.to_string())),
+            ("symbol".into(), self.symbol.to_json()?),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceIdentity {
+    pub path: String,
+    pub sha256: String,
+    pub symbols: Vec<(String, String)>,
+}
+
+impl SourceIdentity {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        let mut symbols = self.symbols.clone();
+        symbols.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let symbols = symbols
+            .into_iter()
+            .map(|(name, kind)| {
+                CanonicalJson::object([
+                    ("kind".into(), CanonicalJson::String(kind)),
+                    ("name".into(), CanonicalJson::String(name)),
+                ])
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        CanonicalJson::object([
+            ("path".into(), CanonicalJson::String(self.path.clone())),
+            ("sha256".into(), CanonicalJson::String(self.sha256.clone())),
+            ("symbols".into(), CanonicalJson::Array(symbols)),
+        ])
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraceSkeleton {
     pub command: String,
     pub argv: Vec<String>,
     pub toolchain: TraceToolchain,
     pub capture_policy: CapturePolicy,
+    pub samples: Vec<TraceSample>,
+    pub allocations: Vec<TraceAllocation>,
+    pub source_identity: Vec<SourceIdentity>,
 }
 
 impl TraceSkeleton {
     pub fn content_json(&self) -> Result<CanonicalJson, String> {
         let argv = CanonicalJson::Array(self.argv.iter().cloned().map(CanonicalJson::String).collect());
+        let samples = self
+            .samples
+            .iter()
+            .map(TraceSample::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
+        let allocations = self
+            .allocations
+            .iter()
+            .map(TraceAllocation::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
+        let source_identity = self
+            .source_identity
+            .iter()
+            .map(SourceIdentity::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
         CanonicalJson::object([
-            ("allocations".into(), CanonicalJson::Array(Vec::new())),
+            ("allocations".into(), CanonicalJson::Array(allocations)),
             ("argv".into(), argv),
             ("browser".into(), CanonicalJson::Array(Vec::new())),
             ("capture_policy".into(), self.capture_policy.to_json()?),
@@ -101,8 +197,8 @@ impl TraceSkeleton {
             ("io".into(), CanonicalJson::Array(Vec::new())),
             ("locks".into(), CanonicalJson::Array(Vec::new())),
             ("native".into(), CanonicalJson::Array(Vec::new())),
-            ("samples".into(), CanonicalJson::Array(Vec::new())),
-            ("source_identity".into(), CanonicalJson::Array(Vec::new())),
+            ("samples".into(), CanonicalJson::Array(samples)),
+            ("source_identity".into(), CanonicalJson::Array(source_identity)),
             ("spans".into(), CanonicalJson::Array(Vec::new())),
             ("tasks".into(), CanonicalJson::Array(Vec::new())),
             ("toolchain".into(), self.toolchain.to_json()?),
@@ -190,25 +286,99 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
         }
         _ => return Err("content.argv is not an array".into()),
     }
-    for key in [
-        "allocations",
-        "browser",
-        "io",
-        "locks",
-        "native",
-        "samples",
-        "source_identity",
-        "spans",
-        "tasks",
-    ] {
+    for key in ["browser", "io", "locks", "native", "spans", "tasks"] {
         match &fields[key] {
             CanonicalJson::Array(_) => {}
             _ => return Err(format!("content.{key} is not an array")),
         }
     }
+    validate_samples(&fields["samples"])?;
+    validate_allocations(&fields["allocations"])?;
+    validate_source_identity(&fields["source_identity"])?;
     validate_capture_policy(&fields["capture_policy"])?;
     validate_toolchain(&fields["toolchain"])?;
     Ok(())
+}
+
+fn validate_symbol(value: &CanonicalJson, label: &str) -> Result<(), String> {
+    let fields = object_keys(value, label, &["name", "path"])?;
+    text(&fields["name"], &format!("{label}.name"))?;
+    text(&fields["path"], &format!("{label}.path"))?;
+    Ok(())
+}
+
+fn validate_samples(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.samples is not an array".into()),
+    };
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.samples[{i}]");
+        let fields = object_keys(item, &label, &["domain", "duration_ns", "symbol"])?;
+        let domain = text(&fields["domain"], &format!("{label}.domain"))?;
+        if !matches!(domain, "wall" | "cpu") {
+            return Err(format!("{label}.domain must be wall or cpu"));
+        }
+        unsigned(&fields["duration_ns"], &format!("{label}.duration_ns"))?;
+        validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+    }
+    Ok(())
+}
+
+fn validate_allocations(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.allocations is not an array".into()),
+    };
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.allocations[{i}]");
+        let fields = object_keys(item, &label, &["bytes", "count", "symbol"])?;
+        unsigned(&fields["bytes"], &format!("{label}.bytes"))?;
+        unsigned(&fields["count"], &format!("{label}.count"))?;
+        validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+    }
+    Ok(())
+}
+
+fn validate_source_identity(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.source_identity is not an array".into()),
+    };
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.source_identity[{i}]");
+        let fields = object_keys(item, &label, &["path", "sha256", "symbols"])?;
+        text(&fields["path"], &format!("{label}.path"))?;
+        let hash = text(&fields["sha256"], &format!("{label}.sha256"))?;
+        if hash.len() != 64 || !hash.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+            return Err(format!("{label}.sha256 is not lowercase Hex64"));
+        }
+        let symbols = match &fields["symbols"] {
+            CanonicalJson::Array(symbols) => symbols,
+            _ => return Err(format!("{label}.symbols is not an array")),
+        };
+        let mut prior: Option<(&str, &str)> = None;
+        for (j, symbol) in symbols.iter().enumerate() {
+            let slabel = format!("{label}.symbols[{j}]");
+            let sfields = object_keys(symbol, &slabel, &["kind", "name"])?;
+            let kind = text(&sfields["kind"], &format!("{slabel}.kind"))?;
+            let name = text(&sfields["name"], &format!("{slabel}.name"))?;
+            if prior.is_some_and(|p| p > (name, kind)) {
+                return Err(format!("{label}.symbols is not sorted"));
+            }
+            prior = Some((name, kind));
+        }
+    }
+    Ok(())
+}
+
+fn unsigned(value: &CanonicalJson, label: &str) -> Result<u64, String> {
+    match value {
+        CanonicalJson::Integer(text) => text
+            .parse::<u64>()
+            .map_err(|_| format!("{label} is not an unsigned integer")),
+        _ => Err(format!("{label} is not an integer")),
+    }
 }
 
 fn validate_capture_policy(value: &CanonicalJson) -> Result<(), String> {
@@ -315,7 +485,42 @@ mod tests {
                 runner_id: "runner-test".into(),
             },
             capture_policy: CapturePolicy::default_exclusions(),
+            samples: Vec::new(),
+            allocations: Vec::new(),
+            source_identity: Vec::new(),
         }
+    }
+
+    #[test]
+    fn captured_wall_and_alloc_round_trip_with_symbol() {
+        let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
+        skeleton.samples.push(TraceSample {
+            domain: "wall".into(),
+            duration_ns: 42,
+            symbol: symbol.clone(),
+        });
+        skeleton.allocations.push(TraceAllocation {
+            count: 3,
+            bytes: 96,
+            symbol: symbol.clone(),
+        });
+        skeleton.source_identity.push(SourceIdentity {
+            path: "app.jet".into(),
+            sha256: "a".repeat(64),
+            symbols: vec![("run".into(), "fn".into())],
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let verified = verify_jettrace(&bytes).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("\"domain\":\"wall\""), "{text}");
+        assert!(text.contains("\"duration_ns\":42"), "{text}");
+        assert!(text.contains("\"count\":3"), "{text}");
+        assert!(text.contains("\"name\":\"run\""), "{text}");
+        assert_eq!(trace_id(&verified).unwrap().len(), 64);
     }
 
     #[test]
