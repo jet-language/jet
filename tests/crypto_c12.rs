@@ -97,13 +97,13 @@ fn typed_crypto_matches_aot_in_default_dev_with_honest_jit_boundary() {
         concat!(
             "aes-gcm = { version = \"=0.10.3\", default-features = false, features = [\"aes\", \"alloc\"] }\n",
             "argon2 = { version = \"=0.5.3\", default-features = false, features = [\"alloc\", \"password-hash\"] }\n",
-            "blake3 = { version = \"=1.8.5\", default-features = false, features = [\"std\"] }\n",
+            "blake3 = { version = \"=1.8.2\", default-features = false, features = [\"std\", \"pure\"] }\n",
             "chacha20poly1305 = { version = \"=0.10.1\", default-features = false, features = [\"alloc\"] }\n",
-            "ed25519-dalek = { version = \"=2.2.0\", default-features = false, features = [\"fast\", \"std\", \"zeroize\"] }\n",
+            "ed25519-dalek = { version = \"=2.2.0\", default-features = false, features = [\"alloc\", \"zeroize\"] }\n",
             "hkdf = { version = \"=0.12.4\", default-features = false, features = [] }\n",
-            "sha2 = { version = \"=0.10.9\", default-features = false, features = [\"std\"] }\n",
-            "subtle = { version = \"=2.6.1\", default-features = false, features = [\"i128\", \"std\"] }\n",
-            "x25519-dalek = { version = \"=2.0.1\", default-features = false, features = [\"alloc\", \"precomputed-tables\", \"zeroize\"] }\n",
+            "sha2 = { version = \"=0.10.9\", default-features = false, features = [] }\n",
+            "subtle = { version = \"=2.6.1\", default-features = false, features = [] }\n",
+            "x25519-dalek = { version = \"=2.0.1\", default-features = false, features = [\"precomputed-tables\", \"zeroize\"] }\n",
         ),
         "generated crypto dependencies must be exact and feature-minimal",
     );

@@ -960,7 +960,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
     (
         "blake3",
-        "{ version = \"=1.8.5\", default-features = false, features = [\"std\"] }",
+        "{ version = \"=1.8.2\", default-features = false, features = [\"std\", \"pure\"] }",
     ),
     (
         "chacha20poly1305",
@@ -968,7 +968,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
     (
         "ed25519-dalek",
-        "{ version = \"=2.2.0\", default-features = false, features = [\"fast\", \"std\", \"zeroize\"] }",
+        "{ version = \"=2.2.0\", default-features = false, features = [\"alloc\", \"zeroize\"] }",
     ),
     (
         "hkdf",
@@ -988,11 +988,11 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
     (
         "sha2",
-        "{ version = \"=0.10.9\", default-features = false, features = [\"std\"] }",
+        "{ version = \"=0.10.9\", default-features = false, features = [] }",
     ),
     (
         "subtle",
-        "{ version = \"=2.6.1\", default-features = false, features = [\"i128\", \"std\"] }",
+        "{ version = \"=2.6.1\", default-features = false, features = [] }",
     ),
     (
         "wasmtime",
@@ -1000,7 +1000,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
     ),
     (
         "x25519-dalek",
-        "{ version = \"=2.0.1\", default-features = false, features = [\"alloc\", \"precomputed-tables\", \"zeroize\"] }",
+        "{ version = \"=2.0.1\", default-features = false, features = [\"precomputed-tables\", \"zeroize\"] }",
     ),
 ];
 
@@ -1030,7 +1030,7 @@ pub const ARGON2_CRATE_SPEC: (&str, &str) = ("argon2", "=0.5.3");
 pub const SHA2_CRATE_SPEC: (&str, &str) = ("sha2", "=0.10.9");
 
 /// The `blake3` crate version backing `core.crypto.blake3_bytes` (D-CRYPTO-SUITE1).
-pub const BLAKE3_CRATE_SPEC: (&str, &str) = ("blake3", "=1.8.5");
+pub const BLAKE3_CRATE_SPEC: (&str, &str) = ("blake3", "=1.8.2");
 
 /// The `hkdf` crate version backing `core.crypto.hkdf_sha256` (D-CRYPTO-SUITE1).
 pub const HKDF_CRATE_SPEC: (&str, &str) = ("hkdf", "=0.12.4");
