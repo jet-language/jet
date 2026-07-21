@@ -1,5 +1,5 @@
 //! D-PERFSESSION1=D: `jet perf` writes/reads a versioned `.jettrace`.
-//! C1: command family + verify. C2: run/attach capture wall/alloc with
+//! C1: command family + verify. C2: run/attach capture wall/alloc/tasks with
 //! Jet symbol identity from the observe live snapshot.
 
 use std::fs;
@@ -76,6 +76,32 @@ fn assert_honest_wall_and_alloc(text: &str) {
     assert!(
         bytes > 0,
         "zero alloc bytes false-green: count={count} bytes={bytes} in {text}"
+    );
+}
+
+/// Fail if tasks are empty, missing root, or missing a spawned child parent link.
+fn assert_honest_tasks(text: &str) {
+    let tasks_at = text
+        .find("\"tasks\":[{")
+        .unwrap_or_else(|| panic!("missing non-empty tasks array: {text}"));
+    let tasks = &text[tasks_at..];
+    assert!(
+        tasks.contains("\"parent\":0"),
+        "missing root task parent=0: {text}"
+    );
+    assert!(
+        tasks.contains("\"parent\":1") || tasks.contains("\"parent\":2"),
+        "missing spawned child parent causality: {text}"
+    );
+    assert!(
+        tasks.contains("\"state\":\"running\"")
+            || tasks.contains("\"state\":\"blocked\"")
+            || tasks.contains("\"state\":\"queued\""),
+        "missing live observe task state: {text}"
+    );
+    assert!(
+        !text.contains("\"tasks\":[]"),
+        "empty tasks false-green leaked beside non-empty claim: {text}"
     );
 }
 
@@ -206,21 +232,26 @@ fn perf_run_captures_wall_and_alloc_into_jettrace() {
     // Non-entry `probe_work` must appear in source_identity; sample symbol is
     // parsed `fn run` only — never a hardcoded invention. Arena stays live in
     // `run` so observe still sees outstanding allocations during sleep.
+    // Spawned child sleeps longer than parent so poll sees parent causality.
     fs::write(
         &source,
         r#"use core.mem as mem
+use core.tasks as tasks
 use core.time as time
 
 fn probe_work() {
-    // Present only so source_identity must parse a non-entry fn name.
+    // Present only so source_identity must parse a non-entry function spelling.
 }
 
 fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     probe_work()
+    child :: tasks.spawn(() => {
+        time.sleep(2000)
+    })
     print("READY")
-    time.sleep(500)
+    time.sleep(800)
 }
 "#,
     )
@@ -247,6 +278,7 @@ fn run() {
     assert!(out.is_file(), "missing {}", out.display());
     let text = fs::read_to_string(&out).unwrap();
     assert_honest_wall_and_alloc(&text);
+    assert_honest_tasks(&text);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("session.jet"), "{text}");
@@ -265,6 +297,9 @@ fn run() {
     assert!(stdout.contains("sample wall"), "{stdout}");
     assert!(stdout.contains("alloc count="), "{stdout}");
     assert!(!stdout.contains("alloc count=0 "), "zero alloc in view: {stdout}");
+    assert!(stdout.contains("tasks count="), "{stdout}");
+    assert!(stdout.contains("children="), "{stdout}");
+    assert!(!stdout.contains("tasks count=0 "), "zero tasks in view: {stdout}");
     assert!(stdout.contains("session.jet#run"), "{stdout}");
     assert!(stdout.contains("command run"), "{stdout}");
 
@@ -282,16 +317,20 @@ fn perf_attach_captures_wall_and_alloc_with_jet_symbol_from_observe() {
     fs::write(
         &source,
         r#"use core.mem as mem
+use core.tasks as tasks
 use core.time as time
 
 fn probe_work() {
-    // Present only so source_identity must parse a non-entry fn name.
+    // Present only so source_identity must parse a non-entry function spelling.
 }
 
 fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     probe_work()
+    child :: tasks.spawn(() => {
+        time.sleep(30000)
+    })
     print("READY")
     time.sleep(30000)
 }
@@ -331,14 +370,19 @@ fn run() {
         match jet::DevServer::LiveInspect::read(pid) {
             Ok(snapshot)
                 if snapshot.contains("\"arena_allocations\":")
-                    && !snapshot.contains("\"arena_allocations\":0") =>
+                    && !snapshot.contains("\"arena_allocations\":0")
+                    && snapshot.contains("\"parent\":1") =>
             {
                 break
             }
             _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-            other => panic!("observe snapshot never became readable with allocs: {other:?}"),
+            other => panic!(
+                "observe snapshot never became readable with allocs+child task: {other:?}"
+            ),
         }
     }
+    // Ensure /proc starttime → wall ticks clear the honest >0 / >=1ms floor.
+    std::thread::sleep(Duration::from_millis(50));
 
     let out = root.join("capture.jettrace");
     let attach = run_jet(
@@ -362,6 +406,7 @@ fn run() {
     assert!(out.is_file(), "missing {}", out.display());
     let text = fs::read_to_string(&out).unwrap();
     assert_honest_wall_and_alloc(&text);
+    assert_honest_tasks(&text);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("live.jet"), "{text}");
@@ -380,6 +425,9 @@ fn run() {
     assert!(stdout.contains("sample wall"), "{stdout}");
     assert!(stdout.contains("alloc count="), "{stdout}");
     assert!(!stdout.contains("alloc count=0 "), "zero alloc in view: {stdout}");
+    assert!(stdout.contains("tasks count="), "{stdout}");
+    assert!(stdout.contains("children="), "{stdout}");
+    assert!(!stdout.contains("tasks count=0 "), "zero tasks in view: {stdout}");
     assert!(stdout.contains("live.jet#run"), "{stdout}");
 
     let _ = fs::remove_dir_all(&root);

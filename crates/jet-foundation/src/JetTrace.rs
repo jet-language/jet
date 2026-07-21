@@ -174,6 +174,31 @@ impl TraceAllocation {
     }
 }
 
+/// One observe-published task fact attributed to a Jet symbol.
+/// Fields mirror D-OBSERVE-LIVE1 task rows (no payloads/locals).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceTask {
+    pub id: u64,
+    pub parent: u64,
+    pub state: String,
+    pub wait: String,
+    pub cancelled: bool,
+    pub symbol: JetSymbolRef,
+}
+
+impl TraceTask {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("cancelled".into(), CanonicalJson::Bool(self.cancelled)),
+            ("id".into(), CanonicalJson::Integer(self.id.to_string())),
+            ("parent".into(), CanonicalJson::Integer(self.parent.to_string())),
+            ("state".into(), CanonicalJson::String(self.state.clone())),
+            ("symbol".into(), self.symbol.to_json()?),
+            ("wait".into(), CanonicalJson::String(self.wait.clone())),
+        ])
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceIdentity {
     pub path: String,
@@ -210,6 +235,7 @@ pub struct TraceSkeleton {
     pub capture_policy: CapturePolicy,
     pub samples: Vec<TraceSample>,
     pub allocations: Vec<TraceAllocation>,
+    pub tasks: Vec<TraceTask>,
     pub source_identity: Vec<SourceIdentity>,
 }
 
@@ -225,6 +251,11 @@ impl TraceSkeleton {
             .allocations
             .iter()
             .map(TraceAllocation::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
+        let tasks = self
+            .tasks
+            .iter()
+            .map(TraceTask::to_json)
             .collect::<Result<Vec<_>, _>>()?;
         let source_identity = self
             .source_identity
@@ -243,7 +274,7 @@ impl TraceSkeleton {
             ("samples".into(), CanonicalJson::Array(samples)),
             ("source_identity".into(), CanonicalJson::Array(source_identity)),
             ("spans".into(), CanonicalJson::Array(Vec::new())),
-            ("tasks".into(), CanonicalJson::Array(Vec::new())),
+            ("tasks".into(), CanonicalJson::Array(tasks)),
             ("toolchain".into(), self.toolchain.to_json()?),
         ])
     }
@@ -329,7 +360,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
         }
         _ => return Err("content.argv is not an array".into()),
     }
-    for key in ["browser", "io", "locks", "native", "spans", "tasks"] {
+    for key in ["browser", "io", "locks", "native", "spans"] {
         match &fields[key] {
             CanonicalJson::Array(_) => {}
             _ => return Err(format!("content.{key} is not an array")),
@@ -337,6 +368,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     }
     validate_samples(&fields["samples"])?;
     validate_allocations(&fields["allocations"])?;
+    validate_tasks(&fields["tasks"])?;
     validate_source_identity(&fields["source_identity"])?;
     validate_capture_policy(&fields["capture_policy"])?;
     validate_toolchain(&fields["toolchain"])?;
@@ -378,6 +410,34 @@ fn validate_allocations(value: &CanonicalJson) -> Result<(), String> {
         let fields = object_keys(item, &label, &["bytes", "count", "symbol"])?;
         unsigned(&fields["bytes"], &format!("{label}.bytes"))?;
         unsigned(&fields["count"], &format!("{label}.count"))?;
+        validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+    }
+    Ok(())
+}
+
+fn validate_tasks(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.tasks is not an array".into()),
+    };
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.tasks[{i}]");
+        let fields = object_keys(
+            item,
+            &label,
+            &["cancelled", "id", "parent", "state", "symbol", "wait"],
+        )?;
+        unsigned(&fields["id"], &format!("{label}.id"))?;
+        unsigned(&fields["parent"], &format!("{label}.parent"))?;
+        let state = text(&fields["state"], &format!("{label}.state"))?;
+        if !matches!(state, "running" | "queued" | "blocked" | "done") {
+            return Err(format!("{label}.state must be a live observe task state"));
+        }
+        text(&fields["wait"], &format!("{label}.wait"))?;
+        match &fields["cancelled"] {
+            CanonicalJson::Bool(_) => {}
+            _ => return Err(format!("{label}.cancelled is not a boolean")),
+        }
         validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
     }
     Ok(())
@@ -530,6 +590,7 @@ mod tests {
             capture_policy: CapturePolicy::default_exclusions(),
             samples: Vec::new(),
             allocations: Vec::new(),
+            tasks: Vec::new(),
             source_identity: Vec::new(),
         }
     }
@@ -577,6 +638,38 @@ mod tests {
         assert!(text.contains("\"count\":3"), "{text}");
         assert!(text.contains("\"name\":\"run\""), "{text}");
         assert_eq!(trace_id(&verified).unwrap().len(), 64);
+    }
+
+    #[test]
+    fn captured_tasks_round_trip_with_parent_causality() {
+        let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
+        skeleton.tasks.push(TraceTask {
+            id: 1,
+            parent: 0,
+            state: "running".into(),
+            wait: String::new(),
+            cancelled: false,
+            symbol: symbol.clone(),
+        });
+        skeleton.tasks.push(TraceTask {
+            id: 2,
+            parent: 1,
+            state: "blocked".into(),
+            wait: "time sleep".into(),
+            cancelled: false,
+            symbol: symbol.clone(),
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("\"tasks\":[{"), "{text}");
+        assert!(text.contains("\"parent\":1"), "{text}");
+        assert!(text.contains("\"state\":\"blocked\""), "{text}");
+        assert!(text.contains("\"wait\":\"time sleep\""), "{text}");
+        verify_jettrace(&bytes).unwrap();
     }
 
     #[test]

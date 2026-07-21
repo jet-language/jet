@@ -10,7 +10,7 @@
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
     trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
-    TraceSample, TraceSkeleton, TraceToolchain, TRACE_SCHEMA, TRACE_VERSION,
+    TraceSample, TraceSkeleton, TraceTask, TraceToolchain, TRACE_SCHEMA, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
@@ -30,6 +30,7 @@ pub(crate) enum Outcome {
 struct CaptureBundle {
     samples: Vec<TraceSample>,
     allocations: Vec<TraceAllocation>,
+    tasks: Vec<TraceTask>,
     source_identity: Vec<SourceIdentity>,
 }
 
@@ -38,6 +39,7 @@ impl CaptureBundle {
         Self {
             samples: Vec::new(),
             allocations: Vec::new(),
+            tasks: Vec::new(),
             source_identity: Vec::new(),
         }
     }
@@ -358,9 +360,24 @@ fn capture_from_source(
             });
         }
     }
+    // Tasks: only rows observe published. Never invent ids/parents/states.
+    let mut tasks = Vec::new();
+    if let (Some(symbol), Some(snapshot)) = (symbol.as_ref(), snapshot) {
+        for observed in observe_tasks(snapshot) {
+            tasks.push(TraceTask {
+                id: observed.id,
+                parent: observed.parent,
+                state: observed.state,
+                wait: observed.wait,
+                cancelled: observed.cancelled,
+                symbol: symbol.clone(),
+            });
+        }
+    }
     Ok(CaptureBundle {
         samples,
         allocations,
+        tasks,
         source_identity: vec![SourceIdentity {
             path: path_text,
             sha256,
@@ -382,22 +399,177 @@ fn observe_arena_resources(snapshot: &str) -> (u64, u64) {
     (count, bytes)
 }
 
+struct ObservedTask {
+    id: u64,
+    parent: u64,
+    state: String,
+    wait: String,
+    cancelled: bool,
+}
+
+/// Parse observe `tasks` objects in id order. Empty when array absent/empty.
+fn observe_tasks(snapshot: &str) -> Vec<ObservedTask> {
+    let Some(inner) = json_array_inner(snapshot, "tasks") else {
+        return Vec::new();
+    };
+    if inner.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for object in split_json_objects(inner) {
+        let Some(id) = json_u64(object, "id") else {
+            continue;
+        };
+        let Some(parent) = json_u64(object, "parent") else {
+            continue;
+        };
+        let Some(state) = json_string(object, "state") else {
+            continue;
+        };
+        if !matches!(state.as_str(), "running" | "queued" | "blocked" | "done") {
+            continue;
+        }
+        let wait = json_string(object, "wait").unwrap_or_default();
+        let cancelled = object.contains("\"cancelled\":true");
+        out.push(ObservedTask {
+            id,
+            parent,
+            state,
+            wait,
+            cancelled,
+        });
+    }
+    out.sort_by_key(|task| task.id);
+    out
+}
+
+fn json_array_inner<'a>(snapshot: &'a str, key: &str) -> Option<&'a str> {
+    let tail = snapshot.split_once(&format!("\"{key}\":["))?.1;
+    let mut depth = 1usize;
+    let mut i = 0usize;
+    let bytes = tail.as_bytes();
+    while i < bytes.len() {
+        match bytes[i] {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&tail[..i]);
+                }
+            }
+            b'"' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == b'"' {
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn split_json_objects(inner: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let bytes = inner.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        while i < bytes.len() && (bytes[i] == b',' || bytes[i].is_ascii_whitespace()) {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        if bytes[i] != b'{' {
+            break;
+        }
+        let start = i;
+        let mut depth = 0usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        out.push(&inner[start..=i]);
+                        i += 1;
+                        break;
+                    }
+                }
+                b'"' => {
+                    i += 1;
+                    while i < bytes.len() {
+                        if bytes[i] == b'\\' {
+                            i += 2;
+                            continue;
+                        }
+                        if bytes[i] == b'"' {
+                            break;
+                        }
+                        i += 1;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+    out
+}
+
+fn json_string(object: &str, key: &str) -> Option<String> {
+    let tail = object.split_once(&format!("\"{key}\":\""))?.1;
+    let mut out = String::new();
+    let mut chars = tail.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => match chars.next()? {
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                'n' => out.push('\n'),
+                'r' => out.push('\r'),
+                't' => out.push('\t'),
+                other => out.push(other),
+            },
+            '"' => return Some(out),
+            other => out.push(other),
+        }
+    }
+    None
+}
+
 /// `jet run` hosts compile then exec; observe publishes under the program PID.
 fn poll_observe_snapshot(root_pid: u32) -> Option<String> {
     let mut stack = vec![root_pid];
     let mut seen = std::collections::BTreeSet::new();
     let mut best = None;
+    let mut best_score = 0u64;
     while let Some(pid) = stack.pop() {
         if !seen.insert(pid) {
             continue;
         }
         if let Ok(snapshot) = jet::DevServer::LiveInspect::read(pid) {
             let (count, bytes) = observe_arena_resources(&snapshot);
-            if count > 0 || bytes > 0 {
-                return Some(snapshot);
-            }
-            if snapshot.contains("\"arena_allocations\":") || snapshot.contains("\"tasks\":[") {
+            let tasks = observe_tasks(&snapshot);
+            let child_tasks = tasks.iter().filter(|task| task.parent > 0).count() as u64;
+            let score = (if count > 0 || bytes > 0 { 100 } else { 0 })
+                + child_tasks.saturating_mul(10)
+                + tasks.len() as u64;
+            if score > best_score {
+                best_score = score;
                 best = Some(snapshot);
+            }
+            // Prefer a snapshot that already shows alloc + spawned child.
+            if (count > 0 || bytes > 0) && child_tasks > 0 {
+                return best;
             }
         }
         stack.extend(process_children(pid));
@@ -468,16 +640,26 @@ fn process_times(pid: u32) -> Option<(u64, u64)> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         // ponytail: Linux USER_HZ is almost always 100; sysconf later if needed.
+        // Parse /proc/uptime as integer ticks — f64 loses precision on long uptime
+        // and can make now_ticks < starttime → fabricated-looking zero wall.
         const CLK_TCK: u64 = 100;
         let uptime = fs::read_to_string("/proc/uptime").ok()?;
-        let uptime_secs: f64 = uptime.split_whitespace().next()?.parse().ok()?;
+        let (secs_s, rest) = uptime.split_once('.')?;
+        let secs: u64 = secs_s.parse().ok()?;
+        let frac_s = rest.split_whitespace().next()?;
+        let hundredths: u64 = frac_s
+            .chars()
+            .take(2)
+            .collect::<String>()
+            .parse()
+            .ok()?;
+        let now_ticks = secs.saturating_mul(CLK_TCK).saturating_add(hundredths);
         let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
         let fields = stat.rsplit_once(") ")?.1;
         let fields: Vec<&str> = fields.split_whitespace().collect();
         let utime: u64 = fields.get(11)?.parse().ok()?;
         let stime: u64 = fields.get(12)?.parse().ok()?;
         let starttime: u64 = fields.get(19)?.parse().ok()?;
-        let now_ticks = (uptime_secs * CLK_TCK as f64) as u64;
         let wall_ticks = now_ticks.saturating_sub(starttime);
         let wall_ns = wall_ticks.saturating_mul(1_000_000_000 / CLK_TCK);
         let cpu_ns = utime
@@ -513,6 +695,9 @@ fn view(args: &[String]) -> i32 {
             }
             if let Some((count, bytes, symbol)) = first_allocation(&trace) {
                 println!("alloc count={count} bytes={bytes} · {symbol}");
+            }
+            if let Some((n, child_n, symbol)) = task_summary(&trace) {
+                println!("tasks count={n} children={child_n} · {symbol}");
             }
             0
         }
@@ -591,8 +776,11 @@ fn export(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let loss = if first_sample(&trace).is_some() || first_allocation(&trace).is_some() {
-        "json-envelope; domains present are wall/cpu/alloc only — no pprof/otel/chrome payloads"
+    let loss = if first_sample(&trace).is_some()
+        || first_allocation(&trace).is_some()
+        || task_summary(&trace).is_some()
+    {
+        "json-envelope; domains present are wall/cpu/alloc/tasks only — no pprof/otel/chrome payloads"
     } else {
         "json-envelope-only; no pprof/otel/chrome payloads in skeleton"
     };
@@ -621,6 +809,7 @@ fn write_session_trace(
         capture_policy: CapturePolicy::default_exclusions(),
         samples: capture.samples,
         allocations: capture.allocations,
+        tasks: capture.tasks,
         source_identity: capture.source_identity,
     };
     let bytes = build_skeleton_bytes(&skeleton)?;
@@ -771,6 +960,31 @@ fn first_allocation(trace: &CanonicalJson) -> Option<(String, String, String)> {
     };
     let symbol = symbol_label(fields.get("symbol")?)?;
     Some((count, bytes, symbol))
+}
+
+fn task_summary(trace: &CanonicalJson) -> Option<(usize, usize, String)> {
+    let items = content_array(trace, "tasks")?;
+    if items.is_empty() {
+        return None;
+    }
+    let mut children = 0usize;
+    let mut symbol = None;
+    for item in items {
+        let CanonicalJson::Object(fields) = item else {
+            continue;
+        };
+        if let Some(CanonicalJson::Integer(parent)) = fields.get("parent") {
+            if parent != "0" {
+                children += 1;
+            }
+        }
+        if symbol.is_none() {
+            if let Some(value) = fields.get("symbol") {
+                symbol = symbol_label(value);
+            }
+        }
+    }
+    Some((items.len(), children, symbol.unwrap_or_else(|| "?".into())))
 }
 
 fn symbol_label(value: &CanonicalJson) -> Option<String> {
