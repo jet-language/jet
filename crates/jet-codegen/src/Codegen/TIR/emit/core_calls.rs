@@ -1859,14 +1859,18 @@ pub(crate) fn emit_tir_core_call(
             helper("jet_net_tls_close"), arg(0)
         ),
         // E2-M10: jet.http — HTTP client.
-        ("jet.http", "get") => emit_http_response_from_bridge(
-            format!("{}(&({}))", regex_fn("jet_http_client_get_impl"), arg(0)),
-            cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
-        ),
-        ("jet.http", "post") => {
+        ("jet.http", "get") => {
+            let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             emit_http_response_from_bridge(
-                format!("{}(&({}), &({}))", regex_fn("jet_http_client_post_impl"), arg(0), arg(1)),
-                cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
+                format!("{{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); {ffi}::jet_http_client_get_impl(&({})) }}", arg(0)),
+                ffi,
+            )
+        }
+        ("jet.http", "post") => {
+            let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+            emit_http_response_from_bridge(
+                format!("{{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); {ffi}::jet_http_client_post_impl(&({}), &({})) }}", arg(0), arg(1)),
+                ffi,
             )
         }
         // c109 Phase 25: HttpRouter producer + parse/dispatch (D-ROUTE1=A), byte-for-byte
@@ -2359,25 +2363,27 @@ pub(crate) fn emit_tir_core_call(
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client constructors.
         // Bridge returns primitives; CoreLib assembles the one shared response.
         ("core.http.client", "get") => {
+            let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             let u = if matches!(args.get(0).map(|e| &e.ty), Some(Type::Named(n)) if n == "Url") {
                 format!("({}).to_string_value()", arg(0))
             } else {
                 arg(0)
             };
             emit_http_response_from_bridge(
-                format!("{}(&({}))", regex_fn("jet_http_client_get_impl"), u),
-                cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
+                format!("{{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); {ffi}::jet_http_client_get_impl(&({u})) }}"),
+                ffi,
             )
         }
         ("core.http.client", "post") => {
+            let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             let u = if matches!(args.get(0).map(|e| &e.ty), Some(Type::Named(n)) if n == "Url") {
                 format!("({}).to_string_value()", arg(0))
             } else {
                 arg(0)
             };
             emit_http_response_from_bridge(
-                format!("{}(&({}), &({}))", regex_fn("jet_http_client_post_impl"), u, arg(1)),
-                cx.ffi_crate.as_deref().unwrap_or("jet_ffi"),
+                format!("{{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); {ffi}::jet_http_client_post_impl(&({u}), &({})) }}", arg(1)),
+                ffi,
             )
         }
         ("core.http.client", "request") => {

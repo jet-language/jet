@@ -2020,7 +2020,7 @@ impl<'a> Checker<'a> {
                     );
                 } else if matches!(&recv_ty, Type::Named(name) if name == "HttpClient") {
                     let want = match method {
-                        "cookies" | "redirects" | "send" | "proxy" | "tls" => 1,
+                        "cookies" | "redirects" | "send" | "proxy" | "tls" | "allow_http_downgrade" => 1,
                         "protocols" => 3,
                         "timeouts" => 7,
                         "raw_encoding" => 0,
@@ -2030,7 +2030,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(wrong_core_arity(method, want, args.len(), span));
                     }
                     let expected = match method {
-                        "cookies" | "protocols" => Some(Type::Bool),
+                        "cookies" | "protocols" | "allow_http_downgrade" => Some(Type::Bool),
                         "redirects" | "timeouts" => Some(Type::Int),
                         "send" => Some(Type::Named("HttpRequest".to_string())),
                         "proxy" => Some(Type::Named("HttpProxy".to_string())),

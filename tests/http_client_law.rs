@@ -1707,3 +1707,245 @@ fn run() {{
     assert_eq!(pass_code, 0, "stderr:\n{pass_err}");
     assert_eq!(pass_out, "200\n");
 }
+
+#[test]
+fn https_to_http_redirect_denied_unless_allow_http_downgrade() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_law_downgrade_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let shown = dir.join("seed.jet");
+    let source =
+        "use core.http.client as http\nfn run() { req :: http.request(\"GET\", \"https://127.0.0.1/\") }\n";
+    fs::write(&shown, source).unwrap();
+    let link = jet::compile_with_path(source, shown.to_str().unwrap())
+        .unwrap()
+        .ffi
+        .expect("HTTP client bridge");
+    let harness = dir.join("bridge_https_downgrade.rs");
+    let bin = dir.join("bridge_https_downgrade");
+    fs::write(
+        &harness,
+        r#"
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
+fn pem(path: &str) -> Vec<u8> {
+    let text = std::fs::read_to_string(path).unwrap();
+    let encoded: String = text.lines().filter(|line| !line.starts_with("-----")).collect();
+    let mut out = Vec::new();
+    let mut bits = 0u32;
+    let mut count = 0u8;
+    for byte in encoded.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            _ => continue,
+        };
+        bits = bits << 6 | u32::from(value);
+        count += 6;
+        if count >= 8 {
+            count -= 8;
+            out.push((bits >> count) as u8);
+            bits &= (1u32 << count).wrapping_sub(1);
+        }
+    }
+    out
+}
+
+fn request_head(stream: &mut impl Read) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut chunk = [0; 512];
+    while !out.windows(4).any(|window| window == b"\r\n\r\n") {
+        let read = stream.read(&mut chunk).unwrap();
+        assert_ne!(read, 0);
+        out.extend_from_slice(&chunk[..read]);
+    }
+    out
+}
+
+fn main() {
+    let cert = pem(&std::env::args().nth(1).unwrap());
+    let key = pem(&std::env::args().nth(2).unwrap());
+    let root_cert = pem(&std::env::args().nth(3).unwrap());
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let http = TcpListener::bind("127.0.0.1:0").unwrap();
+    let http_addr = http.local_addr().unwrap();
+    let http_server = thread::spawn(move || {
+        let (mut stream, _) = http.accept().unwrap();
+        let _ = request_head(&mut stream);
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+    });
+
+    let mut server = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(
+            vec![rustls::pki_types::CertificateDer::from(cert)],
+            rustls::pki_types::PrivateKeyDer::Pkcs8(
+                rustls::pki_types::PrivatePkcs8KeyDer::from(key),
+            ),
+        )
+        .unwrap();
+    server.alpn_protocols = vec![b"http/1.1".to_vec()];
+    let server = Arc::new(server);
+    let https = TcpListener::bind("127.0.0.1:0").unwrap();
+    let https_addr = https.local_addr().unwrap();
+    let location = format!("http://{http_addr}/ok");
+    let https_server = thread::spawn(move || {
+        for _ in 0..2 {
+            let (socket, _) = https.accept().unwrap();
+            socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let connection = rustls::ServerConnection::new(server.clone()).unwrap();
+            let mut stream = rustls::StreamOwned::new(connection, socket);
+            let _ = request_head(&mut stream);
+            let body = format!(
+                "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(body.as_bytes()).unwrap();
+            stream.flush().unwrap();
+        }
+    });
+
+    let root = bridge::jet_http_client_new_impl();
+    let rooted = bridge::jet_http_client_root_certificate_impl(root, &root_cert, false).unwrap();
+    let client = bridge::jet_http_client_protocols_impl(rooted, false, true, false).unwrap();
+    let url = format!("https://localhost:{}/from", https_addr.port());
+    let denied = bridge::jet_http_client_send_with_impl(
+        client, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+    )
+    .unwrap_err();
+    assert!(matches!(denied, bridge::JetHttpBridgeError::Redirect));
+
+    let allowed_root = bridge::jet_http_client_new_impl();
+    let allowed_rooted =
+        bridge::jet_http_client_root_certificate_impl(allowed_root, &root_cert, false).unwrap();
+    let allowed_proto =
+        bridge::jet_http_client_protocols_impl(allowed_rooted, false, true, false).unwrap();
+    let allowed =
+        bridge::jet_http_client_allow_http_downgrade_impl(allowed_proto, true).unwrap();
+    let response = bridge::jet_http_client_send_with_impl(
+        allowed, "GET", &url, &[], None, None, None, None, None, None, None, &[], &[], &[],
+    )
+    .unwrap();
+    assert_eq!(response.0, 200);
+    assert_eq!(
+        bridge::jet_http_client_body_read_impl(response.1, 8).unwrap(),
+        Some(b"ok".to_vec())
+    );
+    https_server.join().unwrap();
+    http_server.join().unwrap();
+}
+"#,
+    )
+    .unwrap();
+    let dependency_dirs: Vec<_> = link
+        .dependency_dirs()
+        .filter(|path| path.is_dir())
+        .collect();
+    let rustls = dependency_dirs
+        .iter()
+        .flat_map(|directory| fs::read_dir(directory).unwrap())
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("librustls-") && name.ends_with(".rlib"))
+        })
+        .expect("generated bridge rustls dependency");
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()))
+        .arg("--extern")
+        .arg(format!("rustls={}", rustls.display()));
+    for dependency in &dependency_dirs {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "bridge downgrade harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin)
+        .arg(fs::canonicalize("tests/fixtures/tls/smtp.server.cert.pem").unwrap())
+        .arg(fs::canonicalize("tests/fixtures/tls/smtp.server.key.pem").unwrap())
+        .arg(fs::canonicalize("tests/fixtures/tls/smtp.ca.cert.pem").unwrap())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "bridge downgrade harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ambient_context_deadline_upper_bounds_client_total_timeout() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = request_head(&mut stream);
+        std::thread::sleep(Duration::from_millis(250));
+        let _ = stream.write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate",
+        );
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+use core.time as time
+fn run() {{
+    client :: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
+    @Context(deadline: time.now() + 40) {{
+        if client.send(http.request("GET", "http://{addr}/slow")) == {{
+            Ok(_) -> print("ok")
+            Err(_) -> print("timeout")
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "ambient_deadline", &src);
+    server.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "timeout\n");
+}
+
+#[test]
+fn public_client_allow_http_downgrade_method_typechecks() {
+    let src = r#"
+use core.http.client as http
+fn run() {
+    _ :: http.Client.new().allow_http_downgrade(true).allow_http_downgrade(false)
+}
+"#;
+    let (code, _stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "allow_http_downgrade_type", src);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+}

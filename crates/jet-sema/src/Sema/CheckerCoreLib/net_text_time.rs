@@ -359,7 +359,7 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "HttpClient" => match (method, _args.len()) {
-            ("cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls", _) => mk("HttpClient"),
+            ("cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade", _) => mk("HttpClient"),
             ("send", 1) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HttpResponse".to_string())),
                 err: Box::new(Type::Named("HttpError".to_string())),

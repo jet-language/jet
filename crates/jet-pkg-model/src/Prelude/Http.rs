@@ -5,11 +5,54 @@
 // std-only. The separately-ratified rustls/system-root bridge remains the sole
 // external transport seam for HTTPS.
 
+use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
+
+thread_local! {
+    static HTTP_AMBIENT_DEADLINE_MS: Cell<Option<i64>> = const { Cell::new(None) };
+}
+
+/// RAII ambient `@Context(deadline:)` upper bound for one HTTP send (D-HTTP-CLIENT2).
+pub struct JetHttpAmbientDeadline {
+    previous: Option<i64>,
+}
+
+impl JetHttpAmbientDeadline {
+    pub fn push(remaining_ms: Option<i64>) -> Self {
+        let previous = HTTP_AMBIENT_DEADLINE_MS.with(|cell| cell.replace(remaining_ms));
+        Self { previous }
+    }
+}
+
+impl Drop for JetHttpAmbientDeadline {
+    fn drop(&mut self) {
+        HTTP_AMBIENT_DEADLINE_MS.with(|cell| cell.set(self.previous));
+    }
+}
+
+fn ambient_deadline_remaining_ms() -> Option<i64> {
+    HTTP_AMBIENT_DEADLINE_MS.with(|cell| cell.get())
+}
+
+fn compose_total_deadline(
+    configured: Option<Duration>,
+) -> Result<Option<Instant>, JetHttpBridgeError> {
+    let ambient = match ambient_deadline_remaining_ms() {
+        Some(ms) if ms <= 0 => return Err(JetHttpBridgeError::Timeout),
+        Some(ms) => Some(validated_timeout("ambient deadline", ms)?),
+        None => None,
+    };
+    Ok(match (configured, ambient) {
+        (Some(configured), Some(ambient)) => Some(Instant::now() + configured.min(ambient)),
+        (Some(configured), None) => Some(Instant::now() + configured),
+        (None, Some(ambient)) => Some(Instant::now() + ambient),
+        (None, None) => None,
+    })
+}
 
 const HTTP_CLIENT_DEFAULT_REDIRECTS: u32 = 10;
 const HTTP_UPLOAD_CHUNK: usize = 64 * 1024;
@@ -217,6 +260,7 @@ fn default_origin_limits() -> &'static Arc<OriginLimits> {
 #[derive(Clone)]
 struct ClientPolicy {
     redirect_limit: u32,
+    allow_http_downgrade: bool,
     proxy: Option<String>,
     use_environment_proxy: bool,
     cookies: bool,
@@ -243,6 +287,7 @@ impl Default for ClientPolicy {
     fn default() -> Self {
         Self {
             redirect_limit: HTTP_CLIENT_DEFAULT_REDIRECTS,
+            allow_http_downgrade: false,
             proxy: None,
             use_environment_proxy: true,
             cookies: false,
@@ -369,6 +414,13 @@ pub fn jet_http_client_cookies_impl(id: i64, enabled: bool) -> Result<i64, JetHt
 pub fn jet_http_client_redirects_impl(id: i64, limit: i64) -> Result<i64, JetHttpBridgeError> {
     let limit = u32::try_from(limit).map_err(|_| JetHttpBridgeError::Redirect)?;
     clone_client_with(id, |policy| policy.redirect_limit = limit)
+}
+
+pub fn jet_http_client_allow_http_downgrade_impl(
+    id: i64,
+    allow: bool,
+) -> Result<i64, JetHttpBridgeError> {
+    clone_client_with(id, |policy| policy.allow_http_downgrade = allow)
 }
 
 pub fn jet_http_client_proxy_from_environment_impl(id: i64) -> Result<i64, JetHttpBridgeError> {
@@ -542,11 +594,12 @@ pub fn jet_http_client_send_with_impl(
         .or(default_timeout)
         .unwrap_or(handle.policy.read_timeout);
     let write = default_timeout.unwrap_or(handle.policy.write_timeout);
-    let total = total_timeout_ms
-        .map(|value| validated_timeout("total timeout", value))
-        .transpose()?
-        .or(handle.policy.total_timeout)
-        .map(|duration| Instant::now() + duration);
+    let total = compose_total_deadline(
+        total_timeout_ms
+            .map(|value| validated_timeout("total timeout", value))
+            .transpose()?
+            .or(handle.policy.total_timeout),
+    )?;
     let (redirect_limit, explicit_redirect_limit) = match redirects {
         Some(value) => (
             u32::try_from(value).map_err(|_| JetHttpBridgeError::Redirect)?,
@@ -579,6 +632,7 @@ pub fn jet_http_client_send_with_impl(
         total,
         redirect_limit,
         explicit_redirect_limit,
+        handle.policy.allow_http_downgrade,
         configured_proxy,
         handle.policy.http2,
         handle.policy.http11,
@@ -1849,7 +1903,7 @@ pub fn jet_http_client_send_stream_impl(
     } else {
         form_body.as_ref().map(Vec::len)
     };
-    let total_deadline = total_timeout.map(|timeout| Instant::now() + timeout);
+    let total_deadline = compose_total_deadline(total_timeout)?;
     send_following_redirects_upload(
         default_client_pool().clone(),
         0,
@@ -1872,6 +1926,7 @@ pub fn jet_http_client_send_stream_impl(
         total_deadline,
         redirect_limit,
         explicit_redirect_limit,
+        false,
         proxy,
         true,
         true,
@@ -1918,11 +1973,12 @@ pub fn jet_http_client_send_with_stream_impl(
         .or(default_timeout)
         .unwrap_or(handle.policy.read_timeout);
     let write = default_timeout.unwrap_or(handle.policy.write_timeout);
-    let total = total_timeout_ms
-        .map(|value| validated_timeout("total timeout", value))
-        .transpose()?
-        .or(handle.policy.total_timeout)
-        .map(|duration| Instant::now() + duration);
+    let total = compose_total_deadline(
+        total_timeout_ms
+            .map(|value| validated_timeout("total timeout", value))
+            .transpose()?
+            .or(handle.policy.total_timeout),
+    )?;
     let (redirect_limit, explicit_redirect_limit) = match redirects {
         Some(value) => (
             u32::try_from(value).map_err(|_| JetHttpBridgeError::Redirect)?,
@@ -1965,6 +2021,7 @@ pub fn jet_http_client_send_with_stream_impl(
         total,
         redirect_limit,
         explicit_redirect_limit,
+        handle.policy.allow_http_downgrade,
         configured_proxy,
         handle.policy.http2,
         handle.policy.http11,
@@ -2007,7 +2064,7 @@ pub fn jet_http_client_send_impl(
     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
     let (headers, body) =
         prepare_request_parts(headers_flat, body, cookies_flat, form_flat, multipart_flat);
-    let total_deadline = total_timeout.map(|timeout| Instant::now() + timeout);
+    let total_deadline = compose_total_deadline(total_timeout)?;
     send_following_redirects(
         default_client_pool().clone(),
         0,
@@ -2028,6 +2085,7 @@ pub fn jet_http_client_send_impl(
         total_deadline,
         redirect_limit,
         explicit_redirect_limit,
+        false,
         proxy,
         true,
         true,
@@ -2093,6 +2151,7 @@ fn send_following_redirects(
     total_deadline: Option<Instant>,
     redirect_limit: u32,
     explicit_redirect_limit: bool,
+    allow_http_downgrade: bool,
     explicit_proxy: Option<&str>,
     http2: bool,
     http11: bool,
@@ -2121,6 +2180,7 @@ fn send_following_redirects(
         total_deadline,
         redirect_limit,
         explicit_redirect_limit,
+        allow_http_downgrade,
         explicit_proxy,
         http2,
         http11,
@@ -2151,6 +2211,7 @@ fn send_following_redirects_upload(
     total_deadline: Option<Instant>,
     redirect_limit: u32,
     explicit_redirect_limit: bool,
+    allow_http_downgrade: bool,
     explicit_proxy: Option<&str>,
     http2: bool,
     http11: bool,
@@ -2305,7 +2366,7 @@ fn send_following_redirects_upload(
         }
         let next = resolve_redirect(&parsed, location)?;
         let next_parsed = parse_url(&next)?;
-        if parsed.scheme == "https" && next_parsed.scheme == "http" {
+        if parsed.scheme == "https" && next_parsed.scheme == "http" && !allow_http_downgrade {
             return Err(JetHttpBridgeError::Redirect);
         }
         if parsed.host != next_parsed.host

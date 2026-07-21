@@ -438,10 +438,11 @@ Client surface:
 | `req.header(name, value)` / `.body(text|Body)` | `HttpClientReq` | Add headers or a string/`Body` upload; `Body.reader` streams in 64 KiB wire chunks without materializing through `Body.bytes(1GiB)` first |
 | `req.form(name, value)` / `.multipart_text(name, value)` | `HttpClientReq` | Encode form or text multipart fields; multipart names percent-encode quotes and line breaks, and bounded RFC-valid boundary selection avoids every supplied name and value |
 | `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or a redirect limit from 0 through 4,294,967,295; unset follows at most 10, and out-of-range limits fail before transport |
-| `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` | `HttpClientReq` | Set nonnegative global/per-phase deadlines; negative milliseconds fail before transport |
+| `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` | `HttpClientReq` | Set nonnegative global/per-phase deadlines; negative milliseconds fail before transport; an ambient `@Context(deadline: …)` remaining budget is an upper bound on the request total |
 | `req.proxy(url)` | `HttpClientReq` | Use an explicit proxy; malformed URLs, refused tunnels, and rejected proxy authentication return stable Jet errors; env proxies are honored by default |
 | `Client.new().proxy(policy)` | `HttpClient` | Typed client proxy policy: `.FromEnvironment` (default), `.None` (ignore env), or `.Url(proxy)` |
 | `Client.new().tls(config)` | `HttpClient` | Apply a `core.tls.ClientConfig`; `CustomOnly` trust is live-proven on HTTPS send; identity and version bounds are carried when set (not separately live-proven here) |
+| `Client.new().allow_http_downgrade(true)` | `HttpClient` | Opt in to following HTTPS→HTTP redirects; denied by default (D-HTTP-CLIENT2) |
 | `req.send()` / `client.send(req)` | `HttpClientResp ? String` | Execute the request; connection, pre-response I/O, and malformed response framing failures return stable Jet errors |
 | `resp.status()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, text body, headers, and Set-Cookie values |
 
@@ -471,7 +472,7 @@ Card 301 audit state:
 |------|-------|
 | HTTPS client / server TLS | Shipped: client default HTTPS, server `tls:` named option |
 | Typed URL input | Shipped: client calls accept `Url` or `String` |
-| Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above; Client exposes typed `.proxy(HttpProxy)` and `.tls(TlsClientConfig)` with live CustomOnly HTTPS trust proof |
+| Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above; Client exposes typed `.proxy(HttpProxy)`, `.tls(TlsClientConfig)`, and `.allow_http_downgrade(Bool)`; ambient `@Context(deadline:)` upper-bounds send totals; live CustomOnly HTTPS trust and HTTPS→HTTP deny/opt-in proven |
 | Router params and wildcard routes | Shipped: `:name` params plus final `*` wildcard (`param("wildcard")`) |
 | SSE, static files, Range, access log, request body limits | Shipped: server helpers above |
 | Bounded hostile request parsing | Partial: HTTP/1.1 incrementally frames and dechunks octets (including extensions) before validating the decoded compatibility text body, preserves pipelined boundaries, and caps the decoded body at 1 MiB plus 32 KiB of chunk metadata; it rejects malformed/truncated chunks, request trailers, non-HTTP header whitespace/control values, multiple/unsupported transfer codings, oversized headers/bodies, ambiguous Content-Length, Content-Length with Transfer-Encoding, folded headers, and malformed framing before dispatch. The compatibility request body is still buffered text. |
