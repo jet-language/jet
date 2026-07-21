@@ -2491,8 +2491,9 @@ exit, and publish with atomic no-overwrite semantics only after authentication
 and durable staging. Identity, framing, recipient, and authentication failures
 from safe open collapse to `FileCryptoError.OpenFailed`; no failure publishes a
 partial destination. The current native bridge supplies this runtime on Linux.
-The ratified Windows delete-on-close and rename implementation remains required
-before cross-platform completion.
+Non-Linux filesystem runtime and platform-matrix proof remain tracked only by
+#526. The ratified Windows delete-on-close and rename implementation remains
+required before cross-platform completion.
 
 ### HTTPS client default (D-TLS1)
 
