@@ -263,6 +263,20 @@ fn web_wasm_stmts_supported(
                     .unwrap_or(true)
                 && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
         }
+        // Plain `loop x; xs` over a list/local (JS already emits `for…of`).
+        // Keep method/map/stride/columnar forms on the honest unsupported path.
+        TIR::TStmt::ForIn {
+            var2: None,
+            step: None,
+            method_kind: None,
+            columnar: false,
+            collection,
+            body,
+            ..
+        } => {
+            web_wasm_expr_supported(collection, bundle, file_prefix, reconstructions)
+                && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+        }
         _ => false,
     })
 }
@@ -1032,6 +1046,29 @@ fn emit_wasm_body(
                         out.push_str(&format!("{pad}}}\n"));
                     }
                 }
+            }
+            // Plain list/local ForIn — mirror native `.iter().cloned()` (or by-value).
+            TIR::TStmt::ForIn {
+                var,
+                var2: None,
+                step: None,
+                method_kind: None,
+                columnar: false,
+                by_value,
+                collection,
+                body,
+                ..
+            } => {
+                let collection = wasm_emit_expr(collection, funcs, file_prefix, reconstructions)?;
+                let loop_var = mangle(var);
+                let iter = if *by_value {
+                    format!("({collection})")
+                } else {
+                    format!("({collection}).iter().cloned()")
+                };
+                out.push_str(&format!("{pad}for {loop_var} in {iter} {{\n"));
+                emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                out.push_str(&format!("{pad}}}\n"));
             }
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
             TIR::TStmt::LineMarker(_) => {}

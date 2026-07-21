@@ -1404,6 +1404,35 @@ fn web_wasm_range_loop_bridge_roundtrip() {
 }
 
 #[test]
+fn web_wasm_for_in_bridge_roundtrip() {
+    // D-WEBBACKEND1 / criterion #1: Wasm compute must lower plain
+    // `loop x; xs` ForIn from checked TIR (JS already could). Live
+    // rustc+node proof — not emit-shape only. Reuses [Int] ABI; does not
+    // reopen String/[Int] packing.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm for-in (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_for_in.jet");
+    let dir = build_web_fixture("wasm_for_in", src, "examples/features/web/web_wasm_for_in.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains(".iter().cloned()")
+            && (wasm.contains("for user_x in") || wasm.contains("for x in")),
+        "plain ForIn was not emitted:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("user_total = (user_total + user_x)")
+            || wasm.contains("total = (total + x)"),
+        "ForIn body assign was dropped:\n{wasm}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_for_in.out");
+    assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_wasm_string_export_hostile_roundtrip() {
     // D-JSBIND1 / criterion #3: String export returns as packed (ptr,len) u64;
     // JS copies UTF-8 then frees. Hostile: empty, interior NUL, non-ASCII.

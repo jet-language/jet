@@ -1,0 +1,18 @@
+// D-WEBBACKEND1 / #123: Wasm compute lowers plain `loop x; xs` ForIn from
+// checked TIR (parity with JS `for…of`), summing an ABI-safe [Int] param.
+@WasmExport
+fn sum_list(xs: [Int]) -> Int {
+    total := 0
+    loop x; xs {
+        total = total + x
+    }
+    return total
+}
+
+@Target(Js)
+fn run() {
+    empty: [Int] :: []
+    print(sum_list(empty))
+    print(sum_list([1, 2, 3]))
+    print(sum_list([-1, 0, 4]))
+}
