@@ -602,6 +602,9 @@ fn jet_crypto_password_parse_law<'a>(text:&'a str,operation:&'static str)->Resul
     Ok(parsed)
 }
 fn jet_crypto_password_policy(parsed:&argon2::PasswordHash<'_>,operation:&'static str)->Result<(argon2::Params,Zeroizing<Vec<u8>>),JetCryptoError>{
+    let mut names=parsed.params.iter().map(|(name,_)|name.as_str()).collect::<Vec<_>>();
+    names.sort_unstable();
+    if names != ["m","p","t"] {return Err(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC parameters"})}
     let memory=parsed.params.get_decimal("m").ok_or(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC parameters"})?;
     let iterations=parsed.params.get_decimal("t").ok_or(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC parameters"})?;
     let lanes=parsed.params.get_decimal("p").ok_or(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC parameters"})?;

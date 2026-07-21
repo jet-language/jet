@@ -372,6 +372,15 @@ mod tests {
             jet_crypto_password_parse_impl(weak_memory),
             Err(JetCryptoError::PasswordPolicy { .. })
         ));
+        let extra_parameter = stored.0.replacen(",p=1$", ",p=1,x=1$", 1);
+        assert!(matches!(
+            jet_crypto_password_parse_impl(extra_parameter.clone()),
+            Err(JetCryptoError::InvalidEncoding { operation: "PasswordHash.parse", value_kind: "PHC parameters" })
+        ));
+        assert!(matches!(
+            jet_crypto_password_verify_typed_impl(&secret, &JetPasswordHash(extra_parameter)),
+            Err(JetCryptoError::InvalidEncoding { operation: "password_verify", value_kind: "PHC parameters" })
+        ));
         let wrong_algorithm=JetPasswordHash(stored.0.replacen("$argon2id$","$argon2i$",1));
         assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wrong_algorithm),Err(JetCryptoError::UnsupportedAlgorithm{operation:"password_verify",algorithm:"argon2i".to_string()}));
         match jet_crypto_password_parse_impl(wrong_algorithm.0) { Err(JetCryptoError::UnsupportedAlgorithm{operation,algorithm}) => { assert_eq!(operation,"PasswordHash.parse"); assert_eq!(algorithm,"argon2i"); }, _ => panic!("argon2i must remain a typed unsupported algorithm") }
