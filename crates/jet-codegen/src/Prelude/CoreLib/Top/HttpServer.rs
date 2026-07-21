@@ -2248,6 +2248,13 @@ fn jet_http_path_query_valid(target: &str) -> bool {
     true
 }
 
+fn jet_http_format_authority(authority: &JetHttpAuthority) -> String {
+    match authority.port {
+        Some(port) => format!("{}:{}", authority.host, port),
+        None => authority.host.clone(),
+    }
+}
+
 fn jet_http_absolute_target(
     method: &str,
     target: &str,
@@ -2260,6 +2267,38 @@ fn jet_http_absolute_target(
         } else {
             Err(JetHttpReadError { status: 400, message: "asterisk request target requires OPTIONS" })
         };
+    }
+    if method == "CONNECT" {
+        if target.starts_with('/') || target.contains("://") {
+            return Err(JetHttpReadError {
+                status: 400,
+                message: "CONNECT requires authority-form request target",
+            });
+        }
+        if jet_http_trim_ows(target) != target {
+            return Err(JetHttpReadError {
+                status: 400,
+                message: "CONNECT authority is malformed",
+            });
+        }
+        let authority = jet_http_parse_authority(target).ok_or(JetHttpReadError {
+            status: 400,
+            message: "CONNECT authority is malformed",
+        })?;
+        if let Some(host) = host {
+            if authority.host != host.host || authority.port != host.port {
+                return Err(JetHttpReadError {
+                    status: 400,
+                    message: "CONNECT authority does not match host",
+                });
+            }
+        } else if host_required {
+            return Err(JetHttpReadError {
+                status: 400,
+                message: "CONNECT request target requires a host header",
+            });
+        }
+        return Ok(jet_http_format_authority(&authority));
     }
     let path_query = if target.starts_with('/') {
         target.to_string()
@@ -2661,7 +2700,14 @@ fn jet_http_mux_dispatch(
         });
         return jet_http_mux_run_handler(mux, req, handler);
     }
-    let path = match jet_http_route_path(&req.path) {
+    // CONNECT authority-form has no path; route against "/{authority}" while
+    // leaving req.path as the normalized authority for handlers.
+    let route_target = if requested_method == "CONNECT" {
+        format!("/{}", req.path)
+    } else {
+        req.path.clone()
+    };
+    let path = match jet_http_route_path(&route_target) {
         Ok(path) => path,
         Err(_) => {
             return Ok(jet_http_srv_head_response(
