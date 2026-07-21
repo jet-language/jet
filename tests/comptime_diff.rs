@@ -283,23 +283,23 @@ fn comptime_f32_width_survives_value_flow_and_matches_aot() {
 }
 
 #[test]
-fn compression_round_trip_and_hostile_inputs_match_comptime_and_aot() {
+fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
     if !have_rustc() {
-        eprintln!("note: rustc not found; skipping compression comptime differential");
+        eprintln!("note: rustc not found; skipping gzip comptime differential");
         return;
     }
     let src = r#"use core.compress.gzip as gzip
-use core.compress.zstd as zstd
 
 fn codec_probe() -> String {
     bytes: [U8] :: [72, 101, 108, 108, 111]
     gz: [U8] :: gzip.decompress(gzip.compress(bytes)) ?? []
-    zs: [U8] :: zstd.decompress(zstd.compress(bytes)) ?? []
-    bad_gz: [U8] :: gzip.decompress([31, 139, 8]) ?? [255]
-    bad_zs: [U8] :: zstd.decompress([40, 181, 47, 253]) ?? [255]
+    golden: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? []
+    bad_size: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [255]
     h: U8 :: 72
+    lower_h: U8 :: 104
+    o: U8 :: 111
     max: U8 :: 255
-    return "{gz.len() == 5}|{gz[0] == h}|{zs.len() == 5}|{zs[0] == h}|{bad_gz[0] == max}|{bad_zs[0] == max}"
+    return "{gz.len() == 5}|{gz[0] == h}|{golden.len() == 5}|{golden[0] == lower_h}|{golden[4] == o}|{bad_size[0] == max}"
 }
 
 comptime expected = codec_probe()
@@ -310,7 +310,7 @@ fn run() {
     print("{actual}")
 }
 "#;
-    check_comptime_src(32_001, "compression round-trip and hostile inputs", src);
+    check_comptime_src(32_001, "gzip independent golden and ISIZE corruption", src);
 }
 
 #[test]

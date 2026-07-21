@@ -654,22 +654,13 @@ pub(super) fn apply_core_call(
     }
 
     match (module, method) {
-        // D-CORE-COMPRESS1=A / card #392 C4: pure stream codecs stay inside
+        // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside
         // tier-0. No native bridge, Boundary classification, or AOT fallback.
         ("core.compress.gzip", "compress") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::gzip_compress(&as_bytes(one(0)?, span)?),
         )),
         ("core.compress.gzip", "decompress") => {
             Ok(match super::super::ArchiveLite::gzip_decompress(&as_bytes(one(0)?, span)?) {
-                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
-            })
-        }
-        ("core.compress.zstd", "compress") => Ok(CtValue::Bytes(
-            super::super::ArchiveLite::zstd_compress(&as_bytes(one(0)?, span)?),
-        )),
-        ("core.compress.zstd", "decompress") => {
-            Ok(match super::super::ArchiveLite::zstd_decompress(&as_bytes(one(0)?, span)?) {
                 Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
                 Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
             })

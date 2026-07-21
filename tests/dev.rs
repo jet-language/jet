@@ -2503,28 +2503,28 @@ fn run() {
 }
 
 #[test]
-fn compression_matches_forced_interpreter_and_aot() {
+fn gzip_golden_matches_forced_interpreter_and_aot() {
     if !have_rustc() {
-        eprintln!("note: rustc not found; skipping compression dev differential");
+        eprintln!("note: rustc not found; skipping gzip dev differential");
         return;
     }
     let source = r#"use core.compress.gzip as gzip
-use core.compress.zstd as zstd
 
 fn run() {
     bytes: [U8] :: [72, 101, 108, 108, 111]
     gz: [U8] :: gzip.decompress(gzip.compress(bytes)) ?? []
-    zs: [U8] :: zstd.decompress(zstd.compress(bytes)) ?? []
-    bad_gz: [U8] :: gzip.decompress([31, 139, 8]) ?? [255]
-    bad_zs: [U8] :: zstd.decompress([40, 181, 47, 253]) ?? [255]
+    golden: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? []
+    bad_size: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [255]
     h: U8 :: 72
+    lower_h: U8 :: 104
+    o: U8 :: 111
     max: U8 :: 255
     print(gz.len() == 5)
     print(gz[0] == h)
-    print(zs.len() == 5)
-    print(zs[0] == h)
-    print(bad_gz[0] == max)
-    print(bad_zs[0] == max)
+    print(golden.len() == 5)
+    print(golden[0] == lower_h)
+    print(golden[4] == o)
+    print(bad_size[0] == max)
 }
 "#;
     let dir = common::unique_tmp("jet_dev_compression");
