@@ -7,9 +7,10 @@
 //! - crash / malformed / incompatible / fuel-exhaust guests fail closed
 //!   (Jet `E:` wires, no process abort, no rustc leak, no auto-commit)
 //! - wall-clock epoch `timeout_ms` interrupts a looping guest fail-closed
+//! - WASI-random import guests fail closed at load (deterministic sandbox)
+//! - pure guest re-analyze is byte-identical for the same snapshot
 //!
 //! Driver post-sema wire lives in `jet-driver::CompilerExtensionHook`.
-//! Nondeterminism policy remains open.
 
 #![allow(non_snake_case)]
 
@@ -229,6 +230,54 @@ fn wall_clock_timeout_ms_epoch_interrupt_fail_closed() {
         "epoch interrupt took too long ({elapsed:?}); wall path should not wait full v1 default"
     );
     assert_jet_owned(&err);
+    assert!(session.staged().is_none());
+    assert!(!session.is_committed());
+    assert!(session.close(jet_compiler_extension_close));
+}
+
+#[test]
+fn wasi_random_import_guest_fails_closed_at_load() {
+    // Deterministic sandbox law: ambient entropy imports are denied.
+    let err = load_guest("imports_random.wasm").expect_err("WASI random must fail load");
+    let lower = err.message.to_ascii_lowercase();
+    assert!(
+        lower.contains("import")
+            || lower.contains("instantiate")
+            || lower.contains("random")
+            || lower.contains("wasi"),
+        "expected import/instantiate denial, got: {}",
+        err.message
+    );
+    assert!(
+        lower.contains("no clock")
+            || lower.contains("no host import")
+            || lower.contains("admits no host"),
+        "message must name the deterministic sandbox denial, got: {}",
+        err.message
+    );
+    assert_jet_owned(&err);
+    let mut session = ExtensionSession::new();
+    assert_eq!(session.phase(), SessionPhase::Idle);
+    assert!(!session.is_committed());
+    assert!(!session.close(jet_compiler_extension_close));
+}
+
+#[test]
+fn pure_guest_reanalyze_is_byte_identical() {
+    let snap = sample_snapshot();
+    let snap_bytes = snap.encode().unwrap();
+    let handle = load_guest("lint_no_x.wasm").expect("load pure lint guest");
+    let mut session = ExtensionSession::new();
+    session.on_loaded(handle).unwrap();
+
+    let wire_a = jet_compiler_extension_analyze(handle, &snap_bytes);
+    let wire_b = jet_compiler_extension_analyze(handle, &snap_bytes);
+    let raw_a = parse_analyze_result(&wire_a).expect("first analyze");
+    let raw_b = parse_analyze_result(&wire_b).expect("second analyze");
+    assert_eq!(
+        raw_a, raw_b,
+        "deterministic sandbox: same snapshot must yield identical analyze bytes"
+    );
     assert!(session.staged().is_none());
     assert!(!session.is_committed());
     assert!(session.close(jet_compiler_extension_close));

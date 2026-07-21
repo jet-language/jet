@@ -27,6 +27,8 @@
 //! - [`ResourceLimits`]: fuel, memory, table, finding/edit/response caps, wall timeout.
 //! - [`TrustPolicy`]: components are `untrusted` by default; protocol + capability
 //!   negotiation must pass before analyze.
+//! - **Deterministic sandbox:** empty host linker — no clock/random/fs/net/process
+//!   imports; guests that declare them fail closed at load (D-DX5-HOOK1).
 //! - [`ExtensionSession`]: Idle → Loaded → (optional staged response) → Closed.
 //!   Staging never mutates compiler facts; [`ExtensionSession::rollback`] discards
 //!   staged output only (accept latch stays final); [`ExtensionSession::close`]
@@ -165,7 +167,8 @@ impl ResourceLimits {
 }
 
 /// Trust class for a loaded component. V1 admits only untrusted sandboxed
-/// guests — no elevated host imports, no compiler mutation rights.
+/// guests — no elevated host imports (no clock/random/fs/net/process), no
+/// compiler mutation rights (deterministic sandbox / D-DX5-HOOK1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustPolicy {
     Untrusted,
@@ -1339,6 +1342,17 @@ mod tests {
         assert!(
             runtime.contains("StoreLimitsBuilder"),
             "runtime must apply memory/table StoreLimits"
+        );
+        assert!(
+            runtime.contains("Linker::new")
+                && runtime.contains("no clock, random, filesystem, network, or process"),
+            "runtime must deny host imports under the deterministic sandbox law"
+        );
+        assert!(
+            !runtime.contains("wasi:")
+                && !runtime.contains("add_to_linker")
+                && !runtime.contains("WasiCtx"),
+            "runtime must not wire WASI or other ambient host imports"
         );
         assert!(
             runtime.contains("10_000_000")
