@@ -291,6 +291,13 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   `close(close_guest)` invokes the WASM host closer
   (`jet_compiler_extension_close`) so guest Store/memory is dropped.
   Uncommitted work never reaches sema or codegen.
+- **E2E harness (partial C4):** `crates/jet-pkg-model/tests/compiler_extension_e2e.rs`
+  loads real `compiler-extension-v1` component fixtures under
+  `crates/jet-pkg-model/fixtures/compiler_extension/` through the same
+  `Prelude/CompilerExtension.rs` host. Proves one custom-lint finding
+  round-trip plus fail-closed crash / malformed / incompatible / fuel-exhaust
+  guests (Jet-owned `E:` wires; no rustc leak; no auto-commit). Compiler
+  post-sema wiring and wall-clock epoch `timeout_ms` enforcement remain open.
 
 ## Rules
 

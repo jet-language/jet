@@ -187,7 +187,7 @@ pub struct ProtocolError {
 }
 
 impl ProtocolError {
-    fn new(message: impl Into<String>) -> Self {
+    pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
         }
@@ -701,6 +701,63 @@ impl Default for ExtensionSession {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Parse `jet_compiler_extension_load` wire (`O:<handle>` / `E:<message>`).
+/// Failures are Jet-owned strings — never rustc diagnostics (I2).
+pub fn parse_load_result(wire: &str) -> Result<u64, ProtocolError> {
+    if let Some(rest) = wire.strip_prefix("O:") {
+        rest.parse::<u64>().map_err(|_| {
+            ProtocolError::new(format!("malformed compiler-extension load handle: {wire}"))
+        })
+    } else if let Some(msg) = wire.strip_prefix("E:") {
+        Err(ProtocolError::new(msg.to_string()))
+    } else {
+        Err(ProtocolError::new(format!(
+            "malformed compiler-extension load wire: {wire}"
+        )))
+    }
+}
+
+/// Parse `jet_compiler_extension_analyze` wire (`O:<len>:<hex>` / `E:<message>`).
+pub fn parse_analyze_result(wire: &str) -> Result<Vec<u8>, ProtocolError> {
+    if let Some(rest) = wire.strip_prefix("O:") {
+        let (len_s, hex) = rest.split_once(':').ok_or_else(|| {
+            ProtocolError::new(format!("malformed compiler-extension analyze wire: {wire}"))
+        })?;
+        let len: usize = len_s.parse().map_err(|_| {
+            ProtocolError::new(format!("malformed compiler-extension analyze length: {len_s}"))
+        })?;
+        if hex.len() != len * 2 {
+            return Err(ProtocolError::new(format!(
+                "compiler-extension analyze hex length mismatch: expected {}, got {}",
+                len * 2,
+                hex.len()
+            )));
+        }
+        let mut bytes = Vec::with_capacity(len);
+        let chars: Vec<char> = hex.chars().collect();
+        for chunk in chars.chunks(2) {
+            let s: String = chunk.iter().collect();
+            let b = u8::from_str_radix(&s, 16).map_err(|_| {
+                ProtocolError::new(format!("malformed compiler-extension analyze hex: {s}"))
+            })?;
+            bytes.push(b);
+        }
+        Ok(bytes)
+    } else if let Some(msg) = wire.strip_prefix("E:") {
+        Err(ProtocolError::new(msg.to_string()))
+    } else {
+        Err(ProtocolError::new(format!(
+            "malformed compiler-extension analyze wire: {wire}"
+        )))
+    }
+}
+
+/// True when a host/guest failure string looks like a leaked rustc diagnostic (I2).
+pub fn message_exposes_rustc(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("rustc") || lower.contains("error[e") || lower.contains("--explain")
 }
 
 /// This host's mechanism identity.
@@ -1430,5 +1487,25 @@ mod tests {
         assert_eq!(d.max_edits, 64);
         assert_eq!(d.max_response_bytes, 256 * 1024);
         assert_eq!(d.timeout_ms, 2_000);
+    }
+
+    #[test]
+    fn load_and_analyze_wire_parsers_roundtrip_and_reject_errors() {
+        assert_eq!(parse_load_result("O:42").unwrap(), 42);
+        let err = parse_load_result("E:couldn't load").unwrap_err();
+        assert!(err.message.contains("couldn't load"));
+        assert!(!message_exposes_rustc(&err.message));
+
+        let bytes = b"{\"protocol\":1}";
+        let mut hex = String::new();
+        for b in bytes {
+            hex.push_str(&format!("{b:02x}"));
+        }
+        let wire = format!("O:{}:{hex}", bytes.len());
+        assert_eq!(parse_analyze_result(&wire).unwrap(), bytes);
+        let trap = parse_analyze_result("E:calling `analyze` trapped: all fuel").unwrap_err();
+        assert!(trap.message.contains("trapped"));
+        assert!(!message_exposes_rustc(&trap.message));
+        assert!(message_exposes_rustc("rustc error[E0308]"));
     }
 }
