@@ -28,6 +28,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -48,6 +49,15 @@ const V1_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024; // 16777216
 const V1_MAX_TABLE_ELEMENTS: usize = 10_000;
 /// Mirror of `ResourceLimits::v1_defaults().timeout_ms`.
 const V1_TIMEOUT_MS: u64 = 2_000;
+
+/// Basename only in user-facing host errors — keeps I4 snapshots portable and
+/// avoids leaking absolute worktree paths into diagnostics.
+fn display_guest(path: &str) -> &str {
+    Path::new(path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+}
 
 struct ExtensionHostState {
     limits: StoreLimits,
@@ -94,7 +104,8 @@ pub fn jet_compiler_extension_load(path: &str) -> String {
     let component = match Component::from_file(&engine, path) {
         Ok(c) => c,
         Err(e) => {
-            return format!("E:couldn't load compiler-extension `{path}`: {e}");
+            let guest = display_guest(path);
+            return format!("E:couldn't load compiler-extension `{guest}`: {e}");
         }
     };
     // Deterministic sandbox: empty linker — clock/random/fs/net/process
@@ -117,16 +128,18 @@ pub fn jet_compiler_extension_load(path: &str) -> String {
     let instance = match linker.instantiate(&mut store, &component) {
         Ok(i) => i,
         Err(e) => {
+            let guest = display_guest(path);
             return format!(
-                "E:compiler-extension `{path}` couldn't be instantiated \
+                "E:compiler-extension `{guest}` couldn't be instantiated \
                  (world `{COMPILER_EXTENSION_WORLD}` admits no host imports — \
                  no clock, random, filesystem, network, or process): {e}"
             );
         }
     };
     if instance.get_func(&mut store, ANALYZE_EXPORT).is_none() {
+        let guest = display_guest(path);
         return format!(
-            "E:compiler-extension `{path}` has no exported `{ANALYZE_EXPORT}` \
+            "E:compiler-extension `{guest}` has no exported `{ANALYZE_EXPORT}` \
              (world `{COMPILER_EXTENSION_WORLD}` requires it; this is not an \
              application `jetplugin` target)"
         );

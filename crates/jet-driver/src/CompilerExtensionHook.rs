@@ -6,6 +6,10 @@
 //! to Jet diagnostics. No new user syntax — env registration only until a
 //! spelling ballot. Failures are Jet-owned (E1402); guests never crash the
 //! compiler or expose rustc (I2/I3).
+//!
+//! Tower #549 C5 focused proofs live in `tests` below (host/SDK/diagnostic +
+//! AOT/dev fact parity). Full repository verification
+//! (`scripts/agent/verify-full.sh`) remains the open C5 gate.
 
 use crate::AST::{Func, Item, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -372,6 +376,157 @@ mod tests {
             err.iter().any(|d| d.code == "E1402"),
             "entry-swap None-facts path must still surface E1402; got {err:?}"
         );
+    }
+
+    // --- Tower #549 C5 focused proofs ------------------------------------
+    // Host/SDK/diagnostic + AOT/dev fact parity where both paths carry facts.
+    // Remaining C5 gate (not claimed here): independent Sol review + full
+    // `scripts/agent/verify-full.sh` repository verification.
+
+    /// Check vs Run modes freeze byte-identical typed snapshots when both
+    /// have solved effect facts (AOT build uses Run; `jet check` uses Check).
+    #[test]
+    fn check_and_run_mode_effect_fact_snapshots_byte_identical() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        let dir = tempfile_dir();
+        let src_path = dir.join("main.jet");
+        std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+        let path = src_path.to_str().unwrap();
+
+        let mut bundle_check =
+            crate::Loader::load_entry_with_overlay(path, None, false).expect("load check");
+        let (diags_c, facts_c) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle_check,
+            crate::Sema::CompileMode::Check,
+        );
+        assert!(
+            !diags_c
+                .iter()
+                .any(|d| d.severity == crate::Diagnostics::Severity::Error),
+            "Check sema must succeed; diags={diags_c:?}"
+        );
+        let enc_check = snapshot_from_bundle(&bundle_check, Some(&facts_c))
+            .expect("check snapshot")
+            .encode()
+            .expect("encode check");
+
+        let mut bundle_run =
+            crate::Loader::load_entry_with_overlay(path, None, false).expect("load run");
+        let (diags_r, facts_r) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle_run,
+            crate::Sema::CompileMode::Run,
+        );
+        assert!(
+            !diags_r
+                .iter()
+                .any(|d| d.severity == crate::Diagnostics::Severity::Error),
+            "Run sema must succeed; diags={diags_r:?}"
+        );
+        let enc_run = snapshot_from_bundle(&bundle_run, Some(&facts_r))
+            .expect("run snapshot")
+            .encode()
+            .expect("encode run");
+
+        assert_eq!(
+            enc_check, enc_run,
+            "Check vs Run typed snapshots must be byte-identical when both have effect facts"
+        );
+        let snap = snapshot_from_bundle(&bundle_check, Some(&facts_c)).unwrap();
+        assert!(
+            snap.capabilities.contains(&Capability::ReadEffects),
+            "fact-bearing snapshots must advertise ReadEffects; caps={:?}",
+            snap.capabilities
+        );
+    }
+
+    /// `jet check` and `jet build` (facts path) surface the same L1401 finding.
+    #[test]
+    fn check_and_build_surface_same_l1401() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile_dir();
+        let src_path = dir.join("main.jet");
+        std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+        let path = src_path.to_str().unwrap();
+        let wasm = fixture_wasm("lint_no_x.wasm");
+        std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+
+        let (check_diags, bundle, _) =
+            crate::Driver::check_file_with_effect_facts(path, None, false);
+        assert!(bundle.is_some(), "check sema must succeed; diags={check_diags:?}");
+        let check_lint = check_diags
+            .iter()
+            .find(|d| d.code == "L1401")
+            .unwrap_or_else(|| panic!("check must surface L1401; diags={check_diags:?}"));
+
+        let build_out = crate::Driver::compile_bundle_path_build(
+            path,
+            crate::Driver::BuildRunOptions::default(),
+        );
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        let build_out = build_out.unwrap_or_else(|errs| {
+            panic!("build must succeed with lint-only guest; errs={errs:?}")
+        });
+        let build_lint = build_out
+            .compile
+            .lints
+            .iter()
+            .find(|d| d.code == "L1401")
+            .unwrap_or_else(|| {
+                panic!(
+                    "build must surface L1401; lints={:?}",
+                    build_out.compile.lints
+                )
+            });
+
+        assert_eq!(check_lint.what, build_lint.what);
+        assert_eq!(check_lint.why, build_lint.why);
+        assert!(check_lint.what.contains("no-x"));
+        assert!(check_lint.what.contains("prefer y"));
+    }
+
+    /// AOT opts_full (`jet run`) and entry-swap (`jet dev`) both get L1401
+    /// even with None effect facts (guest does not require ReadEffects).
+    #[test]
+    fn aot_opts_full_and_dev_entry_swap_surface_same_l1401() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile_dir();
+        let src_path = dir.join("main.jet");
+        std::fs::write(
+            &src_path,
+            "fn run() {\n    print(0)\n}\n\nfn dev() {\n    print(1)\n}\n",
+        )
+        .unwrap();
+        let path = src_path.to_str().unwrap();
+        let wasm = fixture_wasm("lint_no_x.wasm");
+        std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+
+        let aot = crate::Driver::compile_bundle_path_opts(
+            path,
+            crate::Sema::CompileMode::Run,
+            false,
+            false,
+            false,
+            None,
+        )
+        .unwrap_or_else(|errs| panic!("opts_full must succeed with lint guest; errs={errs:?}"));
+        let aot_lint = aot
+            .lints
+            .iter()
+            .find(|d| d.code == "L1401")
+            .unwrap_or_else(|| panic!("opts_full must surface L1401; lints={:?}", aot.lints));
+
+        let dev = crate::Driver::compile_bundle_path_with_entry(path, "dev")
+            .unwrap_or_else(|errs| panic!("entry-swap must succeed with lint guest; errs={errs:?}"));
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        let dev_lint = dev
+            .lints
+            .iter()
+            .find(|d| d.code == "L1401")
+            .unwrap_or_else(|| panic!("entry-swap must surface L1401; lints={:?}", dev.lints));
+
+        assert_eq!(aot_lint.what, dev_lint.what);
+        assert_eq!(aot_lint.why, dev_lint.why);
     }
 
     fn tempfile_dir() -> PathBuf {

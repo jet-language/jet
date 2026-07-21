@@ -1,4 +1,4 @@
-//! Tower #549 C4 — real compiler-extension WASM guest harness.
+//! Tower #549 C4/C5 — real compiler-extension WASM guest harness.
 //!
 //! Drives fixture components under `fixtures/compiler_extension/` through the
 //! compiled `CompilerExtensionHost` (same wasmtime substrate the driver uses)
@@ -10,7 +10,9 @@
 //! - WASI-random import guests fail closed at load (deterministic sandbox)
 //! - pure guest re-analyze is byte-identical for the same snapshot
 //!
-//! Driver post-sema wire lives in `jet-driver::CompilerExtensionHook`.
+//! Driver post-sema wire + AOT/dev fact-parity proofs live in
+//! `jet-driver::CompilerExtensionHook`. C5 still requires independent Sol
+//! review and full `scripts/agent/verify-full.sh` (not claimed by this crate).
 
 #![allow(non_snake_case)]
 
