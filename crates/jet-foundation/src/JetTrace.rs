@@ -97,6 +97,49 @@ impl JetSymbolRef {
     }
 }
 
+/// Best-effort top-level `fn name` spellings in source order.
+/// Used so capture never invents a symbol that is not present in `--source`.
+pub fn fn_names_from_source(src: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let bytes = src.as_bytes();
+    let mut i = 0usize;
+    while i + 2 < bytes.len() {
+        let at_word_start = i == 0 || !is_ident_byte(bytes[i - 1]);
+        if at_word_start && bytes[i] == b'f' && bytes[i + 1] == b'n' {
+            let after = i + 2;
+            if after < bytes.len() && bytes[after].is_ascii_whitespace() {
+                let mut j = after;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                let start = j;
+                while j < bytes.len() && is_ident_byte(bytes[j]) {
+                    j += 1;
+                }
+                if j > start {
+                    names.push(String::from_utf8_lossy(&bytes[start..j]).into_owned());
+                }
+                i = j;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    names
+}
+
+/// Jet program entry is only `fn run` (codegen D-CLIFLAG1). Returns `None`
+/// when that spelling is absent — callers must not invent `"run"`.
+pub fn entrypoint_name_from_source(src: &str) -> Option<String> {
+    fn_names_from_source(src)
+        .into_iter()
+        .find(|name| name == "run")
+}
+
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraceSample {
     pub domain: String,
@@ -489,6 +532,19 @@ mod tests {
             allocations: Vec::new(),
             source_identity: Vec::new(),
         }
+    }
+
+    #[test]
+    fn entrypoint_is_parsed_never_invented() {
+        assert_eq!(entrypoint_name_from_source("fn probe() {\n}\n"), None);
+        assert_eq!(
+            entrypoint_name_from_source("fn probe() {}\nfn run() {}\n").as_deref(),
+            Some("run")
+        );
+        assert_eq!(
+            fn_names_from_source("fn probe() {}\nfn run() {}\n"),
+            vec!["probe".to_string(), "run".to_string()]
+        );
     }
 
     #[test]

@@ -39,6 +39,46 @@ impl Drop for ChildGuard {
     }
 }
 
+fn json_u64_after(haystack: &str, key: &str) -> Option<u64> {
+    let needle = format!("\"{key}\":");
+    let tail = haystack.split_once(&needle)?.1;
+    let digits: String = tail.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+/// Fail if capture invented 1ns wall or recorded a zero-alloc scrape-success.
+fn assert_honest_wall_and_alloc(text: &str) {
+    let wall_at = text
+        .find("\"domain\":\"wall\"")
+        .unwrap_or_else(|| panic!("missing wall sample: {text}"));
+    let wall_ns = json_u64_after(&text[wall_at..], "duration_ns")
+        .unwrap_or_else(|| panic!("missing wall duration_ns: {text}"));
+    assert!(
+        wall_ns > 1,
+        "fabricated 1ns wall (or zero): duration_ns={wall_ns} in {text}"
+    );
+    assert!(
+        wall_ns >= 1_000_000,
+        "wall duration not real observed work: duration_ns={wall_ns} in {text}"
+    );
+
+    let alloc_at = text
+        .find("\"allocations\":[{")
+        .unwrap_or_else(|| panic!("missing allocations object: {text}"));
+    let count = json_u64_after(&text[alloc_at..], "count")
+        .unwrap_or_else(|| panic!("missing alloc count: {text}"));
+    let bytes = json_u64_after(&text[alloc_at..], "bytes")
+        .unwrap_or_else(|| panic!("missing alloc bytes: {text}"));
+    assert!(
+        count > 0,
+        "zero alloc count false-green: count={count} bytes={bytes} in {text}"
+    );
+    assert!(
+        bytes > 0,
+        "zero alloc bytes false-green: count={count} bytes={bytes} in {text}"
+    );
+}
+
 #[test]
 fn perf_attach_view_compare_export_share_one_jettrace_truth() {
     let root = temp_workspace();
@@ -163,14 +203,22 @@ fn perf_run_captures_wall_and_alloc_into_jettrace() {
     let root = temp_workspace();
     fs::create_dir_all(&root).unwrap();
     let source = root.join("session.jet");
+    // Non-entry `probe_work` must appear in source_identity; sample symbol is
+    // parsed `fn run` only — never a hardcoded invention. Arena stays live in
+    // `run` so observe still sees outstanding allocations during sleep.
     fs::write(
         &source,
         r#"use core.mem as mem
 use core.time as time
 
+fn probe_work() {
+    // Present only so source_identity must parse a non-entry fn name.
+}
+
 fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
+    probe_work()
     print("READY")
     time.sleep(500)
 }
@@ -198,20 +246,25 @@ fn run() {
     assert!(stderr.contains("trace:"), "{stderr}");
     assert!(out.is_file(), "missing {}", out.display());
     let text = fs::read_to_string(&out).unwrap();
-    assert!(text.contains("\"domain\":\"wall\""), "{text}");
-    assert!(text.contains("\"duration_ns\":"), "{text}");
-    assert!(text.contains("\"allocations\":[{"), "{text}");
-    assert!(text.contains("\"source_identity\":[{"), "{text}");
+    assert_honest_wall_and_alloc(&text);
+    assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("session.jet"), "{text}");
-    assert!(!text.contains("\"samples\":[]"), "samples still empty: {text}");
-    assert!(!text.contains("\"allocations\":[]"), "allocations still empty: {text}");
+    assert!(
+        !text.contains("\"duration_ns\":1,"),
+        "fabricated 1ns wall leaked into trace: {text}"
+    );
+    assert!(
+        !text.contains("\"count\":0,"),
+        "zero-alloc scrape-success leaked into trace: {text}"
+    );
 
     let view = run_jet(&root, &["perf", "view", out.to_str().unwrap()]);
     let stdout = String::from_utf8_lossy(&view.stdout);
     assert!(view.status.success(), "{}", String::from_utf8_lossy(&view.stderr));
     assert!(stdout.contains("sample wall"), "{stdout}");
     assert!(stdout.contains("alloc count="), "{stdout}");
+    assert!(!stdout.contains("alloc count=0 "), "zero alloc in view: {stdout}");
     assert!(stdout.contains("session.jet#run"), "{stdout}");
     assert!(stdout.contains("command run"), "{stdout}");
 
@@ -231,9 +284,14 @@ fn perf_attach_captures_wall_and_alloc_with_jet_symbol_from_observe() {
         r#"use core.mem as mem
 use core.time as time
 
+fn probe_work() {
+    // Present only so source_identity must parse a non-entry fn name.
+}
+
 fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
+    probe_work()
     print("READY")
     time.sleep(30000)
 }
@@ -271,9 +329,14 @@ fn run() {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match jet::DevServer::LiveInspect::read(pid) {
-            Ok(snapshot) if snapshot.contains("\"arena_allocations\":") => break,
+            Ok(snapshot)
+                if snapshot.contains("\"arena_allocations\":")
+                    && !snapshot.contains("\"arena_allocations\":0") =>
+            {
+                break
+            }
             _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-            other => panic!("observe snapshot never became readable: {other:?}"),
+            other => panic!("observe snapshot never became readable with allocs: {other:?}"),
         }
     }
 
@@ -298,20 +361,25 @@ fn run() {
     );
     assert!(out.is_file(), "missing {}", out.display());
     let text = fs::read_to_string(&out).unwrap();
-    assert!(text.contains("\"domain\":\"wall\""), "{text}");
-    assert!(text.contains("\"duration_ns\":"), "{text}");
-    assert!(text.contains("\"allocations\":[{"), "{text}");
-    assert!(text.contains("\"source_identity\":[{"), "{text}");
+    assert_honest_wall_and_alloc(&text);
+    assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("live.jet"), "{text}");
-    assert!(!text.contains("\"samples\":[]"), "samples still empty: {text}");
-    assert!(!text.contains("\"allocations\":[]"), "allocations still empty: {text}");
+    assert!(
+        !text.contains("\"duration_ns\":1,"),
+        "fabricated 1ns wall leaked into trace: {text}"
+    );
+    assert!(
+        !text.contains("\"count\":0,"),
+        "zero-alloc scrape-success leaked into trace: {text}"
+    );
 
     let view = run_jet(&root, &["perf", "view", out.to_str().unwrap()]);
     let stdout = String::from_utf8_lossy(&view.stdout);
     assert!(view.status.success(), "{}", String::from_utf8_lossy(&view.stderr));
     assert!(stdout.contains("sample wall"), "{stdout}");
     assert!(stdout.contains("alloc count="), "{stdout}");
+    assert!(!stdout.contains("alloc count=0 "), "zero alloc in view: {stdout}");
     assert!(stdout.contains("live.jet#run"), "{stdout}");
 
     let _ = fs::remove_dir_all(&root);

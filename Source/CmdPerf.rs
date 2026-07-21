@@ -8,9 +8,9 @@
 //! Jet source symbol.
 
 use jet_foundation::JetTrace::{
-    artifact_extension, build_skeleton_bytes, trace_id, verify_jettrace, CapturePolicy,
-    JetSymbolRef, SourceIdentity, TraceAllocation, TraceSample, TraceSkeleton, TraceToolchain,
-    TRACE_SCHEMA, TRACE_VERSION,
+    artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
+    trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
+    TraceSample, TraceSkeleton, TraceToolchain, TRACE_SCHEMA, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
@@ -126,7 +126,7 @@ fn run_session(action: &str, args: &[String]) -> i32 {
         Some(source) => match capture_from_source(
             source,
             last_snapshot.as_deref(),
-            wall_ns.max(1),
+            wall_ns,
             None,
         ) {
             Ok(bundle) => bundle,
@@ -271,7 +271,7 @@ fn attach(args: &[String]) -> i32 {
     let capture = match (source.as_deref(), jet::DevServer::LiveInspect::read(pid)) {
         (Some(path), Ok(snapshot)) => {
             let (wall_ns, cpu_ns) = process_times(pid).unwrap_or((0, 0));
-            match capture_from_source(path, Some(&snapshot), wall_ns.max(1), Some(cpu_ns)) {
+            match capture_from_source(path, Some(&snapshot), wall_ns, Some(cpu_ns)) {
                 Ok(bundle) => bundle,
                 Err(message) => {
                     eprintln!("Error [E2102]: {message}");
@@ -321,19 +321,25 @@ fn capture_from_source(
         return Err(format!("source path must be a `.jet` file, got `{source_path}`"));
     }
     let bytes = fs::read(&path).map_err(|e| format!("cannot read source {source_path}: {e}"))?;
+    let src = String::from_utf8_lossy(&bytes);
     let sha256 = SHA256::sha256_hex(&bytes);
     let path_text = source_path.to_string();
-    let symbol = JetSymbolRef {
+    let fn_names = fn_names_from_source(&src);
+    let entry = entrypoint_name_from_source(&src);
+    let symbol = entry.map(|name| JetSymbolRef {
         path: path_text.clone(),
-        name: "run".into(),
-    };
-    let mut samples = Vec::new();
-    samples.push(TraceSample {
-        domain: "wall".into(),
-        duration_ns: wall_ns.max(1),
-        symbol: symbol.clone(),
+        name,
     });
-    if let Some(cpu_ns) = cpu_ns.filter(|ns| *ns > 0) {
+    let mut samples = Vec::new();
+    // Honest wall: omit when zero; never invent 1ns via max(1).
+    if let (Some(symbol), true) = (symbol.as_ref(), wall_ns > 0) {
+        samples.push(TraceSample {
+            domain: "wall".into(),
+            duration_ns: wall_ns,
+            symbol: symbol.clone(),
+        });
+    }
+    if let (Some(symbol), Some(cpu_ns)) = (symbol.as_ref(), cpu_ns.filter(|ns| *ns > 0)) {
         samples.push(TraceSample {
             domain: "cpu".into(),
             duration_ns: cpu_ns,
@@ -341,13 +347,16 @@ fn capture_from_source(
         });
     }
     let mut allocations = Vec::new();
-    if let Some(snapshot) = snapshot {
+    // Only record alloc facts when observe shows activity — never a zero scrape-success.
+    if let (Some(symbol), Some(snapshot)) = (symbol.as_ref(), snapshot) {
         let (alloc_count, alloc_bytes) = observe_arena_resources(snapshot);
-        allocations.push(TraceAllocation {
-            count: alloc_count,
-            bytes: alloc_bytes,
-            symbol: symbol.clone(),
-        });
+        if alloc_count > 0 || alloc_bytes > 0 {
+            allocations.push(TraceAllocation {
+                count: alloc_count,
+                bytes: alloc_bytes,
+                symbol: symbol.clone(),
+            });
+        }
     }
     Ok(CaptureBundle {
         samples,
@@ -355,7 +364,10 @@ fn capture_from_source(
         source_identity: vec![SourceIdentity {
             path: path_text,
             sha256,
-            symbols: vec![("run".into(), "fn".into())],
+            symbols: fn_names
+                .into_iter()
+                .map(|name| (name, "fn".into()))
+                .collect(),
         }],
     })
 }
@@ -380,10 +392,13 @@ fn poll_observe_snapshot(root_pid: u32) -> Option<String> {
             continue;
         }
         if let Ok(snapshot) = jet::DevServer::LiveInspect::read(pid) {
-            if snapshot.contains("\"arena_allocations\":") {
+            let (count, bytes) = observe_arena_resources(&snapshot);
+            if count > 0 || bytes > 0 {
                 return Some(snapshot);
             }
-            best = Some(snapshot);
+            if snapshot.contains("\"arena_allocations\":") || snapshot.contains("\"tasks\":[") {
+                best = Some(snapshot);
+            }
         }
         stack.extend(process_children(pid));
     }
