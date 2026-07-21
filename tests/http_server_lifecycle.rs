@@ -115,6 +115,31 @@ static HTTP_BODY_READS: std::sync::atomic::AtomicUsize =
 static HTTP_H2_BRIDGE_CLOSES: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
+const HELLO_GZIP: &[u8] = &[
+    31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 87, 72, 175, 202, 44,
+    0, 0, 25, 106, 210, 223, 10, 0, 0, 0,
+];
+const GZIP_EXPANSION: &[u8] = &[
+    31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 75, 76, 28, 5, 163, 96, 20, 12, 119, 0,
+    0, 3, 218, 56, 154, 232, 3, 0, 0,
+];
+const GZIP_DYNAMIC: &[u8] = &[
+    31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 29, 143, 65, 106, 196, 48, 20, 67, 247, 57,
+    133, 160, 219, 105, 46, 208, 213, 144, 14, 133, 82, 74, 161, 211, 253, 24, 91,
+    73, 76, 156, 255, 131, 253, 211, 144, 93, 15, 209, 19, 246, 36, 117, 102, 43,
+    36, 61, 233, 1, 231, 151, 203, 251, 245, 179, 157, 3, 254, 126, 126, 241, 74,
+    131, 27, 40, 6, 93, 152, 157, 69, 25, 48, 59, 89, 93, 106, 154, 206, 137, 74,
+    244, 46, 97, 209, 20, 253, 142, 94, 51, 248, 205, 188, 195, 107, 56, 156, 247,
+    100, 139, 91, 247, 118, 254, 122, 190, 212, 206, 27, 98, 129, 67, 217, 231, 20,
+    101, 194, 200, 204, 39, 4, 133, 168, 29, 233, 9, 21, 242, 104, 170, 169, 54, 44,
+    145, 165, 109, 62, 86, 195, 146, 213, 51, 172, 153, 5, 81, 80, 166, 152, 82,
+    57, 33, 176, 196, 65, 238, 202, 66, 95, 133, 237, 40, 40, 230, 140, 135, 120,
+    213, 141, 249, 4, 39, 161, 58, 141, 121, 142, 18, 139, 69, 15, 74, 37, 121, 206,
+    199, 169, 234, 51, 22, 43, 168, 203, 71, 213, 169, 2, 59, 13, 236, 147, 110,
+    199, 82, 27, 89, 225, 236, 153, 51, 3, 116, 19, 102, 104, 95, 231, 23, 227,
+    236, 254, 1, 249, 28, 70, 20, 44, 1, 0, 0,
+];
+
 fn unread_bridge_body(
     _handle: i64,
     _max_chunk: usize,
@@ -1074,6 +1099,143 @@ fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
     let report = server.join().expect("server join");
     assert_eq!(report.user_accepted, 19);
     assert_eq!(report.user_completed, 19);
+}
+
+#[test]
+fn gzip_content_encoding_is_transparent_bounded_and_strict() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = Vec::new();
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => response.extend_from_slice(&buf[..read]),
+                Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => break,
+                Err(error) => panic!("response read: {error}"),
+            }
+        }
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    fn request_with_body(headers: &str, body: &[u8]) -> Vec<u8> {
+        let mut request = format!("POST /echo HTTP/1.1\r\nHost: local\r\n{headers}\r\n").into_bytes();
+        request.extend_from_slice(body);
+        request
+    }
+
+    let stored = [
+        31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 1, 3, 0, 252, 255, b'a', b'b', b'c',
+        194, 65, 36, 53, 3, 0, 0, 0,
+    ];
+    assert_eq!(jet_http_gzip_decode(&stored, 3).unwrap(), b"abc");
+    let dynamic = jet_http_gzip_decode(GZIP_DYNAMIC, 300).unwrap();
+    assert_eq!(dynamic.len(), 300);
+    assert!(dynamic.starts_with(b"# AGENTS.md"));
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    jet_http_mux_add_handler(&mux, "POST", "/echo", std::sync::Arc::new(move |req| {
+        assert_eq!(req.headers.first("content-encoding"), None);
+        assert_eq!(req.headers.first("content-length"), None);
+        let body = req.body.text(100)?;
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+        Ok(jet_http_srv_response(200, &body))
+    }));
+    jet_http_mux_add(&mux, "GET", "/next", |_| {
+        jet_http_srv_response(200, &"next".to_string())
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.max_body_bytes = 100;
+    options.workers = 1;
+    options.admission_queue = 8;
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+            .expect("server")
+    });
+
+    let encoded = exchange(
+        addr,
+        &request_with_body(
+            &format!(
+                "Content-Encoding: GZip\r\nContent-Length: {}\r\nConnection: close\r\n",
+                HELLO_GZIP.len()
+            ),
+            HELLO_GZIP,
+        ),
+    );
+    assert!(encoded.starts_with("HTTP/1.1 200 OK"), "{encoded}");
+    assert!(encoded.ends_with("\r\n\r\nhello gzip"), "{encoded}");
+
+    let mut chunks = Vec::new();
+    for chunk in HELLO_GZIP.chunks(7) {
+        chunks.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+        chunks.extend_from_slice(chunk);
+        chunks.extend_from_slice(b"\r\n");
+    }
+    chunks.extend_from_slice(
+        b"0\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    let chunked = exchange(
+        addr,
+        &request_with_body("Content-Encoding: gzip\r\nTransfer-Encoding: chunked\r\n", &chunks),
+    );
+    assert_eq!(chunked.matches("HTTP/1.1 200 OK").count(), 2, "{chunked}");
+    assert!(chunked.find("\r\n\r\nhello gzip").unwrap() < chunked.rfind("\r\n\r\nnext").unwrap());
+
+    let unsupported = exchange(
+        addr,
+        &request_with_body("Content-Encoding: br\r\nContent-Length: 0\r\nConnection: close\r\n", &[]),
+    );
+    assert!(unsupported.starts_with("HTTP/1.1 415 Unsupported Media Type"), "{unsupported}");
+
+    let mixed = exchange(
+        addr,
+        &request_with_body("Content-Encoding: gzip, br\r\nContent-Length: 0\r\nConnection: close\r\n", &[]),
+    );
+    assert!(mixed.starts_with("HTTP/1.1 415 Unsupported Media Type"), "{mixed}");
+
+    let mut corrupt = HELLO_GZIP.to_vec();
+    corrupt[HELLO_GZIP.len() - 8] ^= 1;
+    let malformed = exchange(
+        addr,
+        &request_with_body(
+            &format!(
+                "Content-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n",
+                corrupt.len()
+            ),
+            &corrupt,
+        ),
+    );
+    assert!(malformed.starts_with("HTTP/1.1 400 Bad Request"), "{malformed}");
+
+    let expansion = exchange(
+        addr,
+        &request_with_body(
+            &format!(
+                "Content-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n",
+                GZIP_EXPANSION.len()
+            ),
+            GZIP_EXPANSION,
+        ),
+    );
+    assert!(expansion.starts_with("HTTP/1.1 413 Payload Too Large"), "{expansion}");
+
+    assert_eq!(calls.load(Ordering::Acquire), 2, "rejected encoding reached handler");
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 6);
+    assert_eq!(report.user_completed, 6);
 }
 
 #[test]
@@ -3820,6 +3982,14 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
         let n = handler_calls.fetch_add(1, Ordering::AcqRel) + 1;
         jet_http_srv_response(200, &format!("ok{n}"))
     });
+    let encoded_calls = calls.clone();
+    jet_http_mux_add_handler(&mux, "POST", "/encoded", std::sync::Arc::new(move |req| {
+        assert_eq!(req.headers.first("content-encoding"), None);
+        assert_eq!(req.headers.first("content-length"), None);
+        let body = req.body.text(1024)?;
+        encoded_calls.fetch_add(1, Ordering::AcqRel);
+        Ok(jet_http_srv_response(200, &body))
+    }));
     let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
     let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
     let tls = JetHttpServerTls {
@@ -3858,9 +4028,17 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
         &mut client,
         b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
     );
+    let mut encoded_request = format!(
+        "POST /encoded HTTP/1.1\r\nHost: localhost\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n",
+        HELLO_GZIP.len(),
+    )
+    .into_bytes();
+    encoded_request.extend_from_slice(HELLO_GZIP);
+    let encoded = rustls_exchange(&mut client, &encoded_request);
     assert!(first.contains("\r\n\r\nok1"), "{first}");
     assert!(second.contains("\r\n\r\nok2"), "{second}");
-    assert_eq!(calls.load(Ordering::Acquire), 2);
+    assert!(encoded.contains("\r\n\r\nhello gzip"), "{encoded}");
+    assert_eq!(calls.load(Ordering::Acquire), 3);
 
     let started = std::time::Instant::now();
     let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 200 }).expect("shutdown");
@@ -3869,7 +4047,7 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     std::thread::sleep(std::time::Duration::from_millis(40));
     assert_eq!(
         calls.load(Ordering::Acquire),
-        2,
+        3,
         "Server.shutdown must stop rustls keep-alive reuse without client Connection: close"
     );
     assert!(started.elapsed() < std::time::Duration::from_millis(1500), "{report:?}");

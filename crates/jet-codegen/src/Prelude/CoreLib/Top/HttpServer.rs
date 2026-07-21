@@ -45,6 +45,358 @@ struct JetHttpRequestHead {
     framing: JetHttpRequestFraming,
     expect_continue: bool,
     target: String,
+    content_encoding_layers: usize,
+}
+
+struct JetHttpDeflateBits<'a> {
+    input: &'a [u8],
+    bit: usize,
+}
+
+impl JetHttpDeflateBits<'_> {
+    fn read(&mut self, count: usize) -> Result<u32, JetHttpReadError> {
+        let value = self.peek(count)?;
+        self.bit += count;
+        Ok(value)
+    }
+
+    fn peek(&self, count: usize) -> Result<u32, JetHttpReadError> {
+        if self.bit.saturating_add(count) > self.input.len().saturating_mul(8) {
+            return Err(jet_http_gzip_invalid());
+        }
+        let mut value = 0u32;
+        for offset in 0..count {
+            let bit = self.bit + offset;
+            value |= u32::from((self.input[bit / 8] >> (bit % 8)) & 1) << offset;
+        }
+        Ok(value)
+    }
+
+    fn align(&mut self) {
+        self.bit = self.bit.saturating_add(7) & !7;
+    }
+}
+
+struct JetHttpDeflateTable {
+    entries: Vec<(u16, u8)>,
+    max_bits: usize,
+}
+
+impl JetHttpDeflateTable {
+    fn new(lengths: &[u8]) -> Result<Self, JetHttpReadError> {
+        let max_bits = usize::from(lengths.iter().copied().max().unwrap_or(0));
+        if max_bits > 15 {
+            return Err(jet_http_gzip_invalid());
+        }
+        if max_bits == 0 {
+            return Ok(Self { entries: Vec::new(), max_bits: 0 });
+        }
+        let mut counts = [0usize; 16];
+        for &length in lengths {
+            counts[usize::from(length)] += usize::from(length != 0);
+        }
+        let mut left = 1isize;
+        for count in counts.iter().skip(1) {
+            left = left.saturating_mul(2) - *count as isize;
+            if left < 0 {
+                return Err(jet_http_gzip_invalid());
+            }
+        }
+        let mut next = [0usize; 16];
+        let mut code = 0usize;
+        for bits in 1..=15 {
+            code = (code + counts[bits - 1]) << 1;
+            next[bits] = code;
+        }
+        let mut entries = vec![(0u16, 0u8); 1usize << max_bits];
+        for (symbol, &length) in lengths.iter().enumerate() {
+            let length = usize::from(length);
+            if length == 0 {
+                continue;
+            }
+            let canonical = next[length];
+            next[length] += 1;
+            let mut reversed = 0usize;
+            for bit in 0..length {
+                reversed |= ((canonical >> bit) & 1) << (length - bit - 1);
+            }
+            for suffix in 0..(1usize << (max_bits - length)) {
+                let entry = &mut entries[reversed | (suffix << length)];
+                if entry.1 != 0 {
+                    return Err(jet_http_gzip_invalid());
+                }
+                *entry = (symbol as u16, length as u8);
+            }
+        }
+        Ok(Self { entries, max_bits })
+    }
+
+    fn symbol(&self, bits: &mut JetHttpDeflateBits<'_>) -> Result<usize, JetHttpReadError> {
+        if self.entries.is_empty() {
+            return Err(jet_http_gzip_invalid());
+        }
+        let remaining = bits.input.len().saturating_mul(8).saturating_sub(bits.bit);
+        let available = remaining.min(self.max_bits);
+        if available == 0 {
+            return Err(jet_http_gzip_invalid());
+        }
+        let (symbol, length) = self.entries[bits.peek(available)? as usize];
+        let length = usize::from(length);
+        if length == 0 || length > available {
+            return Err(jet_http_gzip_invalid());
+        }
+        bits.bit += length;
+        Ok(usize::from(symbol))
+    }
+}
+
+fn jet_http_gzip_invalid() -> JetHttpReadError {
+    JetHttpReadError { status: 400, message: "gzip request body is malformed" }
+}
+
+fn jet_http_gzip_too_large() -> JetHttpReadError {
+    JetHttpReadError { status: 413, message: "decoded request body is too large" }
+}
+
+fn jet_http_deflate_tables(
+    bits: &mut JetHttpDeflateBits<'_>,
+    kind: u32,
+) -> Result<(JetHttpDeflateTable, JetHttpDeflateTable), JetHttpReadError> {
+    if kind == 1 {
+        let mut literals = vec![0u8; 288];
+        literals[..144].fill(8);
+        literals[144..256].fill(9);
+        literals[256..280].fill(7);
+        literals[280..].fill(8);
+        return Ok((JetHttpDeflateTable::new(&literals)?, JetHttpDeflateTable::new(&[5; 32])?));
+    }
+    if kind != 2 {
+        return Err(jet_http_gzip_invalid());
+    }
+    let literal_count = bits.read(5)? as usize + 257;
+    let distance_count = bits.read(5)? as usize + 1;
+    let code_count = bits.read(4)? as usize + 4;
+    if literal_count > 286 || distance_count > 32 {
+        return Err(jet_http_gzip_invalid());
+    }
+    const ORDER: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+    let mut code_lengths = [0u8; 19];
+    for index in 0..code_count {
+        code_lengths[ORDER[index]] = bits.read(3)? as u8;
+    }
+    let code_table = JetHttpDeflateTable::new(&code_lengths)?;
+    let total = literal_count + distance_count;
+    let mut lengths = Vec::with_capacity(total);
+    while lengths.len() < total {
+        match code_table.symbol(bits)? {
+            length @ 0..=15 => lengths.push(length as u8),
+            16 => {
+                let previous = *lengths.last().ok_or_else(jet_http_gzip_invalid)?;
+                let repeats = bits.read(2)? as usize + 3;
+                if lengths.len().saturating_add(repeats) > total {
+                    return Err(jet_http_gzip_invalid());
+                }
+                lengths.extend(std::iter::repeat_n(previous, repeats));
+            }
+            17 => {
+                let repeats = bits.read(3)? as usize + 3;
+                if lengths.len().saturating_add(repeats) > total {
+                    return Err(jet_http_gzip_invalid());
+                }
+                lengths.extend(std::iter::repeat_n(0, repeats));
+            }
+            18 => {
+                let repeats = bits.read(7)? as usize + 11;
+                if lengths.len().saturating_add(repeats) > total {
+                    return Err(jet_http_gzip_invalid());
+                }
+                lengths.extend(std::iter::repeat_n(0, repeats));
+            }
+            _ => return Err(jet_http_gzip_invalid()),
+        }
+    }
+    if lengths.get(256).copied().unwrap_or(0) == 0 {
+        return Err(jet_http_gzip_invalid());
+    }
+    Ok((
+        JetHttpDeflateTable::new(&lengths[..literal_count])?,
+        JetHttpDeflateTable::new(&lengths[literal_count..])?,
+    ))
+}
+
+fn jet_http_deflate_decode(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    member_start: usize,
+    limit: usize,
+) -> Result<usize, JetHttpReadError> {
+    const LENGTH_BASE: [usize; 29] = [
+        3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59,
+        67, 83, 99, 115, 131, 163, 195, 227, 258,
+    ];
+    const LENGTH_EXTRA: [usize; 29] = [
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4,
+        4, 4, 5, 5, 5, 5, 0,
+    ];
+    const DISTANCE_BASE: [usize; 30] = [
+        1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385,
+        513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+    ];
+    const DISTANCE_EXTRA: [usize; 30] = [
+        0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9,
+        10, 10, 11, 11, 12, 12, 13, 13,
+    ];
+    let mut bits = JetHttpDeflateBits { input, bit: 0 };
+    loop {
+        let final_block = bits.read(1)? != 0;
+        let kind = bits.read(2)?;
+        if kind == 0 {
+            bits.align();
+            let length = bits.read(16)? as usize;
+            let complement = bits.read(16)? as u16;
+            if (length as u16) != !complement {
+                return Err(jet_http_gzip_invalid());
+            }
+            if output.len().saturating_add(length) > limit {
+                return Err(jet_http_gzip_too_large());
+            }
+            for _ in 0..length {
+                output.push(bits.read(8)? as u8);
+            }
+        } else {
+            let (literals, distances) = jet_http_deflate_tables(&mut bits, kind)?;
+            loop {
+                let symbol = literals.symbol(&mut bits)?;
+                if symbol < 256 {
+                    if output.len() == limit {
+                        return Err(jet_http_gzip_too_large());
+                    }
+                    output.push(symbol as u8);
+                } else if symbol == 256 {
+                    break;
+                } else {
+                    let length_index = symbol.checked_sub(257).filter(|index| *index < 29)
+                        .ok_or_else(jet_http_gzip_invalid)?;
+                    let length = LENGTH_BASE[length_index]
+                        + bits.read(LENGTH_EXTRA[length_index])? as usize;
+                    let distance_symbol = distances.symbol(&mut bits)?;
+                    if distance_symbol >= 30 {
+                        return Err(jet_http_gzip_invalid());
+                    }
+                    let distance = DISTANCE_BASE[distance_symbol]
+                        + bits.read(DISTANCE_EXTRA[distance_symbol])? as usize;
+                    if distance == 0 || distance > output.len().saturating_sub(member_start) {
+                        return Err(jet_http_gzip_invalid());
+                    }
+                    if output.len().saturating_add(length) > limit {
+                        return Err(jet_http_gzip_too_large());
+                    }
+                    for _ in 0..length {
+                        output.push(output[output.len() - distance]);
+                    }
+                }
+            }
+        }
+        if final_block {
+            bits.align();
+            return Ok(bits.bit / 8);
+        }
+    }
+}
+
+fn jet_http_crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320 & 0u32.wrapping_sub(crc & 1));
+        }
+    }
+    !crc
+}
+
+fn jet_http_gzip_decode(input: &[u8], limit: usize) -> Result<Vec<u8>, JetHttpReadError> {
+    let mut output = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < input.len() {
+        let member = cursor;
+        let header = input.get(cursor..cursor + 10).ok_or_else(jet_http_gzip_invalid)?;
+        if header[..3] != [31, 139, 8] || header[3] & 0xe0 != 0 {
+            return Err(jet_http_gzip_invalid());
+        }
+        let flags = header[3];
+        cursor += 10;
+        if flags & 4 != 0 {
+            let length = input.get(cursor..cursor + 2).ok_or_else(jet_http_gzip_invalid)?;
+            cursor += 2;
+            let length = usize::from(u16::from_le_bytes([length[0], length[1]]));
+            cursor = cursor.checked_add(length).filter(|end| *end <= input.len())
+                .ok_or_else(jet_http_gzip_invalid)?;
+        }
+        for flag in [8u8, 16u8] {
+            if flags & flag != 0 {
+                let end = input[cursor..].iter().position(|byte| *byte == 0)
+                    .ok_or_else(jet_http_gzip_invalid)?;
+                cursor += end + 1;
+            }
+        }
+        if flags & 2 != 0 {
+            let expected = input.get(cursor..cursor + 2).ok_or_else(jet_http_gzip_invalid)?;
+            let expected = u16::from_le_bytes([expected[0], expected[1]]);
+            if jet_http_crc32(&input[member..cursor]) as u16 != expected {
+                return Err(jet_http_gzip_invalid());
+            }
+            cursor += 2;
+        }
+        let member_output = output.len();
+        let compressed = jet_http_deflate_decode(&input[cursor..], &mut output, member_output, limit)?;
+        cursor += compressed;
+        let trailer = input.get(cursor..cursor + 8).ok_or_else(jet_http_gzip_invalid)?;
+        let crc = u32::from_le_bytes(trailer[..4].try_into().map_err(|_| jet_http_gzip_invalid())?);
+        let size = u32::from_le_bytes(trailer[4..].try_into().map_err(|_| jet_http_gzip_invalid())?);
+        if jet_http_crc32(&output[member_output..]) != crc
+            || output.len().saturating_sub(member_output) as u32 != size
+        {
+            return Err(jet_http_gzip_invalid());
+        }
+        cursor += 8;
+    }
+    if cursor == 0 {
+        return Err(jet_http_gzip_invalid());
+    }
+    Ok(output)
+}
+
+fn jet_http_decode_request_bytes(
+    mut bytes: Vec<u8>,
+    layers: usize,
+    limit: usize,
+) -> Result<Vec<u8>, JetHttpReadError> {
+    if layers == 0 {
+        return Ok(bytes);
+    }
+    if bytes.len() > limit {
+        return Err(jet_http_gzip_too_large());
+    }
+    for _ in 0..layers {
+        bytes = jet_http_gzip_decode(&bytes, limit)?;
+    }
+    Ok(bytes)
+}
+
+fn jet_http_decode_request_body(
+    body: JetHttpBody,
+    layers: usize,
+    limit: usize,
+) -> Result<JetHttpBody, JetHttpReadError> {
+    if layers == 0 {
+        return Ok(body);
+    }
+    let bytes = body.bytes(limit).map_err(|error| match error {
+        JetHttpError::BodyTooLarge { .. } => jet_http_gzip_too_large(),
+        _ => JetHttpReadError { status: 400, message: "encoded request body could not be read" },
+    })?;
+    Ok(JetHttpBody::from_bytes(jet_http_decode_request_bytes(bytes, layers, limit)?))
 }
 
 #[derive(Clone, Copy)]
@@ -1942,6 +2294,15 @@ fn jet_http_srv_read_streaming(
             None,
         ),
     };
+    let body = jet_http_decode_request_body(
+        body,
+        head.content_encoding_layers,
+        options.max_body_bytes,
+    )?;
+    if head.content_encoding_layers > 0 {
+        headers.remove("content-encoding");
+        headers.remove("content-length");
+    }
     Ok(Some((
         JetHttpRequest::server_body(method, head.target, body, headers),
         version,
@@ -2559,6 +2920,7 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
     let mut count = 0usize;
     let mut content_length = None;
     let mut transfer_encoding = None;
+    let mut content_encoding_layers = 0usize;
     let mut expectation = None;
     let mut host = None;
     for line in lines {
@@ -2592,6 +2954,29 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
                     status: 400,
                     message: "multiple transfer-encoding headers are not allowed",
                 });
+            }
+        } else if name.eq_ignore_ascii_case("content-encoding") {
+            for coding in value.split(',') {
+                let coding = jet_http_trim_ows(coding);
+                if coding.is_empty() {
+                    return Err(JetHttpReadError {
+                        status: 400,
+                        message: "content-encoding is malformed",
+                    });
+                }
+                if !coding.eq_ignore_ascii_case("gzip") {
+                    return Err(JetHttpReadError {
+                        status: 415,
+                        message: "content encoding is not supported",
+                    });
+                }
+                content_encoding_layers += 1;
+                if content_encoding_layers > 4 {
+                    return Err(JetHttpReadError {
+                        status: 415,
+                        message: "too many content encodings",
+                    });
+                }
             }
         } else if name.eq_ignore_ascii_case("expect") {
             if expectation.replace(jet_http_trim_ows(value)).is_some() {
@@ -2644,12 +3029,13 @@ fn jet_http_validate_headers(header: &[u8]) -> Result<JetHttpRequestHead, JetHtt
             });
         }
     };
-    Ok(JetHttpRequestHead { framing, expect_continue, target })
+    Ok(JetHttpRequestHead { framing, expect_continue, target, content_encoding_layers })
 }
 
 fn jet_http_srv_read_error_response(error: &JetHttpReadError) -> String {
     let reason = match error.status {
         413 => "Payload Too Large",
+        415 => "Unsupported Media Type",
         417 => "Expectation Failed",
         431 => "Request Header Fields Too Large",
         408 => "Request Timeout",
@@ -2798,6 +3184,11 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpRequest, JetHttpReadError> {
         }
         JetHttpRequestFraming::Chunked => jet_http_decode_chunked_body(encoded_body)?,
     };
+    let body = jet_http_decode_request_bytes(
+        body,
+        head.content_encoding_layers,
+        JET_HTTP_MAX_BODY_BYTES,
+    )?;
     let header_part = std::str::from_utf8(header_part).map_err(|_| JetHttpReadError {
         status: 400,
         message: "request headers are not valid UTF-8",
@@ -2818,6 +3209,10 @@ fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpRequest, JetHttpReadError> {
             status: 400,
             message: "request header is malformed",
         })?;
+    }
+    if head.content_encoding_layers > 0 {
+        headers.remove("content-encoding");
+        headers.remove("content-length");
     }
     Ok(JetHttpRequest::server(&method, path, body, headers))
 }
