@@ -11,26 +11,28 @@
 //! - pure guest re-analyze is byte-identical for the same snapshot
 //!
 //! Driver post-sema wire + AOT/dev fact-parity proofs live in
-//! `jet-driver::CompilerExtensionHook`. C5 still requires independent Sol
-//! review and full `scripts/agent/verify-full.sh` (not claimed by this crate).
+//! `jet-driver::CompilerExtensionHook`.
 
 #![allow(non_snake_case)]
 
 use jet_pkg_model::CompilerExtension::{
     message_exposes_rustc, parse_analyze_result, parse_load_result, AnalyzeResponse, Capability,
-    ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact, SymbolFact, TypedSnapshot,
-    TypeFact,
+    ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact, SymbolFact, TypeFact,
+    TypedSnapshot,
 };
-use jet_pkg_model::CompilerExtensionHost::{
+#[path = "../../jet-pkg-model/src/Prelude/CompilerExtension.rs"]
+mod CompilerExtensionHost;
+
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+use CompilerExtensionHost::{
     jet_compiler_extension_analyze, jet_compiler_extension_analyze_with_limits,
     jet_compiler_extension_close, jet_compiler_extension_load,
 };
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("fixtures/compiler_extension")
+        .join("../jet-pkg-model/fixtures/compiler_extension")
         .join(name)
 }
 
@@ -180,8 +182,7 @@ fn fuel_exhaustion_times_out_fail_closed() {
     let wire = jet_compiler_extension_analyze(handle, &snap.encode().unwrap());
     let err = parse_analyze_result(&wire).expect_err("infinite loop must exhaust fuel");
     assert!(
-        err.message.contains("trapped")
-            || err.message.to_ascii_lowercase().contains("fuel"),
+        err.message.contains("trapped") || err.message.to_ascii_lowercase().contains("fuel"),
         "expected fuel/trap failure, got: {}",
         err.message
     );
@@ -286,12 +287,17 @@ fn pure_guest_reanalyze_is_byte_identical() {
 }
 
 #[test]
-fn analyze_wasm_component_helper_accepts_lint() {
+fn analyze_with_host_helper_accepts_lint() {
     let snap = sample_snapshot();
     let path = fixture("lint_no_x.wasm");
-    let accepted =
-        jet_pkg_model::CompilerExtension::analyze_wasm_component(path.to_str().unwrap(), &snap)
-            .expect("helper round-trip");
+    let accepted = jet_pkg_model::CompilerExtension::analyze_with_host(
+        path.to_str().unwrap(),
+        &snap,
+        jet_compiler_extension_load,
+        jet_compiler_extension_analyze,
+        jet_compiler_extension_close,
+    )
+    .expect("helper round-trip");
     assert_eq!(accepted.findings.len(), 1);
     assert_eq!(accepted.findings[0].rule, "no-x");
 }

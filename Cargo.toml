@@ -12,6 +12,7 @@ members = [
     "crates/jet-env-model",
     "crates/jet-nix-eval",
     "crates/jetpack",
+    "crates/jetpack-bin",
     "crates/jetos",
     "crates/jet-queries",
     "crates/jet-semindex",
@@ -25,10 +26,11 @@ members = [
     "crates/jet-canvas",
     "crates/jet-devserver",
 ]
-# Card #367 / D-PRODUCT-SPLIT1=C: `jetpack`/`jetos` own their binaries now
-# (were thin root-package shims) — list them so a bare `cargo build` still
-# produces all three binaries, matching the pre-split behavior.
-default-members = [".", "crates/jet-driver", "crates/jetpack", "crates/jetos"]
+# Card #367 / D-PRODUCT-SPLIT1=C: Jetpack/JetOS own their binaries now (were
+# thin root-package shims). Jetpack's binary-only package keeps host-only
+# dependencies out of its compiler-linked library; default build still ships
+# all three binaries.
+default-members = [".", "crates/jet-driver", "crates/jetpack-bin", "crates/jetos"]
 # This is first-party package source, not a compiler workspace member. It has
 # its own `[workspace]` and external `zip`/`tar` dependencies so CoreProvider
 # can build it into the hangar without importing those dependencies into the

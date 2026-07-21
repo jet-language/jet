@@ -54,14 +54,10 @@ pub mod LuaBind;
 // layer. `jetpack` re-exports both under their historical paths.
 pub mod EffectBudget;
 pub mod Envelope;
-// D-DX5-HOOK1=A / Tower #549: compiler-extension WASM host surface (distinct
-// from application `target: plugin` and PATH `jet-*` helpers; reuses the
-// wasmtime Component Model substrate owned beside `Prelude/Plugin.rs`).
+// D-DX5-HOOK1=A / Tower #549: pure compiler-extension protocol/snapshot model.
+// The Wasmtime host source stays beside `Prelude/Plugin.rs`, but only the
+// isolated `jetpack` binary compiles it; the compiler never links Wasmtime.
 pub mod CompilerExtension;
-/// In-process wasmtime host for `compiler-extension-v1` (same source as
-/// `FFI::COMPILER_EXTENSION_RUNTIME` / `Prelude/CompilerExtension.rs`).
-#[path = "Prelude/CompilerExtension.rs"]
-pub mod CompilerExtensionHost;
 pub mod FFI;
 pub mod JSON;
 pub mod LintPolicy;

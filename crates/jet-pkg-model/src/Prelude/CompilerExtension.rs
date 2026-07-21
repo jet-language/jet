@@ -46,7 +46,7 @@ const V1_MAX_FUEL: u64 = 10_000_000;
 /// Mirror of `ResourceLimits::v1_defaults().max_memory_bytes`.
 const V1_MAX_MEMORY_BYTES: usize = 16 * 1024 * 1024; // 16777216
 /// Mirror of `ResourceLimits::v1_defaults().max_table_elements`.
-const V1_MAX_TABLE_ELEMENTS: usize = 10_000;
+const V1_MAX_TABLE_ELEMENTS: u32 = 10_000;
 /// Mirror of `ResourceLimits::v1_defaults().timeout_ms`.
 const V1_TIMEOUT_MS: u64 = 2_000;
 

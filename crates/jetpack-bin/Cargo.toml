@@ -1,0 +1,15 @@
+[package]
+name = "jetpack-bin"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "jetpack"
+path = "src/main.rs"
+
+[dependencies]
+jetpack = { path = "../jetpack" }
+jet-pkg-model = { path = "../jet-pkg-model" }
+# D-DEP1 / D-DX5-HOOK1: isolated compiler-extension Component Model host.
+# Package boundary keeps Wasmtime out of the `jetpack` library linked by `jet`.
+wasmtime = { version = "25", features = ["component-model"] }

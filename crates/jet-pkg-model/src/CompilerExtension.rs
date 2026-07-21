@@ -1,8 +1,8 @@
 //! D-DX5-HOOK1=A (Tower #549) — compiler-extension v1 host surface.
 //!
-//! Reuses the shipped WASM Component Model substrate owned here
-//! (`WASMTIME_CRATE_SPEC` + Component Model loader pattern in
-//! `Prelude/CompilerExtension.rs`), with a **compiler-specific** WIT world
+//! Reuses the shipped WASM Component Model substrate (`WASMTIME_CRATE_SPEC` +
+//! `Prelude/CompilerExtension.rs`) in the isolated sibling `jetpack` process,
+//! with a **compiler-specific** WIT world
 //! that stays distinct from:
 //! - application `target: plugin` / `core.plugin` (world `jetplugin`, D-PLUGIN1)
 //! - PATH-discovered `jet-*` helpers (D-DX5)
@@ -77,6 +77,16 @@ pub const ANALYZE_EXPORT: &str = "analyze";
 /// ballot if new syntax is needed"). Absolute or relative path to one
 /// `compiler-extension-v1` `.wasm` component. Unset → skip the post-sema hook.
 pub const ENV_COMPILER_EXTENSION: &str = "JET_COMPILER_EXTENSION";
+
+/// Hidden sibling-host verb. Version is part of the process protocol.
+pub const HOST_SUBCOMMAND: &str = "__compiler-extension-v1";
+
+/// Maximum encoded snapshot accepted across the compiler/host pipe.
+pub const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
+
+/// Outer process deadline. Guest execution has its own 2s Wasmtime deadline;
+/// this larger cap also bounds host startup, IPC, and crash cleanup.
+pub const HOST_PROCESS_TIMEOUT_MS: u64 = 5_000;
 
 /// Capabilities a v1 component may negotiate. Later stages extend this set
 /// rather than inventing a second plugin system (D-DX5-HOOK1 hybrid law).
@@ -769,17 +779,17 @@ pub fn message_exposes_rustc(message: &str) -> bool {
     lower.contains("rustc") || lower.contains("error[e") || lower.contains("--explain")
 }
 
-/// Load → analyze → validate/stage → accept → close through the real wasmtime
-/// host. Fail-closed: guest traps and protocol errors never panic or commit.
-pub fn analyze_wasm_component(
+/// Load → analyze → validate/stage → accept → close through one
+/// supplied Component Model host. `jetpack` supplies the real Wasmtime
+/// functions; keeping orchestration here preserves one protocol/lifecycle.
+pub fn analyze_with_host(
     wasm_path: &str,
     snapshot: &TypedSnapshot,
+    load_guest: fn(&str) -> String,
+    analyze_guest: fn(u64, &[u8]) -> String,
+    close_guest: fn(u64) -> bool,
 ) -> Result<AnalyzeResponse, ProtocolError> {
-    use crate::CompilerExtensionHost::{
-        jet_compiler_extension_analyze, jet_compiler_extension_close, jet_compiler_extension_load,
-    };
-
-    let wire = jet_compiler_extension_load(wasm_path);
+    let wire = load_guest(wasm_path);
     let handle = match parse_load_result(&wire) {
         Ok(h) => h,
         Err(e) => {
@@ -793,22 +803,22 @@ pub fn analyze_wasm_component(
     };
     let mut session = ExtensionSession::new();
     if let Err(e) = session.on_loaded(handle) {
-        let _ = jet_compiler_extension_close(handle);
+        let _ = close_guest(handle);
         return Err(e);
     }
 
     let snap_bytes = match snapshot.encode() {
         Ok(b) => b,
         Err(e) => {
-            let _ = session.close(jet_compiler_extension_close);
+            let _ = session.close(close_guest);
             return Err(e);
         }
     };
-    let analyze_wire = jet_compiler_extension_analyze(handle, &snap_bytes);
+    let analyze_wire = analyze_guest(handle, &snap_bytes);
     let raw = match parse_analyze_result(&analyze_wire) {
         Ok(b) => b,
         Err(e) => {
-            let _ = session.close(jet_compiler_extension_close);
+            let _ = session.close(close_guest);
             if message_exposes_rustc(&e.message) {
                 return Err(ProtocolError::new(
                     "compiler-extension failed with an internal message",
@@ -818,17 +828,17 @@ pub fn analyze_wasm_component(
         }
     };
     if let Err(e) = session.stage_response(snapshot, &raw) {
-        let _ = session.close(jet_compiler_extension_close);
+        let _ = session.close(close_guest);
         return Err(e);
     }
     let accepted = match session.accept_staged() {
         Ok(r) => r,
         Err(e) => {
-            let _ = session.close(jet_compiler_extension_close);
+            let _ = session.close(close_guest);
             return Err(e);
         }
     };
-    let _ = session.close(jet_compiler_extension_close);
+    let _ = session.close(close_guest);
     Ok(accepted)
 }
 
@@ -1305,7 +1315,7 @@ mod tests {
     #[test]
     fn host_reuses_jet_pkg_model_wasmtime_substrate() {
         assert_eq!(wasm_substrate_crate_spec(), WASMTIME_CRATE_SPEC);
-        assert_eq!(wasm_substrate_crate_spec(), ("wasmtime", "26"));
+        assert_eq!(wasm_substrate_crate_spec(), ("wasmtime", "25"));
         let runtime = runtime_source();
         assert!(
             runtime.contains("wasmtime::component"),

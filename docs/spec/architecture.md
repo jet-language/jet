@@ -243,9 +243,12 @@ read-only snapshot** and send it to an isolated WASM Component Model guest.
 The guest returns structured findings and edit proposals; the host validates
 every response and remains the only semantic authority (I2/I3).
 
-- **Host ownership:** `crates/jet-pkg-model` — `CompilerExtension` module plus
-  `Prelude/CompilerExtension.rs`, reusing the same wasmtime Component Model
-  pin as application `core.plugin` (`WASMTIME_CRATE_SPEC` / D-DEP-WASM1).
+- **Boundary ownership:** `crates/jet-pkg-model::CompilerExtension` owns the
+  versioned snapshot, response validation, and lifecycle. Its
+  `Prelude/CompilerExtension.rs` substrate compiles only into the shipped
+  sibling `jetpack` binary, using the same wasmtime Component Model pin as
+  application `core.plugin` (`WASMTIME_CRATE_SPEC` / D-DEP-WASM1). Ordinary
+  `jet` processes never link or initialize Wasmtime.
 - **WIT world:** `compiler-extension-v1` (`package jet:compiler-extension@0.1.0`,
   export `analyze`). Distinct from application plugins' fixed world
   `jetplugin` (D-PLUGIN1 / D-PLUGIN-EXPORT1).
@@ -299,7 +302,14 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   `close(close_guest)` invokes the WASM host closer
   (`jet_compiler_extension_close`) so guest Store/memory is dropped.
   Uncommitted work never reaches sema or codegen.
-- **E2E harness (C4 technical):** `crates/jet-pkg-model/tests/compiler_extension_e2e.rs`
+- **Process IPC:** when configured, `jet-driver` resolves `jetpack` only beside
+  the current Jet executable (never PATH), invokes hidden versioned verb
+  `__compiler-extension-v1`, writes at most `16 MiB` of snapshot bytes to
+  stdin, and accepts at most the snapshot's `max_response_bytes` on stdout.
+  Stderr is capped at `64 KiB`; the outer process deadline is `5000ms` and
+  kills a stuck/crashed host. Nonzero exit, malformed output, timeout, and
+  missing sibling all map to Jet-owned E1402.
+- **E2E harness (C4 technical):** `crates/jetpack-bin/tests/compiler_extension_e2e.rs`
   loads real `compiler-extension-v1` component fixtures under
   `crates/jet-pkg-model/fixtures/compiler_extension/` through the same
   `Prelude/CompilerExtension.rs` host. Proves one custom-lint finding
@@ -310,8 +320,8 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
 - **Post-sema driver wire:** when `JET_COMPILER_EXTENSION` names a component
   path (expert env registration — no new user syntax until a spelling ballot),
   `jet-driver::CompilerExtensionHook` freezes a typed snapshot after sema,
-  runs `CompilerExtension::analyze_wasm_component`, and maps findings to
-  `L1401` or host failures to `E1402`.
+  exchanges it with the sibling host, then maps validated findings to `L1401`
+  or host/process failures to `E1402`.
 
 ## Rules
 

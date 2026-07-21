@@ -1,9 +1,9 @@
 //! Post-sema compiler-extension hook (D-DX5-HOOK1=A / Tower #549).
 //!
 //! When `JET_COMPILER_EXTENSION` names a `compiler-extension-v1` `.wasm`,
-//! the driver freezes a typed read-only snapshot after sema, runs the
-//! jet-pkg-model wasmtime host, validates the response, and maps findings
-//! to Jet diagnostics. No new user syntax — env registration only until a
+//! the driver freezes a typed read-only snapshot after sema and sends it to
+//! the sibling `jetpack` compiler-extension host. Wasmtime never links into
+//! the compiler process. No new user syntax — env registration only until a
 //! spelling ballot. Failures are Jet-owned (E1402); guests never crash the
 //! compiler or expose rustc (I2/I3).
 //!
@@ -15,9 +15,17 @@ use crate::AST::{Func, Item, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::SemIndexEffectFacts;
 use jet_pkg_model::CompilerExtension::{
-    self, message_exposes_rustc, AnalyzeResponse, Capability, Finding, SpanFact, SymbolFact,
-    TypeFact, TypedSnapshot, ENV_COMPILER_EXTENSION,
+    self, decode_and_validate_response, message_exposes_rustc, AnalyzeResponse, Capability,
+    Finding, ProtocolError, SpanFact, SymbolFact, TypeFact, TypedSnapshot,
+    ENV_COMPILER_EXTENSION, HOST_PROCESS_TIMEOUT_MS, HOST_SUBCOMMAND, MAX_SNAPSHOT_BYTES,
 };
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+const MAX_HOST_STDERR_BYTES: usize = 64 * 1024;
 
 /// Run configured compiler-extension(s) after a successful sema pass.
 /// Returns diagnostics to merge with the check/compile result (empty when
@@ -43,13 +51,182 @@ pub fn post_sema_diagnostics(
         Err(e) => return vec![host_failure(&e.message, None)],
     };
 
-    match CompilerExtension::analyze_wasm_component(path, &snapshot) {
+    match analyze_via_jetpack(path, &snapshot) {
         Ok(response) => findings_to_diagnostics(&snapshot, &response),
         Err(e) => {
             let msg = sanitize_host_message(&e.message);
             vec![host_failure(&msg, None)]
         }
     }
+}
+
+/// Run one bounded, versioned compiler-extension exchange in the shipped
+/// sibling `jetpack` process. Resolution never consults PATH: release binaries
+/// use the same directory; Cargo test binaries also check their parent `debug`
+/// directory when running from `debug/deps`.
+fn analyze_via_jetpack(
+    wasm_path: &str,
+    snapshot: &TypedSnapshot,
+) -> Result<AnalyzeResponse, ProtocolError> {
+    let request = snapshot.encode()?;
+    if request.len() > MAX_SNAPSHOT_BYTES {
+        return Err(ProtocolError::new(format!(
+            "compiler-extension snapshot exceeds IPC limit ({} > {MAX_SNAPSHOT_BYTES})",
+            request.len()
+        )));
+    }
+
+    let host = compiler_extension_host_path()?;
+    let mut child = Command::new(&host)
+        .arg(HOST_SUBCOMMAND)
+        .arg(wasm_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            ProtocolError::new(format!(
+                "couldn't start compiler-extension host `{}`: {e}",
+                host.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("jetpack")
+            ))
+        })?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| ProtocolError::new("compiler-extension host stdin is unavailable"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ProtocolError::new("compiler-extension host stdout is unavailable"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| ProtocolError::new("compiler-extension host stderr is unavailable"))?;
+
+    let writer = thread::spawn(move || {
+        let result = stdin.write_all(&request);
+        drop(stdin);
+        result
+    });
+    let max_response = snapshot.limits.max_response_bytes;
+    let stdout_reader = thread::spawn(move || read_bounded(stdout, max_response));
+    let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_HOST_STDERR_BYTES));
+
+    let deadline = Instant::now() + Duration::from_millis(HOST_PROCESS_TIMEOUT_MS);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = writer.join();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(ProtocolError::new(format!(
+                    "compiler-extension host timed out after {HOST_PROCESS_TIMEOUT_MS}ms"
+                )));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = writer.join();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
+                return Err(ProtocolError::new(format!(
+                    "couldn't wait for compiler-extension host: {e}"
+                )));
+            }
+        }
+    };
+
+    let write_result = writer
+        .join()
+        .map_err(|_| ProtocolError::new("compiler-extension host input thread panicked"))?;
+    let (stdout, stdout_overflow) = stdout_reader
+        .join()
+        .map_err(|_| ProtocolError::new("compiler-extension host output thread panicked"))?
+        .map_err(|e| ProtocolError::new(format!("couldn't read compiler-extension host output: {e}")))?;
+    let (stderr, stderr_overflow) = stderr_reader
+        .join()
+        .map_err(|_| ProtocolError::new("compiler-extension host error thread panicked"))?
+        .map_err(|e| ProtocolError::new(format!("couldn't read compiler-extension host error: {e}")))?;
+
+    if stdout_overflow {
+        return Err(ProtocolError::new(format!(
+            "compiler-extension host response exceeds IPC limit ({max_response} bytes)"
+        )));
+    }
+    if stderr_overflow {
+        return Err(ProtocolError::new(format!(
+            "compiler-extension host error exceeds IPC limit ({MAX_HOST_STDERR_BYTES} bytes)"
+        )));
+    }
+    if !status.success() {
+        let message = String::from_utf8_lossy(&stderr);
+        let message = message.trim();
+        return Err(ProtocolError::new(if message.is_empty() {
+            format!("compiler-extension host exited with {status}")
+        } else {
+            message.to_string()
+        }));
+    }
+    write_result.map_err(|e| {
+        ProtocolError::new(format!("couldn't send snapshot to compiler-extension host: {e}"))
+    })?;
+    decode_and_validate_response(snapshot, &stdout)
+}
+
+fn read_bounded(
+    reader: impl Read,
+    limit: usize,
+) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut bytes = Vec::new();
+    reader
+        .take(limit.saturating_add(1) as u64)
+        .read_to_end(&mut bytes)?;
+    let overflow = bytes.len() > limit;
+    if overflow {
+        bytes.truncate(limit);
+    }
+    Ok((bytes, overflow))
+}
+
+fn compiler_extension_host_path() -> Result<PathBuf, ProtocolError> {
+    let exe = std::env::current_exe().map_err(|e| {
+        ProtocolError::new(format!("couldn't resolve compiler executable: {e}"))
+    })?;
+    compiler_extension_host_candidates(&exe)
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| {
+            ProtocolError::new(
+                "compiler-extension host `jetpack` is missing beside the Jet compiler",
+            )
+        })
+}
+
+fn compiler_extension_host_candidates(exe: &Path) -> Vec<PathBuf> {
+    let Some(dir) = exe.parent() else {
+        return Vec::new();
+    };
+    let binary = format!(
+        "{}{}",
+        crate::Syntax::JETPACK_BINARY_NAME,
+        std::env::consts::EXE_SUFFIX
+    );
+    let mut candidates = vec![dir.join(&binary)];
+    if dir.file_name().is_some_and(|name| name == "deps") {
+        if let Some(parent) = dir.parent() {
+            candidates.push(parent.join(binary));
+        }
+    }
+    candidates
 }
 
 fn sanitize_host_message(message: &str) -> String {

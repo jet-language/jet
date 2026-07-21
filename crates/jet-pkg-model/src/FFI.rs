@@ -1050,10 +1050,11 @@ const CRYPTO_ENTROPY_RUNTIME: &str =
 /// The `wasmtime` crate version that backs sandboxed Component Model hosts
 /// (D-DEP-WASM1=A application `core.plugin`, and D-DX5-HOOK1=A compiler
 /// extensions). Application `core.plugin` still emits this pin into user
-/// bridge crates; the compiler-extension host also links the same pin in
-/// `jet-pkg-model` under D-DEP1 / D-DX5-HOOK1 so post-sema `analyze` can run
-/// in-process. Reuses the already-approved Cranelift backend (D-JITDEP1).
-pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "26");
+/// bridge crates; the compiler-extension host links the same pin only in the
+/// sibling `jetpack` process under D-DEP1 / D-DX5-HOOK1. Reuses the already-
+/// approved Cranelift backend (D-JITDEP1). Pin matches `jet-jit`'s Cranelift
+/// generation instead of bloating the release with two backend generations.
+pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
 
 /// Hand-written application plugin-loader runtime emitted into the bridge
 /// crate when `core.plugin` is used (D-PLUGIN1 / D-DEP-WASM1=A).
@@ -1061,10 +1062,9 @@ const PLUGIN_RUNTIME: &str = include_str!("Prelude/Plugin.rs");
 
 /// Hand-written compiler-extension host runtime (D-DX5-HOOK1=A). Same
 /// wasmtime Component Model substrate as `PLUGIN_RUNTIME`, distinct WIT
-/// world (`compiler-extension-v1`) and entry points. Compiled into the
-/// compiler as `CompilerExtensionHost`; also kept as include_str source for
-/// documentation/parity with other prelude runtimes. Not mixed into
-/// application `core.plugin` bridges.
+/// world (`compiler-extension-v1`) and entry points. Compiled only by the
+/// isolated `jetpack` binary; kept here beside other prelude runtimes for
+/// substrate parity. Not mixed into application `core.plugin` bridges.
 pub const COMPILER_EXTENSION_RUNTIME: &str =
     include_str!("Prelude/CompilerExtension.rs");
 
