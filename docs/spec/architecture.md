@@ -254,6 +254,42 @@ every response and remains the only semantic authority (I2/I3).
 - **V1 stage:** `typed` only. Later parse/codegen observation extends the same
   capability-negotiated protocol (I8 — one mechanism).
 
+### Protocol / schema (exact)
+
+`analyze` carries opaque `list<u8>` payloads. Host-owned wire format is UTF-8
+JSON with lexicographic key order and no insignificant whitespace
+(`CompilerExtension::{TypedSnapshot,AnalyzeResponse}`).
+
+**Snapshot** (`protocol=1`, `stage="typed"`, `trust="untrusted"`):
+
+| Field | Meaning |
+|-------|---------|
+| `capabilities` | Negotiated subset of `read_types`, `read_symbols`, `read_effects`, `read_spans`, `read_provenance`, `emit_finding`, `propose_edit` |
+| `limits` | `max_fuel`, `max_memory_bytes`, `max_table_elements`, `max_findings`, `max_edits`, `max_response_bytes`, `timeout_ms` |
+| `types` | `{id, repr}` |
+| `symbols` | `{id, name, kind, type_id, span_id, effects, provenance}` |
+| `spans` | `{id, file, start, end}` |
+
+**Response:** `{protocol, findings, proposed_edits, artifacts}`. Findings are
+`{rule, span_id, message, severity}` with `severity ∈ {error,warning,note}`.
+Edits are `{span_id, replacement, rationale}`. V1 requires `artifacts: []`.
+
+Unknown keys are rejected. Span/type refs must resolve. Findings need
+`emit_finding`; edits need `propose_edit`. Counts and raw byte length must
+fit `limits`. Successful validation **stages** output only — the host alone
+may accept; guests never mutate compiler facts or expose rustc (I2/I3).
+
+### Limits, trust, lifecycle, rollback
+
+- **Defaults:** fuel `10_000_000`, memory `16 MiB`, table `10_000`, findings
+  `256`, edits `64`, response `256 KiB`, wall budget `timeout_ms=2000`.
+  Loader applies fuel + `StoreLimits`; snapshot declares the same caps.
+- **Trust:** v1 admits only `untrusted` components (zero host imports).
+- **Lifecycle:** `ExtensionSession` Idle → Loaded → Closed. `stage_response`
+  validates without commit; `rollback` discards staged output; `close` drops
+  the guest handle (guest memory gone). Uncommitted work never reaches sema
+  or codegen.
+
 ## Rules
 
 - **R1 — Codegen is dumb.** No checks, no decisions, no "see if rustc

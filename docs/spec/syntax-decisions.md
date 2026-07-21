@@ -1746,6 +1746,13 @@ same negotiated protocol — they do not invent a second plugin system (I8).
 Exact user-facing registration spelling remains a later ballot if new syntax
 is needed. Distinct from PATH `jet-*` helpers (D-DX5) and application
 `target: plugin` / `core.plugin` (D-PLUGIN1).
+**Wire contract (Tower #549 C3):** deterministic JSON snapshot/response
+(`protocol=1`, `stage=typed`, capability negotiation, exact
+types/symbols/effects/spans/provenance fields, validated findings/edits,
+resource limits, `trust=untrusted`, Idle→Loaded→Closed lifecycle with
+rollback of uncommitted stages) lives in
+`crates/jet-pkg-model/src/CompilerExtension.rs` and is documented under
+architecture.md "Compiler-extension plugins".
 
 ### Testing & benchmarks
 
