@@ -2228,6 +2228,78 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
 }
 
 #[test]
+fn unicode_16_string_and_core_text_match_aot_comptime_and_resident_jit() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let upper_only_in_host_unicode_17 = char::from_u32(0xA7CE).unwrap();
+    let lower_only_in_host_unicode_17 = char::from_u32(0xA7CF).unwrap();
+    let whitespace = char::from_u32(0x2003).unwrap();
+    let source = format!(
+        r#"use core.text as text
+
+fn run() {{
+    print("{upper_only_in_host_unicode_17}".to_lower() == "{upper_only_in_host_unicode_17}")
+    print("{lower_only_in_host_unicode_17}".to_upper() == "{lower_only_in_host_unicode_17}")
+    print("{whitespace}jet{whitespace}".trim())
+    print(text.lower("{upper_only_in_host_unicode_17}") == "{upper_only_in_host_unicode_17}")
+    print(text.upper("{lower_only_in_host_unicode_17}") == "{lower_only_in_host_unicode_17}")
+    print(text.trim("{whitespace}jet{whitespace}"))
+}}
+"#,
+    );
+    let expected = "true\ntrue\njet\ntrue\ntrue\njet\n";
+
+    let resident = run_cranelift_without_fallback(&source, "unicode_16_public_string");
+    assert_eq!(resident.stdout, expected);
+
+    let dir = common::unique_tmp("jet_unicode_16_public_string_aot");
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join("main.jet");
+    let rust_path = dir.join("main.rs");
+    let binary = dir.join("main");
+    fs::write(&jet_path, &source).unwrap();
+    let compiled = jet::compile_with_path(&source, &jet_path.to_string_lossy())
+        .expect("Unicode-16 String fixture should compile");
+    fs::write(&rust_path, compiled.rust).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rust_path)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        rustc.status.success(),
+        "Unicode-16 AOT fixture rejected:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let aot = Command::new(&binary).output().unwrap();
+    assert!(aot.status.success());
+    assert_eq!(String::from_utf8_lossy(&aot.stdout), expected);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn unsupported_core_text_is_not_claimed_by_resident_jit() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jet_unicode_16_jit_boundary");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(
+        &path,
+        "use core.text as text\nfn run() { print(text.casefold(\"Straße\")) }\n",
+    )
+    .unwrap();
+    let bundle = checked_bundle_from_path(&path.to_string_lossy());
+    assert!(!jet_jit::resident_jit_safe_bundle(&bundle));
+    assert!(jet_jit::resident_jit_safe_bundle_detail(&bundle).contains("entry not resident-safe"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn bigint_equality_matches_aot_in_resident_and_default_dev() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

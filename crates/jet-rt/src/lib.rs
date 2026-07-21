@@ -17,15 +17,15 @@ pub fn string_len_chars(s: &str) -> i64 {
 }
 
 pub fn string_trim(s: &str) -> String {
-    s.trim().to_string()
+    jet_foundation::generated::UnicodeTables::jet_unicode_trim(s)
 }
 
 pub fn string_to_upper(s: &str) -> String {
-    s.to_uppercase()
+    jet_foundation::generated::UnicodeTables::jet_unicode_upper(s)
 }
 
 pub fn string_to_lower(s: &str) -> String {
-    s.to_lowercase()
+    jet_foundation::generated::UnicodeTables::jet_unicode_lower(s)
 }
 
 pub fn string_replace(s: &str, from: &str, to: &str) -> String {
@@ -410,6 +410,9 @@ mod tests {
         assert_eq!(string_trim("  jet\n"), "jet");
         assert_eq!(string_to_upper("Jet"), "JET");
         assert_eq!(string_to_lower("Jet"), "jet");
+        assert_eq!(string_to_lower("\u{A7CE}"), "\u{A7CE}");
+        assert_eq!(string_to_upper("\u{A7CF}"), "\u{A7CF}");
+        assert_eq!(string_trim("\u{2003}jet\u{2003}"), "jet");
         assert_eq!(string_replace("one two one", "one", "1"), "1 two 1");
     }
 

@@ -476,7 +476,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Bytes => {
                     format!("{}jet_string_bytes(&({}))", cx.root_prefix, recv)
                 }
-                TBuiltinOp::Trim => format!("({}).trim().to_string()", recv),
+                TBuiltinOp::Trim => format!("jet_unicode_trim(&({}))", recv),
                 TBuiltinOp::Split => format!("jet_string_split(&({}), &{})", recv, a(0)),
                 // c97/D-STRPARSE1: `lines()` → `jet_string_lines` (imported via MOD_USE,
                 // like `jet_string_split` — emitted bare, no root prefix).
@@ -492,8 +492,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::StartsWith => format!("({}).starts_with(&{})", recv, a(0)),
                 TBuiltinOp::EndsWith => format!("({}).ends_with(&{})", recv, a(0)),
                 TBuiltinOp::Replace => format!("({}).replace(&{}, &{})", recv, a(0), a(1)),
-                TBuiltinOp::ToUpper => format!("({}).to_uppercase()", recv),
-                TBuiltinOp::ToLower => format!("({}).to_lowercase()", recv),
+                TBuiltinOp::ToUpper => format!("jet_unicode_upper(&({}))", recv),
+                TBuiltinOp::ToLower => format!("jet_unicode_lower(&({}))", recv),
                 TBuiltinOp::Repeat => format!("({}).repeat({} as usize)", recv, a(0)),
                 TBuiltinOp::Slice { line } => format!(
                     "jet_string_slice(&({}), {}, {}, {:?}, {})",
@@ -510,7 +510,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-MEM1 stage S5: zero-copy siblings, `Stmt::Val` lowering only
                 // (see `lower.rs`'s `b.string_view` branch) — bare calls, no
                 // `.to_string()`, no root prefix (same convention as `After`/`Before`).
-                TBuiltinOp::TrimView => format!("jet_string_trim_view(&({}))", recv),
+                TBuiltinOp::TrimView => format!("jet_unicode_trim_view(&({}))", recv),
                 TBuiltinOp::AfterView => format!("jet_string_after_view(&({}), &{})", recv, a(0)),
                 TBuiltinOp::BeforeView => format!("jet_string_before_view(&({}), &{})", recv, a(0)),
                 TBuiltinOp::Keys => {

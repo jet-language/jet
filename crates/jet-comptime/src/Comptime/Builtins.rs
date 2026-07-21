@@ -524,9 +524,9 @@ pub(super) fn apply_method(
         // String (char-counted per S41)
         (CtValue::Str(s), "len") => Ok(CtValue::Int(s.chars().count() as i64)),
         (CtValue::Str(s), "is_empty") => Ok(CtValue::Bool(s.is_empty())),
-        (CtValue::Str(s), "to_upper") => Ok(CtValue::Str(s.to_uppercase())),
-        (CtValue::Str(s), "to_lower") => Ok(CtValue::Str(s.to_lowercase())),
-        (CtValue::Str(s), "trim") => Ok(CtValue::Str(s.trim().to_string())),
+        (CtValue::Str(s), "to_upper") => Ok(CtValue::Str(super::TextLite::upper(s))),
+        (CtValue::Str(s), "to_lower") => Ok(CtValue::Str(super::TextLite::lower(s))),
+        (CtValue::Str(s), "trim") => Ok(CtValue::Str(super::TextLite::trim(s))),
         (CtValue::Str(s), "contains") => match args.into_iter().next() {
             Some(CtValue::Str(n)) => Ok(CtValue::Bool(s.contains(&n))),
             _ => Err(unsupported("contains with a non-text argument", span)),

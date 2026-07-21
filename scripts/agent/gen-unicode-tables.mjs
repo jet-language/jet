@@ -486,6 +486,96 @@ pub static UNICODE_SENTENCE_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(sentenceR
 
 // Indic_Conjunct_Break (GB9c) tags: ${INCB_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
 pub static UNICODE_INCB: &[(u32,u32,u8)] = &[${fmtU32Triples(incbRanges)}];
+
+fn jet_unicode_contains(table: &[(u32, u32)], cp: u32) -> bool {
+    table
+        .binary_search_by(|&(start, end)| {
+            if cp < start {
+                std::cmp::Ordering::Greater
+            } else if cp > end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
+}
+
+fn jet_unicode_mapping(
+    cp: u32,
+    index: &'static [(u32, u32, u32)],
+    pool: &'static [u32],
+) -> Option<&'static [u32]> {
+    let at = index.binary_search_by_key(&cp, |&(source, _, _)| source).ok()?;
+    let (_, start, len) = index[at];
+    Some(&pool[start as usize..(start + len) as usize])
+}
+
+fn jet_unicode_append_mapping(
+    out: &mut String,
+    cp: u32,
+    index: &'static [(u32, u32, u32)],
+    pool: &'static [u32],
+) {
+    if let Some(mapped) = jet_unicode_mapping(cp, index, pool) {
+        out.extend(mapped.iter().filter_map(|&mapped_cp| char::from_u32(mapped_cp)));
+    } else if let Some(ch) = char::from_u32(cp) {
+        out.push(ch);
+    }
+}
+
+fn jet_unicode_final_sigma(chars: &[char], at: usize) -> bool {
+    let before = chars[..at]
+        .iter()
+        .rev()
+        .find(|ch| !jet_unicode_contains(UNICODE_CASE_IGNORABLE, **ch as u32))
+        .is_some_and(|ch| jet_unicode_contains(UNICODE_CASED, *ch as u32));
+    let after = chars[at + 1..]
+        .iter()
+        .find(|ch| !jet_unicode_contains(UNICODE_CASE_IGNORABLE, **ch as u32))
+        .is_some_and(|ch| jet_unicode_contains(UNICODE_CASED, *ch as u32));
+    before && !after
+}
+
+/// Locale-free full lowercase mapping from the pinned Unicode release.
+pub fn jet_unicode_lower(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    for (at, &ch) in chars.iter().enumerate() {
+        if ch == '\\u{03A3}' && jet_unicode_final_sigma(&chars, at) {
+            out.push('\\u{03C2}');
+        } else {
+            jet_unicode_append_mapping(&mut out, ch as u32, UNICODE_LOWER_INDEX, UNICODE_LOWER_POOL);
+        }
+    }
+    out
+}
+
+/// Locale-free full uppercase mapping from the pinned Unicode release.
+pub fn jet_unicode_upper(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        jet_unicode_append_mapping(&mut out, ch as u32, UNICODE_UPPER_INDEX, UNICODE_UPPER_POOL);
+    }
+    out
+}
+
+/// Borrowed trim using the pinned Unicode White_Space property.
+pub fn jet_unicode_trim_view(s: &str) -> &str {
+    s.trim_matches(|ch| jet_unicode_contains(UNICODE_WHITE_SPACE, ch as u32))
+}
+
+pub fn jet_unicode_trim_start(s: &str) -> String {
+    s.trim_start_matches(|ch| jet_unicode_contains(UNICODE_WHITE_SPACE, ch as u32)).to_string()
+}
+
+pub fn jet_unicode_trim_end(s: &str) -> String {
+    s.trim_end_matches(|ch| jet_unicode_contains(UNICODE_WHITE_SPACE, ch as u32)).to_string()
+}
+
+pub fn jet_unicode_trim(s: &str) -> String {
+    jet_unicode_trim_view(s).to_string()
+}
 `;
 
 const moduleOut = MODULE_HEADER + body;

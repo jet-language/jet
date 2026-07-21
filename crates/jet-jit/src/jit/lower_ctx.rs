@@ -1453,6 +1453,18 @@ impl LowerCtx<'_, '_> {
                     let _ = self.finish_wait_call(self.b.inst_results(call)[0]);
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
+                if module == "core.text" && args.len() == 1 {
+                    let host_id = match method.as_str() {
+                        "lower" => self.host.str_to_lower,
+                        "upper" => self.host.str_to_upper,
+                        "trim" => self.host.str_trim,
+                        _ => return Err(format!("jit core.text call unsupported: {method}")),
+                    };
+                    let text = self.lower_expr(&args[0])?;
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[text]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.perf" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "fidelity" if args.is_empty() => (self.host.perf_fidelity, Vec::new()),

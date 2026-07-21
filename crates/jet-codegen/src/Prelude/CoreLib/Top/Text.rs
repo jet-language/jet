@@ -255,27 +255,6 @@ fn jet_text_fold_lookup(cp: u32) -> Option<&'static [u32]> {
     let (_, start, len) = UNICODE_FOLD_INDEX[idx];
     Some(&UNICODE_FOLD_POOL[start as usize..(start + len) as usize])
 }
-fn jet_text_mapping_lookup(
-    cp: u32,
-    index: &'static [(u32, u32, u32)],
-    pool: &'static [u32],
-) -> Option<&'static [u32]> {
-    let at = index.binary_search_by_key(&cp, |&(c, _, _)| c).ok()?;
-    let (_, start, len) = index[at];
-    Some(&pool[start as usize..(start + len) as usize])
-}
-fn jet_text_append_mapping(
-    out: &mut String,
-    cp: u32,
-    index: &'static [(u32, u32, u32)],
-    pool: &'static [u32],
-) {
-    if let Some(mapped) = jet_text_mapping_lookup(cp, index, pool) {
-        out.extend(mapped.iter().filter_map(|&mapped_cp| char::from_u32(mapped_cp)));
-    } else if let Some(ch) = char::from_u32(cp) {
-        out.push(ch);
-    }
-}
 fn jet_text_casefold(s: &String) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -305,38 +284,11 @@ fn jet_text_alphabetic(cp: u32) -> bool { jet_text_property(UNICODE_ALPHABETIC, 
 fn jet_text_numeric(cp: u32) -> bool { jet_text_property(UNICODE_NUMERIC, cp) }
 fn jet_text_whitespace(cp: u32) -> bool { jet_text_property(UNICODE_WHITE_SPACE, cp) }
 fn jet_text_letter(cp: u32) -> bool { jet_text_property(UNICODE_LETTER, cp) }
-fn jet_text_is_cased(cp: u32) -> bool { jet_text_property(UNICODE_CASED, cp) }
-fn jet_text_is_case_ignorable(cp: u32) -> bool { jet_text_property(UNICODE_CASE_IGNORABLE, cp) }
-fn jet_text_final_sigma(chars: &[char], at: usize) -> bool {
-    let before = chars[..at]
-        .iter()
-        .rev()
-        .find(|ch| !jet_text_is_case_ignorable(**ch as u32))
-        .is_some_and(|ch| jet_text_is_cased(*ch as u32));
-    let after = chars[at + 1..]
-        .iter()
-        .find(|ch| !jet_text_is_case_ignorable(**ch as u32))
-        .is_some_and(|ch| jet_text_is_cased(*ch as u32));
-    before && !after
-}
 fn jet_text_lower(s: &String) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let mut out = String::with_capacity(s.len());
-    for (at, &ch) in chars.iter().enumerate() {
-        if ch == '\u{03A3}' && jet_text_final_sigma(&chars, at) {
-            out.push('\u{03C2}');
-        } else {
-            jet_text_append_mapping(&mut out, ch as u32, UNICODE_LOWER_INDEX, UNICODE_LOWER_POOL);
-        }
-    }
-    out
+    jet_unicode_lower(s)
 }
 fn jet_text_upper(s: &String) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        jet_text_append_mapping(&mut out, ch as u32, UNICODE_UPPER_INDEX, UNICODE_UPPER_POOL);
-    }
-    out
+    jet_unicode_upper(s)
 }
 // Unicode Default Caseless Matching: NFD(toCasefold(NFD(text))).
 fn jet_text_caseless_eq(a: &String, b: &String) -> bool {
@@ -747,9 +699,9 @@ fn jet_text_display_width(s: &String, policy: &jet_std::TextWidth) -> Result<i64
 fn jet_text_is_alphabetic(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_alphabetic(c as u32)) }
 fn jet_text_is_numeric(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_numeric(c as u32)) }
 fn jet_text_is_whitespace(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_whitespace(c as u32)) }
-fn jet_text_trim_start(s: &String) -> String { s.trim_start_matches(|c| jet_text_whitespace(c as u32)).to_string() }
-fn jet_text_trim_end(s: &String) -> String { s.trim_end_matches(|c| jet_text_whitespace(c as u32)).to_string() }
-fn jet_text_trim(s: &String) -> String { s.trim_matches(|c| jet_text_whitespace(c as u32)).to_string() }
+fn jet_text_trim_start(s: &String) -> String { jet_unicode_trim_start(s) }
+fn jet_text_trim_end(s: &String) -> String { jet_unicode_trim_end(s) }
+fn jet_text_trim(s: &String) -> String { jet_unicode_trim(s) }
 fn jet_text_splitn(s: &String, pat: &String, n: i64) -> Vec<String> {
     s.splitn(n.max(0) as usize, pat).map(|x| x.to_string()).collect()
 }

@@ -2123,7 +2123,7 @@ fn jet_string_before_view<'a>(s: &'a str, sep: &str) -> &'a str {
     }
 }
 fn jet_string_trim_view(s: &str) -> &str {
-    s.trim()
+    jet_unicode_trim_view(s)
 }
 // D-TYPEDTEXT1=D: escape a hole's text before it joins an `Html` template —
 // the audited insertion point for every non-`.raw()` interpolation.

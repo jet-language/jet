@@ -208,6 +208,9 @@ use core.regex as re
 comptime folded = text.casefold("Straßeİς")
 comptime lowered = text.lower("ΟΣ")
 comptime uppered = text.upper("ßև")
+comptime method_lowered = "__PINNED_UPPER__".to_lower()
+comptime method_uppered = "__PINNED_LOWER__".to_upper()
+comptime method_trimmed = "__PINNED_SPACE__jet__PINNED_SPACE__".trim()
 comptime keycap = text.display_width("1️⃣")
 comptime emoji = text.display_width("©️")
 comptime ignorable = text.display_width("́‍")
@@ -218,6 +221,9 @@ fn run() {
     runtime_folded :: text.casefold("Straßeİς")
     runtime_lowered :: text.lower("ΟΣ")
     runtime_uppered :: text.upper("ßև")
+    runtime_method_lowered :: "__PINNED_UPPER__".to_lower()
+    runtime_method_uppered :: "__PINNED_LOWER__".to_upper()
+    runtime_method_trimmed :: "__PINNED_SPACE__jet__PINNED_SPACE__".trim()
     runtime_keycap :: text.display_width("1️⃣")
     runtime_emoji :: text.display_width("©️")
     runtime_ignorable :: text.display_width("́‍")
@@ -230,6 +236,9 @@ fn run() {
     print("{folded}|{runtime_folded}")
     print("{lowered}|{runtime_lowered}")
     print("{uppered}|{runtime_uppered}")
+    print(method_lowered == "__PINNED_UPPER__" && runtime_method_lowered == "__PINNED_UPPER__")
+    print(method_uppered == "__PINNED_LOWER__" && runtime_method_uppered == "__PINNED_LOWER__")
+    print("{method_trimmed}|{runtime_method_trimmed}")
     print("{keycap}|{runtime_keycap}")
     print("{emoji}|{runtime_emoji}")
     print("{ignorable}|{runtime_ignorable}")
@@ -237,11 +246,14 @@ fn run() {
     print("{regex_space}|{runtime_regex_space}")
     print(regex_alpha && regex_number && regex_whitespace && insensitive.is_match("K"))
 }
-"#;
-    let (code, stdout, stderr) = common::build_and_run("jet_text_unicode", "parity", source);
+"#
+    .replace("__PINNED_UPPER__", &char::from_u32(0xA7CE).unwrap().to_string())
+    .replace("__PINNED_LOWER__", &char::from_u32(0xA7CF).unwrap().to_string())
+    .replace("__PINNED_SPACE__", &char::from_u32(0x2003).unwrap().to_string());
+    let (code, stdout, stderr) = common::build_and_run("jet_text_unicode", "parity", &source);
     assert_eq!(code, 0, "Unicode parity fixture failed: {stderr}");
     assert_eq!(
         stdout,
-        "strassei̇σ|strassei̇σ\nος|ος\nSSԵՒ|SSԵՒ\n2|2\n2|2\n0|0\ntrue|true\ntrue|true\ntrue\n"
+        "strassei̇σ|strassei̇σ\nος|ος\nSSԵՒ|SSԵՒ\ntrue\ntrue\njet|jet\n2|2\n2|2\n0|0\ntrue|true\ntrue|true\ntrue\n"
     );
 }

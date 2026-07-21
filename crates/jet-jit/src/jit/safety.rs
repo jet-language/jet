@@ -167,14 +167,17 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             args,
             ..
         } => {
-            // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` now returns a `(Sender<T>,
-            // Receiver<T>)` tuple bound via a tuple-destructure `let` — a statement
-            // shape this tier has no representation for at all (never covered), so
-            // the producer itself is never claimed here either. Falls back to the
-            // tier-0 interpreter (JIT is an optional accelerator, not load-bearing).
+            if module == "core.text" {
+                return matches!(args.as_slice(), [arg]
+                    if matches!(method.as_str(), "lower" | "upper" | "trim")
+                        && matches!(&arg.ty, Type::String)
+                        && resident_safe_expr(arg, callees));
+            }
             if module == "core.tasks" && method == "channel" {
                 return false;
             }
+            // Other core modules retain their existing resident coverage. core.text
+            // alone is exact above: unsupported methods cannot fail into fallback.
             resident_safe_expr_list(args, callees)
         }
         TExprKind::CoreClosureCall { kind } => match kind {

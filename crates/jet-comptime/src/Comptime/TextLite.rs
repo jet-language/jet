@@ -215,24 +215,6 @@ fn fold_lookup(cp: u32) -> Option<&'static [u32]> {
     Some(&UNICODE_FOLD_POOL[start as usize..(start + len) as usize])
 }
 
-fn mapping_lookup(
-    cp: u32,
-    index: &'static [(u32, u32, u32)],
-    pool: &'static [u32],
-) -> Option<&'static [u32]> {
-    let at = index.binary_search_by_key(&cp, |&(c, _, _)| c).ok()?;
-    let (_, start, len) = index[at];
-    Some(&pool[start as usize..(start + len) as usize])
-}
-
-fn append_mapping(out: &mut String, cp: u32, index: &'static [(u32, u32, u32)], pool: &'static [u32]) {
-    if let Some(mapped) = mapping_lookup(cp, index, pool) {
-        out.extend(mapped.iter().filter_map(|&mapped_cp| char::from_u32(mapped_cp)));
-    } else if let Some(ch) = char::from_u32(cp) {
-        out.push(ch);
-    }
-}
-
 pub(super) fn casefold(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -266,46 +248,12 @@ pub(super) fn whitespace(cp: u32) -> bool {
     property(UNICODE_WHITE_SPACE, cp)
 }
 
-fn is_cased(cp: u32) -> bool {
-    property(UNICODE_CASED, cp)
-}
-
-fn is_case_ignorable(cp: u32) -> bool {
-    property(UNICODE_CASE_IGNORABLE, cp)
-}
-
-fn final_sigma(chars: &[char], at: usize) -> bool {
-    let before = chars[..at]
-        .iter()
-        .rev()
-        .find(|ch| !is_case_ignorable(**ch as u32))
-        .is_some_and(|ch| is_cased(*ch as u32));
-    let after = chars[at + 1..]
-        .iter()
-        .find(|ch| !is_case_ignorable(**ch as u32))
-        .is_some_and(|ch| is_cased(*ch as u32));
-    before && !after
-}
-
 pub(super) fn lower(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let mut out = String::with_capacity(s.len());
-    for (at, &ch) in chars.iter().enumerate() {
-        if ch == '\u{03A3}' && final_sigma(&chars, at) {
-            out.push('\u{03C2}');
-        } else {
-            append_mapping(&mut out, ch as u32, UNICODE_LOWER_INDEX, UNICODE_LOWER_POOL);
-        }
-    }
-    out
+    jet_unicode_lower(s)
 }
 
 pub(super) fn upper(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        append_mapping(&mut out, ch as u32, UNICODE_UPPER_INDEX, UNICODE_UPPER_POOL);
-    }
-    out
+    jet_unicode_upper(s)
 }
 
 // Unicode Default Caseless Matching: NFD(toCasefold(NFD(text))).
@@ -966,15 +914,15 @@ pub(super) fn is_whitespace(s: &str) -> bool {
 }
 
 pub(super) fn trim_start(s: &str) -> String {
-    s.trim_start_matches(|c| whitespace(c as u32)).to_string()
+    jet_unicode_trim_start(s)
 }
 
 pub(super) fn trim_end(s: &str) -> String {
-    s.trim_end_matches(|c| whitespace(c as u32)).to_string()
+    jet_unicode_trim_end(s)
 }
 
 pub(super) fn trim(s: &str) -> String {
-    s.trim_matches(|c| whitespace(c as u32)).to_string()
+    jet_unicode_trim(s)
 }
 
 pub(super) fn splitn(s: &str, pat: &str, n: i64) -> Vec<String> {

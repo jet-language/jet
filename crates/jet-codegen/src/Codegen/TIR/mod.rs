@@ -2246,7 +2246,7 @@ pub enum TBuiltinOp {
     Chars,
     /// `bytes()` → `{root}jet_string_bytes(&(recv))`.
     Bytes,
-    /// `trim()` → `(recv).trim().to_string()`.
+    /// `trim()` → pinned `jet_unicode_trim(&(recv))`.
     Trim,
     /// `split(sep)` → `jet_string_split(&(recv), &a0)`.
     Split,
@@ -2262,9 +2262,9 @@ pub enum TBuiltinOp {
     EndsWith,
     /// `replace(from, to)` → `(recv).replace(&a0, &a1)`.
     Replace,
-    /// `to_upper()` → `(recv).to_uppercase()`.
+    /// `to_upper()` → pinned `jet_unicode_upper(&(recv))`.
     ToUpper,
-    /// `to_lower()` → `(recv).to_lowercase()`.
+    /// `to_lower()` → pinned `jet_unicode_lower(&(recv))`.
     ToLower,
     /// `repeat(n)` → `(recv).repeat(a0 as usize)`.
     Repeat,
