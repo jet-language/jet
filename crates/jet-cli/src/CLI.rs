@@ -77,6 +77,7 @@ pub enum HandlerKey {
     ProjectParts,
     Push, Bridge, Services, Config,
     Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp,
+    Perf,
 }
 
 impl HandlerKey {
@@ -96,11 +97,12 @@ impl HandlerKey {
             Self::Toolchain => "toolchain",
             Self::Upgrade => "upgrade", Self::Doctor => "doctor", Self::Completions => "completions",
             Self::Man => "man", Self::Devtools => "devtools", Self::Lsp => "lsp",
+            Self::Perf => "perf",
         }
     }
 
     pub const fn keeps_group(self) -> bool {
-        matches!(self, Self::Hangar | Self::GcReport)
+        matches!(self, Self::Hangar | Self::GcReport | Self::Perf)
     }
 }
 
@@ -178,6 +180,19 @@ const OS_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "config", summary: "Manage Jet settings and trust", handler: HandlerKey::Config },
 ];
 
+// D-PERFSESSION1=D: `jet perf` owns collection/view/compare/export. `run`/
+// `test`/`bench` stay canonical top-level intents and also live here so the
+// group help lists the full family; moved_command excludes those three.
+const PERF_ACTIONS: &[NestedCommandSpec] = &[
+    NestedCommandSpec { name: "run", summary: "Run a program and write a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "test", summary: "Run tests and write a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "bench", summary: "Measure performance and write a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "attach", summary: "Attach to a running process and write a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "view", summary: "Show a .jettrace summary", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "compare", summary: "Compare two .jettrace artifacts", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "export", summary: "Export a loss-declared projection of a .jettrace", handler: HandlerKey::Perf },
+];
+
 pub const COMMAND_GROUPS: &[CommandGroup] = &[
     CommandGroup { name: "registry", summary: "Publish and manage packages", actions: REGISTRY_ACTIONS, exhaustive: true },
     CommandGroup { name: "inspect", summary: "Explore code, builds, packages, and bindings", actions: INSPECT_ACTIONS, exhaustive: true },
@@ -186,6 +201,7 @@ pub const COMMAND_GROUPS: &[CommandGroup] = &[
     CommandGroup { name: "project", summary: "Inspect project files and modules", actions: PROJECT_ACTIONS, exhaustive: true },
     CommandGroup { name: "self", summary: "Manage the Jet installation and editor tools", actions: SELF_ACTIONS, exhaustive: true },
     CommandGroup { name: "os", summary: "Manage Jetos machines and services", actions: OS_ACTIONS, exhaustive: false },
+    CommandGroup { name: "perf", summary: "Collect and inspect performance traces", actions: PERF_ACTIONS, exhaustive: true },
 ];
 
 pub fn command_group(name: &str) -> Option<&'static CommandGroup> {
@@ -201,9 +217,11 @@ pub fn moved_command(name: &str) -> Option<(&'static CommandGroup, &'static Nest
     // A spelling can own a canonical top-level meaning and also name a
     // grouped action (`import` translates source at the top level and imports
     // store archives under `hangar`). D-JPK-IMPORTCMD1 / D-MIGRATE-SRC1 make
-    // that one overlap explicit; internal handler rows in COMMANDS do not
-    // make any other grouped action canonical at the top level.
-    if name == "import" {
+    // that one overlap explicit; D-PERFSESSION1=D likewise keeps run/test/bench
+    // as daily top-level intents while listing them under `jet perf`.
+    // Internal handler rows in COMMANDS do not make any other grouped action
+    // canonical at the top level.
+    if name == "import" || matches!(name, "run" | "test" | "bench") {
         return None;
     }
     COMMAND_GROUPS.iter().find_map(|group| {
@@ -444,6 +462,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "perf",
+        summary: "Collect and inspect performance traces",
+        headline: false,
+    },
+    CommandSpec {
         name: "bench",
         summary: "Measure program performance",
         headline: false,
@@ -643,6 +666,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "merge"
             | "prove"
             | "budget"
+            | "perf"
             | "completions"
     )
 }
@@ -1055,13 +1079,25 @@ mod tests {
     fn moved_commands_are_not_canonical_top_level() {
         for group in COMMAND_GROUPS {
             for action in group.actions {
-                if action.name == "import" {
+                if matches!(action.name, "import" | "run" | "test" | "bench") {
                     assert!(is_canonical_top_level(action.name));
                     assert!(moved_command(action.name).is_none());
                     continue;
                 }
                 assert!(!is_canonical_top_level(action.name), "moved bare command leaked: {}", action.name);
-                assert_eq!(moved_command_group(action.name), Some(group.name));
+                let owner = moved_command_group(action.name);
+                assert!(owner.is_some(), "missing moved owner for {}", action.name);
+                // An action name can appear in more than one group (`export` under
+                // hangar and perf). Bare teaching routes to the first registered owner.
+                assert!(
+                    COMMAND_GROUPS.iter().any(|candidate| {
+                        candidate.name == owner.unwrap()
+                            && candidate.actions.iter().any(|entry| entry.name == action.name)
+                    }),
+                    "{} moved to unknown owner {:?}",
+                    action.name,
+                    owner
+                );
             }
         }
     }
@@ -1070,7 +1106,7 @@ mod tests {
     fn typo_suggestions_never_advertise_moved_bare_actions() {
         for group in COMMAND_GROUPS {
             for action in group.actions {
-                if action.name != "import" {
+                if !matches!(action.name, "import" | "run" | "test" | "bench") {
                     assert_ne!(closest_command(action.name), Some(action.name));
                 }
             }
@@ -1108,6 +1144,10 @@ mod tests {
             ("self", "devtools", Devtools, "devtools", false), ("self", "lsp", Lsp, "lsp", false),
             ("os", "push", Push, "push", false), ("os", "bridge", Bridge, "bridge", false),
             ("os", "services", Services, "services", false), ("os", "config", Config, "config", false),
+            ("perf", "run", Perf, "perf", true), ("perf", "test", Perf, "perf", true),
+            ("perf", "bench", Perf, "perf", true), ("perf", "attach", Perf, "perf", true),
+            ("perf", "view", Perf, "perf", true), ("perf", "compare", Perf, "perf", true),
+            ("perf", "export", Perf, "perf", true),
         ];
         assert_eq!(COMMAND_GROUPS.iter().map(|g| g.actions.len()).sum::<usize>(), expected.len());
         for (group_name, action_name, handler, dispatch_word, keeps_group) in expected {

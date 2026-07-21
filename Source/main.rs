@@ -25,6 +25,7 @@ mod CmdExpand;
 mod CmdGc;
 mod CmdImpact;
 mod CmdImport;
+mod CmdPerf;
 mod CmdPkg;
 mod CmdProve;
 mod CmdSchema;
@@ -882,6 +883,18 @@ fn main() {
     }
 
     normalize_frequency_ring_argv(&mut raw);
+
+    // D-PERFSESSION1=D: `jet perf run|test|bench` writes a versioned .jettrace
+    // skeleton, then strips `perf` so the exact base-intent driver path runs.
+    // Utility verbs stay on the `perf` dispatcher.
+    if raw.first().map(String::as_str) == Some("perf") {
+        match CmdPerf::run(&raw) {
+            CmdPerf::Outcome::ForwardBase => {
+                raw.remove(0);
+            }
+            CmdPerf::Outcome::Exit(code) => exit(code),
+        }
+    }
 
     if raw.iter().any(|a| a == "--version") {
         run_version();

@@ -14,6 +14,7 @@ pub mod JitBackend;
 pub mod JSON;
 pub mod Numeric;
 pub mod OsTarget;
+pub mod JetTrace;
 pub mod PerformanceBudget;
 pub mod Policy;
 pub mod RingLayer;
