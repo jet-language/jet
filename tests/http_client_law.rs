@@ -446,7 +446,7 @@ use core.http.client as http
 fn run() {{
     client :: http.Client.new()
         .cookies(true)
-        .redirects(2)
+        .redirects(.Follow.{{ max: 2, same_origin_credentials: true }})
         .protocols(false, true, false)
         .timeouts(1000, 1000, 1000, 1000, 1000, 1000, 5000)
         .raw_encoding()
@@ -1827,6 +1827,11 @@ fn main() {
     )
     .unwrap_err();
     assert!(matches!(denied, bridge::JetHttpBridgeError::Redirect));
+    assert_eq!(
+        bridge::jet_http_client_open_body_count_impl(),
+        0,
+        "HTTPS→HTTP deny must close the redirect response body"
+    );
 
     let allowed_root = bridge::jet_http_client_new_impl();
     let allowed_rooted =
@@ -1938,6 +1943,86 @@ fn run() {{
 }
 
 #[test]
+fn ambient_deadline_absolute_instant_survives_prep_delay() {
+    // Residual-ms storage would revive Instant::now()+budget after a sleep between
+    // push and compose; absolute Instant at push must still time out before dial.
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_law_ambient_abs_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let shown = dir.join("seed.jet");
+    let source = concat!(
+        "use core.http.client as http\n",
+        "fn run() {\n",
+        "    _ :: http.Client.new()\n",
+        "    req :: http.request(\"GET\", \"http://127.0.0.1/ambient-abs-deadline\")\n",
+        "}\n",
+    );
+    fs::write(&shown, source).unwrap();
+    let link = jet::compile_with_path(source, shown.to_str().unwrap())
+        .unwrap()
+        .ffi
+        .expect("HTTP client bridge");
+    let harness = dir.join("bridge_ambient_abs.rs");
+    let bin = dir.join("bridge_ambient_abs");
+    fs::write(
+        &harness,
+        r#"
+use std::time::Duration;
+
+fn main() {
+    let url = "http://127.0.0.1:9/slow".to_string();
+    let client = bridge::jet_http_client_new_impl();
+    let _guard = bridge::JetHttpAmbientDeadline::push(Some(60)).expect("ambient push");
+    std::thread::sleep(Duration::from_millis(80));
+    let err = bridge::jet_http_client_send_with_impl(
+        client, "GET", &url, &[], None,
+        Some(5000), Some(5000), Some(5000), Some(5000),
+        None, None, &[], &[], &[],
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, bridge::JetHttpBridgeError::Timeout),
+        "expected Timeout after prep delay past absolute ambient deadline, got {err:?}"
+    );
+}
+"#,
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "ambient absolute harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin).output().unwrap();
+    assert!(
+        output.status.success(),
+        "ambient absolute harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn public_client_allow_http_downgrade_method_typechecks() {
     let src = r#"
 use core.http.client as http
@@ -1948,4 +2033,65 @@ fn run() {
     let (code, _stdout, stderr) =
         common::build_and_run("jet_http_client_law", "allow_http_downgrade_type", src);
     assert_eq!(code, 0, "stderr:\n{stderr}");
+}
+
+#[test]
+fn follow_same_origin_credentials_strips_authorization_on_redirect() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        for expected_auth in [true, false] {
+            let (mut stream, _) = listener.accept().unwrap();
+            let first = request_head(&mut stream);
+            let first = String::from_utf8_lossy(&first).to_ascii_lowercase();
+            assert!(first.contains("authorization: bearer secret\r\n"));
+            assert!(first.starts_with("get /start "));
+            stream
+                .write_all(b"HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .unwrap();
+            drop(stream);
+
+            let (mut stream, _) = listener.accept().unwrap();
+            let second = request_head(&mut stream);
+            let second = String::from_utf8_lossy(&second).to_ascii_lowercase();
+            assert!(second.starts_with("get /next "));
+            if expected_auth {
+                assert!(
+                    second.contains("authorization: bearer secret\r\n"),
+                    "same_origin_credentials:true must keep Authorization on same-origin hop: {second}"
+                );
+            } else {
+                assert!(
+                    !second.contains("authorization:"),
+                    "same_origin_credentials:false must strip Authorization on same-origin hop: {second}"
+                );
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .unwrap();
+        }
+    });
+
+    for (label, keep) in [("keep", true), ("strip", false)] {
+        let src = format!(
+            r#"
+use core.http.client as http
+fn run() {{
+    client :: http.Client.new()
+        .redirects(.Follow.{{ max: 2, same_origin_credentials: {keep} }})
+        .protocols(false, true, false)
+    req :: http.request("GET", "http://{addr}/start")
+        .header("Authorization", "Bearer secret")
+    resp :: client.send(req) ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+    print(resp.redirect_history().len())
+}}
+"#
+        );
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_http_client_law", &format!("follow_creds_{label}"), &src);
+        assert_eq!(code, 0, "{label} stderr:\n{stderr}");
+        assert_eq!(stdout, "ok\n1\n", "{label}");
+    }
+    server.join().unwrap();
 }

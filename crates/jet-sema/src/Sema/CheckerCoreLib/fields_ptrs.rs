@@ -31,6 +31,9 @@ impl<'a> Checker<'a> {
                 ("core.tls", "ClientConfig") => Some(Type::Named("TlsClientConfigType".to_string())),
                 ("core.http.client", "Client") => Some(Type::Named("HttpClientType".to_string())),
                 ("core.http.client", "Proxy") => Some(Type::Named("HttpProxy".to_string())),
+                ("core.http.client", "RedirectPolicy") => {
+                    Some(Type::Named("HttpRedirectPolicy".to_string()))
+                },
                 ("core.tls", "RootCertificates") => Some(Type::Named("TlsRootCertificatesType".to_string())),
                 ("core.tls", "ClientIdentity") => Some(Type::Named("TlsClientIdentityType".to_string())),
                 ("core.tls", "TlsVersion") => Some(Type::Named("TlsVersion".to_string())),

@@ -673,7 +673,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.time.date" => &["new", "today", "parse"],
         "core.time.datetime" => &["from_timestamp", "now"],
         // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
-        "core.http.client" => &["Client", "Proxy", "get", "post", "request"],
+        "core.http.client" => &["Client", "Proxy", "RedirectPolicy", "get", "post", "request"],
         "core.http.server" => &[
             "bind",
             "mux",

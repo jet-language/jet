@@ -2031,7 +2031,8 @@ impl<'a> Checker<'a> {
                     }
                     let expected = match method {
                         "cookies" | "protocols" | "allow_http_downgrade" => Some(Type::Bool),
-                        "redirects" | "timeouts" => Some(Type::Int),
+                        "timeouts" => Some(Type::Int),
+                        "redirects" => Some(Type::Named("HttpRedirectPolicy".to_string())),
                         "send" => Some(Type::Named("HttpRequest".to_string())),
                         "proxy" => Some(Type::Named("HttpProxy".to_string())),
                         "tls" => Some(Type::Named("TlsClientConfig".to_string())),

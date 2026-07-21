@@ -13,43 +13,51 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 thread_local! {
-    static HTTP_AMBIENT_DEADLINE_MS: Cell<Option<i64>> = const { Cell::new(None) };
+    /// Absolute wall Instant for the ambient `@Context(deadline:)` budget, or None.
+    static HTTP_AMBIENT_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
 /// RAII ambient `@Context(deadline:)` upper bound for one HTTP send (D-HTTP-CLIENT2).
+///
+/// Converts remaining milliseconds into an absolute Instant at push time so later
+/// request prep cannot revive a stale residual budget with `Instant::now() + ms`.
 pub struct JetHttpAmbientDeadline {
-    previous: Option<i64>,
+    previous: Option<Instant>,
 }
 
 impl JetHttpAmbientDeadline {
-    pub fn push(remaining_ms: Option<i64>) -> Self {
-        let previous = HTTP_AMBIENT_DEADLINE_MS.with(|cell| cell.replace(remaining_ms));
-        Self { previous }
+    pub fn push(remaining_ms: Option<i64>) -> Result<Self, JetHttpBridgeError> {
+        let absolute = match remaining_ms {
+            Some(ms) if ms <= 0 => return Err(JetHttpBridgeError::Timeout),
+            Some(ms) => Some(Instant::now() + validated_timeout("ambient deadline", ms)?),
+            None => None,
+        };
+        let previous = HTTP_AMBIENT_DEADLINE.with(|cell| cell.replace(absolute));
+        Ok(Self { previous })
     }
 }
 
 impl Drop for JetHttpAmbientDeadline {
     fn drop(&mut self) {
-        HTTP_AMBIENT_DEADLINE_MS.with(|cell| cell.set(self.previous));
+        HTTP_AMBIENT_DEADLINE.with(|cell| cell.set(self.previous));
     }
 }
 
-fn ambient_deadline_remaining_ms() -> Option<i64> {
-    HTTP_AMBIENT_DEADLINE_MS.with(|cell| cell.get())
+fn ambient_deadline_instant() -> Option<Instant> {
+    HTTP_AMBIENT_DEADLINE.with(|cell| cell.get())
 }
 
 fn compose_total_deadline(
     configured: Option<Duration>,
 ) -> Result<Option<Instant>, JetHttpBridgeError> {
-    let ambient = match ambient_deadline_remaining_ms() {
-        Some(ms) if ms <= 0 => return Err(JetHttpBridgeError::Timeout),
-        Some(ms) => Some(validated_timeout("ambient deadline", ms)?),
-        None => None,
+    let ambient = match ambient_deadline_instant() {
+        Some(deadline) if deadline <= Instant::now() => return Err(JetHttpBridgeError::Timeout),
+        other => other,
     };
     Ok(match (configured, ambient) {
-        (Some(configured), Some(ambient)) => Some(Instant::now() + configured.min(ambient)),
+        (Some(configured), Some(ambient)) => Some((Instant::now() + configured).min(ambient)),
         (Some(configured), None) => Some(Instant::now() + configured),
-        (None, Some(ambient)) => Some(Instant::now() + ambient),
+        (None, Some(ambient)) => Some(ambient),
         (None, None) => None,
     })
 }
@@ -260,6 +268,10 @@ fn default_origin_limits() -> &'static Arc<OriginLimits> {
 #[derive(Clone)]
 struct ClientPolicy {
     redirect_limit: u32,
+    /// When true (default), same-origin redirects keep Authorization /
+    /// Proxy-Authorization / Cookie. Cross-origin redirects always strip them
+    /// (D-HTTP-CLIENT2). When false, strip credentials on every redirect hop.
+    same_origin_credentials: bool,
     allow_http_downgrade: bool,
     proxy: Option<String>,
     use_environment_proxy: bool,
@@ -287,6 +299,7 @@ impl Default for ClientPolicy {
     fn default() -> Self {
         Self {
             redirect_limit: HTTP_CLIENT_DEFAULT_REDIRECTS,
+            same_origin_credentials: true,
             allow_http_downgrade: false,
             proxy: None,
             use_environment_proxy: true,
@@ -411,9 +424,16 @@ pub fn jet_http_client_cookies_impl(id: i64, enabled: bool) -> Result<i64, JetHt
     clone_client_with(id, |policy| policy.cookies = enabled)
 }
 
-pub fn jet_http_client_redirects_impl(id: i64, limit: i64) -> Result<i64, JetHttpBridgeError> {
+pub fn jet_http_client_redirects_impl(
+    id: i64,
+    limit: i64,
+    same_origin_credentials: bool,
+) -> Result<i64, JetHttpBridgeError> {
     let limit = u32::try_from(limit).map_err(|_| JetHttpBridgeError::Redirect)?;
-    clone_client_with(id, |policy| policy.redirect_limit = limit)
+    clone_client_with(id, |policy| {
+        policy.redirect_limit = limit;
+        policy.same_origin_credentials = same_origin_credentials;
+    })
 }
 
 pub fn jet_http_client_allow_http_downgrade_impl(
@@ -632,6 +652,7 @@ pub fn jet_http_client_send_with_impl(
         total,
         redirect_limit,
         explicit_redirect_limit,
+        handle.policy.same_origin_credentials,
         handle.policy.allow_http_downgrade,
         configured_proxy,
         handle.policy.http2,
@@ -1804,6 +1825,14 @@ pub fn jet_http_client_body_close_impl(handle: i64) {
         .map(|mut readers| readers.remove(&handle));
 }
 
+/// Open response-body registry size — bridge harness leak oracle.
+pub fn jet_http_client_open_body_count_impl() -> usize {
+    body_readers()
+        .lock()
+        .map(|readers| readers.len())
+        .unwrap_or(0)
+}
+
 fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, JetHttpBridgeError> {
     let milliseconds = u64::try_from(milliseconds).map_err(|_| {
         let _ = name;
@@ -1926,6 +1955,7 @@ pub fn jet_http_client_send_stream_impl(
         total_deadline,
         redirect_limit,
         explicit_redirect_limit,
+        true,
         false,
         proxy,
         true,
@@ -2021,6 +2051,7 @@ pub fn jet_http_client_send_with_stream_impl(
         total,
         redirect_limit,
         explicit_redirect_limit,
+        handle.policy.same_origin_credentials,
         handle.policy.allow_http_downgrade,
         configured_proxy,
         handle.policy.http2,
@@ -2085,6 +2116,7 @@ pub fn jet_http_client_send_impl(
         total_deadline,
         redirect_limit,
         explicit_redirect_limit,
+        true,
         false,
         proxy,
         true,
@@ -2151,6 +2183,7 @@ fn send_following_redirects(
     total_deadline: Option<Instant>,
     redirect_limit: u32,
     explicit_redirect_limit: bool,
+    same_origin_credentials: bool,
     allow_http_downgrade: bool,
     explicit_proxy: Option<&str>,
     http2: bool,
@@ -2180,6 +2213,7 @@ fn send_following_redirects(
         total_deadline,
         redirect_limit,
         explicit_redirect_limit,
+        same_origin_credentials,
         allow_http_downgrade,
         explicit_proxy,
         http2,
@@ -2211,6 +2245,7 @@ fn send_following_redirects_upload(
     total_deadline: Option<Instant>,
     redirect_limit: u32,
     explicit_redirect_limit: bool,
+    same_origin_credentials: bool,
     allow_http_downgrade: bool,
     explicit_proxy: Option<&str>,
     http2: bool,
@@ -2237,11 +2272,14 @@ fn send_following_redirects_upload(
         {
             let same_site = cookie_site.scheme == parsed.scheme && cookie_site.host == parsed.host;
             let safe_method = matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS" | "TRACE");
-            if let Some(cookie) = jar
-                .as_ref()
-                .and_then(|jar| jar.lock().ok()?.header(&parsed, same_site, safe_method))
-            {
-                request_headers.push(("cookie".to_string(), cookie));
+            let allow_jar_cookie = followed == 0 || (same_origin_credentials && same_site);
+            if allow_jar_cookie {
+                if let Some(cookie) = jar
+                    .as_ref()
+                    .and_then(|jar| jar.lock().ok()?.header(&parsed, same_site, safe_method))
+                {
+                    request_headers.push(("cookie".to_string(), cookie));
+                }
             }
         }
         let response = if let Some(ref bytes) = body {
@@ -2367,12 +2405,15 @@ fn send_following_redirects_upload(
         let next = resolve_redirect(&parsed, location)?;
         let next_parsed = parse_url(&next)?;
         if parsed.scheme == "https" && next_parsed.scheme == "http" && !allow_http_downgrade {
+            jet_http_client_body_close_impl(response.body_handle);
             return Err(JetHttpBridgeError::Redirect);
         }
-        if parsed.host != next_parsed.host
+        let cross_origin = parsed.host != next_parsed.host
             || parsed.port != next_parsed.port
-            || parsed.scheme != next_parsed.scheme
-        {
+            || parsed.scheme != next_parsed.scheme;
+        // D-HTTP-CLIENT2: cross-origin always strips credentials; same-origin
+        // keeps them only when same_origin_credentials is true.
+        if cross_origin || !same_origin_credentials {
             headers.retain(|(name, _)| {
                 !matches!(
                     name.to_ascii_lowercase().as_str(),

@@ -1669,7 +1669,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             (
                                 if matches!(
                                     resolved_type,
-                                    "EmailError" | "SmtpAuth" | "TlsTrust" | "AuthError"
+                                    "EmailError"
+                                        | "SmtpAuth"
+                                        | "TlsTrust"
+                                        | "AuthError"
+                                        | "HttpRedirectPolicy"
                                 ) {
                                     label.clone()
                                 } else {

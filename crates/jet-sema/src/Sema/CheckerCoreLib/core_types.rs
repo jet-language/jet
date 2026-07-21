@@ -239,7 +239,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName" | "HttpHeaderValue"
-        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
+        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -697,6 +697,30 @@ pub(crate) fn core_http_variants(
         variants.insert(
             "Url".to_string(),
             (zero, VariantPayload::Single(Type::String, zero)),
+        );
+        return Some(variants);
+    }
+    if enum_name == "HttpRedirectPolicy" {
+        // D-HTTP-CLIENT2=A: `.Follow(max:, same_origin_credentials:)`.
+        variants.insert(
+            "Follow".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "max".to_string(),
+                        name_span: zero,
+                        ty: Type::Int,
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "same_origin_credentials".to_string(),
+                        name_span: zero,
+                        ty: Type::Bool,
+                        ty_span: zero,
+                    },
+                ]),
+            ),
         );
         return Some(variants);
     }

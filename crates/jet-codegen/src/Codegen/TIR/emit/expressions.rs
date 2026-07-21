@@ -2156,10 +2156,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 "{ffi}::jet_http_client_cookies_impl(_client.owner.handle, {})",
                                 a(0)
                             )),
-                            "redirects" => policy(format!(
-                                "{ffi}::jet_http_client_redirects_impl(_client.owner.handle, {})",
-                                a(0)
-                            )),
+                            "redirects" => {
+                                let error = emit_http_bridge_error(ffi, "error");
+                                format!(
+                                    "{{ let _client = ({recv}); let _policy = &({arg}); let _next = (match _policy {{ JetHttpRedirectPolicy::Follow {{ max, same_origin_credentials }} => {ffi}::jet_http_client_redirects_impl(_client.owner.handle, *max, *same_origin_credentials), }}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    recv = recv,
+                                    arg = a(0),
+                                    ffi = ffi,
+                                    error = error,
+                                )
+                            }
                             "protocols" => policy(format!(
                                 "{ffi}::jet_http_client_protocols_impl(_client.owner.handle, {}, {}, {})",
                                 a(0), a(1), a(2)
@@ -2200,11 +2206,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                     "{ffi}::jet_http_client_send_with_stream_impl(_client.owner.handle, &_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)"
                                 );
                                 let response = emit_http_response_from_bridge(call, ffi);
+                                let error = emit_http_bridge_error(ffi, "error");
                                 format!(
-                                    "{{ let _client = &({recv}); match &_client.policy_error {{ Some(error) => Err(error.clone()), None => {{ let _r = &({arg}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHttpBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHttpBridgeError::Io) }} }} }}; {response} }}) }} }} }} }} }}",
+                                    "{{ let _client = &({recv}); match &_client.policy_error {{ Some(error) => Err(error.clone()), None => {{ let _r = &({arg}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).map_err(|error| {error}).and_then(|_ambient| jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHttpBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHttpBridgeError::Io) }} }} }}; {response} }})) }} }} }} }} }}",
                                     recv = recv,
                                     arg = a(0),
                                     ffi = ffi,
+                                    error = error,
                                     response = response,
                                 )
                             }
@@ -2330,10 +2338,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                     ffi = ffi
                                 );
                                 let response = emit_http_response_from_bridge(call, ffi);
+                                let error = emit_http_bridge_error(ffi, "error");
                                 format!(
-                                    "{{ let _r = &({recv}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHttpBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHttpBridgeError::Io) }} }} }}; {response} }}) }} }} }}",
+                                    "{{ let _r = &({recv}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).map_err(|error| {error}).and_then(|_ambient| jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHttpBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHttpBridgeError::Io) }} }} }}; {response} }})) }} }} }}",
                                     recv = recv,
                                     ffi = ffi,
+                                    error = error,
                                     response = response,
                                 )
                             }

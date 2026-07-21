@@ -11,6 +11,15 @@ enum JetHttpProxy {
     Url(String),
 }
 
+/// D-HTTP-CLIENT2=A: typed redirect policy for `Client.redirects`.
+#[derive(Clone)]
+enum JetHttpRedirectPolicy {
+    Follow {
+        max: i64,
+        same_origin_credentials: bool,
+    },
+}
+
 struct JetHttpClientOwner {
     handle: i64,
     drop_handle: fn(i64),
