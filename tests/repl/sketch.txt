@@ -1,0 +1,39 @@
+# Tower #392 C4: exact tier-0 core.sketch parity transcript.
+# Algorithms mirror AOT JetHyperLogLog / JetTDigest / JetCountMinSketch /
+# JetReservoirSampler (FNV + seeded xorshift). No host entropy.
+> use core.sketch.hll as hll_mod
+ok
+> use core.sketch.tdigest as td_mod
+ok
+> use core.sketch.cms as cms_mod
+ok
+> use core.sketch.reservoir as rs_mod
+ok
+> hll := hll_mod.new()
+> hll.add("apple")
+> hll.add("banana")
+> hll.add("cherry")
+> hll.add("apple")
+> hll.count()
+3 : Int
+> td := td_mod.new()
+> td.add(1.0)
+> td.add(2.0)
+> td.add(3.0)
+> td.add(4.0)
+> td.add(5.0)
+> td.quantile(0.5)
+3.0 : Float
+> cms := cms_mod.new()
+> cms.add("hello")
+> cms.add("world")
+> cms.add("hello")
+> cms.add("hello")
+> cms.count("hello")
+3 : Int
+> rs := rs_mod.new(3)
+> rs.add("x")
+> rs.add("y")
+> rs.add("z")
+> rs.sample().len()
+3 : Int

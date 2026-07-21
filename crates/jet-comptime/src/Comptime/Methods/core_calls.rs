@@ -22,6 +22,14 @@ pub(in super::super) fn apply_core_pure_method(
     core_pure_parity::evaluate_method(recv, method, args, span)
 }
 
+pub(in super::super) fn sketch_add(
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
+    core_pure_parity::sketch_add(recv, args, span)
+}
+
 pub(super) fn display_core_pure_value(value: &CtValue) -> Option<String> {
     core_pure_parity::display(value)
 }

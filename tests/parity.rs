@@ -98,18 +98,10 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // `inner_join`/`left_join` and Packet B's `pivot_sum` route through the
     // interpreter because their closure arguments need live `Interp` access.
     //
-    // core.archive / core.compress.*: zip/tar and gzip/zstd — needs a hand-rolled
-    // (I6) compression implementation ported into the interpreter, not a
-    // one-line Rust std call.
-    ("core.archive", "tar_add"),
-    ("core.archive", "tar_get"),
-    ("core.archive", "tar_names_json"),
-    ("core.archive", "zip_compress"),
-    ("core.archive", "zip_decompress"),
-    ("core.compress.gzip", "compress"),
-    ("core.compress.gzip", "decompress"),
-    ("core.compress.zstd", "compress"),
-    ("core.compress.zstd", "decompress"),
+    // core.archive / core.compress.*: zip/tar and gzip/zstd need hand-rolled
+    // (I6) compression ports or are ambient byte-stream I/O — named boundaries,
+    // not PurePending port gaps. See core_boundary().
+    //
     // core.crypto.expert / core.crypto.random: security-sensitive — needs a
     // careful, independently-reviewed port (AEAD ciphers, CSPRNG), not a
     // quick approximation that could silently diverge from the audited AOT
@@ -220,20 +212,11 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.watcher", "set"),
     ("core.web.devserver", "app"),
     ("core.web.devserver", "for_app"),
-    // Misc small surfaces, each its own small future card.
-    ("core.args", "spec"),
-    ("core.game", "run"),
+    // Misc ambient/runtime surfaces — named boundaries (see core_boundary).
     // core.math.decimal PORTED (card #392 C4) — see CtDecimal + CorePureParity.
-    ("core.testing", "corpus"),
-    ("core.testing", "fixture"),
-    ("core.testing", "golden"),
-    ("core.testing", "snap"),
-    ("core.testing", "temp_dir"),
-    // Opaque mutable handles still pending.
-    ("core.sketch.cms", "new"),
-    ("core.sketch.hll", "new"),
-    ("core.sketch.reservoir", "new"),
-    ("core.sketch.tdigest", "new"),
+    // core.testing fixture/snap/golden/corpus/temp_dir: filesystem effects —
+    // named boundaries (fake_rng/fake_clock already Covered).
+    // core.sketch.* PORTED (card #392 C4) — see CorePureParity sketch helpers.
     // core.url: PORTED (card #392 pass 3) — see `UrlLite.rs` + `Methods.rs`'s
     // `("core.url", ...)` arms, ported verbatim from `JetUrl`/`jet_url_*`
     // (`UrlMime.rs` + `MathRandomTime.rs`).
@@ -975,6 +958,17 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     if matches!(module, "core.os" | "core.raylib" | "core.ui" | "core.term" | "core.web" | "core.web.storage.local" | "core.web.storage.session" | "core.tasks" | "core.watcher" | "core.web.devserver" | "core.uuid") {
         return Some("named ambient/native boundary");
     }
+    if module == "core.archive" || module.starts_with("core.compress.") {
+        return Some("named archive/compress boundary");
+    }
+    if module == "core.testing"
+        && matches!(method, "corpus" | "fixture" | "golden" | "snap" | "temp_dir")
+    {
+        return Some("named testing filesystem boundary");
+    }
+    if matches!((module, method), ("core.args", "spec") | ("core.game", "run")) {
+        return Some("named ambient runtime boundary");
+    }
     if matches!(module, "core.event" | "core.http.client" | "core.http.server" | "core.mem" | "core.scope") {
         return Some("named runtime/native boundary");
     }
@@ -1007,6 +1001,21 @@ fn value_boundary(owner: &str) -> Option<&'static str> {
     }
     if matches!(owner, "Secret" | "WrappedVaultKey") {
         return Some("named native/security boundary");
+    }
+    // Reactive / decision / pool handles need a live runtime graph — same
+    // class as Task/Event (already named). REPL marks core.reactive native-only.
+    if matches!(
+        owner,
+        "Signal"
+            | "Shared"
+            | "Effect"
+            | "Computed"
+            | "Derived"
+            | "Pool"
+            | "DecisionHook"
+            | "Solver"
+    ) {
+        return Some("named reactive runtime boundary");
     }
     matches!(owner, "Task" | "Receiver" | "Sender" | "Event" | "AsyncEvent" | "DispatchReport" | "Hook" | "Subscription" | "EventScope" | "EventTrace" | "WatchHandle" | "WatchSet" | "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "Digest256" | "Digest512" | "PasswordHash")
         .then_some("named runtime/native handle boundary")
@@ -1571,6 +1580,61 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         record(&records, Surface::Fixed, "core.testing", "fake_clock").class,
         Class::Covered
     );
+    for method in ["corpus", "fixture", "golden", "snap", "temp_dir"] {
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.testing", method).class,
+            Class::Boundary
+        );
+    }
+    for method in ["tar_add", "zip_compress"] {
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.archive", method).class,
+            Class::Boundary
+        );
+    }
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.compress.gzip", "compress").class,
+        Class::Boundary
+    );
+    assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Fixed, "core.game", "run").class, Class::Boundary);
+    for (module, method) in [
+        ("core.sketch.hll", "new"),
+        ("core.sketch.tdigest", "new"),
+        ("core.sketch.cms", "new"),
+        ("core.sketch.reservoir", "new"),
+    ] {
+        assert_eq!(
+            record(&records, Surface::Bespoke, module, method).class,
+            Class::Covered
+        );
+    }
+    for owner in [
+        "Signal",
+        "Shared",
+        "Effect",
+        "Computed",
+        "Derived",
+        "Pool",
+        "DecisionHook",
+        "Solver",
+    ] {
+        assert_eq!(
+            record(&records, Surface::Value, owner, match owner {
+                "Signal" => "get",
+                "Shared" => "read",
+                "Effect" => "unsubscribe",
+                "Computed" | "Derived" => "get",
+                "Pool" => "ids",
+                "DecisionHook" => "run",
+                "Solver" => "status",
+                _ => unreachable!(),
+            })
+            .class,
+            Class::Boundary
+        );
+    }
+    assert_eq!(record(&records, Surface::DirectStatic, "Solver", "new").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class, Class::Boundary);
@@ -1584,14 +1648,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 757, 52, 369));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 761, 12, 405));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        7491554902038655417,
+        10217150490898244180,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

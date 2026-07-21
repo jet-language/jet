@@ -22,7 +22,7 @@ use super::super::Interpreter::{Flow, Interp};
 use super::super::Value::CtValue;
 use super::core_calls::{
     apply_core_call, apply_impure_core_call, as_bytes, as_float, display_core_pure_value,
-    shuffle_ct_list, with_ambient_rng,
+    shuffle_ct_list, sketch_add, with_ambient_rng,
 };
 use super::repl_process::{apply_repl_fs_call, pin_repl_command, repl_effect_request};
 
@@ -2921,6 +2921,11 @@ impl<'a> Interp<'a> {
                             Ok(CtValue::Unit)
                         }
                     };
+                }
+                if let Some(result) = sketch_add(&container, &argv, span) {
+                    let (ret, updated) = result?;
+                    self.write_back(receiver, updated, scope)?;
+                    return Ok(ret);
                 }
                 let ret = apply_mutating(&mut container, method, argv, span)?;
                 self.write_back(receiver, container, scope)?;
