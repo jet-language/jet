@@ -66,9 +66,9 @@ fn run() {
 
     let (code, stdout, stderr) = build_and_run("jet_http_server_tls", "bad_cert", src);
     assert_eq!(code, 0, "{stderr}");
-    assert_eq!(
-        stdout.trim(),
-        "TLS certificate PEM did not contain a certificate"
+    assert!(
+        stdout.contains("TLS certificate PEM did not contain a certificate"),
+        "bad cert should stay Jet-voiced:\nstdout={stdout}\nstderr={stderr}"
     );
 }
 
@@ -88,6 +88,26 @@ fn run() {
     assert!(rendered.contains("Error [E0125]"), "{rendered}");
     assert!(
         rendered.contains("`serve` needs `tls:` before the third argument"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn server_bind_tls_requires_named_tls_option() {
+    let src = r#"
+use core.http.server as server
+
+fn run() {
+    mux :: server.mux()
+    _ :: server.bind("127.0.0.1:0", mux, server.tls("cert", "key"))
+}
+"#;
+
+    let err = jet::compile(src).expect_err("unlabeled bind TLS argument should be rejected");
+    let rendered = jet::render_diagnostics("tests/http_server_tls/bad_bind_label.jet", src, &err);
+    assert!(rendered.contains("Error [E0125]"), "{rendered}");
+    assert!(
+        rendered.contains("`bind` needs `tls:` before the third argument"),
         "{rendered}"
     );
 }

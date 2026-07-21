@@ -360,6 +360,185 @@ pub const RUSTLS_NATIVE_CERTS_CRATE_SPEC: (&str, &str) = ("rustls-native-certs",
 /// `core.http.server.tls` is used.
 const HTTP_SERVER_TLS_RUNTIME: &str = include_str!("Prelude/HttpServerTls.rs");
 
+#[cfg(test)]
+mod http_server_tls_persist_tests {
+    #![allow(dead_code)]
+
+    include!("Prelude/HttpServerTls.rs");
+
+    fn fixture_tls() -> (String, String) {
+        (
+            include_str!("../../../tests/fixtures/tls/localhost.cert.pem").to_string(),
+            include_str!("../../../tests/fixtures/tls/localhost.key.pem").to_string(),
+        )
+    }
+
+    fn client(
+        addr: std::net::SocketAddr,
+    ) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
+        use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+        use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+        use rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        #[derive(Debug)]
+        struct AcceptFixture;
+        impl ServerCertVerifier for AcceptFixture {
+            fn verify_server_cert(
+                &self,
+                _end_entity: &CertificateDer<'_>,
+                _intermediates: &[CertificateDer<'_>],
+                _server_name: &ServerName<'_>,
+                _ocsp_response: &[u8],
+                _now: UnixTime,
+            ) -> Result<ServerCertVerified, TlsError> {
+                Ok(ServerCertVerified::assertion())
+            }
+            fn verify_tls12_signature(
+                &self,
+                _message: &[u8],
+                _cert: &CertificateDer<'_>,
+                _dss: &DigitallySignedStruct,
+            ) -> Result<HandshakeSignatureValid, TlsError> {
+                Ok(HandshakeSignatureValid::assertion())
+            }
+            fn verify_tls13_signature(
+                &self,
+                _message: &[u8],
+                _cert: &CertificateDer<'_>,
+                _dss: &DigitallySignedStruct,
+            ) -> Result<HandshakeSignatureValid, TlsError> {
+                Ok(HandshakeSignatureValid::assertion())
+            }
+            fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+                rustls::crypto::ring::default_provider()
+                    .signature_verification_algorithms
+                    .supported_schemes()
+            }
+        }
+
+        let config = std::sync::Arc::new(
+            rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(std::sync::Arc::new(AcceptFixture))
+                .with_no_client_auth(),
+        );
+        let name = rustls::pki_types::ServerName::try_from("localhost").expect("name");
+        let conn = rustls::ClientConnection::new(config, name).expect("conn");
+        let sock = std::net::TcpStream::connect(addr).expect("connect");
+        sock.set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        sock.set_write_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        rustls::StreamOwned::new(conn, sock)
+    }
+
+    fn exchange(
+        stream: &mut rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>,
+        request: &[u8],
+    ) -> String {
+        use std::io::{Read, Write};
+        stream.write_all(request).expect("write");
+        stream.flush().expect("flush");
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    raw.extend_from_slice(&buf[..n]);
+                    if let Some(header_end) = raw.windows(4).position(|window| window == b"\r\n\r\n") {
+                        let headers = std::str::from_utf8(&raw[..header_end]).unwrap_or("");
+                        let length = headers.lines().skip(1).find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        });
+                        if let Some(length) = length {
+                            if raw.len() >= header_end + 4 + length {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    if !raw.is_empty() {
+                        break;
+                    }
+                }
+                Err(error) => panic!("read: {error}"),
+            }
+        }
+        String::from_utf8_lossy(&raw).into_owned()
+    }
+
+    #[test]
+    fn session_keep_alive_reuses_rustls_connection() {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (cert, key) = fixture_tls();
+        jet_http_server_tls_validate_impl(&cert, &key).expect("validate");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let server_calls = calls.clone();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server_stop = stop.clone();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let dispatch_calls = server_calls.clone();
+            jet_http_server_tls_session_impl(
+                &cert,
+                &key,
+                stream,
+                Box::new(move |raw| {
+                    let n = dispatch_calls.fetch_add(1, Ordering::AcqRel) + 1;
+                    let keep = !std::str::from_utf8(raw)
+                        .unwrap_or("")
+                        .to_ascii_lowercase()
+                        .contains("connection: close");
+                    let body = format!("pong{n}");
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: {}\r\n\r\n{body}",
+                        body.len(),
+                        if keep { "keep-alive" } else { "close" }
+                    );
+                    Ok((response.into_bytes(), keep))
+                }),
+                Box::new(move || server_stop.load(Ordering::Acquire)),
+            )
+            .expect("tls session");
+        });
+
+        let mut client = client(addr);
+        let first = exchange(
+            &mut client,
+            b"GET /ping HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        );
+        let second = exchange(
+            &mut client,
+            b"GET /ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        );
+        assert!(first.ends_with("\r\n\r\npong1"), "{first}");
+        assert!(second.ends_with("\r\n\r\npong2"), "{second}");
+        assert_eq!(calls.load(Ordering::Acquire), 2);
+        stop.store(true, Ordering::Release);
+        let _ = client.write_all(b"GET /ping HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        server.join().unwrap();
+        assert_eq!(calls.load(Ordering::Acquire), 2, "stop must prevent keep-alive reuse");
+    }
+}
+
 /// Hand-written client TLS stream runtime emitted when `core.net.tls_connect` is used.
 const NET_TLS_RUNTIME: &str = include_str!("Prelude/NetTls.rs");
 

@@ -2381,12 +2381,21 @@ pub(crate) fn emit_tir_core_call(
             format!("jet_http_client_request_new(&({}), &({}))", arg(0), u)
         }
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
+        ("core.http.server", "bind") if args.len() == 3 => {
+            let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+            format!(
+                "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
+                arg(0),
+                arg(1),
+                arg(2)
+            )
+        }
         ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHttpError::Io {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
         ("core.http.server", "serve") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
-                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, handler| {ffi}::jet_http_server_tls_handle_impl(cert, key, stream, handler)).map_err(|_| JetHttpError::Io {{ operation: \"serve TLS\".to_string() }})",
+                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
                 arg(0),
                 arg(1),
                 arg(2)

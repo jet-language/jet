@@ -212,6 +212,12 @@ struct JetHttpServer {
     inner: std::sync::Arc<JetHttpServerState>,
 }
 
+type JetHttpTlsConn = std::sync::Arc<
+    dyn Fn(std::net::TcpStream, std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), String>
+        + Send
+        + Sync,
+>;
+
 struct JetHttpServerState {
     listener: std::sync::Mutex<Option<std::net::TcpListener>>,
     mux: JetHttpMux,
@@ -223,6 +229,7 @@ struct JetHttpServerState {
     lifecycle: std::sync::atomic::AtomicU8,
     report: std::sync::Mutex<Option<JetHttpShutdownReport>>,
     report_ready: std::sync::Condvar,
+    tls_conn: Option<JetHttpTlsConn>,
 }
 
 impl std::fmt::Display for JetHttpReadError {
@@ -340,23 +347,49 @@ fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), shutdown, None, None).map(|_| ())
+    jet_http_server_run_listener(
+        listener,
+        mux,
+        JetHttpServerOptions::safe(),
+        shutdown,
+        None,
+        None,
+        None,
+    )
+    .map(|_| ())
 }
 
 fn jet_http_server_bind(addr: &String, mux: JetHttpMux) -> Result<JetHttpServer, String> {
+    jet_http_server_bind_with_tls(addr, mux, None)
+}
+
+fn jet_http_server_bind_with_tls(
+    addr: &String,
+    mux: JetHttpMux,
+    tls_conn: Option<JetHttpTlsConn>,
+) -> Result<JetHttpServer, String> {
     jet_http_mux_validate(&mux)?;
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|error| format!("bind on `{addr}` failed: {error}"))?;
-    let local_addr = listener.local_addr().map_err(|error| format!("local address failed: {error}"))?.to_string();
-    Ok(JetHttpServer { inner: std::sync::Arc::new(JetHttpServerState {
-        listener: std::sync::Mutex::new(Some(listener)), mux, local_addr,
-        shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        shutdown_called: std::sync::atomic::AtomicBool::new(false),
-        grace_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(30_000)),
-        drain_deadline_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
-        lifecycle: std::sync::atomic::AtomicU8::new(0), report: std::sync::Mutex::new(None),
-        report_ready: std::sync::Condvar::new(),
-    }) })
+    let local_addr = listener
+        .local_addr()
+        .map_err(|error| format!("local address failed: {error}"))?
+        .to_string();
+    Ok(JetHttpServer {
+        inner: std::sync::Arc::new(JetHttpServerState {
+            listener: std::sync::Mutex::new(Some(listener)),
+            mux,
+            local_addr,
+            shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            shutdown_called: std::sync::atomic::AtomicBool::new(false),
+            grace_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(30_000)),
+            drain_deadline_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            lifecycle: std::sync::atomic::AtomicU8::new(0),
+            report: std::sync::Mutex::new(None),
+            report_ready: std::sync::Condvar::new(),
+            tls_conn,
+        }),
+    })
 }
 
 fn jet_http_server_local_addr(server: &JetHttpServer) -> Result<String, String> { Ok(server.inner.local_addr.clone()) }
@@ -374,6 +407,7 @@ fn jet_http_server_serve(server: &JetHttpServer) -> Result<JetHttpShutdownReport
         server.inner.shutdown.clone(),
         Some(server.inner.grace_ms.clone()),
         Some(server.inner.drain_deadline_ms.clone()),
+        server.inner.tls_conn.clone(),
     );
     server.inner.lifecycle.store(2, Ordering::Release);
     if let Ok(report) = result {
@@ -406,6 +440,7 @@ fn jet_http_server_run_listener(
     shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
     dynamic_grace_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
     drain_deadline_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    tls_conn: Option<JetHttpTlsConn>,
 ) -> Result<JetHttpShutdownReport, String> {
     use std::io::{Read, Write};
     use std::sync::atomic::Ordering;
@@ -437,23 +472,29 @@ fn jet_http_server_run_listener(
         let worker_deadline = drain_deadline_ms.clone();
         let worker_connection_count = connection_count.clone();
         let worker_per_ip = per_ip.clone();
+        let worker_tls = tls_conn.clone();
         workers.push(std::thread::spawn(move || loop {
             let received = worker_rx.lock().unwrap().recv();
             let Ok((mut stream, peer_ip)) = received else { break };
             if worker_force_cancel.load(Ordering::Acquire) {
                 let _ = stream.shutdown(std::net::Shutdown::Both);
             } else {
+                let peer = stream.peer_addr().ok();
                 if let Ok(tracked) = stream.try_clone() { worker_active.lock().unwrap().push(tracked); }
-                jet_http_server_handle_stream(
-                    &mut stream,
-                    &worker_mux,
-                    &worker_options,
-                    &worker_shutdown,
-                    worker_grace.as_deref(),
-                    Some(worker_deadline.as_ref()),
-                );
+                if let Some(tls) = worker_tls.as_ref() {
+                    let _ = tls(stream, worker_shutdown.clone());
+                } else {
+                    jet_http_server_handle_stream(
+                        &mut stream,
+                        &worker_mux,
+                        &worker_options,
+                        &worker_shutdown,
+                        worker_grace.as_deref(),
+                        Some(worker_deadline.as_ref()),
+                    );
+                }
                 worker_completed.fetch_add(1, Ordering::Relaxed);
-                worker_active.lock().unwrap().retain(|tracked| tracked.peer_addr().ok() != stream.peer_addr().ok());
+                worker_active.lock().unwrap().retain(|tracked| tracked.peer_addr().ok() != peer);
             }
             worker_connection_count.fetch_sub(1, Ordering::AcqRel);
             let mut counts = worker_per_ip.lock().unwrap();
@@ -2622,20 +2663,21 @@ fn jet_http_srv_read_error_response(error: &JetHttpReadError) -> String {
     )
 }
 
-fn jet_http_mux_serve_tls<V, H>(
+fn jet_http_mux_serve_tls<V, S>(
     addr: &String,
     mux: JetHttpMux,
     tls: JetHttpServerTls,
     validate: V,
-    handle: H,
+    session: S,
 ) -> Result<(), String>
 where
     V: Fn(&String, &String) -> Result<(), String>,
-    H: Fn(
+    S: Fn(
             &String,
             &String,
             std::net::TcpStream,
-            Box<dyn FnOnce(String) -> String + Send>,
+            Box<dyn FnMut(&[u8]) -> Result<(Vec<u8>, bool), String> + Send>,
+            Box<dyn Fn() -> bool + Send>,
         ) -> Result<(), String>
         + Clone
         + Send
@@ -2645,36 +2687,93 @@ where
     validate(&tls.cert_pem, &tls.key_pem)?;
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
-    let mux = std::sync::Arc::new(mux);
-    loop {
-        let (stream, _peer) = match listener.accept() {
-            Ok(x) => x,
-            Err(e) => {
-                eprintln!("http TLS accept failed: {}", e);
-                continue;
-            }
-        };
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tls_conn = jet_http_tls_conn_handler(mux.clone(), tls, session);
+    jet_http_server_run_listener(
+        listener,
+        mux,
+        JetHttpServerOptions::safe(),
+        shutdown,
+        None,
+        None,
+        Some(tls_conn),
+    )
+    .map(|_| ())
+}
+
+fn jet_http_server_bind_tls<V, S>(
+    addr: &String,
+    mux: JetHttpMux,
+    tls: JetHttpServerTls,
+    validate: V,
+    session: S,
+) -> Result<JetHttpServer, String>
+where
+    V: Fn(&String, &String) -> Result<(), String>,
+    S: Fn(
+            &String,
+            &String,
+            std::net::TcpStream,
+            Box<dyn FnMut(&[u8]) -> Result<(Vec<u8>, bool), String> + Send>,
+            Box<dyn Fn() -> bool + Send>,
+        ) -> Result<(), String>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    validate(&tls.cert_pem, &tls.key_pem)?;
+    let tls_conn = jet_http_tls_conn_handler(mux.clone(), tls, session);
+    jet_http_server_bind_with_tls(addr, mux, Some(tls_conn))
+}
+
+fn jet_http_tls_conn_handler<S>(mux: JetHttpMux, tls: JetHttpServerTls, session: S) -> JetHttpTlsConn
+where
+    S: Fn(
+            &String,
+            &String,
+            std::net::TcpStream,
+            Box<dyn FnMut(&[u8]) -> Result<(Vec<u8>, bool), String> + Send>,
+            Box<dyn Fn() -> bool + Send>,
+        ) -> Result<(), String>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    std::sync::Arc::new(move |stream, shutdown| {
         let m = mux.clone();
         let tls_cfg = tls.clone();
-        let handle_one = handle.clone();
-        std::thread::spawn(move || {
-            let dispatch = Box::new(move |raw: String| {
-                match jet_http_srv_parse(raw.as_bytes()) {
-                    Ok(req) => match jet_http_mux_dispatch(&m, req) {
-                        Ok(response) => jet_http_srv_format(&response),
-                        Err(_) => jet_http_srv_format(&jet_http_srv_response(
-                            500,
-                            &"500 Internal Server Error".to_string(),
-                        )),
-                    },
-                    Err(error) => jet_http_srv_read_error_response(&error),
+        let session = session.clone();
+        let stop = shutdown.clone();
+        session(
+            &tls_cfg.cert_pem,
+            &tls_cfg.key_pem,
+            stream,
+            Box::new(move |raw| {
+                match jet_http_srv_parse(raw) {
+                    Ok(req) => {
+                        let version = jet_http_srv_request_version(raw).to_string();
+                        let keep = jet_http_srv_request_keep_alive(&version, &req.headers);
+                        let response = match jet_http_mux_dispatch(&m, req) {
+                            Ok(response) => response,
+                            Err(JetHttpError::BodyTooLarge { .. }) => jet_http_srv_empty_response(413),
+                            Err(JetHttpError::InvalidFraming) => jet_http_srv_empty_response(400),
+                            Err(JetHttpError::UnsupportedEncoding) => jet_http_srv_empty_response(415),
+                            Err(_) => jet_http_srv_response(500, &"500 Internal Server Error".to_string()),
+                        };
+                        let close = !keep || stop.load(std::sync::atomic::Ordering::Acquire);
+                        Ok((
+                            jet_http_srv_format_connection(&response, &version, close).into_bytes(),
+                            !close,
+                        ))
+                    }
+                    Err(error) => Ok((jet_http_srv_read_error_response(&error).into_bytes(), false)),
                 }
-            });
-            if let Err(e) = handle_one(&tls_cfg.cert_pem, &tls_cfg.key_pem, stream, dispatch) {
-                eprintln!("http TLS connection failed: {}", e);
-            }
-        });
-    }
+            }),
+            Box::new(move || shutdown.load(std::sync::atomic::Ordering::Acquire)),
+        )
+    })
 }
 
 fn jet_http_srv_parse(raw: &[u8]) -> Result<JetHttpRequest, JetHttpReadError> {

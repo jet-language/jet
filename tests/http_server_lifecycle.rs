@@ -607,7 +607,7 @@ fn plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries() {
     options.read_header_timeout = std::time::Duration::from_millis(40);
     options.read_idle_timeout = std::time::Duration::from_millis(40);
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     let pipelined = exchange(
@@ -732,7 +732,7 @@ fn head_preserves_representation_length_without_a_wire_body() {
     options.workers = 1;
     options.admission_queue = 8;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     let implicit = exchange(
@@ -838,7 +838,7 @@ fn reset_content_has_zero_length_and_preserves_pipeline_boundaries() {
     options.workers = 1;
     options.admission_queue = 8;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     let pipelined = exchange(
@@ -906,7 +906,7 @@ fn invalid_response_statuses_fail_closed_without_breaking_pipelines() {
     options.workers = 1;
     options.admission_queue = 8;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     for path in ["/low", "/high"] {
@@ -989,7 +989,7 @@ fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
     options.read_idle_timeout = std::time::Duration::from_secs(1);
     options.read_body_timeout = std::time::Duration::from_secs(1);
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     let pipelined = exchange(
@@ -1147,7 +1147,7 @@ fn expect_continue_is_ordered_bounded_and_rejects_before_dispatch() {
     options.read_idle_timeout = std::time::Duration::from_millis(200);
     options.read_body_timeout = std::time::Duration::from_millis(200);
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     let arrived_content_length = read_rest(&mut arrived_content_length);
@@ -1238,7 +1238,7 @@ fn host_authority_is_single_valid_and_required_for_http11() {
     options.workers = 1;
     options.admission_queue = 24;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     for valid in [
@@ -1340,7 +1340,7 @@ fn absolute_form_target_matches_host_before_routing() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     for (request, expected_path) in [
@@ -1442,7 +1442,7 @@ fn connect_authority_form_matches_host_before_routing() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     for (request, expected_path) in [
@@ -1780,7 +1780,7 @@ fn request_method_is_one_http_token_before_body_or_dispatch() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     for method in ["GET", "M-SEARCH", "custom!#$%&'*+-.^_`|~"] {
@@ -1858,7 +1858,7 @@ fn request_methods_are_case_sensitive_during_routing() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     for method in ["GET", "get"] {
@@ -1958,7 +1958,7 @@ fn options_asterisk_reports_server_methods_without_dispatch() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     let standalone = exchange(
@@ -2053,7 +2053,7 @@ fn connection_options_are_tokens_before_reuse_or_body_permission() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     let http10_extensions = exchange(
@@ -2148,7 +2148,7 @@ fn content_length_is_one_identical_decimal_value_before_body_permission() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     for content_length in [
@@ -2220,7 +2220,7 @@ fn shutdown_closes_idle_keepalive_and_starts_no_new_request() {
     options.admission_queue = 2;
     options.shutdown_grace = std::time::Duration::from_millis(500);
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server")
     });
 
     let mut active = std::net::TcpStream::connect(addr).expect("active connect");
@@ -2268,7 +2268,7 @@ fn bounded_admission_returns_503_and_shutdown_drains_accepted_work() {
         shutdown_grace: std::time::Duration::from_secs(1),
         ..JetHttpServerOptions::safe()
     };
-    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server"));
+    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server"));
     let slow = std::thread::spawn(move || request(addr, b"GET /slow HTTP/1.1\r\nHost: local\r\n\r\n"));
     entered_rx.recv_timeout(std::time::Duration::from_secs(1)).expect("slow admitted");
     let queued = std::thread::spawn(move || request(addr, b"GET /queued HTTP/1.1\r\nHost: local\r\n\r\n"));
@@ -2340,7 +2340,7 @@ fn shutdown_grace_cancels_straggler_socket_and_returns_bounded_report() {
         shutdown_grace: std::time::Duration::from_millis(30),
         ..JetHttpServerOptions::safe()
     };
-    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server"));
+    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server"));
     let mut client = std::net::TcpStream::connect(addr).expect("connect");
     client.write_all(b"GET /slow HTTP/1.1\r\nHost: local\r\n\r\n").expect("write");
     entered_rx.recv_timeout(std::time::Duration::from_secs(1)).expect("handler entered");
@@ -2830,7 +2830,7 @@ fn server_enforces_and_releases_per_ip_connection_capacity() {
         max_connections_per_ip: 1,
         ..JetHttpServerOptions::safe()
     };
-    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, stop, None, None).unwrap());
+    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, stop, None, None, None).unwrap());
     let held = std::thread::spawn(move || request(addr, b"GET /hold HTTP/1.1\r\nHost: local\r\n\r\n"));
     entered_rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
     let rejected = request(addr, b"GET /ok HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
@@ -3164,7 +3164,7 @@ fn native_http2_routes_huffman_headers_and_enforces_stream_framing() {
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop = shutdown.clone();
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), stop, None, None).unwrap()
+        jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), stop, None, None, None).unwrap()
     });
 
     let mut stream = std::net::TcpStream::connect(addr).unwrap();
@@ -3723,4 +3723,59 @@ fn h2_try_read_frame(stream: &mut std::net::TcpStream) -> Option<(u8, u8, u32, V
         u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff,
         payload,
     ))
+}
+
+
+#[test]
+fn tls_slot_keep_alive_and_shutdown_share_server_api() {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // The HTTPS path installs a JetHttpTlsConn that wraps rustls; this test proves
+    // the shared Server.bind/serve/shutdown slot stops keep-alive after shutdown
+    // without needing rustls in the lifecycle crate.
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/", move |_| {
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"ok".to_string())
+    });
+    let tls_mux = mux.clone();
+    let tls_conn: JetHttpTlsConn = std::sync::Arc::new(move |mut stream, shutdown| {
+        let options = JetHttpServerOptions::safe();
+        jet_http_server_handle_stream(&mut stream, &tls_mux, &options, &shutdown, None, None);
+        Ok(())
+    });
+    let server = jet_http_server_bind_with_tls(&"127.0.0.1:0".to_string(), mux, Some(tls_conn))
+        .expect("bind tls slot");
+    let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
+        .expect("addr")
+        .parse()
+        .expect("parse");
+    let serving = server.clone();
+    let serve = std::thread::spawn(move || jet_http_server_serve(&serving));
+
+    let mut client = std::net::TcpStream::connect(addr).expect("connect");
+    client
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
+    client.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n").unwrap();
+    assert!(read_response(&mut client).ends_with("\r\n\r\nok"));
+    client.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n").unwrap();
+    assert!(read_response(&mut client).ends_with("\r\n\r\nok"));
+    assert_eq!(calls.load(Ordering::Acquire), 2);
+
+    let started = std::time::Instant::now();
+    let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 200 }).expect("shutdown");
+    let _ = client.write_all(b"GET / HTTP/1.1\r\nHost: local\r\n\r\n");
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    assert_eq!(
+        calls.load(Ordering::Acquire),
+        2,
+        "tls-slot shutdown started a keep-alive request"
+    );
+    assert!(started.elapsed() < std::time::Duration::from_millis(1500), "{report:?}");
+    assert_eq!(report.user_completed, report.user_accepted, "{report:?}");
+    let _ = serve.join().expect("serve join");
 }
