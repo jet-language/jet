@@ -1013,6 +1013,8 @@ fn value_method_boundary(owner: &str, method: &str) -> Option<&'static str> {
     match (owner, method) {
         ("List" | "FixedList", "view") => Some("named E0214 retired spelling boundary"),
         ("FixedList", "insert") => Some("named E0964 fixed-length boundary"),
+        ("Float", "origin") => Some("named float-debug tracking boundary"),
+        ("Stopwatch", "elapsed_millis") => Some("named clock boundary"),
         _ => None,
     }
 }
@@ -1191,6 +1193,14 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                         )
                             && ct_values.contains(&("Int".to_string(), entry.method.clone()))
                     }
+                    // D-FLOATW1: CtFloat preserves F32 width, so Float method
+                    // dispatch is honest coverage for the F32 surface.
+                    "F32" => {
+                        matches!(
+                            entry.method.as_str(),
+                            "is_nan" | "is_infinite" | "is_finite" | "to_string"
+                        ) && ct_values.contains(&("Float".to_string(), entry.method.clone()))
+                    }
                     _ => false,
                 };
                 if let Some(reason) = value_method_boundary(&entry.owner, &entry.method) {
@@ -1323,15 +1333,15 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     }
     for method in ["is_nan", "is_infinite", "is_finite"] {
         assert_eq!(record(&records, Surface::Value, "Float", method).class, Class::Covered);
-        assert_eq!(record(&records, Surface::Value, "F32", method).class, Class::PurePending);
+        assert_eq!(record(&records, Surface::Value, "F32", method).class, Class::Covered);
     }
-    // CtValue::Float currently erases F32's width. Do not infer coverage from
-    // Float dispatch until comptime preserves f32 rounding across stored values.
-    assert_eq!(record(&records, Surface::Value, "F32", "to_string").class, Class::PurePending);
+    // D-FLOATW1: F32 width is preserved in CtFloat, so F32.to_string shares Float display.
+    assert_eq!(record(&records, Surface::Value, "F32", "to_string").class, Class::Covered);
     for owner in ["I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
         assert_eq!(record(&records, Surface::Value, owner, "to_string").class, Class::Covered);
     }
-    assert_eq!(record(&records, Surface::Value, "Float", "origin").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::Value, "Float", "origin").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Value, "Stopwatch", "elapsed_millis").class, Class::Boundary);
     for owner in ["Int", "I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
         for method in [
             "count_ones",
@@ -1567,14 +1577,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 752, 63, 363));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 756, 57, 365));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        10127880771577218800,
+        11351262486098323257,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
