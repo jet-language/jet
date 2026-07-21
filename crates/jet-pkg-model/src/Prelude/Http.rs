@@ -233,6 +233,10 @@ struct ClientPolicy {
     decompress: bool,
     system_roots: bool,
     custom_roots: Vec<Vec<u8>>,
+    tls_min_version: i64,
+    tls_max_version: i64,
+    tls_identity_cert: Vec<u8>,
+    tls_identity_key: Vec<u8>,
 }
 
 impl Default for ClientPolicy {
@@ -255,6 +259,10 @@ impl Default for ClientPolicy {
             decompress: true,
             system_roots: true,
             custom_roots: Vec::new(),
+            tls_min_version: 12,
+            tls_max_version: 13,
+            tls_identity_cert: Vec::new(),
+            tls_identity_key: Vec::new(),
         }
     }
 }
@@ -271,6 +279,40 @@ struct ClientHandle {
     namespace: i64,
     shared: Arc<ClientShared>,
     policy: ClientPolicy,
+}
+
+#[derive(Clone, Copy)]
+struct TlsSettings<'a> {
+    system_roots: bool,
+    custom_roots: &'a [Vec<u8>],
+    min_version: i64,
+    max_version: i64,
+    identity_cert: &'a [u8],
+    identity_key: &'a [u8],
+}
+
+impl TlsSettings<'static> {
+    const SYSTEM: Self = Self {
+        system_roots: true,
+        custom_roots: &[],
+        min_version: 12,
+        max_version: 13,
+        identity_cert: &[],
+        identity_key: &[],
+    };
+}
+
+impl ClientPolicy {
+    fn tls_settings(&self) -> TlsSettings<'_> {
+        TlsSettings {
+            system_roots: self.system_roots,
+            custom_roots: &self.custom_roots,
+            min_version: self.tls_min_version,
+            max_version: self.tls_max_version,
+            identity_cert: &self.tls_identity_cert,
+            identity_key: &self.tls_identity_key,
+        }
+    }
 }
 
 fn client_handles() -> &'static Mutex<HashMap<i64, ClientHandle>> {
@@ -329,6 +371,13 @@ pub fn jet_http_client_redirects_impl(id: i64, limit: i64) -> Result<i64, JetHtt
     clone_client_with(id, |policy| policy.redirect_limit = limit)
 }
 
+pub fn jet_http_client_proxy_from_environment_impl(id: i64) -> Result<i64, JetHttpBridgeError> {
+    clone_client_with(id, |policy| {
+        policy.proxy = None;
+        policy.use_environment_proxy = true;
+    })
+}
+
 pub fn jet_http_client_proxy_impl(id: i64, proxy: Option<&str>) -> Result<i64, JetHttpBridgeError> {
     let proxy = proxy
         .map(parse_url)
@@ -375,6 +424,49 @@ pub fn jet_http_client_root_certificate_impl(
     clone_client_with(id, |policy| {
         policy.system_roots = include_system_roots;
         policy.custom_roots.push(certificate_der.to_vec());
+    })
+}
+
+pub fn jet_http_client_tls_impl(
+    id: i64,
+    trust_mode: i64,
+    custom_ca_pem: &[u8],
+    identity_cert_pem: &[u8],
+    identity_key_pem: &[u8],
+    min_version: i64,
+    max_version: i64,
+) -> Result<i64, JetHttpBridgeError> {
+    if !matches!(trust_mode, 0 | 1 | 2) {
+        return Err(JetHttpBridgeError::Tls);
+    }
+    if min_version > max_version || !matches!(min_version, 12 | 13) || !matches!(max_version, 12 | 13)
+    {
+        return Err(JetHttpBridgeError::Tls);
+    }
+    if (identity_cert_pem.is_empty()) != (identity_key_pem.is_empty()) {
+        return Err(JetHttpBridgeError::Tls);
+    }
+    let custom_roots = if matches!(trust_mode, 1 | 2) {
+        http_tls_pem_certificates(custom_ca_pem)?
+    } else if !custom_ca_pem.is_empty() {
+        return Err(JetHttpBridgeError::Tls);
+    } else {
+        Vec::new()
+    };
+    if matches!(trust_mode, 1 | 2) && custom_roots.is_empty() {
+        return Err(JetHttpBridgeError::Tls);
+    }
+    if !identity_cert_pem.is_empty() {
+        let _ = http_tls_pem_certificates(identity_cert_pem)?;
+        let _ = http_tls_private_key(identity_key_pem)?;
+    }
+    clone_client_with(id, |policy| {
+        policy.system_roots = matches!(trust_mode, 0 | 1);
+        policy.custom_roots = custom_roots;
+        policy.tls_min_version = min_version;
+        policy.tls_max_version = max_version;
+        policy.tls_identity_cert = identity_cert_pem.to_vec();
+        policy.tls_identity_key = identity_key_pem.to_vec();
     })
 }
 
@@ -491,8 +583,7 @@ pub fn jet_http_client_send_with_impl(
         handle.policy.http2,
         handle.policy.http11,
         handle.policy.h2c,
-        handle.policy.system_roots,
-        &handle.policy.custom_roots,
+        handle.policy.tls_settings(),
     )
 }
 
@@ -1421,14 +1512,113 @@ fn connect_plain(
     Err(last)
 }
 
+fn http_tls_pem_certificates(pem: &[u8]) -> Result<Vec<Vec<u8>>, JetHttpBridgeError> {
+    const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
+    const END: &str = "-----END CERTIFICATE-----";
+    let text = std::str::from_utf8(pem).map_err(|_| JetHttpBridgeError::Tls)?;
+    let mut rest = text;
+    let mut out = Vec::new();
+    while let Some(start) = rest.find(BEGIN) {
+        if !rest[..start].trim().is_empty() {
+            return Err(JetHttpBridgeError::Tls);
+        }
+        rest = &rest[start + BEGIN.len()..];
+        let stop = rest.find(END).ok_or(JetHttpBridgeError::Tls)?;
+        out.push(http_tls_pem_base64(&rest[..stop])?);
+        rest = &rest[stop + END.len()..];
+    }
+    if out.is_empty() || !rest.trim().is_empty() {
+        return Err(JetHttpBridgeError::Tls);
+    }
+    Ok(out)
+}
+
+fn http_tls_private_key(
+    pem: &[u8],
+) -> Result<rustls::pki_types::PrivateKeyDer<'static>, JetHttpBridgeError> {
+    let text = std::str::from_utf8(pem).map_err(|_| JetHttpBridgeError::Tls)?;
+    let parse = |begin: &str, end: &str| -> Result<Option<Vec<u8>>, JetHttpBridgeError> {
+        let Some(start) = text.find(begin) else {
+            return Ok(None);
+        };
+        if !text[..start].trim().is_empty() {
+            return Err(JetHttpBridgeError::Tls);
+        }
+        let rest = &text[start + begin.len()..];
+        let stop = rest.find(end).ok_or(JetHttpBridgeError::Tls)?;
+        if !rest[stop + end.len()..].trim().is_empty() {
+            return Err(JetHttpBridgeError::Tls);
+        }
+        Ok(Some(http_tls_pem_base64(&rest[..stop])?))
+    };
+    if let Some(der) = parse("-----BEGIN PRIVATE KEY-----", "-----END PRIVATE KEY-----")? {
+        return Ok(rustls::pki_types::PrivateKeyDer::Pkcs8(
+            rustls::pki_types::PrivatePkcs8KeyDer::from(der),
+        ));
+    }
+    if let Some(der) = parse("-----BEGIN RSA PRIVATE KEY-----", "-----END RSA PRIVATE KEY-----")? {
+        return Ok(rustls::pki_types::PrivateKeyDer::Pkcs1(
+            rustls::pki_types::PrivatePkcs1KeyDer::from(der),
+        ));
+    }
+    if let Some(der) = parse("-----BEGIN EC PRIVATE KEY-----", "-----END EC PRIVATE KEY-----")? {
+        return Ok(rustls::pki_types::PrivateKeyDer::Sec1(
+            rustls::pki_types::PrivateSec1KeyDer::from(der),
+        ));
+    }
+    Err(JetHttpBridgeError::Tls)
+}
+
+fn http_tls_pem_base64(text: &str) -> Result<Vec<u8>, JetHttpBridgeError> {
+    let filtered: Vec<u8> = text.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if filtered.len() % 4 != 0 {
+        return Err(JetHttpBridgeError::Tls);
+    }
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < filtered.len() {
+        let mut vals = [0u8; 4];
+        let mut pad = 0usize;
+        for j in 0..4 {
+            let byte = filtered[i + j];
+            vals[j] = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => {
+                    pad += 1;
+                    0
+                }
+                _ => return Err(JetHttpBridgeError::Tls),
+            };
+            if byte == b'=' && j < 2 {
+                return Err(JetHttpBridgeError::Tls);
+            }
+        }
+        if pad > 2 {
+            return Err(JetHttpBridgeError::Tls);
+        }
+        out.push((vals[0] << 2) | (vals[1] >> 4));
+        if pad < 2 {
+            out.push(((vals[1] & 0x0f) << 4) | (vals[2] >> 2));
+        }
+        if pad < 1 {
+            out.push(((vals[2] & 0x03) << 6) | vals[3]);
+        }
+        i += 4;
+    }
+    Ok(out)
+}
+
 fn tls_stream(
     tcp: TcpStream,
     host: &str,
     timeout: Duration,
     http2: bool,
     http11: bool,
-    system_roots: bool,
-    custom_roots: &[Vec<u8>],
+    tls: TlsSettings<'_>,
 ) -> Result<HttpStream, JetHttpBridgeError> {
     static PROVIDER: std::sync::Once = std::sync::Once::new();
     PROVIDER.call_once(|| {
@@ -1439,14 +1629,14 @@ fn tls_stream(
     tcp.set_write_timeout(Some(timeout))
         .map_err(|_| JetHttpBridgeError::Tls)?;
     let mut roots = rustls::RootCertStore::empty();
-    if system_roots {
+    if tls.system_roots {
         let native =
             rustls_native_certs::load_native_certs().map_err(|_| JetHttpBridgeError::Tls)?;
         for cert in native {
             roots.add(cert).map_err(|_| JetHttpBridgeError::Tls)?;
         }
     }
-    for cert in custom_roots {
+    for cert in tls.custom_roots {
         roots
             .add(rustls::pki_types::CertificateDer::from(cert.clone()))
             .map_err(|_| JetHttpBridgeError::Tls)?;
@@ -1454,9 +1644,31 @@ fn tls_stream(
     if roots.is_empty() {
         return Err(JetHttpBridgeError::Tls);
     }
-    let mut config = rustls::ClientConfig::builder()
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+    if tls.min_version > tls.max_version
+        || !matches!(tls.min_version, 12 | 13)
+        || !matches!(tls.max_version, 12 | 13)
+    {
+        return Err(JetHttpBridgeError::Tls);
+    }
+    let versions: &[&'static rustls::SupportedProtocolVersion] = match (tls.min_version, tls.max_version) {
+        (12, 12) => &[&rustls::version::TLS12],
+        (13, 13) => &[&rustls::version::TLS13],
+        _ => &[&rustls::version::TLS13, &rustls::version::TLS12],
+    };
+    let builder = rustls::ClientConfig::builder_with_protocol_versions(versions)
+        .with_root_certificates(roots);
+    let mut config = if tls.identity_cert.is_empty() {
+        builder.with_no_client_auth()
+    } else {
+        let certs = http_tls_pem_certificates(tls.identity_cert)?
+            .into_iter()
+            .map(rustls::pki_types::CertificateDer::from)
+            .collect::<Vec<_>>();
+        let key = http_tls_private_key(tls.identity_key)?;
+        builder
+            .with_client_auth_cert(certs, key)
+            .map_err(|_| JetHttpBridgeError::Tls)?
+    };
     config.alpn_protocols = [
         http2.then(|| b"h2".to_vec()),
         http11.then(|| b"http/1.1".to_vec()),
@@ -1664,8 +1876,7 @@ pub fn jet_http_client_send_stream_impl(
         true,
         true,
         false,
-        true,
-        &[],
+        TlsSettings::SYSTEM,
     )
 }
 
@@ -1758,8 +1969,7 @@ pub fn jet_http_client_send_with_stream_impl(
         handle.policy.http2,
         handle.policy.http11,
         handle.policy.h2c,
-        handle.policy.system_roots,
-        &handle.policy.custom_roots,
+        handle.policy.tls_settings(),
     )
 }
 
@@ -1822,8 +2032,7 @@ pub fn jet_http_client_send_impl(
         true,
         true,
         false,
-        true,
-        &[],
+        TlsSettings::SYSTEM,
     )
 }
 
@@ -1888,8 +2097,7 @@ fn send_following_redirects(
     http2: bool,
     http11: bool,
     h2c: bool,
-    system_roots: bool,
-    custom_roots: &[Vec<u8>],
+    tls: TlsSettings<'_>,
 ) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
     send_following_redirects_upload(
         pool,
@@ -1917,8 +2125,7 @@ fn send_following_redirects(
         http2,
         http11,
         h2c,
-        system_roots,
-        custom_roots,
+        tls,
     )
 }
 
@@ -1948,8 +2155,7 @@ fn send_following_redirects_upload(
     http2: bool,
     http11: bool,
     h2c: bool,
-    system_roots: bool,
-    custom_roots: &[Vec<u8>],
+    tls: TlsSettings<'_>,
 ) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
     let mut method = original_method.to_string();
     let mut url = original_url.to_string();
@@ -2000,8 +2206,7 @@ fn send_following_redirects_upload(
                 http2,
                 http11,
                 h2c,
-                system_roots,
-                custom_roots,
+                tls,
             )?
         } else if let Some(ref mut read) = body_stream {
             // Buffer only when a later redirect may need the body again (307/308
@@ -2038,8 +2243,7 @@ fn send_following_redirects_upload(
                 http2,
                 http11,
                 h2c,
-                system_roots,
-                custom_roots,
+                tls,
             )?;
             body = tee;
             body_stream = None;
@@ -2067,8 +2271,7 @@ fn send_following_redirects_upload(
                 http2,
                 http11,
                 h2c,
-                system_roots,
-                custom_roots,
+                tls,
             )?
         };
         if let Some(jar) = &jar {
@@ -2419,8 +2622,7 @@ fn send_once(
     http2: bool,
     http11: bool,
     h2c: bool,
-    system_roots: bool,
-    custom_roots: &[Vec<u8>],
+    tls: TlsSettings<'_>,
 ) -> Result<NativeResponse, JetHttpBridgeError> {
     let body_len = body.map(|bytes| bytes.len());
     let has_body = body.is_some();
@@ -2454,8 +2656,7 @@ fn send_once(
         http2,
         http11,
         h2c,
-        system_roots,
-        custom_roots,
+        tls,
     )
 }
 
@@ -2485,8 +2686,7 @@ fn send_once_upload(
     http2: bool,
     http11: bool,
     h2c: bool,
-    system_roots: bool,
-    custom_roots: &[Vec<u8>],
+    tls: TlsSettings<'_>,
 ) -> Result<NativeResponse, JetHttpBridgeError> {
     if method.is_empty() || !method.bytes().all(http_token_byte) {
         return Err(JetHttpBridgeError::InvalidHeader);
@@ -2541,8 +2741,7 @@ fn send_once_upload(
             http2,
             http11,
             h2c,
-            system_roots,
-            custom_roots,
+            tls,
         )?);
     }
     let mut stream = stream.unwrap();
@@ -2580,8 +2779,7 @@ fn send_once_upload(
                     http2,
                     http11,
                     h2c,
-                    system_roots,
-                    custom_roots,
+                    tls,
                 )?;
                 reused = false;
             }
@@ -2690,8 +2888,7 @@ fn send_once_upload(
                 false,
                 true,
                 false,
-                system_roots,
-                custom_roots,
+                tls,
             )?;
             set_stream_timeouts(
                 &mut fresh,
@@ -2778,8 +2975,7 @@ fn connect(
     http2: bool,
     http11: bool,
     h2c: bool,
-    system_roots: bool,
-    custom_roots: &[Vec<u8>],
+    tls: TlsSettings<'_>,
 ) -> Result<HttpStream, JetHttpBridgeError> {
     let destination = proxy.unwrap_or(url);
     let timeout = remaining_timeout(connect_timeout, deadline)?;
@@ -2814,8 +3010,7 @@ fn connect(
             remaining_timeout(tls_timeout, deadline)?,
             http2,
             http11,
-            system_roots,
-            custom_roots,
+            tls,
         );
         set_timing(facts, 2, elapsed_ms(started));
         stream

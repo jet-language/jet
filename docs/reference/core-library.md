@@ -440,7 +440,9 @@ Client surface:
 | `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or a redirect limit from 0 through 4,294,967,295; unset follows at most 10, and out-of-range limits fail before transport |
 | `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` | `HttpClientReq` | Set nonnegative global/per-phase deadlines; negative milliseconds fail before transport |
 | `req.proxy(url)` | `HttpClientReq` | Use an explicit proxy; malformed URLs, refused tunnels, and rejected proxy authentication return stable Jet errors; env proxies are honored by default |
-| `req.send()` | `HttpClientResp ? String` | Execute the request; connection, pre-response I/O, and malformed response framing failures return stable Jet errors |
+| `Client.new().proxy(policy)` | `HttpClient` | Typed client proxy policy: `.FromEnvironment` (default), `.None` (ignore env), or `.Url(proxy)` |
+| `Client.new().tls(config)` | `HttpClient` | Apply a `core.tls.ClientConfig` trust/identity/version policy; never boolean danger switches |
+| `req.send()` / `client.send(req)` | `HttpClientResp ? String` | Execute the request; connection, pre-response I/O, and malformed response framing failures return stable Jet errors |
 | `resp.status()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, text body, headers, and Set-Cookie values |
 
 The compatibility text response path accepts at most 8 MiB of transfer-decoded
@@ -469,7 +471,7 @@ Card 301 audit state:
 |------|-------|
 | HTTPS client / server TLS | Shipped: client default HTTPS, server `tls:` named option |
 | Typed URL input | Shipped: client calls accept `Url` or `String` |
-| Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above |
+| Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above; Client also exposes typed `.proxy(HttpProxy)` and `.tls(TlsClientConfig)` policy builders |
 | Router params and wildcard routes | Shipped: `:name` params plus final `*` wildcard (`param("wildcard")`) |
 | SSE, static files, Range, access log, request body limits | Shipped: server helpers above |
 | Bounded hostile request parsing | Partial: HTTP/1.1 incrementally frames and dechunks octets (including extensions) before validating the decoded compatibility text body, preserves pipelined boundaries, and caps the decoded body at 1 MiB plus 32 KiB of chunk metadata; it rejects malformed/truncated chunks, request trailers, non-HTTP header whitespace/control values, multiple/unsupported transfer codings, oversized headers/bodies, ambiguous Content-Length, Content-Length with Transfer-Encoding, folded headers, and malformed framing before dispatch. The compatibility request body is still buffered text. |

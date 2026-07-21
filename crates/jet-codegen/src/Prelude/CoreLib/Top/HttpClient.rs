@@ -4,6 +4,13 @@
 // bridge functions use only primitive types (i64, String, Vec<String>) and are
 // called through wrappers here. This is the I6-safe pattern.
 
+#[derive(Clone)]
+enum JetHttpProxy {
+    FromEnvironment,
+    None,
+    Url(String),
+}
+
 struct JetHttpClientOwner {
     handle: i64,
     drop_handle: fn(i64),

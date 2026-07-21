@@ -1480,3 +1480,158 @@ fn main() {{
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn public_client_proxy_none_ignores_environment_proxy() {
+    let origin = TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin_addr = origin.local_addr().unwrap();
+    let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy_addr = proxy.local_addr().unwrap();
+    let origin_server = std::thread::spawn(move || {
+        let (mut stream, _) = origin.accept().unwrap();
+        let head = request_head(&mut stream);
+        assert!(
+            String::from_utf8_lossy(&head).starts_with("GET /direct HTTP/1.1\r\n"),
+            "expected direct origin request, got {}",
+            String::from_utf8_lossy(&head)
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\ndirect")
+            .unwrap();
+    });
+    let proxy_server = std::thread::spawn(move || {
+        proxy.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_millis(400);
+        loop {
+            match proxy.accept() {
+                Ok(_) => panic!("environment proxy should not receive traffic"),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("proxy accept failed: {error}"),
+            }
+        }
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+fn run() {{
+    client :: http.Client.new().proxy(.None)
+    resp :: client.send(http.request("GET", "http://{origin_addr}/direct")) ?? panic("send")
+    print(resp.body().text(16) ?? panic("body"))
+}}
+"#
+    );
+    let dir = common::unique_tmp("jet_http_client_law");
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join("public_proxy_none.jet");
+    fs::write(&jet_path, &src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    let out = jet::compile_with_path(&src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected:\n{}",
+            jet::render_diagnostics(&shown, &src, &diags)
+        )
+    });
+    let rs = dir.join("public_proxy_none.rs");
+    let bin = dir.join("public_proxy_none");
+    fs::write(&rs, &out.rust).unwrap();
+    let mut rustc_cmd = Command::new("rustc");
+    rustc_cmd.args([
+        "--edition",
+        "2021",
+        rs.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    if let Some(link) = &out.ffi {
+        rustc_cmd
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+            rustc_cmd
+                .arg("-L")
+                .arg(format!("dependency={}", deps_dir.display()));
+        }
+    }
+    let rustc = rustc_cmd.output().unwrap();
+    assert!(
+        rustc.status.success(),
+        "rustc rejected generated code (I2 violation):\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    let run = Command::new(&bin)
+        .env("http_proxy", format!("http://{proxy_addr}"))
+        .env("HTTP_PROXY", format!("http://{proxy_addr}"))
+        .env("all_proxy", format!("http://{proxy_addr}"))
+        .env("ALL_PROXY", format!("http://{proxy_addr}"))
+        .env_remove("no_proxy")
+        .env_remove("NO_PROXY")
+        .output()
+        .unwrap();
+    origin_server.join().unwrap();
+    proxy_server.join().unwrap();
+    let _ = fs::remove_dir_all(&dir);
+    assert_eq!(run.status.code().unwrap_or(0), 0, "stderr:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "direct\n");
+}
+
+#[test]
+fn public_client_proxy_url_sends_absolute_form() {
+    let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy_addr = proxy.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = proxy.accept().unwrap();
+        let head = request_head(&mut stream);
+        let text = String::from_utf8_lossy(&head);
+        assert!(
+            text.starts_with("GET http://example.invalid/via-proxy HTTP/1.1\r\n"),
+            "expected absolute-form proxy request, got {text}"
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nproxy")
+            .unwrap();
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+fn run() {{
+    client :: http.Client.new().proxy(.Url("http://{proxy_addr}"))
+    resp :: client.send(http.request("GET", "http://example.invalid/via-proxy")) ?? panic("send")
+    print(resp.body().text(16) ?? panic("body"))
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "public_proxy_url", &src);
+    server.join().unwrap();
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "proxy\n");
+}
+
+#[test]
+fn public_client_tls_custom_only_trust() {
+    let ca = fs::canonicalize("tests/fixtures/tls/smtp.ca.cert.pem").unwrap();
+    let src = format!(
+        r#"
+use core.http.client as http
+use core.tls as tls
+use core.files as fs
+fn run() {{
+    ca :: fs.read_bytes("{ca}") ?? panic("ca")
+    roots :: tls.RootCertificates.from_pem(ca) ?? panic("roots")
+    cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
+    _ :: http.Client.new().tls(cfg)
+    print("ok")
+}}
+"#,
+        ca = ca.display()
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "public_tls_policy", &src);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "ok\n");
+}

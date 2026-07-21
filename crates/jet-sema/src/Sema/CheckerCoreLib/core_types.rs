@@ -239,7 +239,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName" | "HttpHeaderValue"
-        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
+        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -689,6 +689,15 @@ pub(crate) fn core_http_variants(
         for name in ["ClientConnect", "ServerBind", "ServeListener"] {
             variants.insert(name.to_string(), (zero, VariantPayload::Unit));
         }
+        return Some(variants);
+    }
+    if enum_name == "HttpProxy" {
+        variants.insert("FromEnvironment".to_string(), (zero, VariantPayload::Unit));
+        variants.insert("None".to_string(), (zero, VariantPayload::Unit));
+        variants.insert(
+            "Url".to_string(),
+            (zero, VariantPayload::Single(Type::String, zero)),
+        );
         return Some(variants);
     }
     if enum_name != "HttpError" {

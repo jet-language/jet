@@ -673,7 +673,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.time.date" => &["new", "today", "parse"],
         "core.time.datetime" => &["from_timestamp", "now"],
         // D-NETDEP1=A / D-HTTPLIB1=A / D-HTTPLIB2=B: HTTP library.
-        "core.http.client" => &["Client", "get", "post", "request"],
+        "core.http.client" => &["Client", "Proxy", "get", "post", "request"],
         "core.http.server" => &[
             "bind",
             "mux",
@@ -724,6 +724,6 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TlsVersion")
         | ("jet.http" | "core.http.client" | "core.http.server",
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
-            | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HttpError" | "Client")
+            | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HttpError" | "Client" | "Proxy")
     )
 }

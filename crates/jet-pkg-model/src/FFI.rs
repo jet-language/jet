@@ -2140,8 +2140,16 @@ fn emit_wrapper_lib(
     }
     if needs_net_tls {
         // D-NETSOCKET1=A / D-TLS1=A: client stream TLS over an existing TcpStream.
-        out.push_str(NET_TLS_RUNTIME);
-        out.push('\n');
+        // When the native HTTP client is also present, nest the stream runtime so
+        // its std imports do not collide with Http.rs at the bridge crate root.
+        if needs_http_client {
+            out.push_str("mod __jet_net_tls {\n");
+            out.push_str(NET_TLS_RUNTIME);
+            out.push_str("}\npub use __jet_net_tls::*;\n");
+        } else {
+            out.push_str(NET_TLS_RUNTIME);
+            out.push('\n');
+        }
     }
     if needs_crypto {
         // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.

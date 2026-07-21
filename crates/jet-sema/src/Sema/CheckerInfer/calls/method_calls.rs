@@ -347,7 +347,7 @@ impl<'a> Checker<'a> {
                             let type_name = if matches!(ns.as_str(), "jet.http" | "core.http.client" | "core.http.server") {
                                 match leaf.as_str() {
                                     "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
-                                    | "Headers" | "Request" | "Response" | "Body" | "Handler" | "Error" => {
+                                    | "Headers" | "Request" | "Response" | "Body" | "Handler" | "Error" | "Proxy" => {
                                         format!("Http{leaf}")
                                     }
                                     "HttpError" => "HttpError".to_string(),
@@ -2020,7 +2020,7 @@ impl<'a> Checker<'a> {
                     );
                 } else if matches!(&recv_ty, Type::Named(name) if name == "HttpClient") {
                     let want = match method {
-                        "cookies" | "redirects" | "send" => 1,
+                        "cookies" | "redirects" | "send" | "proxy" | "tls" => 1,
                         "protocols" => 3,
                         "timeouts" => 7,
                         "raw_encoding" => 0,
@@ -2033,6 +2033,8 @@ impl<'a> Checker<'a> {
                         "cookies" | "protocols" => Some(Type::Bool),
                         "redirects" | "timeouts" => Some(Type::Int),
                         "send" => Some(Type::Named("HttpRequest".to_string())),
+                        "proxy" => Some(Type::Named("HttpProxy".to_string())),
+                        "tls" => Some(Type::Named("TlsClientConfig".to_string())),
                         _ => None,
                     };
                     for (index, arg) in args.iter_mut().enumerate() {

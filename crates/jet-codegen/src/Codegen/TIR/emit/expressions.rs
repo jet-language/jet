@@ -2171,6 +2171,26 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             "raw_encoding" => policy(format!(
                                 "{ffi}::jet_http_client_decompression_impl(_client.owner.handle, false)"
                             )),
+                            "proxy" => {
+                                let error = emit_http_bridge_error(ffi, "error");
+                                format!(
+                                    "{{ let _client = ({recv}); let _proxy = &({arg}); let _next = (match _proxy {{ JetHttpProxy::FromEnvironment => {ffi}::jet_http_client_proxy_from_environment_impl(_client.owner.handle), JetHttpProxy::None => {ffi}::jet_http_client_proxy_impl(_client.owner.handle, None), JetHttpProxy::Url(url) => {ffi}::jet_http_client_proxy_impl(_client.owner.handle, Some(url.as_str())), }}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    recv = recv,
+                                    arg = a(0),
+                                    ffi = ffi,
+                                    error = error,
+                                )
+                            }
+                            "tls" => {
+                                let error = emit_http_bridge_error(ffi, "error");
+                                format!(
+                                    "{{ let _client = ({recv}); let (_trust, _roots, _cert, _key, _min, _max) = jet_tls_client_config_http_parts(&({arg})); let _next = {ffi}::jet_http_client_tls_impl(_client.owner.handle, _trust, &_roots, &_cert, &_key, _min, _max).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    recv = recv,
+                                    arg = a(0),
+                                    ffi = ffi,
+                                    error = error,
+                                )
+                            }
                             "send" => {
                                 let call = format!(
                                     "{ffi}::jet_http_client_send_with_stream_impl(_client.owner.handle, &_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)"

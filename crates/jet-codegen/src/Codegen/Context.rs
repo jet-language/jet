@@ -494,6 +494,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "HttpRequest" => Some("JetHttpRequest"),
         "HttpResponse" => Some("JetHttpResponse"),
         "HttpClient" => Some("JetHttpClient"),
+        "HttpProxy" => Some("JetHttpProxy"),
         "HttpRouter" => Some("JetHttpRouter"),
         _ => None,
     }
@@ -522,6 +523,7 @@ impl Cx {
         match (self.core_imports.get(alias).map(String::as_str), leaf) {
             (Some("core.auth"), "Claims") => Some("Claims"),
             (Some("core.auth"), "AuthError") => Some("AuthError"),
+            (Some("core.http.client"), "Proxy") => Some("HttpProxy"),
             (Some("core.tls"), "TlsVersion") => Some("TlsVersion"),
             (Some("core.tls"), "RootCertificates") => Some("TlsRootCertificates"),
             (Some("core.tls"), "ClientIdentity") => Some("TlsClientIdentity"),
@@ -977,6 +979,7 @@ impl Cx {
             Type::Named(name) if name == "HttpRequest" => "JetHttpRequest".to_string(),
             Type::Named(name) if name == "HttpResponse" => "JetHttpResponse".to_string(),
             Type::Named(name) if name == "HttpClient" => "JetHttpClient".to_string(),
+            Type::Named(name) if name == "HttpProxy" => "JetHttpProxy".to_string(),
             Type::Named(name) if name == "HttpMethod" => "JetHttpMethod".to_string(),
             Type::Named(name) if name == "HttpStatus" => "JetHttpStatus".to_string(),
             Type::Named(name) if name == "HttpVersion" => "JetHttpVersion".to_string(),
@@ -2041,6 +2044,17 @@ pub(crate) fn build_cx_items(
         cx.variant_owner
             .insert(name.to_string(), "HttpOperation".to_string());
     }
+    let http_proxy = vec![
+        ("FromEnvironment".to_string(), VariantPayload::Unit),
+        ("None".to_string(), VariantPayload::Unit),
+        ("Url".to_string(), VariantPayload::Single(Type::String, zero)),
+    ];
+    for (variant, _) in &http_proxy {
+        cx.variant_owner
+            .insert(variant.clone(), "HttpProxy".to_string());
+    }
+    cx.enum_variants.insert("HttpProxy".to_string(), http_proxy);
+    cx.cloneable.insert("HttpProxy".to_string());
     let mut http_errors = [
         "InvalidMethod",
         "InvalidUrl",

@@ -374,6 +374,34 @@ fn jet_tls_client_config_with_version_bounds(
     Ok(config)
 }
 
+fn jet_tls_client_config_http_parts(
+    config: &JetTlsClientConfig,
+) -> (i64, Vec<u8>, Vec<u8>, Vec<u8>, i64, i64) {
+    let (trust, roots) = match &config.trust {
+        JetTlsTrust::System => (0i64, Vec::new()),
+        JetTlsTrust::SystemPlus(roots) => (1i64, roots.pem.clone()),
+        JetTlsTrust::CustomOnly(roots) => (2i64, roots.pem.clone()),
+    };
+    let empty = Vec::new();
+    let (cert, key) = config
+        .identity
+        .as_ref()
+        .map(|identity| (identity.cert_chain.clone(), identity.private_key.as_vec().clone()))
+        .unwrap_or((empty.clone(), empty));
+    let version = |version| match version {
+        JetTlsVersion::Tls12 => 12i64,
+        JetTlsVersion::Tls13 => 13i64,
+    };
+    (
+        trust,
+        roots,
+        cert,
+        key,
+        version(config.min_version),
+        version(config.max_version),
+    )
+}
+
 #[derive(Clone)]
 pub struct JetTlsCertificate {
     pub der: Vec<u8>,
