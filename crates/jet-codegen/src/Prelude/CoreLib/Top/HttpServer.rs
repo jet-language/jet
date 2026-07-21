@@ -415,6 +415,7 @@ fn jet_http_server_run_listener(
         let worker_completed = completed.clone();
         let worker_force_cancel = force_cancel.clone();
         let worker_shutdown = shutdown.clone();
+        let worker_grace = dynamic_grace_ms.clone();
         let worker_connection_count = connection_count.clone();
         let worker_per_ip = per_ip.clone();
         workers.push(std::thread::spawn(move || loop {
@@ -424,7 +425,13 @@ fn jet_http_server_run_listener(
                 let _ = stream.shutdown(std::net::Shutdown::Both);
             } else {
                 if let Ok(tracked) = stream.try_clone() { worker_active.lock().unwrap().push(tracked); }
-                jet_http_server_handle_stream(&mut stream, &worker_mux, &worker_options, &worker_shutdown);
+                jet_http_server_handle_stream(
+                    &mut stream,
+                    &worker_mux,
+                    &worker_options,
+                    &worker_shutdown,
+                    worker_grace.as_deref(),
+                );
                 worker_completed.fetch_add(1, Ordering::Relaxed);
                 worker_active.lock().unwrap().retain(|tracked| tracked.peer_addr().ok() != stream.peer_addr().ok());
             }
@@ -518,13 +525,14 @@ fn jet_http_server_handle_stream(
     mux: &JetHttpMux,
     options: &JetHttpServerOptions,
     shutdown: &std::sync::atomic::AtomicBool,
+    dynamic_grace_ms: Option<&std::sync::atomic::AtomicU64>,
 ) {
     use std::io::Write;
     use std::sync::atomic::Ordering;
 
     let _ = stream.set_write_timeout(Some(options.write_idle_timeout));
     if jet_http2_is_preface(stream, options.read_header_timeout) {
-        if jet_http2_serve(stream, mux, options, shutdown).is_err() {
+        if jet_http2_serve(stream, mux, options, shutdown, dynamic_grace_ms).is_err() {
             let _ = jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(0, 1));
             let _ = std::io::Write::flush(stream);
         }
@@ -1230,6 +1238,7 @@ fn jet_http2_serve(
     mux: &JetHttpMux,
     options: &JetHttpServerOptions,
     shutdown: &std::sync::atomic::AtomicBool,
+    dynamic_grace_ms: Option<&std::sync::atomic::AtomicU64>,
 ) -> Result<(), String> {
     use std::io::{Read, Write};
     use std::sync::atomic::Ordering;
@@ -1271,7 +1280,10 @@ fn jet_http2_serve(
     loop {
         if shutdown.load(Ordering::Acquire) && !going_away {
             going_away = true;
-            grace_deadline = Some(std::time::Instant::now() + options.shutdown_grace);
+            let grace = dynamic_grace_ms
+                .map(|value| std::time::Duration::from_millis(value.load(Ordering::Acquire)))
+                .unwrap_or(options.shutdown_grace);
+            grace_deadline = Some(std::time::Instant::now() + grace);
             jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(last_stream, 0))?;
             stream.flush().map_err(|_| "HTTP/2 GOAWAY write failed".to_string())?;
             goaway_sent = true;
@@ -1363,7 +1375,16 @@ fn jet_http2_serve(
         match frame.kind {
             0 => {
                 if frame.stream == 0 { return Err("HTTP/2 DATA uses stream zero".to_string()); }
-                let request = requests.get_mut(&frame.stream).ok_or_else(|| "HTTP/2 DATA has no open request".to_string())?;
+                // RFC 7540 §6.8: after GOAWAY, frames for streams > last-stream-id
+                // (and other unknown streams) may be discarded. Never abort drain
+                // with PROTOCOL_ERROR just because the peer kept writing.
+                if !requests.contains_key(&frame.stream) {
+                    if going_away {
+                        continue;
+                    }
+                    return Err("HTTP/2 DATA has no open request".to_string());
+                }
+                let request = requests.get_mut(&frame.stream).expect("checked above");
                 if request.inbound_closed { return Err("HTTP/2 DATA follows end of stream".to_string()); }
                 let (start, padding) = if frame.flags & 0x8 != 0 {
                     (1, usize::from(*frame.payload.first().ok_or_else(|| "HTTP/2 padded DATA is empty".to_string())?))
@@ -1393,6 +1414,7 @@ fn jet_http2_serve(
                 if going_away || frame.stream == 0 || frame.stream % 2 == 0 || frame.stream <= last_stream {
                     if going_away && frame.stream != 0 {
                         jet_http2_write_frame(stream, 3, 0, frame.stream, &7u32.to_be_bytes())?;
+                        stream.flush().map_err(|_| "HTTP/2 RST write failed".to_string())?;
                         continue;
                     }
                     return Err("HTTP/2 HEADERS stream id is invalid".to_string());
