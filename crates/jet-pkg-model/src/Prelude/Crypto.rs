@@ -482,6 +482,7 @@ where F: Fn() -> bool {
     if weight_kib > jet_pwhash_budget_kib() { return Err(JetPwhashRunError::ResourceUnavailable); }
     if cancelled() { return Err(JetPwhashRunError::Cancelled); }
     let pool = jet_pwhash_pool()?;
+    wait_enter();let _blocking=JetPwhashBlockingGuard(wait_leave);
     let mut password_copy=Vec::new();password_copy.try_reserve_exact(password.len()).map_err(|_|JetPwhashRunError::ResourceUnavailable)?;password_copy.extend_from_slice(password);
     let mut salt_copy=Vec::new();salt_copy.try_reserve_exact(salt.len()).map_err(|_|JetPwhashRunError::ResourceUnavailable)?;salt_copy.extend_from_slice(salt);
     let job = {
@@ -500,7 +501,6 @@ where F: Fn() -> bool {
         pool.ready.notify_all();
         job
     };
-    wait_enter();let _blocking=JetPwhashBlockingGuard(wait_leave);
     let mut cancellation_observed=false;
     #[cfg(test)] let mut final_pause=final_pause;
     loop {
@@ -550,6 +550,8 @@ fn jet_pwhash_test_run(cancelled:std::sync::Arc<std::sync::atomic::AtomicBool>,p
 fn jet_pwhash_test_run_with(cancelled:fn()->bool,pause:Option<(std::sync::Arc<std::sync::Barrier>,std::sync::Arc<std::sync::Barrier>)>,final_pause:Option<(std::sync::Arc<std::sync::Barrier>,std::sync::Arc<std::sync::Barrier>)>,wait_enter:fn(),wait_leave:fn())->Result<Zeroizing<Vec<u8>>,JetPwhashRunError>{let params=argon2::Params::new(8_192,1,1,Some(16)).unwrap();jet_crypto_argon2id_run_with(b"sixteen-byte-key",b"sixteen-byte-salt",params,cancelled,wait_enter,wait_leave,pause,final_pause)}
 #[cfg(test)]
 fn jet_pwhash_test_runs()->usize{JET_PWHASH_TEST_RUNS.load(std::sync::atomic::Ordering::SeqCst)}
+#[cfg(test)]
+fn jet_pwhash_test_queued_secrets()->usize{let pool=jet_pwhash_pool().unwrap();let state=pool.state.lock().unwrap();state.queue.iter().filter(|job|job.password.lock().unwrap().is_some()||job.salt.lock().unwrap().is_some()).count()}
 
 fn jet_pwhash_cancel_or_crypto<T>(result: Result<T, JetPwhashRunError>, cancel_outcome: fn()) -> Result<T, JetCryptoError> {
     match result {

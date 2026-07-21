@@ -414,15 +414,28 @@ mod vault_key_wrap_tests {
     #[test]
     fn pwhash_wait_compensates_one_worker_and_arbitrates_cancel_with_shield() {
         std::env::set_var("JET_SCHEDULER_THREADS", "1");
-        let held_entered=std::sync::Arc::new(std::sync::Barrier::new(2));
-        let held_release=std::sync::Arc::new(std::sync::Barrier::new(2));
-        let held=jet_scheduler_spawn({let entered=held_entered.clone();let release=held_release.clone();move||jet_pwhash_test_run_with(jet_crypto_never_cancelled,Some((entered,release)),None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave)});
-        held_entered.wait();
+        let mut controls=Vec::new();let mut waits=Vec::new();let mut releases=Vec::new();
+        for _ in 0..4 {
+            let entered=std::sync::Arc::new(std::sync::Barrier::new(2));let release=std::sync::Arc::new(std::sync::Barrier::new(2));let control=JetTaskControl::new();
+            waits.push(jet_scheduler_spawn_with_control({let entered=entered.clone();let release=release.clone();move||jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,Some((entered,release)),None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave)},control.clone()));
+            entered.wait();controls.push(control);releases.push(release);
+        }
+        for _ in 4..6 { let control=JetTaskControl::new();waits.push(jet_scheduler_spawn_with_control(move||jet_pwhash_test_run_with(jet_scheduler_wait_point_cancelled,None,None,jet_scheduler_blocking_wait_enter,jet_scheduler_blocking_wait_leave),control.clone()));controls.push(control); }
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
+        while (jet_pwhash_test_snapshot().1,jet_scheduler_blocking_wait_stats().0)!=(2,6) { assert!(std::time::Instant::now()<deadline,"six waiters must reach four admitted plus two queued jobs: pwhash={:?}, scheduler={:?}",jet_pwhash_test_snapshot(),jet_scheduler_blocking_wait_stats());std::thread::yield_now(); }
+        assert_eq!(jet_pwhash_test_queued_secrets(),2,"queued jobs retain only bounded caller-owned secret copies");
         let(progress_tx,progress_rx)=std::sync::mpsc::channel();
         let progress=jet_scheduler_spawn(move||progress_tx.send(()).unwrap());
         progress_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("compensation worker must run unrelated task while sole configured worker waits");
-        held_release.wait();
-        assert!(held.join().is_ok());progress.join();
+        let(_,current,peak)=jet_scheduler_blocking_wait_stats();assert!(current<=8&&peak<=8,"compensation thread peak must stay globally bounded: current={current}, peak={peak}");
+        for control in &controls { control.cancel(); }
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
+        while jet_pwhash_test_snapshot().1!=0||jet_pwhash_test_queued_secrets()!=0 { assert!(std::time::Instant::now()<deadline,"cancellation must drain queued jobs and secrets");std::thread::yield_now(); }
+        for release in releases { release.wait(); }
+        for wait in waits { assert!(matches!(wait.join(),Err(JetPwhashRunError::Cancelled))); }progress.join();
+        assert_eq!(jet_pwhash_test_snapshot().0,0,"cancelled admitted jobs release the full Argon arena budget");assert_eq!(jet_pwhash_test_queued_secrets(),0);
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
+        while jet_scheduler_blocking_wait_stats().0!=0||jet_scheduler_blocking_wait_stats().1!=0 { assert!(std::time::Instant::now()<deadline,"all waits and compensation threads must drain");std::thread::yield_now(); }
 
         let race_entered=std::sync::Arc::new(std::sync::Barrier::new(2));
         let race_release=std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -443,5 +456,7 @@ mod vault_key_wrap_tests {
         exit_rx.recv_timeout(std::time::Duration::from_secs(2)).expect("shielded task must exit at deferred cancellation");
         assert!(shield_completed.load(std::sync::atomic::Ordering::SeqCst),"shielded KDF completes before deferred cancellation lands");
         assert!(!shield_after.load(std::sync::atomic::Ordering::SeqCst),"deferred cancellation lands at shield exit");
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(2);
+        while jet_scheduler_blocking_wait_stats().0!=0||jet_scheduler_blocking_wait_stats().1!=0 { assert!(std::time::Instant::now()<deadline,"later race and shield waits must leave no compensation threads");std::thread::yield_now(); }
     }
 }

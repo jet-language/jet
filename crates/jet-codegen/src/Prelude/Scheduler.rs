@@ -494,25 +494,21 @@ pub fn jet_scheduler_wait_point_cancelled() -> bool {
 }
 
 thread_local! {
-    static JET_BLOCKING_WAIT_COMPENSATION: std::cell::RefCell<Vec<Option<Arc<AtomicBool>>>> = const { std::cell::RefCell::new(Vec::new()) };
+    static JET_BLOCKING_WAIT_COMPENSATION: std::cell::RefCell<Vec<bool>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 pub fn jet_scheduler_blocking_wait_enter() {
-    let token = current_task_control().map(|_| {
-        let done=Arc::new(AtomicBool::new(false));
-        let worker_done=done.clone();
-        let sched=scheduler();
-        thread::Builder::new().name("jet-blocking-compensation".into()).spawn(move||sched.compensation_loop(worker_done)).unwrap_or_else(|_|jet_scheduler_fatal("could not start scheduler compensation worker"));
-        done
-    });
-    JET_BLOCKING_WAIT_COMPENSATION.with(|stack|stack.borrow_mut().push(token));
+    let active=current_task_control().is_some();
+    if active { scheduler().blocking_wait_enter(); }
+    JET_BLOCKING_WAIT_COMPENSATION.with(|stack|stack.borrow_mut().push(active));
 }
 
 pub fn jet_scheduler_blocking_wait_leave() {
-    if let Some(Some(done))=JET_BLOCKING_WAIT_COMPENSATION.with(|stack|stack.borrow_mut().pop()) {
-        done.store(true,Ordering::Release);
-        scheduler().notify.notify_all();
-    }
+    if JET_BLOCKING_WAIT_COMPENSATION.with(|stack|stack.borrow_mut().pop())==Some(true) { scheduler().blocking_wait_leave(); }
+}
+
+pub fn jet_scheduler_blocking_wait_stats()->(usize,usize,usize) {
+    let sched=scheduler();let state=sched.blocking_wait.lock().unwrap();(state.waits,state.threads,state.peak)
 }
 
 // ── M2: timer sleep (park/wake, not thread::sleep on pool workers) ───────────
@@ -2099,12 +2095,17 @@ struct WorkerSlot {
     queue: Mutex<VecDeque<Job>>,
 }
 
+// Fixed ceiling prevents blocking waiters from turning scheduler progress into an unbounded thread source.
+const JET_BLOCKING_COMPENSATION_LIMIT:usize=8;
+struct BlockingWaitState { waits:usize,threads:usize,peak:usize }
+
 struct Scheduler {
     workers: Vec<WorkerSlot>,
     global: Mutex<VecDeque<Job>>,
     notify: Condvar,
     live: AtomicUsize,
     shutdown: AtomicBool,
+    blocking_wait:Mutex<BlockingWaitState>,
 }
 
 impl Scheduler {
@@ -2156,8 +2157,16 @@ impl Scheduler {
         }
     }
 
-    fn compensation_loop(self:&Arc<Self>,done:Arc<AtomicBool>){
-        while !done.load(Ordering::Acquire){
+    fn blocking_wait_enter(self:&Arc<Self>){
+        let spawn={let mut state=self.blocking_wait.lock().unwrap();state.waits+=1;if state.threads<state.waits.min(JET_BLOCKING_COMPENSATION_LIMIT){state.threads+=1;state.peak=state.peak.max(state.threads);true}else{false}};
+        if spawn { let sched=self.clone();thread::Builder::new().name("jet-blocking-compensation".into()).spawn(move||sched.compensation_loop()).unwrap_or_else(|_|jet_scheduler_fatal("could not start scheduler compensation worker")); }
+    }
+
+    fn blocking_wait_leave(&self){let mut state=self.blocking_wait.lock().unwrap();state.waits-=1;drop(state);self.notify.notify_all();}
+
+    fn compensation_loop(self:&Arc<Self>){
+        loop{
+            {let mut state=self.blocking_wait.lock().unwrap();if state.waits==0{state.threads-=1;return}}
             if let Some(job)=self.take_work(0){JET_OBSERVE_QUEUED.fetch_sub(1,Ordering::Relaxed);self.live.fetch_add(1,Ordering::Relaxed);job();self.live.fetch_sub(1,Ordering::Relaxed);self.notify.notify_one();continue}
             let guard=self.global.lock().unwrap();let _=self.notify.wait_timeout(guard,Duration::from_millis(2)).unwrap();
         }
@@ -2207,6 +2216,7 @@ fn scheduler() -> Arc<Scheduler> {
                 notify: Condvar::new(),
                 live: AtomicUsize::new(0),
                 shutdown: AtomicBool::new(false),
+                blocking_wait:Mutex::new(BlockingWaitState{waits:0,threads:0,peak:0}),
             });
             for id in 0..n {
                 let s = sched.clone();
