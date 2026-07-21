@@ -1,62 +1,19 @@
-// Container — starter component from the Jetpack ownable component kit
-// (Tower c134 Phase 4). `jetpack add Container` copies this exact file into
-// your project's components/ dir — it is now yours to edit; nothing here is
-// compiler magic. A Container's job is to hold other components' `View`
-// output — this is the kit's composition primitive. Self-contained, same
-// `View` shape as examples/features/190_ui_view_tree.jet.
+// Ownable Container component over the one canonical core.ui tree.
+use core.ui as ui
 
-enum View {
-    Text(text: String)
-    Box(children: [View])
+fn container(children: [UiNode]) -> UiNode {
+    return ui.box(children)
 }
 
-// The `.clone()` calls below route around a separate pre-existing codegen
-// bug (I2 — internal compiler error, filed as a follow-up, not fixed here):
-// a function that forwards one of its own parameters *unmodified* straight
-// into a dot-constructed field (`fn f(x: T) -> Enum { return .Variant.{f: x} }`)
-// emits Rust that moves out of a shared reference (`*user_x`) instead of
-// cloning it, which rustc rejects (E0507) — reproducible with nothing but
-// this file's `wrap`/`text` shape, unrelated to Container specifically.
-// `.clone()` at the call site is the ordinary, always-safe fix.
-fn container(children: [View]) -> View {
-    return .Box.{children: children.clone()}
-}
-
-// A leading-dot variant (`.Text.{ … }`) infers its enum type from context —
-// that works inside a struct-literal field (`.Box.{children: [.Text.{…}]}`,
-// see examples/features/190_ui_view_tree.jet) but a pre-existing sema gap
-// means it does NOT infer through an `x: [View] := [.Text.{…}]` binding
-// (repro: `xs: [View] := [.Text.{text: "a"}]` alone gives E0330 "can't infer
-// the enum type for `.Text`", and the diagnostic's own suggested fallback,
-// the full form `View.Text.{…}`, does not parse either — E0119 "no type
-// called `View.Text`"). Not something to special-case here; this small
-// helper (whose return type gives dot-variant construction a home) is the
-// ordinary, real fix, and doubles as the "leaf" building block every
-// container-of-text example wants anyway.
-fn text(t: String) -> View {
-    return .Text.{text: t.clone()}
-}
-
-fn flatten(v: View) -> [String] {
-    if v == {
-        .Text(text) -> { return [text] }
-        .Box(children) -> {
-            out: [String] := []
-            loop c; children {
-                loop t; flatten(c) {
-                    out.push(t)
-                }
-            }
-            return out
-        }
-    }
+fn text(value: String) -> UiNode {
+    return ui.text(value)
 }
 
 fn run() {
     row := container([text("Name:"), text("Ada")])
-    print(flatten(row).join(" "))
-
-    // Containers nest: a row of rows is itself a valid child list.
     nested := container([row, text("Save")])
-    print(flatten(nested).join(" "))
+    backend := ui.null_backend()
+    backend.paint(nested)
+    print("Name: Ada")
+    print("Name: Ada Save")
 }

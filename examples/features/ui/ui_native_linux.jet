@@ -1,8 +1,7 @@
 // D-UIDEVSHELL1=A (ratified 2026-07-03, c134 Phase 8): the native Linux UI
 // backend — a real, working GTK4 app. `core.ui.gtk_backend()` is a `JetBackend`
-// over libgtk-4: `label`/`button` create real widgets, `set_text`/`set_size`/
-// `set_color` style and update them, `on_click` wires a button, and `present`
-// opens the window and runs the GLib main loop.
+// over libgtk-4: canonical `UiNode` trees reconcile into real widgets,
+// `on_click` wires the reconciled button, and `present` opens the window.
 //
 // The counter below actually counts: the button's click sets a `reactive.signal`,
 // the `ui.reactive_render` effect re-runs (it read the signal), and it updates
@@ -29,23 +28,23 @@ fn run() {
             clicks :: reactive.signal(0)
             app :: ui.gtk_backend()
 
-            heading :: app.label("Jet — native GTK4 counter")
-            count :: app.label("count: 0")
-            app.set_size(count, 220, 40)
-            app.set_color(count, "#3366ff")
-            increment :: app.button("Increment")
-
-            // Click → bump the signal. The effect below re-runs and repaints.
-            app.on_click(increment, () => {
-                clicks.set(clicks.get() + 1)
+            render_app :: ~app
+            ui.reactive_render(take(render_app) () => {
+                tree := ui.box([
+                    ui.text("Jet — native GTK4 counter"),
+                    ui.node_color("count: {clicks.get()}", 220.0, 40.0, "#3366ff"),
+                    ui.button("Increment")
+                ])
+                size := render_app.measure(tree, ui.constraint(0.0, 0.0, 320.0, 240.0))
+                render_app.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+                render_app.paint(tree)
             })
 
-            // Reactive binding: reading `clicks` subscribes this effect, so every
-            // `.set()` updates the label's text in place — a live counter.
-            render_app :: ~app
-            render_count :: ~count
-            ui.reactive_render(take(render_app, render_count) () => {
-                render_app.set_text(render_count, "count: {clicks.get()}")
+            // The retained event hook resolves the already-reconciled canonical
+            // Button widget by identity; it does not create a parallel tree.
+            increment :: app.button("Increment")
+            app.on_click(increment, () => {
+                clicks.set(clicks.get() + 1)
             })
 
             print("native backend: gtk4")

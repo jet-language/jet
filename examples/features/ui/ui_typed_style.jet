@@ -1,84 +1,28 @@
-// 191 — typed styles (Tower c134, D-STYLESHAPE1=A + D-STYLEUNIT1=A). `Style` is
-// a flat record holding every visual property in one place (no nested
-// sub-records), matching D-LAYOUT1's constraint-layout typed-axis shape.
-// `Color` is a plain r/g/b struct.
-//
-// Style lengths are UNIT-FAMILY literals (D-STYLEUNIT1): `core.ui.style`'s
-// length family is declared here as `@UnitFamily(Length) { px }` (D-QUAL3), so
-// `320px` is a compile-checked `Px` value via the one ratified unit mechanism
-// (D-UNITLIT1) — no second style-only unit system (I8). `Px` erases to `Float`;
-// `.raw()` strips the unit. This supersedes the interim `Length { value, unit }`
-// struct pair: a `@UnitFamily` member is a distinct type, and a distinct-typed
-// struct/enum field is now a covered value type in the typed-IR subset
-// (`field_ty_covered`/`enum_payload_ty_covered` admit distinct types), so
-// `Style { width: Px }` lowers and emits without the ICE the struct pair worked
-// around.
-//
-// Cross-family safety comes free: `320px + 500ms` is E0127 (px and ms are
-// different families) — the same guard `unit_family_mix.jet` pins.
+// One flat typed Style feeds the canonical UiNode paint pipeline directly.
+// Lengths use Jet's existing unit-family mechanism; there is no parallel View.
+use core.ui as ui
+
 @UnitFamily(Length) { px }
 
-struct Color {
-    r: Int
-    g: Int
-    b: Int
-}
-
 struct Style {
-    color: Color
+    color: String
     width: Px
     height: Px
 }
 
-enum View {
-    Text(text: String, style: Style)
-    Box(children: [View])
-}
-
-fn describe(v: View) -> [String] {
-    if v == {
-        .Text(text, style) -> {
-            return ["{text} rgb=({style.color.r},{style.color.g},{style.color.b}) w={style.width.raw()} h={style.height.raw()}"]
-        }
-        .Box(children) -> {
-            out: [String] := []
-            loop c; children {
-                loop line; describe(c) {
-                    out.push(line)
-                }
-            }
-            return out
-        }
-
-    }
-}
-
-fn total_width(v: View) -> Float {
-    if v == {
-        .Text(text, style) -> { return style.width.raw() }
-        .Box(children) -> {
-            sum := 0.0
-            loop c; children {
-                sum += total_width(c)
-            }
-            return sum
-        }
-
-    }
+fn styled_text(text: String, style: Style) -> UiNode {
+    return ui.node_color(text, style.width.raw(), style.height.raw(), style.color)
 }
 
 fn run() {
-    red :: Color.{r: 220, g: 20, b: 60}
-    blue :: Color.{r: 30, g: 60, b: 200}
-    a: View :: .Text.{text: "a", style: Style.{color: red, width: 10px, height: 4px}}
-    b: View :: .Text.{text: "b", style: Style.{color: blue, width: 20px, height: 4px}}
-    tree: View :: .Box.{children: [a, b]}
-    loop line; describe(tree) {
-        print(line)
-    }
-    print("total width {(total_width(tree))}")
+    red := Style.{color: "#dc143c", width: 10px, height: 4px}
+    blue := Style.{color: "#1e3cc8", width: 20px, height: 4px}
+    tree := ui.box([styled_text("a", red), styled_text("b", blue)])
+    backend := ui.null_backend()
+    size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
+    print("a color={red.color} w={red.width.raw()} h={red.height.raw()}")
+    print("b color={blue.color} w={blue.width.raw()} h={blue.height.raw()}")
+    print("total width {(red.width.raw() + blue.width.raw())}")
 }
-// --- expected output --------------------------------------------------
-// a rgb=(220,20,60) w=10.0 h=4.0
-// b rgb=(30,60,200) w=20.0 h=4.0
-// total width 30.0

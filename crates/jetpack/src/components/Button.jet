@@ -1,14 +1,6 @@
-// Button — starter component from the Jetpack ownable component kit
-// (Tower c134 Phase 4). `jetpack add Button` copies this exact file into your
-// project's components/ dir — it is now yours to edit; nothing here is
-// compiler magic. Self-contained on purpose: the `View` tree below is the
-// same shape as examples/features/190_ui_view_tree.jet, kept local so this
-// file compiles and runs entirely on its own (no import needed to try it).
-
-enum View {
-    Text(text: String)
-    Box(children: [View])
-}
+// Ownable Button component. Its output is the canonical core.ui UiNode used by
+// every backend; copied projects do not inherit a private view-tree runtime.
+use core.ui as ui
 
 struct Button {
     label: String
@@ -16,38 +8,23 @@ struct Button {
 }
 
 fn button(label: String) -> Button {
-    return Button.{label: label, clicks: 0}
+    return Button.{label: ~label, clicks: 0}
 }
 
-// Jet structs are values: pressing the button returns a new, updated Button
-// rather than mutating one in place.
 fn press(b: Button) -> Button {
-    return Button.{label: b.label, clicks: b.clicks + 1}
+    return Button.{label: ~b.label, clicks: b.clicks + 1}
 }
 
-fn to_view(b: Button) -> View {
-    return .Box.{children: [.Text.{text: "[{b.label}] clicks={b.clicks}"}]}
-}
-
-fn flatten(v: View) -> [String] {
-    if v == {
-        .Text(text) -> { return [text] }
-        .Box(children) -> {
-            out: [String] := []
-            loop c; children {
-                loop t; flatten(c) {
-                    out.push(t)
-                }
-            }
-            return out
-        }
-    }
+fn to_view(b: Button) -> UiNode {
+    return ui.button("[{b.label}] clicks={b.clicks}")
 }
 
 fn run() {
     b := button("Save")
-    print(flatten(to_view(b)).join(" "))
-    b = press(b)
-    b = press(b)
-    print(flatten(to_view(b)).join(" "))
+    backend := ui.null_backend()
+    backend.paint(to_view(b))
+    print("[{b.label}] clicks={b.clicks}")
+    b = press(press(b))
+    backend.paint(to_view(b))
+    print("[{b.label}] clicks={b.clicks}")
 }

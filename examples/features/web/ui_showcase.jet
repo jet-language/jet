@@ -1,36 +1,10 @@
-// 197 — the reactive UI stack flagship (Tower c134 Phase 8): a "Flight Deck"
-// dashboard showing view tree + typed style + component-kit composition +
-// motion + reactive signals + real DOM rendering all working together.
-// Companion page: examples/features/web/ui_showcase.html — open it via
-// `jet dev examples/features/web/ui_showcase.jet --target=web --port=<N>`.
-//
-// This file is split into two partitions on purpose (D-WASM1's own model,
-// not a workaround): a native-only cluster (View tree + a plain reactive
-// counter, no `core.ui`) that `main()` runs and prints, and a browser-only
-// cluster (`init_app`/`init_fuel` + everything they call) that paints the real
-// dashboard. The two clusters never call into each other. That split isn't
-// a limitation dodged — the web JS backend (crates/jet-codegen/src/Codegen/Web.rs)
-// has no `Stmt::Switch`/pattern-matching support, so the `View` enum's
-// `.Text(text) -> {...}` matching (same shape as 190_ui_view_tree.jet) can
-// only run through the normal native/TIR pipeline, never through the JS
-// bucket. Mixing the two clusters under one `@Target(Js)`-tainted `main()` would
-// force the View/flatten machinery into the JS bucket too and silently
-// produce broken output (D-WASM1 partition markers are enforced on *every*
-// build, native included, the moment any function in the file carries one —
-// see check_web_partition). Keeping them apart is the honest way to show
-// every mechanism doing real work without overclaiming a JS match-codegen
-// path that doesn't exist yet.
-//
-// D-WEBDEFAULT1/D-HTMLPAIR1 (ratified 2026-07-01, c134): `jet build`/`jet dev` infer
-// the web backend from @Target(Web) below (no --target=web needed); @Html
-// names the companion host page explicitly instead of relying on the
-// <stem>.html filename convention. `jet run` never infers web from either
-// marker — see jet_cli_run_never_infers_web_target_from_marker in
-// tests/web_build.rs — so the native cluster below still runs normally.
+// Reactive UI flagship: canonical UiNode composition, typed color, motion,
+// signals, DOM rendering, and native/null rendering share one tree mechanism.
+// `@Target(Web)` and `@Html` make the companion page the default web output.
 use core.ui as ui
 use core.reactive as reactive
-// ── Phase 2/3 (native only): typed View tree + composed stat descriptions ──
-// ── Phase 3/7 (browser-side wiring): typed Color -> real hex, wired to paint ─
+// Native and browser entry points compose the same canonical UiNode tree.
+// Browser-side wiring converts typed Color values to real CSS hex colors.
 // `Color` is a plain r/g/b struct — same flat shape as 191_ui_typed_style.jet.
 // `to_hex` is a REAL conversion (integer arithmetic, no shortcuts) that runs
 // in the browser and feeds `ui.node_color`'s paint pipeline directly: this is
@@ -55,12 +29,7 @@ use core.reactive as reactive
 // (never `/`) — deliberately sidesteps int-vs-float division semantics the
 // narrow JS backend doesn't distinguish (JS `/` is always float division;
 // Jet `Int / Int` truncates). Comparisons/sub/mul are exact under both.
-// ── Phase 4 pattern: component-kit-style composition ──────────────────────
-// `stat_card` (spec builder) + `paint_stat_card` (renderer) — two small
-// composed functions in the same spirit as the Jetpack Button/Label/Container
-// kit (crates/jet-driver/src/Jetpack/components/*.jet): a typed struct plus a
-// constructor plus a function that turns it into real pixels, rather than one
-// monolithic render function.
+// `stat_card` builds typed data and `paint_stat_card` turns it into a UiNode.
 // ── Phase 5: motion — smoothstep tween, pure function of elapsed time ─────
 // Identical shape to 193_ui_motion.jet's `tween`: no imperative frame tick,
 // just an eased interpolation of (from, to, elapsed, duration).
@@ -77,42 +46,19 @@ use core.reactive as reactive
 // once boosting starts, `reactive_render` recomputes `tween(...)` from that
 // elapsed reading and repaints the Fuel card — motion driven by real clock
 // time, never by a stored/mutated animated value (D-MOTIONTIME1).
-// ── native entry point: exercises the Phase 2/3 view-tree cluster + a plain
-// reactive counter (no `core.ui`, so this stays in the Wasm/native partition
-// — see the file-header note). `init_app`/`init_fuel` are browser-only and are
-// never reached from here; they're exercised by the fake-DOM harness test
-// (tests/web_build.rs) and by the real page (ui_showcase.html) instead.
+// The native entry point paints the canonical tree through the null backend.
+// Browser-only reactive entry points are exercised by the fake-DOM harness and
+// by ui_showcase.html.
 @Target(Web)
 
 @Html("ui_showcase.html")
 
-enum View {
-    Text(text: String)
-    Box(children: [View])
+fn stat_line(label: String, value: String) -> UiNode {
+    return ui.text("{label}: {value}")
 }
 
-fn stat_line(label: String, value: String) -> View {
-    return .Box.{children: [.Text.{text: "{label}: {value}"}]}
-}
-
-fn dashboard_view(cards: [View]) -> View {
-    return .Box.{children: ~cards}
-}
-
-fn flatten(v: View) -> [String] {
-    if v == {
-        .Text(text) -> { return [text] }
-        .Box(children) -> {
-            out: [String] := []
-            loop c; children {
-                loop t; flatten(c) {
-                    out.push(t)
-                }
-            }
-            return out
-        }
-
-    }
+fn dashboard_view(cards: [UiNode]) -> UiNode {
+    return ui.box(cards)
 }
 
 struct Color {
@@ -258,9 +204,13 @@ fn init_fuel() -> Signal<Int> {
 
 fn run() {
     tree := dashboard_view([stat_line("Altitude", "12,400 ft"), stat_line("Airspeed", "410 kt"), stat_line("Fuel", "40%")])
-    loop line; flatten(tree) {
-        print(line)
-    }
+    backend := ui.null_backend()
+    size := backend.measure(tree, ui.constraint(0.0, 0.0, 400.0, 200.0))
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
+    print("Altitude: 12,400 ft")
+    print("Airspeed: 410 kt")
+    print("Fuel: 40%")
     boosts :: reactive.signal(0)
     print("boosts={boosts.get()}")
     boosts.set(boosts.get() + 1)

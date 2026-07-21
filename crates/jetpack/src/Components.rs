@@ -118,6 +118,27 @@ mod tests {
     }
 
     #[test]
+    fn starter_components_use_the_canonical_ui_tree() {
+        for component in STARTER_COMPONENTS {
+            assert!(
+                component.source.contains("use core.ui as ui"),
+                "{} must import the canonical UI module",
+                component.name
+            );
+            assert!(
+                component.source.contains("UiNode"),
+                "{} must expose canonical UiNode output",
+                component.name
+            );
+            assert!(
+                !component.source.contains("enum View"),
+                "{} must not introduce a private render tree",
+                component.name
+            );
+        }
+    }
+
+    #[test]
     fn copies_component_source_into_components_dir() {
         let dir = scratch_dir("copy");
         let button = find("Button").unwrap();

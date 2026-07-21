@@ -14,6 +14,7 @@
 // imperative frame mutation" rule: motion values are derived, not mutated.
 use core.time as time
 use core.reactive as reactive
+use core.ui as ui
 
 // Smoothstep ease: 3t^2 - 2t^3, clamped at the ends. A correct, simple,
 // deterministic interpolation — not a physics spring-damper model, which
@@ -30,28 +31,40 @@ fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float {
     return from + (to - from) * eased
 }
 
+fn motion_node(x: Float) -> UiNode {
+    return ui.node_color("x={x}", 100.0, 1.0, "#3366ff")
+}
+
 fn run() {
     // D-DET1 injectable Clock, seeded at 0 — no wall-clock read, reproducible
     // by construction. `elapsed` is a Signal fed by explicit clock reads.
     clock := time.clock(0)
     elapsed :: reactive.signal(clock.now())
     x :: reactive.derived(() => tween(0.0, 100.0, elapsed.get(), 400))
+    backend := ui.null_backend()
+    backend.layout(motion_node(x.get()), ui.rect(0.0, 0.0, 100.0, 1.0))
+    backend.paint(motion_node(x.get()))
     print("t={elapsed.get()} x={x.get()}")
     clock.tick(100)
     elapsed.set(clock.now())
+    backend.paint(motion_node(x.get()))
     print("t={elapsed.get()} x={x.get()}")
     clock.tick(100)
     elapsed.set(clock.now())
+    backend.paint(motion_node(x.get()))
     print("t={elapsed.get()} x={x.get()}")
     clock.tick(100)
     elapsed.set(clock.now())
+    backend.paint(motion_node(x.get()))
     print("t={elapsed.get()} x={x.get()}")
     clock.tick(100)
     elapsed.set(clock.now())
+    backend.paint(motion_node(x.get()))
     print("t={elapsed.get()} x={x.get()}")
     // Past the duration the motion clamps to the target — still a pure
     // function of elapsed time, no special-case mutation of x.
     clock.tick(200)
     elapsed.set(clock.now())
+    backend.paint(motion_node(x.get()))
     print("t={elapsed.get()} x={x.get()}")
 }

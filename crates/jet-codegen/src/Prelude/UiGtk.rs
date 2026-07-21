@@ -13,22 +13,19 @@ mod jet_gtk {
     // line is named by `use c.gtk4` in the application (the S59 / `pkg-config
     // gtk4` path); the calls here are the internals it links against.
     //
-    // Retained-mode widget model: `label`/`button` create real GtkWidgets and
-    // return an integer handle; `set_text`/`set_size`/`set_color` mutate a live
-    // widget; `on_click` wires a button's "clicked" signal to a Jet closure. A
-    // reactive effect (`ui.reactive_render`) that calls `set_text` on every
-    // signal change is what makes a counter update on the screen — the button's
-    // click sets the signal, the effect re-runs, and the GtkLabel's text is
-    // updated in place.
+    // Retained-mode widget model: canonical `JetUiNode` trees reconcile by stable
+    // path into real GtkBox/GtkLabel/GtkButton/GtkEntry widgets. Repaint updates
+    // those widgets in place and removes stale children. The existing handle event
+    // methods bind those reconciled widgets rather than creating a second tree.
     //
     // Headless safety: with `JET_UI_HEADLESS=1` or no display, `gtk_init_check`
     // is false, no widgets are created, and every op is a safe no-op — the
     // program still runs (signals update, terminal output prints) and
     // terminates, so tests are deterministic and a display-less CI never hangs.
     use super::{
-        jet_ui_advance_focus, jet_ui_collect_focus, jet_ui_measure_tree, jet_ui_paint_tree,
-        JetBackend, JetEventResult, JetInputEvent, JetPaintCmd, JetRect, JetShow, JetSize,
-        JetSizeConstraint, JetUiNode,
+        jet_ui_advance_focus, jet_ui_measure_tree, jet_ui_paint_tree,
+        JetAriaRole, JetBackend, JetEventResult, JetInputEvent, JetPaintCmd, JetRect, JetShow,
+        JetSize, JetSizeConstraint, JetUiNode, JetUiNodeKind,
     };
     use std::cell::RefCell;
     use std::ffi::CString;
@@ -60,12 +57,17 @@ mod jet_gtk {
         fn gtk_window_present(window: *mut GtkWidget);
         fn gtk_box_new(orientation: c_int, spacing: c_int) -> *mut GtkWidget;
         fn gtk_box_append(box_: *mut GtkWidget, child: *mut GtkWidget);
+        fn gtk_box_remove(box_: *mut GtkWidget, child: *mut GtkWidget);
         fn gtk_label_new(text: *const c_char) -> *mut GtkWidget;
         fn gtk_label_set_text(label: *mut GtkWidget, text: *const c_char);
         fn gtk_button_new_with_label(label: *const c_char) -> *mut GtkWidget;
         fn gtk_button_set_label(button: *mut GtkWidget, label: *const c_char);
+        fn gtk_entry_new() -> *mut GtkWidget;
+        fn gtk_editable_set_text(editable: *mut GtkWidget, text: *const c_char);
         fn gtk_widget_set_size_request(widget: *mut GtkWidget, width: c_int, height: c_int);
         fn gtk_widget_add_css_class(widget: *mut GtkWidget, css_class: *const c_char);
+        fn gtk_widget_remove_css_class(widget: *mut GtkWidget, css_class: *const c_char);
+        fn gtk_widget_grab_focus(widget: *mut GtkWidget) -> gboolean;
         fn gtk_css_provider_new() -> *mut GtkCssProvider;
         fn gtk_css_provider_load_from_string(provider: *mut GtkCssProvider, string: *const c_char);
         fn gtk_style_context_add_provider_for_display(
@@ -123,6 +125,23 @@ mod jet_gtk {
         UnsupportedDisplay,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum GtkWidgetKind {
+        Box,
+        Label,
+        Button,
+        Entry,
+    }
+
+    struct GtkWidgetRecord {
+        path: String,
+        parent: *mut GtkWidget,
+        widget: *mut GtkWidget,
+        kind: GtkWidgetKind,
+        label: String,
+        css_class: Option<String>,
+    }
+
     struct GtkState {
         // Seam parity (display-free): keeps `GtkBackend` a full `JetBackend` so
         // the null/tui measure→layout→paint path is available on it too.
@@ -131,6 +150,7 @@ mod jet_gtk {
         commands: Vec<JetPaintCmd>,
         last_event: Option<JetEventResult>,
         focus_nodes: Vec<JetUiNode>,
+        focus_paths: Vec<String>,
         focused_index: Option<usize>,
         // Retained native widgets.
         inited: bool,
@@ -139,6 +159,7 @@ mod jet_gtk {
         vbox: *mut GtkWidget,
         widgets: Vec<*mut GtkWidget>,
         is_button: Vec<bool>,
+        tree_widgets: Vec<GtkWidgetRecord>,
         availability: GtkAvailability,
     }
 
@@ -173,6 +194,160 @@ mod jet_gtk {
                 gtk_window_set_default_size(self.window, 320, 240);
             }
         }
+
+        fn trace(&self, message: &str) {
+            if std::env::var_os("JET_UI_GTK_TRACE").is_some() {
+                eprintln!("GTK_UI {message}");
+            }
+        }
+
+        fn widget_kind(node: &JetUiNode) -> GtkWidgetKind {
+            match node.kind {
+                JetUiNodeKind::Box => GtkWidgetKind::Box,
+                JetUiNodeKind::Button => GtkWidgetKind::Button,
+                JetUiNodeKind::TextInput => GtkWidgetKind::Entry,
+                _ => match node.role {
+                    Some(JetAriaRole::Button) => GtkWidgetKind::Button,
+                    Some(JetAriaRole::TextInput) => GtkWidgetKind::Entry,
+                    Some(JetAriaRole::Container) => GtkWidgetKind::Box,
+                    _ => GtkWidgetKind::Label,
+                },
+            }
+        }
+
+        fn remove_tree_widget(&mut self, index: usize) {
+            let record = self.tree_widgets.remove(index);
+            if self.display_ok && !record.parent.is_null() && !record.widget.is_null() {
+                unsafe { gtk_box_remove(record.parent, record.widget) };
+            }
+            self.trace(&format!("remove {}", record.path));
+        }
+
+        fn remove_tree_subtree(&mut self, path: &str) {
+            let child_prefix = format!("{path}/");
+            for index in (0..self.tree_widgets.len()).rev() {
+                let record_path = &self.tree_widgets[index].path;
+                if record_path == path || record_path.starts_with(&child_prefix) {
+                    self.remove_tree_widget(index);
+                }
+            }
+        }
+
+        fn reconcile_node(
+            &mut self,
+            node: &JetUiNode,
+            parent: *mut GtkWidget,
+            path: &str,
+            live: &mut Vec<String>,
+            focus_nodes: &mut Vec<JetUiNode>,
+            focus_paths: &mut Vec<String>,
+        ) {
+            let kind = Self::widget_kind(node);
+            if let Some(index) = self.tree_widgets.iter().position(|record| record.path == path) {
+                if self.tree_widgets[index].kind != kind || self.tree_widgets[index].parent != parent {
+                    self.remove_tree_subtree(path);
+                }
+            }
+            let index = if let Some(index) = self.tree_widgets.iter().position(|record| record.path == path) {
+                index
+            } else {
+                let text = CString::new(node.label.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
+                let widget = if self.display_ok {
+                    unsafe {
+                        let widget = match kind {
+                            GtkWidgetKind::Box => gtk_box_new(GTK_ORIENTATION_VERTICAL, 8),
+                            GtkWidgetKind::Label => gtk_label_new(text.as_ptr()),
+                            GtkWidgetKind::Button => gtk_button_new_with_label(text.as_ptr()),
+                            GtkWidgetKind::Entry => gtk_entry_new(),
+                        };
+                        gtk_box_append(parent, widget);
+                        widget
+                    }
+                } else {
+                    std::ptr::null_mut()
+                };
+                self.tree_widgets.push(GtkWidgetRecord {
+                    path: path.to_string(),
+                    parent,
+                    widget,
+                    kind,
+                    label: String::new(),
+                    css_class: None,
+                });
+                self.trace(&format!("create {} {:?}", path, kind));
+                self.tree_widgets.len() - 1
+            };
+
+            live.push(path.to_string());
+            let widget = self.tree_widgets[index].widget;
+            if self.display_ok && !widget.is_null() {
+                let text = CString::new(node.label.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
+                unsafe {
+                    match kind {
+                        GtkWidgetKind::Label => gtk_label_set_text(widget, text.as_ptr()),
+                        GtkWidgetKind::Button => gtk_button_set_label(widget, text.as_ptr()),
+                        GtkWidgetKind::Entry => gtk_editable_set_text(widget, text.as_ptr()),
+                        GtkWidgetKind::Box => {}
+                    }
+                    gtk_widget_set_size_request(widget, node.width as c_int, node.height as c_int);
+                }
+            }
+            self.tree_widgets[index].label = node.label.clone();
+            let old_class = self.tree_widgets[index].css_class.take();
+            let new_class = node.color.as_ref().map(|color| format!("jetfill{}", color.trim_start_matches('#')));
+            if self.display_ok && !widget.is_null() && old_class != new_class {
+                if let Some(old) = old_class.as_ref().and_then(|class| CString::new(class.as_str()).ok()) {
+                    unsafe { gtk_widget_remove_css_class(widget, old.as_ptr()) };
+                }
+                if let (Some(color), Some(class)) = (node.color.as_ref(), new_class.as_ref()) {
+                    let css = format!(".{class} {{ background-color: {color}; }}");
+                    if let (Ok(cclass), Ok(ccss)) = (CString::new(class.as_str()), CString::new(css)) {
+                        unsafe {
+                            let provider = gtk_css_provider_new();
+                            gtk_css_provider_load_from_string(provider, ccss.as_ptr());
+                            let display = gdk_display_get_default();
+                            if !display.is_null() {
+                                gtk_style_context_add_provider_for_display(display, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+                            }
+                            gtk_widget_add_css_class(widget, cclass.as_ptr());
+                            g_object_unref(provider as gpointer);
+                        }
+                    }
+                }
+            }
+            self.tree_widgets[index].css_class = new_class;
+            self.trace(&format!("update {} {}", path, node.label));
+
+            if node.role.as_ref().is_some_and(JetAriaRole::is_interactive) {
+                focus_nodes.push(node.clone());
+                focus_paths.push(path.to_string());
+            }
+            if kind == GtkWidgetKind::Box {
+                for (child_index, child) in node.children.iter().enumerate() {
+                    self.reconcile_node(
+                        child,
+                        widget,
+                        &format!("{path}/{child_index}"),
+                        live,
+                        focus_nodes,
+                        focus_paths,
+                    );
+                }
+            }
+        }
+
+        fn focus_current_widget(&self) {
+            let Some(path) = self.focused_index.and_then(|index| self.focus_paths.get(index)) else {
+                return;
+            };
+            let Some(record) = self.tree_widgets.iter().find(|record| &record.path == path) else {
+                return;
+            };
+            if self.display_ok && !record.widget.is_null() {
+                unsafe { gtk_widget_grab_focus(record.widget) };
+            }
+            self.trace(&format!("focus {path}"));
+        }
     }
 
     impl Drop for GtkState {
@@ -185,6 +360,7 @@ mod jet_gtk {
                 }
                 self.window = std::ptr::null_mut();
             }
+            self.trace("cleanup");
         }
     }
 
@@ -204,6 +380,7 @@ mod jet_gtk {
                     commands: Vec::new(),
                     last_event: None,
                     focus_nodes: Vec::new(),
+                    focus_paths: Vec::new(),
                     focused_index: None,
                     inited: false,
                     display_ok: false,
@@ -211,6 +388,7 @@ mod jet_gtk {
                     vbox: std::ptr::null_mut(),
                     widgets: Vec::new(),
                     is_button: Vec::new(),
+                    tree_widgets: Vec::new(),
                     availability: GtkAvailability::Uninitialized,
                 })),
             }
@@ -236,7 +414,12 @@ mod jet_gtk {
         pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
             let mut state = self.state.borrow_mut();
             state.focused_index = if nodes.is_empty() { None } else { Some(0) };
+            state.focus_paths = nodes
+                .iter()
+                .filter_map(|node| state.tree_widgets.iter().find(|record| record.label == node.label).map(|record| record.path.clone()))
+                .collect();
             state.focus_nodes = nodes;
+            state.focus_current_widget();
         }
         pub fn focused_label(&self) -> String {
             let state = self.state.borrow();
@@ -263,6 +446,18 @@ mod jet_gtk {
             let mut state = self.state.borrow_mut();
             state.ensure_init();
             let id = state.widgets.len() as i64;
+            let tree_kind = if is_button { GtkWidgetKind::Button } else { GtkWidgetKind::Label };
+            if let Some(widget) = state
+                .tree_widgets
+                .iter()
+                .find(|record| record.kind == tree_kind && record.label == text)
+                .map(|record| record.widget)
+            {
+                state.widgets.push(widget);
+                state.is_button.push(is_button);
+                state.trace(&format!("bind {text}"));
+                return id;
+            }
             if state.display_ok {
                 let ctext = CString::new(text).unwrap_or_else(|_| CString::new("").unwrap());
                 // SAFETY: display is live (ensure_init); pointers are GTK handles.
@@ -430,12 +625,34 @@ mod jet_gtk {
                 height: node.height,
             });
             jet_ui_paint_tree(node, frame, &mut self.commands);
-            let mut focus = Vec::new();
-            jet_ui_collect_focus(node, &mut focus);
-            if !focus.is_empty() {
-                self.focused_index = Some(0);
-                self.focus_nodes = focus;
+            self.ensure_init();
+            let previous_focus = self
+                .focused_index
+                .and_then(|index| self.focus_paths.get(index))
+                .cloned();
+            let mut live = Vec::new();
+            let mut focus_nodes = Vec::new();
+            let mut focus_paths = Vec::new();
+            self.reconcile_node(
+                node,
+                self.vbox,
+                "root",
+                &mut live,
+                &mut focus_nodes,
+                &mut focus_paths,
+            );
+            for index in (0..self.tree_widgets.len()).rev() {
+                if !live.contains(&self.tree_widgets[index].path) {
+                    self.remove_tree_widget(index);
+                }
             }
+            self.focused_index = previous_focus
+                .as_ref()
+                .and_then(|path| focus_paths.iter().position(|candidate| candidate == path))
+                .or_else(|| (!focus_paths.is_empty()).then_some(0));
+            self.focus_nodes = focus_nodes;
+            self.focus_paths = focus_paths;
+            self.focus_current_widget();
         }
 
         fn on_event(&mut self, event: JetInputEvent) -> JetEventResult {
@@ -443,6 +660,7 @@ mod jet_gtk {
                 if let Some(result) =
                     jet_ui_advance_focus(&self.focus_nodes, &mut self.focused_index, code)
                 {
+                    self.focus_current_widget();
                     self.last_event = Some(result);
                     return result;
                 }

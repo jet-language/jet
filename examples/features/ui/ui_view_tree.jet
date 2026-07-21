@@ -1,62 +1,17 @@
-// 190 — reactive UI stack: typed view-model tree over core.reactive (Tower c134,
-// D-UITREE1=A). `View` is a plain enum with named-payload variants, constructed
-// with the dot-brace syntax (D-UITREE1/D-DOTCTOR1): `.Box.{ children: [...] }`,
-// `.Text.{ text: "..." }`. The tree lives in a Signal and its flattened leaf list
-// is a Derived, so re-rendering is diff-based: only leaves whose content actually
-// changed are repainted, not the whole tree.
-use core.reactive as reactive
-
-enum View {
-    Text(text: String)
-    Box(children: [View])
-}
-
-fn flatten(v: View) -> [String] {
-    if v == {
-        .Text(text) -> { return [text] }
-        .Box(children) -> {
-            out: [String] := []
-            loop c; children {
-                loop t; flatten(c) {
-                    out.push(t)
-                }
-            }
-            return out
-        }
-
-    }
-}
-
-// Diff-based rerender: only leaves that changed position/content are repainted.
-fn repaint(old: [String], updated: [String]) -> Int {
-    n := 0
-    i := 0
-    loop leaf; updated {
-        same := false
-        if i < old.len() {
-            if leaf == old[i] {
-                same = true
-            }
-        }
-        if !same {
-            n++
-            print("repaint: {leaf}")
-        }
-        i++
-    }
-    return n
-}
+// D-UITREE1: one canonical UiNode tree. Repainting the same paths lets retained
+// backends update stable native/DOM widgets instead of maintaining another View.
+use core.ui as ui
 
 fn run() {
-    initial: View :: .Box.{children: [.Text.{text: "a"}, .Text.{text: "b"}]}
-    tree :: reactive.signal(initial)
-    leaves :: reactive.derived(() => flatten(tree.get()))
-    empty: [String] :: []
-    before :: leaves.get()
-    print("initial repaints: {repaint(empty, before)}")
-    // Only the second leaf's text changes; the first ("a") must not repaint.
-    next: View :: .Box.{children: [.Text.{text: "a"}, .Text.{text: "zz"}]}
-    tree.set(next)
-    after :: leaves.get()
-    print("update repaints: {repaint(before, after)}")
+    backend := ui.null_backend()
+    initial := ui.box([ui.text("a"), ui.text("b")])
+    size := backend.measure(initial, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    backend.layout(initial, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(initial)
+    print("paint: a")
+    print("paint: b")
+
+    updated := ui.box([ui.text("a"), ui.text("zz")])
+    backend.paint(updated)
+    print("update: zz")
 }

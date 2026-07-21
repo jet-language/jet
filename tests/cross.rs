@@ -302,6 +302,10 @@ fn gtk_backend_emits_gtk_ffi_for_linux_triple() {
         "gtk_label_new",
         "gtk_label_set_text",
         "gtk_button_new_with_label",
+        "gtk_entry_new",
+        "gtk_editable_set_text",
+        "gtk_box_remove",
+        "gtk_widget_grab_focus",
         "gtk_widget_set_size_request",
         "gtk_css_provider_load_from_string",
         "g_signal_connect_data",
@@ -368,4 +372,84 @@ fn gtk_backend_resolves_gtk4_link_flags() {
         "expected `-l gtk-4` in the link line; got {:?}",
         clinks
     );
+}
+
+#[test]
+fn gtk_canonical_tree_reconciles_real_widgets_under_xvfb() {
+    let have_gtk = std::process::Command::new("pkg-config")
+        .args(["--exists", "gtk4"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    let have_xvfb = std::process::Command::new("xvfb-run")
+        .arg("--help")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    let have_display = std::env::var_os("DISPLAY").is_some();
+    if !have_gtk || (!have_xvfb && !have_display) {
+        eprintln!("note: skipping live GTK reconcile proof (need gtk4 + display)");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!("jet_gtk_tree_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("gtk_tree.jet");
+    let src = r#"use core.ui as ui
+use c.gtk4 as gtk4
+fn run() {
+    app := ui.gtk_backend()
+    first := ui.box([
+        ui.text("Title"),
+        ui.button("Save"),
+        ui.node_role("Name", 120.0, 24.0, ui.aria_role_text_input())
+    ])
+    size := app.measure(first, ui.constraint(0.0, 0.0, 320.0, 240.0))
+    app.layout(first, ui.rect(0.0, 0.0, size.width, size.height))
+    app.paint(first)
+    app.on_event(ui.key_event("Tab"))
+    second := ui.box([ui.text("Updated"), ui.button("Save")])
+    app.paint(second)
+    print(app.focused_label())
+}
+"#;
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_target(src, &shown, Some("x86_64-unknown-linux-gnu"))
+        .unwrap_or_else(|diags| panic!("{}", jet::render_diagnostics(&shown, src, &diags)));
+    let rs = dir.join("gtk_tree.rs");
+    let bin = dir.join("gtk_tree");
+    fs::write(&rs, out.rust).unwrap();
+    let mut rustc = std::process::Command::new("rustc");
+    rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin);
+    for arg in jet::resolve_c_links(&shown).expect("gtk4 link flags") {
+        rustc.arg(arg);
+    }
+    let compiled = rustc.output().unwrap();
+    assert!(compiled.status.success(), "generated GTK Rust failed:\n{}", String::from_utf8_lossy(&compiled.stderr));
+
+    let mut run_command = if have_xvfb {
+        let mut command = std::process::Command::new("xvfb-run");
+        command.arg("-a").arg(&bin);
+        command
+    } else {
+        std::process::Command::new(&bin)
+    };
+    let run = run_command.env("JET_UI_GTK_TRACE", "1").output().unwrap();
+    assert!(run.status.success(), "live GTK fixture failed:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "Save\n");
+    let trace = String::from_utf8_lossy(&run.stderr);
+    for event in [
+        "GTK_UI create root Box",
+        "GTK_UI create root/1 Button",
+        "GTK_UI create root/2 Entry",
+        "GTK_UI focus root/2",
+        "GTK_UI update root/0 Updated",
+        "GTK_UI remove root/2",
+        "GTK_UI cleanup",
+    ] {
+        assert!(trace.contains(event), "missing `{event}` in GTK trace:\n{trace}");
+    }
+    let _ = fs::remove_dir_all(&dir);
 }

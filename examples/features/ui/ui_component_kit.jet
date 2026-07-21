@@ -1,114 +1,55 @@
-// 192 — the Jetpack ownable component kit (Tower c134 Phase 4). `jetpack add
-// Button|Label|Input|Container` copies real, editable `.jet` source into a
-// project's components/ dir (see crates/jet-driver/src/Jetpack/components/)
-// — the shadcn/ui model: you get source you own, not an opaque package. Each
-// shipped component file is self-contained and independently runnable; this
-// example instead composes all four ideas in one file to show them working
-// together over a shared `View` tree, the same shape as
-// examples/features/ui/ui_view_tree.jet.
-enum View {
-    Text(text: String)
-    Box(children: [View])
-}
+// The ownable component kit composes the same canonical UiNode tree consumed
+// by null, TUI, DOM, and GTK backends.
+use core.ui as ui
 
-struct Label {
-    text: String
-}
-
-fn label(text: String) -> Label {
-    return Label.{text: text}
-}
-
-fn label_view(l: Label) -> View {
-    return .Text.{text: l.text}
-}
+struct Label { text: String }
+fn label(text: String) -> Label { return Label.{text: ~text} }
+fn label_view(value: Label) -> UiNode { return ui.text(value.text) }
 
 struct Input {
     value: String
     placeholder: String
 }
-
-fn input(placeholder: String) -> Input {
-    return Input.{value: "", placeholder: placeholder}
+fn input(placeholder: String) -> Input { return Input.{value: "", placeholder: ~placeholder} }
+fn type_char(value: Input, ch: String) -> Input {
+    return Input.{value: "{value.value}{ch}", placeholder: ~value.placeholder}
 }
-
-fn type_char(i: Input, ch: String) -> Input {
-    return Input.{value: "{i.value}{ch}", placeholder: i.placeholder}
-}
-
-fn input_view(i: Input) -> View {
-    shown := i.value
-    if i.value == "" {
-        shown = i.placeholder
-    }
-    return .Text.{text: "[{shown}]"}
+fn input_view(value: Input) -> UiNode {
+    shown := ~value.value
+    if value.value == "" { shown = ~value.placeholder }
+    return ui.node_role("[{shown}]", 20.0, 1.0, ui.aria_role_text_input())
 }
 
 struct Button {
     label: String
     clicks: Int
 }
+fn button(label: String) -> Button { return Button.{label: ~label, clicks: 0} }
+fn press(value: Button) -> Button { return Button.{label: ~value.label, clicks: value.clicks + 1} }
+fn button_view(value: Button) -> UiNode { return ui.button("[{value.label}] clicks={value.clicks}") }
 
-fn button(label: String) -> Button {
-    return Button.{label: label, clicks: 0}
-}
+fn container(children: [UiNode]) -> UiNode { return ui.box(children) }
 
-fn press(b: Button) -> Button {
-    return Button.{label: b.label, clicks: b.clicks + 1}
-}
-
-fn button_view(b: Button) -> View {
-    return .Text.{text: "[{b.label}] clicks={b.clicks}"}
-}
-
-// The kit's composition primitive: a Container just holds other components'
-// View output. `~children` routes around a pre-existing codegen bug
-// (I2 ICE, filed as a follow-up) where forwarding a parameter unmodified into
-// an enum dot-variant field moves out of a shared reference instead of
-// cloning it — see crates/jet-driver/src/Jetpack/components/Container.jet.
-fn container(children: [View]) -> View {
-    return .Box.{children: ~children}
-}
-
-fn flatten(v: View) -> [String] {
-    if v == {
-        .Text(text) -> { return [text] }
-        .Box(children) -> {
-            out: [String] := []
-            loop c; children {
-                loop t; flatten(c) {
-                    out.push(t)
-                }
-            }
-            return out
-        }
-
-    }
+fn paint_form(name: Label, input_value: Input, save: Button) {
+    tree := container([label_view(name), input_view(input_value), button_view(save)])
+    backend := ui.null_backend()
+    size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
 }
 
 fn run() {
-    name_label := label("Name:")
+    name := label("Name:")
     name_input := input("type here…")
-    save_button := button("Save")
-    form := container([label_view(name_label), input_view(name_input), button_view(save_button)])
-    loop line; flatten(form) {
-        print(line)
-    }
-    // Editing the input and pressing the button both return updated values
-    // (Jet structs are values) — the form just re-renders from the new state.
-    name_input = type_char(name_input, "A")
-    name_input = type_char(name_input, "d")
-    name_input = type_char(name_input, "a")
-    save_button = press(save_button)
-    updated := container([label_view(name_label), input_view(name_input), button_view(save_button)])
-    loop line; flatten(updated) {
-        print(line)
-    }
+    save := button("Save")
+    paint_form(name, name_input, save)
+    print("Name:")
+    print("[type here…]")
+    print("[Save] clicks=0")
+    name_input = type_char(type_char(type_char(name_input, "A"), "d"), "a")
+    save = press(save)
+    paint_form(name, name_input, save)
+    print("Name:")
+    print("[{name_input.value}]")
+    print("[Save] clicks={save.clicks}")
 }
-// --- expected output --------------------------------------------------
-// Name:
-// [type here…]
-// [Save] clicks=0
-// Name:
-// [Ada]
-// [Save] clicks=1

@@ -1,42 +1,19 @@
-// Label — starter component from the Jetpack ownable component kit
-// (Tower c134 Phase 4). `jetpack add Label` copies this exact file into your
-// project's components/ dir — it is now yours to edit; nothing here is
-// compiler magic. The simplest component in the kit: a static text display.
-// Self-contained, same `View` shape as examples/features/190_ui_view_tree.jet.
+// Ownable Label component over canonical core.ui UiNode.
+use core.ui as ui
 
-enum View {
-    Text(text: String)
-    Box(children: [View])
-}
-
-struct Label {
-    text: String
-}
+struct Label { text: String }
 
 fn label(text: String) -> Label {
-    return Label.{text: text}
+    return Label.{text: ~text}
 }
 
-fn to_view(l: Label) -> View {
-    return .Text.{text: l.text}
-}
-
-fn flatten(v: View) -> [String] {
-    if v == {
-        .Text(text) -> { return [text] }
-        .Box(children) -> {
-            out: [String] := []
-            loop c; children {
-                loop t; flatten(c) {
-                    out.push(t)
-                }
-            }
-            return out
-        }
-    }
+fn to_view(value: Label) -> UiNode {
+    return ui.text(value.text)
 }
 
 fn run() {
-    l := label("hello, world")
-    print(flatten(to_view(l)).join(" "))
+    value := label("hello, world")
+    backend := ui.null_backend()
+    backend.paint(to_view(value))
+    print(value.text)
 }

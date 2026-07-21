@@ -264,6 +264,7 @@ class FakeElement {
   appendChild(child) { this.children.push(child); return child; }
   setAttribute(name, value) { this.attrs.set(String(name), String(value)); }
   getAttribute(name) { return this.attrs.get(String(name)) ?? null; }
+  removeAttribute(name) { this.attrs.delete(String(name)); }
 }
 class FakeDocument {
   constructor() { this.body = new FakeElement("body"); this._byId = new Map(); }
@@ -321,6 +322,7 @@ class FakeElement {
   appendChild(child) { child.parent = this; this.children.push(child); return child; }
   setAttribute(name, value) { this.attrs.set(String(name), String(value)); }
   getAttribute(name) { return this.attrs.get(String(name)) ?? null; }
+  removeAttribute(name) { this.attrs.delete(String(name)); }
   focus() { this.ownerDocument.activeElement = this; }
   remove() { if (this.parent) this.parent.children = this.parent.children.filter((child) => child !== this); }
 }
@@ -334,13 +336,17 @@ const origAppend = doc.body.appendChild.bind(doc.body);
 doc.body.appendChild = (el) => { if (el.id) doc._byId.set(el.id, el); return origAppend(el); };
 globalThis.document = doc;
 
-const { render_tree } = await import("./app.js");
+const { render_tree, render_focus_tree } = await import("./app.js");
 render_tree(true);
 let container = doc.getElementById("jet-app");
 console.log(container.children.map((el) => `${el.tagName}:${el.getAttribute("role")}:${el.getAttribute("aria-label")}`).join("|"));
-console.log(`focus=${doc.activeElement?.getAttribute("aria-label")}`);
 render_tree(false);
-console.log(container.children.map((el) => el.tagName).join("|"));
+console.log(container.children.map((el) => `${el.tagName}:${el.getAttribute("role")}:${el.getAttribute("aria-label")}`).join("|"));
+render_focus_tree();
+const second = container.children.find((el) => el.getAttribute("aria-label") === "Cancel");
+second.focus();
+render_focus_tree();
+console.log(`focus=${doc.activeElement === second}:${doc.activeElement?.getAttribute("aria-label")}`);
 "#;
 
 fn run_typed_ui_tree_harness(dir: &PathBuf) -> String {
@@ -1088,11 +1094,20 @@ fn web_typed_tree_a11y_focus_and_cleanup_roundtrip() {
 use core.ui as ui
 
 @Target(Js)
-fn render_tree(show_button: Bool) {
-    tree := ui.box([ui.text("Title")])
-    if show_button {
-        tree = ui.box([ui.text("Title"), ui.button("Save")])
+fn render_tree(with_role: Bool) {
+    tree := ui.node("plain", 80.0, 24.0)
+    if with_role {
+        tree = ui.node_role("Named", 80.0, 24.0, ui.aria_role_label())
     }
+    backend := ui.null_backend()
+    size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
+}
+
+@Target(Js)
+fn render_focus_tree() {
+    tree := ui.box([ui.button("Save"), ui.button("Cancel")])
     backend := ui.null_backend()
     size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
     backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
@@ -1103,7 +1118,7 @@ fn run() {}
 "#;
     let dir = build_web_fixture("typed_tree", src, "tests/fixtures/web_typed_tree.jet");
     let stdout = run_typed_ui_tree_harness(&dir);
-    assert_eq!(stdout, "SPAN:label:Title|BUTTON:button:Save\nfocus=Save\nSPAN\n");
+    assert_eq!(stdout, "DIV:label:Named\nDIV:null:null\nfocus=true:Cancel\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

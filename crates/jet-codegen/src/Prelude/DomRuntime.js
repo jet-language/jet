@@ -124,6 +124,12 @@ function jetReadableTextColor(hex) {
 export function paint(backend, node) {
   const frame = backend.frame ?? { x: 0, y: 0, width: node.width, height: node.height };
   const live = new Set();
+  const activeKey = typeof document !== "undefined"
+    ? document.activeElement?.dataset?.jetKey ?? null
+    : null;
+  const focusedKey = activeKey
+    ?? backend.focusNodes[backend.focusedIndex]?.dataset?.jetKey
+    ?? null;
   backend.focusNodes = [];
   const render = (current, currentFrame, path) => {
     if (current.kind === "box") {
@@ -175,6 +181,9 @@ export function paint(backend, node) {
     if (current.role) {
       box.setAttribute?.("role", current.role);
       box.setAttribute?.("aria-label", current.label);
+    } else {
+      box.removeAttribute?.("role");
+      box.removeAttribute?.("aria-label");
     }
     if (current.role === "button" || current.role === "textbox") {
       backend.focusNodes.push(box);
@@ -190,8 +199,13 @@ export function paint(backend, node) {
       }
     }
   }
-  backend.focusedIndex = backend.focusNodes.length ? 0 : -1;
-  if (backend.focusedIndex >= 0) {
+  const preservedIndex = focusedKey === null
+    ? -1
+    : backend.focusNodes.findIndex((element) => element.dataset?.jetKey === focusedKey);
+  backend.focusedIndex = preservedIndex >= 0
+    ? preservedIndex
+    : backend.focusNodes.length ? 0 : -1;
+  if (backend.focusedIndex >= 0 && (activeKey !== null || focusedKey === null)) {
     backend.focusNodes[backend.focusedIndex].focus?.();
   }
   return backend;

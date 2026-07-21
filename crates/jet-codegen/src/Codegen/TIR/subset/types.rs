@@ -47,7 +47,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         return true;
     }
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
-        "Effect" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
+        "Effect" | "UiNode" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
         | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError")) {
         return true;
     }
@@ -537,6 +537,7 @@ pub(crate) fn is_covered_collection_ty(ty: &Type, cx: &Cx) -> bool {
 pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
     ty.is_scalar()
         || matches!(ty, Type::Char | Type::String)
+        || matches!(ty, Type::Named(name) if name == "UiNode")
         // c109 Phase 17: a type-variable element (`[T]` in a generic fn). A type var only
         // appears where a type param is in scope (sema guarantees), and renders by value
         // via `cx.rust_type` (`Vec<T>`), so a `[T]` list param/return/local is covered.
