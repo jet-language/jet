@@ -291,6 +291,89 @@ mod tests {
         );
     }
 
+    /// `compile_bundle_path_opts_full` / entry-swap pass `None` facts: omit
+    /// `ReadEffects` and leave symbol effects empty — never invent `"pure"`.
+    #[test]
+    fn snapshot_without_effect_facts_omits_read_effects() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        let dir = tempfile_dir();
+        let src_path = dir.join("main.jet");
+        std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+        let (diags, bundle, _) =
+            crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+        assert!(
+            !diags.iter().any(|d| d.severity == crate::Diagnostics::Severity::Error),
+            "sema must succeed; diags={diags:?}"
+        );
+        let bundle = bundle.expect("bundle");
+        let snap = snapshot_from_bundle(&bundle, None).expect("snapshot");
+        assert!(
+            !snap.capabilities.contains(&Capability::ReadEffects),
+            "None facts must omit ReadEffects; caps={:?}",
+            snap.capabilities
+        );
+        for sym in &snap.symbols {
+            assert!(
+                sym.effects.is_empty(),
+                "None facts → empty effects (no invented pure); {:?} got {:?}",
+                sym.name,
+                sym.effects
+            );
+            assert!(
+                !sym.effects.iter().any(|e| e == "pure"),
+                "must not invent `pure`"
+            );
+        }
+    }
+
+    /// opts_full (`jet run` compile path) still runs the hook with `None` facts.
+    #[test]
+    fn compile_opts_full_crash_guest_fail_closed_e1402() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile_dir();
+        let src_path = dir.join("main.jet");
+        std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+        let wasm = fixture_wasm("crash.wasm");
+        std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+        let err = crate::Driver::compile_bundle_path_opts(
+            src_path.to_str().unwrap(),
+            crate::Sema::CompileMode::Run,
+            false,
+            false,
+            false,
+            None,
+        )
+        .expect_err("crash guest must fail closed on opts_full");
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        assert!(
+            err.iter().any(|d| d.code == "E1402"),
+            "opts_full None-facts path must still surface E1402; got {err:?}"
+        );
+    }
+
+    /// Entry-swap (`jet dev` / `--task`) still runs the hook with `None` facts.
+    #[test]
+    fn compile_entry_swap_crash_guest_fail_closed_e1402() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile_dir();
+        let src_path = dir.join("main.jet");
+        std::fs::write(
+            &src_path,
+            "fn run() {\n    print(0)\n}\n\nfn dev() {\n    print(1)\n}\n",
+        )
+        .unwrap();
+        let wasm = fixture_wasm("crash.wasm");
+        std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+        let err = crate::Driver::compile_bundle_path_with_entry(src_path.to_str().unwrap(), "dev")
+            .expect_err("crash guest must fail closed on entry-swap");
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        assert!(
+            err.iter().any(|d| d.code == "E1402"),
+            "entry-swap None-facts path must still surface E1402; got {err:?}"
+        );
+    }
+
     fn tempfile_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "jet-cex-hook-{}-{}",

@@ -1624,6 +1624,9 @@ fn compile_bundle_path_opts_full(
     // before U11's L0203, so the gap went unnoticed).
     let mut errors = Vec::new();
     let mut lints = Vec::new();
+    // Freestanding / impure / output / default compile variants here do not
+    // surface `SemIndexEffectFacts`. Pass `None` so the hook omits
+    // `ReadEffects` honestly — never invent placeholders (D-DX5-HOOK1).
     for d in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
@@ -2203,6 +2206,8 @@ pub fn compile_bundle_path_with_entry(
     // `compile_bundle_path_opts_dbg` — `parse_teaching` rides along here too.
     let mut errors = Vec::new();
     let mut lints = Vec::new();
+    // Entry-swap uses plain `check_bundle` (no effect-facts return). Pass
+    // `None` → omit `ReadEffects`; do not invent effect rows (D-DX5-HOOK1).
     for d in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
