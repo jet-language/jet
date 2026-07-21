@@ -1040,6 +1040,7 @@ struct JetHttp2Outgoing {
     expected: Option<usize>,
     sent: usize,
     control: std::sync::Arc<JetTaskControl>,
+    source_closer: Option<std::sync::Arc<JetHttpBodyCloser>>,
 }
 
 enum JetHttp2ResponsePart {
@@ -1049,7 +1050,10 @@ enum JetHttp2ResponsePart {
 }
 
 impl Drop for JetHttp2Outgoing {
-    fn drop(&mut self) { self.control.cancel(); }
+    fn drop(&mut self) {
+        self.control.cancel();
+        if let Some(closer) = &self.source_closer { closer.close(); }
+    }
 }
 
 fn jet_http2_write_header_block(
@@ -1083,10 +1087,20 @@ fn jet_http2_start_response(
     let empty = body_forbidden || reset_content || head || length == Some(0);
     let headers = jet_http2_encode_response_headers(&response, length);
     if headers.len() > JET_HTTP2_MAX_HEADER_LIST { return Err("HTTP/2 response header list is too large".to_string()); }
+    let mut chunks = if empty {
+        None
+    } else {
+        let chunks = response.body.chunks(JET_HTTP2_MAX_FRAME).map_err(|error| error.to_string())?;
+        if !chunks.h2_cancellable() {
+            return Err("HTTP/2 streaming response body must be bounded or cancellable".to_string());
+        }
+        Some(chunks)
+    };
     jet_http2_write_header_block(stream, stream_id, if empty { 0x1 } else { 0 }, &headers, max_frame)?;
     std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())
         .and_then(|()| if empty { Ok(None) } else {
-            let mut chunks = response.body.chunks(JET_HTTP2_MAX_FRAME).map_err(|error| error.to_string())?;
+            let mut chunks = chunks.take().expect("non-empty HTTP/2 response has chunks");
+            let source_closer = chunks.closer();
             let (sender, receiver) = std::sync::mpsc::sync_channel(1);
             let control = JetTaskControl::new();
             let task_control = control.clone();
@@ -1118,6 +1132,7 @@ fn jet_http2_start_response(
                 expected: length,
                 sent: 0,
                 control,
+                source_closer,
             }))
         })
 }
@@ -2780,7 +2795,7 @@ fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHttpRespo
     };
     let length = usize::try_from(metadata.len()).map_err(|_| format!("static file `{path}` is too large"))?;
     let mut response = jet_http_srv_response(200, &String::new());
-    response.body = JetHttpBody::reader(file, Some(length));
+    response.body = JetHttpBody::file(file, length);
     Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime))
 }
 
@@ -2799,7 +2814,7 @@ fn jet_http_srv_static_file_range(
     let file_len = usize::try_from(metadata.len()).map_err(|_| format!("static file `{path}` is too large"))?;
     let Some(range) = jet_http_srv_req_header(req, &"range".to_string()) else {
         let mut response = jet_http_srv_response(200, &String::new());
-        response.body = JetHttpBody::reader(file, Some(file_len));
+        response.body = JetHttpBody::file(file, file_len);
         return Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime));
     };
     let Some((start, end)) = jet_http_static_range(&range, file_len) else {
@@ -2810,7 +2825,7 @@ fn jet_http_srv_static_file_range(
         .map_err(|error| format!("static file `{path}` seek failed: {error}"))?;
     let length = end - start + 1;
     let mut response = jet_http_srv_response(206, &String::new());
-    response.body = JetHttpBody::reader(std::io::Read::take(file, length as u64), Some(length));
+    response.body = JetHttpBody::file(file, length);
     let resp = jet_http_srv_response_header(
         response,
         &"content-type".to_string(),
@@ -3013,7 +3028,7 @@ fn jet_http_srv_static_files(
     file.seek(std::io::SeekFrom::Start(start as u64))
         .map_err(|_| "static file seek failed".to_string())?;
     let mut response = jet_http_srv_empty_response(status);
-    response.body = JetHttpBody::reader(std::io::Read::take(file, length as u64), Some(length));
+    response.body = JetHttpBody::file(file, length);
     response.headers.append("content-type", jet_http_static_mime(&canonical)).expect("static MIME is valid");
     response.headers.append("accept-ranges", "bytes").expect("static header is valid");
     response.headers.append("etag", &etag).expect("generated ETag is valid");

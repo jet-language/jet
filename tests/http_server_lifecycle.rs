@@ -2373,7 +2373,11 @@ fn http2_response_framing_filters_handler_claims_and_verifies_known_lengths() {
     let (mut server, _) = listener.accept().unwrap();
     peer.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
     let mut response = jet_http_srv_empty_response(200);
-    response.body = JetHttpBody::reader(std::io::Cursor::new(b"ab".to_vec()), Some(1));
+    response.body = JetHttpBody::reader_cancellable(
+        std::io::Cursor::new(b"ab".to_vec()),
+        Some(1),
+        || {},
+    );
     let mut outgoing = jet_http2_start_response(&mut server, 1, response, JET_HTTP2_MAX_FRAME).unwrap().unwrap();
     let mut connection_window = 65_535;
     let mut stream_window = 65_535;
@@ -2388,6 +2392,37 @@ fn http2_response_framing_filters_handler_claims_and_verifies_known_lengths() {
     let mut wire = Vec::new();
     peer.read_to_end(&mut wire).ok();
     assert!(wire.windows(9).any(|header| header[3] == 3 && u32::from_be_bytes(header[5..9].try_into().unwrap()) == 1));
+}
+
+#[test]
+fn http2_rejects_uncancellable_reader_before_response_headers() {
+    struct Uncancellable(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+    impl std::io::Read for Uncancellable {
+        fn read(&mut self, _output: &mut [u8]) -> std::io::Result<usize> {
+            std::thread::park();
+            Ok(0)
+        }
+    }
+    impl Drop for Uncancellable {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut peer = std::net::TcpStream::connect(addr).unwrap();
+    let (mut server, _) = listener.accept().unwrap();
+    peer.set_nonblocking(true).unwrap();
+    let dropped = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut response = jet_http_srv_empty_response(200);
+    response.body = JetHttpBody::reader(Uncancellable(dropped.clone()), None);
+    assert!(jet_http2_start_response(&mut server, 1, response, JET_HTTP2_MAX_FRAME)
+        .err().expect("uncancellable reader rejection")
+        .contains("bounded or cancellable"));
+    assert_eq!(dropped.load(std::sync::atomic::Ordering::Acquire), 1);
+    let mut byte = [0u8; 1];
+    assert_eq!(std::io::Read::read(&mut peer, &mut byte).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
 }
 
 #[test]
@@ -2439,18 +2474,23 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
 
     struct BlockingBody {
         started: Option<std::sync::mpsc::Sender<()>>,
-        release: std::sync::mpsc::Receiver<()>,
-        sent: bool,
+        wake: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+        dropped: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     }
 
     impl std::io::Read for BlockingBody {
-        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
-            if self.sent { return Ok(0); }
+        fn read(&mut self, _output: &mut [u8]) -> std::io::Result<usize> {
             if let Some(started) = self.started.take() { let _ = started.send(()); }
-            self.release.recv().map_err(|_| std::io::ErrorKind::BrokenPipe)?;
-            output[..4].copy_from_slice(b"late");
-            self.sent = true;
-            Ok(4)
+            let (cancelled, wake) = &*self.wake;
+            let mut cancelled = cancelled.lock().unwrap();
+            while !*cancelled { cancelled = wake.wait(cancelled).unwrap(); }
+            Err(std::io::ErrorKind::Interrupted.into())
+        }
+    }
+
+    impl Drop for BlockingBody {
+        fn drop(&mut self) {
+            self.dropped.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         }
     }
 
@@ -2468,16 +2508,27 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
     });
     jet_http_mux_add(&mux, "POST", "/ignore", |_| jet_http_srv_response(200, &"ignored".to_string()));
     let (response_started_tx, response_started_rx) = std::sync::mpsc::channel();
-    let (response_release_tx, response_release_rx) = std::sync::mpsc::channel();
-    let response_release_rx = std::sync::Arc::new(std::sync::Mutex::new(Some(response_release_rx)));
-    let response_release = response_release_rx.clone();
+    let response_wake = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let response_dropped = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let response_closed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let handler_wake = response_wake.clone();
+    let handler_dropped = response_dropped.clone();
+    let handler_closed = response_closed.clone();
     jet_http_mux_add(&mux, "GET", "/slow-response", move |_| {
         let mut response = jet_http_srv_empty_response(200);
-        response.body = JetHttpBody::reader(BlockingBody {
+        let source_wake = handler_wake.clone();
+        let close_wake = handler_wake.clone();
+        let close_count = handler_closed.clone();
+        response.body = JetHttpBody::reader_cancellable(BlockingBody {
             started: Some(response_started_tx.clone()),
-            release: response_release.lock().unwrap().take().unwrap(),
-            sent: false,
-        }, Some(4));
+            wake: source_wake,
+            dropped: handler_dropped.clone(),
+        }, Some(4), move || {
+            close_count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            let (cancelled, wake) = &*close_wake;
+            *cancelled.lock().unwrap() = true;
+            wake.notify_all();
+        });
         response
     });
 
@@ -2548,7 +2599,23 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
     }
     client.write_all(&h2_frame(3, 0, blocked_response_id, &8u32.to_be_bytes())).unwrap();
     client.flush().unwrap();
-    response_release_tx.send(()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        let (waits, threads, _) = jet_scheduler_blocking_wait_stats();
+        if response_closed.load(std::sync::atomic::Ordering::Acquire) == 1
+            && response_dropped.load(std::sync::atomic::Ordering::Acquire) == 1
+            && waits == 0
+            && threads == 0
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline,
+            "RST did not close and drop blocked response source: close={} drop={} scheduler={:?}",
+            response_closed.load(std::sync::atomic::Ordering::Acquire),
+            response_dropped.load(std::sync::atomic::Ordering::Acquire),
+            jet_scheduler_blocking_wait_stats());
+        std::thread::yield_now();
+    }
 
     // With a configured two-stream cap, more than two sequential successes prove
     // every per-stream map releases completed entries rather than accumulating.
