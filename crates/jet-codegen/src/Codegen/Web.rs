@@ -243,6 +243,17 @@ fn web_wasm_stmts_supported(
                 && web_wasm_stmts_supported(then_body, bundle, file_prefix, reconstructions)
                 && else_body.as_deref().map(|body| web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)).unwrap_or(true)
         }
+        // Inclusive `loop i; start..end` (D-SG8 / S22). Same covered Int arithmetic
+        // already used by Wasm if/let — close the JS/Wasm TIR gap for compute loops.
+        TIR::TStmt::Range { start, end, step, body, .. } => {
+            web_wasm_expr_supported(start, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(end, bundle, file_prefix, reconstructions)
+                && step
+                    .as_ref()
+                    .map(|s| web_wasm_expr_supported(s, bundle, file_prefix, reconstructions))
+                    .unwrap_or(true)
+                && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+        }
         _ => false,
     })
 }
@@ -789,6 +800,36 @@ fn emit_wasm_body(
                     emit_wasm_body(else_body, out, indent + 1, funcs, file_prefix, reconstructions)?;
                 }
                 out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::Range { var, start, end, step, body, .. } => {
+                let start = wasm_emit_expr(start, funcs, file_prefix, reconstructions)?;
+                let end = wasm_emit_expr(end, funcs, file_prefix, reconstructions)?;
+                let loop_var = mangle(var);
+                match step {
+                    Some(step) => {
+                        let step = wasm_emit_expr(step, funcs, file_prefix, reconstructions)?;
+                        out.push_str(&format!("{pad}{{\n"));
+                        out.push_str(&format!("{pad}    let _jet_loop_start = {start};\n"));
+                        out.push_str(&format!("{pad}    let _jet_loop_end = {end};\n"));
+                        out.push_str(&format!("{pad}    let _jet_loop_stride = {step};\n"));
+                        out.push_str(&format!(
+                            "{pad}    assert!(_jet_loop_stride > 0, \"E0123: loop stride must be positive\");\n"
+                        ));
+                        out.push_str(&format!(
+                            "{pad}    for {loop_var} in (_jet_loop_start..=_jet_loop_end).step_by(_jet_loop_stride as usize) {{\n"
+                        ));
+                        emit_wasm_body(body, out, indent + 2, funcs, file_prefix, reconstructions)?;
+                        out.push_str(&format!("{pad}    }}\n"));
+                        out.push_str(&format!("{pad}}}\n"));
+                    }
+                    None => {
+                        out.push_str(&format!(
+                            "{pad}for {loop_var} in ({start})..=({end}) {{\n"
+                        ));
+                        emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                        out.push_str(&format!("{pad}}}\n"));
+                    }
+                }
             }
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
             TIR::TStmt::LineMarker(_) => {}
