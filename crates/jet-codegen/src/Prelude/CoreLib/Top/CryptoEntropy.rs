@@ -9,8 +9,8 @@ mod jet_crypto_entropy {
 pub enum JetCryptoError {
     InvalidLength { operation: &'static str, parameter: &'static str, expected: &'static str, actual: usize },
     InvalidEncoding { operation: &'static str, value_kind: &'static str },
-    UnsupportedVersion { operation: &'static str, version: u8 },
-    UnsupportedAlgorithm { operation: &'static str, algorithm: u8 },
+    UnsupportedVersion { operation: &'static str, version: u32 },
+    UnsupportedAlgorithm { operation: &'static str, algorithm: String },
     OpenFailed,
     NonContributoryKey,
     OutputLength { operation: &'static str, minimum: usize, maximum: usize, actual: usize },
@@ -24,16 +24,16 @@ impl std::fmt::Display for JetCryptoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidLength { operation, parameter, expected, actual } => write!(f, "{operation}: {parameter} must be {expected}; got {actual}"),
-            Self::InvalidEncoding { operation, value_kind } => write!(f, "{operation}: invalid {value_kind} encoding"),
-            Self::UnsupportedVersion { operation, version } => write!(f, "{operation}: unsupported version {version}"),
-            Self::UnsupportedAlgorithm { operation, algorithm } => write!(f, "{operation}: unsupported algorithm {algorithm}"),
-            Self::OpenFailed => f.write_str("open failed"),
-            Self::NonContributoryKey => f.write_str("key agreement produced no shared contribution"),
-            Self::OutputLength { operation, minimum, maximum, actual } => write!(f, "{operation}: output length must be {minimum}..={maximum}; got {actual}"),
-            Self::PasswordPolicy { reason } => write!(f, "password policy rejected the value: {reason}"),
+            Self::InvalidEncoding { operation, value_kind } => write!(f, "{operation}: {value_kind} is not canonical"),
+            Self::UnsupportedVersion { operation, version } => write!(f, "{operation}: version {version} is not supported"),
+            Self::UnsupportedAlgorithm { operation, algorithm } => write!(f, "{operation}: algorithm {algorithm} is not supported"),
+            Self::OpenFailed => f.write_str("encrypted data could not be opened"),
+            Self::NonContributoryKey => f.write_str("X25519 peer key does not contribute to a shared secret"),
+            Self::OutputLength { operation, minimum, maximum, actual } => write!(f, "{operation}: output length must be {minimum}..{maximum}; got {actual}"),
+            Self::PasswordPolicy { .. } => f.write_str("password hash is outside Jet's accepted policy"),
             Self::EntropyUnavailable => f.write_str("the operating system could not provide cryptographic randomness"),
-            Self::ResourceUnavailable { resource } => write!(f, "cryptographic resource unavailable: {resource}"),
-            Self::Internal { incident_id } => write!(f, "internal cryptographic failure; incident {incident_id}"),
+            Self::ResourceUnavailable { resource } => write!(f, "{resource} is unavailable for this cryptographic operation"),
+            Self::Internal { incident_id } => write!(f, "Jet could not preserve a cryptographic invariant; incident {incident_id}"),
         }
     }
 }

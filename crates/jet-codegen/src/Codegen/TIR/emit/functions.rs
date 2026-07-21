@@ -165,7 +165,7 @@ fn is_fallible_void_return(ret: &Option<Type>) -> bool {
         ret,
         Some(Type::Result { ok, err })
             if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_VOID)
-                && matches!(err.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_ERROR)
+                && matches!(err.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_ERROR || n == "CryptoError")
     )
 }
 

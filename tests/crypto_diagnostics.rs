@@ -98,6 +98,36 @@ fn multiple_e2702_diagnostics_are_independent_json_lines() {
 }
 
 #[test]
+fn safe_raw_nonce_json_omits_inapplicable_bounds() {
+    let root = scratch();
+    std::fs::write(
+        root.join("main.jet"),
+        concat!(
+            "use core.crypto as crypto\n",
+            "fn run() {\n",
+            "    _ :: crypto.seal([], [], [], nonce: [0])\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", "main.jet", "--json"])
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let json = String::from_utf8(output.stderr).unwrap();
+    assert!(json.contains("\"reason\":\"raw_nonce\""), "{json}");
+    assert!(json.contains("\"operation\":\"seal\""), "{json}");
+    assert!(!json.contains("\"expected\":"), "{json}");
+    assert!(!json.contains("\"actual\":"), "{json}");
+    assert!(!root.join(".jet").exists(), "check emitted .jet state");
+    assert!(!root.join("build").exists(), "check emitted a build artifact");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn explain_e2702_teaches_precedence_and_dynamic_values() {
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["explain", "E2702"])

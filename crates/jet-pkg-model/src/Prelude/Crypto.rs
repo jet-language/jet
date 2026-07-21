@@ -267,8 +267,8 @@ pub fn jet_crypto_seal_typed_impl(mut recipients: Vec<JetX25519PublicKey>, plain
 pub fn jet_crypto_sealed_from_bytes_impl(bytes: Vec<u8>) -> Result<JetSealed, JetCryptoError> {
     if bytes.len() < 182 || bytes.len() > 16_797_798 { return Err(invalid_length("Sealed.from_bytes", "bytes", "182..=16797798", bytes.len())); }
     if &bytes[..4] != JETV_MAGIC { return Err(JetCryptoError::InvalidEncoding { operation: "Sealed.from_bytes", value_kind: "JETV magic" }); }
-    if bytes[4] != 1 { return Err(JetCryptoError::UnsupportedVersion { operation: "Sealed.from_bytes", version: bytes[4] }); }
-    if bytes[5] != 1 { return Err(JetCryptoError::UnsupportedAlgorithm { operation: "Sealed.from_bytes", algorithm: bytes[5] }); }
+    if bytes[4] != 1 { return Err(JetCryptoError::UnsupportedVersion { operation: "Sealed.from_bytes", version: u32::from(bytes[4]) }); }
+    if bytes[5] != 1 { return Err(JetCryptoError::UnsupportedAlgorithm { operation: "Sealed.from_bytes", algorithm: bytes[5].to_string() }); }
     if bytes[6] != 0 || bytes[7] != 0 { return Err(JetCryptoError::InvalidEncoding { operation: "Sealed.from_bytes", value_kind: "flags" }); }
     let count = u16::from_be_bytes([bytes[8], bytes[9]]) as usize;
     if count == 0 || count > 256 { return Err(invalid_length("Sealed.from_bytes", "recipient_count", "1..=256", count)); }
@@ -319,7 +319,7 @@ pub fn jet_crypto_wrap_typed_impl(secret: &Secret, recipient: JetX25519PublicKey
 pub fn jet_crypto_wrapped_from_bytes_impl(bytes: Vec<u8>) -> Result<JetWrappedKey, JetCryptoError> {
     if bytes.len() < 108 || bytes.len() > 1_048_684 { return Err(invalid_length("WrappedKey.from_bytes", "bytes", "108..=1048684", bytes.len())); }
     if &bytes[..4] != JETW_MAGIC { return Err(JetCryptoError::InvalidEncoding { operation: "WrappedKey.from_bytes", value_kind: "JETW magic" }); }
-    if bytes[4] != 1 { return Err(JetCryptoError::UnsupportedVersion { operation: "WrappedKey.from_bytes", version: bytes[4] }); } if bytes[5] != 1 { return Err(JetCryptoError::UnsupportedAlgorithm { operation: "WrappedKey.from_bytes", algorithm: bytes[5] }); } if bytes[6] != 0 || bytes[7] != 0 { return Err(JetCryptoError::InvalidEncoding { operation: "WrappedKey.from_bytes", value_kind: "flags" }); }
+    if bytes[4] != 1 { return Err(JetCryptoError::UnsupportedVersion { operation: "WrappedKey.from_bytes", version: u32::from(bytes[4]) }); } if bytes[5] != 1 { return Err(JetCryptoError::UnsupportedAlgorithm { operation: "WrappedKey.from_bytes", algorithm: bytes[5].to_string() }); } if bytes[6] != 0 || bytes[7] != 0 { return Err(JetCryptoError::InvalidEncoding { operation: "WrappedKey.from_bytes", value_kind: "flags" }); }
     let len = u32::from_be_bytes(bytes[88..92].try_into().unwrap()) as usize; if len > 1_048_576 || bytes.len() != 92 + len + 16 { return Err(JetCryptoError::InvalidEncoding { operation: "WrappedKey.from_bytes", value_kind: "length" }); } Ok(JetWrappedKey(bytes))
 }
 pub fn jet_crypto_wrapped_bytes_impl(wrapped: &JetWrappedKey) -> Vec<u8> { wrapped.0.clone() }
@@ -579,7 +579,15 @@ fn jet_crypto_password_hash_typed_with_cancel(password:&Secret, cancelled:fn()->
 }
 pub fn jet_crypto_password_hash_typed_impl(password:&Secret)->Result<JetPasswordHash,JetCryptoError>{jet_crypto_password_hash_typed_with_cancel(password,jet_crypto_never_cancelled,jet_crypto_ignore_cancel,jet_pwhash_wait_noop,jet_pwhash_wait_noop)}
 pub fn jet_crypto_password_hash_typed_cancel_impl(password:&Secret,cancelled:fn()->bool,cancel_outcome:fn(),wait_enter:fn(),wait_leave:fn())->Result<JetPasswordHash,JetCryptoError>{jet_crypto_password_hash_typed_with_cancel(password,cancelled,cancel_outcome,wait_enter,wait_leave)}
-fn jet_crypto_password_parse_law<'a>(text:&'a str,operation:&'static str)->Result<argon2::PasswordHash<'a>,JetCryptoError>{let parsed=argon2::PasswordHash::new(text).map_err(|_|JetCryptoError::InvalidEncoding{operation,value_kind:"PHC string"})?;if parsed.algorithm.as_str()!="argon2id"||parsed.version!=Some(19){return Err(JetCryptoError::InvalidEncoding{operation,value_kind:"Argon2id v=19 PHC string"})}Ok(parsed)}
+fn jet_crypto_password_parse_law<'a>(text:&'a str,operation:&'static str)->Result<argon2::PasswordHash<'a>,JetCryptoError>{
+    let parsed=argon2::PasswordHash::new(text).map_err(|_|JetCryptoError::InvalidEncoding{operation,value_kind:"PHC string"})?;
+    if parsed.algorithm.as_str()!="argon2id" {
+        return Err(JetCryptoError::UnsupportedAlgorithm{operation,algorithm:parsed.algorithm.as_str().to_string()});
+    }
+    let version=parsed.version.ok_or(JetCryptoError::InvalidEncoding{operation,value_kind:"PHC version"})?;
+    if version!=19{return Err(JetCryptoError::UnsupportedVersion{operation,version})}
+    Ok(parsed)
+}
 pub fn jet_crypto_password_parse_impl(text:String)->Result<JetPasswordHash,JetCryptoError>{jet_crypto_password_parse_law(&text,"PasswordHash.parse")?;Ok(JetPasswordHash(text))}
 pub fn jet_crypto_password_text_impl(hash:&JetPasswordHash)->String{hash.0.clone()}
 fn jet_crypto_password_verify_typed_with_cancel(password:&Secret,stored:&JetPasswordHash,cancelled:fn()->bool,cancel_outcome:fn(),wait_enter:fn(),wait_leave:fn())->Result<bool,JetCryptoError>{

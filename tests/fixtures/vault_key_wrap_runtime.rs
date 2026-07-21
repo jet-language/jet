@@ -59,6 +59,41 @@ mod vault_key_wrap_tests {
     }
 
     #[test]
+    fn key_wrap_error_projection_is_exhaustive_and_redacted() {
+        let errors = [
+            JetVaultKeyWrapError::InvalidEncoding,
+            JetVaultKeyWrapError::UnsupportedVersion,
+            JetVaultKeyWrapError::UnsupportedMode,
+            JetVaultKeyWrapError::UnsupportedKeyType,
+            JetVaultKeyWrapError::InvalidLength,
+            JetVaultKeyWrapError::WeakPassphrase,
+            JetVaultKeyWrapError::OpenFailed,
+            JetVaultKeyWrapError::EntropyUnavailable,
+            JetVaultKeyWrapError::ResourceUnavailable,
+            JetVaultKeyWrapError::Vault(JetVaultError::NotFound),
+            JetVaultKeyWrapError::Internal { incident_id: "key-wrap-17" },
+        ];
+        let tags = errors.iter().map(|error| match error {
+            JetVaultKeyWrapError::InvalidEncoding => "invalid-encoding",
+            JetVaultKeyWrapError::UnsupportedVersion => "unsupported-version",
+            JetVaultKeyWrapError::UnsupportedMode => "unsupported-mode",
+            JetVaultKeyWrapError::UnsupportedKeyType => "unsupported-key-type",
+            JetVaultKeyWrapError::InvalidLength => "invalid-length",
+            JetVaultKeyWrapError::WeakPassphrase => "weak-passphrase",
+            JetVaultKeyWrapError::OpenFailed => "open-failed",
+            JetVaultKeyWrapError::EntropyUnavailable => "entropy-unavailable",
+            JetVaultKeyWrapError::ResourceUnavailable => "resource-unavailable",
+            JetVaultKeyWrapError::Vault(_) => "vault",
+            JetVaultKeyWrapError::Internal { .. } => "internal",
+        }).collect::<Vec<_>>();
+        assert_eq!(tags, ["invalid-encoding", "unsupported-version", "unsupported-mode", "unsupported-key-type", "invalid-length", "weak-passphrase", "open-failed", "entropy-unavailable", "resource-unavailable", "vault", "internal"]);
+        let shown = errors.iter().map(|error| format!("{error:?} {error}")).collect::<Vec<_>>().join("\n");
+        for forbidden in ["secrets.age", "AGE-SECRET", "/home/", "hunter2", "ciphertext sentinel"] {
+            assert!(!shown.contains(forbidden), "key-wrap error leaked `{forbidden}`: {shown}");
+        }
+    }
+
+    #[test]
     fn recipient_and_passphrase_round_trip_both_key_types() {
         let source = scratch("roundtrip-source");
         let destination = scratch("roundtrip-destination");

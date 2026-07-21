@@ -477,6 +477,9 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         if n == "Error" {
             return true;
         }
+        if n == "CryptoError" {
+            return true;
+        }
         // c109 Phase 21 / D-TUPLE-DESTRUCT1: `Closed` is the err type of
         // `Receiver.receive()` → `Result<T, Closed>` (Source/Collections.rs
         // `receiver_method_return`). It renders

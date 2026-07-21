@@ -71,12 +71,64 @@ fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
     }
 }
 
+fn safe_envelope_raw_argument(
+    module: &str,
+    name: &str,
+    args: &[crate::AST::CallArg],
+    expected_arity: usize,
+) -> Option<Diagnostic> {
+    if !matches!(module, "jet.crypto" | "core.crypto")
+        || !matches!(name, "seal" | "open" | "file_seal" | "file_open")
+        || args.len() != expected_arity + 1
+    {
+        return None;
+    }
+    let extra = args.last()?;
+    let (label, label_span) = extra.label.as_ref()?;
+    let (reason, why, fix) = match label.as_str() {
+        "nonce" => (
+            CryptoMisuseReason::RawNonce,
+            format!("`{name}` would use a caller-supplied nonce, which violates the safe envelope requirement that Jet manages nonces internally"),
+            "remove the `nonce:` argument, or use a raw expert primitive inside `@Unsafe` for protocol interop".to_string(),
+        ),
+        "algorithm" => (
+            CryptoMisuseReason::RawAlgorithm,
+            format!("`{name}` would select a caller-supplied algorithm, which violates the safe envelope requirement that Jet selects the algorithm internally"),
+            "remove the `algorithm:` argument, or use a raw expert primitive inside `@Unsafe` for protocol interop".to_string(),
+        ),
+        _ => return None,
+    };
+    let operation = match name {
+        "seal" => "seal",
+        "open" => "open",
+        "file_seal" => "file_seal",
+        "file_open" => "file_open",
+        _ => unreachable!(),
+    };
+    Some(Diagnostic::crypto_misuse_fact(
+        why,
+        fix,
+        Span::new(label_span.start, extra.expr.span().end),
+        reason,
+        operation,
+    ))
+}
+
 fn crypto_misuse_diagnostic(
     checker: &Checker<'_>,
     module: &str,
     name: &str,
     args: &[crate::AST::CallArg],
 ) -> Option<Diagnostic> {
+    if matches!(module, "jet.crypto" | "core.crypto") && name == "password_hash_with_salt" {
+        return Some(Diagnostic::crypto_misuse_fact(
+            "`password_hash_with_salt` would use caller-controlled salt bytes, which makes a deterministic entropy seam reachable from a release build".to_string(),
+            "use `crypto.password_hash` so Jet generates the salt, or move a fixed vector to `expert.argon2id` inside `@Unsafe`".to_string(),
+            args.get(1)?.expr.span(),
+            CryptoMisuseReason::DeterministicEntropy,
+            "password_hash_with_salt",
+        ));
+    }
     if matches!(module, "jet.crypto" | "core.crypto" | "core.crypto.expert")
         && name == "hkdf_sha256"
     {
@@ -3107,7 +3159,9 @@ impl<'a> Checker<'a> {
                 return ret;
             }
             let validation_diag_start = self.diags.len();
-            if args.len() != params.len() {
+            let raw_envelope_diagnostic =
+                safe_envelope_raw_argument(module, name, args, params.len());
+            if args.len() != params.len() && raw_envelope_diagnostic.is_none() {
                 self.diags
                     .push(wrong_core_arity(name, params.len(), args.len(), span));
             }
@@ -3148,10 +3202,12 @@ impl<'a> Checker<'a> {
                     && self.core_imports.values().any(|imported| imported == "core.crypto.expert")
             );
             if expert_gate_ok
-                && args.len() == params.len()
+                && (args.len() == params.len() || raw_envelope_diagnostic.is_some())
                 && self.diags.len() == validation_diag_start
             {
-                if let Some(diagnostic) = crypto_misuse_diagnostic(self, module, name, args) {
+                if let Some(diagnostic) = raw_envelope_diagnostic
+                    .or_else(|| crypto_misuse_diagnostic(self, module, name, args))
+                {
                     self.fx_pending_diagnostics.push(diagnostic);
                 }
             }

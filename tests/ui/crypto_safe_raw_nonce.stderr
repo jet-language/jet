@@ -1,0 +1,7 @@
+Error [E2702]: crypto API misuse
+  --> tests/ui/crypto_safe_raw_nonce.jet:5:34
+    |
+  5 |     _ :: crypto.seal([], [], [], nonce: [0])
+    |                                  ^^^^^^^^^^
+ Why: `seal` would use a caller-supplied nonce, which violates the safe envelope requirement that Jet manages nonces internally
+ Fix: remove the `nonce:` argument, or use a raw expert primitive inside `@Unsafe` for protocol interop

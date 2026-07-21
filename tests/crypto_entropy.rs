@@ -15,6 +15,89 @@ use runtime::{
 use std::sync::{Arc, Barrier};
 
 #[test]
+fn crypto_error_display_contract_is_exact_and_redacted() {
+    let cases = [
+        (
+            JetCryptoEntropyError::InvalidLength {
+                operation: "seal",
+                parameter: "key",
+                expected: "exactly 32",
+                actual: 31,
+            },
+            "seal: key must be exactly 32; got 31",
+        ),
+        (
+            JetCryptoEntropyError::InvalidEncoding {
+                operation: "PasswordHash.parse",
+                value_kind: "PHC string",
+            },
+            "PasswordHash.parse: PHC string is not canonical",
+        ),
+        (
+            JetCryptoEntropyError::UnsupportedVersion {
+                operation: "PasswordHash.parse",
+                version: 16,
+            },
+            "PasswordHash.parse: version 16 is not supported",
+        ),
+        (
+            JetCryptoEntropyError::UnsupportedAlgorithm {
+                operation: "PasswordHash.parse",
+                algorithm: "argon2i".to_string(),
+            },
+            "PasswordHash.parse: algorithm argon2i is not supported",
+        ),
+        (
+            JetCryptoEntropyError::OpenFailed,
+            "encrypted data could not be opened",
+        ),
+        (
+            JetCryptoEntropyError::NonContributoryKey,
+            "X25519 peer key does not contribute to a shared secret",
+        ),
+        (
+            JetCryptoEntropyError::OutputLength {
+                operation: "hkdf_sha256",
+                minimum: 0,
+                maximum: 8160,
+                actual: 8161,
+            },
+            "hkdf_sha256: output length must be 0..8160; got 8161",
+        ),
+        (
+            JetCryptoEntropyError::PasswordPolicy {
+                reason: "public-policy-id",
+            },
+            "password hash is outside Jet's accepted policy",
+        ),
+        (
+            JetCryptoEntropyError::EntropyUnavailable,
+            "the operating system could not provide cryptographic randomness",
+        ),
+        (
+            JetCryptoEntropyError::ResourceUnavailable {
+                resource: "Argon2 worker pool",
+            },
+            "Argon2 worker pool is unavailable for this cryptographic operation",
+        ),
+        (
+            JetCryptoEntropyError::Internal {
+                incident_id: "crypto-17",
+            },
+            "Jet could not preserve a cryptographic invariant; incident crypto-17",
+        ),
+    ];
+
+    for (error, expected) in cases {
+        assert_eq!(error.to_string(), expected);
+        let rendered = format!("{error:?} {error}");
+        for forbidden in ["hunter2", "plaintext sentinel", "ciphertext sentinel", "/home/nate"] {
+            assert!(!rendered.contains(forbidden), "error leaked `{forbidden}`: {rendered}");
+        }
+    }
+}
+
+#[test]
 fn actual_bridge_fixture_compiles_and_runs() {
     let root = std::env::current_dir().unwrap();
     let dir = std::env::temp_dir().join(format!(

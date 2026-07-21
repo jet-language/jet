@@ -673,7 +673,8 @@ fn publish_after_change_impl(
         // Always publish on open — client expects initial diagnostics.
         if let Some(doc) = server.docs.get(&uri) {
             let diags = server.check(doc);
-            let notif = publish_diagnostics(&uri, &doc.text, doc.version, &diags);
+            let file = workspace_relative_diagnostic_path(server, &doc.path);
+            let notif = publish_diagnostics(&uri, &file, &doc.text, doc.version, &diags);
             write_message(stdout, &notif)?;
         }
         server.dirty.remove(&uri);
@@ -740,20 +741,27 @@ fn flush_dirty(server: &mut Server, stdout: &mut impl Write) -> io::Result<()> {
         if let Some(doc) = server.docs.get(&uri) {
             let text = doc.text.clone();
             let diags = server.check(doc);
-            let notif = publish_diagnostics(&uri, &text, doc.version, &diags);
+            let file = workspace_relative_diagnostic_path(server, &doc.path);
+            let notif = publish_diagnostics(&uri, &file, &text, doc.version, &diags);
             write_message(stdout, &notif)?;
         }
     }
     Ok(())
 }
 
-fn publish_diagnostics(uri: &str, src: &str, version: i32, diags: &[Diagnostic]) -> String {
+fn publish_diagnostics(
+    uri: &str,
+    file: &str,
+    src: &str,
+    version: i32,
+    diags: &[Diagnostic],
+) -> String {
     let mut items = String::new();
     for (i, d) in diags.iter().enumerate() {
         if i > 0 {
             items.push(',');
         }
-        items.push_str(&diagnostic_json(d, uri, src));
+        items.push_str(&diagnostic_json(d, file, src));
     }
     format!(
         r#"{{"jsonrpc":"2.0","method":"textDocument/publishDiagnostics","params":{{"uri":"{}","version":{},"diagnostics":[{}]}}}}"#,
@@ -2140,7 +2148,13 @@ mod project_part_tests {
             "exactly 24",
             1,
         );
-        let json = diagnostic_json(&diagnostic, "file:///secret-name.jet", "xxxx[0]");
+        let mut server = Server::new();
+        server.workspace_roots.push("/workspace".into());
+        let file = workspace_relative_diagnostic_path(&server, "/workspace/src/main.jet");
+        assert_eq!(file, "src/main.jet");
+        let src = "xxxx[0]";
+        let compiler_data = diagnostic.structured_json(&file, src).unwrap();
+        let json = diagnostic_json(&diagnostic, &file, src);
         assert_eq!(
             json,
             concat!(
@@ -2153,11 +2167,28 @@ mod project_part_tests {
                 "\"why\":\"nonce has 1 byte; this operation requires exactly 24\",",
                 "\"fix\":\"pass a 24-byte nonce\",\"reason\":\"nonce_length\",",
                 "\"operation\":\"xchacha20poly1305_seal\",\"expected\":\"exactly 24\",",
-                "\"actual\":1,\"primarySpan\":{\"file\":\"file:///secret-name.jet\",",
+                "\"actual\":1,\"primarySpan\":{\"file\":\"src/main.jet\",",
                 "\"start\":4,\"end\":7,\"line\":1,\"col\":5},\"relatedSpans\":[]}}"
             )
         );
+        assert!(json.ends_with(&format!(", \"data\":{compiler_data}}}")), "{json}");
         assert!(!json.contains("backend"), "{json}");
+    }
+
+    #[test]
+    fn e2702_lsp_omits_bounds_that_do_not_apply() {
+        let diagnostic = Diagnostic::crypto_misuse_fact(
+            "safe envelopes manage nonces".into(),
+            "remove the raw nonce".into(),
+            Span::new(2, 7),
+            crate::Diagnostics::CryptoMisuseReason::RawNonce,
+            "seal",
+        );
+        let json = diagnostic_json(&diagnostic, "src/main.jet", "xxnonce");
+        assert!(json.contains("\"reason\":\"raw_nonce\""), "{json}");
+        assert!(json.contains("\"operation\":\"seal\""), "{json}");
+        assert!(!json.contains("\"expected\":"), "{json}");
+        assert!(!json.contains("\"actual\":"), "{json}");
     }
 
     #[test]
@@ -2830,6 +2861,18 @@ fn workspace_root_for_path(server: &Server, path: &str) -> Option<String> {
         .max_by_key(|root| root.len())
         .cloned()
         .or_else(|| project_root_marker(&path))
+}
+
+fn workspace_relative_diagnostic_path(server: &Server, path: &str) -> String {
+    let normalized = normalize_path(path);
+    let Some(root) = workspace_root_for_path(server, &normalized) else {
+        return normalized;
+    };
+    std::path::Path::new(&normalized)
+        .strip_prefix(&root)
+        .unwrap_or(std::path::Path::new(&normalized))
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 fn project_root_marker(path: &str) -> Option<String> {

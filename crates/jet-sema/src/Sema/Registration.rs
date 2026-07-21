@@ -24,7 +24,7 @@ fn is_fallible_void_return(ty: &Type) -> bool {
         ty,
         Type::Result { ok, err }
             if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::TYPE_VOID)
-                && matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERROR)
+                && matches!(err.as_ref(), Type::Named(n) if n == Syntax::TYPE_ERROR || n == "CryptoError")
     )
 }
 

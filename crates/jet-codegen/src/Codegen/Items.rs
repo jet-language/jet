@@ -624,14 +624,14 @@ pub(crate) fn emit_cli_entry_if_needed(
         Item::Const(value) => value.resolved_output.as_ref().filter(|output| output.selected),
         _ => None,
     });
-    let (callable, params, fallible) = if let Some(output) = output {
+    let (callable, params, entry_error) = if let Some(output) = output {
         (
             output.lowered_name.clone(),
             output.params.clone(),
             output
                 .return_type
                 .as_ref()
-                .is_some_and(is_fallible_void_type),
+                .and_then(fallible_void_entry_error),
         )
     } else if let Some(run_fn) = run_fn {
         let params = cx.sigs.get("run").cloned().unwrap_or_else(|| {
@@ -644,13 +644,20 @@ pub(crate) fn emit_cli_entry_if_needed(
         (
             "user_run".to_string(),
             params,
-            is_fallible_void_entry_return(run_fn),
+            fallible_void_entry_error_for_func(run_fn),
         )
     } else {
         return;
     };
+    let crypto_error_type = cx.rust_type(&Type::Named("CryptoError".to_string()));
     if params.is_empty() {
-        let invoke = emit_entry_invocation(&callable, None, fallible, "    ");
+        let invoke = emit_entry_invocation(
+            &callable,
+            None,
+            entry_error,
+            &crypto_error_type,
+            "    ",
+        );
         out.push_str(&format!("fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n{invoke}}}\n\n"));
         return;
     }
@@ -692,7 +699,13 @@ pub(crate) fn emit_cli_entry_if_needed(
     }) {
         if s.derives.iter().any(|(t, _)| t == "Cli") {
             let call_arg = arg_expr("__args");
-            let invoke = emit_entry_invocation(&callable, Some(&call_arg), fallible, "                ");
+            let invoke = emit_entry_invocation(
+                &callable,
+                Some(&call_arg),
+                entry_error,
+                &crypto_error_type,
+                "                ",
+            );
             out.push_str(&format!(
                 "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    let __spec = {helper_prefix}__jet_cli_spec_{name}();\n    match jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n            if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n            match {helper_prefix}__jet_cli_decode_{name}(&__spec, &__parsed) {{\n                Ok(__args) => {{\n{invoke}                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n    }}\n}}\n\n",
                 name = name,
@@ -715,7 +728,8 @@ pub(crate) fn emit_cli_entry_if_needed(
             &param_rust,
             &callable,
             &arg_expr,
-            fallible,
+            entry_error,
+            &crypto_error_type,
             out,
         );
     }
@@ -724,30 +738,44 @@ pub(crate) fn emit_cli_entry_if_needed(
 fn emit_entry_invocation(
     callable: &str,
     argument: Option<&str>,
-    fallible: bool,
+    entry_error: Option<EntryError>,
+    crypto_error_type: &str,
     indent: &str,
 ) -> String {
     let call = argument.map_or_else(|| format!("{callable}()"), |arg| format!("{callable}({arg})"));
-    if fallible {
-        format!(
+    match entry_error {
+        Some(EntryError::Generic) => format!(
             "{indent}if let Err(__jet_err) = jet_runtime_boundary(|| {call}) {{\n{indent}    eprintln!(\"{{}}\", __jet_err);\n{indent}    std::process::exit(1);\n{indent}}}\n"
-        )
-    } else {
-        format!("{indent}jet_runtime_boundary(|| {call});\n")
+        ),
+        Some(EntryError::Crypto) => format!(
+            "{indent}if let Err(__jet_err) = jet_runtime_boundary(|| {call}) {{\n{indent}    let __jet_internal = matches!(&__jet_err, {crypto_error_type}::Internal {{ .. }});\n{indent}    eprintln!(\"Error [E3001]: unhandled cryptographic error\");\n{indent}    eprintln!(\" Why: {{}}\", __jet_err);\n{indent}    eprintln!(\" Fix: handle the CryptoError in fn run\");\n{indent}    std::process::exit(if __jet_internal {{ 101 }} else {{ 70 }});\n{indent}}}\n"
+        ),
+        None => format!("{indent}jet_runtime_boundary(|| {call});\n"),
     }
 }
 
-fn is_fallible_void_entry_return(f: &Func) -> bool {
-    f.return_type.as_ref().is_some_and(is_fallible_void_type)
+#[derive(Clone, Copy)]
+enum EntryError {
+    Generic,
+    Crypto,
 }
 
-fn is_fallible_void_type(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::Result { ok, err }
-            if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_VOID)
-                && matches!(err.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_ERROR)
-    )
+fn fallible_void_entry_error_for_func(f: &Func) -> Option<EntryError> {
+    f.return_type.as_ref().and_then(fallible_void_entry_error)
+}
+
+fn fallible_void_entry_error(ty: &Type) -> Option<EntryError> {
+    let Type::Result { ok, err } = ty else {
+        return None;
+    };
+    if !matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_VOID) {
+        return None;
+    }
+    match err.as_ref() {
+        Type::Named(n) if n == crate::Syntax::TYPE_ERROR => Some(EntryError::Generic),
+        Type::Named(n) if n == "CryptoError" => Some(EntryError::Crypto),
+        _ => None,
+    }
 }
 
 /// D-CLIFLAG1: the `enum Cmd { Serve(ServeArgs) Import(ImportArgs) }` case.
@@ -765,7 +793,8 @@ fn emit_cli_subcommand_entry(
     enum_rust: &str,
     callable: &str,
     arg_expr: &dyn Fn(&str) -> String,
-    fallible: bool,
+    entry_error: Option<EntryError>,
+    crypto_error_type: &str,
     out: &mut String,
 ) {
     let cmd_names: Vec<String> = schema.commands.iter().map(|command| command.name.clone()).collect();
@@ -784,7 +813,13 @@ fn emit_cli_subcommand_entry(
         let tag = mangle_variant(&v.name);
         let ctor = format!("{enum_rust}::{tag}(__payload)");
         let call_arg = arg_expr(&ctor);
-        let invoke = emit_entry_invocation(callable, Some(&call_arg), fallible, "                        ");
+        let invoke = emit_entry_invocation(
+            callable,
+            Some(&call_arg),
+            entry_error,
+            crypto_error_type,
+            "                        ",
+        );
         arms.push_str(&format!(
             "        {sub:?} => {{\n            let __spec = {helper_prefix}__jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
             sub = v.name.to_lowercase(),

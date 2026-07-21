@@ -978,7 +978,7 @@ Wave-1 ring packages (`core.encoding.{csv,toml,yaml,json}`, `core.log`, `core.ti
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2701 | `{parser}` found malformed input at row/line {n} — {detail}. | The ring library parse function encountered text it can't interpret: a missing delimiter, an unclosed quote, or an unexpected character. The row or line number points at the first offending record. | Fix the input at the location named, or validate it before parsing. |
-| E2702 | Crypto API misuse. | After syntax, effects, and types succeed, a compiler-known `core.crypto` argument violates a public cryptographic bound. Live reasons include fixed or literal expert AEAD, Ed25519, or X25519 key, public-key, seed, signature, and nonce lengths; a literal HKDF-SHA256 output length outside 0..8160 bytes; and literal expert Argon2id salt, memory, iteration, lane, output, or memory-time values outside the ratified password policy. Dynamic values remain ordinary runtime `CryptoError` results. | Pass the exact bound named by the diagnostic; use `core.crypto.seal` for managed nonces. |
+| E2702 | Crypto API misuse. | After syntax, effects, and types succeed, a compiler-known `core.crypto` argument violates a public cryptographic bound. Live reasons include fixed or literal expert AEAD, Ed25519, or X25519 key, public-key, seed, signature, and nonce lengths; a literal HKDF-SHA256 output length outside 0..8160 bytes; literal expert Argon2id salt, memory, iteration, lane, output, or memory-time values outside the ratified password policy; raw `nonce:` or `algorithm:` labels on safe `seal`, `open`, or `file_*` calls; and a release-visible deterministic `password_hash_with_salt` seam. Dynamic values remain ordinary runtime `CryptoError` results. | Pass the exact bound named by the diagnostic; use `core.crypto.seal` for managed nonces. |
 
 E2702 is emitted only after parsing, effect checking, and ordinary typing have
 succeeded; those diagnostics win at the same call site. Dynamic or
@@ -989,6 +989,11 @@ with `code`, `class`, `severity`, `phase`, `what`, `why`, `fix`, a closed
 `relatedSpans` list. LSP carries the same object in diagnostic `data`. Neither
 projection may include secret material, ciphertext, parser offsets, operating
 system errors or paths, dependency errors, backend prose, or generated Rust.
+The closed `reason` spellings are `invalid_length`, `nonce_length`,
+`output_length`, `salt_length`, `memory_cost`, `iteration_count`, `lane_count`,
+`memory_time_cost`, `raw_nonce`, `raw_algorithm`, and
+`deterministic_entropy`. `expected` and `actual` are present only when that
+reason has a public bound or observed literal; the other reasons omit both.
 
 The public runtime projection is closed. `CryptoError` has only
 `InvalidLength`, `InvalidEncoding`, `UnsupportedVersion`,
@@ -1000,7 +1005,14 @@ collapsed before the Jet-visible boundary. `VaultError` has only `InvalidName`,
 `NotFound`, `WrongType`, `Revoked`, `Locked`, `AuthorityDenied`, `Conflict`,
 `UnsupportedProvider`, `InvalidEncoding`, `DurabilityUnknown`,
 `Crypto(CryptoError)`, redacted `Io`, and `Internal`. These values contain only
-the named closed fields; handled errors are ordinary values.
+the named closed fields. `KeyWrapError` has only `InvalidEncoding`,
+`UnsupportedVersion`, `UnsupportedMode`, `UnsupportedKeyType`, `InvalidLength`,
+`WeakPassphrase`, `OpenFailed`, `EntropyUnavailable`, `ResourceUnavailable`,
+`Vault(VaultError)`, and `Internal`. Wrapped authentication, wrong recipient,
+wrong passphrase, type mismatch after authentication, and authenticated tamper
+all collapse to `OpenFailed`; backend prose and secret material never cross the
+projection. File-envelope cancellation remains internal task control and is not
+a public `FileCryptoError` variant. Handled errors are ordinary values.
 | E2710 | `` `derive T.{Trait}` body failed while expanding `@[{Trait}]` on `{Type}` ``. | The user-authored derive body ran at compile time (D-METADERIVE1=A, D-CTCODEGEN1=A) and threw a comptime error — typically an undefined name, a bad method call, or a type mismatch in the body. The span points at the `@[Trait]` rule on the struct that triggered expansion. | Fix the `derive T.{Trait}` body: check that every name it references is bound in scope, every method it calls is valid on the reflected type, and every `emit()` argument is a `String`. |
 | E2711 | Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local. | A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract. | Define `derive T.{Trait}` or `{Type}` in the entry module. |
 | E2712 | *retired by D-CTBLOCKEXPOSE1* (was: `$` splice outside comptime context). | Runtime `$name` splices are allowed when a comptime value is in scope. | Define the value with `comptime name = ...`, or remove the `$` prefix. |
@@ -1114,7 +1126,7 @@ span is embedded in the message (Jet file + line + function name).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. | The program hit a `panic`, `require`, or `require_eq` call that failed, or a bounds/key check triggered at runtime. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure; the source line and locals show what values were in play. |
+| E3001 | `panic: {msg}` — with Jet file, line, function name, source-line context box, and (debug builds only) safe local variable values. An unhandled `CryptoError` at `fn run` instead reports `unhandled cryptographic error` plus its stable redacted Display text. | The program hit a `panic`, `require`, or `require_eq` call that failed, a bounds/key check triggered at runtime, or `fn run` returned an unhandled `CryptoError`. Jet file and line are shown in Jet terms — never generated-Rust terms (I2). | Fix the logic that led to the failure; handle `CryptoError` in `fn run`. Unhandled non-`Internal` crypto errors exit 70 after cleanup; unhandled `Internal` exits 101 after fail-closed cleanup. |
 | E3002 | `error propagated from: {fn} ({file}:{line}) via ?` — an error-return trace entry appended when a `?` re-raises an error. | Each `?` that propagates an error adds a frame, making the full error path visible. | Follow the trace from the innermost `Err` origin to the outermost `?` to find where the error was created and which callers forwarded it. |
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `@Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
 | E3005 | `@{Pre\|Post} contract failed: {msg}` — with file:line. | A `@Pre` (argument claim, checked at entry) or `@Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split). | Fix the caller (a failed `@Pre` means an argument violated the function's stated contract) or the function body (a failed `@Post` means it broke its own promise about the result). |

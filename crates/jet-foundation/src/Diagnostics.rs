@@ -95,6 +95,9 @@ pub enum CryptoMisuseReason {
     IterationCount,
     LaneCount,
     MemoryTimeCost,
+    RawNonce,
+    RawAlgorithm,
+    DeterministicEntropy,
 }
 
 impl CryptoMisuseReason {
@@ -108,6 +111,9 @@ impl CryptoMisuseReason {
             Self::IterationCount => "iteration_count",
             Self::LaneCount => "lane_count",
             Self::MemoryTimeCost => "memory_time_cost",
+            Self::RawNonce => "raw_nonce",
+            Self::RawAlgorithm => "raw_algorithm",
+            Self::DeterministicEntropy => "deterministic_entropy",
         }
     }
 }
@@ -117,8 +123,8 @@ pub enum StructuredDiagnostic {
     CryptoMisuse {
         reason: CryptoMisuseReason,
         operation: &'static str,
-        expected: &'static str,
-        actual: i128,
+        expected: Option<&'static str>,
+        actual: Option<i128>,
     },
 }
 
@@ -237,8 +243,31 @@ impl Diagnostic {
         diagnostic.structured = Some(StructuredDiagnostic::CryptoMisuse {
             reason,
             operation,
-            expected,
-            actual,
+            expected: Some(expected),
+            actual: Some(actual),
+        });
+        diagnostic
+    }
+
+    pub fn crypto_misuse_fact(
+        why: String,
+        fix: String,
+        span: Span,
+        reason: CryptoMisuseReason,
+        operation: &'static str,
+    ) -> Self {
+        let mut diagnostic = Self::error(
+            "E2702",
+            "crypto API misuse".to_string(),
+            why,
+            fix,
+            Some(span),
+        );
+        diagnostic.structured = Some(StructuredDiagnostic::CryptoMisuse {
+            reason,
+            operation,
+            expected: None,
+            actual: None,
         });
         diagnostic
     }
@@ -405,29 +434,38 @@ impl Diagnostic {
         } = self.structured.as_ref()?;
         let span = self.span?;
         let (line, col) = line_col(src, span.start);
-        Some(format!(
+        let mut json = format!(
             concat!(
                 "{{\"schema\":\"jet.diagnostic/v1\",",
                 "\"code\":\"E2702\",\"class\":\"user\",",
                 "\"severity\":\"error\",\"phase\":\"sema\",",
                 "\"what\":{},\"why\":{},\"fix\":{},",
-                "\"reason\":{},\"operation\":{},\"expected\":{},\"actual\":{},",
-                "\"primarySpan\":{{\"file\":{},\"start\":{},\"end\":{},\"line\":{},\"col\":{}}},",
-                "\"relatedSpans\":[]}}"
+                "\"reason\":{},\"operation\":{}"
             ),
             json_str(&self.what),
             json_str(&self.why),
             json_str(&self.fix),
             json_str(reason.as_str()),
             json_str(operation),
-            json_str(expected),
-            actual,
+        );
+        if let Some(expected) = expected {
+            json.push_str(&format!(",\"expected\":{}", json_str(expected)));
+        }
+        if let Some(actual) = actual {
+            json.push_str(&format!(",\"actual\":{actual}"));
+        }
+        json.push_str(&format!(
+            concat!(
+                ",\"primarySpan\":{{\"file\":{},\"start\":{},\"end\":{},\"line\":{},\"col\":{}}},",
+                "\"relatedSpans\":[]}}"
+            ),
             json_str(file),
             span.start,
             span.end,
             line,
             col,
-        ))
+        ));
+        Some(json)
     }
 }
 
@@ -455,14 +493,27 @@ pub fn json_str(s: &str) -> String {
 /// Render a batch of diagnostics as a single JSON document in the `--json`
 /// schema: `{ "schema_version": 1, "diagnostics": [ … ] }`.
 pub fn render_all_json(file: &str, src: &str, diags: &[Diagnostic]) -> String {
-    if diags.iter().any(|diagnostic| diagnostic.structured.is_some()) {
+    let structured_count = diags
+        .iter()
+        .filter(|diagnostic| diagnostic.structured.is_some())
+        .count();
+    if structured_count == diags.len() && structured_count != 0 {
         let mut out = String::new();
         for diagnostic in diags {
-            out.push_str(
-                &diagnostic
-                    .structured_json(file, src)
-                    .unwrap_or_else(|| diagnostic.to_json(file, src)),
-            );
+            out.push_str(&diagnostic.structured_json(file, src).unwrap());
+            out.push('\n');
+        }
+        return out;
+    }
+    if structured_count != 0 {
+        let generic = diags
+            .iter()
+            .filter(|diagnostic| diagnostic.structured.is_none())
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut out = render_all_json(file, src, &generic);
+        for diagnostic in diags.iter().filter(|diagnostic| diagnostic.structured.is_some()) {
+            out.push_str(&diagnostic.structured_json(file, src).unwrap());
             out.push('\n');
         }
         return out;
@@ -857,6 +908,9 @@ mod crypto_diagnostic_contract_tests {
             (CryptoMisuseReason::IterationCount, "iteration_count"),
             (CryptoMisuseReason::LaneCount, "lane_count"),
             (CryptoMisuseReason::MemoryTimeCost, "memory_time_cost"),
+            (CryptoMisuseReason::RawNonce, "raw_nonce"),
+            (CryptoMisuseReason::RawAlgorithm, "raw_algorithm"),
+            (CryptoMisuseReason::DeterministicEntropy, "deterministic_entropy"),
         ];
         for (reason, spelling) in reasons {
             assert_eq!(reason.as_str(), spelling);
@@ -877,5 +931,31 @@ mod crypto_diagnostic_contract_tests {
         assert_eq!(json.lines().count(), 2);
         assert_eq!(json.matches("\"schema\":\"jet.diagnostic/v1\"").count(), 2);
         assert_eq!(json.matches("\"reason\":\"invalid_length\"").count(), 2);
+    }
+
+    #[test]
+    fn mixed_batches_preserve_the_generic_envelope_and_crypto_object() {
+        let generic = Diagnostic::error(
+            "E0001",
+            "bad token".into(),
+            "grammar".into(),
+            "remove it".into(),
+            None,
+        );
+        let crypto = Diagnostic::crypto_misuse(
+            "invalid length".into(),
+            "pass the required length".into(),
+            Span::new(0, 1),
+            CryptoMisuseReason::InvalidLength,
+            "x25519",
+            "exactly 32",
+            31,
+        );
+        let json = render_all_json("x.jet", "x", &[crypto, generic]);
+        let lines = json.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 2, "{json}");
+        assert!(lines[0].starts_with("{\"schema_version\":1,\"diagnostics\":["));
+        assert!(lines[0].contains("\"code\":\"E0001\""));
+        assert!(lines[1].starts_with("{\"schema\":\"jet.diagnostic/v1\",\"code\":\"E2702\""));
     }
 }

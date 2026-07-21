@@ -30,6 +30,76 @@ fn run() -> Void ? {
 }
 
 #[test]
+fn crypto_fallible_void_run_uses_the_e3001_runtime_boundary() {
+    let src = r#"
+use core.crypto as crypto
+
+fn run() -> Void ? CryptoError {
+    length :: 0
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
+}
+"#;
+    let out = jet::compile(src).expect("CryptoError entrypoint should compile");
+    let ffi = out
+        .ffi
+        .as_ref()
+        .expect("core.crypto must prepare its hidden bridge");
+    let return_type = format!("Result<(), {}::JetCryptoError>", ffi.crate_name);
+    assert!(
+        out.rust.contains(&format!("pub fn user_run() -> {return_type}")),
+        "CryptoError run should retain its error type:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("Error [E3001]: unhandled cryptographic error")
+            && out.rust.contains("std::process::exit(if __jet_internal { 101 } else { 70 });"),
+        "CryptoError run must use the E3001 boundary:\n{}",
+        out.rust
+    );
+}
+
+#[test]
+fn unhandled_crypto_error_exits_70_with_a_redacted_e3001_frame() {
+    let src = r#"
+use core.crypto as crypto
+
+fn dynamic_length(value: Int) -> Int {
+    return value
+}
+
+fn run() -> Void ? CryptoError {
+    length :: dynamic_length(8161)
+    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
+}
+"#;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_crypto_entry_error_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("unhandled_crypto_error.jet"), src).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "unhandled_crypto_error.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let code = output.status.code().unwrap_or(0);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(code, 70, "stderr:\n{stderr}");
+    assert!(stdout.is_empty(), "stdout must stay empty: {stdout:?}");
+    assert!(
+        stderr.ends_with(concat!(
+            "Error [E3001]: unhandled cryptographic error\n",
+            " Why: hkdf_sha256: output length must be 0..8160; got 8161\n",
+            " Fix: handle the CryptoError in fn run\n",
+        )),
+        "stderr:\n{stderr}"
+    );
+}
+
+#[test]
 fn fallible_void_run_can_finish_normally_after_try() {
     let src = r#"
 fn step() -> Int ? {

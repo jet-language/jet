@@ -177,6 +177,37 @@ mod tests {
             .collect()
     }
 
+    fn file_error_tag(error: &JetFileCryptoError) -> &'static str {
+        match error {
+            JetFileCryptoError::OpenFailed => "open-failed",
+            JetFileCryptoError::SealFailed(_) => "seal-failed",
+            JetFileCryptoError::SourceIo => "source-io",
+            JetFileCryptoError::DestinationExists => "destination-exists",
+            JetFileCryptoError::DestinationIo => "destination-io",
+            JetFileCryptoError::Cancelled => "internal-cancelled",
+        }
+    }
+
+    #[test]
+    fn file_crypto_error_projection_is_exhaustive_and_redacted() {
+        let public = [
+            JetFileCryptoError::OpenFailed,
+            JetFileCryptoError::SealFailed(JetCryptoError::EntropyUnavailable),
+            JetFileCryptoError::SourceIo,
+            JetFileCryptoError::DestinationExists,
+            JetFileCryptoError::DestinationIo,
+        ];
+        assert_eq!(
+            public.iter().map(file_error_tag).collect::<Vec<_>>(),
+            ["open-failed", "seal-failed", "source-io", "destination-exists", "destination-io"]
+        );
+        assert_eq!(file_error_tag(&JetFileCryptoError::Cancelled), "internal-cancelled");
+        let rendered = format!("{public:?}");
+        for forbidden in ["hunter2", "plaintext sentinel", "ciphertext sentinel", "/home/nate"] {
+            assert!(!rendered.contains(forbidden), "file error leaked `{forbidden}`: {rendered}");
+        }
+    }
+
     #[test]
     fn every_bridge_entropy_consumer_fails_without_output() {
         let plaintext = b"secret".to_vec();
@@ -293,6 +324,10 @@ mod tests {
         ).unwrap();
         let bytes = jet_crypto_sealed_bytes_impl(&sealed);
         assert_eq!(&bytes[..4], b"JETV");
+        let mut unsupported_version=bytes.clone();unsupported_version[4]=2;
+        assert!(matches!(jet_crypto_sealed_from_bytes_impl(unsupported_version),Err(JetCryptoError::UnsupportedVersion{operation:"Sealed.from_bytes",version:2})));
+        let mut unsupported_algorithm=bytes.clone();unsupported_algorithm[5]=3;
+        match jet_crypto_sealed_from_bytes_impl(unsupported_algorithm){Err(JetCryptoError::UnsupportedAlgorithm{operation,algorithm})=>{assert_eq!(operation,"Sealed.from_bytes");assert_eq!(algorithm,"3")},_=>panic!("JETV suite id must remain public")}
         assert_eq!(jet_crypto_open_typed_impl(&alice, jet_crypto_sealed_from_bytes_impl(bytes.clone()).unwrap(), &aad).unwrap(), plain);
         assert_eq!(jet_crypto_open_typed_impl(&wrong, jet_crypto_sealed_from_bytes_impl(bytes.clone()).unwrap(), &aad), Err(JetCryptoError::OpenFailed));
         assert_eq!(jet_crypto_open_typed_impl(&alice, jet_crypto_sealed_from_bytes_impl(bytes.clone()).unwrap(), &b"wrong".to_vec()), Err(JetCryptoError::OpenFailed));
@@ -318,11 +353,17 @@ mod tests {
         let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
         assert!(jet_crypto_password_verify_typed_impl(&secret, &stored).unwrap());
         let wrong_algorithm=JetPasswordHash(stored.0.replacen("$argon2id$","$argon2i$",1));
-        assert!(matches!(jet_crypto_password_verify_typed_impl(&secret,&wrong_algorithm),Err(JetCryptoError::InvalidEncoding{..})));
-        assert!(matches!(jet_crypto_password_parse_impl(wrong_algorithm.0),Err(JetCryptoError::InvalidEncoding{..})));
+        assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wrong_algorithm),Err(JetCryptoError::UnsupportedAlgorithm{operation:"password_verify",algorithm:"argon2i".to_string()}));
+        match jet_crypto_password_parse_impl(wrong_algorithm.0) { Err(JetCryptoError::UnsupportedAlgorithm{operation,algorithm}) => { assert_eq!(operation,"PasswordHash.parse"); assert_eq!(algorithm,"argon2i"); }, _ => panic!("argon2i must remain a typed unsupported algorithm") }
+        let wrong_algorithm=JetPasswordHash(stored.0.replacen("$argon2id$","$argon2d$",1));
+        assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wrong_algorithm),Err(JetCryptoError::UnsupportedAlgorithm{operation:"password_verify",algorithm:"argon2d".to_string()}));
+        let unknown_algorithm=JetPasswordHash(stored.0.replacen("$argon2id$","$argon2x$",1));
+        assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&unknown_algorithm),Err(JetCryptoError::UnsupportedAlgorithm{operation:"password_verify",algorithm:"argon2x".to_string()}));
         let wrong_version=JetPasswordHash(stored.0.replacen("$v=19$","$v=16$",1));
-        assert!(matches!(jet_crypto_password_verify_typed_impl(&secret,&wrong_version),Err(JetCryptoError::InvalidEncoding{..})));
-        assert!(matches!(jet_crypto_password_parse_impl(wrong_version.0),Err(JetCryptoError::InvalidEncoding{..})));
+        assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wrong_version),Err(JetCryptoError::UnsupportedVersion{operation:"password_verify",version:16}));
+        assert!(matches!(jet_crypto_password_parse_impl(wrong_version.0),Err(JetCryptoError::UnsupportedVersion{operation:"PasswordHash.parse",version:16})));
+        let wide_version=JetPasswordHash(stored.0.replacen("$v=19$","$v=300$",1));
+        assert_eq!(jet_crypto_password_verify_typed_impl(&secret,&wide_version),Err(JetCryptoError::UnsupportedVersion{operation:"password_verify",version:300}));
         let wrong = jet_crypto_secret_from_text_impl("wrong".to_string());
         let stored = jet_crypto_password_hash_typed_impl(&secret).unwrap();
         assert!(!jet_crypto_password_verify_typed_impl(&wrong, &stored).unwrap());
