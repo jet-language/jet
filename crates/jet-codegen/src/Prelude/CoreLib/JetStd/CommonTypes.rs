@@ -250,6 +250,8 @@
         pub(crate) frames: Vec<super::JetCborReadFrame>,
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
+        // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
+        pub(crate) allocation: super::JetJsonAllocationBudget,
     }
     pub struct CBORWriter {
         pub(crate) output: super::JetFileWriter,
@@ -258,9 +260,13 @@
         pub(crate) total: i64,
         pub(crate) frames: Vec<super::JetCborWriteFrame>,
         pub(crate) root_written: bool,
+        // finish validates one complete root; Drop without finish never claims success
+        // and leaves incomplete buffered containers unwritten (≠ finished wire).
         pub(crate) finished: bool,
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
+        // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
+        pub(crate) allocation: super::JetJsonAllocationBudget,
     }
 
     #[derive(Clone, Debug, PartialEq)]

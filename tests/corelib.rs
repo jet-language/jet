@@ -1790,6 +1790,105 @@ fn run() {{
 }
 
 #[test]
+fn cbor_stream_drop_and_codec_heap_ceiling_are_enforced() {
+    let dir = std::env::temp_dir().join(format!("jet_cbor_stream_drop_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let partial_path = dir.join("partial.cbor");
+    let heap_path = dir.join("heap.cbor");
+    // Capacity doubles to 131072; the next byte charges past the shared codec
+    // heap ceiling while still under max_item_bytes (same counting allocator).
+    let text = vec![b'x'; 131_073];
+    let mut heap_bytes = Vec::new();
+    heap_bytes.push(0x7a); // text, 4-byte length
+    heap_bytes.extend_from_slice(&(131_073u32).to_be_bytes());
+    heap_bytes.extend_from_slice(&text);
+    fs::write(&heap_path, &heap_bytes).unwrap();
+    let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+    let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn write_unfinished(path: String) {{
+    output :: files.create(path) ?? panic("create partial")
+    writer :: cbor.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
+    writer.flush() ?? panic("flush")
+    // no ArrayEnd / finish — Drop leaves buffered items unwritten (incomplete)
+}}
+
+fn run() {{
+    write_unfinished("{partial}")
+    // Same-path reopen after Drop: incomplete leftover still here (empty wire).
+    leftover :: files.read_bytes("{partial}") ?? panic("same-path read after Drop")
+    empty: [U8] :: []
+    print(leftover == empty)
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+    reopen_writer :: cbor.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
+    reopen_writer.finish() ?? panic("reopen finish")
+    finished :: files.read_bytes("{partial}") ?? panic("same-path read after finish")
+    null_wire: [U8] :: [246]
+    print(finished == null_wire)
+    // Honesty: unfinished Drop wire ≠ finished complete root.
+    print(leftover != finished)
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 150000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{heap}") ?? panic("heap open")
+    reader :: cbor.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 4 {{
+        result :: reader.next()
+        if result == {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("heap-not-latched") }}
+                    Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_stream_drop_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    // Header is 5 bytes (0x7a + u32 length); fail when doubling past 131072 payload bytes.
+    assert_eq!(
+        stdout,
+        "true\ntrue\ntrue\n131077\n$\nCBOR stream heap exceeded the bounded codec heap ceiling\ntrue\n"
+    );
+    assert_eq!(fs::read(&partial_path).unwrap(), [0xf6]);
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("cbor_stream_drop_heap.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("CBOR stream drop/heap default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read(&partial_path).unwrap(), [0xf6]);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn csv_whole_value_handles_multiline_quotes_crlf_and_typed_decode() {
     let dir = std::env::temp_dir().join(format!("jet_csv_whole_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

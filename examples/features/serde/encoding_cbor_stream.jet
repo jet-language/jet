@@ -1,0 +1,30 @@
+// D-ENCSTREAM-SURFACE1=A: bounded CBOR reader/writer lifecycle.
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn write_catalog(path: String) {
+    output :: files.create(path) ?? panic("create")
+    writer :: cbor.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+    writer.write(encoding.DataEvent.Key("ok")) ?? panic("key")
+    writer.write(encoding.DataEvent.Bool(true)) ?? panic("bool")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
+    writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
+}
+
+fn run() {
+    path :: "encoding_cbor_stream_out.cbor"
+    write_catalog(path)
+
+    input :: files.open(path) ?? panic("open")
+    reader :: cbor.reader(^input) ?? panic("reader")
+    count := 0
+    loop count < 5 {
+        maybe :: reader.next() ?? panic("next")
+        if maybe == None { print("eof"); break }
+        print("event")
+        count++
+    }
+}
