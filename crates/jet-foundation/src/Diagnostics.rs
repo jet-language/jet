@@ -434,6 +434,7 @@ impl Diagnostic {
         } = self.structured.as_ref()?;
         let span = self.span?;
         let (line, col) = line_col(src, span.start);
+        let file = project_relative_diagnostic_path(file);
         let mut json = format!(
             concat!(
                 "{{\"schema\":\"jet.diagnostic/v1\",",
@@ -459,7 +460,7 @@ impl Diagnostic {
                 ",\"primarySpan\":{{\"file\":{},\"start\":{},\"end\":{},\"line\":{},\"col\":{}}},",
                 "\"relatedSpans\":[]}}"
             ),
-            json_str(file),
+            json_str(&file),
             span.start,
             span.end,
             line,
@@ -467,6 +468,34 @@ impl Diagnostic {
         ));
         Some(json)
     }
+}
+
+fn project_relative_diagnostic_path(file: &str) -> String {
+    let path = std::path::Path::new(file);
+    if !path.is_absolute() {
+        return file.replace('\\', "/");
+    }
+    let mut directory = path.parent();
+    while let Some(root) = directory {
+        if ["pkg.jet", "Jet.toml", "jet.toml", ".git"]
+            .iter()
+            .any(|marker| root.join(marker).exists())
+        {
+            if let Ok(relative) = path.strip_prefix(root) {
+                return relative.to_string_lossy().replace('\\', "/");
+            }
+        }
+        directory = root.parent();
+    }
+    if let Ok(current) = std::env::current_dir() {
+        if let Ok(relative) = path.strip_prefix(current) {
+            return relative.to_string_lossy().replace('\\', "/");
+        }
+    }
+    path.file_name().map_or_else(
+        || "<source>".to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
 }
 
 /// Escape a string as a JSON string literal (RFC 8259), std-only (I6).

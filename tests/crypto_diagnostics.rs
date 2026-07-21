@@ -59,6 +59,39 @@ fn e2702_json_exits_one_and_creates_no_artifact() {
 }
 
 #[test]
+fn e2702_json_redacts_an_absolute_input_to_its_project_path() {
+    let root = scratch();
+    let project = root.join("project");
+    let source_dir = project.join("src");
+    std::fs::create_dir_all(project.join(".git")).unwrap();
+    std::fs::create_dir_all(&source_dir).unwrap();
+    let source = source_dir.join("main.jet");
+    std::fs::write(
+        &source,
+        concat!(
+            "use core.crypto as crypto\n",
+            "fn run() {\n",
+            "    _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 8161)\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("check")
+        .arg(&source)
+        .arg("--json")
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let json = String::from_utf8(output.stderr).unwrap();
+    assert!(json.contains("\"primarySpan\":{\"file\":\"src/main.jet\""), "{json}");
+    assert!(!json.contains(&root.to_string_lossy().into_owned()), "absolute path leaked: {json}");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn multiple_e2702_diagnostics_are_independent_json_lines() {
     let root = scratch();
     std::fs::write(
