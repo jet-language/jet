@@ -1723,12 +1723,29 @@ module (wasmtime + Component Model, typed `.wit` contract), safe by default.
 Plugin target support is shipped for the v1 scope: all-`Int` or all-`Float`
 exported functions, deny-by-default plugin effects, `.wit` emission, component
 lifting through `wasm-tools`, host loading through `core.plugin`, version
-compatibility checks, and Jet-owned diagnostics E1257-E1260. **D-NOSTD1**: no
-`no_std` flag — the std baseline follows the typed platform `target:`
-(bare-metal ⇒ no-std).
+compatibility checks, and Jet-owned diagnostics E1257-E1260. This is the
+**application-plugin** substrate (fixed WIT world `jetplugin`) — not the
+compiler-extension API (D-DX5-HOOK1) and not PATH `jet-*` helpers (D-DX5).
+**D-NOSTD1**: no `no_std` flag — the std baseline follows the typed platform
+`target:` (bare-metal ⇒ no-std).
 **D-OOBPROOF1**: bounds-check elision is proof-carrying: a fixed-list index
 whose distinct-`Int` invariant fits `0..N-1` lowers without the runtime bounds
 helper; other dynamic indexes keep the check.
+
+**D-DX5-HOOK1=A — compiler-extension v1 boundary** *(ratified 2026-07-14,
+card #549)*: the optional formal compiler-extension API's first hook is a
+**typed read-only post-sema snapshot** delivered to an **isolated WASM
+Component Model** guest. The host reuses jet-pkg-model's shipped wasmtime
+Component Model substrate (same `WASMTIME_CRATE_SPEC` as `core.plugin`) with a
+**compiler-specific** WIT world `compiler-extension-v1` (`package
+jet:compiler-extension@0.1.0`, export `analyze`). Plugins inspect typed
+symbols, types, effects, spans, and provenance; they return findings and
+proposed edits. The host validates every response and remains the only
+semantic authority (I2/I3). Later parse or codegen capabilities extend the
+same negotiated protocol — they do not invent a second plugin system (I8).
+Exact user-facing registration spelling remains a later ballot if new syntax
+is needed. Distinct from PATH `jet-*` helpers (D-DX5) and application
+`target: plugin` / `core.plugin` (D-PLUGIN1).
 
 ### Testing & benchmarks
 
@@ -2004,7 +2021,8 @@ client TLS config), zip/tar (`core.archive`, D-DEP-ARCHIVE1), flate2/zstd
 (`core.compress`, D-CORE-COMPRESS1/D-CODECS1),
 rusqlite-bundled (`core.db`, D-DEP-DB1), ureq/hyper/tungstenite
 (`core.http`, D-NETDEP1/D-HTTPLIB3), Cranelift (`jet-jit`, D-JITDEP1),
-wasmtime (plugins, D-DEP-WASM1), age-style crypto bridge
+wasmtime (application plugins D-DEP-WASM1 and compiler-extension host
+D-DX5-HOOK1), age-style crypto bridge
 (D-JPK-SECRETCRYPTO1). `jet repl` stays std-only (D-REPL18). Raylib ships as
 first-party `core.raylib` bridge package (D-RAYLIB1); `core.game` is the
 scene-first game engine layered above it (D-GAME1=B, D-GAME2=A, D-GAME3=C).
@@ -3878,9 +3896,11 @@ call-graph/effects/member facts; `jet inspect semindex --json`, schema v3) —
 foundation for dossier views, breadcrumb hints, impact analysis, and codemods
 (D-DOSSIER1/D-BREADCRUMB1/D-IMPACT1/D-CODEMOD1). `jet inspect dossier <file> [Symbol]`
 is the D-WD2 umbrella over those facts; `jet inspect codemod` starts with named JSON
-rename objects (`dry-run`/`apply`/`undo`) and replay logs. **D-DX5**: PATH `jet-*` plugin
-discovery. **D-REF3**: borrowed-return + cleanup-scope inlay hints on by
-default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
+rename objects (`dry-run`/`apply`/`undo`) and replay logs. **D-DX5**: PATH `jet-*`
+helper discovery (cargo/git-style external commands). **D-DX5-HOOK1=A**:
+compiler-extension WASM components (typed post-sema snapshot; see above) —
+not PATH helpers and not `target: plugin`. **D-REF3**: borrowed-return +
+cleanup-scope inlay hints on by default. **D-JPK-DISCOVER1**: `jet search`/`jet info` + LSP completions from
 a local offline index. **D-JPK-BUILDDBG1**: failed builds keep the scratch
 dir; `--shell-on-fail`; `jet explain <ref>`; `jet logs <pkg>`.
 

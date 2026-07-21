@@ -236,6 +236,24 @@ with request execution and replaces a cancelled in-flight result with JSON-RPC
 `-32800`. D-LSP2 requires every advertised LSP capability to have named coverage
 in `tests/lsp.rs`; the server must not advertise speculative features.
 
+## Compiler-extension plugins (D-DX5-HOOK1=A)
+
+Tower #549. After sema, the compiler may freeze a **versioned typed
+read-only snapshot** and send it to an isolated WASM Component Model guest.
+The guest returns structured findings and edit proposals; the host validates
+every response and remains the only semantic authority (I2/I3).
+
+- **Host ownership:** `crates/jet-pkg-model` — `CompilerExtension` module plus
+  `Prelude/CompilerExtension.rs`, reusing the same wasmtime Component Model
+  pin as application `core.plugin` (`WASMTIME_CRATE_SPEC` / D-DEP-WASM1).
+- **WIT world:** `compiler-extension-v1` (`package jet:compiler-extension@0.1.0`,
+  export `analyze`). Distinct from application plugins' fixed world
+  `jetplugin` (D-PLUGIN1 / D-PLUGIN-EXPORT1).
+- **Not:** PATH-discovered `jet-*` helpers (D-DX5 in `Source/main.rs`), and
+  not `target: plugin` / `core.plugin` application loaders.
+- **V1 stage:** `typed` only. Later parse/codegen observation extends the same
+  capability-negotiated protocol (I8 — one mechanism).
+
 ## Rules
 
 - **R1 — Codegen is dumb.** No checks, no decisions, no "see if rustc

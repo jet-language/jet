@@ -1047,15 +1047,23 @@ const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
 const CRYPTO_ENTROPY_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 
-/// The `wasmtime` crate version that backs `core.plugin` (D-DEP-WASM1=A, c81).
-/// Lives only here — never in the compiler's Cargo.toml (I6). Reuses the
-/// already-approved Cranelift backend internally (D-JITDEP1).
+/// The `wasmtime` crate version that backs sandboxed Component Model hosts
+/// (D-DEP-WASM1=A application `core.plugin`, and D-DX5-HOOK1=A compiler
+/// extensions). Lives only in emitted host runtimes — never in the
+/// compiler's Cargo.toml (I6). Reuses the already-approved Cranelift backend
+/// internally (D-JITDEP1).
 pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "26");
 
-/// Hand-written plugin-loader runtime emitted into the bridge crate when
-/// `core.plugin` is used. This is the only place the `wasmtime` crate is
-/// touched.
+/// Hand-written application plugin-loader runtime emitted into the bridge
+/// crate when `core.plugin` is used (D-PLUGIN1 / D-DEP-WASM1=A).
 const PLUGIN_RUNTIME: &str = include_str!("Prelude/Plugin.rs");
+
+/// Hand-written compiler-extension host runtime (D-DX5-HOOK1=A). Same
+/// wasmtime Component Model substrate as `PLUGIN_RUNTIME`, distinct WIT
+/// world (`compiler-extension-v1`) and entry points. Exposed for the
+/// compiler host path; not mixed into application `core.plugin` bridges.
+pub const COMPILER_EXTENSION_RUNTIME: &str =
+    include_str!("Prelude/CompilerExtension.rs");
 
 /// The `age` crate version backing `core.vault` (U13, D-JPK-SECRETCRYPTO1=A) —
 /// the age-style crypto bridge: X25519 recipients, ChaCha20-Poly1305 payload.
@@ -2196,7 +2204,8 @@ fn emit_wrapper_lib(
         out.push('\n');
     }
     if needs_plugin {
-        // D-DEP-WASM1=A: the plugin runtime is the only place `wasmtime` is touched.
+        // D-DEP-WASM1=A: application `core.plugin` host (wasmtime Component Model).
+        // Compiler-extension host is a separate runtime (`COMPILER_EXTENSION_RUNTIME`).
         out.push_str(PLUGIN_RUNTIME);
         out.push('\n');
     }
