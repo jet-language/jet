@@ -211,10 +211,13 @@ const ageOf = (it) => it.type === 'decision' ? it.decision.created : it.type ===
 // (D-ACCEPT-<num>) when one was minted, or bare when a card landed in
 // verify without ever being flagged needsAcceptance. Either way it's owner
 // work waiting to happen, so it must not hide.
+const openAcceptanceBallot = (c) =>
+  (c.decisions || []).find(d => d.id === `D-ACCEPT-${c.num}` && d.status !== 'ratified') || null;
+
 function verifyQueue() {
   return S.cards.filter(c => c.phase === 'verify').map(c => ({
     card: c,
-    ballot: (c.decisions || []).find(d => d.id === `D-ACCEPT-${c.num}` && d.status !== 'ratified') || null,
+    ballot: openAcceptanceBallot(c),
   }));
 }
 
@@ -455,7 +458,10 @@ function dutyVerify(card, ballot) {
   const content = acceptanceContent(card, ballot);
   const inline = content.proof.slice(0, PROOF_INLINE_MAX);
   const rest = content.proof.slice(PROOF_INLINE_MAX);
-  const yourCheck = content.visualCheck || 'Everything machine-verified — accept to close.';
+  const waitingOnAgent = card.needsAcceptance && !ballot;
+  const yourCheck = waitingOnAgent
+    ? 'Technical verification still in progress — acceptance unlocks after all criteria pass.'
+    : content.visualCheck || 'Everything machine-verified — accept to close.';
   const node = el(`<div class="duty duty--verify">
       <div class="duty__top"><span class="duty__kind">Verify</span>
         <span class="num">${ticket(card)}</span>
@@ -469,8 +475,8 @@ function dutyVerify(card, ballot) {
         <p class="verifyblock__visual">${esc(yourCheck)}</p>
       </div>
       <div class="duty__actions">
-        <button class="btn btn--red btn--sm" data-accept>Accept — close the card</button>
-        <button class="btn btn--ghost btn--sm" data-bounce>Bounce</button>
+        <button class="btn btn--red btn--sm" data-accept ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent verification' : 'Accept — close the card'}</button>
+        <button class="btn btn--ghost btn--sm" data-bounce ${waitingOnAgent ? 'disabled' : ''}>Bounce</button>
         <button class="btn btn--ghost btn--sm" data-open>Open card</button>
       </div>
       <div class="bouncebox" hidden>
@@ -482,7 +488,7 @@ function dutyVerify(card, ballot) {
     ? ownerAcceptance(ballot.id, 'accept')
     : api('card/update', { id: card.id, phase: 'done', logEntry: 'Accepted — closed (no formal ballot).', by: 'owner' });
   $('[data-accept]', node).addEventListener('click', doAccept);
-  node.__primary = doAccept;
+  node.__primary = waitingOnAgent ? () => showDetail(card.id) : doAccept;
   $('[data-open]', node).addEventListener('click', () => showDetail(card.id));
   const box = $('.bouncebox', node);
   $('[data-bounce]', node).addEventListener('click', () => { box.hidden = !box.hidden; if (!box.hidden) $('textarea', box).focus(); });
@@ -793,8 +799,10 @@ function showDetail(id) {
   const m = $('#detail');
   const phaseLabel = (S.phases.find(p => p.id === c.phase) || {}).label || c.phase;
   const sel = (k, opts, cur) => `<select data-fld="${k}">${opts.map(o => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+  const acceptanceBallot = openAcceptanceBallot(c);
+  const waitingOnAgent = c.phase === 'verify' && c.needsAcceptance && !acceptanceBallot;
   const cta = c.phase === 'frozen' ? `<button class="btn btn--red" id="cta-unfreeze">Unfreeze — start work</button>`
-    : c.phase === 'verify' ? `<button class="btn btn--red" id="cta-done">Mark verified — close</button>` : '';
+    : c.phase === 'verify' ? `<button class="btn btn--red" id="cta-done" ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent verification' : acceptanceBallot ? 'Accept — close the card' : 'Mark verified — close'}</button>` : '';
   m.innerHTML = `<div class="modal__panel">
     <div class="modal__bar">
       ${c.workOrder != null ? `<span class="order">${c.workOrder}</span>` : ''}
@@ -887,7 +895,9 @@ function showDetail(id) {
   $('.modal__x', m).addEventListener('click', closeDetail);
   $('#del-card', m).addEventListener('click', async () => { await api('card/delete', { id, by: 'owner' }); closeDetail(); });
   $('#cta-unfreeze', m)?.addEventListener('click', () => api('card/update', { id, phase: 'planning', logEntry: 'Unfrozen.', by: 'owner' }));
-  $('#cta-done', m)?.addEventListener('click', () => api('card/update', { id, phase: 'done', logEntry: 'Verified — closed.', by: 'owner' }));
+  $('#cta-done', m)?.addEventListener('click', () => acceptanceBallot
+    ? ownerAcceptance(acceptanceBallot.id, 'accept')
+    : api('card/update', { id, phase: 'done', logEntry: 'Verified — closed.', by: 'owner' }));
   m.onclick = (e) => { if (e.target === m) closeDetail(); };
   m.hidden = false; $('#scrim').hidden = false;
 }

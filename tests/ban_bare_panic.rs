@@ -77,7 +77,7 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-codegen/src/Codegen/TIR/tests.rs",
-        7,
+        8,
         "test file — every panic! here is inside a #[test] fn",
     ),
     (
@@ -104,6 +104,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "crates/jet-cli/src/Help/mod.rs",
         1,
         "#[test]-only assertion fixture",
+    ),
+    (
+        "crates/jet-cli/src/Help/Render.rs",
+        1,
+        "#[test]-only help-result shape assertion fixture",
     ),
     (
         "crates/jet-repl/src/lib.rs",
