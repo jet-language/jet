@@ -595,7 +595,7 @@ fn plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries() {
     options.read_header_timeout = std::time::Duration::from_millis(40);
     options.read_idle_timeout = std::time::Duration::from_millis(40);
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     let pipelined = exchange(
@@ -720,7 +720,7 @@ fn head_preserves_representation_length_without_a_wire_body() {
     options.workers = 1;
     options.admission_queue = 8;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     let implicit = exchange(
@@ -826,7 +826,7 @@ fn reset_content_has_zero_length_and_preserves_pipeline_boundaries() {
     options.workers = 1;
     options.admission_queue = 8;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     let pipelined = exchange(
@@ -894,7 +894,7 @@ fn invalid_response_statuses_fail_closed_without_breaking_pipelines() {
     options.workers = 1;
     options.admission_queue = 8;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     for path in ["/low", "/high"] {
@@ -977,7 +977,7 @@ fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
     options.read_idle_timeout = std::time::Duration::from_secs(1);
     options.read_body_timeout = std::time::Duration::from_secs(1);
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     let pipelined = exchange(
@@ -1135,7 +1135,7 @@ fn expect_continue_is_ordered_bounded_and_rejects_before_dispatch() {
     options.read_idle_timeout = std::time::Duration::from_millis(200);
     options.read_body_timeout = std::time::Duration::from_millis(200);
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     let arrived_content_length = read_rest(&mut arrived_content_length);
@@ -1226,7 +1226,7 @@ fn host_authority_is_single_valid_and_required_for_http11() {
     options.workers = 1;
     options.admission_queue = 24;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     for valid in [
@@ -1328,7 +1328,7 @@ fn absolute_form_target_matches_host_before_routing() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     for (request, expected_path) in [
@@ -1432,7 +1432,7 @@ fn request_method_is_one_http_token_before_body_or_dispatch() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     for method in ["GET", "M-SEARCH", "custom!#$%&'*+-.^_`|~"] {
@@ -1510,7 +1510,7 @@ fn request_methods_are_case_sensitive_during_routing() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     for method in ["GET", "get"] {
@@ -1610,7 +1610,7 @@ fn options_asterisk_reports_server_methods_without_dispatch() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     let standalone = exchange(
@@ -1705,7 +1705,7 @@ fn connection_options_are_tokens_before_reuse_or_body_permission() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     let http10_extensions = exchange(
@@ -1800,7 +1800,7 @@ fn content_length_is_one_identical_decimal_value_before_body_permission() {
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     for content_length in [
@@ -1872,7 +1872,7 @@ fn shutdown_closes_idle_keepalive_and_starts_no_new_request() {
     options.admission_queue = 2;
     options.shutdown_grace = std::time::Duration::from_millis(500);
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server")
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server")
     });
 
     let mut active = std::net::TcpStream::connect(addr).expect("active connect");
@@ -1920,7 +1920,7 @@ fn bounded_admission_returns_503_and_shutdown_drains_accepted_work() {
         shutdown_grace: std::time::Duration::from_secs(1),
         ..JetHttpServerOptions::safe()
     };
-    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server"));
+    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server"));
     let slow = std::thread::spawn(move || request(addr, b"GET /slow HTTP/1.1\r\nHost: local\r\n\r\n"));
     entered_rx.recv_timeout(std::time::Duration::from_secs(1)).expect("slow admitted");
     let queued = std::thread::spawn(move || request(addr, b"GET /queued HTTP/1.1\r\nHost: local\r\n\r\n"));
@@ -1992,7 +1992,7 @@ fn shutdown_grace_cancels_straggler_socket_and_returns_bounded_report() {
         shutdown_grace: std::time::Duration::from_millis(30),
         ..JetHttpServerOptions::safe()
     };
-    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None).expect("server"));
+    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None).expect("server"));
     let mut client = std::net::TcpStream::connect(addr).expect("connect");
     client.write_all(b"GET /slow HTTP/1.1\r\nHost: local\r\n\r\n").expect("write");
     entered_rx.recv_timeout(std::time::Duration::from_secs(1)).expect("handler entered");
@@ -2482,7 +2482,7 @@ fn server_enforces_and_releases_per_ip_connection_capacity() {
         max_connections_per_ip: 1,
         ..JetHttpServerOptions::safe()
     };
-    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, stop, None).unwrap());
+    let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, stop, None, None).unwrap());
     let held = std::thread::spawn(move || request(addr, b"GET /hold HTTP/1.1\r\nHost: local\r\n\r\n"));
     entered_rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
     let rejected = request(addr, b"GET /ok HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n");
@@ -2582,6 +2582,7 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
             &mux,
             &options,
             &std::sync::atomic::AtomicBool::new(false),
+            None,
             None,
         )
     });
@@ -2717,7 +2718,7 @@ fn http2_uses_configured_header_body_and_size_limits() {
         let mut client = std::net::TcpStream::connect(addr).unwrap();
         let (mut server, _) = listener.accept().unwrap();
         let worker = std::thread::spawn(move || {
-            jet_http2_serve(&mut server, &mux, &options, &std::sync::atomic::AtomicBool::new(false), None)
+            jet_http2_serve(&mut server, &mux, &options, &std::sync::atomic::AtomicBool::new(false), None, None)
         });
         client.write_all(JET_HTTP2_PREFACE).unwrap();
         client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
@@ -2760,7 +2761,7 @@ fn http2_uses_configured_header_body_and_size_limits() {
         ..JetHttpServerOptions::safe()
     };
     let worker = std::thread::spawn(move || {
-        jet_http2_serve(&mut server_stream, &mux, &options, &std::sync::atomic::AtomicBool::new(false), None)
+        jet_http2_serve(&mut server_stream, &mux, &options, &std::sync::atomic::AtomicBool::new(false), None, None)
     });
     client.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
     client.write_all(JET_HTTP2_PREFACE).unwrap();
@@ -2815,7 +2816,7 @@ fn native_http2_routes_huffman_headers_and_enforces_stream_framing() {
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop = shutdown.clone();
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), stop, None).unwrap()
+        jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), stop, None, None).unwrap()
     });
 
     let mut stream = std::net::TcpStream::connect(addr).unwrap();
@@ -2911,6 +2912,7 @@ fn native_http2_routes_huffman_headers_and_enforces_stream_framing() {
         &JetHttpServerOptions::safe(),
         &std::sync::atomic::AtomicBool::new(false),
         None,
+        None,
     ).is_err());
 }
 
@@ -2948,7 +2950,7 @@ fn http2_shutdown_sends_goaway_with_last_stream_and_drains_active() {
         ..JetHttpServerOptions::safe()
     };
     let server = std::thread::spawn(move || {
-        jet_http2_serve(&mut server_stream, &mux, &options, &server_shutdown, None)
+        jet_http2_serve(&mut server_stream, &mux, &options, &server_shutdown, None, None)
     });
 
     client.set_read_timeout(Some(std::time::Duration::from_millis(50))).unwrap();
@@ -3049,6 +3051,143 @@ fn http2_shutdown_sends_goaway_with_last_stream_and_drains_active() {
 }
 
 #[test]
+fn http2_goaway_discards_orphan_continuation_without_aborting_drain() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let mux = jet_http_mux_new();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let release = std::sync::Arc::new(AtomicBool::new(false));
+    let handler_release = release.clone();
+    jet_http_mux_add(&mux, "GET", "/slow", move |_| {
+        entered_tx.send(()).expect("entered");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !handler_release.load(Ordering::Acquire) {
+            assert!(std::time::Instant::now() < deadline, "release timed out");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        jet_http_srv_response(200, &"drained".to_string())
+    });
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let _addr = listener.local_addr().unwrap();
+    let mut client = std::net::TcpStream::connect(_addr).unwrap();
+    let (mut server_stream, _) = listener.accept().unwrap();
+    let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let options = JetHttpServerOptions {
+        workers: 1,
+        admission_queue: 1,
+        shutdown_grace: std::time::Duration::from_secs(2),
+        read_idle_timeout: std::time::Duration::from_secs(2),
+        ..JetHttpServerOptions::safe()
+    };
+    let server = std::thread::spawn(move || {
+        jet_http2_serve(&mut server_stream, &mux, &options, &server_shutdown, None, None)
+    });
+
+    client.set_read_timeout(Some(std::time::Duration::from_millis(50))).unwrap();
+    client.write_all(JET_HTTP2_PREFACE).unwrap();
+    client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+    client.write_all(&h2_frame(1, 0x5, 1, &h2_request_headers(0x82, "/slow"))).unwrap();
+    client.flush().unwrap();
+
+    let read_frame = |stream: &mut std::net::TcpStream| -> Option<(u8, u8, u32, Vec<u8>)> {
+        let mut header = [0u8; 9];
+        match stream.read_exact(&mut header) {
+            Ok(()) => {}
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                return None;
+            }
+            Err(error) => panic!("frame header: {error}"),
+        }
+        let length = (usize::from(header[0]) << 16) | (usize::from(header[1]) << 8) | usize::from(header[2]);
+        let mut payload = vec![0; length];
+        stream.read_exact(&mut payload).expect("frame payload");
+        Some((
+            header[3],
+            header[4],
+            u32::from_be_bytes(header[5..9].try_into().unwrap()) & 0x7fff_ffff,
+            payload,
+        ))
+    };
+
+    let mut saw_server_settings = false;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while !saw_server_settings {
+        assert!(std::time::Instant::now() < deadline, "missing SETTINGS");
+        let Some((kind, flags, stream, _payload)) = read_frame(&mut client) else { continue };
+        if kind == 4 && stream == 0 {
+            saw_server_settings = true;
+            if flags & 0x1 == 0 {
+                client.write_all(&h2_frame(4, 0x1, 0, &[])).unwrap();
+            }
+        }
+    }
+    entered_rx.recv_timeout(std::time::Duration::from_secs(1)).expect("handler entered");
+    shutdown.store(true, Ordering::Release);
+
+    let mut goaway_last = None;
+    let mut saw_body = false;
+    let mut refused_partial = false;
+    let mut partial_headers_sent = false;
+    let mut continuation_sent = false;
+    let mut released = false;
+    let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while std::time::Instant::now() < drain_deadline && (goaway_last.is_none() || !saw_body || !continuation_sent) {
+        if goaway_last.is_some() && !partial_headers_sent {
+            // HEADERS without END_HEADERS after GOAWAY → RST, then orphan CONTINUATION
+            // must be discarded without aborting the active drain.
+            client
+                .write_all(&h2_frame(1, 0x0, 3, &h2_request_headers(0x82, "/late")))
+                .unwrap();
+            client.flush().unwrap();
+            partial_headers_sent = true;
+        }
+        if refused_partial && !continuation_sent {
+            client.write_all(&h2_frame(9, 0x4, 3, &[])).unwrap();
+            client.flush().unwrap();
+            continuation_sent = true;
+        }
+        if continuation_sent && !released {
+            release.store(true, Ordering::Release);
+            released = true;
+        }
+        let Some((kind, _flags, stream, payload)) = read_frame(&mut client) else { continue };
+        match kind {
+            7 => {
+                assert_eq!(stream, 0);
+                assert!(payload.len() >= 8, "GOAWAY payload too short");
+                let last = u32::from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff;
+                let error = u32::from_be_bytes(payload[4..8].try_into().unwrap());
+                assert_eq!(error, 0, "GOAWAY should be NO_ERROR");
+                goaway_last = Some(last);
+            }
+            0 if stream == 1 => {
+                if payload.windows(7).any(|part| part == b"drained") {
+                    saw_body = true;
+                }
+            }
+            3 if stream == 3 => {
+                assert_eq!(payload.len(), 4);
+                assert_eq!(u32::from_be_bytes(payload[..4].try_into().unwrap()), 7);
+                refused_partial = true;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(goaway_last, Some(1), "GOAWAY must advertise the accepted last stream");
+    assert!(refused_partial, "partial HEADERS after GOAWAY must be refused");
+    assert!(continuation_sent, "orphan CONTINUATION after GOAWAY must be exercised");
+    assert!(saw_body, "active request must drain after orphan CONTINUATION");
+    release.store(true, Ordering::Release);
+    server
+        .join()
+        .expect("server join")
+        .expect("http2 serve must survive post-GOAWAY orphan CONTINUATION");
+}
+
+#[test]
 fn http2_serve_honors_dynamic_grace_over_options_shutdown_grace() {
     use std::io::Write;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -3088,6 +3227,7 @@ fn http2_serve_honors_dynamic_grace_over_options_shutdown_grace() {
             &options,
             &server_shutdown,
             Some(server_grace.as_ref()),
+            None,
         )
     });
 
@@ -3128,6 +3268,12 @@ fn http2_server_api_shutdown_grace_reaches_h2_drain() {
     use std::io::Write;
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    // Server.serve uses JetHttpServerOptions::safe() with shutdown_grace=30s.
+    // Server.shutdown(grace) must publish that grace into jet_http2_serve via
+    // dynamic_grace_ms. If H2 ignored it and waited options.shutdown_grace, the
+    // listener would force-close the socket at the short grace and mark cancelled.
+    // A green report with cancelled==0 while the handler is still held proves the
+    // H2 path honored Server.shutdown(grace) without the TCP kill path.
     let mux = jet_http_mux_new();
     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
     let hold = std::sync::Arc::new(AtomicBool::new(true));
@@ -3153,37 +3299,54 @@ fn http2_server_api_shutdown_grace_reaches_h2_drain() {
     client.flush().unwrap();
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-    let mut saw_goaway = false;
     loop {
         assert!(std::time::Instant::now() < deadline, "missing SETTINGS before shutdown");
-        let Some((kind, flags, stream, payload)) = h2_try_read_frame(&mut client) else { continue };
+        let Some((kind, flags, stream, _)) = h2_try_read_frame(&mut client) else { continue };
         if kind == 4 && stream == 0 && flags & 0x1 == 0 {
             client.write_all(&h2_frame(4, 0x1, 0, &[])).unwrap();
             break;
-        }
-        if kind == 7 {
-            saw_goaway = true;
-            let last = u32::from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff;
-            assert_eq!(last, 1);
         }
     }
     entered_rx.recv_timeout(std::time::Duration::from_secs(1)).expect("handler entered");
 
     let started = std::time::Instant::now();
-    let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 70 }).expect("shutdown");
+    let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 250 }).expect("shutdown");
     let elapsed = started.elapsed();
+
     assert!(
-        elapsed < std::time::Duration::from_millis(900),
+        hold.load(Ordering::Acquire),
+        "handler must still be held — completion must come from H2 grace cancel, not a finished response"
+    );
+    assert_eq!(
+        report.user_cancelled, 0,
+        "listener force-closed the socket; H2 did not honor Server.shutdown grace: {report:?}"
+    );
+    assert_eq!(
+        report.user_completed, report.user_accepted,
+        "H2 drain must complete within Server.shutdown grace without TCP kill: {report:?}"
+    );
+    assert!(
+        report.user_accepted >= 1,
+        "{report:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(1500),
         "Server.shutdown(grace) did not bound H2 drain: {elapsed:?}"
     );
-    assert!(report.user_accepted >= 1, "{report:?}");
+    assert!(
+        elapsed > std::time::Duration::from_millis(50),
+        "shutdown returned too fast to prove grace drain: {elapsed:?}"
+    );
 
+    let mut saw_goaway = false;
     let observe = std::time::Instant::now() + std::time::Duration::from_millis(400);
     while !saw_goaway && std::time::Instant::now() < observe {
         if let Some((kind, _, stream, payload)) = h2_try_read_frame(&mut client) {
-            if kind == 7 && stream == 0 {
+            if kind == 7 && stream == 0 && payload.len() >= 8 {
                 let last = u32::from_be_bytes(payload[..4].try_into().unwrap()) & 0x7fff_ffff;
+                let error = u32::from_be_bytes(payload[4..8].try_into().unwrap());
                 assert_eq!(last, 1, "Server API GOAWAY must carry last-stream");
+                assert_eq!(error, 0, "Server API GOAWAY must be NO_ERROR");
                 saw_goaway = true;
             }
         }

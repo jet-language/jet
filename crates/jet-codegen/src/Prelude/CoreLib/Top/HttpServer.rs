@@ -219,6 +219,7 @@ struct JetHttpServerState {
     shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
     shutdown_called: std::sync::atomic::AtomicBool,
     grace_ms: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    drain_deadline_ms: std::sync::Arc<std::sync::atomic::AtomicU64>,
     lifecycle: std::sync::atomic::AtomicU8,
     report: std::sync::Mutex<Option<JetHttpShutdownReport>>,
     report_ready: std::sync::Condvar,
@@ -339,7 +340,7 @@ fn jet_http_mux_serve(addr: &String, mux: JetHttpMux) -> Result<(), String> {
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|e| format!("bind on `{}` failed: {}", addr, e))?;
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), shutdown, None).map(|_| ())
+    jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), shutdown, None, None).map(|_| ())
 }
 
 fn jet_http_server_bind(addr: &String, mux: JetHttpMux) -> Result<JetHttpServer, String> {
@@ -352,6 +353,7 @@ fn jet_http_server_bind(addr: &String, mux: JetHttpMux) -> Result<JetHttpServer,
         shutdown: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         shutdown_called: std::sync::atomic::AtomicBool::new(false),
         grace_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(30_000)),
+        drain_deadline_ms: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         lifecycle: std::sync::atomic::AtomicU8::new(0), report: std::sync::Mutex::new(None),
         report_ready: std::sync::Condvar::new(),
     }) })
@@ -365,8 +367,14 @@ fn jet_http_server_serve(server: &JetHttpServer) -> Result<JetHttpShutdownReport
         .map_err(|_| "HTTP server can only be served once".to_string())?;
     let listener = server.inner.listener.lock().unwrap().take()
         .ok_or_else(|| "HTTP server listener was already consumed".to_string())?;
-    let result = jet_http_server_run_listener(listener, server.inner.mux.clone(), JetHttpServerOptions::safe(),
-        server.inner.shutdown.clone(), Some(server.inner.grace_ms.clone()));
+    let result = jet_http_server_run_listener(
+        listener,
+        server.inner.mux.clone(),
+        JetHttpServerOptions::safe(),
+        server.inner.shutdown.clone(),
+        Some(server.inner.grace_ms.clone()),
+        Some(server.inner.drain_deadline_ms.clone()),
+    );
     server.inner.lifecycle.store(2, Ordering::Release);
     if let Ok(report) = result {
         *server.inner.report.lock().unwrap() = Some(report);
@@ -379,7 +387,12 @@ fn jet_http_server_shutdown(server: &JetHttpServer, grace: &jet_std::Duration) -
     use std::sync::atomic::Ordering;
     if server.inner.shutdown_called.swap(true, Ordering::AcqRel) { return Err("HTTP server shutdown was already requested".to_string()); }
     if server.inner.lifecycle.load(Ordering::Acquire) != 1 { return Err("HTTP server is not serving".to_string()); }
-    server.inner.grace_ms.store(grace.ms.max(0) as u64, Ordering::Release);
+    let grace_ms = grace.ms.max(0) as u64;
+    // Publish the absolute drain deadline before the shutdown flag so H2 and the
+    // accept loop share one clock instead of each computing now+grace.
+    let deadline_ms = jet_http_unix_now_ms().saturating_add(grace_ms);
+    server.inner.drain_deadline_ms.store(deadline_ms, Ordering::Release);
+    server.inner.grace_ms.store(grace_ms, Ordering::Release);
     server.inner.shutdown.store(true, Ordering::Release);
     let mut report = server.inner.report.lock().unwrap();
     while report.is_none() && server.inner.lifecycle.load(Ordering::Acquire) == 1 { report = server.inner.report_ready.wait(report).unwrap(); }
@@ -392,6 +405,7 @@ fn jet_http_server_run_listener(
     options: JetHttpServerOptions,
     shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
     dynamic_grace_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+    drain_deadline_ms: Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
 ) -> Result<JetHttpShutdownReport, String> {
     use std::io::{Read, Write};
     use std::sync::atomic::Ordering;
@@ -406,6 +420,10 @@ fn jet_http_server_run_listener(
     let force_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let connection_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let per_ip = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::<std::net::IpAddr, usize>::new()));
+    // Absolute UNIX-ms drain deadline shared by accept-loop wait and H2 serve.
+    // Server.shutdown publishes it before the flag; other callers set it here.
+    let drain_deadline_ms = drain_deadline_ms
+        .unwrap_or_else(|| std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)));
     let mut workers = Vec::new();
     for _ in 0..options.workers.max(1) {
         let worker_rx = rx.clone();
@@ -416,6 +434,7 @@ fn jet_http_server_run_listener(
         let worker_force_cancel = force_cancel.clone();
         let worker_shutdown = shutdown.clone();
         let worker_grace = dynamic_grace_ms.clone();
+        let worker_deadline = drain_deadline_ms.clone();
         let worker_connection_count = connection_count.clone();
         let worker_per_ip = per_ip.clone();
         workers.push(std::thread::spawn(move || loop {
@@ -431,6 +450,7 @@ fn jet_http_server_run_listener(
                     &worker_options,
                     &worker_shutdown,
                     worker_grace.as_deref(),
+                    Some(worker_deadline.as_ref()),
                 );
                 worker_completed.fetch_add(1, Ordering::Relaxed);
                 worker_active.lock().unwrap().retain(|tracked| tracked.peer_addr().ok() != stream.peer_addr().ok());
@@ -500,9 +520,26 @@ fn jet_http_server_run_listener(
     let grace = dynamic_grace_ms.as_ref()
         .map(|value| std::time::Duration::from_millis(value.load(Ordering::Acquire)))
         .unwrap_or(options.shutdown_grace);
-    let deadline = std::time::Instant::now() + grace;
+    let deadline_ms = {
+        let existing = drain_deadline_ms.load(Ordering::Acquire);
+        if existing > 0 {
+            existing
+        } else {
+            let computed = jet_http_unix_now_ms().saturating_add(grace.as_millis() as u64);
+            drain_deadline_ms.store(computed, Ordering::Release);
+            computed
+        }
+    };
+    let deadline = jet_http_instant_from_unix_ms(deadline_ms);
     while completed.load(Ordering::Acquire) < report.user_accepted as usize
         && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    // H2 may observe the shared deadline only after its poll read times out.
+    let observe = deadline + std::time::Duration::from_millis(30);
+    while completed.load(Ordering::Acquire) < report.user_accepted as usize
+        && std::time::Instant::now() < observe
     {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
@@ -520,19 +557,37 @@ fn jet_http_server_run_listener(
     Ok(report)
 }
 
+fn jet_http_unix_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn jet_http_instant_from_unix_ms(deadline_ms: u64) -> std::time::Instant {
+    let now = std::time::Instant::now();
+    let now_ms = jet_http_unix_now_ms();
+    if deadline_ms <= now_ms {
+        now
+    } else {
+        now + std::time::Duration::from_millis(deadline_ms - now_ms)
+    }
+}
+
 fn jet_http_server_handle_stream(
     stream: &mut std::net::TcpStream,
     mux: &JetHttpMux,
     options: &JetHttpServerOptions,
     shutdown: &std::sync::atomic::AtomicBool,
     dynamic_grace_ms: Option<&std::sync::atomic::AtomicU64>,
+    drain_deadline_ms: Option<&std::sync::atomic::AtomicU64>,
 ) {
     use std::io::Write;
     use std::sync::atomic::Ordering;
 
     let _ = stream.set_write_timeout(Some(options.write_idle_timeout));
     if jet_http2_is_preface(stream, options.read_header_timeout) {
-        if jet_http2_serve(stream, mux, options, shutdown, dynamic_grace_ms).is_err() {
+        if jet_http2_serve(stream, mux, options, shutdown, dynamic_grace_ms, drain_deadline_ms).is_err() {
             let _ = jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(0, 1));
             let _ = std::io::Write::flush(stream);
         }
@@ -1239,6 +1294,7 @@ fn jet_http2_serve(
     options: &JetHttpServerOptions,
     shutdown: &std::sync::atomic::AtomicBool,
     dynamic_grace_ms: Option<&std::sync::atomic::AtomicU64>,
+    drain_deadline_ms: Option<&std::sync::atomic::AtomicU64>,
 ) -> Result<(), String> {
     use std::io::{Read, Write};
     use std::sync::atomic::Ordering;
@@ -1280,10 +1336,17 @@ fn jet_http2_serve(
     loop {
         if shutdown.load(Ordering::Acquire) && !going_away {
             going_away = true;
-            let grace = dynamic_grace_ms
-                .map(|value| std::time::Duration::from_millis(value.load(Ordering::Acquire)))
-                .unwrap_or(options.shutdown_grace);
-            grace_deadline = Some(std::time::Instant::now() + grace);
+            let shared = drain_deadline_ms
+                .map(|value| value.load(Ordering::Acquire))
+                .filter(|value| *value > 0);
+            grace_deadline = Some(if let Some(deadline_ms) = shared {
+                jet_http_instant_from_unix_ms(deadline_ms)
+            } else {
+                let grace = dynamic_grace_ms
+                    .map(|value| std::time::Duration::from_millis(value.load(Ordering::Acquire)))
+                    .unwrap_or(options.shutdown_grace);
+                std::time::Instant::now() + grace
+            });
             jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(last_stream, 0))?;
             stream.flush().map_err(|_| "HTTP/2 GOAWAY write failed".to_string())?;
             goaway_sent = true;
@@ -1545,7 +1608,15 @@ fn jet_http2_serve(
                     }
                 }
             }
-            9 => return Err("HTTP/2 CONTINUATION has no open header block".to_string()),
+            9 => {
+                // CONTINUATION is only legal mid header-block (consumed inline under
+                // HEADERS). An orphan frame on an unknown/idle stream after GOAWAY
+                // must be discarded like post-GOAWAY DATA — never abort drain.
+                if going_away {
+                    continue;
+                }
+                return Err("HTTP/2 CONTINUATION has no open header block".to_string());
+            }
             _ => {}
         }
     }
