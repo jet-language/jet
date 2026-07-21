@@ -990,7 +990,10 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "utc" | "local_time" | "zoned" | "zoned_local" | "zone" | "instant" | "sleep" | "start") {
         return Some("named clock boundary");
     }
-    if matches!(module, "core.auth" | "core.crypto.expert" | "core.crypto.random") {
+    if matches!(
+        module,
+        "core.auth" | "core.crypto.expert" | "core.crypto.random" | "core.vault" | "core.vault.expert"
+    ) {
         return Some("named native/security boundary");
     }
     if (module == "core.time.date" && method == "today")
@@ -1287,7 +1290,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (468, 147, 483, 49));
+    assert_eq!((fixed, direct_static, value, bespoke), (495, 147, 483, 49));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1537,6 +1540,8 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Fixed, "core.time", "now").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Fixed, "core.vault.expert", "prepare_import_signing").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::Fixed, "core.vault.expert", "commit_import_x25519").class, Class::Boundary);
 
     let rendered = render_inventory(&records);
     let mut reversed = records.clone();
@@ -1545,14 +1550,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_147, 733, 74, 340));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_174, 733, 74, 367));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        2932551212490532082,
+        14766545749149204126,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
