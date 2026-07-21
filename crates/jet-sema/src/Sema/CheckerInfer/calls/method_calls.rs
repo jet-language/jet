@@ -2030,7 +2030,8 @@ impl<'a> Checker<'a> {
                         self.diags.push(wrong_core_arity(method, want, args.len(), span));
                     }
                     let expected = match method {
-                        "cookies" | "protocols" | "allow_http_downgrade" => Some(Type::Bool),
+                        "cookies" => Some(Type::Named("HttpCookieJar".to_string())),
+                        "protocols" | "allow_http_downgrade" => Some(Type::Bool),
                         "timeouts" => Some(Type::Int),
                         "redirects" => Some(Type::Named("HttpRedirectPolicy".to_string())),
                         "retries" => Some(Type::Named("HttpRetryPolicy".to_string())),

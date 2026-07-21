@@ -338,6 +338,9 @@ pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
 
 /// Native HTTP client runtime emitted into the bridge crate when `core.http.client` is used.
 const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/Http.rs");
+/// Mozilla Public Suffix List snapshot, compacted to whitespace-separated rules.
+/// Source: https://publicsuffix.org/list/public_suffix_list.dat (MPL-2.0).
+const HTTP_PUBLIC_SUFFIX_LIST: &str = include_str!("Prelude/public_suffix_list.dat");
 
 /// The `rustls` crate version that backs `core.http.server` TLS
 /// (D-TLSSERVE1=A). Lives only here — never in the compiler's Cargo.toml (I6).
@@ -1849,6 +1852,7 @@ fn cache_key_full(
     if needs_http_client {
         needs_http_client.hash(&mut h);
         HTTP_CLIENT_RUNTIME.hash(&mut h);
+        HTTP_PUBLIC_SUFFIX_LIST.hash(&mut h);
     }
     if needs_http_server_tls {
         needs_http_server_tls.hash(&mut h);
@@ -2129,6 +2133,9 @@ fn emit_wrapper_lib(
     }
     if needs_http_client {
         // D-HTTP-CLIENT2=A: native HTTP; rustls is the separately-ratified TLS seam.
+        out.push_str("const HTTP_PUBLIC_SUFFIX_LIST: &str = r################\"");
+        out.push_str(HTTP_PUBLIC_SUFFIX_LIST);
+        out.push_str("\"################;\n");
         out.push_str(HTTP_CLIENT_RUNTIME);
         out.push('\n');
     }

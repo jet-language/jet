@@ -239,7 +239,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName" | "HttpHeaderValue"
-        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
+        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpCookieJar" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -729,6 +729,10 @@ pub(crate) fn core_http_variants(
         for name in ["None", "Safe", "Idempotent"] {
             variants.insert(name.to_string(), (zero, VariantPayload::Unit));
         }
+        return Some(variants);
+    }
+    if enum_name == "HttpCookieJar" {
+        variants.insert("Memory".to_string(), (zero, VariantPayload::Unit));
         return Some(variants);
     }
     if enum_name != "HttpError" {

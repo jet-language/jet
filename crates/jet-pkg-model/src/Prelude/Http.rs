@@ -694,6 +694,7 @@ struct StoredCookie {
     name: String,
     value: String,
     domain: String,
+    site: String,
     path: String,
     host_only: bool,
     secure: bool,
@@ -749,6 +750,9 @@ impl CookieJar {
     }
 
     fn store(&mut self, url: &ParsedUrl, value: &str) {
+        if value.len() > 4096 {
+            return;
+        }
         let mut parts = value.split(';').map(str::trim);
         let Some((name, cookie_value)) = parts.next().and_then(|pair| pair.split_once('=')) else {
             return;
@@ -773,13 +777,26 @@ impl CookieJar {
             match name.to_ascii_lowercase().as_str() {
                 "domain" => {
                     let candidate = value.trim_start_matches('.').to_ascii_lowercase();
-                    if !domain_matches(&url.host, &candidate) {
+                    if !valid_cookie_domain(&candidate) || !domain_matches(&url.host, &candidate) {
                         return;
                     }
-                    domain = candidate;
-                    host_only = false;
+                    if is_public_suffix(&candidate) || candidate.parse::<std::net::IpAddr>().is_ok() {
+                        if candidate != url.host {
+                            return;
+                        }
+                        domain = url.host.clone();
+                        host_only = true;
+                    } else {
+                        domain = candidate;
+                        host_only = false;
+                    }
                 }
-                "path" if value.starts_with('/') => path = value.to_string(),
+                "path"
+                    if value.starts_with('/')
+                        && !value.bytes().any(|byte| byte < 0x20 || byte == 0x7f) =>
+                {
+                    path = value.to_string()
+                }
                 "secure" => secure = true,
                 "max-age" => {
                     if let Ok(seconds) = value.parse::<i64>() {
@@ -804,48 +821,68 @@ impl CookieJar {
                 SystemTime::now().checked_add(Duration::from_secs(seconds as u64))
             };
         }
-        if name.starts_with("__Secure-") && (!secure || url.scheme != "https") {
+        if secure && url.scheme != "https" {
+            return;
+        }
+        if name.starts_with("__Secure-") && !secure {
             return;
         }
         if name.starts_with("__Host-")
-            && (!secure || url.scheme != "https" || !host_only || path != "/")
+            && (!secure || !host_only || path != "/")
         {
             return;
         }
         if matches!(same_site, CookieSameSite::None) && !secure {
             return;
         }
+        let now = SystemTime::now();
+        self.cookies
+            .retain(|cookie| cookie.expires.is_none_or(|expires| expires > now));
+        if !secure
+            && self.cookies.iter().any(|cookie| {
+                cookie.secure
+                    && cookie.name == name
+                    && (domain_matches(&domain, &cookie.domain)
+                        || domain_matches(&cookie.domain, &domain))
+                    && path_matches(&path, &cookie.path)
+            })
+        {
+            return;
+        }
+        let created = self
+            .cookies
+            .iter()
+            .find(|cookie| cookie.name == name && cookie.domain == domain && cookie.path == path)
+            .map(|cookie| cookie.created);
         self.cookies.retain(|cookie| {
             !(cookie.name == name && cookie.domain == domain && cookie.path == path)
         });
         if expires.is_some_and(|time| time <= SystemTime::now()) {
             return;
         }
-        self.sequence = self.sequence.wrapping_add(1);
+        if created.is_none() {
+            self.sequence = self.sequence.saturating_add(1);
+        }
+        let site = cookie_site_domain(&domain);
         self.cookies.push(StoredCookie {
             name: name.to_string(),
             value: cookie_value.to_string(),
             domain: domain.clone(),
+            site: site.clone(),
             path,
             host_only,
             secure,
             expires,
-            created: self.sequence,
+            created: created.unwrap_or(self.sequence),
             same_site,
         });
-        while self
-            .cookies
-            .iter()
-            .filter(|cookie| cookie.domain == domain)
-            .count()
-            > 180
-        {
+        while self.cookies.iter().filter(|cookie| cookie.site == site).count() > 180 {
             if let Some((index, _)) = self
                 .cookies
                 .iter()
                 .enumerate()
-                .filter(|(_, cookie)| cookie.domain == domain)
-                .min_by_key(|(_, cookie)| cookie.created)
+                .filter(|(_, cookie)| cookie.site == site)
+                .min_by_key(|(index, cookie)| (cookie.created, *index))
             {
                 self.cookies.remove(index);
             }
@@ -855,7 +892,7 @@ impl CookieJar {
                 .cookies
                 .iter()
                 .enumerate()
-                .min_by_key(|(_, cookie)| cookie.created)
+                .min_by_key(|(index, cookie)| (cookie.created, *index))
             {
                 self.cookies.remove(index);
             }
@@ -958,6 +995,89 @@ fn domain_matches(host: &str, domain: &str) -> bool {
         || host.len() > domain.len()
             && host.as_bytes()[host.len() - domain.len() - 1] == b'.'
             && &host[host.len() - domain.len()..] == domain
+}
+
+struct PublicSuffixRules {
+    exact: Vec<&'static str>,
+    wildcard: Vec<&'static str>,
+    exception: Vec<&'static str>,
+}
+
+fn public_suffix_rules() -> &'static PublicSuffixRules {
+    static RULES: OnceLock<PublicSuffixRules> = OnceLock::new();
+    RULES.get_or_init(|| {
+        let mut exact = Vec::new();
+        let mut wildcard = Vec::new();
+        let mut exception = Vec::new();
+        for rule in HTTP_PUBLIC_SUFFIX_LIST.split_whitespace() {
+            if let Some(rule) = rule.strip_prefix("*.") {
+                wildcard.push(rule);
+            } else if let Some(rule) = rule.strip_prefix('!') {
+                exception.push(rule);
+            } else {
+                exact.push(rule);
+            }
+        }
+        exact.sort_unstable();
+        wildcard.sort_unstable();
+        exception.sort_unstable();
+        PublicSuffixRules { exact, wildcard, exception }
+    })
+}
+
+fn valid_cookie_domain(domain: &str) -> bool {
+    !domain.is_empty()
+        && domain.len() <= 253
+        && domain.is_ascii()
+        && domain.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+}
+
+fn public_suffix_label_count(domain: &str) -> usize {
+    let labels = domain.split('.').collect::<Vec<_>>();
+    let rules = public_suffix_rules();
+    let mut matched = 1;
+    for index in 0..labels.len() {
+        let candidate = labels[index..].join(".");
+        if rules.exception.binary_search(&candidate.as_str()).is_ok() {
+            return labels.len().saturating_sub(index + 1);
+        }
+        if rules.exact.binary_search(&candidate.as_str()).is_ok() {
+            matched = matched.max(labels.len() - index);
+        }
+        if index > 0 && rules.wildcard.binary_search(&candidate.as_str()).is_ok() {
+            matched = matched.max(labels.len() - index + 1);
+        }
+    }
+    matched
+}
+
+fn registrable_domain(domain: &str) -> Option<String> {
+    if domain.parse::<std::net::IpAddr>().is_ok() || !valid_cookie_domain(domain) {
+        return None;
+    }
+    let labels = domain.split('.').collect::<Vec<_>>();
+    let suffix = public_suffix_label_count(domain);
+    (labels.len() > suffix).then(|| labels[labels.len() - suffix - 1..].join("."))
+}
+
+fn is_public_suffix(domain: &str) -> bool {
+    valid_cookie_domain(domain)
+        && domain.parse::<std::net::IpAddr>().is_err()
+        && registrable_domain(domain).is_none()
+}
+
+fn cookie_site_domain(domain: &str) -> String {
+    registrable_domain(domain).unwrap_or_else(|| domain.to_string())
+}
+
+fn schemeful_site(url: &ParsedUrl) -> (String, String) {
+    (url.scheme.clone(), cookie_site_domain(&url.host))
 }
 
 fn default_cookie_path(target: &str) -> String {
@@ -2371,7 +2491,7 @@ fn send_following_redirects_upload(
     let mut visited = std::collections::HashSet::new();
     let mut redirect_history = Vec::new();
     let started = Instant::now();
-    let cookie_site = parse_url(original_url)?;
+    let cookie_site = schemeful_site(&parse_url(original_url)?);
     for followed in 0..=redirect_limit {
         if !visited.insert(url.clone()) {
             return Err(JetHttpBridgeError::Redirect);
@@ -2383,7 +2503,7 @@ fn send_following_redirects_upload(
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("cookie"))
         {
-            let same_site = cookie_site.scheme == parsed.scheme && cookie_site.host == parsed.host;
+            let same_site = cookie_site == schemeful_site(&parsed);
             let safe_method = matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS" | "TRACE");
             let allow_jar_cookie = followed == 0 || (same_origin_credentials && same_site);
             if allow_jar_cookie {

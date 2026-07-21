@@ -30,6 +30,12 @@ enum JetHttpRetryPolicy {
     Idempotent,
 }
 
+/// D-HTTP-CLIENT2=A: explicit in-memory RFC6265bis cookie jar.
+#[derive(Clone)]
+enum JetHttpCookieJar {
+    Memory,
+}
+
 struct JetHttpClientOwner {
     handle: i64,
     drop_handle: fn(i64),

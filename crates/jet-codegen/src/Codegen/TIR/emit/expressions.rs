@@ -2153,8 +2153,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         };
                         match method.as_str() {
                             "cookies" => policy(format!(
-                                "{ffi}::jet_http_client_cookies_impl(_client.owner.handle, {})",
-                                a(0)
+                                "{{ let _jar = &({}); match _jar {{ JetHttpCookieJar::Memory => {ffi}::jet_http_client_cookies_impl(_client.owner.handle, true), }} }}",
+                                a(0),
                             )),
                             "redirects" => {
                                 let error = emit_http_bridge_error(ffi, "error");

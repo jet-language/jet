@@ -34,6 +34,9 @@ impl<'a> Checker<'a> {
                 ("core.http.client", "RedirectPolicy") => {
                     Some(Type::Named("HttpRedirectPolicy".to_string()))
                 },
+                ("core.http.client", "CookieJar") => {
+                    Some(Type::Named("HttpCookieJar".to_string()))
+                },
                 ("core.tls", "RootCertificates") => Some(Type::Named("TlsRootCertificatesType".to_string())),
                 ("core.tls", "ClientIdentity") => Some(Type::Named("TlsClientIdentityType".to_string())),
                 ("core.tls", "TlsVersion") => Some(Type::Named("TlsVersion".to_string())),
