@@ -2434,6 +2434,7 @@ fn send_following_redirects_upload(
             && body.is_none()
             && !matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS" | "TRACE")
         {
+            jet_http_client_body_close_impl(response.body_handle);
             return Err(JetHttpBridgeError::Redirect);
         }
         redirect_history.push(url.clone());

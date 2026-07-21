@@ -1862,14 +1862,14 @@ pub(crate) fn emit_tir_core_call(
         ("jet.http", "get") => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             emit_http_response_from_bridge(
-                format!("{{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); {ffi}::jet_http_client_get_impl(&({})) }}", arg(0)),
+                format!("{ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_get_impl(&({})))", arg(0)),
                 ffi,
             )
         }
         ("jet.http", "post") => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             emit_http_response_from_bridge(
-                format!("{{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); {ffi}::jet_http_client_post_impl(&({}), &({})) }}", arg(0), arg(1)),
+                format!("{ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_post_impl(&({}), &({})))", arg(0), arg(1)),
                 ffi,
             )
         }
@@ -2370,7 +2370,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             };
             emit_http_response_from_bridge(
-                format!("{{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); {ffi}::jet_http_client_get_impl(&({u})) }}"),
+                format!("{ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_get_impl(&({u})))"),
                 ffi,
             )
         }
@@ -2382,7 +2382,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             };
             emit_http_response_from_bridge(
-                format!("{{ let _ambient = {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()); {ffi}::jet_http_client_post_impl(&({u}), &({})) }}", arg(1)),
+                format!("{ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_post_impl(&({u}), &({})))", arg(1)),
                 ffi,
             )
         }

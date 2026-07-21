@@ -1943,6 +1943,188 @@ fn run() {{
 }
 
 #[test]
+fn http_get_expired_ambient_deadline_fails_closed() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let server_hits = hits.clone();
+    let server = std::thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .ok();
+        let mut buf = [0; 1];
+        // Only count a real dial that sent at least one request byte.
+        if stream.read(&mut buf).ok().filter(|n| *n > 0).is_some() {
+            server_hits.fetch_add(1, Ordering::SeqCst);
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            );
+        }
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+use core.time as time
+fn run() {{
+    @Context(deadline: time.now()) {{
+        if http.get("http://{addr}/expired") == {{
+            Ok(_) -> print("ok")
+            Err(_) -> print("timeout")
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "get_ambient_expired", &src);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "timeout\n");
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "expired ambient must fail before dialing http.get"
+    );
+    let _ = TcpStream::connect(addr);
+    let _ = server.join();
+}
+
+#[test]
+fn http_post_expired_ambient_deadline_fails_closed() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let server_hits = hits.clone();
+    let server = std::thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .ok();
+        let mut buf = [0; 1];
+        if stream.read(&mut buf).ok().filter(|n| *n > 0).is_some() {
+            server_hits.fetch_add(1, Ordering::SeqCst);
+            let _ = stream.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+            );
+        }
+    });
+    let src = format!(
+        r#"
+use core.http.client as http
+use core.time as time
+fn run() {{
+    @Context(deadline: time.now()) {{
+        if http.post("http://{addr}/expired", "body") == {{
+            Ok(_) -> print("ok")
+            Err(_) -> print("timeout")
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_http_client_law", "post_ambient_expired", &src);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "timeout\n");
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "expired ambient must fail before dialing http.post"
+    );
+    let _ = TcpStream::connect(addr);
+    let _ = server.join();
+}
+
+#[test]
+fn unreplayable_307_closes_redirect_body() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = request_head(&mut stream);
+        stream
+            .write_all(
+                b"HTTP/1.1 307 Temporary Redirect\r\nLocation: /to\r\nContent-Length: 5\r\nConnection: close\r\n\r\nleak!",
+            )
+            .unwrap();
+    });
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_law_307_body_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let shown = dir.join("seed.jet");
+    let source = "use core.http.client as http\nfn run() { _ :: http.Client.new() }\n";
+    fs::write(&shown, source).unwrap();
+    let link = jet::compile_with_path(source, shown.to_str().unwrap())
+        .unwrap()
+        .ffi
+        .expect("HTTP client bridge");
+    let harness = dir.join("unreplayable_307.rs");
+    let bin = dir.join("unreplayable_307");
+    let url = format!("http://{addr}/from");
+    fs::write(
+        &harness,
+        format!(
+            r#"
+fn main() {{
+    let url = {url:?}.to_string();
+    let client = bridge::jet_http_client_new_impl();
+    // POST with no buffered body: 307/308 cannot replay → Redirect, must close body.
+    let err = bridge::jet_http_client_send_with_impl(
+        client, "POST", &url, &[], None, None, None, None, None, Some(2), None, &[], &[], &[],
+    )
+    .unwrap_err();
+    assert!(matches!(err, bridge::JetHttpBridgeError::Redirect), "{{err:?}}");
+    assert_eq!(
+        bridge::jet_http_client_open_body_count_impl(),
+        0,
+        "unreplayable 307 must close the redirect response body"
+    );
+}}
+"#
+        ),
+    )
+    .unwrap();
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        harness.to_str().unwrap(),
+        "-o",
+        bin.to_str().unwrap(),
+    ]);
+    rustc
+        .arg("--extern")
+        .arg(format!("bridge={}", link.rlib_path.display()));
+    for dependency in link.dependency_dirs().filter(|path| path.is_dir()) {
+        rustc
+            .arg("-L")
+            .arg(format!("dependency={}", dependency.display()));
+    }
+    let built = rustc.output().unwrap();
+    assert!(
+        built.status.success(),
+        "unreplayable 307 harness compile failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let output = Command::new(&bin).output().unwrap();
+    server.join().unwrap();
+    assert!(
+        output.status.success(),
+        "unreplayable 307 harness failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn ambient_deadline_absolute_instant_survives_prep_delay() {
     // Residual-ms storage would revive Instant::now()+budget after a sleep between
     // push and compose; absolute Instant at push must still time out before dial.
