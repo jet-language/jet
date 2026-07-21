@@ -1623,7 +1623,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             Class::Boundary
         );
     }
-    assert_eq!(record(&records, Surface::Value, "Pool", "ids").class, Class::PurePending);
+    for method in ["add", "remove", "ids"] {
+        assert_eq!(record(&records, Surface::Value, "Pool", method).class, Class::Covered);
+    }
     assert_eq!(record(&records, Surface::Value, "Solver", "status").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Solver", "new").class, Class::Covered);
     assert_eq!(record(&records, Surface::Value, "Solver", "require").class, Class::Covered);
@@ -1641,7 +1643,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 784, 5, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 787, 2, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1649,7 +1651,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        2362674285498790202,
+        964006579815181813,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

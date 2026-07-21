@@ -1583,6 +1583,9 @@ impl<'a> Interp<'a> {
             }
         }
         if let Expr::Ident(type_name, _) = receiver {
+            if type_name == crate::Syntax::MEM_POOL && method == "new" {
+                return Ok(super::pool::new_value());
+            }
             if type_name == crate::Syntax::TYPE_BYTE_BUFFER
                 && matches!(method, "new" | "from")
             {
@@ -2318,6 +2321,24 @@ impl<'a> Interp<'a> {
         }
 
         let mut evaluated_receiver = None;
+        if matches!(method, "add" | "remove" | "ids") {
+            let recv = self.eval(receiver, scope)?;
+            if super::pool::is_method(&recv, method) {
+                let mut argv = Vec::with_capacity(args.len());
+                for arg in args {
+                    argv.push(self.eval(&arg.expr, scope)?);
+                }
+                let outcome = super::pool::apply(&recv, method, &argv, resolved_ret, span)?;
+                if let Some(updated) = outcome.updated {
+                    if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                        return Err(unsupported("Pool mutation on a temporary value", span));
+                    }
+                    self.write_back(receiver, updated, scope)?;
+                }
+                return Ok(outcome.value);
+            }
+            evaluated_receiver = Some(recv);
+        }
         if matches!(
             method,
             "add"
@@ -2348,7 +2369,10 @@ impl<'a> Interp<'a> {
                 | "to_list"
                 | "any"
         ) {
-            let peek = self.eval(receiver, scope)?;
+            let peek = match &evaluated_receiver {
+                Some(value) => value.clone(),
+                None => self.eval(receiver, scope)?,
+            };
             match (&peek, method) {
                 (
                     CtValue::Struct { type_name, fields },

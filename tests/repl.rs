@@ -685,6 +685,11 @@ fn repl_compress_exact_transcript() {
 }
 
 #[test]
+fn repl_pool_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/pool.txt"));
+}
+
+#[test]
 fn strict_transcript_rejects_unexpected_trailing_output() {
     assert!(
         std::panic::catch_unwind(|| run_transcript_file_strict("> 1 + 1")).is_err(),

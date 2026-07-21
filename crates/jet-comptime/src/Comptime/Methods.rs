@@ -6,6 +6,8 @@ mod dispatch;
 mod repl_process;
 #[path = "Methods/core_calls.rs"]
 mod core_calls;
+#[path = "Methods/pool.rs"]
+mod pool;
 
 pub(super) use core_calls::{apply_core_pure_method, as_float, as_string};
 
@@ -17,6 +19,7 @@ mod structure_tests {
             ("dispatch", include_str!("Methods/dispatch.rs")),
             ("repl_process", include_str!("Methods/repl_process.rs")),
             ("core_calls", include_str!("Methods/core_calls.rs")),
+            ("pool", include_str!("Methods/pool.rs")),
         ] {
             let lines = source.lines().count();
             assert!(lines < 2_500, "{name}.rs regrew to {lines} lines; split it along semantic ownership");
