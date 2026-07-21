@@ -192,7 +192,7 @@ impl JetHttpBodySource {
     }
 
     fn h2_cancellable(&self) -> bool {
-        matches!(self, Self::Bytes(_) | Self::File(_)) || self.closer().is_some()
+        matches!(self, Self::Bytes(_) | Self::File(_) | Self::Reader { closer: Some(_), .. })
     }
 
     fn close(&self) {

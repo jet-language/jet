@@ -106,16 +106,25 @@ include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 static HTTP_BODY_CLOSES: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
+static HTTP_BODY_READS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+static HTTP_H2_BRIDGE_CLOSES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 fn unread_bridge_body(
     _handle: i64,
     _max_chunk: usize,
 ) -> Result<Option<Vec<u8>>, JetHttpError> {
+    HTTP_BODY_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     Ok(Some(vec![1]))
 }
 
 fn close_unread_bridge_body(_handle: i64) {
     HTTP_BODY_CLOSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn close_h2_bridge_body(_handle: i64) {
+    HTTP_H2_BRIDGE_CLOSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
 
 #[test]
@@ -2421,6 +2430,31 @@ fn http2_rejects_uncancellable_reader_before_response_headers() {
         .err().expect("uncancellable reader rejection")
         .contains("bounded or cancellable"));
     assert_eq!(dropped.load(std::sync::atomic::Ordering::Acquire), 1);
+    let mut byte = [0u8; 1];
+    assert_eq!(std::io::Read::read(&mut peer, &mut byte).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+}
+
+#[test]
+fn http2_rejects_transport_bridge_before_response_headers() {
+    HTTP_BODY_READS.store(0, std::sync::atomic::Ordering::SeqCst);
+    HTTP_H2_BRIDGE_CLOSES.store(0, std::sync::atomic::Ordering::SeqCst);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut peer = std::net::TcpStream::connect(addr).unwrap();
+    let (mut server, _) = listener.accept().unwrap();
+    peer.set_nonblocking(true).unwrap();
+    let mut response = jet_http_srv_empty_response(200);
+    response.body = JetHttpBody::bridge(
+        1,
+        None,
+        unread_bridge_body,
+        close_h2_bridge_body,
+    );
+    assert!(jet_http2_start_response(&mut server, 1, response, JET_HTTP2_MAX_FRAME)
+        .err().expect("transport bridge rejection")
+        .contains("bounded or cancellable"));
+    assert_eq!(HTTP_BODY_READS.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(HTTP_H2_BRIDGE_CLOSES.load(std::sync::atomic::Ordering::SeqCst), 1);
     let mut byte = [0u8; 1];
     assert_eq!(std::io::Read::read(&mut peer, &mut byte).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
 }
