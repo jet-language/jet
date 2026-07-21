@@ -397,9 +397,11 @@ fn gtk_canonical_tree_reconciles_real_widgets_under_xvfb() {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("gtk_tree.jet");
     let src = r#"use core.ui as ui
+use core.reactive as reactive
 use c.gtk4 as gtk4
 fn run() {
     app := ui.gtk_backend()
+    clicks := reactive.signal(0)
     first := ui.box([
         ui.text("Title"),
         ui.button("Save"),
@@ -409,6 +411,10 @@ fn run() {
     app.layout(first, ui.rect(0.0, 0.0, size.width, size.height))
     app.paint(first)
     save := app.button("Save")
+    app.on_click(save, () => {
+        clicks.set(clicks.get() + 1)
+    })
+    app.set_text(save, "__JET_TEST_CLICK__")
     app.on_event(ui.key_event("Tab"))
     second := ui.box([ui.text("Updated")])
     app.paint(second)
@@ -416,16 +422,39 @@ fn run() {
     third := ui.box([ui.text("Updated"), ui.button("Save")])
     app.paint(third)
     app.set_text(save, "Rebound")
-    print(app.focused_label())
+    app.set_text(save, "__JET_TEST_CLICK__")
+    print("{app.focused_label()}:{clicks.get()}")
 }
 "#;
     fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy();
     let out = jet::compile_with_target(src, &shown, Some("x86_64-unknown-linux-gnu"))
         .unwrap_or_else(|diags| panic!("{}", jet::render_diagnostics(&shown, src, &diags)));
+    // Test-only generated-Rust hook: emit `clicked` on the resolved GTK button
+    // when the fixture writes the sentinel text. This uses GTK's real signal
+    // without adding a Jet-visible testing API to core.ui.
+    let extern_marker = "    extern \"C\" {\n        fn gtk_init_check() -> gboolean;";
+    let extern_replacement = "    extern \"C\" {\n        fn g_signal_emit_by_name(instance: gpointer, detailed_signal: *const c_char, ...);\n        fn gtk_init_check() -> gboolean;";
+    let set_text_marker = "        pub fn set_text(&self, id: i64, text: &str) {\n            let state = self.state.borrow();";
+    let set_text_replacement = r#"        pub fn set_text(&self, id: i64, text: &str) {
+            if text == "__JET_TEST_CLICK__" {
+                let state = self.state.borrow();
+                if let Some((widget, GtkWidgetKind::Button)) = state.resolve_widget_handle(id) {
+                    let signal = CString::new("clicked").unwrap();
+                    unsafe { g_signal_emit_by_name(widget as gpointer, signal.as_ptr()); }
+                }
+                return;
+            }
+            let state = self.state.borrow();"#;
+    assert!(out.rust.contains(extern_marker), "missing GTK extern injection marker");
+    assert!(out.rust.contains(set_text_marker), "missing GTK signal injection marker");
+    let rust = out
+        .rust
+        .replacen(extern_marker, extern_replacement, 1)
+        .replacen(set_text_marker, set_text_replacement, 1);
     let rs = dir.join("gtk_tree.rs");
     let bin = dir.join("gtk_tree");
-    fs::write(&rs, out.rust).unwrap();
+    fs::write(&rs, rust).unwrap();
     let mut rustc = std::process::Command::new("rustc");
     rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin);
     for arg in jet::resolve_c_links(&shown).expect("gtk4 link flags") {
@@ -443,22 +472,29 @@ fn run() {
     };
     let run = run_command.env("JET_UI_GTK_TRACE", "1").output().unwrap();
     assert!(run.status.success(), "live GTK fixture failed:\n{}", String::from_utf8_lossy(&run.stderr));
-    assert_eq!(String::from_utf8_lossy(&run.stdout), "Save\n");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "Save:2\n");
     let trace = String::from_utf8_lossy(&run.stderr);
     for event in [
         "GTK_UI create root Box",
         "GTK_UI create root/1 Button",
         "GTK_UI create root/2 Entry",
+        "GTK_UI click-connect root/1 1",
         "GTK_UI focus root/2",
         "GTK_UI update root/0 Updated",
         "GTK_UI remove root/2",
         "GTK_UI remove root/1",
         "GTK_UI handle-miss 0",
         "GTK_UI create root/1 Button",
+        "GTK_UI click-connect root/1 1",
         "GTK_UI handle-set-text 0 Rebound",
         "GTK_UI cleanup",
     ] {
         assert!(trace.contains(event), "missing `{event}` in GTK trace:\n{trace}");
     }
+    assert_eq!(
+        trace.matches("GTK_UI click-connect root/1 1").count(),
+        2,
+        "click handler must connect exactly once per widget lifetime:\n{trace}"
+    );
     let _ = fs::remove_dir_all(&dir);
 }

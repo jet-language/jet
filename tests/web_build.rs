@@ -260,21 +260,27 @@ fn run_web_api_harness(dir: &PathBuf) -> String {
 /// and reads every painted box back out of the fake DOM tree.
 const SHOWCASE_HARNESS: &str = r#"
 class FakeElement {
-  constructor(tag) { this.tagName = tag; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.id = ""; this.attrs = new Map(); }
+  constructor(tag, doc) { this.tagName = tag; this.ownerDocument = doc; this.style = {}; this.dataset = {}; this.children = []; this.textContent = ""; this.id = ""; this.attrs = new Map(); }
   appendChild(child) { this.children.push(child); return child; }
   setAttribute(name, value) { this.attrs.set(String(name), String(value)); }
   getAttribute(name) { return this.attrs.get(String(name)) ?? null; }
   removeAttribute(name) { this.attrs.delete(String(name)); }
+  focus() { this.ownerDocument.activeElement = this; }
 }
 class FakeDocument {
-  constructor() { this.body = new FakeElement("body"); this._byId = new Map(); }
-  createElement(tag) { return new FakeElement(tag); }
+  constructor() { this.activeElement = null; this._byId = new Map(); this.body = new FakeElement("body", this); }
+  createElement(tag) { return new FakeElement(tag, this); }
   getElementById(id) { return this._byId.get(id) ?? null; }
 }
 const doc = new FakeDocument();
 const origAppend = doc.body.appendChild.bind(doc.body);
 doc.body.appendChild = (el) => { if (el.id) doc._byId.set(el.id, el); return origAppend(el); };
 globalThis.document = doc;
+
+// The real companion HTML owns this control outside Jet's render tree.
+const boostButton = doc.createElement("button");
+boostButton.id = "boost-btn";
+doc.body.appendChild(boostButton);
 
 const { init_app, init_fuel } = await import("./app.js");
 const boosts = init_app();
@@ -292,6 +298,9 @@ for (const b of boxes()) {
 boosts.set(boosts.get() + 1);
 boosts.set(boosts.get() + 1);
 console.log(`boosts: ${find("Boosts").text}`);
+boostButton.focus();
+boosts.set(boosts.get() + 1);
+console.log(`external-focus=${doc.activeElement === boostButton}`);
 
 for (const t of [0, 150, 300, 450, 600, 900]) {
   elapsed.set(t);
@@ -1345,6 +1354,10 @@ fn web_showcase_dashboard_roundtrip() {
     assert!(
         lines.contains(&"boosts: Boosts: 2"),
         "reactive counter didn't repaint from two external Signal.set() calls:\n{stdout}"
+    );
+    assert!(
+        lines.contains(&"external-focus=true"),
+        "Jet repaint stole focus from the companion HTML boost button:\n{stdout}"
     );
 
     for elapsed_ms in [0i64, 150, 300, 450, 600, 900] {

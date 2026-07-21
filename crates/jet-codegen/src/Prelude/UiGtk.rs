@@ -90,16 +90,14 @@ mod jet_gtk {
         fn g_object_unref(object: gpointer);
     }
 
-    /// Trampoline for a GTK "clicked" signal. `data` is a leaked
-    /// `*const Rc<dyn Fn()>` (see `on_click`); invoking it runs the Jet handler,
-    /// which typically calls `reactive.signal.set(...)` and thereby re-runs the
-    /// effect that repaints the label.
+    /// Trampoline for a GTK "clicked" signal. Each connection owns one boxed
+    /// `Rc<dyn Fn()>`; the registry retains another `Rc` for path recreation.
     extern "C" fn jet_gtk_click_trampoline(_widget: *mut GtkWidget, data: gpointer) {
         if data.is_null() {
             return;
         }
-        // SAFETY: `data` is an `Rc<dyn Fn()>` leaked in `on_click` that outlives
-        // the window (owned to program exit). Borrowing it to call is sound.
+        // SAFETY: `data` is a boxed `Rc<dyn Fn()>` owned by this signal
+        // connection. GTK runs its destroy notifier before releasing it.
         unsafe {
             let cb = &*(data as *const Rc<dyn Fn()>);
             cb();
@@ -155,6 +153,12 @@ mod jet_gtk {
         kind: GtkWidgetKind,
     }
 
+    struct GtkClickBinding {
+        path: String,
+        callback: Rc<dyn Fn()>,
+        connected_widget: *mut GtkWidget,
+    }
+
     struct GtkState {
         // Seam parity (display-free): keeps `GtkBackend` a full `JetBackend` so
         // the null/tui measure→layout→paint path is available on it too.
@@ -171,6 +175,7 @@ mod jet_gtk {
         window: *mut GtkWidget,
         vbox: *mut GtkWidget,
         widget_handles: Vec<GtkWidgetHandle>,
+        click_bindings: Vec<GtkClickBinding>,
         tree_widgets: Vec<GtkWidgetRecord>,
         availability: GtkAvailability,
     }
@@ -229,6 +234,11 @@ mod jet_gtk {
 
         fn remove_tree_widget(&mut self, index: usize) {
             let record = self.tree_widgets.remove(index);
+            for binding in &mut self.click_bindings {
+                if binding.path == record.path {
+                    binding.connected_widget = std::ptr::null_mut();
+                }
+            }
             if self.display_ok && !record.parent.is_null() && !record.widget.is_null() {
                 unsafe { gtk_box_remove(record.parent, record.widget) };
             }
@@ -260,8 +270,8 @@ mod jet_gtk {
                     self.remove_tree_subtree(path);
                 }
             }
-            let index = if let Some(index) = self.tree_widgets.iter().position(|record| record.path == path) {
-                index
+            let (index, created) = if let Some(index) = self.tree_widgets.iter().position(|record| record.path == path) {
+                (index, false)
             } else {
                 let text = CString::new(node.label.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
                 let widget = if self.display_ok {
@@ -287,11 +297,14 @@ mod jet_gtk {
                     css_class: None,
                 });
                 self.trace(&format!("create {} {:?}", path, kind));
-                self.tree_widgets.len() - 1
+                (self.tree_widgets.len() - 1, true)
             };
 
             live.push(path.to_string());
             let widget = self.tree_widgets[index].widget;
+            if created && kind == GtkWidgetKind::Button {
+                self.attach_click_bindings(path, widget);
+            }
             if self.display_ok && !widget.is_null() {
                 let text = CString::new(node.label.as_str()).unwrap_or_else(|_| CString::new("").unwrap());
                 unsafe {
@@ -373,6 +386,40 @@ mod jet_gtk {
             };
             (!widget.is_null()).then_some((widget, handle.kind))
         }
+
+        fn connect_click_callback(widget: *mut GtkWidget, callback: Rc<dyn Fn()>) {
+            let boxed = Box::into_raw(Box::new(callback));
+            let signal = CString::new("clicked").unwrap();
+            // SAFETY: `widget` is a live GTK button. The connection owns
+            // `boxed`, and GTK invokes the destroy notifier exactly once.
+            unsafe {
+                g_signal_connect_data(
+                    widget as gpointer,
+                    signal.as_ptr(),
+                    jet_gtk_click_trampoline,
+                    boxed as gpointer,
+                    Some(jet_gtk_drop_callback),
+                    0,
+                );
+            }
+        }
+
+        fn attach_click_bindings(&mut self, path: &str, widget: *mut GtkWidget) {
+            if widget.is_null() {
+                return;
+            }
+            let mut connected = 0;
+            for binding in &mut self.click_bindings {
+                if binding.path == path && binding.connected_widget != widget {
+                    Self::connect_click_callback(widget, Rc::clone(&binding.callback));
+                    binding.connected_widget = widget;
+                    connected += 1;
+                }
+            }
+            if connected > 0 {
+                self.trace(&format!("click-connect {path} {connected}"));
+            }
+        }
     }
 
     impl Drop for GtkState {
@@ -412,6 +459,7 @@ mod jet_gtk {
                     window: std::ptr::null_mut(),
                     vbox: std::ptr::null_mut(),
                     widget_handles: Vec::new(),
+                    click_bindings: Vec::new(),
                     tree_widgets: Vec::new(),
                     availability: GtkAvailability::Uninitialized,
                 })),
@@ -570,24 +618,28 @@ mod jet_gtk {
 
         /// Wire a button's "clicked" signal to a Jet handler.
         pub fn on_click<F: Fn() + 'static>(&self, id: i64, handler: F) {
-            let state = self.state.borrow();
+            let mut state = self.state.borrow_mut();
             let Some((widget, GtkWidgetKind::Button)) = state.resolve_widget_handle(id) else {
                 state.trace(&format!("handle-miss {id}"));
                 return;
             };
-            let boxed: *mut Rc<dyn Fn()> = Box::into_raw(Box::new(Rc::new(handler) as Rc<dyn Fn()>));
-            let signal = CString::new("clicked").unwrap();
-            // SAFETY: display is live; `widget` is a GTK button; `boxed` is a
-            // owned callback; GTK invokes its destroy notifier at widget teardown.
-            unsafe {
-                g_signal_connect_data(
-                    widget as gpointer,
-                    signal.as_ptr(),
-                    jet_gtk_click_trampoline,
-                    boxed as gpointer,
-                    Some(jet_gtk_drop_callback),
-                    0,
-                );
+            let callback = Rc::new(handler) as Rc<dyn Fn()>;
+            let path = state.widget_handles.get(id as usize).and_then(|handle| {
+                if let GtkWidgetHandleTarget::TreePath(path) = &handle.target {
+                    Some(path.clone())
+                } else {
+                    None
+                }
+            });
+            if let Some(path) = path {
+                state.click_bindings.push(GtkClickBinding {
+                    path: path.clone(),
+                    callback,
+                    connected_widget: std::ptr::null_mut(),
+                });
+                state.attach_click_bindings(&path, widget);
+            } else {
+                GtkState::connect_click_callback(widget, callback);
             }
         }
 

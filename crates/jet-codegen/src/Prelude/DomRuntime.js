@@ -124,12 +124,16 @@ function jetReadableTextColor(hex) {
 export function paint(backend, node) {
   const frame = backend.frame ?? { x: 0, y: 0, width: node.width, height: node.height };
   const live = new Set();
-  const activeKey = typeof document !== "undefined"
-    ? document.activeElement?.dataset?.jetKey ?? null
+  const activeElement = typeof document !== "undefined"
+    ? document.activeElement ?? null
     : null;
+  const activeKey = activeElement?.dataset?.jetKey ?? null;
   const backendPrefix = `${backend.boxKey}/`;
   const activeInBackend = activeKey !== null
     && (activeKey === backend.boxKey || activeKey.startsWith(backendPrefix));
+  const externalActive = activeElement !== null
+    && activeElement !== document.body
+    && activeKey === null;
   const focusedKey = (activeInBackend ? activeKey : null)
     ?? backend.focusNodes[backend.focusedIndex]?.dataset?.jetKey
     ?? null;
@@ -208,7 +212,7 @@ export function paint(backend, node) {
   backend.focusedIndex = preservedIndex >= 0
     ? preservedIndex
     : backend.focusNodes.length ? 0 : -1;
-  if (backend.focusedIndex >= 0 && (activeInBackend || activeKey === null)) {
+  if (backend.focusedIndex >= 0 && (activeInBackend || (!externalActive && activeKey === null))) {
     backend.focusNodes[backend.focusedIndex].focus?.();
   }
   return backend;
