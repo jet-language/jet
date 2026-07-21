@@ -943,6 +943,19 @@ enum JetHttp2BodyPart {
     End,
 }
 
+struct JetHttpSchedulerBlockingWait;
+
+impl JetHttpSchedulerBlockingWait {
+    fn enter() -> Self {
+        jet_scheduler_blocking_wait_enter();
+        Self
+    }
+}
+
+impl Drop for JetHttpSchedulerBlockingWait {
+    fn drop(&mut self) { jet_scheduler_blocking_wait_leave(); }
+}
+
 struct JetHttp2BodyReader {
     receiver: std::sync::mpsc::Receiver<JetHttp2BodyPart>,
     consumed: std::sync::mpsc::Sender<(u32, usize)>,
@@ -965,7 +978,16 @@ impl std::io::Read for JetHttp2BodyReader {
                 if read != 0 { return Ok(read); }
             }
             if self.ended { return Ok(0); }
-            match self.receiver.recv() {
+            let part = match self.receiver.try_recv() {
+                Ok(part) => Ok(part),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(std::sync::mpsc::RecvError),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    let _wait = JetHttpSchedulerBlockingWait::enter();
+                    self.receiver.recv()
+                }
+            };
+            if jet_scheduler_wait_point_cancelled() { jet_task_deliver_cancel(); }
+            match part {
                 Ok(JetHttp2BodyPart::Data { bytes, flow_bytes }) => {
                     self.current = Some((std::io::Cursor::new(bytes), flow_bytes));
                 }
@@ -1012,11 +1034,22 @@ impl Drop for JetHttp2RequestStream {
 }
 
 struct JetHttp2Outgoing {
-    chunks: JetHttpBodyChunks,
+    receiver: std::sync::mpsc::Receiver<JetHttp2ResponsePart>,
     chunk: Vec<u8>,
     offset: usize,
     expected: Option<usize>,
     sent: usize,
+    control: std::sync::Arc<JetTaskControl>,
+}
+
+enum JetHttp2ResponsePart {
+    Chunk(Vec<u8>),
+    Error,
+    End,
+}
+
+impl Drop for JetHttp2Outgoing {
+    fn drop(&mut self) { self.control.cancel(); }
 }
 
 fn jet_http2_write_header_block(
@@ -1053,14 +1086,39 @@ fn jet_http2_start_response(
     jet_http2_write_header_block(stream, stream_id, if empty { 0x1 } else { 0 }, &headers, max_frame)?;
     std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())
         .and_then(|()| if empty { Ok(None) } else {
-            response.body.chunks(JET_HTTP2_MAX_FRAME).map_err(|error| error.to_string())
-                .map(|chunks| Some(JetHttp2Outgoing {
-                    chunks,
-                    chunk: Vec::new(),
-                    offset: 0,
-                    expected: length,
-                    sent: 0,
-                }))
+            let mut chunks = response.body.chunks(JET_HTTP2_MAX_FRAME).map_err(|error| error.to_string())?;
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            let control = JetTaskControl::new();
+            let task_control = control.clone();
+            let _task = jet_scheduler_spawn_blocking_with_control(move || loop {
+                let part = {
+                    let _wait = JetHttpSchedulerBlockingWait::enter();
+                    match chunks.next() {
+                        Some(Ok(chunk)) => JetHttp2ResponsePart::Chunk(chunk),
+                        Some(Err(_)) => JetHttp2ResponsePart::Error,
+                        None => JetHttp2ResponsePart::End,
+                    }
+                };
+                if jet_scheduler_wait_point_cancelled() { break; }
+                let done = matches!(part, JetHttp2ResponsePart::Error | JetHttp2ResponsePart::End);
+                let sent = match sender.try_send(part) {
+                    Ok(()) => true,
+                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => false,
+                    Err(std::sync::mpsc::TrySendError::Full(part)) => {
+                        let _wait = JetHttpSchedulerBlockingWait::enter();
+                        sender.send(part).is_ok()
+                    }
+                };
+                if done || !sent { break; }
+            }, task_control);
+            Ok(Some(JetHttp2Outgoing {
+                receiver,
+                chunk: Vec::new(),
+                offset: 0,
+                expected: length,
+                sent: 0,
+                control,
+            }))
         })
 }
 
@@ -1074,18 +1132,18 @@ fn jet_http2_flush_body(
 ) -> Result<bool, String> {
     loop {
         if outgoing.offset == outgoing.chunk.len() {
-            match outgoing.chunks.next() {
-                Some(Ok(chunk)) => {
+            match outgoing.receiver.try_recv() {
+                Ok(JetHttp2ResponsePart::Chunk(chunk)) => {
                     outgoing.chunk = chunk;
                     outgoing.offset = 0;
                     if outgoing.chunk.is_empty() { continue; }
                 }
-                Some(Err(_)) => {
+                Ok(JetHttp2ResponsePart::Error) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     jet_http2_write_frame(stream, 3, 0, stream_id, &2u32.to_be_bytes())?;
                     std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())?;
                     return Ok(true);
                 }
-                None => {
+                Ok(JetHttp2ResponsePart::End) => {
                     if outgoing.expected.is_some_and(|expected| expected != outgoing.sent) {
                         jet_http2_write_frame(stream, 3, 0, stream_id, &2u32.to_be_bytes())?;
                         std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())?;
@@ -1095,6 +1153,7 @@ fn jet_http2_flush_body(
                     std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())?;
                     return Ok(true);
                 }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(false),
             }
         }
         if *connection_window <= 0 || *stream_window <= 0 { return Ok(false); }
@@ -1206,6 +1265,18 @@ fn jet_http2_serve(
                 &mut connection_send_window, initial_send_window, peer_max_frame,
             )?;
         }
+        for id in outgoing.keys().copied().collect::<Vec<_>>() {
+            let Some(mut body) = outgoing.remove(&id) else { continue };
+            let stream_window = stream_windows.get_mut(&id)
+                .ok_or_else(|| "HTTP/2 response stream lost its window".to_string())?;
+            if jet_http2_flush_body(
+                stream, id, &mut body, &mut connection_send_window, stream_window, peer_max_frame,
+            )? {
+                if let Some(request) = requests.get_mut(&id) { request.response_done = true; }
+            } else {
+                outgoing.insert(id, body);
+            }
+        }
         let closed = requests.iter()
             .filter_map(|(id, request)| (request.inbound_closed && request.response_done).then_some(*id))
             .collect::<Vec<_>>();
@@ -1220,25 +1291,27 @@ fn jet_http2_serve(
             stream_windows.remove(&id);
             stream_receive_windows.remove(&id);
         }
+        let now = std::time::Instant::now();
+        let expired = requests.iter()
+            .filter_map(|(id, request)| (!request.inbound_closed
+                && now.duration_since(request.last_body) >= options.read_body_timeout).then_some(*id))
+            .collect::<Vec<_>>();
+        for id in expired {
+            jet_http2_write_frame(stream, 3, 0, id, &8u32.to_be_bytes())?;
+            if let Some(request) = requests.remove(&id) {
+                if request.unconsumed_flow > 0 {
+                    connection_receive_window += request.unconsumed_flow as i64;
+                    jet_http2_write_frame(stream, 8, 0, 0, &(request.unconsumed_flow as u32).to_be_bytes())?;
+                }
+            }
+            outgoing.remove(&id);
+            stream_windows.remove(&id);
+            stream_receive_windows.remove(&id);
+        }
         let frame = match jet_http2_read_frame(stream) {
             Ok(frame) => { last_activity = std::time::Instant::now(); frame }
             Err(error) if error == "HTTP/2 read timed out" => {
                 let now = std::time::Instant::now();
-                let expired = requests.iter()
-                    .filter_map(|(id, request)| (!request.inbound_closed && now.duration_since(request.last_body) >= options.read_body_timeout).then_some(*id))
-                    .collect::<Vec<_>>();
-                for id in expired {
-                    jet_http2_write_frame(stream, 3, 0, id, &8u32.to_be_bytes())?;
-                    if let Some(request) = requests.remove(&id) {
-                        if request.unconsumed_flow > 0 {
-                            connection_receive_window += request.unconsumed_flow as i64;
-                            jet_http2_write_frame(stream, 8, 0, 0, &(request.unconsumed_flow as u32).to_be_bytes())?;
-                        }
-                    }
-                    outgoing.remove(&id);
-                    stream_windows.remove(&id);
-                    stream_receive_windows.remove(&id);
-                }
                 if now.duration_since(last_activity) >= options.read_idle_timeout { return Ok(()); }
                 continue;
             }
@@ -2698,13 +2771,17 @@ fn jet_http_srv_sse(data: &String) -> JetHttpResponse {
 }
 
 fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHttpResponse, String> {
-    std::fs::read(path)
-        .map(|body| {
-            let mut response = jet_http_srv_response(200, &String::new());
-            response.body = JetHttpBody::from_bytes(body);
-            jet_http_srv_response_header(response, &"content-type".to_string(), mime)
-        })
-        .map_err(|e| format!("static file `{}` failed: {}", path, e))
+    let candidate = std::path::Path::new(path);
+    let parent = candidate.parent().filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let root = std::fs::canonicalize(parent).map_err(|error| format!("static file `{path}` failed: {error}"))?;
+    let Some((file, metadata, _)) = jet_http_static_open(&root, candidate) else {
+        return Err(format!("static file `{path}` could not be opened with held identity"));
+    };
+    let length = usize::try_from(metadata.len()).map_err(|_| format!("static file `{path}` is too large"))?;
+    let mut response = jet_http_srv_response(200, &String::new());
+    response.body = JetHttpBody::reader(file, Some(length));
+    Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime))
 }
 
 fn jet_http_srv_static_file_range(
@@ -2712,18 +2789,28 @@ fn jet_http_srv_static_file_range(
     path: &String,
     mime: &String,
 ) -> Result<JetHttpResponse, String> {
-    let body = std::fs::read(path).map_err(|e| format!("static file `{}` failed: {}", path, e))?;
+    let candidate = std::path::Path::new(path);
+    let parent = candidate.parent().filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let root = std::fs::canonicalize(parent).map_err(|error| format!("static file `{path}` failed: {error}"))?;
+    let Some((mut file, metadata, _)) = jet_http_static_open(&root, candidate) else {
+        return Err(format!("static file `{path}` could not be opened with held identity"));
+    };
+    let file_len = usize::try_from(metadata.len()).map_err(|_| format!("static file `{path}` is too large"))?;
     let Some(range) = jet_http_srv_req_header(req, &"range".to_string()) else {
         let mut response = jet_http_srv_response(200, &String::new());
-        response.body = JetHttpBody::from_bytes(body);
+        response.body = JetHttpBody::reader(file, Some(file_len));
         return Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime));
     };
-    let Some((start, end)) = jet_http_static_range(&range, body.len()) else {
+    let Some((start, end)) = jet_http_static_range(&range, file_len) else {
         return Ok(jet_http_srv_response(416, &"range not satisfiable".to_string()));
     };
-    let part = body[start..=end].to_vec();
+    use std::io::Seek;
+    file.seek(std::io::SeekFrom::Start(start as u64))
+        .map_err(|error| format!("static file `{path}` seek failed: {error}"))?;
+    let length = end - start + 1;
     let mut response = jet_http_srv_response(206, &String::new());
-    response.body = JetHttpBody::from_bytes(part);
+    response.body = JetHttpBody::reader(std::io::Read::take(file, length as u64), Some(length));
     let resp = jet_http_srv_response_header(
         response,
         &"content-type".to_string(),
@@ -2732,7 +2819,7 @@ fn jet_http_srv_static_file_range(
     Ok(jet_http_srv_response_header(
         resp,
         &"content-range".to_string(),
-        &format!("bytes {}-{}/{}", start, end, body.len()),
+        &format!("bytes {start}-{end}/{file_len}"),
     ))
 }
 
@@ -2827,6 +2914,16 @@ fn jet_http_static_open(
     root: &std::path::Path,
     candidate: &std::path::Path,
 ) -> Option<(std::fs::File, std::fs::Metadata, std::path::PathBuf)> {
+    // std exposes neither final-path-by-handle nor an openat-style no-reparse
+    // walk on Windows. Pathname revalidation is not an identity guarantee, so
+    // static serving fails closed there until the native bridge owns this open.
+    #[cfg(windows)]
+    {
+        let _ = (root, candidate);
+        return None;
+    }
+    #[cfg(not(windows))]
+    {
     let canonical = std::fs::canonicalize(candidate).ok()?;
     if !canonical.starts_with(root) { return None; }
     let mut options = std::fs::OpenOptions::new();
@@ -2853,7 +2950,8 @@ fn jet_http_static_open(
         let current = std::fs::metadata(&canonical).ok()?;
         if current.dev() != metadata.dev() || current.ino() != metadata.ino() { return None; }
     }
-    Some((file, metadata, canonical))
+        Some((file, metadata, canonical))
+    }
 }
 
 fn jet_http_srv_static_files(

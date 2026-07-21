@@ -1,4 +1,4 @@
-#![allow(dead_code, non_camel_case_types)]
+#![allow(dead_code, non_camel_case_types, unexpected_cfgs)]
 
 struct JetTcpListener {
     inner: std::net::TcpListener,
@@ -44,36 +44,65 @@ mod jet_std {
     }
 }
 
-struct JetTaskControl {
-    cancelled: std::sync::atomic::AtomicBool,
+enum JetParaRuntimeFailure {
+    SchedulerFatal { msg: String },
 }
 
-impl JetTaskControl {
-    fn new() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self {
-            cancelled: std::sync::atomic::AtomicBool::new(false),
-        })
-    }
-
-    fn cancel(&self) {
-        self.cancelled.store(true, std::sync::atomic::Ordering::Release);
-    }
+thread_local! {
+    static JET_PARA_DEFER_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static JET_OBSERVE_TASK_ID: std::cell::Cell<usize> = const { std::cell::Cell::new(1) };
+    static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-fn jet_scheduler_spawn_blocking_with_control<F>(
-    task: F,
-    _control: std::sync::Arc<JetTaskControl>,
-) -> std::thread::JoinHandle<()>
-where
-    F: FnOnce() + Send + 'static,
-{
-    std::thread::spawn(task)
+fn jet_scheduler_task_panic_enter() { JET_IN_SCHEDULER_TASK.with(|task| task.set(true)); }
+fn jet_scheduler_task_panic_leave() { JET_IN_SCHEDULER_TASK.with(|task| task.set(false)); }
+fn jet_scheduler_panic_should_unwind() -> bool { JET_IN_SCHEDULER_TASK.with(|task| task.get()) }
+fn jet_deadline_remaining_ms() -> Option<i64> {
+    TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.get().then_some(0))
 }
+fn jet_deadline_exceeded(wait_kind: &str) -> ! {
+    std::panic::resume_unwind(Box::new(JetDeadlineUnwind {
+        rendered: format!("deadline exceeded: {wait_kind}"),
+    }))
+}
+
+#[derive(Clone)]
+struct JetObserveTask {
+    parent: usize,
+    state: &'static str,
+    wait: String,
+    deadline_ms: Option<i64>,
+    cancelled: bool,
+}
+
+#[derive(Clone)]
+struct JetObserveChannel {
+    depth: usize,
+    capacity: Option<usize>,
+    send_waiters: usize,
+    recv_waiters: usize,
+    closed: bool,
+}
+
+struct JetObserveRegistry {
+    next_task: std::sync::atomic::AtomicUsize,
+    next_channel: std::sync::atomic::AtomicUsize,
+    tasks: std::sync::Mutex<std::collections::HashMap<usize, JetObserveTask>>,
+    channels: std::sync::Mutex<std::collections::HashMap<usize, JetObserveChannel>>,
+}
+
+static JET_OBSERVE_WORKERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static JET_OBSERVE_QUEUED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>> { None }
+fn jet_observe_task_update(_state: &'static str, _wait: &str, _deadline_ms: Option<i64>) {}
 
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpMessage.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
+include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 static HTTP_BODY_CLOSES: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
@@ -2271,12 +2300,44 @@ fn static_file_response_holds_the_open_identity_and_streams_the_selected_range()
     headers.append("range", "bytes=2-6").unwrap();
     let request = JetHttpRequest::server("GET", "/asset.bin".to_string(), Vec::new(), headers);
     let response = jet_http_srv_static_files(&request, &root).unwrap();
+    let direct = jet_http_srv_static_file_range(
+        &request,
+        &path.to_string_lossy().into_owned(),
+        &"application/octet-stream".to_string(),
+    ).unwrap();
 
     std::fs::rename(&path, root.join("old.bin")).unwrap();
     std::fs::write(&path, b"attacker-body").unwrap();
     assert_eq!(response.status, 206);
     assert_eq!(response.body.length(), Some(5));
     assert_eq!(response.body.bytes(5).unwrap(), b"usted");
+    assert_eq!(direct.body.length(), Some(5));
+    assert_eq!(direct.body.bytes(5).unwrap(), b"usted");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_static_serving_fails_closed_without_held_no_reparse_identity() {
+    let root = std::env::temp_dir().join(format!("jet-http-windows-static-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("asset.txt"), b"must not serve by pathname").unwrap();
+    let request = JetHttpRequest::server(
+        "GET",
+        "/asset.txt".to_string(),
+        Vec::new(),
+        JetHttpHeaders::new(),
+    );
+    assert_eq!(jet_http_srv_static_files(&request, &root).unwrap().status, 404);
+    assert!(jet_http_srv_static_file(
+        &root.join("asset.txt").to_string_lossy().into_owned(),
+        &"text/plain".to_string(),
+    ).is_err());
+    assert!(jet_http_srv_static_file_range(
+        &request,
+        &root.join("asset.txt").to_string_lossy().into_owned(),
+        &"text/plain".to_string(),
+    ).is_err());
     std::fs::remove_dir_all(root).unwrap();
 }
 
@@ -2316,9 +2377,14 @@ fn http2_response_framing_filters_handler_claims_and_verifies_known_lengths() {
     let mut outgoing = jet_http2_start_response(&mut server, 1, response, JET_HTTP2_MAX_FRAME).unwrap().unwrap();
     let mut connection_window = 65_535;
     let mut stream_window = 65_535;
-    assert!(jet_http2_flush_body(
-        &mut server, 1, &mut outgoing, &mut connection_window, &mut stream_window, JET_HTTP2_MAX_FRAME,
-    ).unwrap());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        if jet_http2_flush_body(
+            &mut server, 1, &mut outgoing, &mut connection_window, &mut stream_window, JET_HTTP2_MAX_FRAME,
+        ).unwrap() { break; }
+        assert!(std::time::Instant::now() < deadline, "response producer did not complete");
+        std::thread::yield_now();
+    }
     let mut wire = Vec::new();
     peer.read_to_end(&mut wire).ok();
     assert!(wire.windows(9).any(|header| header[3] == 3 && u32::from_be_bytes(header[5..9].try_into().unwrap()) == 1));
@@ -2371,13 +2437,28 @@ fn server_enforces_and_releases_per_ip_connection_capacity() {
 fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_capacity() {
     use std::io::Write;
 
+    struct BlockingBody {
+        started: Option<std::sync::mpsc::Sender<()>>,
+        release: std::sync::mpsc::Receiver<()>,
+        sent: bool,
+    }
+
+    impl std::io::Read for BlockingBody {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            if self.sent { return Ok(0); }
+            if let Some(started) = self.started.take() { let _ = started.send(()); }
+            self.release.recv().map_err(|_| std::io::ErrorKind::BrokenPipe)?;
+            output[..4].copy_from_slice(b"late");
+            self.sent = true;
+            Ok(4)
+        }
+    }
+
+    std::env::set_var("JET_SCHEDULER_THREADS", "1");
     let mux = jet_http_mux_new();
-    let (release_tx, release_rx) = std::sync::mpsc::channel();
-    let release_rx = std::sync::Arc::new(std::sync::Mutex::new(release_rx));
-    let release = release_rx.clone();
-    jet_http_mux_add(&mux, "GET", "/slow", move |_| {
-        release.lock().unwrap().recv().unwrap();
-        jet_http_srv_response(200, &"slow".to_string())
+    jet_http_mux_add(&mux, "POST", "/slow-body", |request| {
+        let body = request.body.bytes(64).unwrap();
+        jet_http_srv_response(200, &body.len().to_string())
     });
     jet_http_mux_add(&mux, "GET", "/fast", |_| jet_http_srv_response(200, &"fast".to_string()));
     jet_http_mux_add(&mux, "GET", "/large", |_| {
@@ -2386,6 +2467,19 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
         response
     });
     jet_http_mux_add(&mux, "POST", "/ignore", |_| jet_http_srv_response(200, &"ignored".to_string()));
+    let (response_started_tx, response_started_rx) = std::sync::mpsc::channel();
+    let (response_release_tx, response_release_rx) = std::sync::mpsc::channel();
+    let response_release_rx = std::sync::Arc::new(std::sync::Mutex::new(Some(response_release_rx)));
+    let response_release = response_release_rx.clone();
+    jet_http_mux_add(&mux, "GET", "/slow-response", move |_| {
+        let mut response = jet_http_srv_empty_response(200);
+        response.body = JetHttpBody::reader(BlockingBody {
+            started: Some(response_started_tx.clone()),
+            release: response_release.lock().unwrap().take().unwrap(),
+            sent: false,
+        }, Some(4));
+        response
+    });
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -2408,7 +2502,15 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
     client.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
     client.write_all(JET_HTTP2_PREFACE).unwrap();
     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
-    client.write_all(&h2_frame(1, 0x5, 1, &h2_request_headers(0x82, "/slow"))).unwrap();
+    client.write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/slow-body"))).unwrap();
+    client.write_all(&h2_frame(0, 0, 1, b"part")).unwrap();
+    client.flush().unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while jet_scheduler_blocking_wait_stats().0 == 0 {
+        assert!(std::time::Instant::now() < deadline, "request Body did not enter a scheduler-aware blocking wait");
+        std::thread::yield_now();
+    }
+    assert_eq!(JET_OBSERVE_WORKERS.load(std::sync::atomic::Ordering::Relaxed), 1);
     client.write_all(&h2_frame(1, 0x5, 3, &h2_request_headers(0x82, "/fast"))).unwrap();
     client.write_all(&h2_frame(6, 0, 0, b"12345678")).unwrap();
     client.flush().unwrap();
@@ -2420,24 +2522,47 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
         fast |= kind == 0 && stream == 3 && payload == b"fast";
         ping |= kind == 6 && flags & 1 != 0 && payload == b"12345678";
     }
-    release_tx.send(()).unwrap();
+    assert!(jet_scheduler_blocking_wait_stats().2 >= 1, "one blocked worker did not receive bounded compensation");
+    client.write_all(&h2_frame(0, 0x1, 1, b"done")).unwrap();
+    client.flush().unwrap();
     while {
         let (kind, _, stream, payload) = h2_read_frame(&mut client);
-        !(kind == 0 && stream == 1 && payload == b"slow")
+        !(kind == 0 && stream == 1 && payload == b"8")
     } {}
+
+    let blocked_response_id = 5;
+    client.write_all(&h2_frame(1, 0x5, blocked_response_id, &h2_request_headers(0x82, "/slow-response"))).unwrap();
+    client.flush().unwrap();
+    response_started_rx.recv_timeout(std::time::Duration::from_secs(1))
+        .expect("response Body producer did not start");
+    client.write_all(&h2_frame(1, 0x5, 7, &h2_request_headers(0x82, "/fast"))).unwrap();
+    client.write_all(&h2_frame(6, 0, 0, b"bodyping")).unwrap();
+    client.flush().unwrap();
+    let mut fast = false;
+    let mut ping = false;
+    while !fast || !ping {
+        let (kind, flags, stream, payload) = h2_read_frame(&mut client);
+        fast |= kind == 0 && stream == 7 && payload == b"fast";
+        ping |= kind == 6 && flags & 1 != 0 && payload == b"bodyping";
+        assert!(!(kind == 0 && stream == blocked_response_id), "blocked response produced DATA before release");
+    }
+    client.write_all(&h2_frame(3, 0, blocked_response_id, &8u32.to_be_bytes())).unwrap();
+    client.flush().unwrap();
+    response_release_tx.send(()).unwrap();
 
     // With a configured two-stream cap, more than two sequential successes prove
     // every per-stream map releases completed entries rather than accumulating.
-    for stream_id in (5..25).step_by(2) {
+    for stream_id in (9..29).step_by(2) {
         client.write_all(&h2_frame(1, 0x5, stream_id, &h2_request_headers(0x82, "/fast"))).unwrap();
         client.flush().unwrap();
         loop {
             let (kind, _, stream, payload) = h2_read_frame(&mut client);
+            assert!(!(kind == 0 && stream == blocked_response_id), "cancelled response producer emitted late DATA");
             if kind == 0 && stream == stream_id && payload == b"fast" { break; }
         }
     }
 
-    let large_id = 25;
+    let large_id = 29;
     client.write_all(&h2_frame(4, 0, 0, &[0, 4, 0, 0, 0, 1])).unwrap();
     client.write_all(&h2_frame(1, 0x5, large_id, &h2_request_headers(0x82, "/large"))).unwrap();
     client.flush().unwrap();
@@ -2456,7 +2581,7 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
         if kind == 6 && flags & 1 != 0 && payload == b"reset-ok" { break; }
     }
 
-    let ignored_id = 27;
+    let ignored_id = 31;
     client.write_all(&h2_frame(4, 0, 0, &[0, 4, 0, 0, 0xff, 0xff])).unwrap();
     client.write_all(&h2_frame(1, 0x4, ignored_id, &h2_request_headers(0x83, "/ignore"))).unwrap();
     client.write_all(&h2_frame(0, 0, ignored_id, b"body")).unwrap();
@@ -2540,6 +2665,15 @@ fn http2_uses_configured_header_body_and_size_limits() {
     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
     client.write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/echo"))).unwrap();
     client.flush().unwrap();
+    let mut pinger = client.try_clone().unwrap();
+    let pings = std::thread::spawn(move || {
+        for sequence in 0u64..20 {
+            if pinger.write_all(&h2_frame(6, 0, 0, &sequence.to_be_bytes())).is_err() { break; }
+            let _ = pinger.flush();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    });
+    let deadline_started = std::time::Instant::now();
     loop {
         let (kind, _, stream, payload) = h2_read_frame(&mut client);
         if kind == 3 && stream == 1 {
@@ -2547,6 +2681,9 @@ fn http2_uses_configured_header_body_and_size_limits() {
             break;
         }
     }
+    assert!(deadline_started.elapsed() < std::time::Duration::from_millis(250),
+        "frequent PING traffic extended the incomplete-body deadline");
+    pings.join().unwrap();
     client.write_all(&h2_frame(7, 0, 0, &[0; 8])).unwrap();
     client.flush().unwrap();
     assert!(worker.join().unwrap().is_ok());
