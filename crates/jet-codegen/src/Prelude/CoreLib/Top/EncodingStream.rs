@@ -378,7 +378,7 @@ impl jet_std::JSONReader {
         Err(error)
     }
 
-    fn append_string_bytes(&self, bytes: &mut Vec<u8>, append: &[u8]) -> Result<(), jet_std::EncodingError> {
+    fn append_item_bytes(&self, bytes: &mut Vec<u8>, append: &[u8], item: &str) -> Result<(), jet_std::EncodingError> {
         let limit = self.limits.max_item_bytes as usize;
         let Some(new_len) = bytes.len().checked_add(append.len()) else {
             return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset, self.line, self.column, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)));
@@ -390,10 +390,10 @@ impl jet_std::JSONReader {
             let next_capacity = bytes.capacity().max(1).saturating_mul(2).max(new_len);
             let growth = next_capacity.saturating_sub(bytes.capacity());
             if self.allocation_budget.as_ref().is_some_and(|budget| !budget.charge(growth)) {
-                return Err(self.string_allocation_error());
+                return Err(self.item_allocation_error(item));
             }
             if bytes.try_reserve_exact(next_capacity - bytes.len()).is_err() {
-                return Err(self.string_allocation_error());
+                return Err(self.item_allocation_error(item));
             }
             debug_assert_eq!(bytes.capacity(), next_capacity);
         }
@@ -401,28 +401,28 @@ impl jet_std::JSONReader {
         Ok(())
     }
 
-    fn string_allocation_error(&self) -> jet_std::EncodingError {
+    fn item_allocation_error(&self, item: &str) -> jet_std::EncodingError {
         jet_encoding_error(
             jet_std::EncodingErrorKind::Limit,
             self.offset,
             self.line,
             self.column,
-            "JSON string allocation exceeded the bounded codec heap ceiling",
+            format!("JSON {item} allocation exceeded the bounded codec heap ceiling"),
         )
     }
 
     fn clone_key_for_frame(&self, key: &str) -> Result<(String, usize), jet_std::EncodingError> {
         let Some(budget) = &self.allocation_budget else { return Ok((key.to_string(), 0)) };
         let capacity = key.len();
-        if !budget.charge(capacity) { return Err(self.string_allocation_error()); }
+        if !budget.charge(capacity) { return Err(self.item_allocation_error("string")); }
         let mut cloned = String::new();
-        if cloned.try_reserve_exact(capacity).is_err() { return Err(self.string_allocation_error()); }
+        if cloned.try_reserve_exact(capacity).is_err() { return Err(self.item_allocation_error("string")); }
         cloned.push_str(key);
         debug_assert_eq!(cloned.capacity(), capacity);
         Ok((cloned, capacity))
     }
 
-    fn release_key_heap(&self, bytes: usize) {
+    fn release_item_heap(&self, bytes: usize) {
         if let Some(budget) = &self.allocation_budget { budget.release(bytes); }
     }
 
@@ -554,12 +554,12 @@ impl jet_std::JSONReader {
                         return Err(jet_encoding_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, "incomplete JSON escape"));
                     };
                     match escaped {
-                        b'"' | b'\\' | b'/' => self.append_string_bytes(&mut bytes, &[escaped])?,
-                        b'b' => self.append_string_bytes(&mut bytes, &[8])?,
-                        b'f' => self.append_string_bytes(&mut bytes, &[12])?,
-                        b'n' => self.append_string_bytes(&mut bytes, b"\n")?,
-                        b'r' => self.append_string_bytes(&mut bytes, b"\r")?,
-                        b't' => self.append_string_bytes(&mut bytes, b"\t")?,
+                        b'"' | b'\\' | b'/' => self.append_item_bytes(&mut bytes, &[escaped], "string")?,
+                        b'b' => self.append_item_bytes(&mut bytes, &[8], "string")?,
+                        b'f' => self.append_item_bytes(&mut bytes, &[12], "string")?,
+                        b'n' => self.append_item_bytes(&mut bytes, b"\n", "string")?,
+                        b'r' => self.append_item_bytes(&mut bytes, b"\r", "string")?,
+                        b't' => self.append_item_bytes(&mut bytes, b"\t", "string")?,
                         b'u' => {
                             let first = self.read_hex4()?;
                             let scalar = if (0xd800..=0xdbff).contains(&first) {
@@ -577,12 +577,12 @@ impl jet_std::JSONReader {
                             };
                             let ch = char::from_u32(scalar).ok_or_else(|| jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "invalid Unicode scalar"))?;
                             let mut buf = [0u8; 4];
-                            self.append_string_bytes(&mut bytes, ch.encode_utf8(&mut buf).as_bytes())?;
+                            self.append_item_bytes(&mut bytes, ch.encode_utf8(&mut buf).as_bytes(), "string")?;
                         }
                         _ => return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), "unknown JSON escape")),
                     }
                 }
-                _ => self.append_string_bytes(&mut bytes, &[byte])?,
+                _ => self.append_item_bytes(&mut bytes, &[byte], "string")?,
             }
         }
         String::from_utf8(bytes).map_err(|_| jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "JSON string is not valid UTF-8"))
@@ -596,13 +596,11 @@ impl jet_std::JSONReader {
     }
 
     fn read_number(&mut self, first: u8) -> Result<jet_std::DataEvent, jet_std::EncodingError> {
-        let mut bytes = vec![first];
+        let mut bytes = Vec::new();
+        self.append_item_bytes(&mut bytes, &[first], "number")?;
         while let Some(byte @ (b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E')) = self.fill()? {
-            bytes.push(byte);
+            self.append_item_bytes(&mut bytes, &[byte], "number")?;
             self.take()?;
-            if bytes.len() as i64 > self.limits.max_item_bytes {
-                return Err(jet_encoding_error(jet_std::EncodingErrorKind::Limit, self.offset, self.line, self.column, format!("max_item_bytes {} exceeded", self.limits.max_item_bytes)));
-            }
         }
         let text = std::str::from_utf8(&bytes).unwrap_or("");
         let valid = {
@@ -613,18 +611,24 @@ impl jet_std::JSONReader {
             if i != usize::MAX && matches!(b.get(i), Some(b'e' | b'E')) { i += 1; if matches!(b.get(i), Some(b'+' | b'-')) { i += 1; } let start = i; while matches!(b.get(i), Some(b'0'..=b'9')) { i += 1; } if i == start { i = usize::MAX; } }
             i == b.len()
         };
-        if !valid {
-            return Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - bytes.len() as i64, self.line, self.column, format!("invalid JSON number `{}`", text)));
-        }
-        if !text.contains(['.', 'e', 'E']) {
-            if let Ok(value) = text.parse::<i64>() {
-                return Ok(jet_std::DataEvent::Int(value));
+        let result = if !valid {
+            Err(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset - bytes.len() as i64, self.line, self.column, format!("invalid JSON number `{}`", text)))
+        } else if !text.contains(['.', 'e', 'E']) {
+            match text.parse::<i64>() {
+                Ok(value) => Ok(jet_std::DataEvent::Int(value)),
+                Err(_) => match text.parse::<f64>() {
+                    Ok(value) if value.is_finite() => Ok(jet_std::DataEvent::Float(value)),
+                    _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.offset - bytes.len() as i64, self.line, self.column, "JSON number is outside the DataTree numeric range")),
+                },
             }
-        }
-        match text.parse::<f64>() {
-            Ok(value) if value.is_finite() => Ok(jet_std::DataEvent::Float(value)),
-            _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.offset - bytes.len() as i64, self.line, self.column, "JSON number is outside the DataTree numeric range")),
-        }
+        } else {
+            match text.parse::<f64>() {
+                Ok(value) if value.is_finite() => Ok(jet_std::DataEvent::Float(value)),
+                _ => Err(jet_encoding_error(jet_std::EncodingErrorKind::Unsupported, self.offset - bytes.len() as i64, self.line, self.column, "JSON number is outside the DataTree numeric range")),
+            }
+        };
+        self.release_item_heap(bytes.capacity());
+        result
     }
 
     fn parse_value(&mut self) -> Result<jet_std::DataEvent, jet_std::EncodingError> {
@@ -714,12 +718,12 @@ impl jet_std::JSONReader {
                         self.take()?;
                         let previous = std::mem::replace(self.frames.last_mut().unwrap(), JetJsonReadFrame::ObjectKeyOrEnd { first: false });
                         let JetJsonReadFrame::ObjectCommaOrEnd { key_heap, .. } = previous else { unreachable!() };
-                        self.release_key_heap(key_heap);
+                        self.release_item_heap(key_heap);
                     }
                     Some(b'}') => {
                         self.take()?;
                         let Some(JetJsonReadFrame::ObjectCommaOrEnd { key_heap, .. }) = self.frames.pop() else { unreachable!() };
-                        self.release_key_heap(key_heap);
+                        self.release_item_heap(key_heap);
                         return Ok(Some(jet_std::DataEvent::ObjectEnd));
                     }
                     Some(_) => return self.fail(jet_encoding_error(jet_std::EncodingErrorKind::Syntax, self.offset, self.line, self.column, "expected `,` or `}` after object value")),

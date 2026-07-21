@@ -1470,6 +1470,124 @@ fn run() {{
 }
 
 #[test]
+fn json_stream_number_token_stays_under_counting_allocator_ceiling() {
+    if !Command::new("rustc").arg("--version").output().is_ok() {
+        eprintln!("note: skipping JSON counting-allocator test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_json_counted_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let input_path = dir.join("number.json");
+    fs::write(&input_path, format!("1{}", "0".repeat(149_999))).unwrap();
+    let input = input_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {{
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 150000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{input}") ?? panic("open number")
+    reader :: json.reader(^input, limits) ?? panic("create reader")
+    result :: reader.next()
+    if result == {{
+        Ok(_) -> {{ panic("oversized number allocation accepted") }}
+        Err(first) -> {{
+            print(first.reason)
+            again :: reader.next()
+            if again == {{
+                Ok(_) -> {{ panic("number allocation error not terminal") }}
+                Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let path = dir.join("counted.jet");
+    fs::write(&path, &source).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(&source, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected fixture:\n{}", jet::render_diagnostics(&shown, &source, &diags))
+    });
+    let renamed = out.rust.replacen(
+        "fn jet_enc_json_reader_next(",
+        "fn jet_enc_json_reader_next_inner(",
+        1,
+    );
+    assert_ne!(renamed, out.rust, "generated JSON reader seam changed");
+    let allocator = r#"
+mod jet_json_alloc_probe {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    pub struct CountingAlloc;
+    static COUNTING: AtomicBool = AtomicBool::new(false);
+    static LIVE: AtomicUsize = AtomicUsize::new(0);
+    static PEAK: AtomicUsize = AtomicUsize::new(0);
+    fn add(size: usize) {
+        let live = LIVE.fetch_add(size, Ordering::SeqCst) + size;
+        PEAK.fetch_max(live, Ordering::SeqCst);
+    }
+    unsafe impl GlobalAlloc for CountingAlloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let ptr = System.alloc(layout);
+            if !ptr.is_null() && COUNTING.load(Ordering::SeqCst) { add(layout.size()); }
+            ptr
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if COUNTING.load(Ordering::SeqCst) { LIVE.fetch_sub(layout.size(), Ordering::SeqCst); }
+            System.dealloc(ptr, layout);
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, old: Layout, new_size: usize) -> *mut u8 {
+            let counting = COUNTING.load(Ordering::SeqCst);
+            if counting { LIVE.fetch_sub(old.size(), Ordering::SeqCst); }
+            let next = System.realloc(ptr, old, new_size);
+            if counting { if next.is_null() { add(old.size()); } else { add(new_size); } }
+            next
+        }
+    }
+    pub fn begin() {
+        LIVE.store(0, Ordering::SeqCst);
+        PEAK.store(0, Ordering::SeqCst);
+        COUNTING.store(true, Ordering::SeqCst);
+    }
+    pub fn finish() -> usize {
+        COUNTING.store(false, Ordering::SeqCst);
+        PEAK.load(Ordering::SeqCst)
+    }
+}
+#[global_allocator]
+static JET_JSON_ALLOC: jet_json_alloc_probe::CountingAlloc = jet_json_alloc_probe::CountingAlloc;
+fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
+    let ceiling = jet_encoding_codec_heap_ceiling(&reader.limits);
+    jet_json_alloc_probe::begin();
+    let result = jet_enc_json_reader_next_inner(reader);
+    let peak = jet_json_alloc_probe::finish();
+    assert!(peak <= ceiling, "JSON requested allocation peak {peak} exceeded {ceiling}");
+    result
+}
+"#;
+    let rs = dir.join("counted.rs");
+    let bin = dir.join("counted");
+    let generated = renamed.replacen("#![allow(warnings)]", "", 1);
+    assert_ne!(generated, renamed, "generated crate attribute changed");
+    fs::write(&rs, format!("#![allow(warnings)]\n{allocator}\n{generated}")).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .output().unwrap();
+    assert!(rustc.status.success(), "rustc rejected counted JSON program:\n{}", String::from_utf8_lossy(&rustc.stderr));
+    let run = Command::new(&bin).current_dir(&dir).output().unwrap();
+    assert!(run.status.success(), "counted JSON program failed:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "JSON number allocation exceeded the bounded codec heap ceiling\ntrue\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn jsonl_stream_drop_and_codec_heap_ceiling_are_enforced() {
     let dir = std::env::temp_dir().join(format!("jet_jsonl_stream_drop_heap_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
