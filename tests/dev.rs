@@ -2503,6 +2503,48 @@ fn run() {
 }
 
 #[test]
+fn compression_matches_forced_interpreter_and_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping compression dev differential");
+        return;
+    }
+    let source = r#"use core.compress.gzip as gzip
+use core.compress.zstd as zstd
+
+fn run() {
+    bytes: [U8] :: [72, 101, 108, 108, 111]
+    gz: [U8] :: gzip.decompress(gzip.compress(bytes)) ?? []
+    zs: [U8] :: zstd.decompress(zstd.compress(bytes)) ?? []
+    bad_gz: [U8] :: gzip.decompress([31, 139, 8]) ?? [255]
+    bad_zs: [U8] :: zstd.decompress([40, 181, 47, 253]) ?? [255]
+    h: U8 :: 72
+    max: U8 :: 255
+    print(gz.len() == 5)
+    print(gz[0] == h)
+    print(zs.len() == 5)
+    print(zs[0] == h)
+    print(bad_gz[0] == max)
+    print(bad_zs[0] == max)
+}
+"#;
+    let dir = common::unique_tmp("jet_dev_compression");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("compression.jet");
+    fs::write(&path, source).unwrap();
+    let file = path.to_string_lossy();
+    let expected = compiled_binary_output(&dir, "compression", 0, "compression", &file);
+    let actual = match dev_iteration(&file, false, true) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => panic!("forced compression interpreter failed: {diags:?}"),
+    };
+    assert_eq!(actual, expected);
+    assert_eq!(actual.stdout, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn resident_jit_checked_numeric_and_distinct_conversion_matrix_is_native() {
     if skip_if_cranelift_host_unsupported() {
         return;

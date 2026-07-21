@@ -1,13 +1,322 @@
-//! Std-only `core.archive` evaluator used by comptime, REPL, and interpreter.
+//! Std-only archive and stream-codec evaluator used by comptime, REPL, and
+//! interpreter.
 //!
 //! ZIP writes the same uncompressed single-entry shape as AOT's
 //! `ZipWriter::start_file(FileOptions::default())`; reads accept stored and
 //! DEFLATE entries. TAR reads ordinary ustar/GNU archives and writes GNU
-//! archives. Invalid inputs follow the AOT bridge and return empty values.
+//! archives. GZIP writes stored DEFLATE and reads stored/fixed/dynamic DEFLATE.
+//! Zstandard writes raw blocks and reads raw/RLE blocks. Invalid inputs stay
+//! bounded and follow each public API's existing empty/`Err` contract.
 
 use std::path::{Component, Path};
 
 const TAR_BLOCK: usize = 512;
+const MAX_CODEC_OUTPUT: usize = 64 * 1024 * 1024;
+
+pub(super) fn gzip_compress(data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
+    if data.is_empty() {
+        out.extend_from_slice(&[1, 0, 0, 255, 255]);
+    } else {
+        let mut blocks = data.chunks(u16::MAX as usize).peekable();
+        while let Some(block) = blocks.next() {
+            out.push(u8::from(blocks.peek().is_none()));
+            let len = block.len() as u16;
+            put_u16(&mut out, len);
+            put_u16(&mut out, !len);
+            out.extend_from_slice(block);
+        }
+    }
+    put_u32(&mut out, crc32(data));
+    put_u32(&mut out, data.len() as u32);
+    out
+}
+
+pub(super) fn gzip_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+    let fail = || "compress.gzip.decompress: invalid gzip data".to_string();
+    if data.len() < 18 || data[..3] != [0x1f, 0x8b, 8] {
+        return Err(fail());
+    }
+    let flags = data[3];
+    if flags & 0xe0 != 0 {
+        return Err(fail());
+    }
+    let trailer = data.len() - 8;
+    let mut offset = 10usize;
+    if flags & 4 != 0 {
+        let len = read_u16(data, offset).ok_or_else(&fail)? as usize;
+        offset = offset
+            .checked_add(2 + len)
+            .filter(|end| *end <= trailer)
+            .ok_or_else(&fail)?;
+    }
+    for mask in [8, 16] {
+        if flags & mask != 0 {
+            let len = data
+                .get(offset..trailer)
+                .and_then(|rest| rest.iter().position(|byte| *byte == 0))
+                .ok_or_else(&fail)?;
+            offset = offset
+                .checked_add(len + 1)
+                .filter(|end| *end <= trailer)
+                .ok_or_else(&fail)?;
+        }
+    }
+    if flags & 2 != 0 {
+        let header_crc = read_u16(data, offset).ok_or_else(&fail)?;
+        if header_crc != crc32(&data[..offset]) as u16 {
+            return Err(fail());
+        }
+        offset = offset
+            .checked_add(2)
+            .filter(|end| *end <= trailer)
+            .ok_or_else(&fail)?;
+    }
+    let expected = read_u32(data, trailer + 4).ok_or_else(&fail)? as usize;
+    if expected > MAX_CODEC_OUTPUT || offset > trailer {
+        return Err(fail());
+    }
+    let (out, consumed) =
+        inflate_with_consumed(&data[offset..trailer], expected).ok_or_else(&fail)?;
+    if consumed != trailer - offset {
+        return Err(fail());
+    }
+    if crc32(&out) != read_u32(data, trailer).ok_or_else(&fail)? {
+        return Err(fail());
+    }
+    Ok(out)
+}
+
+pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x28, 0xb5, 0x2f, 0xfd];
+    match data.len() {
+        len @ 0..=255 => {
+            out.push(0x20);
+            out.push(len as u8);
+        }
+        len @ 256..=65_791 => {
+            out.push(0x60);
+            put_u16(&mut out, (len - 256) as u16);
+        }
+        len if len <= u32::MAX as usize => {
+            out.push(0xa0);
+            put_u32(&mut out, len as u32);
+        }
+        len => {
+            out.push(0xe0);
+            out.extend_from_slice(&(len as u64).to_le_bytes());
+        }
+    }
+    if data.is_empty() {
+        out.extend_from_slice(&[1, 0, 0]);
+    } else {
+        let mut blocks = data.chunks(128 * 1024).peekable();
+        while let Some(block) = blocks.next() {
+            let header = ((block.len() as u32) << 3) | u32::from(blocks.peek().is_none());
+            out.extend_from_slice(&header.to_le_bytes()[..3]);
+            out.extend_from_slice(block);
+        }
+    }
+    out
+}
+
+pub(super) fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+    let fail = || "compress.zstd.decompress: invalid zstd data".to_string();
+    let mut offset = 0usize;
+    let mut out = Vec::new();
+    while offset < data.len() {
+        let magic = read_u32(data, offset).ok_or_else(&fail)?;
+        offset += 4;
+        if (0x184d_2a50..=0x184d_2a5f).contains(&magic) {
+            let len = read_u32(data, offset).ok_or_else(&fail)? as usize;
+            offset = offset
+                .checked_add(4 + len)
+                .filter(|end| *end <= data.len())
+                .ok_or_else(&fail)?;
+            continue;
+        }
+        if magic != 0xfd2f_b528 {
+            return Err(fail());
+        }
+        let descriptor = *data.get(offset).ok_or_else(&fail)?;
+        offset += 1;
+        if descriptor & 8 != 0 {
+            return Err(fail());
+        }
+        let single_segment = descriptor & 0x20 != 0;
+        let window = if !single_segment {
+            let window_descriptor = *data.get(offset).ok_or_else(&fail)?;
+            offset += 1;
+            let log = usize::from(window_descriptor >> 3) + 10;
+            let base = 1usize.checked_shl(log as u32).ok_or_else(&fail)?;
+            let window = base
+                .checked_add((base / 8) * usize::from(window_descriptor & 7))
+                .ok_or_else(&fail)?;
+            if window > MAX_CODEC_OUTPUT {
+                return Err(fail());
+            }
+            Some(window)
+        } else {
+            None
+        };
+        let dict_len = [0usize, 1, 2, 4][usize::from(descriptor & 3)];
+        if dict_len != 0 {
+            let dictionary = read_le(data, offset, dict_len).ok_or_else(&fail)?;
+            offset += dict_len;
+            if dictionary != 0 {
+                return Err(fail());
+            }
+        }
+        let size_flag = descriptor >> 6;
+        let size_len = match (size_flag, single_segment) {
+            (0, false) => 0,
+            (0, true) => 1,
+            (1, _) => 2,
+            (2, _) => 4,
+            (3, _) => 8,
+            _ => unreachable!(),
+        };
+        let expected = if size_len == 0 {
+            None
+        } else {
+            let mut size = read_le(data, offset, size_len).ok_or_else(&fail)?;
+            offset += size_len;
+            if size_len == 2 {
+                size += 256;
+            }
+            let size = usize::try_from(size).map_err(|_| fail())?;
+            if size > MAX_CODEC_OUTPUT {
+                return Err(fail());
+            }
+            Some(size)
+        };
+        let frame_start = out.len();
+        let max_block = window
+            .or(expected)
+            .unwrap_or(MAX_CODEC_OUTPUT)
+            .min(128 * 1024);
+        loop {
+            let header = read_le(data, offset, 3).ok_or_else(&fail)? as usize;
+            offset += 3;
+            let last = header & 1 != 0;
+            let kind = (header >> 1) & 3;
+            let size = header >> 3;
+            if size > max_block
+                || out
+                    .len()
+                    .checked_add(size)
+                    .is_none_or(|len| len > MAX_CODEC_OUTPUT)
+            {
+                return Err(fail());
+            }
+            match kind {
+                0 => {
+                    let end = offset
+                        .checked_add(size)
+                        .filter(|end| *end <= data.len())
+                        .ok_or_else(&fail)?;
+                    out.extend_from_slice(&data[offset..end]);
+                    offset = end;
+                }
+                1 => {
+                    let byte = *data.get(offset).ok_or_else(&fail)?;
+                    offset += 1;
+                    out.resize(out.len() + size, byte);
+                }
+                _ => return Err(fail()),
+            }
+            if last {
+                break;
+            }
+        }
+        let frame = &out[frame_start..];
+        if expected.is_some_and(|size| size != frame.len()) {
+            return Err(fail());
+        }
+        if descriptor & 4 != 0 {
+            let checksum = read_u32(data, offset).ok_or_else(&fail)?;
+            offset += 4;
+            if checksum != xxhash64(frame) as u32 {
+                return Err(fail());
+            }
+        }
+    }
+    if offset == 0 { Err(fail()) } else { Ok(out) }
+}
+
+fn read_le(data: &[u8], offset: usize, len: usize) -> Option<u64> {
+    let mut value = 0u64;
+    for (shift, byte) in data
+        .get(offset..offset.checked_add(len)?)?
+        .iter()
+        .enumerate()
+    {
+        value |= u64::from(*byte) << (shift * 8);
+    }
+    Some(value)
+}
+
+fn xxhash64(data: &[u8]) -> u64 {
+    const P1: u64 = 11_400_714_785_074_694_791;
+    const P2: u64 = 14_029_467_366_897_019_727;
+    const P3: u64 = 1_609_587_929_392_839_161;
+    const P4: u64 = 9_650_029_242_287_828_579;
+    const P5: u64 = 2_870_177_450_012_600_261;
+    let round = |acc: u64, lane: u64| {
+        acc.wrapping_add(lane.wrapping_mul(P2))
+            .rotate_left(31)
+            .wrapping_mul(P1)
+    };
+    let mut offset = 0;
+    let mut hash = if data.len() >= 32 {
+        let mut lanes = [P1.wrapping_add(P2), P2, 0, 0u64.wrapping_sub(P1)];
+        while offset + 32 <= data.len() {
+            for lane in &mut lanes {
+                *lane = round(
+                    *lane,
+                    u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()),
+                );
+                offset += 8;
+            }
+        }
+        let mut hash = lanes[0]
+            .rotate_left(1)
+            .wrapping_add(lanes[1].rotate_left(7))
+            .wrapping_add(lanes[2].rotate_left(12))
+            .wrapping_add(lanes[3].rotate_left(18));
+        for lane in lanes {
+            let mixed = round(0, lane);
+            hash = (hash ^ mixed).wrapping_mul(P1).wrapping_add(P4);
+        }
+        hash
+    } else {
+        P5
+    };
+    hash = hash.wrapping_add(data.len() as u64);
+    while offset + 8 <= data.len() {
+        let lane = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        hash ^= round(0, lane);
+        hash = hash.rotate_left(27).wrapping_mul(P1).wrapping_add(P4);
+        offset += 8;
+    }
+    if offset + 4 <= data.len() {
+        hash ^= u64::from(u32::from_le_bytes(
+            data[offset..offset + 4].try_into().unwrap(),
+        ))
+        .wrapping_mul(P1);
+        hash = hash.rotate_left(23).wrapping_mul(P2).wrapping_add(P3);
+        offset += 4;
+    }
+    for byte in &data[offset..] {
+        hash ^= u64::from(*byte).wrapping_mul(P5);
+        hash = hash.rotate_left(11).wrapping_mul(P1);
+    }
+    hash ^= hash >> 33;
+    hash = hash.wrapping_mul(P2);
+    hash ^= hash >> 29;
+    hash = hash.wrapping_mul(P3);
+    hash ^ (hash >> 32)
+}
 
 pub(super) fn zip_compress(name: &str, data: &[u8]) -> Vec<u8> {
     let name = name.as_bytes();
@@ -457,6 +766,10 @@ fn reverse_bits(mut code: u32, count: usize) -> u32 {
 }
 
 fn inflate(data: &[u8], expected_len: usize) -> Option<Vec<u8>> {
+    inflate_with_consumed(data, expected_len).map(|(out, _)| out)
+}
+
+fn inflate_with_consumed(data: &[u8], expected_len: usize) -> Option<(Vec<u8>, usize)> {
     let mut bits = Bits { data, bit: 0 };
     let mut out = Vec::new();
     loop {
@@ -486,7 +799,7 @@ fn inflate(data: &[u8], expected_len: usize) -> Option<Vec<u8>> {
             _ => return None,
         }
         if final_block {
-            return Some(out);
+            return Some((out, bits.bit.div_ceil(8)));
         }
     }
 }
@@ -639,5 +952,53 @@ mod tests {
         let expected = b"the quick brown fox jumps over the lazy dog; pack my box with five dozen liquor jugs. "
             .repeat(2);
         assert_eq!(inflate(&compressed, expected.len()), Some(expected));
+    }
+
+    #[test]
+    fn gzip_and_zstd_round_trip_with_bounded_frames() {
+        for data in [&[][..], b"hello", &vec![42; 200_000]] {
+            assert_eq!(gzip_decompress(&gzip_compress(data)), Ok(data.to_vec()));
+            assert_eq!(zstd_decompress(&zstd_compress(data)), Ok(data.to_vec()));
+        }
+    }
+
+    #[test]
+    fn native_gzip_and_zstd_raw_frames_decode() {
+        let gzip = [
+            31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16,
+            54, 5, 0, 0, 0,
+        ];
+        assert_eq!(gzip_decompress(&gzip), Ok(b"hello".to_vec()));
+        let zstd = [
+            40, 181, 47, 253, 4, 88, 41, 0, 0, 104, 101, 108, 108, 111, 163, 109, 159,
+            136,
+        ];
+        assert_eq!(zstd_decompress(&zstd), Ok(b"hello".to_vec()));
+    }
+
+    #[test]
+    fn codecs_reject_truncation_corruption_and_oversized_frames() {
+        let mut gzip = gzip_compress(b"hello");
+        gzip[14] ^= 1;
+        assert!(gzip_decompress(&gzip).is_err());
+        assert!(gzip_decompress(&[31, 139, 8]).is_err());
+        let mut trailing = gzip_compress(b"hello");
+        trailing.insert(trailing.len() - 8, 0);
+        assert!(gzip_decompress(&trailing).is_err());
+        let mut with_hcrc = gzip_compress(b"hello");
+        with_hcrc[3] |= 2;
+        let hcrc = (crc32(&with_hcrc[..10]) as u16).to_le_bytes();
+        with_hcrc.splice(10..10, hcrc);
+        assert_eq!(gzip_decompress(&with_hcrc), Ok(b"hello".to_vec()));
+        with_hcrc[10] ^= 1;
+        assert!(gzip_decompress(&with_hcrc).is_err());
+
+        assert!(zstd_decompress(&[40, 181, 47, 253]).is_err());
+        let oversized = [40, 181, 47, 253, 160, 1, 0, 0, 4];
+        assert!(zstd_decompress(&oversized).is_err());
+        let compressed_block = [40, 181, 47, 253, 32, 1, 5, 0, 0, 0];
+        assert!(zstd_decompress(&compressed_block).is_err());
+        let over_window = [40, 181, 47, 253, 0, 0, 1, 64, 0];
+        assert!(zstd_decompress(&over_window).is_err());
     }
 }

@@ -98,13 +98,8 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // `inner_join`/`left_join` and Packet B's `pivot_sum` route through the
     // interpreter because their closure arguments need live `Interp` access.
     //
-    // core.compress.*: AOT is a pure [U8]→[U8] byte transform, not ambient
-    // FS. Still needs an honest comptime port — keep PurePending, do not wash
-    // as Boundary. core.archive is interpreter-resident (card #392 C4).
-    ("core.compress.gzip", "compress"),
-    ("core.compress.gzip", "decompress"),
-    ("core.compress.zstd", "compress"),
-    ("core.compress.zstd", "decompress"),
+    // core.compress.* and core.archive are interpreter-resident pure byte
+    // transforms (card #392 C4), not native boundaries.
     // core.crypto.expert / core.crypto.random: security-sensitive — needs a
     // careful, independently-reviewed port (AEAD ciphers, CSPRNG), not a
     // quick approximation that could silently diverge from the audited AOT
@@ -1588,10 +1583,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             Class::Covered
         );
     }
-    assert_eq!(
-        record(&records, Surface::Fixed, "core.compress.gzip", "compress").class,
-        Class::PurePending
-    );
+    for module in ["core.compress.gzip", "core.compress.zstd"] {
+        for method in ["compress", "decompress"] {
+            assert_eq!(
+                record(&records, Surface::Fixed, module, method).class,
+                Class::Covered
+            );
+        }
+    }
     assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.game", "run").class, Class::Boundary);
     for (module, method) in [
@@ -1637,7 +1636,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 782, 7, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 786, 3, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1645,7 +1644,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        14096273572204797594,
+        2983373393414839204,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
