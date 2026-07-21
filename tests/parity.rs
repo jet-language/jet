@@ -223,7 +223,7 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // Misc small surfaces, each its own small future card.
     ("core.args", "spec"),
     ("core.game", "run"),
-    ("core.math", "decimal"),
+    // core.math.decimal PORTED (card #392 C4) — see CtDecimal + CorePureParity.
     ("core.testing", "corpus"),
     ("core.testing", "fixture"),
     ("core.testing", "golden"),
@@ -1160,7 +1160,7 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                     Some((Class::Covered, "comptime direct dispatch"))
                 } else if matches!(
                     entry.method.as_str(),
-                    "consume" | "expect" | "checked" | "saturating" | "wrapping" | "Decimal"
+                    "consume" | "expect" | "checked" | "saturating" | "wrapping"
                         | "F32x4" | "F64x2" | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
                 ) {
                     Some((Class::PurePending, "direct builtin port pending"))
@@ -1315,7 +1315,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::DirectStatic, "Bag", "new").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::PurePending);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "BigInt").class, Class::Covered);
-    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::PurePending);
+    assert_eq!(record(&records, Surface::DirectStatic, "direct", "Decimal").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "direct", "Vec3").class, Class::PurePending);
     assert_eq!(record(&records, Surface::Value, "String", "trim").class, Class::Covered);
     for method in ["after", "before", "bytes", "slice"] {
@@ -1343,6 +1343,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         }
     }
     assert_eq!(record(&records, Surface::Value, "BigInt", "to_string").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Decimal", "to_string").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Value, "Decimal", "add").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Fixed, "core.math", "decimal").class, Class::Covered);
     for method in ["add", "add_new", "clear", "each", "has_key"] {
         assert_eq!(record(&records, Surface::Value, "Map", method).class, Class::Covered);
     }
@@ -1564,14 +1567,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 748, 67, 363));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 752, 63, 363));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
     );
     assert_eq!(
         stable_hash(&rendered),
-        3127679427168958324,
+        10127880771577218800,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

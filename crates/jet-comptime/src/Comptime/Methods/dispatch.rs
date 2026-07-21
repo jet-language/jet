@@ -665,6 +665,22 @@ impl<'a> Interp<'a> {
                 _ => Err(unsupported("`BigInt` with a non-Int/String argument", span)),
             };
         }
+        // D-DECIMAL1: `Decimal("10.50")` — explicit string construction only.
+        if name == crate::Syntax::TYPE_DECIMAL
+            && self.funcs.get(name).is_none()
+            && !scope.contains_key(name)
+        {
+            let arg = match args.first() {
+                Some(a) => self.eval(&a.expr, scope)?,
+                None => return Err(unsupported("`Decimal` with no argument", span)),
+            };
+            return match arg {
+                CtValue::Str(s) => crate::Numeric::CtDecimal::from_str(&s)
+                    .map(|decimal| decimal.to_value())
+                    .map_err(|_| unsupported(&format!("`Decimal(\"{}\")`", s), span)),
+                _ => Err(unsupported("`Decimal` with a non-String argument", span)),
+            };
+        }
         // c139/HOF: `f(x)` where `f` is a local binding (a lambda param, or a
         // `let f = someLambdaOrFn` variable) rather than a top-level `fn`
         // name — every bare-name call, whatever the callee resolves to,

@@ -72,6 +72,34 @@ pub(super) fn eval_binop(
         (BinOp::Add, BigInt(a), BigInt(b)) => Ok(BigInt(a.add(&b))),
         (BinOp::Sub, BigInt(a), BigInt(b)) => Ok(BigInt(a.sub(&b))),
         (BinOp::Mul, BigInt(a), BigInt(b)) => Ok(BigInt(a.mul(&b))),
+        (op @ (BinOp::Add | BinOp::Sub | BinOp::Mul), left, right)
+            if matches!(
+                (&left, &right),
+                (
+                    CtValue::Struct {
+                        type_name: left_name,
+                        ..
+                    },
+                    CtValue::Struct {
+                        type_name: right_name,
+                        ..
+                    }
+                ) if left_name == crate::Syntax::TYPE_DECIMAL
+                    && right_name == crate::Syntax::TYPE_DECIMAL
+            ) =>
+        {
+            let left = crate::Numeric::CtDecimal::from_value(&left)
+                .map_err(|error| unsupported(&error, span))?;
+            let right = crate::Numeric::CtDecimal::from_value(&right)
+                .map_err(|error| unsupported(&error, span))?;
+            let out = match op {
+                BinOp::Add => left.add(&right),
+                BinOp::Sub => left.sub(&right),
+                BinOp::Mul => left.mul(&right),
+                _ => unreachable!("decimal binop guard"),
+            };
+            Ok(out.to_value())
+        }
         (BinOp::Eq, a, b) => Ok(Bool(a == b)),
         (BinOp::Ne, a, b) => Ok(Bool(a != b)),
         (BinOp::Lt, a, b) => cmp(a, b, span).map(|o| Bool(o == std::cmp::Ordering::Less)),

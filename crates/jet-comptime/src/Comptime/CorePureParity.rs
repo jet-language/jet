@@ -46,6 +46,7 @@ pub(super) fn evaluate(
         ("core.time", "zone") => zone_named(args, span),
         ("core.time", "zoned") => zoned_from_datetime(args, span),
         ("core.time", "zoned_local") => zoned_from_local(args, span),
+        ("core.math", "decimal") => decimal_from_str(args, span),
         ("core.science.measurement", "from") => measurement(args, span),
         ("core.time.date", "new") => date_new_call(args, span),
         ("core.time.date", "parse") => date_parse_call(args, span),
@@ -190,6 +191,18 @@ pub(super) fn evaluate_method(
             .value())
         }),
         ("Zone", "name", 0) => string_field(recv, "Zone", "name", span),
+        ("Decimal", "to_string", 0) => decimal_from_value(recv, span)
+            .map(|decimal| CtValue::Str(decimal.to_string_rep())),
+        ("Decimal", "add" | "sub" | "mul", 1) => decimal_from_value(recv, span).and_then(|left| {
+            let right = decimal_from_value(&args[0], span)?;
+            let out = match method {
+                "add" => left.add(&right),
+                "sub" => left.sub(&right),
+                "mul" => left.mul(&right),
+                _ => unreachable!("decimal method guard"),
+            };
+            Ok(out.to_value())
+        }),
         ("ZonedDateTime", "date", 0) => zoned_from_value(recv, span).map(|zoned| zoned.date().value()),
         ("ZonedDateTime", "time", 0) => zoned_from_value(recv, span).map(|zoned| zoned.time().value()),
         ("ZonedDateTime", "offset_seconds", 0) => {
@@ -801,6 +814,17 @@ impl ZonedDateTime {
 
 fn zone_utc() -> CtValue {
     Zone::utc().value()
+}
+
+fn decimal_from_str(args: &[CtValue], span: Span) -> EvalResult {
+    match crate::Numeric::CtDecimal::from_str(string_arg(args, 0, span)?) {
+        Ok(decimal) => Ok(decimal.to_value()),
+        Err(error) => Err(unsupported(&error, span)),
+    }
+}
+
+fn decimal_from_value(value: &CtValue, span: Span) -> Result<crate::Numeric::CtDecimal, Diagnostic> {
+    crate::Numeric::CtDecimal::from_value(value).map_err(|error| unsupported(&error, span))
 }
 
 fn zone_named(args: &[CtValue], span: Span) -> EvalResult {
