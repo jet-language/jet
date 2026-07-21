@@ -490,7 +490,11 @@ fn run() {
 fn encoding_stream_foundation_types_are_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(&dir, "encoding_foundation",
+    let path = dir.join("foundation.json");
+    let bad_path = dir.join("bad-limits.json");
+    let path_text = path.to_string_lossy().replace('\\', "\\\\");
+    let bad_text = bad_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
         r#"
 use core.encoding as encoding
 use core.encoding.json as json
@@ -498,33 +502,102 @@ use core.encoding.jsonl as jsonl
 use core.encoding.csv as csv
 use core.encoding.xml as xml
 use core.encoding.cbor as cbor
+use core.files as files
 
-fn keep_error(v: ^encoding.EncodingError) -> encoding.EncodingError { return v }
-fn keep_cause(v: ^encoding.EncodingCause) -> encoding.EncodingCause { return v }
-fn keep_event(v: ^encoding.DataEvent) -> encoding.DataEvent { return v }
-fn keep_format(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat { return v }
-fn keep_kind(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind { return v }
-fn keep_json_reader(v: ^json.JSONReader) -> json.JSONReader { return v }
-fn keep_json_writer(v: ^json.JSONWriter) -> json.JSONWriter { return v }
-fn keep_jsonl_reader(v: ^jsonl.JSONLReader) -> jsonl.JSONLReader { return v }
-fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) -> jsonl.JSONLWriter { return v }
-fn keep_csv_reader(v: ^csv.CSVReader) -> csv.CSVReader { return v }
-fn keep_csv_writer(v: ^csv.CSVWriter) -> csv.CSVWriter { return v }
-fn keep_xml_reader(v: ^xml.XMLReader) -> xml.XMLReader { return v }
-fn keep_xml_writer(v: ^xml.XMLWriter) -> xml.XMLWriter { return v }
-fn keep_cbor_reader(v: ^cbor.CBORReader) -> cbor.CBORReader { return v }
-fn keep_cbor_writer(v: ^cbor.CBORWriter) -> cbor.CBORWriter { return v }
+fn keep_error(v: ^encoding.EncodingError) -> encoding.EncodingError {{ return v }}
+fn keep_cause(v: ^encoding.EncodingCause) -> encoding.EncodingCause {{ return v }}
+fn keep_event(v: ^encoding.DataEvent) -> encoding.DataEvent {{ return v }}
+fn keep_format(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat {{ return v }}
+fn keep_kind(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind {{ return v }}
+fn keep_json_reader(v: ^json.JSONReader) -> json.JSONReader {{ return v }}
+fn keep_json_writer(v: ^json.JSONWriter) -> json.JSONWriter {{ return v }}
+fn keep_jsonl_reader(v: ^jsonl.JSONLReader) -> jsonl.JSONLReader {{ return v }}
+fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) -> jsonl.JSONLWriter {{ return v }}
+fn keep_csv_reader(v: ^csv.CSVReader) -> csv.CSVReader {{ return v }}
+fn keep_csv_writer(v: ^csv.CSVWriter) -> csv.CSVWriter {{ return v }}
+fn keep_xml_reader(v: ^xml.XMLReader) -> xml.XMLReader {{ return v }}
+fn keep_xml_writer(v: ^xml.XMLWriter) -> xml.XMLWriter {{ return v }}
+fn keep_cbor_reader(v: ^cbor.CBORReader) -> cbor.CBORReader {{ return v }}
+fn keep_cbor_writer(v: ^cbor.CBORWriter) -> cbor.CBORWriter {{ return v }}
 
-fn run() {
+fn run() {{
     limits: encoding.EncodingLimits := encoding.EncodingLimits.safe()
-    print("{limits.buffer_bytes}:{limits.max_depth}:{limits.max_item_bytes}:{limits.max_expansion_depth}:{limits.max_expansion_bytes}")
-}
-"#,
-        &[],
-        None,
+    print("{{limits.buffer_bytes}}:{{limits.max_depth}}:{{limits.max_item_bytes}}:{{limits.max_expansion_depth}}:{{limits.max_expansion_bytes}}")
+    if limits.max_total_bytes == None {{ print(true) }} else {{ print(false) }}
+    print(keep_format(^encoding.EncodingFormat.JSON) == encoding.EncodingFormat.JSON)
+    print(keep_kind(^encoding.EncodingErrorKind.Limit) == encoding.EncodingErrorKind.Limit)
+
+    cause := encoding.EncodingCause.{{ kind: "io", os_code: None, message: "nope" }}
+    kept_cause := keep_cause(^cause)
+    print(kept_cause.kind)
+    print(kept_cause.message)
+
+    err := encoding.EncodingError.{{
+        format: encoding.EncodingFormat.JSON,
+        kind: encoding.EncodingErrorKind.Limit,
+        byte_offset: 0,
+        line: None,
+        column: None,
+        path: "",
+        reason: "buffer_bytes 1 is outside 4096..16777216",
+        cause: None,
+    }}
+    kept_err := keep_error(^err)
+    print(kept_err.format == encoding.EncodingFormat.JSON)
+    print(kept_err.kind == encoding.EncodingErrorKind.Limit)
+    print(kept_err.byte_offset)
+    if kept_err.cause == None {{ print(true) }} else {{ print(false) }}
+    print("{{kept_err}}")
+
+    event := encoding.DataEvent.Null
+    kept_event := keep_event(^event)
+    print(true)
+
+    output :: files.create("{path_text}") ?? panic("create")
+    writer :: json.writer(^output, limits, false) ?? panic("writer")
+    kept_writer := keep_json_writer(^writer)
+    kept_writer.write(encoding.DataEvent.Null) ?? panic("write")
+    kept_writer.finish() ?? panic("finish")
+
+    bad := encoding.EncodingLimits.safe()
+    bad.buffer_bytes = 1
+    bad_output :: files.create("{bad_text}") ?? panic("bad create")
+    if json.writer(^bad_output, bad, false) == {{
+        Ok(_) -> {{ print("limits-missed") }}
+        Err(reject) -> {{
+            print("{{reject}}")
+            print(reject.format == encoding.EncodingFormat.JSON)
+            print(reject.kind == encoding.EncodingErrorKind.Limit)
+            print(reject.reason)
+        }}
+    }}
+}}
+"#
     );
+    let (code, stdout, stderr) = build_and_run(&dir, "encoding_foundation", &source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert_eq!(stdout, "65536:256:16777216:32:8388608\n");
+    assert_eq!(
+        stdout,
+        concat!(
+            "65536:256:16777216:32:8388608\n",
+            "true\n",
+            "true\n",
+            "true\n",
+            "io\n",
+            "nope\n",
+            "true\n",
+            "true\n",
+            "0\n",
+            "true\n",
+            "JSON Limit at byte 0: buffer_bytes 1 is outside 4096..16777216\n",
+            "true\n",
+            "JSON Limit at byte 0, line 1, column 1: buffer_bytes 1 is outside 4096..16777216\n",
+            "true\n",
+            "true\n",
+            "buffer_bytes 1 is outside 4096..16777216\n",
+        )
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), "null");
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1213,6 +1286,7 @@ fn run() {{
     near_limits.buffer_bytes = 4096
     near_limits.max_depth = 1
     near_limits.max_item_bytes = 100000
+    near_limits.max_expansion_bytes = 0
     near_input :: files.open("{near_string_path}") ?? panic("near string open")
     near_reader :: jsonl.reader(^near_input, near_limits) ?? panic("near string reader")
     near_result :: near_reader.next()
@@ -1302,8 +1376,659 @@ fn run() {{
     );
     let (code, stdout, stderr) = build_and_run(&dir, "jsonl_heap", &source, &[], None);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert_eq!(stdout, "true\n$[0]\nJSON string allocation exceeded the bounded record resource limit\ntrue\n0\n$[0]\ntrue\ntrue\n$[0][63]\ntrue\ntrue\n$[0][\"key0073\"]\ntrue\n");
+    assert_eq!(stdout, "true\n$[0]\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n0\n$[0]\ntrue\ntrue\n$[0][63]\ntrue\ntrue\n$[0][\"key0073\"]\ntrue\n");
     assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn json_stream_drop_and_codec_heap_ceiling_are_enforced() {
+    let dir = std::env::temp_dir().join(format!("jet_json_stream_drop_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let partial_path = dir.join("partial.json");
+    let heap_path = dir.join("heap.json");
+    let key = "k".repeat(100_000);
+    fs::write(&heap_path, format!("{{\"{key}\":0}}")).unwrap();
+    let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+    let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn write_unfinished(path: String) {{
+    output :: files.create(path) ?? panic("create partial")
+    writer :: json.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
+    writer.flush() ?? panic("flush")
+    // no finish — Drop must close the handle without claiming success
+}}
+
+fn run() {{
+    write_unfinished("{partial}")
+    // Same-path reopen after Drop: unfinished bytes still on this path.
+    leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+    print(leftover == "[7")
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+    reopen_writer :: json.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
+    reopen_writer.finish() ?? panic("reopen finish")
+    finished :: files.read("{partial}") ?? panic("same-path read after finish")
+    print(finished == "null")
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 100000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{heap}") ?? panic("heap open")
+    reader :: json.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 4 {{
+        result :: reader.next()
+        if result == {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("heap-not-latched") }}
+                    Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "json_stream_drop_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "true\ntrue\n100003\n$\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
+    );
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null");
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("json_stream_drop_heap.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("JSON stream drop/heap default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn json_stream_number_token_stays_under_counting_allocator_ceiling() {
+    if !Command::new("rustc").arg("--version").output().is_ok() {
+        eprintln!("note: skipping JSON counting-allocator test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_json_counted_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let input_path = dir.join("number.json");
+    fs::write(&input_path, format!("1{}", "0".repeat(149_999))).unwrap();
+    let input = input_path.to_string_lossy().replace('\\', "\\\\");
+    let malformed_path = dir.join("malformed.json");
+    fs::write(&malformed_path, format!("1{}+", "0".repeat(199_998))).unwrap();
+    let malformed = malformed_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {{
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 150000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{input}") ?? panic("open number")
+    reader :: json.reader(^input, limits) ?? panic("create reader")
+    result :: reader.next()
+    if result == {{
+        Ok(_) -> {{ panic("oversized number allocation accepted") }}
+        Err(first) -> {{
+            print(first.reason)
+            again :: reader.next()
+            if again == {{
+                Ok(_) -> {{ panic("number allocation error not terminal") }}
+                Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.reason == second.reason) }}
+            }}
+        }}
+    }}
+
+    malformed_limits := encoding.EncodingLimits.safe()
+    malformed_limits.buffer_bytes = 4096
+    malformed_limits.max_depth = 1
+    malformed_limits.max_item_bytes = 200000
+    malformed_limits.max_expansion_bytes = 0
+    malformed_input :: files.open("{malformed}") ?? panic("open malformed number")
+    malformed_reader :: json.reader(^malformed_input, malformed_limits) ?? panic("create malformed reader")
+    malformed_result :: malformed_reader.next()
+    if malformed_result == {{
+        Ok(_) -> {{ panic("malformed number accepted") }}
+        Err(first) -> {{
+            print(first.reason)
+            again :: malformed_reader.next()
+            if again == {{
+                Ok(_) -> {{ panic("malformed number error not terminal") }}
+                Err(second) -> {{ print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason) }}
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let path = dir.join("counted.jet");
+    fs::write(&path, &source).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(&source, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected fixture:\n{}", jet::render_diagnostics(&shown, &source, &diags))
+    });
+    let renamed = out.rust.replacen(
+        "fn jet_enc_json_reader_next(",
+        "fn jet_enc_json_reader_next_inner(",
+        1,
+    );
+    assert_ne!(renamed, out.rust, "generated JSON reader seam changed");
+    let allocator = r#"
+mod jet_json_alloc_probe {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    pub struct CountingAlloc;
+    static COUNTING: AtomicBool = AtomicBool::new(false);
+    static LIVE: AtomicUsize = AtomicUsize::new(0);
+    static PEAK: AtomicUsize = AtomicUsize::new(0);
+    fn add(size: usize) {
+        let live = LIVE.fetch_add(size, Ordering::SeqCst) + size;
+        PEAK.fetch_max(live, Ordering::SeqCst);
+    }
+    unsafe impl GlobalAlloc for CountingAlloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let ptr = System.alloc(layout);
+            if !ptr.is_null() && COUNTING.load(Ordering::SeqCst) { add(layout.size()); }
+            ptr
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if COUNTING.load(Ordering::SeqCst) { LIVE.fetch_sub(layout.size(), Ordering::SeqCst); }
+            System.dealloc(ptr, layout);
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, old: Layout, new_size: usize) -> *mut u8 {
+            let counting = COUNTING.load(Ordering::SeqCst);
+            if counting { LIVE.fetch_sub(old.size(), Ordering::SeqCst); }
+            let next = System.realloc(ptr, old, new_size);
+            if counting { if next.is_null() { add(old.size()); } else { add(new_size); } }
+            next
+        }
+    }
+    pub fn begin() {
+        LIVE.store(0, Ordering::SeqCst);
+        PEAK.store(0, Ordering::SeqCst);
+        COUNTING.store(true, Ordering::SeqCst);
+    }
+    pub fn finish() -> usize {
+        COUNTING.store(false, Ordering::SeqCst);
+        PEAK.load(Ordering::SeqCst)
+    }
+}
+#[global_allocator]
+static JET_JSON_ALLOC: jet_json_alloc_probe::CountingAlloc = jet_json_alloc_probe::CountingAlloc;
+fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
+    let ceiling = jet_encoding_codec_heap_ceiling(&reader.limits);
+    jet_json_alloc_probe::begin();
+    let result = jet_enc_json_reader_next_inner(reader);
+    let peak = jet_json_alloc_probe::finish();
+    assert!(peak <= ceiling, "JSON requested allocation peak {peak} exceeded {ceiling}");
+    result
+}
+"#;
+    let rs = dir.join("counted.rs");
+    let bin = dir.join("counted");
+    let generated = renamed.replacen("#![allow(warnings)]", "", 1);
+    assert_ne!(generated, renamed, "generated crate attribute changed");
+    fs::write(&rs, format!("#![allow(warnings)]\n{allocator}\n{generated}")).unwrap();
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021", rs.to_str().unwrap(), "-o", bin.to_str().unwrap()])
+        .output().unwrap();
+    assert!(rustc.status.success(), "rustc rejected counted JSON program:\n{}", String::from_utf8_lossy(&rustc.stderr));
+    let run = Command::new(&bin).current_dir(&dir).output().unwrap();
+    assert!(run.status.success(), "counted JSON program failed:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout),
+        "JSON number allocation exceeded the bounded codec heap ceiling\ntrue\ninvalid JSON number\ntrue\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jsonl_stream_drop_and_codec_heap_ceiling_are_enforced() {
+    let dir = std::env::temp_dir().join(format!("jet_jsonl_stream_drop_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let partial_path = dir.join("partial.jsonl");
+    let heap_path = dir.join("heap.jsonl");
+    let key = "k".repeat(100_000);
+    fs::write(&heap_path, format!("{{\"{key}\":0}}\n")).unwrap();
+    let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+    let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn write_unfinished(path: String) {{
+    output :: files.create(path) ?? panic("create partial")
+    writer :: jsonl.writer(^output) ?? panic("writer")
+    writer.write(DataTree.Text("alpha")) ?? panic("record")
+    writer.flush() ?? panic("flush")
+    // no finish — Drop must leave the record LF unwritten (incomplete wire)
+}}
+
+fn run() {{
+    write_unfinished("{partial}")
+    // Same-path reopen after Drop: incomplete bytes (no record LF) still here.
+    leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+    print(leftover == "\"alpha\"")
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+    reopen_writer :: jsonl.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(DataTree.Null) ?? panic("reopen write")
+    reopen_writer.finish() ?? panic("reopen finish")
+    finished :: files.read("{partial}") ?? panic("same-path read after finish")
+    print(finished == "null\n")
+    // Honesty: unfinished Drop wire ≠ finished wire for the same value.
+    print(leftover != "\"alpha\"\n")
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 100000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{heap}") ?? panic("heap open")
+    reader :: jsonl.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 4 {{
+        result :: reader.next()
+        if result == {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("heap-not-latched") }}
+                    Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "jsonl_stream_drop_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "true\ntrue\ntrue\n100003\n$[0]\nJSON string allocation exceeded the bounded codec heap ceiling\ntrue\n"
+    );
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null\n");
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("jsonl_stream_drop_heap.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("JSONL stream drop/heap default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "null\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn csv_stream_drop_and_codec_heap_ceiling_are_enforced() {
+    let dir = std::env::temp_dir().join(format!("jet_csv_stream_drop_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let partial_path = dir.join("partial.csv");
+    let heap_path = dir.join("heap.csv");
+    // Capacity doubles to 131072; the next byte charges past the shared codec
+    // heap ceiling while still under max_item_bytes (same counting allocator).
+    let field = "x".repeat(131_072);
+    fs::write(&heap_path, format!("{field}y")).unwrap();
+    let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+    let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.csv as csv
+use core.files as files
+
+fn write_unfinished(path: String) {{
+    output :: files.create(path) ?? panic("create partial")
+    writer :: csv.writer(^output) ?? panic("writer")
+    writer.write(["alpha", "beta"]) ?? panic("record")
+    writer.flush() ?? panic("flush")
+    // no finish — Drop must leave the record CRLF unwritten (incomplete wire)
+}}
+
+fn run() {{
+    write_unfinished("{partial}")
+    // Same-path reopen after Drop: incomplete bytes (no record CRLF) still here.
+    leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+    print(leftover == "alpha,beta")
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+    reopen_writer :: csv.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(["done"]) ?? panic("reopen write")
+    reopen_writer.finish() ?? panic("reopen finish")
+    finished :: files.read("{partial}") ?? panic("same-path read after finish")
+    // finished is "done\\r\\n"; Jet has no \\r escape — prove via length + prefix.
+    print(finished.starts_with("done") && finished.len() == 6)
+    // Honesty: unfinished Drop wire ≠ finished row terminator.
+    print(leftover.len() == 10)
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 150000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{heap}") ?? panic("heap open")
+    reader :: csv.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 4 {{
+        result :: reader.next()
+        if result == {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("heap-not-latched") }}
+                    Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "csv_stream_drop_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "true\ntrue\ntrue\n131073\n$[0][0]\nCSV record heap exceeded the bounded codec heap ceiling\ntrue\n"
+    );
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "done\r\n");
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("csv_stream_drop_heap.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("CSV stream drop/heap default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "done\r\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn xml_stream_drop_and_codec_heap_ceiling_are_enforced() {
+    let dir = std::env::temp_dir().join(format!("jet_xml_stream_drop_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let partial_path = dir.join("partial.xml");
+    let heap_path = dir.join("heap.xml");
+    // Attribute text under max_item_bytes; raw_bytes→Array<Int> DataTree slots
+    // charge past the shared codec heap ceiling (same counting allocator).
+    // Keep modest: ByteLexer retains per-scalar units, so 128KiB hung the suite.
+    let attr = "x".repeat(8_192);
+    fs::write(&heap_path, format!("<r a=\"{attr}\"/>")).unwrap();
+    let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+    let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.xml as xml
+use core.files as files
+
+fn xml_name(local: String) -> DataTree {{
+    return DataTree.Object([
+        "raw": DataTree.Text(~local),
+        "prefix": DataTree.Null,
+        "local": DataTree.Text(~local),
+        "namespace_uri": DataTree.Null,
+    ])
+}}
+
+fn document_start() -> DataTree {{
+    return DataTree.Object([
+        "$xml_event": DataTree.Text("document_start"),
+        "encoding": DataTree.Null,
+        "bom": DataTree.Array([]),
+    ])
+}}
+
+fn document_end() -> DataTree {{
+    return DataTree.Object(["$xml_event": DataTree.Text("document_end")])
+}}
+
+fn element_start(empty_style: String) -> DataTree {{
+    return DataTree.Object([
+        "$xml_event": DataTree.Text("element_start"),
+        "name": xml_name("r"),
+        "namespaces": DataTree.Array([]),
+        "attributes": DataTree.Array([]),
+        "empty_style": DataTree.Text(~empty_style),
+        "open_lexical": DataTree.Object([
+            "raw_text": DataTree.Null,
+            "raw_bytes": DataTree.Null,
+            "semantic": DataTree.Object([
+                "name": xml_name("r"),
+                "namespaces": DataTree.Array([]),
+                "attributes": DataTree.Array([]),
+                "empty_style": DataTree.Text(~empty_style),
+            ]),
+        ]),
+    ])
+}}
+
+fn write_unfinished(path: String) {{
+    output :: files.create(path) ?? panic("create partial")
+    writer :: xml.writer(^output) ?? panic("writer")
+    writer.write(document_start()) ?? panic("document_start")
+    writer.write(element_start("explicit")) ?? panic("open root")
+    writer.flush() ?? panic("flush")
+    // no element_end / document_end / finish — Drop leaves incomplete open tag
+}}
+
+fn run() {{
+    write_unfinished("{partial}")
+    // Same-path reopen after Drop: incomplete open element still here.
+    leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+    print(leftover == "<r>")
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+    reopen_writer :: xml.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(document_start()) ?? panic("reopen start")
+    reopen_writer.write(element_start("empty")) ?? panic("reopen empty root")
+    reopen_writer.write(document_end()) ?? panic("reopen end")
+    reopen_writer.finish() ?? panic("reopen finish")
+    finished :: files.read("{partial}") ?? panic("same-path read after finish")
+    print(finished == "<r/>")
+    // Honesty: unfinished Drop wire ≠ finished complete document.
+    print(leftover != finished)
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 150000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{heap}") ?? panic("heap open")
+    reader :: xml.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 8 {{
+        result :: reader.next()
+        if result == {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("heap-not-latched") }}
+                    Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_stream_drop_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        format!(
+            "true\ntrue\ntrue\n{}\n$\nXML event heap exceeded the bounded codec heap ceiling\ntrue\n",
+            fs::metadata(&heap_path).unwrap().len()
+        )
+    );
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "<r/>");
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("xml_stream_drop_heap.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("XML stream drop/heap default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "<r/>");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cbor_stream_drop_and_codec_heap_ceiling_are_enforced() {
+    let dir = std::env::temp_dir().join(format!("jet_cbor_stream_drop_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let partial_path = dir.join("partial.cbor");
+    let heap_path = dir.join("heap.cbor");
+    // Capacity doubles to 131072; the next byte charges past the shared codec
+    // heap ceiling while still under max_item_bytes (same counting allocator).
+    let text = vec![b'x'; 131_073];
+    let mut heap_bytes = Vec::new();
+    heap_bytes.push(0x7a); // text, 4-byte length
+    heap_bytes.extend_from_slice(&(131_073u32).to_be_bytes());
+    heap_bytes.extend_from_slice(&text);
+    fs::write(&heap_path, &heap_bytes).unwrap();
+    let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+    let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn write_unfinished(path: String) {{
+    output :: files.create(path) ?? panic("create partial")
+    writer :: cbor.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    writer.write(encoding.DataEvent.Int(7)) ?? panic("int")
+    writer.flush() ?? panic("flush")
+    // no ArrayEnd / finish — Drop leaves buffered items unwritten (incomplete)
+}}
+
+fn run() {{
+    write_unfinished("{partial}")
+    // Same-path reopen after Drop: incomplete leftover still here (empty wire).
+    leftover :: files.read_bytes("{partial}") ?? panic("same-path read after Drop")
+    empty: [U8] :: []
+    print(leftover == empty)
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+    reopen_writer :: cbor.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
+    reopen_writer.finish() ?? panic("reopen finish")
+    finished :: files.read_bytes("{partial}") ?? panic("same-path read after finish")
+    null_wire: [U8] :: [246]
+    print(finished == null_wire)
+    // Honesty: unfinished Drop wire ≠ finished complete root.
+    print(leftover != finished)
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 150000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{heap}") ?? panic("heap open")
+    reader :: cbor.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 4 {{
+        result :: reader.next()
+        if result == {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("heap-not-latched") }}
+                    Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_stream_drop_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    // Header is 5 bytes (0x7a + u32 length); fail when doubling past 131072 payload bytes.
+    assert_eq!(
+        stdout,
+        "true\ntrue\ntrue\n131077\n$\nCBOR stream heap exceeded the bounded codec heap ceiling\ntrue\n"
+    );
+    assert_eq!(fs::read(&partial_path).unwrap(), [0xf6]);
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("cbor_stream_drop_heap.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("CBOR stream drop/heap default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read(&partial_path).unwrap(), [0xf6]);
     let _ = fs::remove_dir_all(&dir);
 }
 
