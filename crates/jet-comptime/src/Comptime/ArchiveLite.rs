@@ -2,8 +2,10 @@
 //!
 //! ZIP writes the same uncompressed single-entry shape as AOT's
 //! `ZipWriter::start_file(FileOptions::default())`; reads accept stored and
-//! DEFLATE entries. TAR reads ordinary ustar/GNU archives and writes portable
-//! ustar entries. Invalid inputs follow the AOT bridge and return empty values.
+//! DEFLATE entries. TAR reads ordinary ustar/GNU archives and writes GNU
+//! archives. Invalid inputs follow the AOT bridge and return empty values.
+
+use std::path::{Component, Path};
 
 const TAR_BLOCK: usize = 512;
 
@@ -200,6 +202,9 @@ fn tar_read_all(data: &[u8]) -> Vec<(String, Vec<u8>)> {
 fn tar_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
     let mut out = Vec::new();
     for (name, data) in entries {
+        if !tar_name_valid(name) {
+            continue;
+        }
         if split_ustar_name(name).is_none() {
             let mut long = name.as_bytes().to_vec();
             long.push(0);
@@ -209,6 +214,17 @@ fn tar_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
     }
     out.resize(out.len() + TAR_BLOCK * 2, 0);
     out
+}
+
+fn tar_name_valid(name: &str) -> bool {
+    !name.is_empty()
+        && !name.as_bytes().contains(&0)
+        && !Path::new(name).components().any(|component| {
+            matches!(
+                component,
+                Component::Prefix(_) | Component::RootDir | Component::ParentDir
+            )
+        })
 }
 
 fn append_tar_entry(out: &mut Vec<u8>, name: &str, data: &[u8], kind: u8) {
@@ -590,6 +606,17 @@ mod tests {
         assert_eq!(&tar[257..263], b"ustar\0");
         assert_eq!(tar_get(&tar, "hello.txt"), b"hello");
         assert_eq!(tar_names_json(&tar), "[\"hello.txt\"]");
+    }
+
+    #[test]
+    fn tar_rejects_invalid_names_without_dropping_valid_entries() {
+        for name in ["", "../x", "/x"] {
+            let valid = tar_add(&[], "keep.txt", b"keep");
+            let tar = tar_add(&valid, name, b"invalid");
+            assert_eq!(tar_names_json(&tar), "[\"keep.txt\"]");
+            assert_eq!(tar_get(&tar, "keep.txt"), b"keep");
+            assert_eq!(tar_get(&tar, name), b"");
+        }
     }
 
     #[test]

@@ -1296,6 +1296,14 @@ fn archive_view() -> String {
 }"#;
 const ARCHIVE_EXPECTED: &str =
     "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0";
+const ARCHIVE_INVALID_TAR_NAME_DECLS: &str = r#"use core.archive as archive
+fn invalid_tar_name_view(name: String) -> String {
+    empty: [U8] :: []
+    valid :: archive.tar_add(empty, "keep.txt", [1])
+    attempted :: archive.tar_add(valid, name, [2])
+    return "{archive.tar_names_json(attempted)}|{archive.tar_get(attempted, "keep.txt")}|{archive.tar_get(attempted, name)}"
+}"#;
+const ARCHIVE_INVALID_TAR_NAME_EXPECTED: &str = "[\"keep.txt\"]|[1]|[]";
 
 #[test]
 fn rustc_backed_archive_matches_aot_comptime_and_dev_tiers() {
@@ -1305,4 +1313,28 @@ fn rustc_backed_archive_matches_aot_comptime_and_dev_tiers() {
         ARCHIVE_EXPECTED
     );
     check_dev_tiers("archive-all-pure-calls", &source, ARCHIVE_EXPECTED);
+}
+
+#[test]
+fn archive_rejects_invalid_tar_names_across_aot_comptime_and_forced_interpreter() {
+    for (label, name) in [
+        ("empty", "\"\""),
+        ("parent", "\"../x\""),
+        ("absolute", "\"/x\""),
+    ] {
+        let source = parity_source(
+            &format!("invalid_tar_name_view({name})"),
+            ARCHIVE_INVALID_TAR_NAME_DECLS,
+        );
+        assert_eq!(
+            check_aot_comptime(&format!("archive/invalid-tar-name/{label}"), &source),
+            ARCHIVE_INVALID_TAR_NAME_EXPECTED,
+        );
+        check_dev_tiers_with_boundary(
+            &format!("archive-invalid-tar-name-{label}"),
+            &source,
+            ARCHIVE_INVALID_TAR_NAME_EXPECTED,
+            true,
+        );
+    }
 }
