@@ -227,6 +227,8 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) total: i64,
         pub(crate) eof: bool,
+        // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling for retained events.
+        pub(crate) allocation: super::JetJsonAllocationBudget,
     }
     pub struct XMLWriter {
         pub(crate) output: super::JetFileWriter,

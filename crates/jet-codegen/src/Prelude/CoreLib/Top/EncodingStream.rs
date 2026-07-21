@@ -2136,6 +2136,20 @@ fn jet_enc_xml_reader(
         options,
     )
     .map_err(jet_xml_stream_error)?;
+    let allocation = JetJsonAllocationBudget::new(jet_encoding_codec_heap_ceiling(&limits));
+    // Scratch read buffer is codec-owned for the reader lifetime.
+    if !allocation.charge(limits.buffer_bytes as usize) {
+        return Err(jet_std::EncodingError {
+            format: jet_std::EncodingFormat::XML,
+            kind: jet_std::EncodingErrorKind::Limit,
+            byte_offset: 0,
+            line: None,
+            column: None,
+            path: "$".to_string(),
+            reason: "XML event heap exceeded the bounded codec heap ceiling".to_string(),
+            cause: None,
+        });
+    }
     Ok(jet_std::XMLReader {
         input,
         limits,
@@ -2143,8 +2157,45 @@ fn jet_enc_xml_reader(
         terminal: None,
         total: 0,
         eof: false,
+        allocation,
     })
 }
+
+fn jet_xml_value_heap_cost(value: &crate::jet_xml_pull::Value) -> usize {
+    match value {
+        crate::jet_xml_pull::Value::Null
+        | crate::jet_xml_pull::Value::Bool(_)
+        | crate::jet_xml_pull::Value::Int(_) => 0,
+        crate::jet_xml_pull::Value::Text(text) => text.len(),
+        crate::jet_xml_pull::Value::Array(items) => items
+            .len()
+            .saturating_mul(std::mem::size_of::<jet_std::DataTree>())
+            .saturating_add(items.iter().map(jet_xml_value_heap_cost).fold(0usize, usize::saturating_add)),
+        crate::jet_xml_pull::Value::Object(entries) => entries
+            .len()
+            .saturating_mul(std::mem::size_of::<(String, jet_std::DataTree)>())
+            .saturating_add(
+                entries
+                    .iter()
+                    .map(|(key, value)| key.len().saturating_add(jet_xml_value_heap_cost(value)))
+                    .fold(0usize, usize::saturating_add),
+            ),
+    }
+}
+
+fn jet_xml_heap_error(offset: i64) -> jet_std::EncodingError {
+    jet_std::EncodingError {
+        format: jet_std::EncodingFormat::XML,
+        kind: jet_std::EncodingErrorKind::Limit,
+        byte_offset: offset,
+        line: None,
+        column: None,
+        path: "$".to_string(),
+        reason: "XML event heap exceeded the bounded codec heap ceiling".to_string(),
+        cause: None,
+    }
+}
+
 fn jet_enc_xml_reader_next(
     reader: &mut jet_std::XMLReader,
 ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
@@ -2154,9 +2205,33 @@ fn jet_enc_xml_reader_next(
     loop {
         match reader.scanner.next() {
             Ok(Some(event)) => {
-                return Ok(Some(jet_xml_to_data_tree(
-                    crate::jet_xml_pull::stream_event_value(event),
-                )))
+                // Lexical raw_bytes / BOM project to Array<Int> DataTree slots.
+                // Charge that projection before building so a hostile token fails
+                // closed without retaining the projected tree.
+                let slot = std::mem::size_of::<jet_std::DataTree>();
+                let prospective = event
+                    .raw_bytes
+                    .len()
+                    .saturating_mul(slot)
+                    .saturating_add(event.bom.len().saturating_mul(slot));
+                if !reader.allocation.charge(prospective) {
+                    let error = jet_xml_heap_error(reader.total);
+                    reader.terminal = Some(error.clone());
+                    return Err(error);
+                }
+                let value = crate::jet_xml_pull::stream_event_value(event);
+                let full = jet_xml_value_heap_cost(&value);
+                let extra = full.saturating_sub(prospective);
+                if extra > 0 && !reader.allocation.charge(extra) {
+                    reader.allocation.release(prospective);
+                    let error = jet_xml_heap_error(reader.total);
+                    reader.terminal = Some(error.clone());
+                    return Err(error);
+                }
+                let tree = jet_xml_to_data_tree(value);
+                // Returned DataTree leaves codec ownership (D-ENCSTREAM-SURFACE1).
+                reader.allocation.release(prospective.saturating_add(extra));
+                return Ok(Some(tree));
             }
             Ok(None) if reader.eof => return Ok(None),
             Ok(None) => {}

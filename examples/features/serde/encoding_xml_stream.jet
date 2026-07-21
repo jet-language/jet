@@ -1,0 +1,58 @@
+// D-ENCSTREAM-SURFACE1=A: bounded XML reader/writer lifecycle.
+use core.encoding as encoding
+use core.encoding.xml as xml
+use core.files as files
+
+fn xml_name(local: String) -> DataTree {
+    return DataTree.Object([
+        "raw": DataTree.Text(~local),
+        "prefix": DataTree.Null,
+        "local": DataTree.Text(~local),
+        "namespace_uri": DataTree.Null,
+    ])
+}
+
+fn write_catalog(path: String) {
+    output :: files.create(path) ?? panic("create")
+    writer :: xml.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(DataTree.Object([
+        "$xml_event": DataTree.Text("document_start"),
+        "encoding": DataTree.Null,
+        "bom": DataTree.Array([]),
+    ])) ?? panic("document_start")
+    writer.write(DataTree.Object([
+        "$xml_event": DataTree.Text("element_start"),
+        "name": xml_name("r"),
+        "namespaces": DataTree.Array([]),
+        "attributes": DataTree.Array([]),
+        "empty_style": DataTree.Text("empty"),
+        "open_lexical": DataTree.Object([
+            "raw_text": DataTree.Null,
+            "raw_bytes": DataTree.Null,
+            "semantic": DataTree.Object([
+                "name": xml_name("r"),
+                "namespaces": DataTree.Array([]),
+                "attributes": DataTree.Array([]),
+                "empty_style": DataTree.Text("empty"),
+            ]),
+        ]),
+    ])) ?? panic("root")
+    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")])) ?? panic("document_end")
+    writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
+}
+
+fn run() {
+    path :: "encoding_xml_stream_out.xml"
+    write_catalog(path)
+
+    input :: files.open(path) ?? panic("open")
+    reader :: xml.reader(^input) ?? panic("reader")
+    count := 0
+    loop count < 5 {
+        maybe :: reader.next() ?? panic("next")
+        if maybe == None { print("eof"); break }
+        print("event")
+        count++
+    }
+}

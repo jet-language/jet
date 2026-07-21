@@ -1651,6 +1651,145 @@ fn run() {{
 }
 
 #[test]
+fn xml_stream_drop_and_codec_heap_ceiling_are_enforced() {
+    let dir = std::env::temp_dir().join(format!("jet_xml_stream_drop_heap_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let partial_path = dir.join("partial.xml");
+    let heap_path = dir.join("heap.xml");
+    // Attribute text under max_item_bytes; raw_bytes→Array<Int> DataTree slots
+    // charge past the shared codec heap ceiling (same counting allocator).
+    // Keep modest: ByteLexer retains per-scalar units, so 128KiB hung the suite.
+    let attr = "x".repeat(8_192);
+    fs::write(&heap_path, format!("<r a=\"{attr}\"/>")).unwrap();
+    let partial = partial_path.to_string_lossy().replace('\\', "\\\\");
+    let heap = heap_path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.xml as xml
+use core.files as files
+
+fn xml_name(local: String) -> DataTree {{
+    return DataTree.Object([
+        "raw": DataTree.Text(~local),
+        "prefix": DataTree.Null,
+        "local": DataTree.Text(~local),
+        "namespace_uri": DataTree.Null,
+    ])
+}}
+
+fn document_start() -> DataTree {{
+    return DataTree.Object([
+        "$xml_event": DataTree.Text("document_start"),
+        "encoding": DataTree.Null,
+        "bom": DataTree.Array([]),
+    ])
+}}
+
+fn document_end() -> DataTree {{
+    return DataTree.Object(["$xml_event": DataTree.Text("document_end")])
+}}
+
+fn element_start(empty_style: String) -> DataTree {{
+    return DataTree.Object([
+        "$xml_event": DataTree.Text("element_start"),
+        "name": xml_name("r"),
+        "namespaces": DataTree.Array([]),
+        "attributes": DataTree.Array([]),
+        "empty_style": DataTree.Text(~empty_style),
+        "open_lexical": DataTree.Object([
+            "raw_text": DataTree.Null,
+            "raw_bytes": DataTree.Null,
+            "semantic": DataTree.Object([
+                "name": xml_name("r"),
+                "namespaces": DataTree.Array([]),
+                "attributes": DataTree.Array([]),
+                "empty_style": DataTree.Text(~empty_style),
+            ]),
+        ]),
+    ])
+}}
+
+fn write_unfinished(path: String) {{
+    output :: files.create(path) ?? panic("create partial")
+    writer :: xml.writer(^output) ?? panic("writer")
+    writer.write(document_start()) ?? panic("document_start")
+    writer.write(element_start("explicit")) ?? panic("open root")
+    writer.flush() ?? panic("flush")
+    // no element_end / document_end / finish — Drop leaves incomplete open tag
+}}
+
+fn run() {{
+    write_unfinished("{partial}")
+    // Same-path reopen after Drop: incomplete open element still here.
+    leftover :: files.read("{partial}") ?? panic("same-path read after Drop")
+    print(leftover == "<r>")
+    // Same-path recreate: Drop must have released the unfinished writer handle.
+    reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
+    reopen_writer :: xml.writer(^reopen_out) ?? panic("reopen writer")
+    reopen_writer.write(document_start()) ?? panic("reopen start")
+    reopen_writer.write(element_start("empty")) ?? panic("reopen empty root")
+    reopen_writer.write(document_end()) ?? panic("reopen end")
+    reopen_writer.finish() ?? panic("reopen finish")
+    finished :: files.read("{partial}") ?? panic("same-path read after finish")
+    print(finished == "<r/>")
+    // Honesty: unfinished Drop wire ≠ finished complete document.
+    print(leftover != finished)
+
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 150000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{heap}") ?? panic("heap open")
+    reader :: xml.reader(^input, limits) ?? panic("heap reader")
+    count := 0
+    loop count < 8 {{
+        result :: reader.next()
+        if result == {{
+            Ok(_) -> {{ count++ }}
+            Err(first) -> {{
+                again :: reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("heap-not-latched") }}
+                    Err(second) -> {{
+                        print(first.byte_offset)
+                        print(first.path)
+                        print(first.reason)
+                        print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                    }}
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_stream_drop_heap", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stdout,
+        format!(
+            "true\ntrue\ntrue\n{}\n$\nXML event heap exceeded the bounded codec heap ceiling\ntrue\n",
+            fs::metadata(&heap_path).unwrap().len()
+        )
+    );
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "<r/>");
+    assert_eq!(stderr, "");
+    let dev_path = dir.join("xml_stream_drop_heap.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+        }
+        other => panic!("XML stream drop/heap default-dev failed: {other:?}"),
+    }
+    assert_eq!(fs::read_to_string(&partial_path).unwrap(), "<r/>");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn csv_whole_value_handles_multiline_quotes_crlf_and_typed_decode() {
     let dir = std::env::temp_dir().join(format!("jet_csv_whole_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
