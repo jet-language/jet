@@ -559,8 +559,16 @@ impl CtValue {
             CtValue::ResOk(v) => v.jet_show(),
             CtValue::ResErr(_) => "err".to_string(),
             CtValue::Struct { type_name, fields } => {
+                // Comptime `Table`/`Series`/`LazyFrame` keep an internal
+                // `elem_type` string for empty-schema parity; AOT's
+                // DataTable/DataSeries/DataLazyFrame have no such field, so
+                // omit it from user-visible echo (I2 / AOT↔REPL shape).
                 let parts: Vec<String> = fields
                     .iter()
+                    .filter(|(n, _)| {
+                        !(matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame")
+                            && n == "elem_type")
+                    })
                     .map(|(n, v)| format!("{}: {}", n, v.jet_show()))
                     .collect();
                 format!("{}({})", type_name, parts.join(", "))

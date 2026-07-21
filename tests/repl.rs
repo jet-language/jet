@@ -2582,3 +2582,28 @@ fn repl_core_data_schema_empty_table_and_series_law() {
         "non-empty and empty Series<Ticket> both need value:Ticket (not expanded fields): {out}"
     );
 }
+
+#[test]
+fn repl_core_data_table_echo_hides_elem_type() {
+    let inputs = &[
+        "use core.data as data",
+        "struct Ticket { team: String minutes: Float }",
+        "empty_rows: [Ticket] := []",
+        "data.table(empty_rows)",
+        "data.series(empty_rows)",
+        "data.lazy(data.table(empty_rows))",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        !out.contains("E0956"),
+        "core.data containers should dispatch at comptime, got: {out}"
+    );
+    assert!(
+        out.contains("Table(rows:") && out.contains("Series(values:") && out.contains("LazyFrame(rows:"),
+        "expected Table/Series/LazyFrame echoes: {out}"
+    );
+    assert!(
+        !out.contains("elem_type:"),
+        "elem_type is comptime-only metadata; must not leak into REPL echo: {out}"
+    );
+}
