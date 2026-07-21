@@ -265,10 +265,10 @@ fn default_origin_limits() -> &'static Arc<OriginLimits> {
     LIMITS.get_or_init(|| Arc::new(OriginLimits::default()))
 }
 
-/// D-HTTP-CLIENT2: automatic connection retries are bounded (max one) and never
-/// keyed off response status. Default `Safe` covers GET/HEAD/OPTIONS/TRACE;
-/// `.retries(.Idempotent)` opts in PUT/DELETE; `None` disables. POST/PATCH never
-/// auto-retry.
+/// D-HTTP-CLIENT2: automatic retries only for a stale pooled connection *before
+/// request bytes* (max one), never keyed off response status or post-write I/O.
+/// Default `Safe` covers GET/HEAD/OPTIONS/TRACE; `.retries(.Idempotent)` opts in
+/// PUT/DELETE; `None` disables. POST/PATCH never auto-retry.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RetryPolicy {
     None,
@@ -3097,7 +3097,13 @@ fn send_once_upload(
     )?;
     let write_started = Instant::now();
     if let Err((error, wrote_any)) = write_request(&mut stream, &request) {
-        if reused && !wrote_any && connection_retry_allowed(retry_policy, method) {
+        // D-HTTP-CLIENT2: reconnect only on stale-pool Io before any request
+        // bytes — never Timeout / post-write first-byte failures.
+        if reused
+            && !wrote_any
+            && matches!(error, JetHttpBridgeError::Io)
+            && connection_retry_allowed(retry_policy, method)
+        {
             let mut fresh = connect(
                 &dns,
                 &facts,
@@ -3135,71 +3141,18 @@ fn send_once_upload(
         .peer_addr()
         .map(|address| address.to_string())
         .unwrap_or_default();
-    let mut response = match read_response(
+    let mut response = read_response(
         stream,
-        key.clone(),
-        pool.clone(),
+        key,
+        pool,
         method == "HEAD",
         decompress,
-        facts.clone(),
+        facts,
         request_started,
         read_timeout,
         total_deadline,
         permit,
-    ) {
-        Ok(response) => response,
-        // Stale pooled socket may accept the request write then EOF on first
-        // byte. Safe/idempotent bodyless methods reconnect once (max one).
-        Err(error)
-            if reused
-                && !has_body
-                && matches!(error, JetHttpBridgeError::Io)
-                && connection_retry_allowed(retry_policy, method) =>
-        {
-            let mut fresh = connect(
-                &dns,
-                &facts,
-                url,
-                proxy,
-                dns_timeout,
-                connect_timeout,
-                tls_timeout,
-                total_deadline,
-                false,
-                true,
-                false,
-                tls,
-            )?;
-            set_stream_timeouts(
-                &mut fresh,
-                first_byte_timeout,
-                write_timeout,
-                total_deadline,
-            )?;
-            write_request(&mut fresh, &request).map_err(|(error, _)| error)?;
-            let permit = limits.acquire(key.clone(), total_deadline)?;
-            let remote_address = fresh
-                .peer_addr()
-                .map(|address| address.to_string())
-                .unwrap_or_default();
-            let mut response = read_response(
-                fresh,
-                key,
-                pool,
-                method == "HEAD",
-                decompress,
-                facts,
-                request_started,
-                read_timeout,
-                total_deadline,
-                permit,
-            )?;
-            response.reused_connection = false;
-            response.remote_address = remote_address;
-            return Ok(response);
-        }
-        Err(error) => return Err(error),
-    };
+    )?;
     response.reused_connection = reused;
     response.remote_address = remote_address;
     Ok(response)

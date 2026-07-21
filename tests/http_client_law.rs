@@ -2315,29 +2315,76 @@ fn run() {{
 
 #[test]
 fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
-    use std::net::Shutdown;
+    /// RST so the next pooled write fails before any request bytes (ECONNRESET),
+    /// not a post-write first-byte EOF that must not reconnect under D-HTTP-CLIENT2.
+    fn rst_before_next_write(stream: TcpStream) {
+        use std::os::fd::AsRawFd;
+        #[repr(C)]
+        struct Linger {
+            l_onoff: i32,
+            l_linger: i32,
+        }
+        // Avoid unstable `TcpStream::set_linger`: SO_LINGER zero → RST on close.
+        extern "C" {
+            fn setsockopt(
+                sockfd: i32,
+                level: i32,
+                optname: i32,
+                optval: *const core::ffi::c_void,
+                optlen: u32,
+            ) -> i32;
+        }
+        // Linux socket constants (this law harness runs on Linux).
+        const SOL_SOCKET: i32 = 1;
+        const SO_LINGER: i32 = 13;
+        let linger = Linger {
+            l_onoff: 1,
+            l_linger: 0,
+        };
+        unsafe {
+            setsockopt(
+                stream.as_raw_fd(),
+                SOL_SOCKET,
+                SO_LINGER,
+                (&linger as *const Linger).cast(),
+                std::mem::size_of::<Linger>() as u32,
+            );
+        }
+        drop(stream);
+    }
+
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     let url = format!("http://{addr}/");
     let puts = Arc::new(AtomicUsize::new(0));
     let puts_observed = puts.clone();
     let server = std::thread::spawn(move || {
-        // 1) Default Safe: warm + stale GET reconnects once.
+        // 1) Same TCP proves pool reuse, then RST forces write-path Io reconnect.
         let (mut stream, _) = listener.accept().unwrap();
         assert!(request_head(&mut stream).starts_with(b"GET /warm HTTP/1.1\r\n"));
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nw")
             .unwrap();
-        let _ = stream.shutdown(Shutdown::Both);
-        drop(stream);
+        // Second request on THIS socket — no new accept — proves keepalive reuse.
+        // Vacuous "always dial fresh" clients hang here and fail the harness.
+        assert!(
+            request_head(&mut stream).starts_with(b"GET /reuse HTTP/1.1\r\n"),
+            "expected pooled reuse on the same TCP connection"
+        );
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nr")
+            .unwrap();
+        rst_before_next_write(stream);
 
         let (mut stream, _) = listener.accept().unwrap();
-        assert!(request_head(&mut stream).starts_with(b"GET /retry HTTP/1.1\r\n"));
+        assert!(
+            request_head(&mut stream).starts_with(b"GET /retry HTTP/1.1\r\n"),
+            "Safe must reconnect once after write-before-bytes Io on a reused pool socket"
+        );
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok")
             .unwrap();
-        let _ = stream.shutdown(Shutdown::Both);
-        drop(stream);
+        rst_before_next_write(stream);
 
         // 2) Safe: warm + POST fails on stale socket without dialing again.
         let (mut stream, _) = listener.accept().unwrap();
@@ -2345,8 +2392,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nx")
             .unwrap();
-        let _ = stream.shutdown(Shutdown::Both);
-        drop(stream);
+        rst_before_next_write(stream);
 
         // 3) retries(.None): warm + stale GET fails without reconnect.
         let (mut stream, _) = listener.accept().unwrap();
@@ -2359,8 +2405,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\ny")
             .unwrap();
-        let _ = stream.shutdown(Shutdown::Both);
-        drop(stream);
+        rst_before_next_write(stream);
 
         // 4) Safe denies PUT retry (no dial); Idempotent opts in.
         let (mut stream, _) = listener.accept().unwrap();
@@ -2373,8 +2418,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nz")
             .unwrap();
-        let _ = stream.shutdown(Shutdown::Both);
-        drop(stream);
+        rst_before_next_write(stream);
 
         let (mut stream, _) = listener.accept().unwrap();
         let head = request_head(&mut stream);
@@ -2386,8 +2430,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\nConnection: keep-alive\r\n\r\nq")
             .unwrap();
-        let _ = stream.shutdown(Shutdown::Both);
-        drop(stream);
+        rst_before_next_write(stream);
 
         let (mut stream, _) = listener.accept().unwrap();
         puts_observed.fetch_add(1, Ordering::Relaxed);
@@ -2461,11 +2504,24 @@ fn main() {
 
     let warm = format!("{base}warm");
     let first = send(safe, "GET", &warm, None).unwrap();
+    assert!(!bridge::jet_http_client_response_reused_impl(first.1));
     assert_eq!(drain(first.1), b"w");
+
+    // Same pool socket as /warm — proves reuse before the write-fail arm.
+    let reuse = format!("{base}reuse");
+    let pooled = send(safe, "GET", &reuse, None).unwrap();
+    assert!(
+        bridge::jet_http_client_response_reused_impl(pooled.1),
+        "write-path retry proof requires a reused pooled connection first"
+    );
+    assert_eq!(drain(pooled.1), b"r");
 
     let retry = format!("{base}retry");
     let second = send(safe, "GET", &retry, None).unwrap();
-    assert!(!bridge::jet_http_client_response_reused_impl(second.1));
+    assert!(
+        !bridge::jet_http_client_response_reused_impl(second.1),
+        "write-before-bytes Io reconnect must dial fresh"
+    );
     assert_eq!(drain(second.1), b"ok");
 
     let warm2 = format!("{base}warm2");
