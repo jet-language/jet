@@ -17,6 +17,7 @@ mod structure_tests {
     fn method_modules_stay_below_the_split_threshold() {
         for (name, source) in [
             ("dispatch", include_str!("Methods/dispatch.rs")),
+            ("eval_method", include_str!("Methods/dispatch/eval_method.rs")),
             ("repl_process", include_str!("Methods/repl_process.rs")),
             ("core_calls", include_str!("Methods/core_calls.rs")),
             ("pool", include_str!("Methods/pool.rs")),
