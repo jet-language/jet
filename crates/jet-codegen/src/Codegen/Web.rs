@@ -228,7 +228,7 @@ fn is_map_string_int(ty: &Type) -> bool {
         ty,
         Type::Map { key, value, .. }
             if matches!(**key, Type::String)
-                && matches!(**value, Type::Int | Type::IntN { .. })
+                && matches!(**value, Type::Int)
     )
 }
 
@@ -320,7 +320,12 @@ fn web_wasm_expr_supported(
                 r.local_rust == *local && r.fields.iter().any(|(field, _, _)| field == field_rust)
             })
         }
-        TIR::TExprKind::Index { base, index, is_map: true, .. } => {
+        TIR::TExprKind::Index {
+            base,
+            index,
+            is_map: true,
+            ..
+        } => {
             web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
                 && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
         }
@@ -381,7 +386,9 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
         E::ListLit(elements) => elements.iter().all(web_expr_supported),
-        E::MapLit(entries) => entries.iter().all(|(key, value)| web_expr_supported(key) && web_expr_supported(value)),
+        E::MapLit(entries) => entries
+            .iter()
+            .all(|(key, value)| web_expr_supported(key) && web_expr_supported(value)),
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
@@ -701,10 +708,7 @@ fn js_abi_call_args(
             ));
             vec![format!("_{name}")]
         }
-        Type::Map { key, value, .. }
-            if matches!(**key, Type::String)
-                && matches!(**value, Type::Int | Type::IntN { .. }) =>
-        {
+        ty if is_map_string_int(ty) => {
             prelude.push_str(&format!(
                 "  const _{name} = jetDom.marshalAbi({name}, \"map-string-int\", wasm);\n"
             ));
@@ -1041,7 +1045,9 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
             } else if is_list_string(ty) {
                 out.push_str(&format!("    let {name} = jet_abi_list_string_arg({name});\n"));
             } else if is_map_string_int(ty) {
-                out.push_str(&format!("    let {name} = jet_abi_map_string_i64_arg({name});\n"));
+                out.push_str(&format!(
+                    "    let {name} = jet_abi_map_string_i64_arg({name});\n"
+                ));
             }
         }
         for reconstruction in &f.tir.web_param_reconstructions {
@@ -1142,8 +1148,7 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("Vec<i64>"),
         Type::List(inner) if matches!(**inner, Type::String) => Some("Vec<String>"),
         Type::Map { key, value, .. }
-            if matches!(**key, Type::String)
-                && matches!(**value, Type::Int | Type::IntN { .. }) =>
+            if matches!(**key, Type::String) && matches!(**value, Type::Int) =>
         {
             Some("std::collections::BTreeMap<String, i64>")
         }
@@ -1359,7 +1364,12 @@ fn wasm_emit_expr(
             }
             format!("({}).{}", wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?, field_rust)
         }
-        TIR::TExprKind::Index { base, index, is_map: true, .. } => format!(
+        TIR::TExprKind::Index {
+            base,
+            index,
+            is_map: true,
+            ..
+        } => format!(
             "({}).get(&({})).cloned().expect(\"index miss\")",
             wasm_emit_expr(base, funcs, file_prefix, reconstructions)?,
             wasm_emit_expr(index, funcs, file_prefix, reconstructions)?,
@@ -1438,7 +1448,11 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
                 Some(ty) if is_map_string_int(ty) => "map-string-int",
                 _ => "scalar",
             };
-            if ret_kind == "string" || ret_kind == "list-int" || ret_kind == "list-string" || ret_kind == "map-string-int" {
+            if ret_kind == "string"
+                || ret_kind == "list-int"
+                || ret_kind == "list-string"
+                || ret_kind == "map-string-int"
+            {
                 out.push_str(&format!(
                     "  return jetDom.unmarshalAbi(raw, \"{ret_kind}\", wasm);\n"
                 ));
@@ -1616,6 +1630,35 @@ fn tir_plain_args(args: &[TIR::TExpr], funcs: &[FuncWeb], file_prefix: Option<&s
     args.iter().map(|a| tir_js_expr(a, funcs, file_prefix)).collect()
 }
 
+fn tir_js_abi_int_expr(
+    expr: &TIR::TExpr,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<String, ()> {
+    use TIR::TExprKind as E;
+    match &expr.kind {
+        E::IntLit(n, _) => Ok(format!("{n}n")),
+        E::Unary { op, operand } => Ok(format!(
+            "({}{})",
+            unop(op),
+            tir_js_abi_int_expr(operand, funcs, file_prefix)?
+        )),
+        E::Binary { op, lhs, rhs, .. } => Ok(format!(
+            "({} {} {})",
+            tir_js_abi_int_expr(lhs, funcs, file_prefix)?,
+            binop(op),
+            tir_js_abi_int_expr(rhs, funcs, file_prefix)?
+        )),
+        E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => {
+            tir_js_abi_int_expr(inner, funcs, file_prefix)
+        }
+        _ => Ok(format!(
+            "BigInt({})",
+            tir_js_expr(expr, funcs, file_prefix)?
+        )),
+    }
+}
+
 fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<String, ()> {
     use TIR::TExprKind as E;
     Ok(match &expr.kind {
@@ -1635,11 +1678,19 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::ListLit(elements) => format!("[{}]", elements.iter().map(|element| tir_js_expr(element, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", ")),
         E::MapLit(entries) => format!(
             "new Map([{}])",
-            entries.iter().map(|(key, value)| Ok(format!(
-                "[{}, {}]",
-                tir_js_expr(key, funcs, file_prefix)?,
-                tir_js_expr(value, funcs, file_prefix)?,
-            ))).collect::<Result<Vec<_>, ()>>()?.join(", ")
+            entries
+                .iter()
+                .map(|(key, value)| Ok(format!(
+                    "[{}, {}]",
+                    tir_js_expr(key, funcs, file_prefix)?,
+                    if matches!(&value.ty, Type::Int) {
+                        tir_js_abi_int_expr(value, funcs, file_prefix)?
+                    } else {
+                        tir_js_expr(value, funcs, file_prefix)?
+                    },
+                )))
+                .collect::<Result<Vec<_>, ()>>()?
+                .join(", ")
         ),
         E::Call { name, args } => {
             let name = local_web_key(file_prefix, name);

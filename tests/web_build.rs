@@ -946,10 +946,14 @@ fn web_missing_return_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
-    let src = "@Target(Web)\n@WasmExport\nfn echo(xs: [Float]) -> [Float] { return ~xs }\nfn run() {}\n";
+    let src =
+        "@Target(Web)\n@WasmExport\nfn echo(xs: [Float]) -> [Float] { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_wasm_abi.jet")
         .expect_err("unsupported Wasm ABI must be rejected before emission");
-    assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
+    assert!(
+        diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"),
+        "{diags:?}"
+    );
 }
 
 #[test]
@@ -957,7 +961,10 @@ fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
     let src = "@Target(Web)\nfn helper(xs: [Float]) -> [Float] { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_internal_wasm_abi.jet")
         .expect_err("unsupported internal Wasm ABI must be rejected before emission");
-    assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
+    assert!(
+        diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"),
+        "{diags:?}"
+    );
 }
 
 #[test]
@@ -1009,10 +1016,19 @@ fn run() { print("hello, web") }
         .expect("host dev entry and web run body must compile through their own execution paths");
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
-    assert!(wasm.contains("fn jet_wasm_tools__dev() -> i64"), "module tools.dev was not emitted:\n{wasm}");
-    assert!(wasm.contains("println!(\"{}\", \"hello, web\".to_string())"), "literal TIR print was not emitted:\n{wasm}");
+    assert!(
+        wasm.contains("fn jet_wasm_tools__dev() -> i64"),
+        "module tools.dev was not emitted:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("println!(\"{}\", \"hello, web\".to_string())"),
+        "literal TIR print was not emitted:\n{wasm}"
+    );
     let js = &web.js_app;
-    assert!(!js.contains("function dev("), "top-level host dev leaked into JS runtime:\n{js}");
+    assert!(
+        !js.contains("function dev("),
+        "top-level host dev leaked into JS runtime:\n{js}"
+    );
 }
 
 #[test]
@@ -1701,7 +1717,9 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
     );
     assert!(
         wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) -> u32")
-            && wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32)"),
+            && wasm.contains(
+                "pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32)"
+            ),
         "map-string-int ownership exports missing:\n{wasm}"
     );
     assert!(
@@ -1728,5 +1746,127 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
     let stdout = run_web_app(&dir);
     let expected = include_str!("../examples/features/expected/web/web_wasm_map.out");
     assert_eq!(stdout, expected);
+
+    let harness = r#"
+import { marshalAbi, unmarshalAbi } from "./jet_dom_runtime.js";
+
+function check(ok, message) {
+  if (!ok) throw new Error(message);
+}
+
+let cursor = 16;
+const frees = [];
+const wasm = {
+  memory: { buffer: new ArrayBuffer(4096) },
+  jet_abi_map_string_i64_alloc(byteLen) {
+    const ptr = cursor;
+    cursor += byteLen;
+    return ptr;
+  },
+  jet_abi_map_string_i64_free(ptr, byteLen) {
+    frees.push([ptr, byteLen]);
+  },
+};
+const limits = new Map([
+  ["min", -9223372036854775808n],
+  ["max", 9223372036854775807n],
+  ["above-safe", 9007199254740993n],
+  ["below-safe", -9007199254740993n],
+  ["small", 7n],
+]);
+const packed = marshalAbi(limits, "map-string-int", wasm);
+const decoded = unmarshalAbi(packed, "map-string-int", wasm);
+for (const [key, value] of limits) {
+  check(typeof decoded.get(key) === "bigint", `${key} was not BigInt`);
+  check(decoded.get(key) === value, `${key} changed`);
+}
+const repacked = marshalAbi(decoded, "map-string-int", wasm);
+const decodedTwice = unmarshalAbi(repacked, "map-string-int", wasm);
+for (const [key, value] of limits) check(decodedTwice.get(key) === value, `${key} changed on re-marshal`);
+try {
+  marshalAbi(new Map([["number", 1]]), "map-string-int", wasm);
+  throw new Error("Number-backed Int accepted");
+} catch (error) {
+  check(error instanceof TypeError, "Number-backed Int was not rejected");
+}
+
+let allocations = 0;
+const bounded = {
+  memory: { buffer: new ArrayBuffer(64) },
+  jet_abi_map_string_i64_alloc() { allocations += 1; return 60; },
+  jet_abi_map_string_i64_free(ptr, byteLen) { frees.push([ptr, byteLen]); },
+};
+class HugeMap extends Map { get size() { return 0x1_0000_0000; } }
+try {
+  marshalAbi(new HugeMap([["x", 1n]]), "map-string-int", bounded);
+  throw new Error("count overflow accepted");
+} catch (error) {
+  check(error instanceof RangeError, "count overflow was not a RangeError");
+}
+check(allocations === 0, "count overflow allocated");
+
+const RealTextEncoder = globalThis.TextEncoder;
+globalThis.TextEncoder = class { encode() { return { length: 0x1_0000_0000 }; } };
+try {
+  marshalAbi(new Map([["x", 1n]]), "map-string-int", bounded);
+  throw new Error("key length overflow accepted");
+} catch (error) {
+  check(error instanceof RangeError, "key length overflow was not a RangeError");
+}
+check(allocations === 0, "key length overflow allocated");
+
+globalThis.TextEncoder = class { encode() { return { length: 0xfffffff4 }; } };
+try {
+  marshalAbi(new Map([["x", 1n]]), "map-string-int", bounded);
+  throw new Error("blob length overflow accepted");
+} catch (error) {
+  check(error instanceof RangeError, "blob length overflow was not a RangeError");
+}
+check(allocations === 0, "blob length overflow allocated");
+globalThis.TextEncoder = RealTextEncoder;
+
+try {
+  marshalAbi(new Map([["x", 1n]]), "map-string-int", bounded);
+  throw new Error("bounded write unexpectedly succeeded");
+} catch (error) {
+  check(error instanceof RangeError, "bounded write did not fail at the memory boundary");
+}
+check(frees.some(([ptr]) => ptr === 60), "post-allocation write failure leaked");
+
+const highBit = {
+  memory: { buffer: new ArrayBuffer(64) },
+  jet_abi_map_string_i64_alloc() { return -2147483648; },
+  jet_abi_map_string_i64_free(ptr, byteLen) { frees.push([ptr, byteLen]); },
+};
+try {
+  marshalAbi(new Map([["x", 1n]]), "map-string-int", highBit);
+  throw new Error("high-bit pointer unexpectedly fit bounded memory");
+} catch (error) {
+  check(error instanceof RangeError, "high-bit pointer did not reach the memory boundary");
+}
+check(frees.some(([ptr, len]) => ptr === 0x80000000 && len > 0), "signed allocation pointer was not freed as u32");
+
+try {
+  unmarshalAbi((0x80000000n << 32n) | 4n, "map-string-int", highBit);
+  throw new Error("high-bit return pointer unexpectedly fit bounded memory");
+} catch (error) {
+  check(error instanceof RangeError, "high-bit return pointer did not reach the memory boundary");
+}
+check(frees.some(([ptr, len]) => ptr === 0x80000000 && len === 4), "high-bit return pointer was not freed as u32");
+console.log("ok");
+"#;
+    fs::write(dir.join("build/map_abi_harness.mjs"), harness).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("map_abi_harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "map ABI hostile harness failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&node.stdout), "ok\n");
     let _ = fs::remove_dir_all(&dir);
 }

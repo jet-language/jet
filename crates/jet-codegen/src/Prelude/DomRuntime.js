@@ -481,6 +481,30 @@ export async function instantiateWasm(wasmPath, imports = {}) {
   return instance;
 }
 
+const JET_ABI_U32_MAX = 0xffffffff;
+
+function abiU32(value, label) {
+  if (!Number.isInteger(value) || value < 0 || value > JET_ABI_U32_MAX) {
+    throw new RangeError(`${label} exceeds u32`);
+  }
+  return value >>> 0;
+}
+
+function abiWasmU32(value, label) {
+  if (!Number.isInteger(value) || value < -0x80000000 || value > JET_ABI_U32_MAX) {
+    throw new RangeError(`${label} is not a Wasm i32/u32`);
+  }
+  return value >>> 0;
+}
+
+function abiAddU32(total, amount, label) {
+  amount = abiU32(amount, label);
+  if (total > JET_ABI_U32_MAX - amount) {
+    throw new RangeError(`${label} exceeds u32`);
+  }
+  return total + amount;
+}
+
 /** D-JSBIND1=A: marshal ABI-safe values at the JS/WASM boundary.
  *  String params: TextEncoder → jet_abi_string_alloc → packed u64 (ptr<<32)|len.
  *  [Int] params: BigInt64Array → jet_abi_list_i64_alloc → packed u64 (ptr<<32)|len.
@@ -528,7 +552,8 @@ export function marshalAbi(value, kind, wasm) {
     if (!(value instanceof Map)) {
       throw new TypeError("map-string-int ABI expects a Map");
     }
-    if (value.size === 0) return 0n;
+    const count = abiU32(value.size, "map-string-int ABI entry count");
+    if (count === 0) return 0n;
     const enc = new TextEncoder();
     const entries = [];
     let byteLen = 4;
@@ -536,34 +561,42 @@ export function marshalAbi(value, kind, wasm) {
       if (typeof key !== "string") {
         throw new TypeError("map-string-int ABI expects String keys");
       }
-      if (typeof raw !== "number" && typeof raw !== "bigint") {
-        throw new TypeError("map-string-int ABI expects Int values");
+      if (typeof raw !== "bigint") {
+        throw new TypeError("map-string-int ABI expects BigInt values");
       }
-      if (typeof raw === "number" && !Number.isSafeInteger(raw)) {
-        throw new TypeError("map-string-int ABI expects safe integer values");
-      }
-      const int = BigInt(raw);
+      const int = raw;
       if (int < -(1n << 63n) || int > (1n << 63n) - 1n) {
         throw new RangeError("map-string-int ABI value exceeds Int range");
       }
       const bytes = enc.encode(key);
       entries.push([bytes, int]);
-      byteLen += 4 + bytes.length + 8;
+      abiU32(bytes.length, "map-string-int ABI key length");
+      byteLen = abiAddU32(byteLen, 4, "map-string-int ABI blob length");
+      byteLen = abiAddU32(byteLen, bytes.length, "map-string-int ABI blob length");
+      byteLen = abiAddU32(byteLen, 8, "map-string-int ABI blob length");
     }
-    const ptr = wasm.jet_abi_map_string_i64_alloc(byteLen);
-    const bytes = new Uint8Array(wasm.memory.buffer, ptr, byteLen);
-    const view = new DataView(wasm.memory.buffer, ptr, byteLen);
-    view.setUint32(0, entries.length, true);
-    let o = 4;
-    for (const [key, int] of entries) {
-      view.setUint32(o, key.length, true);
-      o += 4;
-      bytes.set(key, o);
-      o += key.length;
-      view.setBigInt64(o, int, true);
-      o += 8;
+    const ptr = abiWasmU32(
+      wasm.jet_abi_map_string_i64_alloc(byteLen),
+      "map-string-int ABI allocation pointer",
+    );
+    try {
+      const bytes = new Uint8Array(wasm.memory.buffer, ptr, byteLen);
+      const view = new DataView(wasm.memory.buffer, ptr, byteLen);
+      view.setUint32(0, count, true);
+      let o = 4;
+      for (const [key, int] of entries) {
+        view.setUint32(o, key.length, true);
+        o += 4;
+        bytes.set(key, o);
+        o += key.length;
+        view.setBigInt64(o, int, true);
+        o += 8;
+      }
+      return (BigInt(ptr) << 32n) | BigInt(byteLen);
+    } catch (error) {
+      wasm.jet_abi_map_string_i64_free(ptr, byteLen);
+      throw error;
     }
-    return (BigInt(ptr) << 32n) | BigInt(byteLen);
   }
   if (kind === "struct-point") {
     return { x: Number(value?.x ?? 0), y: Number(value?.y ?? 0) };
@@ -618,15 +651,19 @@ export function unmarshalAbi(value, kind, wasm) {
     return out;
   }
   if (kind === "map-string-int") {
-    const packed = typeof value === "bigint" ? value : BigInt(value);
-    const ptr = Number(packed >> 32n);
-    const byteLen = Number(packed & 0xffffffffn);
+    const packed = BigInt.asUintN(64, typeof value === "bigint" ? value : BigInt(value));
+    const ptr = Number((packed >> 32n) & 0xffffffffn) >>> 0;
+    const byteLen = Number(packed & 0xffffffffn) >>> 0;
     if (byteLen === 0) {
       if (ptr !== 0) wasm.jet_abi_map_string_i64_free(ptr, 0);
       return new Map();
     }
-    const bytes = new Uint8Array(wasm.memory.buffer, ptr, byteLen).slice();
-    wasm.jet_abi_map_string_i64_free(ptr, byteLen);
+    let bytes;
+    try {
+      bytes = new Uint8Array(wasm.memory.buffer, ptr, byteLen).slice();
+    } finally {
+      wasm.jet_abi_map_string_i64_free(ptr, byteLen);
+    }
     if (byteLen < 4) throw new Error("invalid map-string-int ABI header");
     const view = new DataView(bytes.buffer);
     const count = view.getUint32(0, true);
@@ -637,10 +674,12 @@ export function unmarshalAbi(value, kind, wasm) {
       if (o + 4 > byteLen) throw new Error("invalid map-string-int ABI key length");
       const len = view.getUint32(o, true);
       o += 4;
-      if (o + len + 8 > byteLen) throw new Error("invalid map-string-int ABI entry");
+      if (len > byteLen - o || byteLen - o - len < 8) {
+        throw new Error("invalid map-string-int ABI entry");
+      }
       const key = dec.decode(bytes.subarray(o, o + len));
       o += len;
-      out.set(key, Number(view.getBigInt64(o, true)));
+      out.set(key, view.getBigInt64(o, true));
       o += 8;
     }
     if (o !== byteLen) throw new Error("invalid map-string-int ABI trailing bytes");
