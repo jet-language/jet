@@ -227,6 +227,11 @@ impl Huffman {
             return None;
         }
         weights.push((32 - leftover.leading_zeros()) as u8);
+        if !weights.contains(&1)
+            || weights.iter().filter(|weight| **weight != 0).take(2).count() < 2
+        {
+            return None;
+        }
         let lengths = weights
             .iter()
             .map(|weight| if *weight == 0 { 0 } else { log + 1 - *weight })
@@ -474,6 +479,11 @@ mod tests {
     fn entropy_headers_reject_truncation_and_oversized_counts() {
         assert!(literals(&[], &mut HuffmanState::default()).is_none());
         assert!(literals(&[0xff], &mut HuffmanState::default()).is_none());
+        assert!(literals(
+            &[0x12, 0xc0, 0x00, 0x80, 0x20, 0x02],
+            &mut HuffmanState::default(),
+        )
+        .is_none());
         assert!(Huffman::parse(&[0]).is_none());
         assert!(FseTable::parse(&[0xff], 6, 255).is_none());
     }
