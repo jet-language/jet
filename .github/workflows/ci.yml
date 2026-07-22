@@ -1,14 +1,17 @@
 name: CI
 
-# D-CI3=A: full suite on every push (flags red, never blocks — no branch
-# protection changes here). Nightly lane adds rotating-seed fuzzing
-# (N>=1000) and the perf ratchet.
+# CI paused during active development churn (2026-07-22).
+# Automatic push/PR/schedule triggers removed; workflow kept for later restore.
+# To re-enable, restore:
+#   on:
+#     push:
+#     pull_request:
+#     schedule:
+#       - cron: "0 3 * * *"
+# Previous policy (D-CI3=A): full suite on every push (flags red, never
+# blocks). Nightly lane adds rotating-seed fuzzing (N>=1000) and perf ratchet.
 on:
-  push:
-  pull_request:
-  schedule:
-    # Nightly fuzz + perf ratchet lane, 03:00 UTC.
-    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 jobs:
   cffi-native-matrix:
