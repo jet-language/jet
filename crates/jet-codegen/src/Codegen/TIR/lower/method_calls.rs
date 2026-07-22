@@ -739,6 +739,17 @@ pub(crate) fn lower_method_call(
             };
         }
     }
+    // D-TTL-CLOCK2=A: one explicit monotonic production Clock constructor.
+    if matches!(receiver, Expr::Ident(name, _) if name == Syntax::CLOCK_TYPE)
+        && method == "system"
+        && args.is_empty()
+        && !env.locals.contains_key(Syntax::CLOCK_TYPE)
+    {
+        return TExpr {
+            ty: Type::Named(Syntax::CLOCK_TYPE.to_string()),
+            kind: TExprKind::ConstInline(format!("{}jet_std_clock_system()", cx.root_prefix)),
+        };
+    }
     // D-SHAPE-DURATION1=A: a bare `Duration.unit(value)` is a type-owned
     // checked constructor, not an instance/static user method.
     {

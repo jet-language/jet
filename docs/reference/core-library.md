@@ -1385,6 +1385,7 @@ fn run() {
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
 | `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
+| `Clock.system()` | `Clock` | An explicit monotonic production clock capability; carries the `Time` effect |
 | `Duration.milliseconds/seconds/minutes/hours(n)` | `Duration ? RangeError` | Checked runtime elapsed-time span |
 | `period(years, months, days)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Calendar span for local-date arithmetic |
 
@@ -1421,10 +1422,15 @@ data reaches Jet.
 integer, `time.now()` returns that value instead of the real clock. Tests use
 this to pin output; normal programs ignore it.
 
-A `fn … --[]->` cannot call ambient `time.now()` (E3403 — the wall clock is not
-reproducible). To use time inside a `fn … --[]->`, take a seeded `Clock` **as a
-parameter** and read through it; the clock only moves when you `tick` it, so the
-result is reproducible:
+A `fn … --[]->` cannot call ambient `time.now()` or construct `Clock.system()`
+(E3403 — the system clock is not reproducible). `Clock.system()` is the explicit
+production-clock constructor; `time.clock(seed)` remains the manual clock for
+deterministic tests. Copying either clock creates an independent timeline at the
+same observed instant.
+
+To use time inside a `fn … --[]->`, take a seeded `Clock` **as a parameter** and
+read through it; the clock only moves when you `tick` it, so the result is
+reproducible:
 
 ```jet
 fn at(clock: Clock) --[]-> Int {

@@ -85,24 +85,29 @@ fn jet_std_time_start() -> jet_std::Stopwatch {
 // time/randomness THROUGH the handle and stay reproducible. No wall-clock or
 // OS-RNG read; std-only (no external crate, I6).
 fn jet_std_clock_new(seed: i64) -> jet_std::Clock {
-    jet_std::Clock { now: seed }
+    jet_std::Clock::manual(seed)
+}
+fn jet_std_clock_system() -> jet_std::Clock {
+    jet_std::Clock::system()
 }
 fn jet_clock_now(c: &jet_std::Clock) -> i64 {
-    c.now
+    c.now()
 }
 fn jet_clock_tick(c: &mut jet_std::Clock, ms: i64) -> i64 {
-    c.now = c.now.wrapping_add(ms);
-    c.now
+    let now = c.now().wrapping_add(ms);
+    c.set(now);
+    now
 }
 // D-DET-CAPAPI: `clock.advance(to_ms)` sets the clock to an ABSOLUTE instant;
 // `clock.wait(d)` advances by a `Duration` (relative). Both return the new value.
 fn jet_clock_advance(c: &mut jet_std::Clock, to_ms: i64) -> i64 {
-    c.now = to_ms;
-    c.now
+    c.set(to_ms);
+    to_ms
 }
 fn jet_clock_wait(c: &mut jet_std::Clock, d: &jet_std::Duration) -> i64 {
-    c.now = c.now.wrapping_add(d.ms);
-    c.now
+    let now = c.now().wrapping_add(d.ms);
+    c.set(now);
+    now
 }
 fn jet_std_rng_new(seed: i64) -> jet_std::Rng {
     jet_std::Rng { state: seed as u64 }

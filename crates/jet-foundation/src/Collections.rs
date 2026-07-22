@@ -385,6 +385,9 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "new", 1) if n == crate::Syntax::SOLVER_TYPE => {
             Some(Some(Type::Named(crate::Syntax::SOLVER_TYPE.to_string())))
         }
+        (Type::Named(n), "system", 0) if n == crate::Syntax::CLOCK_TYPE => {
+            Some(Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())))
+        }
         (Type::Named(n), method, 1)
             if n == crate::Syntax::DURATION_TYPE
                 && crate::Syntax::DURATION_CONSTRUCTORS.contains(&method) =>

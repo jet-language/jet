@@ -1062,6 +1062,9 @@ pub(crate) fn static_method_call_in_subset(
     if locals.contains(type_name) {
         return false;
     }
+    if matches!((type_name, method, args.len()), ("Clock", "system", 0)) {
+        return true;
+    }
     if matches!((type_name, method, args.len()), ("Int" | "Float", "parse", 1)) {
         return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);
     }

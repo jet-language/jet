@@ -984,6 +984,7 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
         Syntax::TYPE_STRING => Some(Type::String),
         Syntax::TYPE_CHAR => Some(Type::Char),
         Syntax::DURATION_TYPE => Some(Type::Named(Syntax::DURATION_TYPE.to_string())),
+        Syntax::CLOCK_TYPE => Some(Type::Named(Syntax::CLOCK_TYPE.to_string())),
         _ => None,
     }
 }

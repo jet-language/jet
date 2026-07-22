@@ -543,7 +543,7 @@ fn jet_std_uuid_v4() -> String {
 }
 
 fn jet_std_uuid_v7(clock: &jet_std::Clock) -> String {
-    let ts_ms = clock.now as u64;
+    let ts_ms = clock.now() as u64;
     let mut bytes = [0u8; 16];
     // 48-bit timestamp in the high bytes
     bytes[0] = (ts_ms >> 40) as u8;

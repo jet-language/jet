@@ -408,6 +408,15 @@ impl<'a> Checker<'a> {
                                 return Some(ret);
                             }
                             if let Some(ret) = Collections::builtin_method_return(&ty, method, args.len(), true) {
+                                if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
+                                    self.record_effect(Effect::Time.name(), span);
+                                    if self.in_pure && self.det_suppress == 0 {
+                                        self.diags.push(crate::Sema::e3403(
+                                            "Clock.system",
+                                            Some(span),
+                                        ));
+                                    }
+                                }
                                 let ret = self.finish_builtin_method(receiver, method, &ty, args, span, ret);
                                 let ret = if matches!(ns.as_str(), "jet.crypto" | "core.crypto") {
                                     ret.map(crate::Sema::Diagnostics::core_crypto_nominal)
@@ -635,6 +644,15 @@ impl<'a> Checker<'a> {
                         if let Some(ret) =
                             Collections::builtin_method_return(&ty, method, args.len(), true)
                         {
+                            if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
+                                self.record_effect(Effect::Time.name(), span);
+                                if self.in_pure && self.det_suppress == 0 {
+                                    self.diags.push(crate::Sema::e3403(
+                                        "Clock.system",
+                                        Some(span),
+                                    ));
+                                }
+                            }
                             return self
                                 .finish_builtin_method(receiver, method, &ty, args, span, ret);
                         }

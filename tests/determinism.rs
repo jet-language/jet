@@ -9,6 +9,8 @@
 //!   2. `@Nondeterministic("reason") { … }` — expert escape suspending
 //!      determinism rejections (E3401/E3403) for its body.
 
+mod common;
+
 // ── Piece 1: injected deterministic Clock / Rng ───────────────────────────────
 
 /// A `@Pure fn` reading time through an injected `Clock` param compiles.
@@ -69,6 +71,49 @@ fn run() { print("{seeded()}") }
         "cap constructors should be pure: {:?}",
         res.err()
     );
+}
+
+/// D-TTL-CLOCK2=A: production code can explicitly create a monotonic system
+/// Clock, while the constructor itself remains an ambient Time effect.
+#[test]
+fn system_clock_is_monotonic_and_effectful() {
+    let pure = r#"
+fn bad() --[]-> Int {
+    clock := Clock.system()
+    return clock.now()
+}
+fn run() { print(bad()) }
+"#;
+    let diags = jet::compile(pure).expect_err("Clock.system must carry Time");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E3403"),
+        "expected E3403, got {:?}",
+        diags.iter().map(|diag| diag.code.as_str()).collect::<Vec<_>>()
+    );
+
+    if !common::have_rustc() {
+        return;
+    }
+    let runtime = r#"
+use core.time as time
+
+fn run() {
+    clock := Clock.system()
+    before := clock.now()
+    time.sleep(2)
+    after := clock.now()
+    print(after >= before)
+
+    manual := time.clock(10)
+    copied := ~manual
+    copied.tick(5)
+    print("{manual.now()}|{copied.now()}")
+}
+"#;
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_system_clock", "system_clock", runtime);
+    assert_eq!(code, 0, "system clock failed: {stderr}");
+    assert_eq!(stdout, "true\n10|15\n");
 }
 
 /// Ambient `time.now()` inside a `@Pure fn` is STILL E3403 — the injection is
