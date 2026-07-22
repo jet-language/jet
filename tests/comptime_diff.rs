@@ -335,6 +335,25 @@ fn run() {
 }
 
 #[test]
+fn zstd_72_mib_advertised_window_matches_resident_and_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping zstd window differential");
+        return;
+    }
+    let src = r#"use core.compress.zstd as zstd
+
+comptime expected = zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [255]
+
+fn run() {
+    actual: [U8] :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [255]
+    print("{expected}")
+    print("{actual}")
+}
+"#;
+    check_comptime_src(32_003, "zstd 72 MiB advertised window", src);
+}
+
+#[test]
 fn comptime_bigint_matches_runtime() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping BigInt differential battery");

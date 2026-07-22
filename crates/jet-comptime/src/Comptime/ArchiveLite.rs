@@ -14,6 +14,7 @@ use std::path::{Component, Path};
 const TAR_BLOCK: usize = 512;
 const MAX_CODEC_OUTPUT: usize = 64 * 1024 * 1024;
 const ZSTD_BLOCK_MAX: usize = 128 * 1024;
+const ZSTD_WINDOW_MAX: u64 = 128 * 1024 * 1024;
 const U32_MAX_U64: u64 = u32::MAX as u64;
 
 /// Emit a standards-valid Zstandard frame without bringing the native `zstd`
@@ -96,8 +97,10 @@ pub(super) fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
         } else {
             window.ok_or_else(|| fail("invalid zstd data"))?
         };
-        if window > MAX_CODEC_OUTPUT as u64 || expected.is_some_and(|n| n > MAX_CODEC_OUTPUT as u64)
-        {
+        if window > ZSTD_WINDOW_MAX {
+            return Err(fail("frame exceeds the 128 MiB window limit"));
+        }
+        if expected.is_some_and(|n| n > MAX_CODEC_OUTPUT as u64) {
             return Err(fail("frame exceeds the 64 MiB output limit"));
         }
         let block_max = window.min(ZSTD_BLOCK_MAX as u64) as usize;
@@ -1140,6 +1143,13 @@ mod tests {
             .contains("dictionary frames are unsupported"));
         let oversized = [40, 181, 47, 253, 160, 1, 0, 0, 4];
         assert!(zstd_decompress(&oversized).unwrap_err().contains("64 MiB"));
+        let max_window = [40, 181, 47, 253, 0, 136, 41, 0, 0, 104, 101, 108, 108, 111];
+        assert_eq!(zstd_decompress(&max_window), Ok(b"hello".to_vec()));
+        let oversized_window =
+            [40, 181, 47, 253, 0, 137, 41, 0, 0, 104, 101, 108, 108, 111];
+        assert!(zstd_decompress(&oversized_window)
+            .unwrap_err()
+            .contains("128 MiB"));
         assert!(zstd_decompress(&[]).is_err());
         assert!(zstd_decompress(&[40, 181, 47]).is_err());
     }
