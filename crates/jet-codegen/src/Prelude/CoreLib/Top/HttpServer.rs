@@ -4041,10 +4041,7 @@ fn jet_http_srv_access_log(req: &JetHttpRequest, status: i64) -> String {
 /// on the response when the handler did not set the header.
 fn jet_http_request_id_valid(value: &str) -> bool {
     let len = value.len();
-    (1..=128).contains(&len)
-        && value.bytes().all(|byte| {
-            byte.is_ascii_graphic() || byte == b' ' || byte == b'\t'
-        })
+    (1..=128).contains(&len) && value.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
 fn jet_http_new_request_id() -> String {

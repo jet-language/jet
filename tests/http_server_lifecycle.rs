@@ -3051,6 +3051,23 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
             .is_some_and(|value| value.starts_with("req-")),
         "empty inbound id must be replaced"
     );
+    for unsafe_id in ["space separated", "tab\tseparated"] {
+        let mut request = JetHttpRequest::server(
+            "GET",
+            "/id".to_string(),
+            Vec::new(),
+            JetHttpHeaders::new(),
+        );
+        request.headers.set("x-request-id", unsafe_id).unwrap();
+        let response = jet_http_mux_dispatch(&mux, request).expect("dispatch unsafe id");
+        assert!(
+            response
+                .headers
+                .get("x-request-id")
+                .is_some_and(|value| value.starts_with("req-")),
+            "log-unsafe inbound id was preserved: {unsafe_id:?}",
+        );
+    }
     let server = jet_http_server_bind(&"127.0.0.1:0".to_string(), mux).expect("bind");
     let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
         .expect("addr")
@@ -3089,9 +3106,106 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
     );
     assert!(preserved.ends_with("\r\n\r\nclient-trace-7"), "{preserved}");
 
+    let pipelined = {
+        use std::io::{Read, Write};
+        let mut stream = std::net::TcpStream::connect(addr).unwrap();
+        stream
+            .write_all(b"GET /id HTTP/1.1\r\nHost: local\r\n\r\nGET /id HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        stream.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    };
+    let pipeline_ids = pipelined
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("x-request-id")
+                .then(|| value.trim().to_string())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(pipeline_ids.len(), 2, "{pipelined}");
+    assert_ne!(pipeline_ids[0], pipeline_ids[1], "pipelined requests reused an id");
+    assert!(
+        pipelined.contains(&format!("\r\n\r\n{}HTTP/1.1", pipeline_ids[0])),
+        "first pipelined response body did not match its id: {pipelined}",
+    );
+    assert!(pipelined.ends_with(&format!("\r\n\r\n{}", pipeline_ids[1])), "{pipelined}");
+
     let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 200 }).expect("shutdown");
     assert_eq!(report.user_completed, report.user_accepted, "{report:?}");
     let _ = serve.join().expect("serve join");
+}
+
+#[test]
+fn builtin_request_id_crosses_cleartext_http2() {
+    use std::io::Write;
+
+    let mux = jet_http_mux_new();
+    jet_http_srv_install_request_id(&mux);
+    jet_http_mux_add(&mux, "GET", "/id", |request| {
+        jet_http_srv_response(
+            200,
+            &request
+                .headers
+                .get("x-request-id")
+                .cloned()
+                .unwrap_or_else(|| "missing".to_string()),
+        )
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(
+            listener,
+            mux,
+            JetHttpServerOptions::safe(),
+            server_shutdown,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+    });
+
+    let mut client = std::net::TcpStream::connect(addr).unwrap();
+    client
+        .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+        .unwrap();
+    client.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").unwrap();
+    client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+    client
+        .write_all(&h2_frame(1, 0x5, 1, &h2_request_headers(0x82, "/id")))
+        .unwrap();
+    client.flush().unwrap();
+
+    let mut response_id = None;
+    let mut body = Vec::new();
+    for _ in 0..8 {
+        let (kind, flags, stream, payload) = h2_read_frame(&mut client);
+        if kind == 1 && stream == 1 {
+            let headers = jet_http2_decode_headers(&mut JetHttp2Hpack::new(), &payload).unwrap();
+            response_id = headers
+                .into_iter()
+                .find_map(|(name, value)| name.eq_ignore_ascii_case("x-request-id").then_some(value));
+        } else if kind == 0 && stream == 1 {
+            body.extend(payload);
+            if flags & 0x1 != 0 {
+                break;
+            }
+        }
+    }
+    let response_id = response_id.expect("HTTP/2 response request id");
+    assert!(response_id.starts_with("req-"), "{response_id}");
+    assert_eq!(body, response_id.as_bytes());
+
+    shutdown.store(true, std::sync::atomic::Ordering::Release);
+    drop(client);
+    let report = server.join().unwrap();
+    assert_eq!(report.user_accepted, 1);
 }
 
 #[test]
@@ -4351,6 +4465,7 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     // Real rustls path: Server.bind(tls) → keep-alive reuse → Server.shutdown stops
     // a third request. Plaintext JetHttpTlsConn stubs are not enough.
     let mux = jet_http_mux_new();
+    jet_http_srv_install_request_id(&mux);
     let calls = std::sync::Arc::new(AtomicUsize::new(0));
     let handler_calls = calls.clone();
     jet_http_mux_add(&mux, "GET", "/", move |_| {
@@ -4415,7 +4530,7 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     );
     let second = rustls_exchange(
         &mut client,
-        b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+        b"GET / HTTP/1.1\r\nHost: localhost\r\nX-Request-Id: tls-client-id\r\n\r\n",
     );
     let mut encoded_request = format!(
         "POST /encoded HTTP/1.1\r\nHost: localhost\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n",
@@ -4430,6 +4545,10 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     );
     assert!(first.contains("\r\n\r\nok1"), "{first}");
     assert!(second.contains("\r\n\r\nok2"), "{second}");
+    assert!(
+        second.to_ascii_lowercase().contains("x-request-id: tls-client-id\r\n"),
+        "{second}",
+    );
     assert!(encoded.contains("\r\n\r\nhello gzip"), "{encoded}");
     assert!(trailers.contains("Trailer: X-Checksum\r\n"), "{trailers}");
     assert!(trailers.ends_with("3\r\ntls\r\n0\r\nX-Checksum: tls-out\r\n\r\n"), "{trailers}");
