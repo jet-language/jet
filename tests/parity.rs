@@ -229,12 +229,12 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.uuid", "v7"),
 ];
 
-/// Production-dispatched calls whose implementation is deliberately partial.
-/// Unlike `KNOWN_OPEN_GAPS`, every entry must have a real comptime arm; unlike
-/// ordinary dispatch, it stays PurePending until the complete AOT contract is
-/// proven. Remove the entry in the same commit that completes the call.
-// Zstandard frame/raw/RLE decoding is resident, but compressed blocks still
-// require the complete Huffman/FSE substrate.
+/// Calls with a production-compiled foundation that must remain private until
+/// the complete AOT contract is resident. A public comptime arm is a false
+/// parity claim while an entry remains here. Remove the entry in the same
+/// commit that completes and dispatches the call.
+// Zstandard frame/raw/RLE decoding exists, but compressed blocks still require
+// the complete Huffman/FSE substrate.
 const KNOWN_PARTIAL_GAPS: &[(&str, &str)] = &[("core.compress.zstd", "decompress")];
 
 fn raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
@@ -1154,8 +1154,10 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                 && entry.method == method
         }) {
             errors.push(format!("stale partial gap: {module}.{method} is no longer discovered"));
-        } else if !ct_core.contains(&pair) {
-            errors.push(format!("stale partial gap: {module}.{method} has no comptime dispatch"));
+        } else if ct_core.contains(&pair) {
+            errors.push(format!(
+                "partial gap leaked into comptime dispatch: {module}.{method}"
+            ));
         }
     }
     let mut out = Vec::new();

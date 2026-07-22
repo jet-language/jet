@@ -37,7 +37,10 @@ pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
     out
 }
 
-pub(super) fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+// Staged decoder foundation. Keep private until compressed-block FSE/Huffman
+// support makes the whole public AOT contract resident.
+#[allow(dead_code)]
+fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     let fail = |reason: &str| format!("compress.zstd.decompress: {reason}");
     let mut input = 0usize;
     let mut out = Vec::new();
