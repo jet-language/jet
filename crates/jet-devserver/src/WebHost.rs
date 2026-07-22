@@ -515,12 +515,12 @@ impl DevStatus {
     }
 
     fn activate_requested_browser_trace(&self) {
-        self.activate_requested_browser_trace_from(|| fs::read_to_string("build/web.manifest.json").ok());
-    }
-
-    fn activate_requested_browser_trace_from(&self, manifest: impl FnOnce() -> Option<String>) {
-        if !matches!(crate::BrowserTrace::take_request(), Ok(true)) { return }
-        if let Some(manifest) = manifest() { let _ = self.activate_browser_trace(&manifest); }
+        if !matches!(crate::BrowserTrace::take_request(), Ok(true)) {
+            return;
+        }
+        if let Ok(manifest) = fs::read_to_string("build/web.manifest.json") {
+            let _ = self.activate_browser_trace(&manifest);
+        }
     }
 }
 
@@ -1465,59 +1465,8 @@ fn inject_live_reload(html: &str, nonce: &str) -> String {
 mod tests {
     use super::{
         format_build_time, format_line_colored, format_line_plain, frame_lines, header_words,
-        handle_connection, inject_live_reload, DevStatus, Ordering,
+        inject_live_reload, DevStatus, Ordering,
     };
-    use std::io::{Read, Write};
-    use std::net::{TcpListener, TcpStream};
-    use std::sync::Arc;
-
-    fn manifest(hash: char) -> String {
-        let map = format!("source\t6170702e6a6574\t{}\nsymbol\t6170702e6a6574\t72756e\tfn\nsymbol\t6170702e6a6574\t72756e2468616e646c657230\thandler", hash.to_string().repeat(64));
-        format!("{{\n  \"traceMap\": \"{}\"\n}}\n", crate::BrowserTrace::hex(map.as_bytes()))
-    }
-
-    fn post_browser(status: Arc<DevStatus>, nonce: &str) -> String {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = std::thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            handle_connection(stream, &status, "app.jet").unwrap();
-        });
-        let body = "class=event&symbol=run&start_ns=10&duration_ns=5&clock_ns=15";
-        let mut client = TcpStream::connect(address).unwrap();
-        write!(client, "POST /__jet_perf_browser?nonce={nonce} HTTP/1.1\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
-        client.shutdown(std::net::Shutdown::Write).unwrap();
-        let mut response = String::new();
-        client.read_to_string(&mut response).unwrap();
-        server.join().unwrap();
-        response
-    }
-
-    #[test]
-    fn browser_trace_attach_owns_nonce_endpoint_and_rebuild_lifecycle() {
-        let _guard = crate::BrowserTrace::TEST_LOCK.lock().unwrap();
-        let status = Arc::new(DevStatus::new("app.jet", false));
-        let normal = inject_live_reload("<body></body>", "");
-        assert!(!normal.contains("__jetPerfNow"), "normal jet dev started timing");
-        assert!(!normal.contains("/__jet_perf_browser"), "normal jet dev emitted beacons");
-        crate::BrowserTrace::request(std::process::id()).unwrap();
-        status.activate_requested_browser_trace_from(|| Some(manifest('a')));
-        let nonce = status.browser_relay.lock().unwrap().as_ref().unwrap().nonce().to_string();
-        let instrumented = inject_live_reload("<body></body>", &nonce);
-        assert!(instrumented.contains("__jetPerfNow"));
-        assert!(instrumented.contains(&format!("jetPerfNonce = \"{nonce}\"")));
-        assert!(post_browser(Arc::clone(&status), "stale").starts_with("HTTP/1.1 403"));
-        assert!(post_browser(Arc::clone(&status), &nonce).starts_with("HTTP/1.1 204"));
-        let capture = crate::BrowserTrace::read(std::process::id()).unwrap();
-        assert_eq!(capture.sources[0].sha256, "a".repeat(64));
-        assert_eq!(capture.rows[0].symbol, "run");
-        status.mark_building();
-        status.activate_browser_trace(&manifest('b')).unwrap();
-        let rebuilt_nonce = status.browser_relay.lock().unwrap().as_ref().unwrap().nonce().to_string();
-        assert_ne!(nonce, rebuilt_nonce);
-        assert!(post_browser(Arc::clone(&status), &nonce).starts_with("HTTP/1.1 403"));
-        assert!(post_browser(status, &rebuilt_nonce).starts_with("HTTP/1.1 204"));
-    }
 
     #[test]
     fn injects_before_closing_body_tag() {

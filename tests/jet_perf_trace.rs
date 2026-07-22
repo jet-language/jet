@@ -4,7 +4,8 @@
 //! from the observe live snapshot.
 
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -33,6 +34,51 @@ fn temp_workspace() -> PathBuf {
     let root = common::unique_tmp("jet-perf");
     fs::create_dir_all(&root).unwrap();
     root
+}
+
+fn unused_local_port() -> u16 {
+    TcpListener::bind(("127.0.0.1", 0))
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
+fn http_request(port: u16, method: &str, path: &str, body: &str) -> Option<(u16, String)> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+    write!(
+        stream,
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    let (headers, body) = raw.split_once("\r\n\r\n")?;
+    let status = headers.lines().next()?.split_whitespace().nth(1)?.parse().ok()?;
+    Some((status, body.to_string()))
+}
+
+fn wait_http(port: u16, path: &str, accept: impl Fn(&str) -> bool) -> String {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some((200, body)) = http_request(port, "GET", path, "") {
+            if accept(&body) {
+                return body;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "GET {path} did not reach expected state"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn perf_nonce(html: &str) -> Option<&str> {
+    let rest = html.split_once("jetPerfNonce = \"")?.1;
+    rest.split_once('"').map(|(nonce, _)| nonce)
 }
 
 #[test]
@@ -74,6 +120,126 @@ fn run() { handlers.init() }
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn perf_attach_drives_real_devserver_browser_lifecycle() {
+    if Command::new("rustc").arg("--version").output().is_err() {
+        eprintln!("note: skipping real browser relay lifecycle (need rustc)");
+        return;
+    }
+    let _guard = SELF_ATTACH_LOCK.lock().unwrap();
+    let root = temp_workspace();
+    let source = root.join("app.jet");
+    let original = r##"@Target(Web)
+use core.web as web
+module handlers {
+    @Target(Js)
+    pub fn init() { web.on("#field", "input", (ev) => {}) }
+}
+@Target(Js)
+fn run() { handlers.init() }
+"##;
+    fs::write(&source, original).unwrap();
+    let port = unused_local_port();
+    let dev = Command::new(jet())
+        .current_dir(&root)
+        .args([
+            "dev",
+            "app.jet",
+            "--target=web",
+            &format!("--port={port}"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start real web devserver");
+    let dev_pid = dev.id();
+    let dev = ChildGuard(dev);
+
+    let initial_html = wait_http(port, "/", |_| true);
+    assert!(
+        !initial_html.contains("__jetPerfNow"),
+        "normal jet dev timed browser work"
+    );
+    assert!(
+        !initial_html.contains("/__jet_perf_browser"),
+        "normal jet dev emitted perf beacon"
+    );
+    let initial_version = wait_http(port, "/__jet_dev_version", |body| !body.trim().is_empty());
+
+    let trace = root.join("browser.jettrace");
+    let attach = Command::new(jet())
+        .current_dir(&root)
+        .args([
+            "perf",
+            "attach",
+            &dev_pid.to_string(),
+            "--out",
+            trace.to_str().unwrap(),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start real jet perf attach");
+    let attached_html = wait_http(port, "/", |html| perf_nonce(html).is_some());
+    let nonce = perf_nonce(&attached_html).unwrap().to_string();
+    assert!(attached_html.contains("self.__jetPerfNow"));
+    assert!(attached_html.contains("navigator.sendBeacon(\"/__jet_perf_browser?nonce=\""));
+    let event = "class=event&symbol=handlers__init%24handler0&start_ns=10&duration_ns=5&clock_ns=15";
+    assert_eq!(
+        http_request(
+            port,
+            "POST",
+            &format!("/__jet_perf_browser?nonce={nonce}"),
+            event
+        )
+        .unwrap()
+        .0,
+        204
+    );
+    let output = attach.wait_with_output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let trace_text = fs::read_to_string(&trace).unwrap();
+    verify_jettrace(trace_text.as_bytes()).unwrap();
+    assert!(
+        trace_text.contains("\"name\":\"handlers__init$handler0\""),
+        "{trace_text}"
+    );
+    let active_version = wait_http(port, "/__jet_dev_version", |body| body != initial_version);
+
+    fs::write(&source, format!("{original}\n// rebuilt\n")).unwrap();
+    let rebuilt_version = wait_http(port, "/__jet_dev_version", |body| body != active_version);
+    assert_ne!(rebuilt_version, active_version);
+    let rebuilt_html = wait_http(port, "/", |html| {
+        perf_nonce(html).is_some_and(|next| next != nonce)
+    });
+    let rebuilt_nonce = perf_nonce(&rebuilt_html).unwrap().to_string();
+    assert_eq!(
+        http_request(
+            port,
+            "POST",
+            &format!("/__jet_perf_browser?nonce={nonce}"),
+            event
+        )
+        .unwrap()
+        .0,
+        403
+    );
+    assert_eq!(
+        http_request(
+            port,
+            "POST",
+            &format!("/__jet_perf_browser?nonce={rebuilt_nonce}"),
+            event
+        )
+        .unwrap()
+        .0,
+        204
+    );
+
+    drop(dev);
+    let _ = fs::remove_dir_all(root);
+}
+
 struct ChildGuard(Child);
 
 impl Drop for ChildGuard {
@@ -82,6 +248,8 @@ impl Drop for ChildGuard {
         let _ = self.0.kill();
         let _ = self.0.wait();
         let _ = fs::remove_file(jet::DevServer::LiveInspect::snapshot_path(pid));
+        let _ = fs::remove_file(jet::DevServer::BrowserTrace::relay_path(pid));
+        let _ = fs::remove_file(jet::DevServer::BrowserTrace::request_path(pid));
     }
 }
 
