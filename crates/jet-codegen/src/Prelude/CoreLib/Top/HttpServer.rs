@@ -20,6 +20,7 @@ struct JetHttpMuxRoute {
 struct JetHttpMux(
     std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxRoute>>>,
     std::sync::Arc<std::sync::Mutex<Vec<JetHttpMiddleware>>>,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
 );
 
 #[derive(Clone)]
@@ -624,6 +625,7 @@ impl JetHttpMux {
         JetHttpMux(
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
     }
     fn add<F>(&self, method: &str, pattern: &str, f: F)
@@ -1045,13 +1047,8 @@ fn jet_http_server_handle_stream(
         if request_index > 0 && shutdown.load(Ordering::Acquire) {
             return;
         }
-        let response = match jet_http_mux_dispatch(mux, request) {
-            Ok(response) => response,
-            Err(JetHttpError::BodyTooLarge { .. }) => jet_http_srv_empty_response(413),
-            Err(JetHttpError::InvalidFraming) => jet_http_srv_empty_response(400),
-            Err(JetHttpError::UnsupportedEncoding) => jet_http_srv_empty_response(415),
-            Err(_) => jet_http_srv_response(500, &"500 Internal Server Error".to_string()),
-        };
+        let response = jet_http_mux_dispatch(mux, request)
+            .unwrap_or_else(jet_http_srv_error_response);
         let close = close
             || !body.is_drained()
             || (request_version == "HTTP/1.0" && response.body.length().is_none());
@@ -1733,8 +1730,7 @@ fn jet_http2_dispatch(
     mux: &JetHttpMux,
     request: JetHttpRequest,
 ) -> Result<JetHttpResponse, String> {
-    Ok(jet_http_mux_dispatch(mux, request)
-        .unwrap_or_else(|_| jet_http_srv_response(500, &"500 Internal Server Error".to_string())))
+    Ok(jet_http_mux_dispatch(mux, request).unwrap_or_else(jet_http_srv_error_response))
 }
 
 fn jet_http2_queue_response(
@@ -2404,8 +2400,7 @@ fn jet_http_mux_serve_once_listener(
             return Ok(());
         }
     };
-    let resp = jet_http_mux_dispatch(mux, req)
-        .unwrap_or_else(|_| jet_http_srv_response(500, &"500 Internal Server Error".to_string()));
+    let resp = jet_http_mux_dispatch(mux, req).unwrap_or_else(jet_http_srv_error_response);
     jet_http_srv_write_response(&mut stream, &resp, &version, true)
         .map_err(|error| error.to_string())
 }
@@ -3307,13 +3302,8 @@ where
                     Ok(req) => {
                         let version = jet_http_srv_request_version(raw).to_string();
                         let keep = jet_http_srv_request_keep_alive(&version, &req.headers);
-                        let response = match jet_http_mux_dispatch(&m, req) {
-                            Ok(response) => response,
-                            Err(JetHttpError::BodyTooLarge { .. }) => jet_http_srv_empty_response(413),
-                            Err(JetHttpError::InvalidFraming) => jet_http_srv_empty_response(400),
-                            Err(JetHttpError::UnsupportedEncoding) => jet_http_srv_empty_response(415),
-                            Err(_) => jet_http_srv_response(500, &"500 Internal Server Error".to_string()),
-                        };
+                        let response = jet_http_mux_dispatch(&m, req)
+                            .unwrap_or_else(jet_http_srv_error_response);
                         let close = !keep
                             || force_close
                             || stop.load(std::sync::atomic::Ordering::Acquire)
@@ -3423,7 +3413,7 @@ fn jet_http_mux_dispatch(
                 [("Allow".to_string(), allow)].into_iter().collect(),
             ))
         });
-        return jet_http_mux_run_handler(mux, req, handler);
+        return Ok(jet_http_mux_run_handler(mux, req, handler));
     }
     // CONNECT authority-form has no path; route against "/{authority}" while
     // leaving req.path as the normalized authority for handlers.
@@ -3435,10 +3425,11 @@ fn jet_http_mux_dispatch(
     let path = match jet_http_route_path(&route_target) {
         Ok(path) => path,
         Err(_) => {
-            return Ok(jet_http_srv_head_response(
-                jet_http_srv_response(400, &"400 Bad Request".to_string()),
-                is_head,
-            ));
+            let handler: JetHttpHandler = std::sync::Arc::new(|_| {
+                Ok(jet_http_srv_response(400, &"400 Bad Request".to_string()))
+            });
+            let response = jet_http_mux_run_handler(mux, req, handler);
+            return Ok(jet_http_srv_head_response(response, is_head));
         }
     };
     // Route lookup is a short snapshot operation. Never retain the registry
@@ -3467,7 +3458,7 @@ fn jet_http_mux_dispatch(
                 [("Allow".to_string(), allow.clone())].into_iter().collect(),
             ))
         });
-        return jet_http_mux_run_handler(mux, req, handler);
+        return Ok(jet_http_mux_run_handler(mux, req, handler));
     }
     if let Some((_, route, params, _)) = path_matches.iter()
         .filter(|(_, route, _, _)| route.method == effective_method)
@@ -3478,39 +3469,81 @@ fn jet_http_mux_dispatch(
         let mut r2 = req.clone();
         r2.params = params.clone();
         r2.route_template = Some(route.pattern.clone());
-        let response = jet_http_mux_run_handler(mux, r2, route.handler.clone())?;
+        let response = jet_http_mux_run_handler(mux, r2, route.handler.clone());
         return Ok(jet_http_srv_head_response(response, is_head));
     }
     if !path_matches.is_empty() {
-        return Ok(jet_http_srv_head_response(
-            jet_http_srv_response_with_headers(
+        let allow = jet_http_allowed_methods(
+            path_matches.iter().map(|(_, route, _, _)| route.method.as_str()),
+        );
+        let handler: JetHttpHandler = std::sync::Arc::new(move |_| {
+            Ok(jet_http_srv_response_with_headers(
                 405,
                 "405 Method Not Allowed",
-                [("Allow".to_string(), jet_http_allowed_methods(
-                    path_matches.iter().map(|(_, route, _, _)| route.method.as_str()),
-                ))].into_iter().collect(),
-            ),
-            is_head,
-        ));
+                [("Allow".to_string(), allow.clone())].into_iter().collect(),
+            ))
+        });
+        let response = jet_http_mux_run_handler(mux, req, handler);
+        return Ok(jet_http_srv_head_response(response, is_head));
     }
-    Ok(jet_http_srv_head_response(
-        jet_http_srv_response(404, &"404 Not Found".to_string()),
-        is_head,
-    ))
+    let handler: JetHttpHandler = std::sync::Arc::new(|_| {
+        Ok(jet_http_srv_response(404, &"404 Not Found".to_string()))
+    });
+    let response = jet_http_mux_run_handler(mux, req, handler);
+    Ok(jet_http_srv_head_response(response, is_head))
 }
 
 fn jet_http_mux_run_handler(
     mux: &JetHttpMux,
-    req: JetHttpRequest,
-    mut handler: JetHttpHandler,
-) -> Result<JetHttpResponse, JetHttpError> {
+    mut req: JetHttpRequest,
+    handler: JetHttpHandler,
+) -> JetHttpResponse {
+    let request_id = mux.2.load(std::sync::atomic::Ordering::Acquire).then(|| {
+        let id = match req.headers.get("x-request-id") {
+            Some(value) if jet_http_request_id_valid(value) => value.clone(),
+            _ => jet_http_new_request_id(),
+        };
+        let _ = req.headers.set("x-request-id", &id);
+        id
+    });
+    let mut handler: JetHttpHandler = std::sync::Arc::new(move |req| {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(error)) => Ok(jet_http_srv_error_response(error)),
+            Err(_) => Ok(jet_http_srv_internal_response()),
+        }
+    });
     let middlewares = mux.1.lock().unwrap().clone();
-    for middleware in middlewares.iter().rev() { handler = middleware(handler); }
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
-        Ok(response) => response,
-        Err(_) => Err(JetHttpError::Internal {
-            incident_id: "http-handler-panic".to_string(),
-        }),
+    for middleware in middlewares.iter().rev() {
+        let next = handler.clone();
+        handler = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| middleware(next))) {
+            Ok(handler) => handler,
+            Err(_) => std::sync::Arc::new(|_| Ok(jet_http_srv_internal_response())),
+        };
+    }
+    let mut response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
+        Ok(Ok(response)) => response,
+        Ok(Err(error)) => jet_http_srv_error_response(error),
+        Err(_) => jet_http_srv_internal_response(),
+    };
+    if let Some(id) = request_id {
+        if response.headers.get("x-request-id").is_none() {
+            let _ = response.headers.set("x-request-id", &id);
+        }
+    }
+    response
+}
+
+fn jet_http_srv_internal_response() -> JetHttpResponse {
+    jet_http_srv_response(500, &"500 Internal Server Error".to_string())
+}
+
+fn jet_http_srv_error_response(error: JetHttpError) -> JetHttpResponse {
+    match error {
+        JetHttpError::BodyTooLarge { .. } => jet_http_srv_empty_response(413),
+        JetHttpError::InvalidFraming => jet_http_srv_empty_response(400),
+        JetHttpError::UnsupportedEncoding => jet_http_srv_empty_response(415),
+        _ => jet_http_srv_internal_response(),
     }
 }
 
@@ -4036,9 +4069,9 @@ fn jet_http_srv_access_log(req: &JetHttpRequest, status: i64) -> String {
     format!("{} {} {}", req.method, route, status)
 }
 
-/// D-HTTP-SERVER2 built-in `request_id` middleware: ordinary Handler wrapper.
-/// Keeps a valid inbound `x-request-id`, otherwise assigns one, and echoes it
-/// on the response when the handler did not set the header.
+/// D-HTTP-SERVER2 built-in `request_id` middleware response boundary. Keeps a
+/// valid inbound `x-request-id`, otherwise assigns one, and correlates every
+/// router, handler, and recovery response unless that response chose its own.
 fn jet_http_request_id_valid(value: &str) -> bool {
     let len = value.len();
     (1..=128).contains(&len) && value.bytes().all(|byte| byte.is_ascii_graphic())
@@ -4055,25 +4088,6 @@ fn jet_http_new_request_id() -> String {
     format!("req-{nanos:x}-{seq:x}")
 }
 
-fn jet_http_srv_request_id(next: JetHttpHandler) -> JetHttpHandler {
-    std::sync::Arc::new(move |mut request| {
-        let id = match request.headers.get("x-request-id") {
-            Some(value) if jet_http_request_id_valid(value) => value.clone(),
-            _ => jet_http_new_request_id(),
-        };
-        let _ = request.headers.set("x-request-id", &id);
-        match next(request) {
-            Ok(mut response) => {
-                if response.headers.get("x-request-id").is_none() {
-                    let _ = response.headers.set("x-request-id", &id);
-                }
-                Ok(response)
-            }
-            Err(error) => Err(error),
-        }
-    })
-}
-
 fn jet_http_srv_install_request_id(mux: &JetHttpMux) {
-    jet_http_mux_middleware(mux, jet_http_srv_request_id);
+    mux.2.store(true, std::sync::atomic::Ordering::Release);
 }

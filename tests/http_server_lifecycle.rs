@@ -2942,10 +2942,9 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
         "outer:before:/ok/one", "inner:before:/ok/one",
         "inner:after:/ok/one", "outer:after:/ok/one",
     ]);
-    assert!(matches!(
-        jet_http_mux_dispatch(&mux, request("/panic")),
-        Err(JetHttpError::Internal { .. })
-    ));
+    let panic = jet_http_mux_dispatch(&mux, request("/panic")).expect("redacted panic response");
+    assert_eq!(panic.status, 500);
+    assert_eq!(panic.body.text(64).unwrap(), "500 Internal Server Error");
 
     let short = jet_http_mux_new();
     let handler_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -3022,6 +3021,13 @@ fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
 fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
     let mux = jet_http_mux_new();
     jet_http_srv_install_request_id(&mux);
+    jet_http_mux_middleware(&mux, |next| {
+        std::sync::Arc::new(move |request| {
+            let mut response = next(request)?;
+            response.headers.set("x-middleware", "seen").unwrap();
+            Ok(response)
+        })
+    });
     jet_http_mux_add(&mux, "GET", "/id", |req| {
         let id = req
             .headers
@@ -3031,6 +3037,22 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
         let event = jet_http_srv_access_event(&req, 200, id.len() as i64, 1, "127.0.0.1:0", "HTTP/1.1", false);
         assert_eq!(event.request_id, id);
         jet_http_srv_response(200, &id)
+    });
+    jet_http_mux_add(&mux, "GET", "/known", |_| {
+        jet_http_srv_response(200, &"known".to_string())
+    });
+    jet_http_mux_add_handler(
+        &mux,
+        "GET",
+        "/error",
+        std::sync::Arc::new(|_| {
+            Err(JetHttpError::Internal {
+                incident_id: "private-handler-error".to_string(),
+            })
+        }),
+    );
+    jet_http_mux_add(&mux, "GET", "/panic", |_| {
+        panic!("private handler panic")
     });
 
     let mut forged = JetHttpRequest::server("GET", "/id".to_string(), Vec::new(), JetHttpHeaders::new());
@@ -3068,6 +3090,55 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
             "log-unsafe inbound id was preserved: {unsafe_id:?}",
         );
     }
+    for (method, path, status) in [
+        ("GET", "/missing", 404),
+        ("POST", "/known", 405),
+        ("GET", "/error", 500),
+        ("GET", "/panic", 500),
+    ] {
+        let request = JetHttpRequest::server(
+            method,
+            path.to_string(),
+            Vec::new(),
+            JetHttpHeaders::new(),
+        );
+        let response = jet_http_mux_dispatch(&mux, request).expect("redacted response");
+        assert_eq!(response.status, status, "{method} {path}");
+        assert!(
+            response
+                .headers
+                .get("x-request-id")
+                .is_some_and(|value| value.starts_with("req-")),
+            "uncorrelated {status} response for {method} {path}",
+        );
+        assert_eq!(response.headers.get("x-middleware").map(String::as_str), Some("seen"));
+        if status == 500 {
+            assert_eq!(response.body.text(64).unwrap(), "500 Internal Server Error");
+        }
+    }
+
+    let factory_panic = jet_http_mux_new();
+    jet_http_srv_install_request_id(&factory_panic);
+    jet_http_mux_middleware(&factory_panic, |_| {
+        panic!("private middleware factory panic")
+    });
+    jet_http_mux_add(&factory_panic, "GET", "/", |_| {
+        jet_http_srv_response(200, &"must not run".to_string())
+    });
+    let response = jet_http_mux_dispatch(
+        &factory_panic,
+        JetHttpRequest::server("GET", "/".to_string(), Vec::new(), JetHttpHeaders::new()),
+    )
+    .expect("factory panic response");
+    assert_eq!(response.status, 500);
+    assert_eq!(response.body.text(64).unwrap(), "500 Internal Server Error");
+    assert!(
+        response
+            .headers
+            .get("x-request-id")
+            .is_some_and(|value| value.starts_with("req-")),
+        "factory panic response was not correlated",
+    );
     let server = jet_http_server_bind(&"127.0.0.1:0".to_string(), mux).expect("bind");
     let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
         .expect("addr")
@@ -3105,6 +3176,23 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
         "{preserved}"
     );
     assert!(preserved.ends_with("\r\n\r\nclient-trace-7"), "{preserved}");
+
+    for (raw, status) in [
+        (&b"GET /missing HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"[..], "404 Not Found"),
+        (&b"POST /known HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"[..], "405 Method Not Allowed"),
+        (&b"GET /error HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"[..], "500 Internal Server Error"),
+        (&b"GET /panic HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n"[..], "500 Internal Server Error"),
+    ] {
+        let response = request(addr, raw);
+        assert!(response.starts_with(&format!("HTTP/1.1 {status}")), "{response}");
+        assert!(
+            response
+                .lines()
+                .any(|line| line.to_ascii_lowercase().starts_with("x-request-id: req-")),
+            "uncorrelated HTTP/1.1 {status}: {response}",
+        );
+        assert!(!response.contains("private"), "private failure leaked: {response}");
+    }
 
     let pipelined = {
         use std::io::{Read, Write};
@@ -3178,19 +3266,24 @@ fn builtin_request_id_crosses_cleartext_http2() {
     client.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").unwrap();
     client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
     client
-        .write_all(&h2_frame(1, 0x5, 1, &h2_request_headers(0x82, "/id")))
+        .write_all(&h2_frame(1, 0x5, 1, &h2_request_headers(0x82, "/missing")))
         .unwrap();
     client.flush().unwrap();
 
     let mut response_id = None;
+    let mut response_status = None;
     let mut body = Vec::new();
     for _ in 0..8 {
         let (kind, flags, stream, payload) = h2_read_frame(&mut client);
         if kind == 1 && stream == 1 {
             let headers = jet_http2_decode_headers(&mut JetHttp2Hpack::new(), &payload).unwrap();
-            response_id = headers
-                .into_iter()
-                .find_map(|(name, value)| name.eq_ignore_ascii_case("x-request-id").then_some(value));
+            for (name, value) in headers {
+                if name == ":status" {
+                    response_status = Some(value);
+                } else if name.eq_ignore_ascii_case("x-request-id") {
+                    response_id = Some(value);
+                }
+            }
         } else if kind == 0 && stream == 1 {
             body.extend(payload);
             if flags & 0x1 != 0 {
@@ -3200,7 +3293,8 @@ fn builtin_request_id_crosses_cleartext_http2() {
     }
     let response_id = response_id.expect("HTTP/2 response request id");
     assert!(response_id.starts_with("req-"), "{response_id}");
-    assert_eq!(body, response_id.as_bytes());
+    assert_eq!(response_status.as_deref(), Some("404"));
+    assert_eq!(body, b"404 Not Found");
 
     shutdown.store(true, std::sync::atomic::Ordering::Release);
     drop(client);
@@ -4494,6 +4588,11 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
         response.trailers.append("X-Checksum", "tls-out").unwrap();
         Ok(response)
     }));
+    jet_http_mux_add_handler(&mux, "GET", "/error", std::sync::Arc::new(|_| {
+        Err(JetHttpError::Internal {
+            incident_id: "private-tls-handler-error".to_string(),
+        })
+    }));
     let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
     let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
     let tls = JetHttpServerTls {
@@ -4543,6 +4642,10 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
         &mut client,
         b"POST /trailers HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum\r\n\r\n3\r\ntls\r\n0\r\nX-Checksum: tls-in\r\n\r\n",
     );
+    let failed = rustls_exchange(
+        &mut client,
+        b"GET /error HTTP/1.1\r\nHost: localhost\r\n\r\n",
+    );
     assert!(first.contains("\r\n\r\nok1"), "{first}");
     assert!(second.contains("\r\n\r\nok2"), "{second}");
     assert!(
@@ -4552,6 +4655,14 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     assert!(encoded.contains("\r\n\r\nhello gzip"), "{encoded}");
     assert!(trailers.contains("Trailer: X-Checksum\r\n"), "{trailers}");
     assert!(trailers.ends_with("3\r\ntls\r\n0\r\nX-Checksum: tls-out\r\n\r\n"), "{trailers}");
+    assert!(failed.starts_with("HTTP/1.1 500 Internal Server Error"), "{failed}");
+    assert!(
+        failed
+            .lines()
+            .any(|line| line.to_ascii_lowercase().starts_with("x-request-id: req-")),
+        "uncorrelated TLS failure: {failed}",
+    );
+    assert!(!failed.contains("private"), "private TLS failure leaked: {failed}");
     assert_eq!(calls.load(Ordering::Acquire), 4);
 
     let started = std::time::Instant::now();
