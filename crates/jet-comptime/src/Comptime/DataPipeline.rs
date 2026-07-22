@@ -10,7 +10,7 @@
 //! lambdas over rows, applied through the same `call_closure` path
 //! `list.map`/`.filter`/`.sort_by` already use.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::AST::{CtFloat, Type};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -129,6 +129,41 @@ fn ct_value_type_name(v: &CtValue) -> String {
 }
 
 impl<'a> Interp<'a> {
+    fn data_schema_columns_for_type(
+        &self,
+        elem_ty: &Type,
+        expand_struct: bool,
+    ) -> Option<Vec<CtValue>> {
+        if !expand_struct {
+            return Some(vec![data_column("value", &elem_ty.name())]);
+        }
+        let struct_name = elem_ty.base_name()?;
+        let def = self.structs.get(struct_name)?;
+        let args = match elem_ty {
+            Type::Apply { args, .. } => args.as_slice(),
+            Type::Named(_) => &[],
+            _ => return None,
+        };
+        if def.type_params.len() != args.len() {
+            return None;
+        }
+        let subst: HashMap<String, Type> = def
+            .type_params
+            .iter()
+            .zip(args)
+            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+            .collect();
+        Some(
+            def.fields
+                .iter()
+                .map(|field| {
+                    let field_ty = crate::Generics::substitute_type(&field.ty, &subst);
+                    data_column(&field.name, &field_ty.name())
+                })
+                .collect(),
+        )
+    }
+
     fn materialize_lazy(&mut self, frame: &CtValue, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
         let (rows, _, _) = expect_struct(frame, "LazyFrame", "collect", span)?;
         let mut rows = rows.clone();
@@ -293,72 +328,31 @@ impl<'a> Interp<'a> {
                         ));
                     }
                 };
-                let columns = match sample {
-                    Some(value) if !expand => {
-                        // Series law: one `value` column even when the element is a struct.
-                        vec![data_column("value", &ct_value_type_name(value))]
-                    }
-                    Some(CtValue::Struct { type_name, fields }) => {
-                        if let Some(def) = self.structs.get(type_name.as_str()) {
-                            def.fields
-                                .iter()
-                                .map(|f| data_column(&f.name, &f.ty.name()))
-                                .collect()
-                        } else {
-                            // ponytail: fall back to runtime field names when the
-                            // struct def is out of the comptime registry.
-                            fields
-                                .iter()
-                                .map(|(name, value)| data_column(name, &ct_value_type_name(value)))
-                                .collect()
+                let from_arg = arg0_ty.and_then(data_schema_elem_ty);
+                let columns = if let Some(columns) = from_arg
+                    .and_then(|elem| self.data_schema_columns_for_type(elem, expand))
+                {
+                    columns
+                } else {
+                    match sample {
+                        Some(value) if !expand => {
+                            vec![data_column("value", &ct_value_type_name(value))]
                         }
-                    }
-                    Some(value) => vec![data_column("value", &ct_value_type_name(value))],
-                    // Empty containers: match AOT — schema is type-driven.
-                    None => {
-                        let from_arg = arg0_ty.and_then(data_schema_elem_ty);
-                        let from_stored = match recv {
+                        Some(CtValue::Struct { fields, .. }) => fields
+                            .iter()
+                            .map(|(name, value)| data_column(name, &ct_value_type_name(value)))
+                            .collect(),
+                        Some(value) => vec![data_column("value", &ct_value_type_name(value))],
+                        None => match recv {
                             CtValue::Struct { type_name, .. }
-                                if type_name == "Table"
-                                    || type_name == "Series"
-                                    || type_name == "LazyFrame" =>
+                                if matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame") =>
                             {
                                 container_elem_type_name(recv, type_name)
+                                    .map(|name| vec![data_column("value", &name)])
+                                    .unwrap_or_default()
                             }
-                            _ => None,
-                        };
-                        match from_arg {
-                            Some(elem) if !expand => {
-                                vec![data_column("value", &elem.name())]
-                            }
-                            Some(Type::Named(struct_name)) => {
-                                if let Some(def) = self.structs.get(struct_name.as_str()) {
-                                    def.fields
-                                        .iter()
-                                        .map(|f| data_column(&f.name, &f.ty.name()))
-                                        .collect()
-                                } else {
-                                    vec![data_column("value", struct_name)]
-                                }
-                            }
-                            Some(elem) => vec![data_column("value", &elem.name())],
-                            None => match from_stored {
-                                Some(name) if !expand => {
-                                    vec![data_column("value", &name)]
-                                }
-                                Some(name) => {
-                                    if let Some(def) = self.structs.get(name.as_str()) {
-                                        def.fields
-                                            .iter()
-                                            .map(|f| data_column(&f.name, &f.ty.name()))
-                                            .collect()
-                                    } else {
-                                        vec![data_column("value", &name)]
-                                    }
-                                }
-                                None => Vec::new(),
-                            },
-                        }
+                            _ => Vec::new(),
+                        },
                     }
                 };
                 Ok(CtValue::List(columns))

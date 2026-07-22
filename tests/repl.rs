@@ -2561,6 +2561,12 @@ fn repl_core_data_schema_empty_table_and_series_law() {
         "data.schema(data.series([t]))",
         "empty_tickets: [Ticket] := []",
         "data.schema(data.series(empty_tickets))",
+        "struct Empty {}",
+        "empty_units: [Empty] := []",
+        "data.schema(data.table(empty_units))",
+        "struct Box<T> { value: T }",
+        "boxed: [Box<Int>] := []",
+        "data.schema(data.table(boxed))",
     ];
     let out = run_transcript(inputs, None);
     assert!(
@@ -2580,6 +2586,11 @@ fn repl_core_data_schema_empty_table_and_series_law() {
     assert!(
         ticket_value_hits >= 2,
         "non-empty and empty Series<Ticket> both need value:Ticket (not expanded fields): {out}"
+    );
+    assert!(out.contains("[] : List"), "zero-field row must have zero columns: {out}");
+    assert!(
+        out.contains("DataColumn(name: value, type_name: Int)"),
+        "generic row fields must substitute concrete type arguments: {out}"
     );
 }
 
@@ -2610,9 +2621,19 @@ fn repl_core_data_table_echo_hides_elem_type() {
 
 #[test]
 fn repl_core_data_json_ingest_and_select() {
+    let fixture = std::env::temp_dir().join(format!(
+        "jet_repl_data_json_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&fixture).unwrap();
+    std::fs::write(
+        fixture.join("model.jet"),
+        "@Codable\nstruct Ticket { team: String minutes: Float }\n",
+    )
+    .unwrap();
+    let project_dir = fixture.to_string_lossy().to_string();
     let inputs = &[
         "use core.data as data",
-        "struct Ticket { team: String minutes: Float }",
         r#"raw :: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]""#,
         r#"rows :: data.json<Ticket>(raw) ?? panic("bad json")"#,
         "table :: data.table(rows)",
@@ -2621,7 +2642,8 @@ fn repl_core_data_json_ingest_and_select() {
         "data.count(selected)",
         "data.status()[6]",
     ];
-    let out = run_transcript(inputs, None);
+    let out = run_transcript(inputs, Some(&project_dir));
+    std::fs::remove_dir_all(fixture).ok();
     assert!(
         !out.contains("E0956"),
         "core.data json should dispatch at comptime, got: {out}"

@@ -6351,6 +6351,12 @@ struct Ticket {
     minutes: Float
 }
 
+struct Empty {}
+
+struct Box<T> {
+    value: T
+}
+
 fn run() {
     empty_rows: [Ticket] := []
     empty_table :: data.table(empty_rows)
@@ -6373,6 +6379,14 @@ fn run() {
     loop c; data.schema(empty_series) {
         print("empty_series:{c.name}:{c.type_name}")
     }
+
+    empty_units: [Empty] := []
+    print("empty_struct:{data.count(data.schema(data.table(empty_units)))}")
+
+    boxed: [Box<Int>] := []
+    loop c; data.schema(data.table(boxed)) {
+        print("generic:{c.name}:{c.type_name}")
+    }
 }
 "#,
         &[],
@@ -6381,7 +6395,7 @@ fn run() {
     assert_eq!(code, 0, "core.data empty schema program failed: {stderr}");
     assert_eq!(
         stdout,
-        "empty:team:String\nempty:minutes:Float\nfloat:value:Float\nstruct:value:Ticket\nempty_series:value:Ticket\n"
+        "empty:team:String\nempty:minutes:Float\nfloat:value:Float\nstruct:value:Ticket\nempty_series:value:Ticket\nempty_struct:0\ngeneric:value:Int\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

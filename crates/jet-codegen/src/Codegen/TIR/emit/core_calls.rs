@@ -10,6 +10,7 @@ use crate::Codegen::TIR::enc_row_target_rust;
 use crate::Codegen::TIR::enc_row_target_rust_traced;
 use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::enc_target_rust_traced;
+use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::TExpr;
 
 fn emit_data_schema_columns(elem_ty: &Type, expand_struct: bool, cx: &Cx) -> String {
@@ -26,18 +27,26 @@ fn emit_data_schema_columns(elem_ty: &Type, expand_struct: bool, cx: &Cx) -> Str
     if !expand_struct {
         return format!("vec![{}]", column("value", &elem_ty.name()));
     }
-    match elem_ty {
-        Type::Named(struct_name) => match cx.struct_fields.get(struct_name) {
-            Some(fields) if !fields.is_empty() => {
-                let items: Vec<String> = fields
-                    .iter()
-                    .map(|(fname, fty)| column(fname, &fty.name()))
-                    .collect();
+    let Some(struct_name) = elem_ty.base_name() else {
+        return format!("vec![{}]", column("value", &elem_ty.name()));
+    };
+    match cx.struct_fields.get(struct_name) {
+        Some(fields) => {
+            let items: Vec<String> = fields
+                .iter()
+                .map(|(fname, _)| {
+                    let field_ty = struct_field_type(cx, elem_ty, fname)
+                        .expect("registered struct field must have a concrete type");
+                    column(fname, &field_ty.name())
+                })
+                .collect();
+            if items.is_empty() {
+                format!("Vec::<{}jet_std::DataColumn>::new()", cx.root_prefix)
+            } else {
                 format!("vec![{}]", items.join(", "))
             }
-            _ => format!("vec![{}]", column("value", &elem_ty.name())),
-        },
-        _ => format!("vec![{}]", column("value", &elem_ty.name())),
+        }
+        None => format!("vec![{}]", column("value", &elem_ty.name())),
     }
 }
 
