@@ -7424,9 +7424,18 @@ fn xml_stream_reader_is_incremental_exact_and_terminal() {
     fs::write(&invalid_char, b"<r>\x01</r>").unwrap();
     let limited = dir.join("limited.xml");
     fs::write(&limited, "<root>text</root>").unwrap();
+    let encoding_conflict = dir.join("encoding-conflict.xml");
+    let mut encoding_conflict_bytes = vec![0xff, 0xfe];
+    encoding_conflict_bytes.extend(
+        "<?xml version='1.0' encoding='UTF-8'?><r/>"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes),
+    );
+    fs::write(&encoding_conflict, encoding_conflict_bytes).unwrap();
     let malformed = malformed.to_string_lossy().replace('\\', "\\\\");
     let invalid_char = invalid_char.to_string_lossy().replace('\\', "\\\\");
     let limited = limited.to_string_lossy().replace('\\', "\\\\");
+    let encoding_conflict = encoding_conflict.to_string_lossy().replace('\\', "\\\\");
 
     let source = format!(
         r#"
@@ -7544,6 +7553,20 @@ fn run() {{
             }}
         }}
     }}
+
+    conflict_input :: files.open("{encoding_conflict}") ?? panic("open encoding conflict")
+    conflict_reader :: xml.reader(^conflict_input) ?? panic("encoding conflict reader")
+    conflict_start :: conflict_reader.next() ?? panic("encoding conflict document start")
+    if conflict_start == None {{ panic("missing document start") }}
+    conflict :: conflict_reader.next()
+    if conflict == {{
+        Ok(_) -> {{ print("encoding-conflict-missed") }}
+        Err(error) -> {{
+            print(error.kind == encoding.EncodingErrorKind.Syntax)
+            print(error.byte_offset)
+            print(error.reason)
+        }}
+    }}
 }}
 "#
     );
@@ -7551,7 +7574,7 @@ fn run() {{
     assert_eq!(code, 0, "XML stream test failed: {stderr}");
     assert_eq!(
         stdout,
-        "33\ntrue\ntrue\n3\n1\n4\n$/r\nXML contains forbidden character U+0001\ntrue\n7\ntrue\n"
+        "33\ntrue\ntrue\n3\n1\n4\n$/r\nXML contains forbidden character U+0001\ntrue\n7\ntrue\ntrue\n2\nXML declaration conflicts with detected input encoding\n"
     );
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);

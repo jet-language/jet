@@ -1505,7 +1505,7 @@ fn canonical_attr_escape(value: &str) -> String { value.replace('&', "&amp;").re
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use super::{canonical_document, field, parse_document, parse_document_with, render_document, stream_event_value, ByteLexer, CanonicalMode, CanonicalOptions, EntityPolicy, Error, Event, LexicalPolicy, Limits, ParseOptions, Part, Reason, RenderEncoding, Scanner, StreamScanner, StreamWriter, TokenKind, Value, WireEncoding};
+    use super::{canonical_document, field, parse_document, parse_document_with, render_document, stream_event_value, wire_bytes, ByteLexer, CanonicalMode, CanonicalOptions, EntityPolicy, Error, Event, LexicalPolicy, Limits, ParseOptions, Part, Reason, RenderEncoding, Scanner, StreamEvent, StreamScanner, StreamWriter, TokenKind, Value, WireEncoding};
 
     fn scan(source: &str) -> Result<Vec<Event>, String> {
         let mut scanner = Scanner::new(source);
@@ -1962,6 +1962,43 @@ mod tests {
             let expected = lex_chunks(&wire, wire.len());
             for split in 0..=wire.len() { assert_eq!(lex_chunks(&wire, split), expected, "{encoding:?} split {split}"); }
             assert_eq!(expected.iter().map(|(_, text, _)| text.as_str()).collect::<String>(), source);
+        }
+    }
+
+    #[test]
+    fn stream_bytes_validate_declaration_and_preserve_encoding_identity() {
+        for (wire, bom, declared) in [
+            (WireEncoding::Utf8, vec![0xef, 0xbb, 0xbf], "UTF-16"),
+            (WireEncoding::Utf16Le, vec![0xff, 0xfe], "UTF-8"),
+            (WireEncoding::Utf16Be, vec![0xfe, 0xff], "UTF-8"),
+        ] {
+            let source = format!("<?xml version='1.0' encoding='{declared}'?><r/>");
+            let mut bytes = bom.clone();
+            bytes.extend(wire_bytes(&source, wire));
+            let mut scanner = StreamScanner::new(4096, ParseOptions::safe()).expect("scanner");
+            scanner.push(&bytes).expect("input bytes");
+            scanner.finish_input().expect("finish input");
+            assert!(matches!(scanner.next().expect("document start"), Some(StreamEvent { event: Event::DocumentStart, .. })));
+            let error = scanner.next().expect_err("conflicting XML declaration");
+            assert_eq!(error.kind, Reason::InvalidEncoding, "{wire:?}");
+            assert_eq!(error.offset, bom.len(), "{wire:?}");
+        }
+
+        for (wire, render, bom, declared) in [
+            (WireEncoding::Utf8, RenderEncoding::Utf8Bom, vec![0xef, 0xbb, 0xbf], "UTF-8"),
+            (WireEncoding::Utf16Le, RenderEncoding::Utf16Le, vec![0xff, 0xfe], "UTF-16"),
+            (WireEncoding::Utf16Be, RenderEncoding::Utf16Be, vec![0xfe, 0xff], "UTF-16BE"),
+        ] {
+            let source = format!("<?xml version='1.0' encoding='{declared}'?><r>\u{1f642}</r>");
+            let mut bytes = bom;
+            bytes.extend(wire_bytes(&source, wire));
+            let events = stream_values(&bytes, bytes.len());
+            let mut writer = StreamWriter::new(render, LexicalPolicy::PreserveValid);
+            let mut output = Vec::new();
+            for event in &events {
+                output.extend(writer.write(event).expect("write matching encoded event"));
+            }
+            assert_eq!(output, bytes, "{wire:?} byte identity");
         }
     }
 
@@ -2433,7 +2470,7 @@ impl StreamScanner {
             return Ok(Some(StreamEvent{event:Event::DocumentEnd,raw_bytes:Vec::new(),encoding,bom:self.lexer.bom().to_vec()}));
         };
         if token.text.starts_with("<?xml") && self.wire_consumed != self.lexer.bom().len() { return self.fail(Error::at_kind(self.wire_consumed,Reason::Malformed,"XML declaration is out of order")); }
-        let mut scanner=Scanner{source:&token.text,offset:0,started:true,ended:false,root_seen:self.root_seen,root_closed:self.root_closed,declaration_seen:self.declaration_seen,doctype_seen:self.doctype_seen,declared_entities:self.declared_entities.clone(),stack:self.stack.clone(),options:self.options.clone(),nodes:self.nodes,text_bytes:self.text_bytes,entity_replacement_bytes:self.entity_replacement_bytes};
+        let mut scanner=Scanner{source:&token.text,wire_encoding:Some(encoding),offset:0,started:true,ended:false,root_seen:self.root_seen,root_closed:self.root_closed,declaration_seen:self.declaration_seen,doctype_seen:self.doctype_seen,declared_entities:self.declared_entities.clone(),stack:self.stack.clone(),options:self.options.clone(),nodes:self.nodes,text_bytes:self.text_bytes,entity_replacement_bytes:self.entity_replacement_bytes};
         let event=match scanner.next(){Ok(Some(event))=>event,Ok(None)=>return self.fail(Error::at_kind(self.wire_consumed,Reason::Malformed,"XML token produced no event")),Err(mut error)=>{
             let scalar_count=token.text[..error.offset.min(token.text.len())].chars().count();
             error.offset=self.wire_consumed+token.scalar_bytes.iter().take(scalar_count).sum::<usize>();
@@ -2456,6 +2493,7 @@ struct Frame {
 }
 pub struct Scanner<'a> {
     source: &'a str,
+    wire_encoding: Option<WireEncoding>,
     offset: usize,
     started: bool,
     ended: bool,
@@ -2700,8 +2738,8 @@ fn declaration_fields(data: &str) -> Result<(String, Option<String>, Option<bool
     for (key, value) in fields.into_iter().skip(1) {
         match key {
             "encoding" if encoding.is_none() && standalone.is_none() => {
-                if !value.eq_ignore_ascii_case("UTF-8") {
-                    return Err(Error::at(0, "String XML input must declare UTF-8"));
+                if !matches!(value.to_ascii_uppercase().as_str(), "UTF-8" | "UTF-16" | "UTF-16LE" | "UTF-16BE") {
+                    return Err(Error::at_kind(0, Reason::InvalidEncoding, "unsupported XML declaration encoding"));
                 }
                 encoding = Some(value);
             }
@@ -2716,10 +2754,21 @@ fn declaration_fields(data: &str) -> Result<(String, Option<String>, Option<bool
     Ok((version, encoding, standalone))
 }
 
+fn declaration_matches_input(name: &str, encoding: Option<WireEncoding>) -> bool {
+    match encoding.unwrap_or(WireEncoding::Utf8) {
+        WireEncoding::Utf8 => name.eq_ignore_ascii_case("UTF-8"),
+        WireEncoding::Utf16Le | WireEncoding::Utf16Be => matches!(
+            name.to_ascii_uppercase().as_str(),
+            "UTF-16" | "UTF-16LE" | "UTF-16BE"
+        ),
+    }
+}
+
 impl<'a> Scanner<'a> {
     pub fn new(source: &'a str) -> Self {
         Self {
             source,
+            wire_encoding: None,
             offset: 0,
             started: false,
             ended: false,
@@ -3330,8 +3379,17 @@ impl<'a> Scanner<'a> {
             }
             let (raw, body) = self.take_until("?>", "unterminated XML declaration")?;
             let data = body[5..].trim();
-            let (version, encoding, standalone) =
-                declaration_fields(data).map_err(|error| Error::at(error.offset, error.reason))?;
+            let (version, encoding, standalone) = declaration_fields(data)?;
+            if encoding
+                .as_deref()
+                .is_some_and(|name| !declaration_matches_input(name, self.wire_encoding))
+            {
+                return Err(Error::at_kind(
+                    0,
+                    Reason::InvalidEncoding,
+                    "XML declaration conflicts with detected input encoding",
+                ));
+            }
             self.declaration_seen = true;
             return Ok(Some(Event::Declaration {
                 version,
