@@ -4344,16 +4344,14 @@ fn service_probe_uses_jetpack_lifecycle_and_produces_twenty_samples() {
     fs::write(
         dir.join("env.jet"),
         r#"module env.dev {
-    services: { mydb: { enable: true, init: "sleep 30" } }
+    services: { mydb: { enable: true, init: "sleep 30", ready: "true" } }
 }
 "#,
     )
     .unwrap();
     fs::write(
         dir.join("src/main.jet"),
-        r#"module env.dev {
-    services: { mydb: { enable: true, init: "sleep 30" } }
-}
+        r#"use project.env.dev
 
 module perf.package {
     budgets: [Budget.{

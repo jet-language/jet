@@ -826,8 +826,9 @@ pub fn wait_healthy(project_dir: &Path, plan: &DevServicePlan, timeout: Duration
 /// D-PERFBUDGET-PROVIDER1 / INTEGRATION1: this is the **only** measurement
 /// path for `ServiceProbe`; no proxy or facade fact is ever substituted.
 /// Each trial is fully isolated (process group torn down between trials) and
-/// measures from the moment the start command is issued until `ready:` (or
-/// TCP ports) passes.
+/// measures from the moment the start command is issued until the effective
+/// declared `ready:` command passes. Port and process liveness are valid dev
+/// health fallbacks, but are not ServiceReadiness measurement evidence.
 ///
 /// Returns exactly `trials` nanosecond samples, or a `String` error if any
 /// trial fails to start or times out.
@@ -837,9 +838,24 @@ pub fn measure_readiness(
     plan: &DevServicePlan,
     trials: usize,
 ) -> Result<Vec<u64>, String> {
+    measure_readiness_with_timeout(project_dir, env, plan, trials, Duration::from_secs(10))
+}
+
+fn measure_readiness_with_timeout(
+    project_dir: &Path,
+    env: &ShellEnv,
+    plan: &DevServicePlan,
+    trials: usize,
+    timeout: Duration,
+) -> Result<Vec<u64>, String> {
+    if resolve(project_dir, plan)?.ready.is_none() {
+        return Err(format!(
+            "ServiceProbe `{}` has no declared `ready:` event; process and port liveness are not readiness evidence",
+            plan.name
+        ));
+    }
     // Bring any leftover instance down before the first trial.
     down_one(project_dir, plan)?;
-    let timeout = Duration::from_secs(10);
     let mut samples = Vec::with_capacity(trials);
     for trial in 0..trials {
         let t0 = Instant::now();
@@ -974,6 +990,66 @@ mod tests {
             "a port that never accepts must time out, not hang"
         );
         down_one(&dir, &unreachable).unwrap();
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn service_probe_requires_and_waits_for_declared_ready() {
+        let dir = scratch("probe-ready");
+        let p = plan("fixture", "sleep 30");
+        let error = measure_readiness_with_timeout(
+            &dir,
+            &env(),
+            &p,
+            1,
+            Duration::from_millis(100),
+        )
+        .unwrap_err();
+        assert!(error.contains("no declared `ready:` event"), "{error}");
+        assert!(read_pid(&service_dir(&dir, "fixture")).is_none());
+
+        let ready = service_dir(&dir, "fixture").join("data/ready");
+        let observed = service_dir(&dir, "fixture").join("data/probed");
+        let mut declared = p;
+        declared.ready = Some(format!(
+            "touch '{}'; test -f '{}'",
+            observed.display(),
+            ready.display()
+        ));
+        let signal_ready = ready.clone();
+        let signal = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            fs::write(signal_ready, "ready").unwrap();
+        });
+        let samples = measure_readiness_with_timeout(
+            &dir,
+            &env(),
+            &declared,
+            1,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        signal.join().unwrap();
+        assert_eq!(samples.len(), 1);
+        assert!(observed.exists(), "ServiceProbe must execute the declared ready event");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn service_probe_timeout_stops_the_service() {
+        let dir = scratch("probe-timeout");
+        let mut p = plan("fixture", "sleep 30");
+        p.ready = Some("false".to_string());
+        let error = measure_readiness_with_timeout(
+            &dir,
+            &env(),
+            &p,
+            1,
+            Duration::from_millis(100),
+        )
+        .unwrap_err();
+        assert!(error.contains("did not become ready"), "{error}");
+        assert!(read_pid(&service_dir(&dir, "fixture")).is_none());
         fs::remove_dir_all(&dir).ok();
     }
 

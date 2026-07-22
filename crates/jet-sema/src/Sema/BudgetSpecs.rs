@@ -94,25 +94,42 @@ pub fn collect_budget_specs_bundle(bundle: &ProgramBundle) -> Result<Vec<BudgetS
 pub fn collect_located_budget_specs_bundle(bundle: &ProgramBundle) -> Result<Vec<LocatedBudgetSpec>, Vec<Diagnostic>> {
     let mut specs = Vec::new();
     let mut diags = Vec::new();
+    let mut groups = BTreeMap::<std::path::PathBuf, (Vec<BudgetSpec>, AttachmentCatalog)>::new();
     for (module_index, module) in bundle.modules.iter().enumerate() {
-        let (mut module_specs, mut module_diags) = validate_items(&module.items);
+        let (mut module_specs, mut module_diags) = elaborate_items(&module.items);
+        let group = groups.entry(owning_package_root(bundle, &module.path)).or_default();
+        group.0.extend(module_specs.iter().cloned());
+        group.1.extend(attachment_catalog(&module.items));
         specs.extend(module_specs.drain(..).map(|spec| LocatedBudgetSpec { spec, module_index }));
         diags.append(&mut module_diags);
     }
-    let plain_specs = specs.iter().map(|located| located.spec.clone()).collect::<Vec<_>>();
-    validate_collisions(&plain_specs, &mut diags);
+    for (_, (group_specs, catalog)) in groups {
+        validate_resolution(&group_specs, &catalog, &mut diags);
+        validate_collisions(&group_specs, &mut diags);
+    }
     if diags.is_empty() { Ok(specs) } else { Err(diags) }
 }
 
 pub fn validate_bundle(bundle: &ProgramBundle) -> Vec<Diagnostic> {
-    let mut out = Vec::new();
-    for module in &bundle.modules {
-        out.extend(validate_items(&module.items).1);
-    }
-    out
+    collect_located_budget_specs_bundle(bundle).err().unwrap_or_default()
+}
+
+fn owning_package_root(bundle: &ProgramBundle, module_path: &std::path::Path) -> std::path::PathBuf {
+    bundle.dep_roots.values()
+        .filter(|root| module_path.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .cloned()
+        .unwrap_or_else(|| bundle.project_root.clone())
 }
 
 fn validate_items(items: &[Item]) -> (Vec<BudgetSpec>, Vec<Diagnostic>) {
+    let (specs, mut diags) = elaborate_items(items);
+    validate_resolution(&specs, &attachment_catalog(items), &mut diags);
+    validate_collisions(&specs, &mut diags);
+    (specs, diags)
+}
+
+fn elaborate_items(items: &[Item]) -> (Vec<BudgetSpec>, Vec<Diagnostic>) {
     let mut specs = Vec::new();
     let mut diags = Vec::new();
     for item in items {
@@ -120,8 +137,6 @@ fn validate_items(items: &[Item]) -> (Vec<BudgetSpec>, Vec<Diagnostic>) {
             validate_module(module, &mut specs, &mut diags);
         }
     }
-    validate_resolution(&specs, &attachment_catalog(items), &mut diags);
-    validate_collisions(&specs, &mut diags);
     (specs, diags)
 }
 
@@ -132,6 +147,16 @@ struct AttachmentCatalog {
     targets: std::collections::BTreeSet<String>,
     scenes: std::collections::BTreeSet<String>,
     benches: std::collections::BTreeSet<String>,
+}
+
+impl AttachmentCatalog {
+    fn extend(&mut self, other: Self) {
+        self.envs.extend(other.envs);
+        self.services.extend(other.services);
+        self.targets.extend(other.targets);
+        self.scenes.extend(other.scenes);
+        self.benches.extend(other.benches);
+    }
 }
 
 fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
