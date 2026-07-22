@@ -1420,7 +1420,7 @@ fn typed_cli_entry_accepts_an_imported_argument_type() {
         r#"@Cli
 pub struct RunArgs {
     @[Doc("person to greet")] pub name: String
-    #[Default(2)] pub retries: Int
+    @[Default(2)] pub retries: Int
     pub verbose: Bool
 }
 "#,
@@ -2482,7 +2482,7 @@ end module matrix_math
     let generated = fs::read_to_string(dir.join(".jet/bindings/fortran/matrix.jet")).unwrap();
     assert!(generated.contains("fortran-layout probe.a: column-major 2x3"));
     assert!(generated.contains("a.len() != 6"));
-    assert!(generated.contains("#(Fortran)"));
+    assert!(generated.contains("--[Fortran]->"));
     assert!(String::from_utf8_lossy(&bind.stdout).contains("layout: probe.a column-major 2x3"));
 
     fs::write(
@@ -2751,7 +2751,7 @@ fn run() --[DotNet, Io]-> {
     print(counter.add(handle, 2) ?? -1)
     print(counter.twice(2.5) ?? -1.0)
     print(counter.explode(handle, -1) ?? -7)
-    counter.close(^handle) ?? panic("CoreCLR close failed")
+    counter.close(^handle)
 }
 "#).unwrap();
     let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded CoreCLR binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n5.0\n-7\n");assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden managed detail"));
@@ -2877,7 +2877,7 @@ fn run() --[Pascal, Io]-> {
     handle :: inv.counter_new(40) ?? panic("Pascal constructor failed")
     print(inv.counter_add(handle, 2) ?? -1)
     print(inv.destroyed_count())
-    close(^handle)
+    inv.close(^handle)
     print(inv.destroyed_count())
 }
 "#).unwrap();
@@ -2905,7 +2905,7 @@ fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
     if Command::new("dart").arg("--version").output().is_err(){return}
     let dir=isolated_cwd("dart_bind_round_trip");let contract=dir.join("callbacks.dart");let compute=dir.join("compute.jet");
     fs::write(&contract,"@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n").unwrap();
-    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) --[Dart]-> Int {\n    return callbacks.dartDouble(value) ?? -1\n}\n").unwrap();
+    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) --[Dart]-> Int {\n    return callbacks.dart_double(value) ?? -1\n}\n").unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","dart"]).arg(&contract).args(["--jet",compute.to_str().unwrap(),"--pkg","callbacks"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(bind.status.success(),"Dart bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     let cache=dir.join(".jet/bindings/dart");let native=cache.join(if cfg!(target_os="macos"){"libjet_dart_callbacks_compute.dylib"}else if cfg!(target_os="windows"){"libjet_dart_callbacks_compute.dll"}else{"libjet_dart_callbacks_compute.so"});
@@ -2947,13 +2947,13 @@ use core.encoding.json as json
 fn run() --[PowerShell, Io]-> {
     session :: ops.open() ?? panic("PowerShell open failed")
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
-    first :: ops.Get_Stateful(session, ~input, 5000) ?? panic("first call failed")
-    second :: ops.Get_Stateful(session, ~input, 5000) ?? panic("second call failed")
+    first :: ops.get_stateful(session, ~input, 5000) ?? panic("first call failed")
+    second :: ops.get_stateful(session, ~input, 5000) ?? panic("second call failed")
     print(json.canonical(first))
     print(json.canonical(second))
-    failed :: ops.Fail(session, DataTree.Null, 5000) ?? DataTree.Text("failed")
+    failed :: ops.fail(session, DataTree.Null, 5000) ?? DataTree.Text("failed")
     print(json.canonical(failed))
-    timed :: ops.Sleep(session, DataTree.Int(1), 100) ?? DataTree.Text("timeout")
+    timed :: ops.sleep(session, DataTree.Int(1), 100) ?? DataTree.Text("timeout")
     print(json.canonical(timed))
     ops.close(^session)
 }
@@ -2963,12 +2963,12 @@ fn run() --[PowerShell, Io]-> {
 #include <stdint.h>
 #include <unistd.h>
 extern int64_t jet_pwsh_ops_open(void);
-extern const char* jet_pwsh_ops_invoke_Sleep(int64_t,const char*,int64_t);
+extern const char* jet_pwsh_ops_invoke_sleep(int64_t,const char*,int64_t);
 extern void jet_pwsh_ops_cancel(int64_t);
 extern void jet_pwsh_ops_close(int64_t);
 extern int64_t jet_pwsh_ops_take_error(void);
 static int64_t handle;static int64_t code;
-static void* call(void*unused){(void)unused;jet_pwsh_ops_invoke_Sleep(handle,"null",60000);code=jet_pwsh_ops_take_error();return 0;}
+static void* call(void*unused){(void)unused;jet_pwsh_ops_invoke_sleep(handle,"null",60000);code=jet_pwsh_ops_take_error();return 0;}
 int main(void){handle=jet_pwsh_ops_open();if(!handle)return 1;pthread_t thread;if(pthread_create(&thread,0,call,0))return 2;usleep(100000);jet_pwsh_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 3;int64_t fresh=jet_pwsh_ops_open();if(!fresh)return 4;jet_pwsh_ops_close(fresh);return 0;}
 "#).unwrap();
     let cc=Command::new("cc").arg("cancel.c").args(["-L.jet/bindings/pwsh","-l:libjet_pwsh_ops.a","-lpthread","-o","cancel"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"PowerShell cancellation probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let cancel=Command::new(dir.join("cancel")).current_dir(&dir).output().unwrap();assert!(cancel.status.success(),"PowerShell cancellation did not clean the worker: {:?}",cancel.status.code());

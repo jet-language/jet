@@ -1211,7 +1211,7 @@ fn qualified_ident(value: &str) -> bool {
     value.split("::").all(ident)
 }
 
-fn snake(value: &str) -> String {
+pub(crate) fn snake(value: &str) -> String {
     let mut out = String::new();
     for (index, ch) in value.chars().enumerate() {
         if ch.is_ascii_uppercase() && index > 0 {

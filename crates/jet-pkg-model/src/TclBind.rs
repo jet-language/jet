@@ -73,6 +73,8 @@ pub fn eval_float(session: Session, code: String) -> Float ? TclError {{
 impl Session.Close {{
     fn close(^self) {{ abi.close(self.value) }}
 }}
+
+pub fn close(^session: Session) {{}}
 "#)}
 
 fn render_c(lib:&str,seed:&str)->String{let abi=format!("jet_tcl_{lib}");format!(r#"#include <tcl.h>
