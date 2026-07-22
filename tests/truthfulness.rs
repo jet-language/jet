@@ -412,6 +412,9 @@ fn compiler_seam_crates_have_only_path_dependencies() {
         ("jet-jit", &["D-JITDEP1", "D-JIT2"]),
         ("jet-net", &["D-DEP1"]),
         ("jetpack", &["D-DEP-CRYPTO1=A"]),
+        // D-DX5-HOOK1: compiler-extension Wasmtime host runs only in the
+        // sibling binary package; jetpack's compiler-linked library stays clean.
+        ("jetpack-bin", &["D-DEP1", "D-DX5-HOOK1"]),
         // Card #367 / D-PRODUCT-SPLIT1=C: FFI.rs (the rustls test-only
         // loopback peer) moved from `jetpack` to `jet-pkg-model`.
         ("jet-pkg-model", &["D-DEP1", "D-EMAIL-DKIM-CONFIG1"]),

@@ -22,6 +22,7 @@ pub mod QueryService;
 // API-freeze validation via Sema) and was never used by `jetpack` itself, so
 // it lives directly in this crate instead of the shared model.
 pub mod PluginExport;
+pub mod CompilerExtensionHook;
 // Card #367 / D-PRODUCT-SPLIT1=C slice 3: `EffectBudget`/`LintPolicy` are
 // pure policy computation over the manifest/effect-fixpoint data (no
 // network/provider/shell), so they live in the shared read-only model too —
