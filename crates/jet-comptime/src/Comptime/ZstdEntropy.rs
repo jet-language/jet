@@ -1,7 +1,7 @@
 //! Private std-only Zstandard entropy substrate.
 //!
-//! This is production-compiled but not publicly dispatched until sequence
-//! decoding completes the full `core.compress.zstd.decompress` contract.
+//! This is production-compiled but not publicly dispatched until the complete
+//! frame, block, dictionary, and checksum contract has closed review.
 
 const BLOCK_MAX: usize = 128 * 1024;
 
@@ -116,7 +116,22 @@ impl FseTable {
                 return None;
             }
         }
+        let table = Self::from_probabilities(log, &probabilities)?;
+        Some((table, bits.bit.div_ceil(8)))
+    }
+
+    fn from_probabilities(log: u8, probabilities: &[i32]) -> Option<Self> {
         let size = 1usize << log;
+        let total = probabilities.iter().try_fold(0usize, |sum, probability| {
+            sum.checked_add(match *probability {
+                -1 => 1,
+                value if value >= 0 => value as usize,
+                _ => return None,
+            })
+        })?;
+        if total != size || probabilities.is_empty() || probabilities.len() > 256 {
+            return None;
+        }
         let mut entries = vec![FseEntry { baseline: 0, bits: 0, symbol: 0 }; size];
         let mut high = size;
         for (symbol, probability) in probabilities.iter().enumerate() {
@@ -153,7 +168,7 @@ impl FseTable {
             }
             counters[usize::from(entry.symbol)] += 1;
         }
-        Some((Self { log, entries }, bits.bit.div_ceil(8)))
+        Some(Self { log, entries })
     }
 
     fn weights(&self, source: &[u8]) -> Option<Vec<u8>> {
@@ -367,6 +382,279 @@ pub(super) fn literals(
     Some((out, header + compressed))
 }
 
+const LL_BASE: [usize; 36] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24,
+    28, 32, 40, 48, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768,
+    65536,
+];
+const LL_BITS: [u8; 36] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3,
+    4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+];
+const ML_BASE: [usize; 53] = [
+    3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+    23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 41, 43, 47,
+    51, 59, 67, 83, 99, 131, 259, 515, 1027, 2051, 4099, 8195, 16387, 32771,
+    65539,
+];
+const ML_BITS: [u8; 53] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10,
+    11, 12, 13, 14, 15, 16,
+];
+const LL_DEFAULT: [i32; 36] = [
+    4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2,
+    2, 3, 2, 1, 1, 1, 1, 1, -1, -1, -1, -1,
+];
+const ML_DEFAULT: [i32; 53] = [
+    1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1,
+    -1, -1, -1, -1, -1, -1,
+];
+const OF_DEFAULT: [i32; 29] = [
+    1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    -1, -1, -1, -1, -1,
+];
+
+pub(super) struct SequenceState {
+    literal_lengths: Option<FseTable>,
+    offsets: Option<FseTable>,
+    match_lengths: Option<FseTable>,
+    recent_offsets: [usize; 3],
+}
+
+impl Default for SequenceState {
+    fn default() -> Self {
+        Self {
+            literal_lengths: None,
+            offsets: None,
+            match_lengths: None,
+            recent_offsets: [1, 4, 8],
+        }
+    }
+}
+
+fn sequence_count(source: &[u8]) -> Option<(usize, usize)> {
+    match *source.first()? {
+        0..=127 => Some((usize::from(source[0]), 1)),
+        128..=254 => Some((
+            ((usize::from(source[0]) - 128) << 8) + usize::from(*source.get(1)?),
+            2,
+        )),
+        255 => Some((
+            usize::from(*source.get(1)?) + (usize::from(*source.get(2)?) << 8) + 0x7f00,
+            3,
+        )),
+    }
+}
+
+fn sequence_table(
+    mode: u8,
+    source: &[u8],
+    current: &mut Option<FseTable>,
+    max_log: u8,
+    max_symbol: usize,
+    default_log: u8,
+    default: &[i32],
+) -> Option<usize> {
+    match mode {
+        0 => {
+            *current = Some(FseTable::from_probabilities(default_log, default)?);
+            Some(0)
+        }
+        1 => {
+            let symbol = *source.first()?;
+            if usize::from(symbol) > max_symbol {
+                return None;
+            }
+            *current = Some(FseTable {
+                log: 0,
+                entries: vec![FseEntry { baseline: 0, bits: 0, symbol }],
+            });
+            Some(1)
+        }
+        2 => {
+            let (table, used) = FseTable::parse(source, max_log, max_symbol)?;
+            *current = Some(table);
+            Some(used)
+        }
+        3 => current.as_ref().map(|_| 0),
+        _ => None,
+    }
+}
+
+fn update_sequence_state(table: &FseTable, entry: FseEntry, bits: &mut ReverseBits) -> Option<usize> {
+    let state = entry.baseline.checked_add(bits.read(entry.bits))?;
+    (state < table.entries.len()).then_some(state)
+}
+
+fn resolve_offset(value: usize, literals: usize, recent: &mut [usize; 3]) -> Option<usize> {
+    let actual = if literals != 0 {
+        match value {
+            1..=3 => recent[value - 1],
+            _ => value.checked_sub(3)?,
+        }
+    } else {
+        match value {
+            1..=2 => recent[value],
+            3 => recent[0].checked_sub(1)?,
+            _ => value.checked_sub(3)?,
+        }
+    };
+    if actual == 0 {
+        return None;
+    }
+    match (literals != 0, value) {
+        (true, 1) => {}
+        (true, 2) | (false, 1) => {
+            recent[1] = recent[0];
+            recent[0] = actual;
+        }
+        _ => {
+            recent[2] = recent[1];
+            recent[1] = recent[0];
+            recent[0] = actual;
+        }
+    }
+    Some(actual)
+}
+
+fn append_match(
+    out: &mut Vec<u8>,
+    frame_start: usize,
+    offset: usize,
+    length: usize,
+    window: usize,
+    maximum: usize,
+) -> Option<()> {
+    if offset > window || out.len().checked_sub(offset)? < frame_start {
+        return None;
+    }
+    if out.len().checked_add(length)? > maximum {
+        return None;
+    }
+    for _ in 0..length {
+        out.push(out[out.len() - offset]);
+    }
+    Some(())
+}
+
+pub(super) fn sequences(
+    source: &[u8],
+    literals: &[u8],
+    state: &mut SequenceState,
+    out: &mut Vec<u8>,
+    frame_start: usize,
+    window: usize,
+    block_max: usize,
+    maximum: usize,
+) -> Option<()> {
+    let block_start = out.len();
+    let (count, mut used) = sequence_count(source)?;
+    if count == 0 {
+        if used != source.len() || out.len().checked_add(literals.len())? > maximum {
+            return None;
+        }
+        out.extend_from_slice(literals);
+        return (out.len() - block_start <= block_max).then_some(());
+    }
+    let modes = *source.get(used)?;
+    used += 1;
+    if modes & 3 != 0 {
+        return None;
+    }
+    let ll_mode = modes >> 6;
+    let of_mode = (modes >> 4) & 3;
+    let ml_mode = (modes >> 2) & 3;
+    let table_source = source.get(used..)?;
+    used += sequence_table(
+        ll_mode,
+        table_source,
+        &mut state.literal_lengths,
+        9,
+        35,
+        6,
+        &LL_DEFAULT,
+    )?;
+    let table_source = source.get(used..)?;
+    used += sequence_table(
+        of_mode,
+        table_source,
+        &mut state.offsets,
+        8,
+        31,
+        5,
+        &OF_DEFAULT,
+    )?;
+    let table_source = source.get(used..)?;
+    used += sequence_table(
+        ml_mode,
+        table_source,
+        &mut state.match_lengths,
+        9,
+        52,
+        6,
+        &ML_DEFAULT,
+    )?;
+
+    let ll_table = state.literal_lengths.as_ref()?;
+    let of_table = state.offsets.as_ref()?;
+    let ml_table = state.match_lengths.as_ref()?;
+    let mut bits = ReverseBits::new(source.get(used..)?)?;
+    let mut ll_state = bits.read(ll_table.log);
+    let mut of_state = bits.read(of_table.log);
+    let mut ml_state = bits.read(ml_table.log);
+    if bits.remaining < 0 {
+        return None;
+    }
+    let mut literal = 0usize;
+    for index in 0..count {
+        let ll_entry = *ll_table.entries.get(ll_state)?;
+        let of_entry = *of_table.entries.get(of_state)?;
+        let ml_entry = *ml_table.entries.get(ml_state)?;
+        let ll_code = usize::from(ll_entry.symbol);
+        let ml_code = usize::from(ml_entry.symbol);
+        let of_code = of_entry.symbol;
+        let offset_value = (1usize << of_code).checked_add(bits.read(of_code))?;
+        let match_length = ML_BASE.get(ml_code)?.checked_add(bits.read(ML_BITS[ml_code]))?;
+        let literal_length = LL_BASE.get(ll_code)?.checked_add(bits.read(LL_BITS[ll_code]))?;
+        if bits.remaining < 0 {
+            return None;
+        }
+        let literal_end = literal.checked_add(literal_length)?;
+        let selected = literals.get(literal..literal_end)?;
+        let after_sequence = out
+            .len()
+            .checked_add(selected.len())?
+            .checked_add(match_length)?;
+        if after_sequence > maximum || after_sequence.checked_sub(block_start)? > block_max {
+            return None;
+        }
+        out.extend_from_slice(selected);
+        literal = literal_end;
+        let offset = resolve_offset(offset_value, literal_length, &mut state.recent_offsets)?;
+        append_match(out, frame_start, offset, match_length, window, maximum)?;
+        if index + 1 < count {
+            ll_state = update_sequence_state(ll_table, ll_entry, &mut bits)?;
+            ml_state = update_sequence_state(ml_table, ml_entry, &mut bits)?;
+            of_state = update_sequence_state(of_table, of_entry, &mut bits)?;
+            if bits.remaining < 0 {
+                return None;
+            }
+        }
+    }
+    if bits.remaining != 0 {
+        return None;
+    }
+    let remaining = literals.get(literal..)?;
+    let end = out.len().checked_add(remaining.len())?;
+    if end > maximum || end.checked_sub(block_start)? > block_max {
+        return None;
+    }
+    out.extend_from_slice(remaining);
+    Some(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,8 +663,13 @@ mod tests {
     use std::process::{Command, Stdio};
 
     fn compress(plain: &[u8]) -> Vec<u8> {
+        compress_with(plain, &[])
+    }
+
+    fn compress_with(plain: &[u8], args: &[&str]) -> Vec<u8> {
         let mut child = Command::new("zstd")
             .args(["-q", "--no-check", "-c"])
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -419,6 +712,21 @@ mod tests {
             })
             .collect::<Vec<_>>();
         compress(&plain)
+    }
+
+    fn sequence_repeat_plain() -> Vec<u8> {
+        let mut value = 1u32;
+        let base = (0..BLOCK_MAX)
+            .map(|_| {
+                value = value.wrapping_mul(1_103_515_245).wrapping_add(12_345) & 0x7fff_ffff;
+                (value % 3) as u8
+            })
+            .collect::<Vec<_>>();
+        let mut plain = Vec::with_capacity(BLOCK_MAX * 3);
+        for shift in [0, 4, 8] {
+            plain.extend(base.iter().map(|byte| byte + shift));
+        }
+        plain
     }
 
     fn blocks(frame: &[u8]) -> Vec<&[u8]> {
@@ -473,6 +781,109 @@ mod tests {
             }
         }
         assert!(kinds.contains(&2) && kinds.contains(&3), "expected compressed + treeless: {kinds:?}");
+    }
+
+    #[test]
+    fn ordinary_multiblock_corpus_reuses_sequence_table() {
+        let plain = sequence_repeat_plain();
+        let frame = compress_with(&plain, &["-19"]);
+        let mut huffman = HuffmanState::default();
+        let mut modes = Vec::new();
+        for block in blocks(&frame) {
+            let (_, used) = literals(block, &mut huffman).expect("literals");
+            let section = &block[used..];
+            let (count, header) = sequence_count(section).expect("sequence header");
+            if count != 0 {
+                modes.push(section[header]);
+            }
+        }
+        assert!(modes.iter().any(|modes| {
+            [modes >> 6, (modes >> 4) & 3, (modes >> 2) & 3].contains(&3)
+        }), "stock corpus must repeat an LL/ML/OF table: {modes:02x?}");
+    }
+
+    #[test]
+    fn sequence_modes_and_headers_enforce_spec_bounds() {
+        assert_eq!(sequence_count(&[127]), Some((127, 1)));
+        assert_eq!(sequence_count(&[128, 5]), Some((5, 2)));
+        assert_eq!(sequence_count(&[255, 1, 2]), Some((0x8101, 3)));
+
+        let mut state = SequenceState::default();
+        let mut out = vec![b'A'];
+        assert!(sequences(
+            &[1, 0x54, 1, 0, 0, 1],
+            b"B",
+            &mut state,
+            &mut out,
+            0,
+            8,
+            128,
+            128,
+        )
+        .is_some());
+        assert_eq!(out, b"ABBBB");
+        assert!(sequences(
+            &[1, 0xfc, 1],
+            b"C",
+            &mut state,
+            &mut out,
+            0,
+            8,
+            128,
+            128,
+        )
+        .is_some());
+        assert_eq!(out, b"ABBBBCCCC");
+        let mut zero_count = Vec::new();
+        assert!(sequences(
+            &[128, 0],
+            b"literal",
+            &mut SequenceState::default(),
+            &mut zero_count,
+            0,
+            8,
+            128,
+            128,
+        )
+        .is_some());
+        assert_eq!(zero_count, b"literal");
+
+        for (window, block_max) in [(0, 128), (8, 3)] {
+            assert!(sequences(
+                &[1, 0x54, 1, 0, 0, 1],
+                b"B",
+                &mut SequenceState::default(),
+                &mut vec![b'A'],
+                0,
+                window,
+                block_max,
+                128,
+            )
+            .is_none());
+        }
+
+        for malformed in [
+            &[0, 0][..],
+            &[1, 0xfc, 1],
+            &[1, 1, 1],
+            &[1, 0x40, 36, 1],
+            &[1, 0x10, 32, 1],
+            &[1, 0x04, 53, 1],
+            &[1, 0x54, 0, 0, 0, 1],
+            &[1, 0x54, 1, 0, 0, 3],
+        ] {
+            assert!(sequences(
+                malformed,
+                b"B",
+                &mut SequenceState::default(),
+                &mut vec![b'A'],
+                0,
+                8,
+                128,
+                128,
+            )
+            .is_none(), "accepted malformed sequence section: {malformed:?}");
+        }
     }
 
     #[test]

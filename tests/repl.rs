@@ -2575,7 +2575,7 @@ fn repl_zstd_compress_is_resident() {
 }
 
 #[test]
-fn repl_zstd_decompress_stays_pending_until_compressed_blocks_land() {
+fn repl_zstd_decompress_stays_pending_until_private_decoder_is_complete() {
     let out = run_transcript(
         &[
             "use core.compress.zstd as zstd",

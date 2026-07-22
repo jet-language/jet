@@ -37,8 +37,8 @@ pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
     out
 }
 
-// Staged decoder foundation. Keep private until compressed-block FSE/Huffman
-// support makes the whole public AOT contract resident.
+// Staged decoder foundation. Keep private until the full format-law and AOT
+// compatibility review closes; private checkpoints must not leak publicly.
 #[allow(dead_code)]
 fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     let fail = |reason: &str| format!("compress.zstd.decompress: {reason}");
@@ -104,6 +104,7 @@ fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
         }
         let block_max = window.min(ZSTD_BLOCK_MAX as u64) as usize;
         let mut huffman = super::ZstdEntropy::HuffmanState::default();
+        let mut sequences = super::ZstdEntropy::SequenceState::default();
         loop {
             let header = read_le(data, input, 3).ok_or_else(|| fail("invalid zstd data"))? as u32;
             input += 3;
@@ -111,10 +112,11 @@ fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
             let kind = (header >> 1) & 3;
             let size = (header >> 3) as usize;
             if size > block_max
-                || out
-                    .len()
-                    .checked_add(size)
-                    .is_none_or(|len| len > MAX_CODEC_OUTPUT)
+                || (kind != 2
+                    && out
+                        .len()
+                        .checked_add(size)
+                        .is_none_or(|len| len > MAX_CODEC_OUTPUT))
             {
                 return Err(fail("frame exceeds the 64 MiB output limit"));
             }
@@ -138,12 +140,20 @@ fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
                         .filter(|end| *end <= data.len())
                         .ok_or_else(|| fail("invalid zstd data"))?;
                     let block = &data[input..end];
-                    let (_, used) = super::ZstdEntropy::literals(block, &mut huffman)
+                    let (literals, used) = super::ZstdEntropy::literals(block, &mut huffman)
                         .ok_or_else(|| fail("invalid compressed literals"))?;
-                    if block.get(used) == Some(&0) && used + 1 == block.len() {
-                        return Err(fail("compressed literals ready; sequences pending"));
-                    }
-                    return Err(fail("compressed sequences require FSE execution"));
+                    super::ZstdEntropy::sequences(
+                        block.get(used..).ok_or_else(|| fail("invalid compressed sequences"))?,
+                        &literals,
+                        &mut sequences,
+                        &mut out,
+                        frame_start,
+                        window as usize,
+                        block_max,
+                        MAX_CODEC_OUTPUT,
+                    )
+                    .ok_or_else(|| fail("invalid compressed sequences"))?;
+                    input = end;
                 }
                 _ => return Err(fail("invalid zstd data")),
             }
@@ -926,6 +936,27 @@ fn inflate_codes(
 mod tests {
     use super::*;
 
+    fn stock_zstd(plain: &[u8]) -> Vec<u8> {
+        stock_zstd_with(plain, &[])
+    }
+
+    fn stock_zstd_with(plain: &[u8], args: &[&str]) -> Vec<u8> {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        let mut child = Command::new("zstd")
+            .args(["-q", "--no-check", "-c"])
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("zstd must be available in the Jet test environment");
+        child.stdin.take().unwrap().write_all(plain).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        output.stdout
+    }
+
     #[test]
     fn stored_zip_and_tar_round_trip() {
         let zip = zip_compress("hello.txt", b"hello");
@@ -1116,7 +1147,7 @@ mod tests {
     }
 
     #[test]
-    fn zstd_compressed_blocks_remain_an_explicit_gap() {
+    fn zstd_stock_compressed_sequence_golden_decodes() {
         // zstd 1.5.7 compressed-block frame for a repeated pangram.
         let compressed = [
             40, 181, 47, 253, 0, 88, 181, 1, 0, 180, 2, 116, 104, 101, 32, 113, 117, 105,
@@ -1124,8 +1155,49 @@ mod tests {
             115, 32, 111, 118, 101, 114, 32, 116, 104, 101, 32, 108, 97, 122, 121, 32, 100,
             111, 103, 2, 0, 253, 169, 4, 6, 194, 44, 3,
         ];
-        assert!(zstd_decompress(&compressed)
-            .unwrap_err()
-            .contains("compressed sequences require FSE execution"));
+        assert_eq!(
+            zstd_decompress(&compressed),
+            Ok(b"the quick brown fox jumps over the lazy dog ".repeat(4))
+        );
+    }
+
+    #[test]
+    fn zstd_stock_multiblock_sequences_use_prior_output() {
+        let mut value = 1u32;
+        let base = (0..120_000)
+            .map(|_| {
+                value ^= value << 13;
+                value ^= value >> 17;
+                value ^= value << 5;
+                value as u8
+            })
+            .collect::<Vec<_>>();
+        let plain = base.repeat(3);
+        let frame = stock_zstd(&plain);
+        assert_eq!(zstd_decompress(&frame), Ok(plain));
+
+        let mut value = 1u32;
+        let plain = (0..300_000)
+            .map(|_| {
+                value = value.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                b'A' + (value % 3) as u8
+            })
+            .collect::<Vec<_>>();
+        let frame = stock_zstd(&plain);
+        assert_eq!(zstd_decompress(&frame), Ok(plain));
+
+        let mut value = 1u32;
+        let base = (0..ZSTD_BLOCK_MAX)
+            .map(|_| {
+                value = value.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                (value % 3) as u8
+            })
+            .collect::<Vec<_>>();
+        let mut plain = Vec::with_capacity(ZSTD_BLOCK_MAX * 3);
+        for shift in [0, 4, 8] {
+            plain.extend(base.iter().map(|byte| byte + shift));
+        }
+        let frame = stock_zstd_with(&plain, &["-19"]);
+        assert_eq!(zstd_decompress(&frame), Ok(plain));
     }
 }
