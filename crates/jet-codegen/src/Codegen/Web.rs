@@ -34,6 +34,7 @@ pub struct WebArtifacts {
 }
 
 const DOM_RUNTIME: &str = include_str!("../Prelude/DomRuntime.js");
+const INLINE_HANDLER_PLACEHOLDER: &str = "/*__JET_INLINE_HANDLER__*/null";
 
 /// D-WEBTIR1=A: data-only fact reported by codegen's TIR coverage gate.
 /// The driver/API layer owns the user-facing diagnostic text.
@@ -928,14 +929,16 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
                 json_quote("run")
             ));
             out.push_str("  try {\n");
+            let mut body = String::new();
             emit_tir_js_body(
                 &main_fn.tir.body,
-                &mut out,
+                &mut body,
                 funcs,
                 main_fn.file_prefix.as_deref(),
                 2,
             )
-                .map_err(|()| web_emit_error(main_fn))?;
+            .map_err(|()| web_emit_error(main_fn))?;
+            out.push_str(&bind_inline_handler_symbols(&body, &main_fn.key));
             out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
             out.push_str("}\n\n");
             out.push_str("const _isMain = typeof process !== \"undefined\" && process.argv[1]?.endsWith(\"app.js\");\n");
@@ -986,11 +989,27 @@ fn emit_js_fn(f: &FuncWeb, out: &mut String, all: &[FuncWeb]) -> WebEmitResult<(
         json_quote(&f.key)
     ));
     out.push_str("  try {\n");
-    emit_tir_js_body(&f.tir.body, out, all, f.file_prefix.as_deref(), 2)
+    let mut body = String::new();
+    emit_tir_js_body(&f.tir.body, &mut body, all, f.file_prefix.as_deref(), 2)
         .map_err(|()| web_emit_error(f))?;
+    out.push_str(&bind_inline_handler_symbols(&body, &f.key));
     out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
     out.push_str("}\n\n");
     Ok(())
+}
+
+fn bind_inline_handler_symbols(body: &str, owner: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body;
+    let mut index = 0usize;
+    while let Some(at) = rest.find(INLINE_HANDLER_PLACEHOLDER) {
+        out.push_str(&rest[..at]);
+        out.push_str(&json_quote(&format!("{owner}$handler{index}")));
+        rest = &rest[at + INLINE_HANDLER_PLACEHOLDER.len()..];
+        index += 1;
+    }
+    out.push_str(rest);
+    out
 }
 
 fn param_names(params: &[(String, Type)]) -> String {
@@ -1217,11 +1236,20 @@ fn tir_core_call(
         let symbol = match &args[2].kind {
             TIR::TExprKind::Local(name) => {
                 let key = local_web_key(file_prefix, name);
-                funcs.iter().find(|func| func.key == key).map(|func| func.name.as_str()).unwrap_or("")
+                funcs
+                    .iter()
+                    .find(|func| func.key == key)
+                    .map(|func| json_quote(&func.key))
+                    .unwrap_or_else(|| INLINE_HANDLER_PLACEHOLDER.into())
             }
-            _ => "",
+            _ => INLINE_HANDLER_PLACEHOLDER.into(),
         };
-        return Ok(format!("jetDom.on({}, {}, {}, {})", get(0), get(1), get(2), json_quote(symbol)));
+        return Ok(format!(
+            "jetDom.on({}, {}, {}, {symbol})",
+            get(0),
+            get(1),
+            get(2)
+        ));
     }
     if let Some(kind) = storage {
         return Ok(match method {

@@ -392,20 +392,32 @@ fn attach(args: &[String]) -> i32 {
 
 fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<CaptureBundle, String> {
     let mut bundle = capture_from_source(&capture.source, None, 0, None, None, None)?;
-    let symbols = bundle
+    let mut symbols = bundle
         .source_identity
         .first()
         .map(|source| {
             source
                 .symbols
                 .iter()
-                .map(|(name, _)| name.as_str())
+                .map(|(name, _)| name.clone())
                 .collect::<BTreeSet<_>>()
         })
         .unwrap_or_default();
     for row in capture.rows {
-        if !symbols.contains(row.symbol.as_str()) {
-            return Err(format!("browser trace named unknown Jet handler `{}`", row.symbol));
+        if !symbols.contains(&row.symbol) {
+            let owner = inline_handler_owner(&row.symbol).ok_or_else(|| {
+                format!("browser trace named unknown Jet handler `{}`", row.symbol)
+            })?;
+            if !symbols.contains(owner) {
+                return Err(format!(
+                    "browser trace named unknown Jet handler `{}`",
+                    row.symbol
+                ));
+            }
+            symbols.insert(row.symbol.clone());
+            if let Some(source) = bundle.source_identity.first_mut() {
+                source.symbols.push((row.symbol.clone(), "handler".into()));
+            }
         }
         bundle.browser.push(TraceBrowser {
             class: row.class,
@@ -419,6 +431,18 @@ fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<Cap
     }
     bundle.browser_rows_truncated = capture.truncated;
     Ok(bundle)
+}
+
+fn inline_handler_owner(symbol: &str) -> Option<&str> {
+    let (owner, index) = symbol.rsplit_once("$handler")?;
+    if owner.is_empty()
+        || index.is_empty()
+        || !index.bytes().all(|byte| byte.is_ascii_digit())
+        || (index.len() > 1 && index.starts_with('0'))
+    {
+        return None;
+    }
+    Some(owner.rsplit("__").next().unwrap_or(owner))
 }
 
 fn capture_from_source(

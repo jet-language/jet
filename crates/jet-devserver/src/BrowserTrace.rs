@@ -39,23 +39,23 @@ impl Relay {
     pub fn new(source: &str) -> Result<Self, String> {
         let path = relay_path(std::process::id());
         let _ = fs::remove_file(&path);
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|error| format!("cannot create browser trace relay: {error}"))?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-                .map_err(|error| format!("cannot secure browser trace relay: {error}"))?;
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
+        let mut file = options
+            .open(&path)
+            .map_err(|error| format!("cannot create browser trace relay: {error}"))?;
         let nonce = nonce();
+        let pid = std::process::id();
         writeln!(
             file,
-            "{SCHEMA}\t{nonce}\t{}\t{}",
+            "{SCHEMA}\t{nonce}\t{}\t{pid}\t{}",
             hex(source.as_bytes()),
-            process_start_marker(std::process::id()).unwrap_or_else(|| "unknown".into())
+            process_start_marker(pid).unwrap_or_else(|| "unknown".into())
         )
         .map_err(|error| format!("cannot initialize browser trace relay: {error}"))?;
         file.flush()
@@ -92,7 +92,9 @@ impl Relay {
         if !matches!(class.as_str(), "event" | "wasm" | "dom")
             || symbol.is_empty()
             || symbol.len() > 128
-            || !symbol.bytes().all(|b| b == b'_' || b.is_ascii_alphanumeric())
+            || !symbol
+                .bytes()
+                .all(|b| matches!(b, b'_' | b'$') || b.is_ascii_alphanumeric())
         {
             return Err(RecordError::Malformed);
         }
@@ -140,6 +142,17 @@ pub enum RecordError {
 }
 
 pub fn read(pid: u32) -> Result<Capture, String> {
+    read_with_process_state(pid, process_state(pid))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ProcessState {
+    Alive(String),
+    Dead,
+    Unknown,
+}
+
+fn read_with_process_state(pid: u32, process: ProcessState) -> Result<Capture, String> {
     let path = relay_path(pid);
     let link_metadata = fs::symlink_metadata(&path)
         .map_err(|_| format!("process {pid} has no browser trace relay"))?;
@@ -190,10 +203,17 @@ pub fn read(pid: u32) -> Result<Capture, String> {
     }
     let _nonce = parts.next().ok_or("browser trace relay nonce is missing")?;
     let source = unhex(parts.next().ok_or("browser trace relay source is missing")?)?;
+    let recorded_pid = parts
+        .next()
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or("browser trace relay process id is missing")?;
     let started = parts.next().ok_or("browser trace relay process identity is missing")?;
-    if parts.next().is_some()
-        || process_start_marker(pid).is_some_and(|current| started != "unknown" && current != started)
-    {
+    let stale = recorded_pid != pid
+        || parts.next().is_some()
+        || matches!(&process, ProcessState::Dead)
+        || matches!(&process, ProcessState::Alive(current) if started != "unknown" && current != started);
+    if stale {
+        let _ = fs::remove_file(&path);
         return Err("browser trace relay belongs to a stale process session".into());
     }
     let mut rows = Vec::new();
@@ -274,6 +294,24 @@ fn process_start_marker(pid: u32) -> Option<String> {
     }
 }
 
+fn process_state(pid: u32) -> ProcessState {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        let path = PathBuf::from(format!("/proc/{pid}"));
+        if !path.exists() {
+            return ProcessState::Dead;
+        }
+        return process_start_marker(pid)
+            .map(ProcessState::Alive)
+            .unwrap_or(ProcessState::Unknown);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = pid;
+        ProcessState::Unknown
+    }
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -309,6 +347,16 @@ mod tests {
     fn relay_maps_payload_free_rows_and_rejects_extra_fields() {
         let _guard = TEST_LOCK.lock().unwrap();
         let relay = Relay::new("app.jet").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(relay_path(std::process::id()))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "relay mode must be atomic owner-only");
+        }
         relay
             .record(b"class=event&symbol=load_report&start_ns=10&duration_ns=5&clock_ns=15")
             .unwrap();
@@ -323,6 +371,18 @@ mod tests {
         assert_eq!(capture.rows.len(), 1);
         assert_eq!(capture.rows[0].symbol, "load_report");
         assert!(!capture.truncated);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn dead_devserver_relay_is_rejected_and_removed() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let relay = Relay::new("app.jet").unwrap();
+        let path = relay_path(std::process::id());
+        let error = read_with_process_state(std::process::id(), ProcessState::Dead).unwrap_err();
+        assert!(error.contains("stale process session"), "{error}");
+        assert!(!path.exists(), "dead devserver relay was not removed");
+        drop(relay);
     }
 
     #[test]

@@ -43,11 +43,11 @@ fn perf_attach_joins_devserver_browser_rows_into_one_trace() {
     fs::write(&source, "fn run() {}\n").unwrap();
     let relay = jet::DevServer::BrowserTrace::Relay::new(source.to_str().unwrap()).unwrap();
     relay
-        .record(b"class=event&symbol=run&start_ns=100&duration_ns=25&clock_ns=125")
+        .record(b"class=event&symbol=run%24handler0&start_ns=100&duration_ns=25&clock_ns=125")
         .unwrap();
     for _ in 1..=jet::DevServer::BrowserTrace::ROW_LIMIT {
         relay
-            .record(b"class=event&symbol=run&start_ns=100&duration_ns=25&clock_ns=125")
+            .record(b"class=event&symbol=run%24handler0&start_ns=100&duration_ns=25&clock_ns=125")
             .unwrap();
     }
 
@@ -62,12 +62,18 @@ fn perf_attach_joins_devserver_browser_rows_into_one_trace() {
     let text = String::from_utf8(bytes).unwrap();
     assert!(text.contains("\"browser\":[{\"class\":\"event\""), "{text}");
     assert!(text.contains("\"clock\":\"browser_monotonic_mapped\""), "{text}");
-    assert!(text.contains("\"name\":\"run\""), "{text}");
+    assert!(text.contains("\"name\":\"run$handler0\""), "{text}");
+    assert!(
+        text.contains("{\"kind\":\"handler\",\"name\":\"run$handler0\"}"),
+        "{text}"
+    );
     assert!(text.contains("\"browser_rows_truncated\":true"), "{text}");
     assert_eq!(text.matches("\"class\":\"event\"").count(), 4096, "{text}");
     assert!(!text.contains("nonce"), "session secret leaked into trace: {text}");
     let view = run_jet(&root, &["perf", "view", out.to_str().unwrap()]);
-    assert!(String::from_utf8_lossy(&view.stdout).contains("browser count=4096 ·"));
+    let view = String::from_utf8_lossy(&view.stdout);
+    assert!(view.contains("browser count=4096 ·"), "{view}");
+    assert!(view.contains("browser.jet#run$handler0"), "{view}");
     drop(relay);
     let _ = fs::remove_dir_all(root);
 }

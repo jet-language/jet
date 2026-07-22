@@ -278,7 +278,7 @@ function normalizeEvent(ev) {
 export function on(selector, eventName, handler, symbol) {
   const el = query(selector);
   if (!el || !el.addEventListener) return "Missing";
-  const handlerSymbol = symbol || jetDomScopeName;
+  const handlerSymbol = String(symbol);
   el.addEventListener(String(eventName), (ev) => {
     const started = perfNow();
     try {

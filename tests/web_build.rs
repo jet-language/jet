@@ -1234,7 +1234,10 @@ fn run() {}
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
     assert!(js.contains("jetDom.on(\"#new-task\", \"input\""), "{js}");
-    assert!(runtime.contains("const handlerSymbol = symbol || jetDomScopeName"), "{runtime}");
+    assert!(js.contains("\"init$handler0\""), "{js}");
+    assert!(!js.contains("__JET_INLINE_HANDLER__"), "{js}");
+    assert!(runtime.contains("const handlerSymbol = String(symbol)"), "{runtime}");
+    assert!(!runtime.contains("symbol || jetDomScopeName"), "{runtime}");
     assert!(runtime.contains("perfRecord(handlerSymbol, \"event\""), "{runtime}");
     let stdout = run_web_api_harness(&dir);
     assert_eq!(
