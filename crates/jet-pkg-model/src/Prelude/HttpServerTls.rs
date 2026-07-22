@@ -351,7 +351,7 @@ fn jet_http_tls_body_state(
 enum JetHttpTlsChunkPhase {
     Size,
     Data(usize),
-    FinalCrlf,
+    Trailers,
 }
 
 struct JetHttpTlsChunkState {
@@ -420,7 +420,8 @@ impl JetHttpTlsChunkState {
                     };
                     self.cursor = line_end + 2;
                     if size == 0 {
-                        self.phase = JetHttpTlsChunkPhase::FinalCrlf;
+                        self.search = self.cursor;
+                        self.phase = JetHttpTlsChunkPhase::Trailers;
                     } else {
                         let Some(decoded) = self.decoded.checked_add(size) else {
                             return JetHttpTlsMessageStatus::Reject;
@@ -446,14 +447,40 @@ impl JetHttpTlsChunkState {
                     self.search = self.cursor;
                     self.phase = JetHttpTlsChunkPhase::Size;
                 }
-                JetHttpTlsChunkPhase::FinalCrlf => {
-                    let Some(crlf) = body.get(self.cursor..self.cursor.saturating_add(2)) else {
-                        return JetHttpTlsMessageStatus::Pending;
+                JetHttpTlsChunkPhase::Trailers => {
+                    let start = self.search.saturating_sub(1).max(self.cursor);
+                    let found = body.get(start..).and_then(|tail| {
+                        tail.windows(2).position(|window| window == b"\r\n")
+                    });
+                    #[cfg(test)]
+                    {
+                        self.inspected = self.inspected.saturating_add(match found {
+                            Some(position) => position + 1,
+                            None => body.len().saturating_sub(start).saturating_sub(1),
+                        });
+                    }
+                    let Some(position) = found else {
+                        self.search = body.len();
+                        return if self
+                            .framing
+                            .saturating_add(body.len().saturating_sub(self.cursor))
+                            > Self::MAX_FRAMING
+                        {
+                            JetHttpTlsMessageStatus::Reject
+                        } else {
+                            JetHttpTlsMessageStatus::Pending
+                        };
                     };
-                    if crlf != b"\r\n" || !self.add_framing(2) {
+                    let line_end = start + position;
+                    if !self.add_framing(line_end - self.cursor + 2) {
                         return JetHttpTlsMessageStatus::Reject;
                     }
-                    return JetHttpTlsMessageStatus::Complete(self.cursor + 2);
+                    let empty = line_end == self.cursor;
+                    self.cursor = line_end + 2;
+                    self.search = self.cursor;
+                    if empty {
+                        return JetHttpTlsMessageStatus::Complete(self.cursor);
+                    }
                 }
             }
         }

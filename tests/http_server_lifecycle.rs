@@ -489,6 +489,215 @@ fn live_shared_messages_round_trip_binary_and_stream_unknown_length() {
 }
 
 #[test]
+fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn exchange(addr: std::net::SocketAddr, request: &[u8]) -> String {
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+        stream.write_all(request).expect("request write");
+        stream.shutdown(std::net::Shutdown::Write).expect("finish request");
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).expect("response read");
+        String::from_utf8(response).expect("response UTF-8")
+    }
+
+    let mut forbidden_response = jet_http_srv_response(200, &"body".to_string());
+    forbidden_response.trailers.append("Content-Length", "4").unwrap();
+    let mut unpublished = Vec::new();
+    assert_eq!(
+        jet_http_srv_write_response(&mut unpublished, &forbidden_response, "HTTP/1.1", true),
+        Err(JetHttpError::InvalidHeader),
+    );
+    assert!(unpublished.is_empty(), "forbidden trailers published response headers");
+
+    let mut http10_response = jet_http_srv_response(200, &"body".to_string());
+    http10_response.trailers.append("X-Checksum", "done").unwrap();
+    assert_eq!(
+        jet_http_srv_write_response(&mut unpublished, &http10_response, "HTTP/1.0", true),
+        Err(JetHttpError::InvalidFraming),
+    );
+    assert!(unpublished.is_empty(), "HTTP/1.0 trailers published response headers");
+
+    let mut http10_stream = jet_http_srv_response(200, &String::new());
+    http10_stream.body = JetHttpBody::reader(std::io::Cursor::new(b"close-body".to_vec()), None);
+    let mut http10_wire = Vec::new();
+    jet_http_srv_write_response(&mut http10_wire, &http10_stream, "HTTP/1.0", false).unwrap();
+    let http10_wire = String::from_utf8(http10_wire).unwrap();
+    assert!(!http10_wire.contains("Content-Length"), "{http10_wire}");
+    assert!(!http10_wire.contains("Transfer-Encoding"), "{http10_wire}");
+    assert!(http10_wire.contains("Connection: close\r\n"), "{http10_wire}");
+    assert!(http10_wire.ends_with("\r\n\r\nclose-body"), "{http10_wire}");
+
+    let mut streamed_head = jet_http_srv_response(200, &String::new());
+    streamed_head.body = JetHttpBody::reader(std::io::Cursor::new(b"hidden".to_vec()), None);
+    streamed_head.trailers.append("X-Checksum", "hidden").unwrap();
+    let streamed_head = jet_http_srv_head_response(streamed_head, true);
+    let mut head_wire = Vec::new();
+    jet_http_srv_write_response(&mut head_wire, &streamed_head, "HTTP/1.1", true).unwrap();
+    let head_wire = String::from_utf8(head_wire).unwrap();
+    assert!(!head_wire.contains("Transfer-Encoding"), "{head_wire}");
+    assert!(!head_wire.contains("Trailer:"), "{head_wire}");
+    assert!(head_wire.ends_with("\r\n\r\n"), "{head_wire}");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let handler_calls = calls.clone();
+    jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(move |req| {
+        let body = req.body.text(1024)?;
+        let trailers = req.trailers.lock().map_err(|_| JetHttpError::Internal {
+            incident_id: "request-trailers-lock".to_string(),
+        })?;
+        assert_eq!(trailers.first("x-checksum"), Some("abc123"));
+        assert_eq!(trailers.all("x-trace"), vec!["one", "two"]);
+        drop(trailers);
+        handler_calls.fetch_add(1, Ordering::AcqRel);
+
+        let mut response = jet_http_srv_response(200, &String::new());
+        response.body = JetHttpBody::reader(std::io::Cursor::new(format!("stream:{body}")), None);
+        response.trailers.append("X-Checksum", "done").unwrap();
+        response.trailers.append("X-Trace", "first").unwrap();
+        response.trailers.append("x-trace", "second").unwrap();
+        Ok(response)
+    }));
+    jet_http_mux_add(&mux, "GET", "/next", |_| {
+        jet_http_srv_response(200, &"next".to_string())
+    });
+    jet_http_mux_add(&mux, "GET", "/stream10", |_| {
+        let mut response = jet_http_srv_response(200, &String::new());
+        response.body = JetHttpBody::reader(std::io::Cursor::new(b"close-body".to_vec()), None);
+        response
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 8;
+    options.read_body_timeout = std::time::Duration::from_secs(2);
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+            .expect("server")
+    });
+
+    let valid = exchange(
+        addr,
+        b"POST /trailers HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum, X-Trace\r\n\r\n5\r\nhello\r\n0\r\nX-Checksum: abc123\r\nX-Trace: one\r\nx-trace: two\r\n\r\nGET /next HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(valid.matches("HTTP/1.1 200 OK").count(), 2, "{valid}");
+    assert!(valid.contains("Transfer-Encoding: chunked\r\n"), "{valid}");
+    assert!(valid.contains("Trailer: X-Checksum, X-Trace\r\n"), "{valid}");
+    assert!(valid.contains("c\r\nstream:hello\r\n0\r\nX-Checksum: done\r\nX-Trace: first\r\nx-trace: second\r\n\r\n"), "{valid}");
+    assert!(valid.find("stream:hello").unwrap() < valid.rfind("\r\n\r\nnext").unwrap());
+
+    let undeclared = exchange(
+        addr,
+        b"POST /trailers HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum\r\nConnection: close\r\n\r\n1\r\nx\r\n0\r\nX-Other: hidden\r\n\r\n",
+    );
+    assert!(undeclared.starts_with("HTTP/1.1 400 Bad Request"), "{undeclared}");
+
+    let forbidden = exchange(
+        addr,
+        b"POST /trailers HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: Content-Length\r\nConnection: close\r\n\r\n0\r\nContent-Length: 0\r\n\r\n",
+    );
+    assert!(forbidden.starts_with("HTTP/1.1 400 Bad Request"), "{forbidden}");
+
+    let mut excessive = b"POST /trailers HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Large\r\nConnection: close\r\n\r\n0\r\nX-Large: ".to_vec();
+    excessive.extend(std::iter::repeat_n(b'x', 32 * 1024));
+    excessive.extend_from_slice(b"\r\n\r\n");
+    let excessive = exchange(addr, &excessive);
+    assert!(excessive.starts_with("HTTP/1.1 413 Payload Too Large"), "{excessive}");
+
+    let http10 = exchange(
+        addr,
+        b"GET /stream10 HTTP/1.0\r\nHost: local\r\nConnection: keep-alive\r\n\r\nGET /next HTTP/1.0\r\nHost: local\r\nConnection: close\r\n\r\n",
+    );
+    assert_eq!(http10.matches("HTTP/1.0 200 OK").count(), 1, "{http10}");
+    assert!(http10.contains("Connection: close\r\n"), "{http10}");
+    assert!(http10.ends_with("\r\n\r\nclose-body"), "{http10}");
+
+    assert_eq!(calls.load(Ordering::Acquire), 1, "invalid trailers completed a handler");
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 5);
+    assert_eq!(report.user_completed, 5);
+}
+
+#[test]
+fn http1_streaming_response_backpressure_cancels_its_source() {
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Endless {
+        reads: std::sync::Arc<AtomicUsize>,
+    }
+
+    impl Read for Endless {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            self.reads.fetch_add(1, Ordering::AcqRel);
+            output.fill(b'x');
+            Ok(output.len())
+        }
+    }
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("address");
+    let mux = jet_http_mux_new();
+    let reads = std::sync::Arc::new(AtomicUsize::new(0));
+    let source_reads = reads.clone();
+    let closes = std::sync::Arc::new(AtomicUsize::new(0));
+    let source_closes = closes.clone();
+    jet_http_mux_add(&mux, "GET", "/stream", move |_| {
+        let mut response = jet_http_srv_response(200, &String::new());
+        response.body = JetHttpBody::reader_cancellable(
+            Endless {
+                reads: source_reads.clone(),
+            },
+            None,
+            {
+                let source_closes = source_closes.clone();
+                move || {
+                    source_closes.fetch_add(1, Ordering::AcqRel);
+                }
+            },
+        );
+        response
+    });
+    let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let server_shutdown = shutdown.clone();
+    let mut options = JetHttpServerOptions::safe();
+    options.workers = 1;
+    options.admission_queue = 1;
+    options.write_idle_timeout = std::time::Duration::from_millis(50);
+    let server = std::thread::spawn(move || {
+        jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None)
+            .expect("server")
+    });
+
+    let mut client = std::net::TcpStream::connect(addr).expect("connect");
+    client
+        .write_all(b"GET /stream HTTP/1.1\r\nHost: local\r\nConnection: close\r\n\r\n")
+        .expect("request");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while closes.load(Ordering::Acquire) == 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(closes.load(Ordering::Acquire), 1, "timed-out stream source was not cancelled");
+    assert!(
+        (2..=1024).contains(&reads.load(Ordering::Acquire)),
+        "server pulled an unbounded response ahead of the blocked socket: {} chunks",
+        reads.load(Ordering::Acquire),
+    );
+
+    let _ = client.shutdown(std::net::Shutdown::Both);
+    shutdown.store(true, Ordering::Release);
+    let report = server.join().expect("server join");
+    assert_eq!(report.user_accepted, 1);
+    assert_eq!(report.user_completed, 1);
+}
+
+#[test]
 fn live_server_body_starts_before_the_large_slow_upload_finishes() {
     use std::io::{Read, Write};
 
@@ -4057,7 +4266,7 @@ fn h2_try_read_frame(stream: &mut std::net::TcpStream) -> Option<(u8, u8, u32, V
 
 #[test]
 fn tls_chunk_framing_scan_is_incremental_and_bounded() {
-    let valid = b"POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1 ; name=value\r\nx\r\n0\r\n\r\n";
+    let valid = b"POST / HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum\r\n\r\n1 ; name=value\r\nx\r\n0\r\nX-Checksum: done\r\n\r\n";
     let (status, end, inspected) = http_server_tls_runtime::framing_probe(valid);
     assert_eq!((status, end), (1, valid.len()));
     assert!(inspected <= valid.len() * 4, "valid scan was not linear: {inspected}");
@@ -4156,6 +4365,20 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
         encoded_calls.fetch_add(1, Ordering::AcqRel);
         Ok(jet_http_srv_response(200, &body))
     }));
+    let trailer_calls = calls.clone();
+    jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(move |req| {
+        let body = req.body.text(1024)?;
+        let trailers = req.trailers.lock().map_err(|_| JetHttpError::Internal {
+            incident_id: "tls-request-trailers-lock".to_string(),
+        })?;
+        assert_eq!(trailers.first("x-checksum"), Some("tls-in"));
+        drop(trailers);
+        trailer_calls.fetch_add(1, Ordering::AcqRel);
+        let mut response = jet_http_srv_response(200, &String::new());
+        response.body = JetHttpBody::reader(std::io::Cursor::new(body), None);
+        response.trailers.append("X-Checksum", "tls-out").unwrap();
+        Ok(response)
+    }));
     let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
     let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
     let tls = JetHttpServerTls {
@@ -4201,10 +4424,16 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     .into_bytes();
     encoded_request.extend_from_slice(HELLO_GZIP);
     let encoded = rustls_exchange(&mut client, &encoded_request);
+    let trailers = rustls_exchange(
+        &mut client,
+        b"POST /trailers HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nTrailer: X-Checksum\r\n\r\n3\r\ntls\r\n0\r\nX-Checksum: tls-in\r\n\r\n",
+    );
     assert!(first.contains("\r\n\r\nok1"), "{first}");
     assert!(second.contains("\r\n\r\nok2"), "{second}");
     assert!(encoded.contains("\r\n\r\nhello gzip"), "{encoded}");
-    assert_eq!(calls.load(Ordering::Acquire), 3);
+    assert!(trailers.contains("Trailer: X-Checksum\r\n"), "{trailers}");
+    assert!(trailers.ends_with("3\r\ntls\r\n0\r\nX-Checksum: tls-out\r\n\r\n"), "{trailers}");
+    assert_eq!(calls.load(Ordering::Acquire), 4);
 
     let started = std::time::Instant::now();
     let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 200 }).expect("shutdown");
@@ -4213,7 +4442,7 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     std::thread::sleep(std::time::Duration::from_millis(40));
     assert_eq!(
         calls.load(Ordering::Acquire),
-        3,
+        4,
         "Server.shutdown must stop rustls keep-alive reuse without client Connection: close"
     );
     assert!(started.elapsed() < std::time::Duration::from_millis(1500), "{report:?}");
@@ -4312,6 +4541,28 @@ fn rustls_exchange(
                     });
                     if let Some(length) = length {
                         if raw.len() >= header_end + 4 + length {
+                            break;
+                        }
+                    } else if headers.lines().skip(1).any(|line| {
+                        line.split_once(':').is_some_and(|(name, value)| {
+                            name.eq_ignore_ascii_case("transfer-encoding")
+                                && value.trim().eq_ignore_ascii_case("chunked")
+                        })
+                    }) {
+                        let trailer_values = headers
+                            .lines()
+                            .skip(1)
+                            .filter_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("trailer")
+                                    .then(|| value.trim().to_string())
+                            })
+                            .collect::<Vec<_>>();
+                        let trailer_names = jet_http_parse_trailer_names(&trailer_values)
+                            .expect("response trailer declaration");
+                        let mut state = JetHttpChunkState::new(8 * 1024 * 1024, trailer_names);
+                        if let Ok(Some(end)) = state.advance(&raw[header_end + 4..]) {
+                            raw.truncate(header_end + 4 + end);
                             break;
                         }
                     } else {

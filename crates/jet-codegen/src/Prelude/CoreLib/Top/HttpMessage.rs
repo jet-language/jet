@@ -624,6 +624,7 @@ struct JetHttpRequest {
     path: String,
     version: String,
     headers: JetHttpHeaders,
+    trailers: std::sync::Arc<std::sync::Mutex<JetHttpHeaders>>,
     body: JetHttpBody,
     body_set: bool,
     params: std::collections::BTreeMap<String, String>,
@@ -648,6 +649,7 @@ struct JetHttpResponse {
     body: JetHttpBody,
     trailers: JetHttpHeaders,
     head_content_length: Option<usize>,
+    suppress_body: bool,
 }
 
 type JetHttpHandler = std::sync::Arc<
@@ -665,12 +667,29 @@ impl JetHttpRequest {
         body: JetHttpBody,
         headers: JetHttpHeaders,
     ) -> Self {
+        Self::server_body_with_trailers(
+            method,
+            path,
+            body,
+            headers,
+            std::sync::Arc::new(std::sync::Mutex::new(JetHttpHeaders::new())),
+        )
+    }
+
+    fn server_body_with_trailers(
+        method: &str,
+        path: String,
+        body: JetHttpBody,
+        headers: JetHttpHeaders,
+        trailers: std::sync::Arc<std::sync::Mutex<JetHttpHeaders>>,
+    ) -> Self {
         Self {
             method: method.to_string(),
             url: String::new(),
             path,
             version: "HTTP/1.1".to_string(),
             headers,
+            trailers,
             body,
             body_set: true,
             params: std::collections::BTreeMap::new(),

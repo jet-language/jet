@@ -11,6 +11,7 @@ fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpRequest 
         path: String::new(),
         version: "HTTP/1.1".to_string(),
         headers: JetHttpHeaders::new(),
+        trailers: std::sync::Arc::new(std::sync::Mutex::new(JetHttpHeaders::new())),
         header_error: None,
         body: JetHttpBody::empty(),
         body_set: false,
@@ -132,6 +133,7 @@ fn jet_http_client_response_new(
         headers: JetHttpHeaders::from_flat(headers).map_err(|_| JetHttpError::InvalidHeader)?,
         trailers: JetHttpHeaders::new(),
         head_content_length: None,
+        suppress_body: false,
     })
 }
 fn jet_http_client_response_body(resp: &JetHttpResponse) -> JetHttpBody {
