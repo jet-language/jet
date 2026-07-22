@@ -646,7 +646,9 @@ Example: `examples/features/crypto/auth_tokens.jet`.
 `core.watcher` owns watch-style APIs (D-WATCH-SCOPE1). It uses std-only polling
 today: file watchers diff recursive metadata snapshots, process watchers check
 process liveness, and port watchers attempt a TCP connect. Handles can be
-polled directly or connected to `core.event` scopes with callbacks.
+polled directly or connected to `core.event` scopes with callbacks. Cancelling
+or dropping the scope detaches its callbacks; cancelling a handle stops future
+polls. Watchers own no background thread or shell process.
 
 ```jet
 use core.event as event

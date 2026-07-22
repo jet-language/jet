@@ -1,48 +1,106 @@
 // D-WATCH-SCOPE1=A/comment: core.watcher owns file/process/port watch handles.
 use core.event as event
 use core.files as fs
+use core.io as io
+use core.net as net
+use core.os as os
 use core.path as path
+use core.process as process
+use core.time as time
 use core.watcher as watcher
 
 fn run() {
+    args :: io.args()
+    if args.len() > 1 && (args.get(1) ?? "") == "--watch-child" {
+        time.sleep(100)
+        return
+    }
+
     root :: "/tmp/jet_watcher_demo"
     if fs.exists(root) {
         fs.remove_all(root) ?? panic("cleanup failed")
     }
     fs.create_dir_all(root) ?? panic("mkdir failed")
 
+    nested :: path.join(root, "nested")
+    fs.create_dir_all(nested) ?? panic("nested mkdir failed")
+    created :: path.join(nested, "note.txt")
+
     scope :: event.scope()
     files :: watcher.files(root) ?? panic("watch files failed")
-    files.on(scope, (ev) => {
-        print("callback {ev.domain}:{ev.kind}:{ev.detail}")
+    callback_path :: ~created
+    sub :: files.on(scope, (ev) => {
+        if ev.path == ~callback_path {
+            print("callback {ev.domain}:{ev.kind}:recursive")
+        }
     })
 
-    created :: path.join(root, "note.txt")
     fs.write(created, "hello") ?? panic("write failed")
     first :: files.poll()
     first_kind := "none"
-    if first.len() > 0 {
-        ev :: first.get(0) ?? panic("missing file event")
-        first_kind = ev.kind
+    loop ev; first {
+        if ev.path == created {
+            first_kind = ev.kind
+        }
     }
-    print("file events: {first.len()} {first_kind}")
+    print("recursive file: {first_kind}")
+    print("callback active: {sub.is_active()}")
+    scope.cancel()
+    print("callback after scope cancel: {sub.is_active()}")
 
-    dead :: watcher.process_pid(-1)
-    proc_events :: dead.poll()
-    proc_kind := "none"
-    if proc_events.len() > 0 {
-        ev :: proc_events.get(0) ?? panic("missing process event")
-        proc_kind = ev.kind
+    after_drop :: path.join(nested, "after-drop.txt")
+    dropped_path :: ~after_drop
+    if true {
+        dropped_scope :: event.scope()
+        files.on(dropped_scope, (ev) => {
+            if ev.path == ~dropped_path {
+                print("leaked callback after scope drop")
+            }
+        })
     }
-    print("process events: {proc_events.len()} {proc_kind}")
+    fs.write(after_drop, "cleanup") ?? panic("scope-drop write failed")
+    after_drop_events :: files.poll()
+    after_drop_kind := "none"
+    loop ev; after_drop_events {
+        if ev.path == after_drop {
+            after_drop_kind = ev.kind
+        }
+    }
+    print("scope drop file: {after_drop_kind}")
 
-    closed :: watcher.port("127.0.0.1", 1)
-    print("port events: {closed.poll().len()}")
+    child :: process.cmd([os.executable(), "--watch-child"]).spawn() ?? panic("child spawn failed")
+    exited :: watcher.process_pid(child.id())
+    before_exit :: exited.poll()
+    print("process events before exit: {before_exit.len()}")
+    _ :: child.wait() ?? panic("child wait failed")
+
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen failed")
+    address :: net.listener_local_socket_addr(listener) ?? panic("listener address failed")
+    ready :: watcher.port("127.0.0.1", net.socket_port(address))
 
     set := watcher.set()
-    set.add(dead)
+    set.add(exited)
+    set.add(ready)
+    print(set.summary())
     combined :: set.poll()
+    process_kind := "none"
+    port_kind := "none"
+    loop ev; combined {
+        if ev.domain == "process" {
+            process_kind = ev.kind
+        }
+        if ev.domain == "port" {
+            port_kind = ev.kind
+        }
+    }
+    print("process event: {process_kind}")
+    print("port event: {port_kind}")
     print("set events: {combined.len()}")
 
+    files.cancel()
+    print("file watcher active: {files.is_active()}")
+    cancelled_path :: path.join(nested, "after-cancel.txt")
+    fs.write(cancelled_path, "stopped") ?? panic("cancelled watcher write failed")
+    print("file events after cancel: {files.poll().len()}")
     fs.remove_all(root) ?? panic("remove failed")
 }
