@@ -103,6 +103,7 @@ fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
             return Err(fail("frame exceeds the 64 MiB output limit"));
         }
         let block_max = window.min(ZSTD_BLOCK_MAX as u64) as usize;
+        let mut huffman = super::ZstdEntropy::HuffmanState::default();
         loop {
             let header = read_le(data, input, 3).ok_or_else(|| fail("invalid zstd data"))? as u32;
             input += 3;
@@ -131,7 +132,19 @@ fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
                     input += 1;
                     out.resize(out.len() + size, byte);
                 }
-                2 => return Err(fail("compressed blocks require FSE/Huffman support")),
+                2 => {
+                    let end = input
+                        .checked_add(size)
+                        .filter(|end| *end <= data.len())
+                        .ok_or_else(|| fail("invalid zstd data"))?;
+                    let block = &data[input..end];
+                    let (_, used) = super::ZstdEntropy::literals(block, &mut huffman)
+                        .ok_or_else(|| fail("invalid compressed literals"))?;
+                    if block.get(used) == Some(&0) && used + 1 == block.len() {
+                        return Err(fail("compressed literals ready; sequences pending"));
+                    }
+                    return Err(fail("compressed sequences require FSE execution"));
+                }
                 _ => return Err(fail("invalid zstd data")),
             }
             if last {
@@ -1113,6 +1126,6 @@ mod tests {
         ];
         assert!(zstd_decompress(&compressed)
             .unwrap_err()
-            .contains("compressed blocks require FSE/Huffman support"));
+            .contains("compressed sequences require FSE execution"));
     }
 }
