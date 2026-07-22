@@ -544,7 +544,8 @@ fn perf_run_captures_wall_and_alloc_into_jettrace() {
     // Child blocks on channel receive so poll sees contention + parent link.
     fs::write(
         &source,
-        r#"use core.mem as mem
+        r#"use core.crypto as crypto
+use core.mem as mem
 use core.net as net
 use core.tasks as tasks
 use core.time as time
@@ -573,13 +574,11 @@ fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     probe_work()
-    (work_sender, work_receiver) :: tasks.channel<Int>(1)
-    checksum := 0
-    loop i; 0..131072 {
-        work_sender.send(~i)
-        checksum += work_receiver.receive() ?? panic("work channel closed")
+    digest := crypto.sha256("trace-work".bytes())
+    loop i; 0..16384 {
+        digest = crypto.sha256(digest.hex().bytes())
     }
-    print("READY {checksum}")
+    print("READY {digest.hex().len()}")
     time.sleep(800)
 }
 "#,
