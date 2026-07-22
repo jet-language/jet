@@ -54,6 +54,10 @@ pub mod LuaBind;
 // layer. `jetpack` re-exports both under their historical paths.
 pub mod EffectBudget;
 pub mod Envelope;
+// D-DX5-HOOK1=A / Tower #549: pure compiler-extension protocol/snapshot model.
+// The Wasmtime host source stays beside `Prelude/Plugin.rs`, but only the
+// isolated `jetpack` binary compiles it; the compiler never links Wasmtime.
+pub mod CompilerExtension;
 pub mod FFI;
 pub mod JSON;
 pub mod LintPolicy;

@@ -3327,9 +3327,11 @@ A package built `target: plugin` compiles to a sandboxed `wasm32` Component
 Model module instead of a native binary. A host program loads and calls it —
 safe by default, **no `@Unsafe` gate anywhere in the story** (I1): the
 sandbox is the safety boundary, by construction. This is a general
-application-plugin substrate, distinct from the deferred Epoch-3
-compiler-extension plugin API (custom lints/sema hooks, Tower #549 and
-D-DX5-HOOK1) — don't conflate them (I8).
+application-plugin substrate (WIT world `jetplugin`), distinct from PATH
+`jet-*` helpers (D-DX5) and from the compiler-extension API (Tower #549,
+D-DX5-HOOK1=A: typed read-only post-sema snapshot in world
+`compiler-extension-v1`, same wasmtime substrate, separate host) — don't
+conflate them (I8).
 
 ```jet
 // pkg.jet

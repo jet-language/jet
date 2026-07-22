@@ -145,6 +145,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         1,
         "#[cfg(test)] bundle-presence assertion fixture",
     ),
+    (
+        "crates/jet-driver/src/CompilerExtensionHook.rs",
+        8,
+        "#[cfg(test)] compiler-extension assertion fixtures",
+    ),
 ];
 
 const SCAN_ROOTS: &[&str] = &[

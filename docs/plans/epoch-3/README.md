@@ -16,8 +16,8 @@ This directory keeps only durable cross-card law:
 - [marker-plane-source-of-truth-matrix-2026-07-07.md](marker-plane-source-of-truth-matrix-2026-07-07.md)
   — machine-checked marker-plane inventory.
 
-`plugin-api.md` remains pending owner routing: its application-plugin target
-shipped, but its separate compiler-extension hooks have no live card.
+Application `target: plugin` shipped (D-PLUGIN1). Compiler-extension hooks are
+Tower #549 / D-DX5-HOOK1=A (typed post-sema WASM host in jet-pkg-model).
 
 Per-feature plans belong on Tower cards. Delete completed, superseded, or
 fully carded plan files after durable law and acceptance evidence exist.

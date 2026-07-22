@@ -236,6 +236,93 @@ with request execution and replaces a cancelled in-flight result with JSON-RPC
 `-32800`. D-LSP2 requires every advertised LSP capability to have named coverage
 in `tests/lsp.rs`; the server must not advertise speculative features.
 
+## Compiler-extension plugins (D-DX5-HOOK1=A)
+
+Tower #549. After sema, the compiler may freeze a **versioned typed
+read-only snapshot** and send it to an isolated WASM Component Model guest.
+The guest returns structured findings and edit proposals; the host validates
+every response and remains the only semantic authority (I2/I3).
+
+- **Boundary ownership:** `crates/jet-pkg-model::CompilerExtension` owns the
+  versioned snapshot, response validation, and lifecycle. Its
+  `Prelude/CompilerExtension.rs` substrate compiles only into the shipped
+  sibling `jetpack` binary, using the same wasmtime Component Model pin as
+  application `core.plugin` (`WASMTIME_CRATE_SPEC` / D-DEP-WASM1). Ordinary
+  `jet` processes never link or initialize Wasmtime.
+- **WIT world:** `compiler-extension-v1` (`package jet:compiler-extension@0.1.0`,
+  export `analyze`). Distinct from application plugins' fixed world
+  `jetplugin` (D-PLUGIN1 / D-PLUGIN-EXPORT1).
+- **Not:** PATH-discovered `jet-*` helpers (D-DX5 in `Source/main.rs`), and
+  not `target: plugin` / `core.plugin` application loaders.
+- **V1 stage:** `typed` only. Later parse/codegen observation extends the same
+  capability-negotiated protocol (I8 — one mechanism).
+
+### Protocol / schema (exact)
+
+`analyze` carries opaque `list<u8>` payloads. Host-owned wire format is UTF-8
+JSON with lexicographic key order and no insignificant whitespace
+(`CompilerExtension::{TypedSnapshot,AnalyzeResponse}`).
+
+**Snapshot** (`protocol=1`, `stage="typed"`, `trust="untrusted"`):
+
+| Field | Meaning |
+|-------|---------|
+| `capabilities` | Negotiated subset of `read_types`, `read_symbols`, `read_effects`, `read_spans`, `read_provenance`, `emit_finding`, `propose_edit` |
+| `limits` | `max_fuel`, `max_memory_bytes`, `max_table_elements`, `max_findings`, `max_edits`, `max_response_bytes`, `timeout_ms` |
+| `types` | `{id, repr}` |
+| `symbols` | `{id, name, kind, type_id, span_id, effects, provenance}` |
+| `spans` | `{id, file, start, end}` |
+
+**Response:** `{protocol, findings, proposed_edits, artifacts}`. Findings are
+`{rule, span_id, message, severity}` with `severity ∈ {error,warning,note}`.
+Edits are `{span_id, replacement, rationale}`. V1 requires `artifacts: []`.
+
+Unknown keys are rejected. Span/type refs must resolve. Findings need
+`emit_finding`; edits need `propose_edit`. Counts and raw byte length must
+fit `limits`. Successful validation **stages** output only — the host alone
+may accept; guests never mutate compiler facts or expose rustc (I2/I3).
+
+### Limits, trust, lifecycle, rollback
+
+- **Defaults:** fuel `10_000_000`, memory `16 MiB`, table `10_000`, findings
+  `256`, edits `64`, response `256 KiB`, wall budget `timeout_ms=2000`.
+  Loader applies fuel + `StoreLimits`; each `analyze` arms wasmtime epoch
+  interruption and ticks the engine after `timeout_ms` (fail-closed interrupt
+  trap). Snapshot declares the same caps.
+- **Trust:** v1 admits only `untrusted` components (zero host imports).
+- **Deterministic sandbox (D-DX5-HOOK1):** the host linker registers no
+  imports, so guests get no ambient clock, random, filesystem, network, or
+  process. Components that declare any host import (for example WASI random
+  or clocks) fail closed at load — Jet-owned `E:` wire, no session commit,
+  no rustc leak. Pure guests over a frozen snapshot are the only admitted
+  shape; the host never supplies nondeterminism sources.
+- **Lifecycle:** `ExtensionSession` Idle → Loaded → Closed. `stage_response`
+  validates without commit; `rollback` discards staged output only (an
+  accepted commit latch stays final — restage requires a new session);
+  `close(close_guest)` invokes the WASM host closer
+  (`jet_compiler_extension_close`) so guest Store/memory is dropped.
+  Uncommitted work never reaches sema or codegen.
+- **Process IPC:** when configured, `jet-driver` resolves `jetpack` only beside
+  the current Jet executable (never PATH), invokes hidden versioned verb
+  `__compiler-extension-v1`, writes at most `16 MiB` of snapshot bytes to
+  stdin, and accepts at most the snapshot's `max_response_bytes` on stdout.
+  Stderr is capped at `64 KiB`; the outer process deadline is `5000ms` and
+  kills a stuck/crashed host. Nonzero exit, malformed output, timeout, and
+  missing sibling all map to Jet-owned E1402.
+- **E2E harness (C4 technical):** `crates/jetpack-bin/tests/compiler_extension_e2e.rs`
+  loads real `compiler-extension-v1` component fixtures under
+  `crates/jet-pkg-model/fixtures/compiler_extension/` through the same
+  `Prelude/CompilerExtension.rs` host. Proves one custom-lint finding
+  round-trip, fail-closed crash / malformed / incompatible / fuel-exhaust /
+  WASI-random-import guests, wall-clock epoch `timeout_ms` interrupt, and
+  byte-identical re-analyze of a pure guest (Jet-owned `E:` wires; no rustc
+  leak; no auto-commit).
+- **Post-sema driver wire:** when `JET_COMPILER_EXTENSION` names a component
+  path (expert env registration — no new user syntax until a spelling ballot),
+  `jet-driver::CompilerExtensionHook` freezes a typed snapshot after sema,
+  exchanges it with the sibling host, then maps validated findings to `L1401`
+  or host/process failures to `E1402`.
+
 ## Rules
 
 - **R1 — Codegen is dumb.** No checks, no decisions, no "see if rustc
