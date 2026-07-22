@@ -2024,6 +2024,42 @@ mod tests {
     }
 
     #[test]
+    fn stream_writer_rejects_hostile_raw_byte_evidence() {
+        let source = b"<r  a='x'/>";
+        for case in ["negative byte", "oversized byte", "extra key", "both raw forms"] {
+            let mut events = stream_values(source, source.len());
+            let Value::Object(event) = &mut events[1] else { panic!("element_start event") };
+            let Some((_, Value::Object(lexical))) =
+                event.iter_mut().find(|(key, _)| key == "open_lexical")
+            else {
+                panic!("open_lexical object")
+            };
+            match case {
+                "negative byte" | "oversized byte" => {
+                    let value = if case == "negative byte" { -1 } else { 256 };
+                    lexical.iter_mut().find(|(key, _)| key == "raw_bytes").unwrap().1 =
+                        Value::Array(vec![Value::Int(value)]);
+                }
+                "extra key" => lexical.push(("extra".to_string(), Value::Null)),
+                "both raw forms" => {
+                    lexical.iter_mut().find(|(key, _)| key == "raw_text").unwrap().1 =
+                        Value::Text("<forged/>".to_string());
+                }
+                _ => unreachable!(),
+            }
+
+            let mut writer =
+                StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::PreserveValid);
+            let mut output = Vec::new();
+            for event in &events {
+                output.extend(writer.write(event).expect("write hostile event deterministically"));
+            }
+            assert_eq!(output, b"<r a='x'/>", "{case}");
+            assert_ne!(output, source, "{case} replayed forged raw bytes");
+        }
+    }
+
+    #[test]
     fn stream_writer_emits_selected_encoding_and_rejects_state_without_output() {
         let source = b"<r a='x'>z</r>";
         let events = stream_values(source, source.len());
