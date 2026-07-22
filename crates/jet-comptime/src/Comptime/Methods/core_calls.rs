@@ -637,6 +637,10 @@ pub(super) fn apply_core_call(
     span: Span,
     repl_mode: bool,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
+        return result;
+    }
+
     if repl_mode {
         if let Some(_) = repl_native_only_module(module) {
             return Err(repl_native_module_diag(module, method, span));
@@ -648,10 +652,6 @@ pub(super) fn apply_core_call(
             unsupported(&format!("{}.{}(): missing arg {}", module, method, i), span)
         })
     };
-
-    if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
-        return result;
-    }
 
     match (module, method) {
         // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside

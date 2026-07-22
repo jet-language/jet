@@ -690,6 +690,26 @@ fn repl_pool_exact_transcript() {
 }
 
 #[test]
+fn repl_ui_values_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/ui_values.txt"));
+}
+
+#[test]
+fn repl_net_style_values_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/net_style_values.txt"));
+}
+
+#[test]
+fn repl_net_runtime_call_still_requires_authority() {
+    let out = run_transcript(
+        &["use core.net as net", "net.tcp_connect(\"127.0.0.1:1\")"],
+        None,
+    );
+    assert!(out.contains("ok"), "core.net import should be accepted: {out}");
+    assert!(out.contains("E1803"), "live socket call must require authority: {out}");
+}
+
+#[test]
 fn strict_transcript_rejects_unexpected_trailing_output() {
     assert!(
         std::panic::catch_unwind(|| run_transcript_file_strict("> 1 + 1")).is_err(),

@@ -106,13 +106,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.crypto.expert", "aes256gcm_seal"),
     ("core.crypto.expert", "argon2id"),
     ("core.crypto.expert", "ed25519_sign"),
-    ("core.crypto.expert", "ed25519_verify_strict"),
-    ("core.crypto.expert", "hkdf_sha256"),
-    ("core.crypto.expert", "secret_bytes"),
-    ("core.crypto.expert", "shared_secret_bytes"),
-    ("core.crypto.expert", "signing_key_bytes"),
-    ("core.crypto.expert", "x25519"),
-    ("core.crypto.expert", "x25519_secret_bytes"),
     ("core.crypto.expert", "xchacha20poly1305_open"),
     ("core.crypto.expert", "xchacha20poly1305_seal"),
     ("core.crypto.random", "bytes"),
@@ -163,7 +156,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.raylib", "begin_drawing"),
     ("core.raylib", "clear_background"),
     ("core.raylib", "close_window"),
-    ("core.raylib", "color"),
     ("core.raylib", "draw_rectangle"),
     ("core.raylib", "draw_text"),
     ("core.raylib", "end_drawing"),
@@ -172,21 +164,8 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.raylib", "window_open"),
     ("core.raylib", "window_ready"),
     ("core.raylib", "window_should_close"),
-    ("core.ui", "aria_role_button"),
-    ("core.ui", "aria_role_container"),
-    ("core.ui", "aria_role_label"),
-    ("core.ui", "aria_role_text_input"),
-    ("core.ui", "constraint"),
     ("core.ui", "gtk_backend"),
-    ("core.ui", "key_event"),
-    ("core.ui", "node"),
-    ("core.ui", "node_color"),
-    ("core.ui", "node_role"),
     ("core.ui", "null_backend"),
-    ("core.ui", "point"),
-    ("core.ui", "rect"),
-    ("core.ui", "resize_event"),
-    ("core.ui", "size"),
     ("core.ui", "tui_backend"),
     ("core.term", "read_key"),
     ("core.web", "on"),
@@ -907,7 +886,11 @@ fn ct_build_context_methods() -> BTreeSet<String> {
         "let result = match method {",
         Some("_ => return None.ok_or_else"),
     ));
-    let dispatch = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
+    let dispatch = format!(
+        "{}\n{}",
+        read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs"),
+        read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch"),
+    );
     for method in ["find", "fetch", "embed"] {
         if dispatch.contains(&format!("method == \"{method}\""))
             || dispatch.contains(&format!("\"{method}\" =>"))
@@ -1083,7 +1066,11 @@ fn discover_inventory() -> BTreeSet<Entry> {
 fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, Vec<String>> {
     let core_dispatch_src = read_rust_tree("crates/jet-comptime/src/Comptime");
     let builtin_dispatch_src = read("crates/jet-comptime/src/Comptime/Builtins.rs");
-    let dispatch_src = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
+    let dispatch_src = format!(
+        "{}\n{}",
+        read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs"),
+        read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch"),
+    );
     let ct_core = extract_pairs(&core_dispatch_src);
     let gaps = KNOWN_OPEN_GAPS.iter().copied().collect::<BTreeSet<_>>();
     let partials = KNOWN_PARTIAL_GAPS.iter().copied().collect::<BTreeSet<_>>();
@@ -1661,7 +1648,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 789, 0, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 837, 0, 341));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1669,7 +1656,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        4070249345243482995,
+        1735070472196747529,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

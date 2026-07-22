@@ -500,7 +500,7 @@ impl<'a> Interp<'a> {
                     ));
                 }
                 // D-CTEFFECT1: Tier-2 effect calls require an @Impure gate (or REPL sandbox).
-                let is_tier2 = matches!(
+                let is_tier2 = (matches!(
                     module.as_str(),
                     "core.files"
                         | "core.env"
@@ -509,7 +509,8 @@ impl<'a> Interp<'a> {
                         | "core.net"
                         | "core.tls"
                         | "core.process"
-                ) || (self.repl_mode && module == "core.random" && method != "rng");
+                ) && !is_pure_tier2_call(&module, method))
+                    || (self.repl_mode && module == "core.random" && method != "rng");
                 if is_tier2 {
                     if self.repl_mode && matches!((module.as_str(), method), ("core.io", "eprint")) {
                         return apply_impure_core_call(

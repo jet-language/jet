@@ -56,6 +56,54 @@ pub(super) fn evaluate(
         ("core.sketch.tdigest", "new") => Ok(tdigest_new()),
         ("core.sketch.cms", "new") => Ok(cms_new()),
         ("core.sketch.reservoir", "new") => reservoir_new(args, span),
+        ("core.ui", "point") => ui_point(args, span),
+        ("core.ui", "size") => ui_size(args, span),
+        ("core.ui", "rect") => ui_rect(args, span),
+        ("core.ui", "constraint") => ui_constraint(args, span),
+        ("core.ui", "node") => ui_node(args, span, None, None, "Custom"),
+        ("core.ui", "node_role") => ui_node_role(args, span),
+        ("core.ui", "node_color") => ui_node_color(args, span),
+        ("core.ui", "text") => ui_text(args, span),
+        ("core.ui", "button") => ui_button(args, span),
+        ("core.ui", "box") => ui_box(args, span),
+        ("core.ui", "aria_role_button") => Ok(ui_role("Button")),
+        ("core.ui", "aria_role_text_input") => Ok(ui_role("TextInput")),
+        ("core.ui", "aria_role_label") => Ok(ui_role("Label")),
+        ("core.ui", "aria_role_container") => Ok(ui_role("Container")),
+        ("core.ui", "key_event") => ui_key_event(args, span),
+        ("core.ui", "resize_event") => ui_resize_event(args, span),
+        ("core.raylib", "color") => raylib_color(args, span),
+        ("core.io", "style_force") => io_style_force(args, span),
+        ("core.net", "ip_addr") => net_ip_addr(args, span),
+        ("core.net", "ip_to_string") => net_string_field(args, "IpAddr", "text", span),
+        ("core.net", "ip_is_ipv4") => net_ip_is_ipv4(args, span),
+        ("core.net", "socket_addr_parse") => net_socket_addr_parse(args, span),
+        ("core.net", "socket_host") => net_string_field(args, "SocketAddr", "host", span),
+        ("core.net", "socket_port") => net_value_field(args, "SocketAddr", "port", span),
+        ("core.net", "socket_to_string") => net_string_field(args, "SocketAddr", "text", span),
+        ("core.net", "ready_readable") => net_value_field(args, "NetReady", "readable", span),
+        ("core.net", "ready_writable") => net_value_field(args, "NetReady", "writable", span),
+        ("core.net", "error_operation") => net_string_field(args, "NetError", "operation", span),
+        ("core.net", "error_address") => net_value_field(args, "NetError", "address", span),
+        ("core.net", "error_name") => net_value_field(args, "NetError", "name", span),
+        ("core.net", "error_message") => net_string_field(args, "NetError", "message", span),
+        ("core.net", "error_os_code") => net_value_field(args, "NetError", "os_code", span),
+        ("core.net", "dns_srv_target") => net_string_field(args, "DnsSrv", "target", span),
+        ("core.net", "dns_srv_port") => net_value_field(args, "DnsSrv", "port", span),
+        ("core.net", "dns_srv_priority") => net_value_field(args, "DnsSrv", "priority", span),
+        ("core.net", "dns_srv_weight") => net_value_field(args, "DnsSrv", "weight", span),
+        ("core.net", "udp_packet_data") => net_udp_packet_data(args, span),
+        ("core.net", "udp_packet_bytes") => net_value_field(args, "UdpPacket", "data", span),
+        ("core.net", "udp_packet_addr") => net_value_field(args, "UdpPacket", "addr", span),
+        ("core.net", "udp_packet_original_len") => net_value_field(args, "UdpPacket", "original_len", span),
+        ("core.net", "udp_packet_truncated") => net_value_field(args, "UdpPacket", "truncated", span),
+        ("core.crypto.expert", "ed25519_verify_strict") => crypto_ed25519_verify(args, span),
+        ("core.crypto.expert", "hkdf_sha256") => crypto_hkdf(args, span),
+        ("core.crypto.expert", "x25519") => crypto_x25519(args, span),
+        ("core.crypto.expert", "secret_bytes") => crypto_extract(args, 0, "Secret", span),
+        ("core.crypto.expert", "signing_key_bytes") => crypto_extract(args, 0, "SigningKey", span),
+        ("core.crypto.expert", "x25519_secret_bytes") => crypto_extract(args, 0, "X25519SecretKey", span),
+        ("core.crypto.expert", "shared_secret_bytes") => crypto_extract(args, 0, "SharedSecret", span),
         _ => return None,
     };
     Some(result)
@@ -385,6 +433,326 @@ fn structure(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
             .into_iter()
             .map(|(name, value)| (name.to_string(), value))
             .collect(),
+    }
+}
+
+fn ui_role(variant: &str) -> CtValue {
+    CtValue::Enum {
+        type_name: "UiAriaRole".to_string(),
+        variant: variant.to_string(),
+        args: Vec::new(),
+    }
+}
+
+fn ui_kind(variant: &str) -> CtValue {
+    CtValue::Enum {
+        type_name: "UiNodeKind".to_string(),
+        variant: variant.to_string(),
+        args: Vec::new(),
+    }
+}
+
+fn ui_point(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(structure("Point", vec![
+        ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
+        ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
+    ]))
+}
+
+fn ui_size(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(structure("Size", vec![
+        ("width", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
+        ("height", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
+    ]))
+}
+
+fn ui_rect(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(structure("Rect", vec![
+        ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
+        ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
+        ("width", CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?))),
+        ("height", CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?))),
+    ]))
+}
+
+fn ui_constraint(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(structure("SizeConstraint", vec![
+        ("min_width", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
+        ("min_height", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
+        ("max_width", CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?))),
+        ("max_height", CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?))),
+    ]))
+}
+
+fn ui_node_value(
+    label: String,
+    width: f64,
+    height: f64,
+    role: Option<CtValue>,
+    color: Option<String>,
+    kind: &str,
+    children: Vec<CtValue>,
+) -> CtValue {
+    structure("UiNode", vec![
+        ("label", CtValue::Str(label)),
+        ("width", CtValue::Float(CtFloat::f64(width))),
+        ("height", CtValue::Float(CtFloat::f64(height))),
+        ("role", role.map_or(CtValue::None(Type::Named("UiAriaRole".to_string())), |role| CtValue::Some(Box::new(role)))),
+        ("color", color.map_or(CtValue::None(Type::String), |color| CtValue::Some(Box::new(CtValue::Str(color))))),
+        ("kind", ui_kind(kind)),
+        ("children", CtValue::List(children)),
+    ])
+}
+
+fn ui_node(
+    args: &[CtValue],
+    span: Span,
+    role: Option<CtValue>,
+    color: Option<String>,
+    kind: &str,
+) -> EvalResult {
+    Ok(ui_node_value(
+        string_arg(args, 0, span)?.to_string(),
+        float_arg(args, 1, span)?,
+        float_arg(args, 2, span)?,
+        role,
+        color,
+        kind,
+        Vec::new(),
+    ))
+}
+
+fn ui_node_role(args: &[CtValue], span: Span) -> EvalResult {
+    let role = args.get(3).cloned().ok_or_else(|| unsupported("core.ui.node_role(): missing role", span))?;
+    let kind = match &role {
+        CtValue::Enum { variant, .. } if variant == "Button" => "Button",
+        CtValue::Enum { variant, .. } if variant == "TextInput" => "TextInput",
+        _ => "Custom",
+    };
+    ui_node(args, span, Some(role), None, kind)
+}
+
+fn ui_node_color(args: &[CtValue], span: Span) -> EvalResult {
+    let color = string_arg(args, 3, span)?.to_string();
+    ui_node(args, span, Some(ui_role("Label")), Some(color), "Custom")
+}
+
+fn ui_text(args: &[CtValue], span: Span) -> EvalResult {
+    let text = string_arg(args, 0, span)?.to_string();
+    Ok(ui_node_value(
+        text.clone(),
+        text.chars().count() as f64,
+        1.0,
+        Some(ui_role("Label")),
+        None,
+        "Text",
+        Vec::new(),
+    ))
+}
+
+fn ui_button(args: &[CtValue], span: Span) -> EvalResult {
+    let label = string_arg(args, 0, span)?.to_string();
+    Ok(ui_node_value(
+        label.clone(),
+        label.chars().count() as f64 + 4.0,
+        1.0,
+        Some(ui_role("Button")),
+        None,
+        "Button",
+        Vec::new(),
+    ))
+}
+
+fn ui_box(args: &[CtValue], span: Span) -> EvalResult {
+    let children = match args.first() {
+        Some(CtValue::List(children)) => children.clone(),
+        _ => return Err(unsupported("core.ui.box() needs [UiNode]", span)),
+    };
+    let mut width = 0.0_f64;
+    let mut height = 0.0_f64;
+    for child in &children {
+        width = width.max(as_float(field(child, "UiNode", "width").ok_or_else(|| unsupported("core.ui.box() needs UiNode children", span))?, span)?);
+        height += as_float(field(child, "UiNode", "height").ok_or_else(|| unsupported("core.ui.box() needs UiNode children", span))?, span)?;
+    }
+    Ok(ui_node_value(String::new(), width, height, Some(ui_role("Container")), None, "Box", children))
+}
+
+fn ui_key_event(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(CtValue::Enum {
+        type_name: "InputEvent".to_string(),
+        variant: "Key".to_string(),
+        args: vec![(Some("code".to_string()), CtValue::Str(string_arg(args, 0, span)?.to_string()))],
+    })
+}
+
+fn ui_resize_event(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(CtValue::Enum {
+        type_name: "InputEvent".to_string(),
+        variant: "Resize".to_string(),
+        args: vec![(Some("size".to_string()), ui_size(args, span)?)],
+    })
+}
+
+fn raylib_color(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(structure("RaylibColor", vec![
+        ("r", CtValue::Int(int_arg(args, 0, span)?)),
+        ("g", CtValue::Int(int_arg(args, 1, span)?)),
+        ("b", CtValue::Int(int_arg(args, 2, span)?)),
+        ("a", CtValue::Int(int_arg(args, 3, span)?)),
+    ]))
+}
+
+fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
+    let style = string_arg(args, 0, span)?;
+    let text = string_arg(args, 1, span)?;
+    let code = match style {
+        "black" => Some("30"),
+        "red" => Some("31"),
+        "green" => Some("32"),
+        "yellow" => Some("33"),
+        "blue" => Some("34"),
+        "magenta" => Some("35"),
+        "cyan" => Some("36"),
+        "white" => Some("37"),
+        "bold" => Some("1"),
+        "dim" => Some("2"),
+        _ => None,
+    };
+    Ok(CtValue::Str(code.map_or_else(|| text.to_string(), |code| format!("\u{1b}[{code}m{text}\u{1b}[0m"))))
+}
+
+fn net_error(operation: &str, address: Option<String>, message: String) -> CtValue {
+    structure("NetError", vec![
+        ("operation", CtValue::Str(operation.to_string())),
+        ("address", address.map_or(CtValue::None(Type::String), |value| CtValue::Some(Box::new(CtValue::Str(value))))),
+        ("name", CtValue::None(Type::String)),
+        ("message", CtValue::Str(message)),
+        ("os_code", CtValue::None(Type::Int)),
+    ])
+}
+
+fn net_ip_addr(args: &[CtValue], span: Span) -> EvalResult {
+    let text = string_arg(args, 0, span)?;
+    Ok(match text.parse::<std::net::IpAddr>() {
+        Ok(address) => CtValue::ResOk(Box::new(structure("IpAddr", vec![("text", CtValue::Str(address.to_string()))]))),
+        Err(error) => CtValue::ResErr(Box::new(net_error(
+            "parse IP address",
+            Some(text.to_string()),
+            format!("invalid IP address `{text}`: {error}"),
+        ))),
+    })
+}
+
+fn net_ip_is_ipv4(args: &[CtValue], span: Span) -> EvalResult {
+    let text = match field(one(args, 0, "core.net", "ip_is_ipv4", span)?, "IpAddr", "text") {
+        Some(CtValue::Str(text)) => text,
+        _ => return Err(unsupported("malformed IpAddr value", span)),
+    };
+    Ok(CtValue::Bool(text.parse::<std::net::Ipv4Addr>().is_ok()))
+}
+
+fn net_socket_addr_parse(args: &[CtValue], span: Span) -> EvalResult {
+    let text = string_arg(args, 0, span)?;
+    Ok(match text.parse::<std::net::SocketAddr>() {
+        Ok(address) => CtValue::ResOk(Box::new(structure("SocketAddr", vec![
+            ("host", CtValue::Str(address.ip().to_string())),
+            ("port", CtValue::Int(i64::from(address.port()))),
+            ("text", CtValue::Str(address.to_string())),
+        ]))),
+        Err(error) => CtValue::ResErr(Box::new(net_error(
+            "parse socket address",
+            Some(text.to_string()),
+            format!("invalid socket address `{text}`: {error}"),
+        ))),
+    })
+}
+
+fn net_value_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -> EvalResult {
+    field(one(args, 0, "core.net", name, span)?, type_name, name)
+        .cloned()
+        .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))
+}
+
+fn net_string_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -> EvalResult {
+    match net_value_field(args, type_name, name, span)? {
+        CtValue::Str(value) => Ok(CtValue::Str(value)),
+        _ => Err(unsupported(&format!("malformed {type_name}.{name} value"), span)),
+    }
+}
+
+fn net_udp_packet_data(args: &[CtValue], span: Span) -> EvalResult {
+    match net_value_field(args, "UdpPacket", "data", span)? {
+        CtValue::Bytes(value) => Ok(CtValue::Str(String::from_utf8_lossy(&value).into_owned())),
+        _ => Err(unsupported("malformed UdpPacket.data value", span)),
+    }
+}
+
+fn crypto_secret(type_name: &str, bytes: Vec<u8>) -> CtValue {
+    structure(type_name, vec![("bytes", CtValue::Bytes(bytes))])
+}
+
+fn crypto_error(reason: &str) -> CtValue {
+    structure("CryptoError", vec![("reason", CtValue::Str(reason.to_string()))])
+}
+
+fn crypto_hkdf(args: &[CtValue], span: Span) -> EvalResult {
+    let length = int_arg(args, 3, span)?;
+    if !(0..=8_160).contains(&length) {
+        return Ok(CtValue::ResErr(Box::new(crypto_error("HKDF-SHA256 output length must be 0..8160"))));
+    }
+    let bytes = crate::Comptime::CryptoLite::hkdf_sha256(
+        &bytes_value(one(args, 0, "core.crypto.expert", "hkdf_sha256", span)?, span)?,
+        &bytes_value(one(args, 1, "core.crypto.expert", "hkdf_sha256", span)?, span)?,
+        &bytes_value(one(args, 2, "core.crypto.expert", "hkdf_sha256", span)?, span)?,
+        length as usize,
+    );
+    Ok(CtValue::ResOk(Box::new(crypto_secret("Secret", bytes))))
+}
+
+fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
+    let public = bytes_value(one(args, 0, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
+    let message = bytes_value(one(args, 1, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
+    let signature = bytes_value(one(args, 2, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
+    if public.len() != 32 {
+        return Ok(CtValue::ResErr(Box::new(crypto_error("Ed25519 public keys must contain exactly 32 bytes"))));
+    }
+    if signature.len() != 64 {
+        return Ok(CtValue::ResErr(Box::new(crypto_error("Ed25519 signatures must contain exactly 64 bytes"))));
+    }
+    if message.len() > 1_073_741_824 {
+        return Ok(CtValue::ResErr(Box::new(crypto_error("Ed25519 messages must contain at most 1073741824 bytes"))));
+    }
+    let public: [u8; 32] = public.try_into().expect("length checked");
+    let signature: [u8; 64] = signature.try_into().expect("length checked");
+    match crate::Comptime::CryptoLite::ed25519_verify_strict(&public, &message, &signature) {
+        Ok(valid) => Ok(CtValue::ResOk(Box::new(CtValue::Bool(valid)))),
+        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error("invalid Ed25519 public key encoding")))),
+    }
+}
+
+fn crypto_x25519(args: &[CtValue], span: Span) -> EvalResult {
+    let secret = bytes_value(one(args, 0, "core.crypto.expert", "x25519", span)?, span)?;
+    let public = bytes_value(one(args, 1, "core.crypto.expert", "x25519", span)?, span)?;
+    if secret.len() != 32 || public.len() != 32 {
+        return Ok(CtValue::ResErr(Box::new(crypto_error("X25519 keys must contain exactly 32 bytes"))));
+    }
+    let shared = crate::Comptime::CryptoLite::x25519(&secret, &public).expect("length checked");
+    let reject_all_zero = match args.get(2) {
+        Some(CtValue::Bool(value)) => *value,
+        _ => return Err(unsupported("core.crypto.expert.x25519() needs a Bool third argument", span)),
+    };
+    if reject_all_zero && shared == [0; 32] {
+        return Ok(CtValue::ResErr(Box::new(crypto_error("X25519 peer key does not contribute to a shared secret"))));
+    }
+    Ok(CtValue::ResOk(Box::new(crypto_secret("Secret", shared.to_vec()))))
+}
+
+fn crypto_extract(args: &[CtValue], index: usize, type_name: &str, span: Span) -> EvalResult {
+    let value = one(args, index, "core.crypto.expert", "secret_bytes", span)?;
+    match field(value, type_name, "bytes") {
+        Some(CtValue::Bytes(bytes)) => Ok(CtValue::Bytes(bytes.clone())),
+        Some(CtValue::List(bytes)) => bytes_value(&CtValue::List(bytes.clone()), span).map(CtValue::Bytes),
+        _ => Err(unsupported(&format!("malformed {type_name} value"), span)),
     }
 }
 

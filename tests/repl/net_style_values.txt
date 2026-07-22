@@ -1,0 +1,26 @@
+# Tower #392 C4: deterministic net values and forced ANSI style run in tier-0.
+> use core.net as net
+ok
+> ip4 :: net.ip_addr("127.0.0.1") ?? panic("ip4")
+> net.ip_to_string(ip4)
+"127.0.0.1" : String
+> net.ip_is_ipv4(ip4)
+true : Bool
+> ip6 :: net.ip_addr("2001:0db8:0:0:0:0:0:1") ?? panic("ip6")
+> net.ip_to_string(ip6)
+"2001:db8::1" : String
+> net.ip_is_ipv4(ip6)
+false : Bool
+> socket :: net.socket_addr_parse("[2001:db8::1]:443") ?? panic("socket")
+> net.socket_host(socket)
+"2001:db8::1" : String
+> net.socket_port(socket)
+443 : Int
+> net.socket_to_string(socket)
+"[2001:db8::1]:443" : String
+> use core.io as io
+ok
+> io.style_force("red", "x").len()
+10 : Int
+> io.style_force("unknown", "plain")
+"plain" : String
