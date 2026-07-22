@@ -593,8 +593,29 @@ struct JetHttpServer {
     inner: std::sync::Arc<JetHttpServerState>,
 }
 
+type JetHttpTlsReader = Box<dyn std::io::Read + Send>;
+type JetHttpTlsWriter = Box<dyn std::io::Write + Send>;
+type JetHttpTlsTimeout = Box<
+    dyn Fn(Option<std::time::Duration>) -> Result<(), String> + Send,
+>;
+type JetHttpTlsH2 = Box<
+    dyn FnOnce(
+            JetHttpTlsReader,
+            JetHttpTlsWriter,
+            JetHttpTlsTimeout,
+            JetHttpTlsTimeout,
+        ) -> Result<(), String>
+        + Send,
+>;
+
 type JetHttpTlsConn = std::sync::Arc<
-    dyn Fn(std::net::TcpStream, std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), String>
+    dyn Fn(
+            std::net::TcpStream,
+            std::sync::Arc<std::sync::atomic::AtomicBool>,
+            JetHttpServerOptions,
+            Option<std::sync::Arc<std::sync::atomic::AtomicU64>>,
+            std::sync::Arc<std::sync::atomic::AtomicU64>,
+        ) -> Result<(), String>
         + Send
         + Sync,
 >;
@@ -865,7 +886,13 @@ fn jet_http_server_run_listener(
                 let peer = stream.peer_addr().ok();
                 if let Ok(tracked) = stream.try_clone() { worker_active.lock().unwrap().push(tracked); }
                 if let Some(tls) = worker_tls.as_ref() {
-                    let _ = tls(stream, worker_shutdown.clone());
+                    let _ = tls(
+                        stream,
+                        worker_shutdown.clone(),
+                        worker_options.clone(),
+                        worker_grace.clone(),
+                        worker_deadline.clone(),
+                    );
                 } else {
                     jet_http_server_handle_stream(
                         &mut stream,
@@ -1011,8 +1038,22 @@ fn jet_http_server_handle_stream(
 
     let _ = stream.set_write_timeout(Some(options.write_idle_timeout));
     if jet_http2_is_preface(stream, options.read_header_timeout) {
-        if jet_http2_serve(stream, mux, options, shutdown, dynamic_grace_ms, drain_deadline_ms).is_err() {
-            let _ = jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(0, 1));
+        let (result, last_stream) = jet_http2_serve_with_last_stream(
+            stream,
+            mux,
+            options,
+            shutdown,
+            dynamic_grace_ms,
+            drain_deadline_ms,
+        );
+        if result.is_err() {
+            let _ = jet_http2_write_frame(
+                stream,
+                7,
+                0,
+                0,
+                &jet_http2_goaway_payload(last_stream, 1),
+            );
             let _ = std::io::Write::flush(stream);
         }
         let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -1082,6 +1123,75 @@ fn jet_http_srv_finish_close(stream: &mut std::net::TcpStream) {
 const JET_HTTP2_PREFACE: &[u8; 24] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const JET_HTTP2_MAX_FRAME: usize = 16 * 1024;
 const JET_HTTP2_MAX_HEADER_LIST: usize = 32 * 1024;
+
+trait JetHttp2Transport: std::io::Read + std::io::Write {
+    fn jet_http_set_read_timeout(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(), String>;
+    fn jet_http_set_write_timeout(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(), String>;
+}
+
+impl JetHttp2Transport for std::net::TcpStream {
+    fn jet_http_set_read_timeout(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(), String> {
+        self.set_read_timeout(timeout)
+            .map_err(|_| "HTTP/2 read timeout setup failed".to_string())
+    }
+
+    fn jet_http_set_write_timeout(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(), String> {
+        self.set_write_timeout(timeout)
+            .map_err(|_| "HTTP/2 write timeout setup failed".to_string())
+    }
+}
+
+struct JetHttp2TlsTransport {
+    reader: JetHttpTlsReader,
+    writer: JetHttpTlsWriter,
+    set_read_timeout: JetHttpTlsTimeout,
+    set_write_timeout: JetHttpTlsTimeout,
+}
+
+impl std::io::Read for JetHttp2TlsTransport {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        self.reader.read(output)
+    }
+}
+
+impl std::io::Write for JetHttp2TlsTransport {
+    fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
+        self.writer.write(input)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+impl JetHttp2Transport for JetHttp2TlsTransport {
+    fn jet_http_set_read_timeout(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(), String> {
+        (self.set_read_timeout)(timeout)
+    }
+
+    fn jet_http_set_write_timeout(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(), String> {
+        (self.set_write_timeout)(timeout)
+    }
+}
+
 static JET_HTTP2_HUFFMAN: std::sync::OnceLock<std::collections::HashMap<(u8, u32), u8>> = std::sync::OnceLock::new();
 const JET_HTTP2_HUFFMAN_LENGTHS: [u8; 256] = [
     13, 23, 28, 28, 28, 28, 28, 28, 28, 24, 30, 28, 28, 30, 28, 28,
@@ -1641,7 +1751,7 @@ impl Drop for JetHttp2Outgoing {
 }
 
 fn jet_http2_write_header_block(
-    stream: &mut std::net::TcpStream,
+    stream: &mut impl std::io::Write,
     stream_id: u32,
     flags: u8,
     block: &[u8],
@@ -1658,7 +1768,7 @@ fn jet_http2_write_header_block(
 }
 
 fn jet_http2_start_response(
-    stream: &mut std::net::TcpStream,
+    stream: &mut impl std::io::Write,
     stream_id: u32,
     response: JetHttpResponse,
     max_frame: usize,
@@ -1743,7 +1853,7 @@ fn jet_http2_start_response(
 }
 
 fn jet_http2_flush_body(
-    stream: &mut std::net::TcpStream,
+    stream: &mut impl std::io::Write,
     stream_id: u32,
     outgoing: &mut JetHttp2Outgoing,
     connection_window: &mut i64,
@@ -1808,7 +1918,7 @@ fn jet_http2_dispatch(
 }
 
 fn jet_http2_queue_response(
-    stream: &mut std::net::TcpStream,
+    stream: &mut impl std::io::Write,
     stream_id: u32,
     response: JetHttpResponse,
     outgoing: &mut std::collections::BTreeMap<u32, JetHttp2Outgoing>,
@@ -1827,17 +1937,56 @@ fn jet_http2_queue_response(
 }
 
 fn jet_http2_serve(
-    stream: &mut std::net::TcpStream,
+    stream: &mut impl JetHttp2Transport,
     mux: &JetHttpMux,
     options: &JetHttpServerOptions,
     shutdown: &std::sync::atomic::AtomicBool,
     dynamic_grace_ms: Option<&std::sync::atomic::AtomicU64>,
     drain_deadline_ms: Option<&std::sync::atomic::AtomicU64>,
 ) -> Result<(), String> {
-    use std::io::{Read, Write};
+    jet_http2_serve_with_last_stream(
+        stream,
+        mux,
+        options,
+        shutdown,
+        dynamic_grace_ms,
+        drain_deadline_ms,
+    ).0
+}
+
+fn jet_http2_serve_with_last_stream(
+    stream: &mut impl JetHttp2Transport,
+    mux: &JetHttpMux,
+    options: &JetHttpServerOptions,
+    shutdown: &std::sync::atomic::AtomicBool,
+    dynamic_grace_ms: Option<&std::sync::atomic::AtomicU64>,
+    drain_deadline_ms: Option<&std::sync::atomic::AtomicU64>,
+) -> (Result<(), String>, u32) {
+    let mut last_stream = 0u32;
+    let result = jet_http2_serve_inner(
+        stream,
+        mux,
+        options,
+        shutdown,
+        dynamic_grace_ms,
+        drain_deadline_ms,
+        &mut last_stream,
+    );
+    (result, last_stream)
+}
+
+fn jet_http2_serve_inner(
+    stream: &mut impl JetHttp2Transport,
+    mux: &JetHttpMux,
+    options: &JetHttpServerOptions,
+    shutdown: &std::sync::atomic::AtomicBool,
+    dynamic_grace_ms: Option<&std::sync::atomic::AtomicU64>,
+    drain_deadline_ms: Option<&std::sync::atomic::AtomicU64>,
+    last_stream: &mut u32,
+) -> Result<(), String> {
     use std::sync::atomic::Ordering;
-    stream.set_read_timeout(Some(options.read_header_timeout))
-        .map_err(|_| "HTTP/2 header timeout setup failed".to_string())?;
+    stream.jet_http_set_read_timeout(Some(options.read_header_timeout))?;
+    stream.jet_http_set_write_timeout(Some(options.write_idle_timeout))?;
     let mut preface = [0u8; 24];
     stream.read_exact(&mut preface).map_err(|_| "HTTP/2 preface ended early".to_string())?;
     if &preface != JET_HTTP2_PREFACE { return Err("HTTP/2 preface is invalid".to_string()); }
@@ -1852,15 +2001,13 @@ fn jet_http2_serve(
     jet_http2_write_frame(stream, 4, 0, 0, &settings)?;
     stream.flush().map_err(|_| "HTTP/2 settings write failed".to_string())?;
     let poll_timeout = options.read_idle_timeout.min(std::time::Duration::from_millis(10));
-    stream.set_read_timeout(Some(poll_timeout.max(std::time::Duration::from_millis(1))))
-        .map_err(|_| "HTTP/2 read timeout setup failed".to_string())?;
+    stream.jet_http_set_read_timeout(Some(poll_timeout.max(std::time::Duration::from_millis(1))))?;
     let mut requests = std::collections::BTreeMap::<u32, JetHttp2RequestStream>::new();
     let mut outgoing = std::collections::BTreeMap::<u32, JetHttp2Outgoing>::new();
     let mut stream_windows = std::collections::BTreeMap::<u32, i64>::new();
     let (completed_tx, completed_rx) = std::sync::mpsc::channel::<(u32, Result<JetHttpResponse, String>)>();
     let (consumed_tx, consumed_rx) = std::sync::mpsc::channel::<(u32, usize)>();
     let mut decoder = JetHttp2Hpack::new();
-    let mut last_stream = 0u32;
     let mut last_activity = std::time::Instant::now();
     let mut connection_send_window = 65_535i64;
     let mut initial_send_window = 65_535i64;
@@ -1885,7 +2032,7 @@ fn jet_http2_serve(
                     .unwrap_or(options.shutdown_grace);
                 std::time::Instant::now() + grace
             });
-            jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(last_stream, 0))?;
+            jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(*last_stream, 0))?;
             stream.flush().map_err(|_| "HTTP/2 GOAWAY write failed".to_string())?;
             goaway_sent = true;
         }
@@ -2013,7 +2160,7 @@ fn jet_http2_serve(
             }
             1 => {
                 let trailing = requests.contains_key(&frame.stream);
-                if going_away || frame.stream == 0 || frame.stream % 2 == 0 || !trailing && frame.stream <= last_stream {
+                if going_away || frame.stream == 0 || frame.stream % 2 == 0 || !trailing && frame.stream <= *last_stream {
                     if going_away && frame.stream != 0 {
                         jet_http2_write_frame(stream, 3, 0, frame.stream, &7u32.to_be_bytes())?;
                         stream.flush().map_err(|_| "HTTP/2 RST write failed".to_string())?;
@@ -2026,7 +2173,7 @@ fn jet_http2_serve(
                 }
                 if !trailing {
                     if requests.len() >= max_streams { return Err("HTTP/2 concurrent stream limit exceeded".to_string()); }
-                    last_stream = frame.stream;
+                    *last_stream = frame.stream;
                 }
                 let mut offset = 0usize;
                 let padding = if frame.flags & 0x8 != 0 { offset = 1; usize::from(*frame.payload.first().ok_or_else(|| "HTTP/2 padded HEADERS is empty".to_string())?) } else { 0 };
@@ -2034,8 +2181,7 @@ fn jet_http2_serve(
                 if offset + padding > frame.payload.len() { return Err("HTTP/2 HEADERS padding is invalid".to_string()); }
                 let mut block = frame.payload[offset..frame.payload.len() - padding].to_vec();
                 if frame.flags & 0x4 == 0 {
-                    stream.set_read_timeout(Some(options.read_header_timeout))
-                        .map_err(|_| "HTTP/2 header timeout setup failed".to_string())?;
+                    stream.jet_http_set_read_timeout(Some(options.read_header_timeout))?;
                     loop {
                         let continuation = jet_http2_read_frame(stream)?;
                         if continuation.kind != 9 || continuation.stream != frame.stream { return Err("HTTP/2 header block was interrupted".to_string()); }
@@ -2043,8 +2189,7 @@ fn jet_http2_serve(
                         if block.len() > JET_HTTP2_MAX_HEADER_LIST { return Err("HTTP/2 header block is too large".to_string()); }
                         if continuation.flags & 0x4 != 0 { break; }
                     }
-                    stream.set_read_timeout(Some(poll_timeout.max(std::time::Duration::from_millis(1))))
-                        .map_err(|_| "HTTP/2 read timeout setup failed".to_string())?;
+                    stream.jet_http_set_read_timeout(Some(poll_timeout.max(std::time::Duration::from_millis(1))))?;
                 }
                 let headers = jet_http2_decode_headers(&mut decoder, &block)?;
                 if trailing {
@@ -2185,7 +2330,7 @@ fn jet_http2_serve(
         if let Some(control) = &request.control { control.cancel(); }
     }
     if !goaway_sent {
-        jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(last_stream, 0))?;
+        jet_http2_write_frame(stream, 7, 0, 0, &jet_http2_goaway_payload(*last_stream, 0))?;
     }
     let _ = stream.flush();
     Ok(())
@@ -3321,6 +3466,7 @@ where
             &String,
             std::net::TcpStream,
             Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
+            JetHttpTlsH2,
             Box<dyn Fn() -> bool + Send>,
         ) -> Result<(), String>
         + Clone
@@ -3359,6 +3505,7 @@ where
             &String,
             std::net::TcpStream,
             Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
+            JetHttpTlsH2,
             Box<dyn Fn() -> bool + Send>,
         ) -> Result<(), String>
         + Clone
@@ -3378,6 +3525,7 @@ where
             &String,
             std::net::TcpStream,
             Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
+            JetHttpTlsH2,
             Box<dyn Fn() -> bool + Send>,
         ) -> Result<(), String>
         + Clone
@@ -3385,11 +3533,13 @@ where
         + Sync
         + 'static,
 {
-    std::sync::Arc::new(move |stream, shutdown| {
+    std::sync::Arc::new(move |stream, shutdown, options, dynamic_grace_ms, drain_deadline_ms| {
         let m = mux.clone();
+        let h2_mux = mux.clone();
         let tls_cfg = tls.clone();
         let session = session.clone();
         let stop = shutdown.clone();
+        let h2_stop = shutdown.clone();
         session(
             &tls_cfg.cert_pem,
             &tls_cfg.key_pem,
@@ -3412,6 +3562,33 @@ where
                     }
                     Err(error) => Ok((jet_http_srv_read_error_response(&error).into_bytes(), false)),
                 }
+            }),
+            Box::new(move |reader, writer, set_read_timeout, set_write_timeout| {
+                let mut transport = JetHttp2TlsTransport {
+                    reader,
+                    writer,
+                    set_read_timeout,
+                    set_write_timeout,
+                };
+                let (result, last_stream) = jet_http2_serve_with_last_stream(
+                    &mut transport,
+                    &h2_mux,
+                    &options,
+                    &h2_stop,
+                    dynamic_grace_ms.as_deref(),
+                    Some(drain_deadline_ms.as_ref()),
+                );
+                if result.is_err() {
+                    let _ = jet_http2_write_frame(
+                        &mut transport,
+                        7,
+                        0,
+                        0,
+                        &jet_http2_goaway_payload(last_stream, 1),
+                    );
+                    let _ = std::io::Write::flush(&mut transport);
+                }
+                result
             }),
             Box::new(move || shutdown.load(std::sync::atomic::Ordering::Acquire)),
         )

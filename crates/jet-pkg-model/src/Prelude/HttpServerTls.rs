@@ -3,6 +3,37 @@ use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::Duration;
 
+type JetHttpRustlsStream = rustls::StreamOwned<rustls::ServerConnection, TcpStream>;
+
+struct JetHttpTlsSharedReader(Arc<std::sync::Mutex<JetHttpRustlsStream>>);
+
+impl Read for JetHttpTlsSharedReader {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .map_err(|_| std::io::Error::other("TLS stream lock failed"))?
+            .read(output)
+    }
+}
+
+struct JetHttpTlsSharedWriter(Arc<std::sync::Mutex<JetHttpRustlsStream>>);
+
+impl Write for JetHttpTlsSharedWriter {
+    fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .map_err(|_| std::io::Error::other("TLS stream lock failed"))?
+            .write(input)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0
+            .lock()
+            .map_err(|_| std::io::Error::other("TLS stream lock failed"))?
+            .flush()
+    }
+}
+
 fn jet_http_server_tls_config(
     cert_pem: &String,
     key_pem: &String,
@@ -25,10 +56,11 @@ fn jet_http_server_tls_config(
         .map_err(|_| "TLS private key PEM could not be read".to_string())?
         .ok_or_else(|| "TLS private key PEM did not contain a private key".to_string())?;
 
-    let config = rustls::ServerConfig::builder()
+    let mut config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .map_err(|_| "TLS certificate and private key do not match".to_string())?;
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok(Arc::new(config))
 }
 
@@ -39,9 +71,9 @@ pub fn jet_http_server_tls_validate_impl(
     jet_http_server_tls_config(cert_pem, key_pem).map(|_| ())
 }
 
-/// One TLS connection session: handshake, then repeatedly read one buffered HTTP/1
-/// request, dispatch, and write the response until the dispatcher asks to close,
-/// idle timeout hits, or shutdown stops keep-alive reuse.
+/// One TLS connection session: handshake and ALPN-select the native H2 callback
+/// or repeatedly dispatch buffered HTTP/1 requests until close, idle timeout, or
+/// shutdown stops keep-alive reuse.
 ///
 /// `on_request` receives `(raw_request, force_close)`. `force_close` is set on the
 /// final request of the 1000-request cap so the response carries `Connection: close`
@@ -51,9 +83,26 @@ pub fn jet_http_server_tls_session_impl(
     key_pem: &String,
     stream: TcpStream,
     on_request: Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
+    on_h2: Box<
+        dyn FnOnce(
+                Box<dyn Read + Send>,
+                Box<dyn Write + Send>,
+                Box<dyn Fn(Option<Duration>) -> Result<(), String> + Send>,
+                Box<dyn Fn(Option<Duration>) -> Result<(), String> + Send>,
+            ) -> Result<(), String>
+            + Send,
+    >,
     should_stop: Box<dyn Fn() -> bool + Send>,
 ) -> Result<(), String> {
-    jet_http_server_tls_session_limited(cert_pem, key_pem, stream, on_request, should_stop, 1000)
+    jet_http_server_tls_session_limited(
+        cert_pem,
+        key_pem,
+        stream,
+        on_request,
+        on_h2,
+        should_stop,
+        1000,
+    )
 }
 
 fn jet_http_server_tls_session_limited(
@@ -61,6 +110,15 @@ fn jet_http_server_tls_session_limited(
     key_pem: &String,
     stream: TcpStream,
     mut on_request: Box<dyn FnMut(&[u8], bool) -> Result<(Vec<u8>, bool), String> + Send>,
+    on_h2: Box<
+        dyn FnOnce(
+                Box<dyn Read + Send>,
+                Box<dyn Write + Send>,
+                Box<dyn Fn(Option<Duration>) -> Result<(), String> + Send>,
+                Box<dyn Fn(Option<Duration>) -> Result<(), String> + Send>,
+            ) -> Result<(), String>
+            + Send,
+    >,
     should_stop: Box<dyn Fn() -> bool + Send>,
     max_requests: usize,
 ) -> Result<(), String> {
@@ -75,6 +133,53 @@ fn jet_http_server_tls_session_limited(
     let conn = rustls::ServerConnection::new(config)
         .map_err(|_| "TLS server could not start the handshake".to_string())?;
     let mut tls = rustls::StreamOwned::new(conn, stream);
+    tls.sock
+        .set_read_timeout(Some(HEADER_TIMEOUT))
+        .map_err(|_| "TLS handshake timeout setup failed".to_string())?;
+    tls.sock
+        .set_write_timeout(Some(HEADER_TIMEOUT))
+        .map_err(|_| "TLS handshake timeout setup failed".to_string())?;
+    while tls.conn.is_handshaking() {
+        tls.conn.complete_io(&mut tls.sock).map_err(|error| {
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) {
+                "TLS handshake timed out".to_string()
+            } else {
+                "TLS handshake failed".to_string()
+            }
+        })?;
+    }
+    if tls.conn.alpn_protocol() == Some(b"h2") {
+        let shared = Arc::new(std::sync::Mutex::new(tls));
+        let read_timeout = shared.clone();
+        let write_timeout = shared.clone();
+        let result = on_h2(
+            Box::new(JetHttpTlsSharedReader(shared.clone())),
+            Box::new(JetHttpTlsSharedWriter(shared.clone())),
+            Box::new(move |timeout| {
+                read_timeout
+                    .lock()
+                    .map_err(|_| "TLS stream lock failed".to_string())?
+                    .sock
+                    .set_read_timeout(timeout)
+                    .map_err(|_| "TLS read timeout setup failed".to_string())
+            }),
+            Box::new(move |timeout| {
+                write_timeout
+                    .lock()
+                    .map_err(|_| "TLS stream lock failed".to_string())?
+                    .sock
+                    .set_write_timeout(timeout)
+                    .map_err(|_| "TLS write timeout setup failed".to_string())
+            }),
+        );
+        if let Ok(tls) = shared.lock() {
+            let _ = tls.sock.shutdown(std::net::Shutdown::Both);
+        }
+        return result;
+    }
 
     // Carry pipelined leftovers across requests — same law as plain HTTP/1.
     let mut pending = Vec::new();
@@ -188,6 +293,7 @@ pub fn jet_http_server_tls_handle_impl(
             );
             Ok((response.into_bytes(), false))
         }),
+        Box::new(|_, _, _, _| Err("TLS one-shot handler does not support HTTP/2".to_string())),
         Box::new(|| false),
     )
 }

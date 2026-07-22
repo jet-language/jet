@@ -2384,7 +2384,7 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "bind") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
-                "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
+                "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
                 arg(0),
                 arg(1),
                 arg(2)
@@ -2395,7 +2395,7 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "serve") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
-                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
+                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
                 arg(0),
                 arg(1),
                 arg(2)

@@ -4689,12 +4689,13 @@ fn tls_oversized_content_length_chunk_and_framing_return_413() {
         mux,
         JetHttpServerTls { cert_pem: cert, key_pem: key },
         |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
-        |cert, key, stream, on_request, should_stop| {
+        |cert, key, stream, on_request, on_h2, should_stop| {
             http_server_tls_runtime::jet_http_server_tls_session_impl(
                 cert,
                 key,
                 stream,
                 on_request,
+                on_h2,
                 should_stop,
             )
         },
@@ -4780,12 +4781,13 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
         mux,
         tls,
         |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
-        |cert, key, stream, on_request, should_stop| {
+        |cert, key, stream, on_request, on_h2, should_stop| {
             http_server_tls_runtime::jet_http_server_tls_session_impl(
                 cert,
                 key,
                 stream,
                 on_request,
+                on_h2,
                 should_stop,
             )
         },
@@ -4862,8 +4864,184 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     let _ = serve.join().expect("serve join");
 }
 
+#[test]
+fn tls_rustls_alpn_serves_native_http2_streams_trailers_and_shutdown() {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let mux = jet_http_mux_new();
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let trailer_calls = calls.clone();
+    jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(move |request| {
+        assert!(matches!(
+            jet_http_srv_req_trailers(&request),
+            Err(JetHttpError::InvalidFraming),
+        ));
+        let body = request.body.text(64)?;
+        let incoming = jet_http_srv_req_trailers(&request)?;
+        assert_eq!(incoming.all("x-trace"), vec!["one", "two"]);
+        trailer_calls.fetch_add(1, Ordering::AcqRel);
+
+        let mut trailers = JetHttpHeaders::new();
+        trailers.append("X-Trace", "first").unwrap();
+        trailers.append("x-trace", "second").unwrap();
+        jet_http_srv_response_trailers(
+            jet_http_srv_response(200, &format!("tls-h2:{body}")),
+            trailers,
+        )
+    }));
+    let fast_calls = calls.clone();
+    jet_http_mux_add(&mux, "GET", "/fast", move |_| {
+        fast_calls.fetch_add(1, Ordering::AcqRel);
+        jet_http_srv_response(200, &"fast".to_string())
+    });
+
+    let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
+    let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
+    let server = jet_http_server_bind_tls(
+        &"127.0.0.1:0".to_string(),
+        mux,
+        JetHttpServerTls { cert_pem: cert, key_pem: key },
+        |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
+        |cert, key, stream, on_request, on_h2, should_stop| {
+            http_server_tls_runtime::jet_http_server_tls_session_impl(
+                cert,
+                key,
+                stream,
+                on_request,
+                on_h2,
+                should_stop,
+            )
+        },
+    )
+    .expect("bind rustls h2");
+    let addr: std::net::SocketAddr = jet_http_server_local_addr(&server)
+        .expect("addr")
+        .parse()
+        .expect("parse");
+    let serving = server.clone();
+    let serve = std::thread::spawn(move || jet_http_server_serve(&serving));
+
+    // One real rustls connection carries two concurrent H2 streams. Stream 1
+    // sends and receives ordered repeated trailers while stream 3 completes
+    // independently, proving the native multiplexer is reused under TLS.
+    let mut client = rustls_fixture_client_with_alpn(addr, &[b"h2"]);
+    client.write_all(JET_HTTP2_PREFACE).unwrap();
+    client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+    client.write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/trailers"))).unwrap();
+    client.write_all(&h2_frame(1, 0x5, 3, &h2_request_headers(0x82, "/fast"))).unwrap();
+    client.write_all(&h2_frame(0, 0, 1, b"body")).unwrap();
+    let mut request_trailers = h2_literal_named_header("x-trace", "one");
+    request_trailers.extend_from_slice(&h2_literal_named_header("x-trace", "two"));
+    client.write_all(&h2_frame(1, 0x5, 1, &request_trailers)).unwrap();
+    client.flush().unwrap();
+    assert_eq!(client.conn.alpn_protocol(), Some(b"h2".as_slice()));
+
+    let mut stream_one_body = Vec::new();
+    let mut stream_one_trailers = Vec::new();
+    let mut stream_one_done = false;
+    let mut stream_three_body = Vec::new();
+    let mut stream_three_done = false;
+    let mut decoder = JetHttp2Hpack::new();
+    while !stream_one_done || !stream_three_done {
+        let frame = jet_http2_read_frame(&mut client).unwrap();
+        if frame.stream == 1 && frame.kind == 0 {
+            stream_one_body.extend_from_slice(&frame.payload);
+            assert_eq!(frame.flags & 0x1, 0, "TLS H2 DATA ended before trailers");
+        } else if frame.stream == 1 && frame.kind == 1 {
+            let headers = jet_http2_decode_headers(&mut decoder, &frame.payload).unwrap();
+            if frame.flags & 0x1 != 0 {
+                stream_one_trailers = headers;
+                stream_one_done = true;
+            }
+        } else if frame.stream == 3 && frame.kind == 0 {
+            stream_three_body.extend_from_slice(&frame.payload);
+            stream_three_done = frame.flags & 0x1 != 0;
+        }
+    }
+    assert_eq!(stream_one_body, b"tls-h2:body");
+    assert_eq!(stream_three_body, b"fast");
+    assert_eq!(
+        stream_one_trailers
+            .into_iter()
+            .filter_map(|(name, value)| (name == "x-trace").then_some(value))
+            .collect::<Vec<_>>(),
+        vec!["first", "second"],
+    );
+    assert_eq!(calls.load(Ordering::Acquire), 2);
+    client.write_all(&h2_frame(7, 0, 0, &[0; 8])).unwrap();
+    client.flush().unwrap();
+    drop(client);
+
+    // A second negotiated TLS connection violates the server's advertised
+    // frame bound. The H2 loop closes it before the handler can complete.
+    let mut bounded = rustls_fixture_client_with_alpn(addr, &[b"h2"]);
+    bounded.write_all(JET_HTTP2_PREFACE).unwrap();
+    bounded.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+    bounded.write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/trailers"))).unwrap();
+    bounded.write_all(&h2_frame(0, 0, 1, &vec![0; JET_HTTP2_MAX_FRAME + 1])).unwrap();
+    bounded.flush().unwrap();
+    assert_eq!(bounded.conn.alpn_protocol(), Some(b"h2".as_slice()));
+    let mut bounded_goaway = false;
+    let mut bounded_closed = false;
+    for _ in 0..4 {
+        match jet_http2_read_frame(&mut bounded) {
+            Ok(frame) if frame.kind == 7 => {
+                bounded_goaway = true;
+                assert_eq!(&frame.payload[..4], &1u32.to_be_bytes());
+                assert_eq!(&frame.payload[4..8], &1u32.to_be_bytes());
+            }
+            Ok(_) => {}
+            Err(_) => {
+                bounded_closed = true;
+                break;
+            }
+        }
+    }
+    assert!(bounded_goaway, "oversized TLS H2 frame omitted protocol GOAWAY");
+    assert!(bounded_closed, "oversized TLS H2 frame did not close the connection");
+    assert_eq!(calls.load(Ordering::Acquire), 2, "bounded request completed a handler");
+
+    // Keep a final request body open, then prove Server.shutdown negotiates
+    // GOAWAY over rustls and closes within the requested grace bound.
+    let mut draining = rustls_fixture_client_with_alpn(addr, &[b"h2"]);
+    draining.write_all(JET_HTTP2_PREFACE).unwrap();
+    draining.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+    draining.write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/trailers"))).unwrap();
+    draining.write_all(&h2_frame(0, 0, 1, b"partial")).unwrap();
+    draining.flush().unwrap();
+    assert_eq!(draining.conn.alpn_protocol(), Some(b"h2".as_slice()));
+    loop {
+        let frame = jet_http2_read_frame(&mut draining).unwrap();
+        if frame.kind == 4 && frame.stream == 0 { break; }
+    }
+    let started = std::time::Instant::now();
+    let report = jet_http_server_shutdown(&server, &jet_std::Duration { ms: 40 }).expect("shutdown");
+    assert!(started.elapsed() < std::time::Duration::from_millis(1500), "{report:?}");
+    let mut saw_goaway = false;
+    while let Ok(frame) = jet_http2_read_frame(&mut draining) {
+        if frame.kind == 7 {
+            saw_goaway = true;
+            assert_eq!(&frame.payload[..4], &1u32.to_be_bytes());
+            break;
+        }
+    }
+    assert!(saw_goaway, "TLS H2 shutdown omitted GOAWAY");
+    assert_eq!(report.user_accepted, 3, "{report:?}");
+    assert_eq!(report.user_completed + report.user_cancelled, report.user_accepted, "{report:?}");
+    assert_eq!(calls.load(Ordering::Acquire), 2, "partial request completed during shutdown");
+    let _ = serve.join().expect("serve join");
+}
+
 fn rustls_fixture_client(
     addr: std::net::SocketAddr,
+) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
+    rustls_fixture_client_with_alpn(addr, &[])
+}
+
+fn rustls_fixture_client_with_alpn(
+    addr: std::net::SocketAddr,
+    alpn_protocols: &[&[u8]],
 ) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -4907,12 +5085,12 @@ fn rustls_fixture_client(
         }
     }
 
-    let config = std::sync::Arc::new(
-        rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(std::sync::Arc::new(AcceptFixture))
-            .with_no_client_auth(),
-    );
+    let mut config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(AcceptFixture))
+        .with_no_client_auth();
+    config.alpn_protocols = alpn_protocols.iter().map(|protocol| protocol.to_vec()).collect();
+    let config = std::sync::Arc::new(config);
     let name = rustls::pki_types::ServerName::try_from("localhost").expect("name");
     let conn = rustls::ClientConnection::new(config, name).expect("conn");
     let sock = std::net::TcpStream::connect(addr).expect("connect");

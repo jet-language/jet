@@ -516,6 +516,7 @@ mod http_server_tls_persist_tests {
                     );
                     Ok((response.into_bytes(), keep))
                 }),
+                Box::new(|_, _, _, _| Err("unexpected HTTP/2 ALPN".to_string())),
                 Box::new(move || server_stop.load(Ordering::Acquire)),
             )
             .expect("tls session");
@@ -628,6 +629,7 @@ mod http_server_tls_persist_tests {
                     );
                     Ok((response.into_bytes(), keep))
                 }),
+                Box::new(|_, _, _, _| Err("unexpected HTTP/2 ALPN".to_string())),
                 Box::new(|| false),
             )
             .expect("tls session");
@@ -679,6 +681,7 @@ mod http_server_tls_persist_tests {
                     );
                     Ok((response.into_bytes(), keep))
                 }),
+                Box::new(|_, _, _, _| Err("unexpected HTTP/2 ALPN".to_string())),
                 Box::new(|| false),
                 2,
             )
