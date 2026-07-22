@@ -1187,7 +1187,7 @@ fn canonical_attr_escape(value: &str) -> String { value.replace('&', "&amp;").re
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use super::{canonical_document, field, parse_document, parse_document_with, render_document, stream_event_value, ByteLexer, CanonicalMode, CanonicalOptions, EntityPolicy, Event, LexicalPolicy, Limits, ParseOptions, Part, Reason, RenderEncoding, Scanner, StreamScanner, StreamWriter, TokenKind, Value, WireEncoding};
+    use super::{canonical_document, field, parse_document, parse_document_with, render_document, stream_event_value, ByteLexer, CanonicalMode, CanonicalOptions, EntityPolicy, Error, Event, LexicalPolicy, Limits, ParseOptions, Part, Reason, RenderEncoding, Scanner, StreamScanner, StreamWriter, TokenKind, Value, WireEncoding};
 
     fn scan(source: &str) -> Result<Vec<Event>, String> {
         let mut scanner = Scanner::new(source);
@@ -1257,6 +1257,105 @@ mod tests {
             "<r>bad]]>text</r>",
         ] {
             assert!(scan(source).is_err(), "accepted {source}");
+        }
+    }
+
+    #[test]
+    fn xml_10_fifth_edition_char_production_is_exact_and_chunk_invariant() {
+        fn stream_error(bytes: &[u8], split: usize) -> Error {
+            let mut scanner = StreamScanner::new(4096, ParseOptions::safe()).expect("scanner");
+            let error = 'failed: {
+                if let Err(error) = scanner.push(&bytes[..split]) {
+                    break 'failed error;
+                }
+                loop {
+                    match scanner.next() {
+                        Ok(Some(_)) => {}
+                        Ok(None) => break,
+                        Err(error) => break 'failed error,
+                    }
+                }
+                if let Err(error) = scanner.push(&bytes[split..]) {
+                    break 'failed error;
+                }
+                if let Err(error) = scanner.finish_input() {
+                    break 'failed error;
+                }
+                loop {
+                    match scanner.next() {
+                        Ok(Some(_)) => {}
+                        Ok(None) => panic!("stream accepted forbidden XML character at split {split}"),
+                        Err(error) => break 'failed error,
+                    }
+                }
+            };
+            assert_eq!(scanner.next(), Err(error.clone()), "terminal split {split}");
+            error
+        }
+
+        for character in [
+            '\u{9}', '\u{a}', '\u{d}', '\u{20}', '\u{d7ff}', '\u{e000}', '\u{fffd}',
+            '\u{10000}', '\u{10ffff}',
+        ] {
+            parse_document(&format!("<r>{character}</r>")).unwrap_or_else(|error| {
+                panic!("rejected XML Char U+{:X}: {error:?}", character as u32)
+            });
+        }
+        for reference in [
+            "&#9;", "&#xA;", "&#13;", "&#x20;", "&#xD7FF;", "&#xE000;", "&#xFFFD;",
+            "&#x10000;", "&#x10FFFF;",
+        ] {
+            parse_document(&format!("<r>{reference}</r>")).unwrap_or_else(|error| {
+                panic!("rejected XML character reference {reference}: {error:?}")
+            });
+        }
+
+        for character in [
+            '\u{0}', '\u{1}', '\u{8}', '\u{b}', '\u{c}', '\u{e}', '\u{1f}', '\u{fffe}',
+            '\u{ffff}',
+        ] {
+            let source = format!("<r>{character}</r>");
+            let expected = parse_document(&source).expect_err("forbidden XML character");
+            assert_eq!(
+                (expected.kind, expected.offset, expected.line, expected.column),
+                (Reason::Malformed, 3, Some(1), Some(4)),
+                "U+{:X}",
+                character as u32
+            );
+            for split in 0..=source.len() {
+                let actual = stream_error(source.as_bytes(), split);
+                assert_eq!(actual, expected, "U+{:X} split {split}", character as u32);
+            }
+        }
+
+        for source in [
+            "<r a='\u{1}'/>",
+            "<r><!--\u{1}--></r>",
+            "<r><![CDATA[\u{1}]]></r>",
+            "<r><?p \u{1}?></r>",
+            "<!DOCTYPE r [\u{1}]><r/>",
+            "<r\u{1}/>",
+            "<r></r\u{1}>",
+            "<r>&\u{1};</r>",
+            "<r/>\u{1}",
+        ] {
+            let expected = parse_document(source).expect_err("forbidden XML token character");
+            assert_eq!(expected.kind, Reason::Malformed, "{source:?}");
+            for split in 0..=source.len() {
+                assert_eq!(
+                    stream_error(source.as_bytes(), split),
+                    expected,
+                    "{source:?} split {split}"
+                );
+            }
+        }
+
+        for reference in [
+            "&#0;", "&#x1;", "&#xB;", "&#xC;", "&#x1F;", "&#xFFFE;", "&#xFFFF;",
+        ] {
+            let error = parse_document(&format!("<r>{reference}</r>"))
+                .expect_err("forbidden XML character reference");
+            assert_eq!(error.kind, Reason::Entity, "{reference}");
         }
     }
 
@@ -1933,6 +2032,12 @@ fn valid_name(s: &str) -> bool {
     let mut cs = s.chars();
     cs.next().is_some_and(name_start) && cs.all(name_char) && s.matches(':').count() <= 1
 }
+fn valid_xml_char(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
+    )
+}
 fn split_name(raw: &str) -> (Option<String>, String) {
     match raw.split_once(':') {
         Some((p, l)) => (Some(p.to_string()), l.to_string()),
@@ -1949,11 +2054,13 @@ fn predefined(name: &str) -> Option<String> {
         _ if name.starts_with("#x") => u32::from_str_radix(&name[2..], 16)
             .ok()
             .and_then(char::from_u32)
+            .filter(|character| valid_xml_char(*character))
             .map(|c| c.to_string()),
         _ if name.starts_with('#') => name[1..]
             .parse::<u32>()
             .ok()
             .and_then(char::from_u32)
+            .filter(|character| valid_xml_char(*character))
             .map(|c| c.to_string()),
         _ => None,
     }
@@ -2266,6 +2373,18 @@ impl<'a> Scanner<'a> {
     fn fail<T>(&self, reason: impl Into<String>) -> Result<T, Error> {
         Err(Error::at(self.offset, reason))
     }
+    fn validate_characters(&self, start: usize, end: usize) -> Result<(), Error> {
+        if let Some((offset, character)) = self.source[start..end]
+            .char_indices()
+            .find(|(_, character)| !valid_xml_char(*character))
+        {
+            return Err(Error::at(
+                start + offset,
+                format!("XML contains forbidden character U+{:04X}", character as u32),
+            ));
+        }
+        Ok(())
+    }
     fn starts(&self, s: &str) -> bool {
         self.source[self.offset..].starts_with(s)
     }
@@ -2274,7 +2393,9 @@ impl<'a> Scanner<'a> {
         let Some(rel) = self.source[self.offset..].find(end) else {
             return self.fail(reason);
         };
-        self.offset += rel + end.len();
+        let token_end = self.offset + rel + end.len();
+        self.validate_characters(start, token_end)?;
+        self.offset = token_end;
         Ok((
             self.source[start..self.offset].to_string(),
             self.source[start..self.offset - end.len()].to_string(),
@@ -2336,6 +2457,7 @@ impl<'a> Scanner<'a> {
         if name.is_empty() {
             return self.fail("empty entity reference");
         }
+        self.validate_characters(start, start + end + 1)?;
         let resolved = self.resolve_entity(name)?;
         self.offset = start + end + 1;
         Ok((
@@ -2414,6 +2536,7 @@ impl<'a> Scanner<'a> {
         if end == self.source.len() {
             return self.fail("unterminated opening tag");
         }
+        self.validate_characters(start, end + 1)?;
         let mut inner = &self.source[start + 1..end];
         let empty = inner.trim_end().ends_with('/');
         if empty {
@@ -2767,6 +2890,7 @@ impl<'a> Scanner<'a> {
             if i == self.source.len() {
                 return self.fail("unterminated DOCTYPE");
             }
+            self.validate_characters(start, i + 1)?;
             self.offset = i + 1;
             let raw = self.source[start..self.offset].to_string();
             let inside = self.source[start + 9..i].trim();
@@ -2798,6 +2922,7 @@ impl<'a> Scanner<'a> {
             let Some(rel) = self.source[start..].find('>') else {
                 return self.fail("unterminated closing tag");
             };
+            self.validate_characters(start, start + rel + 1)?;
             let raw_name = self.source[start + 2..start + rel].trim();
             let frame = self
                 .stack
@@ -2839,6 +2964,7 @@ impl<'a> Scanner<'a> {
         let rel = self.source[start..]
             .find(['<', '&'])
             .unwrap_or(self.source.len() - start);
+        self.validate_characters(start, start + rel)?;
         self.offset += rel;
         let raw = self.source[start..self.offset].to_string();
         if self.stack.is_empty() {

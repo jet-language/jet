@@ -1560,15 +1560,19 @@ Each adapter is a full serde equivalent, not a lossy subset:
   (`|`/`>` with chomping), comments, `---`/`...` document markers, and
   anchors/aliases (`&a`/`*a`). Explicit/custom tags (`!!str`, `!T`) are deferred.
 
-**Current implementation boundary:** JSONL, the existing lossy XML prototype,
-base32/base64url, and an infallible key-sorting `json.canonical` exist. CBOR's
+**Current implementation boundary:** JSONL, the lossless tagged XML engine and
+pull handles, base32/base64url, and an infallible key-sorting `json.canonical`
+exist. XML whole and stream parsing enforce the exact XML 1.0 Fifth Edition
+`Char` production for literal scalars and numeric references, with identical
+typed errors across every byte split. CBOR's
 typed whole-value byte verbs, closed errors/options, native `[U8]`, original-wire
 Core deterministic validation, live allocation limits, and normal-mode
 indefinite values execute in the native runtime; pull handles also exist. Exact
-lossless XML algebra/C14N, RFC 8785 serialization, strict edition migration,
-full hostile standards corpora, complete stream lifecycle proof, error-allocation
-oracles, and AOT/JIT/comptime parity remain open. Entries above state ratified API
-law, not a broad-complete implementation claim.
+XML 1.0/Namespaces and inclusive/exclusive C14N corpus closure, XML byte-identity
+whole-value verbs, XML Codable projection, RFC 8785 serialization, strict edition
+migration, full hostile standards corpora, complete stream lifecycle proof, and
+error-allocation oracles remain open. Entries above state ratified API law, not a
+broad-complete implementation claim.
 
 Compiler/runtime codec implementations remain std-only under I6.
 

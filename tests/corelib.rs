@@ -7138,6 +7138,55 @@ fn run() {
 }
 
 #[test]
+fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML character parity test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_xml_chars_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.xml as xml
+
+fn show(result: DataTree ? XMLError) -> String {
+    if result == {
+        Ok(_) -> { return "accepted" }
+        Err(error) -> {
+            return "{error.byte_offset}|{error.line}|{error.column}|{error.path}|{error.reason}"
+        }
+    }
+    return "unreachable"
+}
+
+comptime numeric = show(xml.parse("<r>&#0;</r>"))
+
+fn run() {
+    runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
+    print("{numeric}|{runtime_numeric}")
+}
+"#;
+    let expected = concat!(
+        "3|1|4|$/r|invalid numeric character reference|3|1|4|$/r|invalid numeric character reference\n",
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_chars", &source, &[], None);
+    assert_eq!(code, 0, "XML character AOT fixture failed: {stderr}");
+    assert_eq!(stdout, expected);
+    assert_eq!(stderr, "");
+
+    let dev_path = dir.join("xml_chars.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
+        }
+        other => panic!("XML character default-dev fixture failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
@@ -7300,9 +7349,12 @@ fn xml_stream_reader_is_incremental_exact_and_terminal() {
         .join(", ");
     let malformed = dir.join("malformed.xml");
     fs::write(&malformed, "<r>").unwrap();
+    let invalid_char = dir.join("invalid-char.xml");
+    fs::write(&invalid_char, b"<r>\x01</r>").unwrap();
     let limited = dir.join("limited.xml");
     fs::write(&limited, "<root>text</root>").unwrap();
     let malformed = malformed.to_string_lossy().replace('\\', "\\\\");
+    let invalid_char = invalid_char.to_string_lossy().replace('\\', "\\\\");
     let limited = limited.to_string_lossy().replace('\\', "\\\\");
 
     let source = format!(
@@ -7370,6 +7422,34 @@ fn run() {{
         }}
     }}
 
+    invalid_char_input :: files.open("{invalid_char}") ?? panic("open invalid character")
+    invalid_char_reader :: xml.reader(^invalid_char_input) ?? panic("invalid character reader")
+    loop true {{
+        result :: invalid_char_reader.next()
+        if result == {{
+            Ok(maybe) -> {{
+                if maybe == {{
+                    Val(_) -> {{}}
+                    None -> {{ print("invalid-character-missed"); break }}
+                }}
+            }}
+            Err(first) -> {{
+                print(first.kind == encoding.EncodingErrorKind.Syntax)
+                print(first.byte_offset)
+                print(first.line ?? -1)
+                print(first.column ?? -1)
+                print(first.path)
+                print(first.reason)
+                again :: invalid_char_reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("invalid-character-terminal-missed") }}
+                    Err(second) -> {{ print(first.reason == second.reason) }}
+                }}
+                break
+            }}
+        }}
+    }}
+
     total_limits := encoding.EncodingLimits.safe()
     total_limits.max_total_bytes = Val(6)
     total_input :: files.open("{limited}") ?? panic("open total")
@@ -7398,7 +7478,10 @@ fn run() {{
     );
     let (code, stdout, stderr) = build_and_run(&dir, "xml_stream", &source, &[], None);
     assert_eq!(code, 0, "XML stream test failed: {stderr}");
-    assert_eq!(stdout, "33\ntrue\n7\ntrue\n");
+    assert_eq!(
+        stdout,
+        "33\ntrue\ntrue\n3\n1\n4\n$/r\nXML contains forbidden character U+0001\ntrue\n7\ntrue\n"
+    );
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);
 }
