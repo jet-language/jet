@@ -283,6 +283,58 @@ fn comptime_f32_width_survives_value_flow_and_matches_aot() {
 }
 
 #[test]
+fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping gzip comptime differential");
+        return;
+    }
+    let src = r#"use core.compress.gzip as gzip
+
+fn codec_probe() -> String {
+    bytes: [U8] :: [72, 101, 108, 108, 111]
+    gz: [U8] :: gzip.decompress(gzip.compress(bytes)) ?? []
+    golden: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? []
+    bad_size: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [255]
+    h: U8 :: 72
+    lower_h: U8 :: 104
+    o: U8 :: 111
+    max: U8 :: 255
+    return "{gz.len() == 5}|{gz[0] == h}|{golden.len() == 5}|{golden[0] == lower_h}|{golden[4] == o}|{bad_size[0] == max}"
+}
+
+comptime expected = codec_probe()
+
+fn run() {
+    actual :: codec_probe()
+    print("{expected}")
+    print("{actual}")
+}
+"#;
+    check_comptime_src(32_001, "gzip independent golden and ISIZE corruption", src);
+}
+
+#[test]
+fn zstd_comptime_raw_frame_is_accepted_by_aot_decoder() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping zstd comptime differential");
+        return;
+    }
+    let src = r#"use core.compress.zstd as zstd
+
+comptime bytes = [72, 101, 108, 108, 111]
+comptime encoded = zstd.compress(bytes)
+comptime expected = bytes
+
+fn run() {
+    restored: [U8] :: zstd.decompress(encoded) ?? []
+    print("{expected}")
+    print("{restored}")
+}
+"#;
+    check_comptime_src(32_002, "zstd resident encoder accepted by AOT decoder", src);
+}
+
+#[test]
 fn comptime_bigint_matches_runtime() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping BigInt differential battery");
@@ -353,13 +405,21 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
     let rs = dir.join(format!("jet_ctdiff_{}_{}.rs", std::process::id(), i));
     let bin = dir.join(format!("jet_ctdiff_{}_{}", std::process::id(), i));
     fs::write(&rs, &compiled.rust).unwrap();
-    let out = Command::new("rustc")
+    let mut rustc = Command::new("rustc");
+    rustc
         .args(["--edition", "2021"])
         .arg(&rs)
         .arg("-o")
-        .arg(&bin)
-        .output()
-        .unwrap();
+        .arg(&bin);
+    if let Some(link) = &compiled.ffi {
+        rustc
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+            rustc.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+        }
+    }
+    let out = rustc.output().unwrap();
     assert!(
         out.status.success(),
         "I2 violated: rustc rejected generated code for `{}`:\n{}",

@@ -108,7 +108,7 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     (
         "crates/jet-cli/src/Help/Render.rs",
         1,
-        "#[cfg(test)] help-result assertion fixture",
+        "#[test]-only help-result shape assertion fixture",
     ),
     (
         "crates/jet-repl/src/lib.rs",

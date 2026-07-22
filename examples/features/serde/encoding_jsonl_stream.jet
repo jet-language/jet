@@ -1,0 +1,27 @@
+// D-ENCSTREAM-SURFACE1=A: bounded JSONL reader/writer lifecycle.
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn write_catalog(path: String) {
+    output :: files.create(path) ?? panic("create")
+    writer :: jsonl.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(DataTree.Object(["ok": DataTree.Bool(true)])) ?? panic("record")
+    writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
+}
+
+fn run() {
+    path :: "encoding_jsonl_stream_out.jsonl"
+    write_catalog(path)
+
+    input :: files.open(path) ?? panic("open")
+    reader :: jsonl.reader(^input) ?? panic("reader")
+    count := 0
+    loop count < 3 {
+        maybe :: reader.next() ?? panic("next")
+        if maybe == None { print("eof"); break }
+        print("record")
+        count++
+    }
+}

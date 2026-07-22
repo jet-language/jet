@@ -22,7 +22,7 @@ use super::super::Interpreter::{Flow, Interp};
 use super::super::Value::CtValue;
 use super::core_calls::{
     apply_core_call, apply_impure_core_call, as_bytes, as_float, display_core_pure_value,
-    shuffle_ct_list, with_ambient_rng,
+    shuffle_ct_list, sketch_add, solver_new, solver_require, with_ambient_rng,
 };
 use super::repl_process::{apply_repl_fs_call, pin_repl_command, repl_effect_request};
 
@@ -665,6 +665,74 @@ impl<'a> Interp<'a> {
                 _ => Err(unsupported("`BigInt` with a non-Int/String argument", span)),
             };
         }
+        // D-DECIMAL1: `Decimal("10.50")` — explicit string construction only.
+        if name == crate::Syntax::TYPE_DECIMAL
+            && self.funcs.get(name).is_none()
+            && !scope.contains_key(name)
+        {
+            let arg = match args.first() {
+                Some(a) => self.eval(&a.expr, scope)?,
+                None => return Err(unsupported("`Decimal` with no argument", span)),
+            };
+            return match arg {
+                CtValue::Str(s) => crate::Numeric::CtDecimal::from_str(&s)
+                    .map(|decimal| decimal.to_value())
+                    .map_err(|_| unsupported(&format!("`Decimal(\"{}\")`", s), span)),
+                _ => Err(unsupported("`Decimal` with a non-String argument", span)),
+            };
+        }
+        // D-SIMD2 / D-LINALG1: `Vec3(…)` / `F32x4(…)` / `Mat3(…)` constructors.
+        if (name == crate::Syntax::LINALG_VEC2_TYPE
+            || name == crate::Syntax::LINALG_VEC3_TYPE
+            || name == crate::Syntax::LINALG_VEC4_TYPE
+            || name == crate::Syntax::LINALG_MAT3_TYPE
+            || name == crate::Syntax::LINALG_MAT4_TYPE
+            || name == crate::Syntax::SIMD_F32X4_TYPE
+            || name == crate::Syntax::SIMD_F64X2_TYPE)
+            && self.funcs.get(name).is_none()
+            && !scope.contains_key(name)
+        {
+            let mut vals = Vec::with_capacity(args.len());
+            for a in args {
+                vals.push(self.eval(&a.expr, scope)?);
+            }
+            return super::super::MathLayout::construct(name, &vals, span);
+        }
+        // D-LIN1-DROP: `consume(x)` — eval then discard.
+        if name == crate::Syntax::BUILTIN_CONSUME
+            && self.funcs.get(name).is_none()
+            && !scope.contains_key(name)
+        {
+            if args.len() != 1 {
+                return Err(unsupported("`consume` discards exactly one value", span));
+            }
+            let _ = self.eval(&args[0].expr, scope)?;
+            return Ok(CtValue::Unit);
+        }
+        // D-TOOL4: `expect(x)` — wrap Display text for `.snapshot()`.
+        if name == crate::Syntax::BUILTIN_EXPECT
+            && self.funcs.get(name).is_none()
+            && !scope.contains_key(name)
+        {
+            if args.len() != 1 {
+                return Err(unsupported("`expect` needs exactly one value", span));
+            }
+            let value = self.eval(&args[0].expr, scope)?;
+            let shown = self.show_value(&value, args[0].expr.span())?;
+            return Ok(CtValue::Struct {
+                type_name: "__JetExpect__".to_string(),
+                fields: vec![("value".into(), CtValue::Str(shown))],
+            });
+        }
+        // D-NUMOPS1: `wrapping`/`saturating`/`checked` over one integer binary.
+        if name == crate::Syntax::BUILTIN_WRAPPING
+            || name == crate::Syntax::BUILTIN_SATURATING
+            || name == crate::Syntax::BUILTIN_CHECKED
+        {
+            if self.funcs.get(name).is_none() && !scope.contains_key(name) {
+                return self.eval_overflow_opt(name, args, span, scope);
+            }
+        }
         // c139/HOF: `f(x)` where `f` is a local binding (a lambda param, or a
         // `let f = someLambdaOrFn` variable) rather than a top-level `fn`
         // name — every bare-name call, whatever the callee resolves to,
@@ -1088,6 +1156,47 @@ impl<'a> Interp<'a> {
         })
     }
 
+    fn eval_overflow_opt(
+        &mut self,
+        mode: &str,
+        args: &[CallArg],
+        span: Span,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let Some(arg) = args.first() else {
+            return Err(unsupported(&format!("`{mode}` needs one binary expression"), span));
+        };
+        let Expr::Binary(op, left, right, _) = &arg.expr else {
+            return Err(unsupported(
+                &format!("`{mode}` wraps one integer +/−/*/÷"),
+                span,
+            ));
+        };
+        let lv = self.eval(left, scope)?;
+        let rv = self.eval(right, scope)?;
+        let left_n = as_int(&lv, left.span())?;
+        let right_n = as_int(&rv, right.span())?;
+        let width = self
+            .overflow_opt_width(left.as_ref())
+            .or_else(|| self.overflow_opt_width(right.as_ref()))
+            .unwrap_or((true, 64));
+        super::super::MathLayout::overflow_opt(mode, *op, left_n, right_n, width.0, width.1, span)
+    }
+
+    fn overflow_opt_width(&self, expr: &Expr) -> Option<(bool, u8)> {
+        match expr {
+            Expr::Ident(name, _) => match self.binding_types.get(name) {
+                Some(Type::IntN { signed, bits }) => Some((*signed, *bits)),
+                Some(Type::Int) => Some((true, 64)),
+                _ => None,
+            },
+            Expr::Binary(_, left, right, _) => self
+                .overflow_opt_width(left)
+                .or_else(|| self.overflow_opt_width(right)),
+            _ => None,
+        }
+    }
+
     fn eval_require(
         &mut self,
         name: &str,
@@ -1396,6 +1505,31 @@ impl<'a> Interp<'a> {
                 }
             }
         }
+        // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — module-field sentinel constructor.
+        if method == "new" {
+            let solver_ctor = match receiver {
+                Expr::Ident(type_name, _) if type_name == crate::Syntax::SOLVER_TYPE => true,
+                Expr::Field(base, type_name, _)
+                    if type_name == crate::Syntax::SOLVER_TYPE
+                        && matches!(
+                            base.as_ref(),
+                            Expr::Ident(alias, _)
+                                if self.core_imports.get(alias).map(String::as_str)
+                                    == Some("core.solve")
+                        ) =>
+                {
+                    true
+                }
+                _ => false,
+            };
+            if solver_ctor {
+                let mut argv = Vec::with_capacity(args.len());
+                for a in args {
+                    argv.push(self.eval(&a.expr, scope)?);
+                }
+                return solver_new(&argv, span);
+            }
+        }
         // D-SHAPE-CONVERT1=A: numeric-backed distinct/unit conversion is the
         // existing distinct constructor with destination-owned spelling.
         if let Expr::Ident(type_name, _) = receiver {
@@ -1449,6 +1583,9 @@ impl<'a> Interp<'a> {
             }
         }
         if let Expr::Ident(type_name, _) = receiver {
+            if type_name == crate::Syntax::MEM_POOL && method == "new" {
+                return Ok(super::pool::new_value());
+            }
             if type_name == crate::Syntax::TYPE_BYTE_BUFFER
                 && matches!(method, "new" | "from")
             {
@@ -1579,9 +1716,18 @@ impl<'a> Interp<'a> {
                     })),
                 });
             }
+            // D-SOLVER-LIB1=A: bare `Solver.new(seed)` (same state as `solve.Solver.new`).
+            if type_name == crate::Syntax::SOLVER_TYPE && method == "new" {
+                let mut argv = Vec::with_capacity(args.len());
+                for a in args {
+                    argv.push(self.eval(&a.expr, scope)?);
+                }
+                return solver_new(&argv, span);
+            }
             // Only intercept known built-in type names; user struct names use normal path.
             let is_builtin_type = crate::AST::numeric_type_from_name(type_name).is_some()
-                || matches!(type_name.as_str(), "Bool" | "String");
+                || matches!(type_name.as_str(), "Bool" | "String")
+                || super::super::MathLayout::is_math_type(type_name);
             if is_builtin_type {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
@@ -2175,6 +2321,24 @@ impl<'a> Interp<'a> {
         }
 
         let mut evaluated_receiver = None;
+        if matches!(method, "add" | "remove" | "ids") {
+            let recv = self.eval(receiver, scope)?;
+            if super::pool::is_method(&recv, method) {
+                let mut argv = Vec::with_capacity(args.len());
+                for arg in args {
+                    argv.push(self.eval(&arg.expr, scope)?);
+                }
+                let outcome = super::pool::apply(&recv, method, &argv, resolved_ret, span)?;
+                if let Some(updated) = outcome.updated {
+                    if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                        return Err(unsupported("Pool mutation on a temporary value", span));
+                    }
+                    self.write_back(receiver, updated, scope)?;
+                }
+                return Ok(outcome.value);
+            }
+            evaluated_receiver = Some(recv);
+        }
         if matches!(
             method,
             "add"
@@ -2205,7 +2369,10 @@ impl<'a> Interp<'a> {
                 | "to_list"
                 | "any"
         ) {
-            let peek = self.eval(receiver, scope)?;
+            let peek = match &evaluated_receiver {
+                Some(value) => value.clone(),
+                None => self.eval(receiver, scope)?,
+            };
             match (&peek, method) {
                 (
                     CtValue::Struct { type_name, fields },
@@ -2906,6 +3073,11 @@ impl<'a> Interp<'a> {
                         }
                     };
                 }
+                if let Some(result) = sketch_add(&container, &argv, span) {
+                    let (ret, updated) = result?;
+                    self.write_back(receiver, updated, scope)?;
+                    return Ok(ret);
+                }
                 let ret = apply_mutating(&mut container, method, argv, span)?;
                 self.write_back(receiver, container, scope)?;
                 return Ok(ret);
@@ -3154,6 +3326,20 @@ impl<'a> Interp<'a> {
                     scope,
                 )?;
                 return Ok(value);
+            }
+            // D-SOLVER-LIB1=A: `solver.require(ok)` records a Bool constraint in place.
+            (CtValue::Struct { type_name, .. }, "require")
+                if type_name == crate::Syntax::SOLVER_TYPE =>
+            {
+                if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
+                    return Err(unsupported("Solver method on a temporary value", span));
+                }
+                let Some(result) = solver_require(&recv, &argv, span) else {
+                    return Err(unsupported("`Solver.require`", span));
+                };
+                let (ret, updated) = result?;
+                self.write_back(receiver, updated, scope)?;
+                return Ok(ret);
             }
             _ => {}
         }

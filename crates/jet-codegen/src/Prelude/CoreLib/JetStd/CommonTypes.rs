@@ -36,6 +36,41 @@
         pub line: Option<i64>, pub column: Option<i64>, pub path: String,
         pub reason: String, pub cause: Option<EncodingCause>,
     }
+    impl EncodingError {
+        /// D-ENCSTREAM-SURFACE1=A: handle-free IO snapshot when kind is IO.
+        pub fn cause(&self) -> Option<EncodingCause> {
+            self.cause.clone()
+        }
+        fn display_text(&self) -> String {
+            let mut out = format!("{:?} {:?} at byte {}", self.format, self.kind, self.byte_offset);
+            if let Some(line) = self.line {
+                out.push_str(&format!(", line {line}"));
+            }
+            if let Some(column) = self.column {
+                out.push_str(&format!(", column {column}"));
+            }
+            if !self.path.is_empty() {
+                out.push_str(&format!(", path {}", self.path));
+            }
+            out.push_str(&format!(": {}", self.reason));
+            out
+        }
+    }
+    impl std::fmt::Display for EncodingError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.display_text())
+        }
+    }
+    impl super::JetShow for EncodingError {
+        fn jet_show(&self) -> String {
+            self.display_text()
+        }
+    }
+    impl super::JetDisplay for EncodingError {
+        fn jet_display(&self) -> String {
+            self.display_text()
+        }
+    }
     #[derive(Clone, Debug, PartialEq)]
     pub enum DataEvent {
         Null, Bool(bool), Int(i64), Float(f64), Text(String), Bytes(Vec<u8>),
@@ -159,6 +194,9 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) record_index: i64,
         pub(crate) finished: bool,
+        // D-ENCSTREAM-SURFACE1: record LF is stream closure; finish emits it.
+        // Drop without finish leaves the last value unterminated on the wire.
+        pub(crate) pending_lf: bool,
     }
     pub struct CSVReader {
         pub(crate) input: super::JetFileReader,
@@ -178,6 +216,9 @@
         pub(crate) total: i64,
         pub(crate) record_index: i64,
         pub(crate) finished: bool,
+        // D-ENCSTREAM-SURFACE1: record CRLF is stream closure; finish emits it.
+        // Drop without finish leaves the last row unterminated on the wire.
+        pub(crate) pending_crlf: bool,
     }
     pub struct XMLReader {
         pub(crate) input: super::JetFileReader,
@@ -186,6 +227,8 @@
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) total: i64,
         pub(crate) eof: bool,
+        // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling for retained events.
+        pub(crate) allocation: super::JetJsonAllocationBudget,
     }
     pub struct XMLWriter {
         pub(crate) output: super::JetFileWriter,
@@ -207,6 +250,8 @@
         pub(crate) frames: Vec<super::JetCborReadFrame>,
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
+        // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
+        pub(crate) allocation: super::JetJsonAllocationBudget,
     }
     pub struct CBORWriter {
         pub(crate) output: super::JetFileWriter,
@@ -215,9 +260,13 @@
         pub(crate) total: i64,
         pub(crate) frames: Vec<super::JetCborWriteFrame>,
         pub(crate) root_written: bool,
+        // finish validates one complete root; Drop without finish never claims success
+        // and leaves incomplete buffered containers unwritten (≠ finished wire).
         pub(crate) finished: bool,
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
+        // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
+        pub(crate) allocation: super::JetJsonAllocationBudget,
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -729,11 +778,16 @@
         }
 
         fn normalize(mut self) -> Self {
-            while self.digits.len() > 1 && self.digits.last() == Some(&0) {
+            // Trailing fractional zeros are insignificant; drop them with scale.
+            // Popping digits without `scale -= 1` silently shifts the radix point
+            // (`"10.50"` → 1.05) and breaks D-DECIMAL1 / R12 vs comptime.
+            while self.scale > 0 && self.digits.len() > 1 && self.digits.last() == Some(&0) {
                 self.digits.pop();
+                self.scale -= 1;
             }
             if self.digits == [0] {
                 self.negative = false;
+                self.scale = 0;
             }
             self
         }

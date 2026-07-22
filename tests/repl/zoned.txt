@@ -1,0 +1,42 @@
+# Tower #392 C4: exact tier-0 Zone / ZonedDateTime parity transcript.
+# UTC zone construction and zoned methods are pure; no clock / tzdb I/O.
+> use core.time as time
+ok
+> use core.time.datetime as datetime
+ok
+> dt :: datetime.from_timestamp(1710502245)
+> utc :: time.utc()
+> utc.name()
+"UTC" : String
+> z :: dt.in_zone(utc)
+> z.offset_seconds()
+0 : Int
+> z.date().to_string()
+"2024-03-15" : String
+> z.time().to_string()
+"11:30:45" : String
+> z.to_datetime().to_timestamp()
+1710502245 : Int
+> z.zone().name()
+"UTC" : String
+> z.to_string()
+"2024-03-15 11:30:45 UTC (+00:00)" : String
+> z.format("yyyy-MM-dd HH:mm:ss VV XXX")
+"2024-03-15 11:30:45 UTC +00:00" : String
+> span :: Duration.hours(2) ?? panic("duration")
+> later :: z.add_duration(span)
+> later.to_datetime().to_timestamp()
+1710509445 : Int
+> period :: time.period_days(1)
+> next :: z.add_period(period)
+> next.date().to_string()
+"2024-03-16" : String
+> via_ctor :: time.zoned(dt, utc)
+> via_ctor.to_string()
+"2024-03-15 11:30:45 UTC (+00:00)" : String
+> zone_ok :: time.zone("UTC") ?? panic("utc zone")
+> zone_ok.name()
+"UTC" : String
+> local :: time.zoned_local(z.date(), z.time(), utc)
+> local.to_datetime().to_timestamp()
+1710502245 : Int

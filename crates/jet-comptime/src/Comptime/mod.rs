@@ -16,12 +16,14 @@
 
 pub mod Build;
 mod Builtins;
+mod ArchiveLite;
 mod DataLite;
 mod DataPipeline;
 mod Diagnostics;
 mod EncodingLite;
 mod Interpreter;
 mod JsonInterp;
+mod MathLayout;
 mod Methods;
 mod Purity;
 mod Reflect;

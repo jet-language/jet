@@ -22,6 +22,29 @@ pub(in super::super) fn apply_core_pure_method(
     core_pure_parity::evaluate_method(recv, method, args, span)
 }
 
+pub(in super::super) fn sketch_add(
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
+    core_pure_parity::sketch_add(recv, args, span)
+}
+
+pub(in super::super) fn solver_require(
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
+    core_pure_parity::solver_require(recv, args, span)
+}
+
+pub(in super::super) fn solver_new(
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    core_pure_parity::solver_new(args, span)
+}
+
 pub(super) fn display_core_pure_value(value: &CtValue) -> Option<String> {
     core_pure_parity::display(value)
 }
@@ -290,7 +313,6 @@ fn repl_native_only_module(module: &str) -> Option<&'static str> {
         }
         "core.db" | "jet.db" => Some("`core.db` (SQLite)"),
         "core.net" => Some("network sockets (`core.net`)"),
-        "core.archive" | "jet.archive" => Some("`core.archive`"),
         "core.reactive" | "jet.reactive" => Some("`core.reactive`"),
         "core.crypto" | "core.crypto.random" | "jet.crypto" => Some("`core.crypto`"),
         "core.auth" => Some("`core.auth` token verification"),
@@ -632,6 +654,51 @@ pub(super) fn apply_core_call(
     }
 
     match (module, method) {
+        // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside
+        // tier-0. No native bridge, Boundary classification, or AOT fallback.
+        ("core.compress.gzip", "compress") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::gzip_compress(&as_bytes(one(0)?, span)?),
+        )),
+        ("core.compress.gzip", "decompress") => {
+            Ok(match super::super::ArchiveLite::gzip_decompress(&as_bytes(one(0)?, span)?) {
+                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+            })
+        }
+        // A raw-block Zstandard frame is fully interoperable despite choosing
+        // ratio zero. Keep this pure encoder resident; decompression remains
+        // pending until compressed-block FSE/Huffman support is complete.
+        ("core.compress.zstd", "compress") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::zstd_compress(&as_bytes(one(0)?, span)?),
+        )),
+        // D-CORE-COMPRESS1=A / card #392 C4: archive containers are pure byte
+        // transforms. Keep them interpreter-resident; never route through the
+        // native FFI bridge or an AOT fallback.
+        ("core.archive", "zip_compress") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::zip_compress(
+                as_string(one(0)?, span)?,
+                &as_bytes(one(1)?, span)?,
+            ),
+        )),
+        ("core.archive", "zip_decompress") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::zip_decompress(&as_bytes(one(0)?, span)?),
+        )),
+        ("core.archive", "tar_add") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::tar_add(
+                &as_bytes(one(0)?, span)?,
+                as_string(one(1)?, span)?,
+                &as_bytes(one(2)?, span)?,
+            ),
+        )),
+        ("core.archive", "tar_get") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::tar_get(
+                &as_bytes(one(0)?, span)?,
+                as_string(one(1)?, span)?,
+            ),
+        )),
+        ("core.archive", "tar_names_json") => Ok(CtValue::Str(
+            super::super::ArchiveLite::tar_names_json(&as_bytes(one(0)?, span)?),
+        )),
         // D-PENDING1=B: the same four enum variants AOT lowers to JetLoadable.
         ("core.reactive.loadable", state @ ("idle" | "loading")) => Ok(CtValue::Enum {
             type_name: "Loadable".to_string(),

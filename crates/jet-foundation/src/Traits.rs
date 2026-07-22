@@ -1142,6 +1142,20 @@ impl TraitRegistry {
             Some(Type::String),
             AccessConvention::Move,
         );
+        // D-ENCSTREAM-SURFACE1=A: EncodingError Display is the exact stream error
+        // projection law; Format/Kind/Cause/Error compare by value.
+        self.trait_impls
+            .insert(("EncodingError".to_string(), DISPLAY.to_string()));
+        for ty in [
+            "EncodingFormat",
+            "EncodingErrorKind",
+            "EncodingCause",
+            "EncodingError",
+            "EncodingLimits",
+        ] {
+            self.auto_equatable.insert(ty.to_string());
+            self.auto_debug.insert(ty.to_string());
+        }
     }
 
     /// D-SHAPE-RESOURCE2=A: one nominal consuming cleanup protocol. The

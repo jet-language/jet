@@ -284,6 +284,14 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
                     && type_args.is_empty()
             });
+            let core_encoding_struct = import_ns.as_deref().is_some_and(|alias| {
+                cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding")
+                    && matches!(
+                        type_name.as_str(),
+                        "EncodingLimits" | "EncodingCause" | "EncodingError"
+                    )
+                    && type_args.is_empty()
+            });
             let core_xml_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml")
                     && matches!(type_name.as_str(), "XMLLimits" | "XMLParseOptions" | "XMLRenderOptions" | "XMLCanonical" | "XMLError")
@@ -312,7 +320,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // namespace head (`{root}{mod}::{user_<Name>}[::<args>]`, mangled fields).
             // Covered when the named foreign type is a covered foreign struct and the
             // import alias resolves; the head is resolved at lowering (`lower_expr`).
-            if import_ns.is_some() && !core_email_struct && !core_cbor_struct && !core_xml_struct {
+            if import_ns.is_some()
+                && !core_email_struct
+                && !core_cbor_struct
+                && !core_encoding_struct
+                && !core_xml_struct
+            {
                 return foreign_struct_lit_in_subset(
                     type_name,
                     type_args,
@@ -398,6 +411,16 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 }
                 if enum_name == "DataEvent"
                     && matches!(member.as_str(), "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd")
+                {
+                    return true;
+                }
+                if (enum_name == "EncodingFormat"
+                    && matches!(member.as_str(), "JSON" | "JSONL" | "CSV" | "XML" | "CBOR"))
+                    || (enum_name == "EncodingErrorKind"
+                        && matches!(
+                            member.as_str(),
+                            "Syntax" | "Truncated" | "Unsupported" | "Limit" | "IO" | "State"
+                        ))
                 {
                     return true;
                 }

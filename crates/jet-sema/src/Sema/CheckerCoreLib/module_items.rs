@@ -150,6 +150,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // JSON value; `decode` → lenient typed decode (D-JSON3). D-MIGRATE3=A:
         // `decode_traced<T>` rides alongside `decode` on every format.
         "core.encoding.json" => &[
+            "JSONReader",
+            "JSONWriter",
             "parse",
             "decode",
             "decode_traced",
@@ -160,9 +162,25 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "reader",
             "writer",
         ],
-        "core.encoding.jsonl" => &["parse", "to_string", "reader", "writer"],
+        "core.encoding.jsonl" => &[
+            "JSONLReader",
+            "JSONLWriter",
+            "parse",
+            "to_string",
+            "reader",
+            "writer",
+        ],
         // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.
-        "core.encoding.csv" => &["parse", "decode", "decode_traced", "to_string", "reader", "writer"],
+        "core.encoding.csv" => &[
+            "CSVReader",
+            "CSVWriter",
+            "parse",
+            "decode",
+            "decode_traced",
+            "to_string",
+            "reader",
+            "writer",
+        ],
         "core.encoding.toml" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.yaml" => &["parse", "decode", "decode_traced", "to_string"],
         "core.encoding.xml" => &[
@@ -171,8 +189,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "parse", "parse_with", "to_string", "canonical", "reader", "writer", "XMLReader", "XMLWriter",
         ],
         "core.encoding.cbor" => &[
-            "CBOROptions", "CBORError", "CBORErrorKind", "parse", "decode",
-            "to_bytes", "to_bytes_canonical", "reader", "writer",
+            "CBOROptions", "CBORError", "CBORErrorKind", "CBORReader", "CBORWriter",
+            "parse", "decode", "to_bytes", "to_bytes_canonical", "reader", "writer",
         ],
         // D-UUIDENC1=A: hex/base64 codecs and UUID generator.
         "core.encoding.hex" => &["encode", "decode"],

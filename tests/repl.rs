@@ -655,6 +655,41 @@ fn repl_f32_exact_transcript() {
 }
 
 #[test]
+fn repl_zoned_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/zoned.txt"));
+}
+
+#[test]
+fn repl_decimal_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/decimal.txt"));
+}
+
+#[test]
+fn repl_string_from_bytes_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/string_from_bytes.txt"));
+}
+
+#[test]
+fn repl_sketch_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/sketch.txt"));
+}
+
+#[test]
+fn repl_archive_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/archive.txt"));
+}
+
+#[test]
+fn repl_compress_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/compress.txt"));
+}
+
+#[test]
+fn repl_pool_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/pool.txt"));
+}
+
+#[test]
 fn strict_transcript_rejects_unexpected_trailing_output() {
     assert!(
         std::panic::catch_unwind(|| run_transcript_file_strict("> 1 + 1")).is_err(),
@@ -2519,6 +2554,24 @@ fn repl_core_data_dispatch() {
     assert!(out.contains("DataSummary(count: 4"), "got: {out}");
     assert!(out.contains("mean: 2.5"), "got: {out}");
     assert!(out.contains("DataStatus(step: core.data.csv"), "got: {out}");
+}
+
+#[test]
+fn repl_zstd_compress_is_resident() {
+    let out = run_transcript(
+        &[
+            "use core.compress.zstd as zstd",
+            "frame :: zstd.compress([72, 101, 108, 108, 111])",
+            "frame.len() > 9",
+            "frame[0] == (U8.from_int(40) ?? 0) && frame[1] == (U8.from_int(181) ?? 0) && frame[2] == (U8.from_int(47) ?? 0) && frame[3] == (U8.from_int(253) ?? 0)",
+        ],
+        None,
+    );
+    assert!(
+        !out.contains("E0956"),
+        "zstd compressor hit comptime fallback: {out}"
+    );
+    assert_eq!(out.matches("true : Bool").count(), 2, "got: {out}");
 }
 
 #[test]
