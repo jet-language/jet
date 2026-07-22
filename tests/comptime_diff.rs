@@ -28,7 +28,8 @@ const CASES: &[&str] = &[
     "(0 - 17) / 5",
     "1 << 10",
     "255 & 15",
-    "12 | 3",
+    // D-SHAPE-PIPE1=C reserves single `|` for pattern alternatives; Jet has
+    // no bitwise-or expression. `|=` remains covered by tests/numops.rs.
     "6 ^ 3",
     "1000000 * 1000000",
     // Float rounding + S21 "always a decimal" display
@@ -600,12 +601,12 @@ fn show(result: DataTree ? XMLError) -> String {
     return "unreachable"
 }
 
-comptime mismatch = show(xml.parse("<root>\n<a></root>"))
+comptime expected_mismatch = show(xml.parse("<root>\n<a></root>"))
 
 fn run() {
-    mismatch :: show(xml.parse("<root>\n<a></root>"))
-    print("{mismatch}")
-    print("{mismatch}")
+    actual_mismatch :: show(xml.parse("<root>\n<a></root>"))
+    print("{expected_mismatch}")
+    print("{actual_mismatch}")
 }
 "#;
     check_comptime_src(2006, "typed hostile XML mismatch error", src);
@@ -648,22 +649,22 @@ use core.encoding.hex as hex
 @[Codable]
 struct Packet { id: Int, payload: [U8] }
 
-comptime map = hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
-comptime floats = hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
-comptime nan = hex.encode(cbor.to_bytes_canonical(Float.nan) ?? panic("canonical"))
-comptime typed = hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+comptime expected_map = hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+comptime expected_floats = hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
+comptime expected_nan = hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+comptime expected_typed = hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
 
 fn run() {
-    map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
-    floats := hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
-    nan := hex.encode(cbor.to_bytes_canonical(Float.nan) ?? panic("canonical"))
-    typed := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
-    if map != "a261620262616101" { panic("canonical encoded-key order drift") }
-    if floats != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
-    if nan != "f97e00" { panic("canonical NaN drift") }
-    if typed != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
-    print("{map}|{floats}|{nan}|{typed}")
-    print("{map}|{floats}|{nan}|{typed}")
+    actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+    actual_floats := hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
+    actual_nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+    actual_typed := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+    if actual_map != "a261620262616101" { panic("canonical encoded-key order drift") }
+    if actual_floats != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
+    if actual_nan != "f97e00" { panic("canonical NaN drift") }
+    if actual_typed != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
+    print("{expected_map}|{expected_floats}|{expected_nan}|{expected_typed}")
+    print("{actual_map}|{actual_floats}|{actual_nan}|{actual_typed}")
 }
 "#;
     check_comptime_src(2002, "canonical CBOR map/float/typed corpus", src);
@@ -733,15 +734,15 @@ fn show_ints(bytes: [U8]) -> String {
     return "unreachable"
 }
 
-comptime malformed = show([255])
-comptime truncated = show([129])
-comptime noncanonical = show_strict([24, 1])
-comptime unsupported = show([192, 1])
-comptime mismatch = show_ints([129, 97, 120])
-comptime depth = show_depth([129, 129, 1])
-comptime items = show_items([130, 1, 2])
-comptime bytes = show_bytes([130, 1, 2])
-comptime alloc = show_alloc([130, 1, 2])
+comptime expected_malformed = show([255])
+comptime expected_truncated = show([129])
+comptime expected_noncanonical = show_strict([24, 1])
+comptime expected_unsupported = show([192, 1])
+comptime expected_mismatch = show_ints([129, 97, 120])
+comptime expected_depth = show_depth([129, 129, 1])
+comptime expected_items = show_items([130, 1, 2])
+comptime expected_bytes = show_bytes([130, 1, 2])
+comptime expected_alloc = show_alloc([130, 1, 2])
 
 fn run() {
     malformed_wire: [U8] := [255]
@@ -751,17 +752,17 @@ fn run() {
     mismatch_wire: [U8] := [129, 97, 120]
     depth_wire: [U8] := [129, 129, 1]
     items_wire: [U8] := [130, 1, 2]
-    malformed := show(malformed_wire)
-    truncated := show(truncated_wire)
-    noncanonical := show_strict(noncanonical_wire)
-    unsupported := show(unsupported_wire)
-    mismatch := show_ints(mismatch_wire)
-    depth := show_depth(depth_wire)
-    items := show_items(items_wire)
-    bytes := show_bytes(items_wire)
-    alloc := show_alloc(items_wire)
-    print("{malformed}~{truncated}~{noncanonical}~{unsupported}~{mismatch}~{depth}~{items}~{bytes}~{alloc}")
-    print("{malformed}~{truncated}~{noncanonical}~{unsupported}~{mismatch}~{depth}~{items}~{bytes}~{alloc}")
+    actual_malformed := show(malformed_wire)
+    actual_truncated := show(truncated_wire)
+    actual_noncanonical := show_strict(noncanonical_wire)
+    actual_unsupported := show(unsupported_wire)
+    actual_mismatch := show_ints(mismatch_wire)
+    actual_depth := show_depth(depth_wire)
+    actual_items := show_items(items_wire)
+    actual_bytes := show_bytes(items_wire)
+    actual_alloc := show_alloc(items_wire)
+    print("{expected_malformed}~{expected_truncated}~{expected_noncanonical}~{expected_unsupported}~{expected_mismatch}~{expected_depth}~{expected_items}~{expected_bytes}~{expected_alloc}")
+    print("{actual_malformed}~{actual_truncated}~{actual_noncanonical}~{actual_unsupported}~{actual_mismatch}~{actual_depth}~{actual_items}~{actual_bytes}~{actual_alloc}")
 }
 "#;
     check_comptime_src(2003, "CBOR options and hostile error projection", src);
