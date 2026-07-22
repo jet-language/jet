@@ -1357,6 +1357,32 @@ mod tests {
                 .expect_err("forbidden XML character reference");
             assert_eq!(error.kind, Reason::Entity, "{reference}");
         }
+
+        for (source, offset, column, path) in [
+            ("<r a='&#0;'/>", 6, 7, "$"),
+            ("<r xmlns='&#0;'/>", 10, 11, "$"),
+            ("<r>&#0;</r>", 3, 4, "$/r"),
+        ] {
+            let expected = parse_document(source).expect_err("forbidden numeric reference");
+            assert_eq!(
+                (
+                    expected.kind,
+                    expected.offset,
+                    expected.line,
+                    expected.column,
+                    expected.path.as_str(),
+                ),
+                (Reason::Entity, offset, Some(1), Some(column), path),
+                "{source}"
+            );
+            for split in 0..=source.len() {
+                assert_eq!(
+                    stream_error(source.as_bytes(), split),
+                    expected,
+                    "{source} split {split}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2466,7 +2492,11 @@ impl<'a> Scanner<'a> {
             resolved,
         ))
     }
-    fn parse_parts(&mut self, raw: &str) -> Result<(Vec<Part>, Option<String>), Error> {
+    fn parse_parts(
+        &mut self,
+        raw: &str,
+        source_base: usize,
+    ) -> Result<(Vec<Part>, Option<String>), Error> {
         let mut parts = Vec::new();
         let mut normalized = String::new();
         let mut at = 0;
@@ -2482,11 +2512,14 @@ impl<'a> Scanner<'a> {
                 }
                 let start = at + rel;
                 let Some(end) = raw[start..].find(';') else {
-                    return Err(Error::at(start, "unterminated entity reference"));
+                    return Err(Error::at(
+                        source_base + start,
+                        "unterminated entity reference",
+                    ));
                 };
                 let name = &raw[start + 1..start + end];
                 let resolved = self.resolve_entity(name).map_err(|mut error| {
-                    error.offset = start;
+                    error.offset = source_base + start;
                     error
                 })?;
                 if let Some(v) = &resolved {
@@ -2611,15 +2644,22 @@ impl<'a> Scanner<'a> {
                 return self.fail("unterminated attribute value");
             }
             let value = inner[vstart..cursor].to_string();
+            let value_source_base = start + 1 + vstart;
             if value.contains('<') {
                 return self.fail("XML attribute value contains <");
             }
             cursor += 1;
-            raw_attrs.push((key, value, quote, inner[astart..cursor].to_string()));
+            raw_attrs.push((
+                key,
+                value,
+                value_source_base,
+                quote,
+                inner[astart..cursor].to_string(),
+            ));
         }
         let mut declarations = Vec::new();
         let mut seen_ns = BTreeSet::new();
-        for (k, v, q, r) in &raw_attrs {
+        for (k, v, value_source_base, q, r) in &raw_attrs {
             if k == "xmlns" || k.starts_with("xmlns:") {
                 let p = if k == "xmlns" {
                     None
@@ -2634,7 +2674,7 @@ impl<'a> Scanner<'a> {
                 {
                     return self.fail("reserved namespace prefix binding");
                 }
-                let (_, normalized) = self.parse_parts(v)?;
+                let (_, normalized) = self.parse_parts(v, *value_source_base)?;
                 let Some(namespace_uri) = normalized else {
                     return self.fail("namespace URI contains unresolved entity reference");
                 };
@@ -2657,7 +2697,7 @@ impl<'a> Scanner<'a> {
             .collect();
         let mut attributes = Vec::new();
         let mut expanded = BTreeSet::new();
-        for (k, v, q, r) in raw_attrs {
+        for (k, v, value_source_base, q, r) in raw_attrs {
             if k == "xmlns" || k.starts_with("xmlns:") {
                 continue;
             }
@@ -2665,7 +2705,7 @@ impl<'a> Scanner<'a> {
             if !expanded.insert((aname.namespace_uri.clone(), aname.local.clone())) {
                 return self.fail("duplicate expanded XML attribute");
             }
-            let (parts, normalized) = self.parse_parts(&v)?;
+            let (parts, normalized) = self.parse_parts(&v, value_source_base)?;
             attributes.push(Attribute {
                 name: aname,
                 parts,

@@ -7161,14 +7161,22 @@ fn show(result: DataTree ? XMLError) -> String {
 }
 
 comptime numeric = show(xml.parse("<r>&#0;</r>"))
+comptime attribute = show(xml.parse("<r a='&#0;'/>"))
+comptime namespace = show(xml.parse("<r xmlns='&#0;'/>"))
 
 fn run() {
     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
+    runtime_attribute :: show(xml.parse("<r a='&#0;'/>"))
+    runtime_namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
     print("{numeric}|{runtime_numeric}")
+    print("{attribute}|{runtime_attribute}")
+    print("{namespace}|{runtime_namespace}")
 }
 "#;
     let expected = concat!(
         "3|1|4|$/r|invalid numeric character reference|3|1|4|$/r|invalid numeric character reference\n",
+        "6|1|7|$|invalid numeric character reference|6|1|7|$|invalid numeric character reference\n",
+        "10|1|11|$|invalid numeric character reference|10|1|11|$|invalid numeric character reference\n",
     );
     let (code, stdout, stderr) = build_and_run(&dir, "xml_chars", &source, &[], None);
     assert_eq!(code, 0, "XML character AOT fixture failed: {stderr}");
