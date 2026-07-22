@@ -314,6 +314,27 @@ fn run() {
 }
 
 #[test]
+fn zstd_comptime_raw_frame_is_accepted_by_aot_decoder() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping zstd comptime differential");
+        return;
+    }
+    let src = r#"use core.compress.zstd as zstd
+
+comptime bytes = [72, 101, 108, 108, 111]
+comptime encoded = zstd.compress(bytes)
+comptime expected = bytes
+
+fn run() {
+    restored: [U8] :: zstd.decompress(encoded) ?? []
+    print("{expected}")
+    print("{restored}")
+}
+"#;
+    check_comptime_src(32_002, "zstd resident encoder accepted by AOT decoder", src);
+}
+
+#[test]
 fn comptime_bigint_matches_runtime() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping BigInt differential battery");

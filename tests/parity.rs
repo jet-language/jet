@@ -100,8 +100,8 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     //
     // Gzip and core.archive are interpreter-resident pure byte transforms.
     // Zstandard compressed blocks require the complete Huffman/FSE substrate;
-    // raw-block-only decoding is not parity, so both calls remain honest debt.
-    ("core.compress.zstd", "compress"),
+    // the interoperable raw-frame encoder is resident, but raw-block-only
+    // decoding is not parity, so decompression remains honest debt.
     ("core.compress.zstd", "decompress"),
     // core.crypto.expert / core.crypto.random: security-sensitive — needs a
     // careful, independently-reviewed port (AEAD ciphers, CSPRNG), not a
@@ -1593,7 +1593,11 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         );
         assert_eq!(
             record(&records, Surface::Fixed, "core.compress.zstd", method).class,
-            Class::PurePending
+            if method == "compress" {
+                Class::Covered
+            } else {
+                Class::PurePending
+            }
         );
     }
     assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
@@ -1643,7 +1647,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 787, 2, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 788, 1, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1651,7 +1655,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        964006579815181813,
+        5844906304385626344,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

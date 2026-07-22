@@ -2557,6 +2557,24 @@ fn repl_core_data_dispatch() {
 }
 
 #[test]
+fn repl_zstd_compress_is_resident() {
+    let out = run_transcript(
+        &[
+            "use core.compress.zstd as zstd",
+            "frame :: zstd.compress([72, 101, 108, 108, 111])",
+            "frame.len() > 9",
+            "frame[0] == (U8.from_int(40) ?? 0) && frame[1] == (U8.from_int(181) ?? 0) && frame[2] == (U8.from_int(47) ?? 0) && frame[3] == (U8.from_int(253) ?? 0)",
+        ],
+        None,
+    );
+    assert!(
+        !out.contains("E0956"),
+        "zstd compressor hit comptime fallback: {out}"
+    );
+    assert_eq!(out.matches("true : Bool").count(), 2, "got: {out}");
+}
+
+#[test]
 fn repl_core_data_lazy_plans_and_typed_joins() {
     let inputs = &[
         "use core.data as data",
