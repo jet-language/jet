@@ -1611,27 +1611,192 @@ fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
         Value::Int(value) => json_variant("Int", Some(CtValue::Int(value))),
         Value::Text(value) => json_variant("Text", Some(CtValue::Str(value))),
         Value::Array(values) => json_array(values.into_iter().map(xml_to_ct).collect()),
-        Value::Object(entries) => json_object(
-            entries.into_iter().map(|(key, value)| (key, xml_to_ct(value))).collect(),
-        ),
+        Value::Object(mut entries) => {
+            if has_exact_xml_keys(&entries, &["raw_text", "raw_bytes", "semantic"])
+                && !entries
+                    .iter()
+                    .find_map(|(key, value)| (key == "semantic").then_some(value))
+                    .is_some_and(xml_snapshot_order_is_valid)
+            {
+                for (key, value) in &mut entries {
+                    if matches!(key.as_str(), "raw_text" | "raw_bytes") {
+                        *value = Value::Null;
+                    }
+                }
+            }
+            json_object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key, xml_to_ct(value)))
+                    .collect(),
+            )
+        }
+    }
+}
+
+fn has_exact_xml_keys(
+    entries: &[(String, jet_foundation::XmlPull::Value)],
+    keys: &[&str],
+) -> bool {
+    entries.len() == keys.len()
+        && keys
+            .iter()
+            .all(|key| entries.iter().any(|(candidate, _)| candidate == key))
+}
+
+fn xml_schema_order(
+    entries: &[(String, jet_foundation::XmlPull::Value)],
+) -> Option<&'static [&'static str]> {
+    use jet_foundation::XmlPull::Value;
+
+    let text_field = |key: &str| {
+        entries.iter().find_map(|(candidate, value)| {
+            (candidate == key).then_some(value).and_then(|value| match value {
+                Value::Text(value) => Some(value.as_str()),
+                _ => None,
+            })
+        })
+    };
+    let has = |key: &str| entries.iter().any(|(candidate, _)| candidate == key);
+    let order: &[&str] = if let Some(tag) = text_field("$xml") {
+        match tag {
+            "document" => &["$xml", "encoding", "bom", "children"],
+            "document_whitespace" if has("lexical") => &["$xml", "value", "lexical"],
+            "document_whitespace" => &["$xml", "value"],
+            "declaration" if has("lexical") => {
+                &["$xml", "version", "encoding", "standalone", "lexical"]
+            }
+            "declaration" => &["$xml", "version", "encoding", "standalone"],
+            "doctype" if has("lexical") => &[
+                "$xml",
+                "name",
+                "public_id",
+                "system_id",
+                "internal_subset",
+                "lexical",
+            ],
+            "doctype" => &["$xml", "name", "public_id", "system_id", "internal_subset"],
+            "element" if has("open_lexical") => &[
+                "$xml",
+                "name",
+                "namespaces",
+                "attributes",
+                "children",
+                "empty_style",
+                "open_lexical",
+                "close_lexical",
+            ],
+            "element" => &[
+                "$xml",
+                "name",
+                "namespaces",
+                "attributes",
+                "children",
+                "empty_style",
+            ],
+            "namespace" if has("lexical") => {
+                &["$xml", "prefix", "namespace_uri", "quote", "lexical"]
+            }
+            "namespace" => &["$xml", "prefix", "namespace_uri", "quote"],
+            "attribute" if has("lexical") => &[
+                "$xml",
+                "name",
+                "parts",
+                "normalized_value",
+                "quote",
+                "lexical",
+            ],
+            "attribute" => &["$xml", "name", "parts", "normalized_value", "quote"],
+            "text" | "cdata" | "comment" if has("lexical") => {
+                &["$xml", "value", "lexical"]
+            }
+            "text" | "cdata" | "comment" => &["$xml", "value"],
+            "entity_ref" if has("lexical") => {
+                &["$xml", "name", "resolved_value", "lexical"]
+            }
+            "entity_ref" => &["$xml", "name", "resolved_value"],
+            "processing_instruction" if has("lexical") => {
+                &["$xml", "target", "value", "lexical"]
+            }
+            "processing_instruction" => &["$xml", "target", "value"],
+            _ => return None,
+        }
+    } else if let Some(tag) = text_field("$xml_event") {
+        match tag {
+            "document_start" => &["$xml_event", "encoding", "bom"],
+            "document_whitespace" => &["$xml_event", "value", "lexical"],
+            "declaration" => {
+                &["$xml_event", "version", "encoding", "standalone", "lexical"]
+            }
+            "doctype" => &[
+                "$xml_event",
+                "name",
+                "public_id",
+                "system_id",
+                "internal_subset",
+                "lexical",
+            ],
+            "element_start" => &[
+                "$xml_event",
+                "name",
+                "namespaces",
+                "attributes",
+                "empty_style",
+                "open_lexical",
+            ],
+            "text" | "cdata" | "comment" => &["$xml_event", "value", "lexical"],
+            "entity_ref" => &["$xml_event", "name", "resolved_value", "lexical"],
+            "processing_instruction" => &["$xml_event", "target", "value", "lexical"],
+            "element_end" => &["$xml_event", "name", "close_lexical"],
+            "document_end" => &["$xml_event"],
+            _ => return None,
+        }
+    } else {
+        [
+            &["raw", "prefix", "local", "namespace_uri"][..],
+            &["raw_text", "raw_bytes", "semantic"],
+            &["name", "namespaces", "attributes", "empty_style"],
+            &["encoding", "bom"],
+            &["version", "encoding", "standalone"],
+            &["name", "public_id", "system_id", "internal_subset"],
+            &["name", "resolved_value"],
+            &["target", "value"],
+            &["value"],
+            &["name"],
+        ]
+        .into_iter()
+        .find(|keys| has_exact_xml_keys(entries, keys))?
+    };
+    has_exact_xml_keys(entries, order).then_some(order)
+}
+
+fn xml_snapshot_order_is_valid(value: &jet_foundation::XmlPull::Value) -> bool {
+    use jet_foundation::XmlPull::Value;
+    match value {
+        Value::Array(values) => values.iter().all(xml_snapshot_order_is_valid),
+        Value::Object(entries) => xml_schema_order(entries).is_some_and(|order| {
+            entries
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .eq(order.iter().copied())
+                && entries
+                    .iter()
+                    .all(|(_, value)| xml_snapshot_order_is_valid(value))
+        }),
+        _ => true,
     }
 }
 
 fn restore_xml_snapshot_order(
     mut entries: Vec<(String, jet_foundation::XmlPull::Value)>,
 ) -> Vec<(String, jet_foundation::XmlPull::Value)> {
-    // CtValue maps sort keys; this snapshot's schema order is identity-significant.
-    const ELEMENT_OPEN: [&str; 4] = ["name", "namespaces", "attributes", "empty_style"];
-    if entries.len() == ELEMENT_OPEN.len()
-        && entries
-            .iter()
-            .all(|(key, _)| ELEMENT_OPEN.contains(&key.as_str()))
-    {
+    // CtValue maps sort keys; D-ENCXML1 closed schemas preserve exact field order.
+    if let Some(order) = xml_schema_order(&entries) {
         entries.sort_by_key(|(key, _)| {
-            ELEMENT_OPEN
+            order
                 .iter()
                 .position(|expected| *expected == key)
-                .expect("checked element-open key")
+                .expect("checked XML schema key")
         });
     }
     entries
@@ -1796,11 +1961,138 @@ pub(super) fn xml_render(value: &CtValue) -> String {
 mod xml_tests {
     use super::*;
 
+    fn field_mut<'a>(
+        value: &'a mut jet_foundation::XmlPull::Value,
+        key: &str,
+    ) -> &'a mut jet_foundation::XmlPull::Value {
+        let jet_foundation::XmlPull::Value::Object(entries) = value else {
+            panic!("expected object")
+        };
+        &mut entries
+            .iter_mut()
+            .find(|(candidate, _)| candidate == key)
+            .unwrap_or_else(|| panic!("missing {key}"))
+            .1
+    }
+
+    fn first(value: &mut jet_foundation::XmlPull::Value) -> &mut jet_foundation::XmlPull::Value {
+        let jet_foundation::XmlPull::Value::Array(values) = value else {
+            panic!("expected array")
+        };
+        &mut values[0]
+    }
+
     #[test]
     fn parse_render_preserves_element_open_lexical_snapshot() {
         let source = "<r xmlns='urn:\tfoo\r\nbar' a='x\t y\r\nz\ru\nv' b='&#xD;&#xA;&#x9;'/>";
         let tree = xml_parse(&source).expect("parse XML");
         assert_eq!(xml_render(&tree), source);
+    }
+
+    #[test]
+    fn round_trip_restores_every_nested_xml_schema_order() {
+        let source = "<?xml version='1.0'?>\n<!DOCTYPE r [<!ENTITY e 'v'>]>\n<r xmlns='urn:r' xmlns:p='urn:p' a='x&amp;y'>t&amp;<![CDATA[c]]><!--m--><?go now?><p:c/></r>\n";
+        let expected = jet_foundation::XmlPull::parse_document(source).expect("parse XML");
+        let actual = xml_from_ct(&xml_to_ct(expected.clone())).expect("reconstruct XML");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn round_trip_restores_every_xml_event_schema_order() {
+        let source = b"<?xml version='1.0'?>\n<!DOCTYPE r [<!ENTITY e 'v'>]>\n<r xmlns='urn:r' xmlns:p='urn:p' a='x&amp;y'>t&amp;<![CDATA[c]]><!--m--><?go now?><p:c/></r>\n";
+        let mut scanner = jet_foundation::XmlPull::StreamScanner::new(
+            source.len(),
+            jet_foundation::XmlPull::ParseOptions::safe(),
+        )
+        .expect("stream scanner");
+        scanner.push(source).expect("stream input");
+        scanner.finish_input().expect("finish stream input");
+
+        let mut tags = std::collections::BTreeSet::new();
+        while let Some(event) = scanner.next().expect("stream event") {
+            let expected = jet_foundation::XmlPull::stream_event_value(event);
+            if let jet_foundation::XmlPull::Value::Object(entries) = &expected {
+                if let Some((_, jet_foundation::XmlPull::Value::Text(tag))) =
+                    entries.iter().find(|(key, _)| key == "$xml_event")
+                {
+                    tags.insert(tag.clone());
+                }
+            }
+            let actual = xml_from_ct(&xml_to_ct(expected.clone())).expect("reconstruct event");
+            assert_eq!(actual, expected);
+        }
+
+        assert_eq!(
+            tags,
+            [
+                "cdata",
+                "comment",
+                "declaration",
+                "doctype",
+                "document_end",
+                "document_start",
+                "document_whitespace",
+                "element_end",
+                "element_start",
+                "entity_ref",
+                "processing_instruction",
+                "text",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+        );
+    }
+
+    #[test]
+    fn hostile_deep_snapshots_match_runtime_rejection() {
+        const SOURCE: &str = "<r xmlns='urn:\troot' xmlns:p='urn:p' a='x\t y' b='z'><?go   now?></r>";
+        let parsed = || jet_foundation::XmlPull::parse_document(SOURCE).expect("parse XML");
+        let assert_parity = |value: jet_foundation::XmlPull::Value, label: &str| {
+            let runtime = jet_foundation::XmlPull::render_document(&value).expect("runtime render");
+            let comptime = xml_render(&xml_to_ct(value));
+            assert_eq!(comptime, runtime, "{label}");
+            assert_ne!(runtime, SOURCE, "{label} trusted stale raw");
+        };
+
+        let mut reordered_name = parsed();
+        let root = first(field_mut(&mut reordered_name, "children"));
+        let semantic = field_mut(field_mut(root, "open_lexical"), "semantic");
+        let jet_foundation::XmlPull::Value::Object(name) = field_mut(semantic, "name") else {
+            panic!("name object")
+        };
+        name.reverse();
+        assert_parity(reordered_name, "reordered XMLName snapshot");
+
+        let mut reordered_attributes = parsed();
+        let root = first(field_mut(&mut reordered_attributes, "children"));
+        let semantic = field_mut(field_mut(root, "open_lexical"), "semantic");
+        let jet_foundation::XmlPull::Value::Array(attributes) =
+            field_mut(semantic, "attributes")
+        else {
+            panic!("attribute array")
+        };
+        attributes.reverse();
+        assert_parity(reordered_attributes, "reordered attribute snapshot");
+
+        let mut stale_namespace = parsed();
+        let root = first(field_mut(&mut stale_namespace, "children"));
+        let semantic = field_mut(field_mut(root, "open_lexical"), "semantic");
+        let namespace = first(field_mut(semantic, "namespaces"));
+        *field_mut(namespace, "namespace_uri") =
+            jet_foundation::XmlPull::Value::Text("urn:stale".to_string());
+        assert_parity(stale_namespace, "stale namespace snapshot");
+
+        let mut stale_leaf = parsed();
+        let root = first(field_mut(&mut stale_leaf, "children"));
+        let processing_instruction = first(field_mut(root, "children"));
+        let semantic = field_mut(
+            field_mut(processing_instruction, "lexical"),
+            "semantic",
+        );
+        *field_mut(semantic, "value") =
+            jet_foundation::XmlPull::Value::Text("stale".to_string());
+        assert_parity(stale_leaf, "stale leaf snapshot");
     }
 }
 
