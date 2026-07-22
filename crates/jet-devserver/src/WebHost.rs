@@ -395,7 +395,7 @@ impl DevStatus {
         let mut browser_relay = self.browser_relay.lock().unwrap();
         if self.browser_trace_enabled.load(Ordering::SeqCst) {
             browser_relay.take();
-            *browser_relay = crate::BrowserTrace::Relay::new(&self.watched_file).ok();
+            *browser_relay = fs::read_to_string("build/web.manifest.json").ok().and_then(|manifest| crate::BrowserTrace::Relay::new(&manifest).ok());
         }
         drop(browser_relay);
         if is_rebuild {
@@ -505,6 +505,23 @@ impl DevStatus {
     fn command_receipt(&self) -> Option<String> {
         self.command_receipt.lock().unwrap().clone()
     }
+
+    fn activate_browser_trace(&self, manifest: &str) -> Result<(), String> {
+        let relay = crate::BrowserTrace::Relay::new(manifest)?;
+        *self.browser_relay.lock().unwrap() = Some(relay);
+        self.browser_trace_enabled.store(true, Ordering::SeqCst);
+        self.version.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn activate_requested_browser_trace(&self) {
+        self.activate_requested_browser_trace_from(|| fs::read_to_string("build/web.manifest.json").ok());
+    }
+
+    fn activate_requested_browser_trace_from(&self, manifest: impl FnOnce() -> Option<String>) {
+        if !matches!(crate::BrowserTrace::take_request(), Ok(true)) { return }
+        if let Some(manifest) = manifest() { let _ = self.activate_browser_trace(&manifest); }
+    }
 }
 
 pub struct WebHost {
@@ -521,8 +538,6 @@ impl WebHost {
             .map(|address| address.port())
             .unwrap_or(*PORT_RANGE.start());
         let status = Arc::new(DevStatus::new(file, verbose));
-        *status.browser_relay.lock().unwrap() = Some(crate::BrowserTrace::Relay::new(file)?);
-        status.browser_trace_enabled.store(true, Ordering::SeqCst);
         status.set_port(bound_port);
         Ok(Self {
             listener: Mutex::new(Some(listener)),
@@ -542,6 +557,7 @@ impl WebHost {
             let status = Arc::clone(&self.status);
             thread::spawn(move || loop {
                 thread::sleep(Duration::from_millis(LIVE_RELOAD_POLL_MS));
+                status.activate_requested_browser_trace();
                 status.expire_clients();
             });
         }
@@ -1290,12 +1306,10 @@ fn serve_static(stream: &mut TcpStream, path: &str, nonce: &str) -> std::io::Res
 /// reworded); a clean rebuild (browser strip is dumb — it just re-renders
 /// whatever the poll says) collapses it back to the pill.
 fn live_reload_script(nonce: &str) -> String {
-    format!(
-        r##"<script>
-(function () {{
-  var jetPerfNonce = "{nonce}";
+    let perf_script = if nonce.is_empty() { String::new() } else { format!(r#"  var jetPerfNonce = "{nonce}";
+  self.__jetPerfNow = function () {{ return performance.now(); }};
   self.__jetPerfRecord = function (symbol, eventClass, startMs) {{
-    if (!symbol || !jetPerfNonce || typeof performance === "undefined") return;
+    if (!symbol || typeof performance === "undefined") return;
     var endMs = performance.now();
     var body = new URLSearchParams({{
       class: String(eventClass), symbol: String(symbol),
@@ -1305,6 +1319,11 @@ fn live_reload_script(nonce: &str) -> String {
     }});
     try {{ navigator.sendBeacon("/__jet_perf_browser?nonce=" + jetPerfNonce, body); }} catch (_) {{}}
   }};
+"#) };
+    format!(
+        r##"<script>
+(function () {{
+{perf_script}
   var jetDevVersion = null, reconnectAttempt = 0;
   var jetDevClient = null;
   try {{ jetDevClient = sessionStorage.getItem("jet-dev-client"); }} catch (_) {{}}
@@ -1420,7 +1439,7 @@ fn live_reload_script(nonce: &str) -> String {
 </script>
 "##,
         poll_ms = LIVE_RELOAD_POLL_MS,
-        nonce = nonce
+        perf_script = perf_script
     )
 }
 
@@ -1452,6 +1471,11 @@ mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::sync::Arc;
 
+    fn manifest(hash: char) -> String {
+        let map = format!("source\t6170702e6a6574\t{}\nsymbol\t6170702e6a6574\t72756e\tfn\nsymbol\t6170702e6a6574\t72756e2468616e646c657230\thandler", hash.to_string().repeat(64));
+        format!("{{\n  \"traceMap\": \"{}\"\n}}\n", crate::BrowserTrace::hex(map.as_bytes()))
+    }
+
     fn post_browser(status: Arc<DevStatus>, nonce: &str) -> String {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let address = listener.local_addr().unwrap();
@@ -1470,14 +1494,29 @@ mod tests {
     }
 
     #[test]
-    fn browser_trace_endpoint_authenticates_session_nonce() {
+    fn browser_trace_attach_owns_nonce_endpoint_and_rebuild_lifecycle() {
         let _guard = crate::BrowserTrace::TEST_LOCK.lock().unwrap();
         let status = Arc::new(DevStatus::new("app.jet", false));
-        let relay = crate::BrowserTrace::Relay::new("app.jet").unwrap();
-        let nonce = relay.nonce().to_string();
-        *status.browser_relay.lock().unwrap() = Some(relay);
+        let normal = inject_live_reload("<body></body>", "");
+        assert!(!normal.contains("__jetPerfNow"), "normal jet dev started timing");
+        assert!(!normal.contains("/__jet_perf_browser"), "normal jet dev emitted beacons");
+        crate::BrowserTrace::request(std::process::id()).unwrap();
+        status.activate_requested_browser_trace_from(|| Some(manifest('a')));
+        let nonce = status.browser_relay.lock().unwrap().as_ref().unwrap().nonce().to_string();
+        let instrumented = inject_live_reload("<body></body>", &nonce);
+        assert!(instrumented.contains("__jetPerfNow"));
+        assert!(instrumented.contains(&format!("jetPerfNonce = \"{nonce}\"")));
         assert!(post_browser(Arc::clone(&status), "stale").starts_with("HTTP/1.1 403"));
-        assert!(post_browser(status, &nonce).starts_with("HTTP/1.1 204"));
+        assert!(post_browser(Arc::clone(&status), &nonce).starts_with("HTTP/1.1 204"));
+        let capture = crate::BrowserTrace::read(std::process::id()).unwrap();
+        assert_eq!(capture.sources[0].sha256, "a".repeat(64));
+        assert_eq!(capture.rows[0].symbol, "run");
+        status.mark_building();
+        status.activate_browser_trace(&manifest('b')).unwrap();
+        let rebuilt_nonce = status.browser_relay.lock().unwrap().as_ref().unwrap().nonce().to_string();
+        assert_ne!(nonce, rebuilt_nonce);
+        assert!(post_browser(Arc::clone(&status), &nonce).starts_with("HTTP/1.1 403"));
+        assert!(post_browser(status, &rebuilt_nonce).starts_with("HTTP/1.1 204"));
     }
 
     #[test]

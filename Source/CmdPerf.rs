@@ -309,7 +309,7 @@ fn attach(args: &[String]) -> i32 {
         return 2;
     }
 
-    let browser_capture = match jet::DevServer::BrowserTrace::read(pid) {
+    let browser_capture = match read_browser_capture(pid, source.is_none()) {
         Ok(capture) => Some(capture),
         Err(_) if !jet::DevServer::BrowserTrace::relay_path(pid).exists() => None,
         Err(message) => {
@@ -318,7 +318,7 @@ fn attach(args: &[String]) -> i32 {
         }
     };
     let capture = if let Some(browser_capture) = browser_capture {
-        if source.as_deref().is_some_and(|path| path != browser_capture.source) {
+        if source.as_deref().is_some_and(|path| !browser_capture.sources.iter().any(|source| source.path == path)) {
             eprintln!("Error [E2102]: `--source` does not match the devserver browser session");
             return 2;
         }
@@ -390,59 +390,43 @@ fn attach(args: &[String]) -> i32 {
     }
 }
 
-fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<CaptureBundle, String> {
-    let mut bundle = capture_from_source(&capture.source, None, 0, None, None, None)?;
-    let mut symbols = bundle
-        .source_identity
-        .first()
-        .map(|source| {
-            source
-                .symbols
-                .iter()
-                .map(|(name, _)| name.clone())
-                .collect::<BTreeSet<_>>()
-        })
-        .unwrap_or_default();
-    for row in capture.rows {
-        if !symbols.contains(&row.symbol) {
-            let owner = inline_handler_owner(&row.symbol).ok_or_else(|| {
-                format!("browser trace named unknown Jet handler `{}`", row.symbol)
-            })?;
-            if !symbols.contains(owner) {
-                return Err(format!(
-                    "browser trace named unknown Jet handler `{}`",
-                    row.symbol
-                ));
-            }
-            symbols.insert(row.symbol.clone());
-            if let Some(source) = bundle.source_identity.first_mut() {
-                source.symbols.push((row.symbol.clone(), "handler".into()));
-            }
+fn read_browser_capture(pid: u32, activate: bool) -> Result<jet::DevServer::BrowserTrace::Capture, String> {
+    match jet::DevServer::BrowserTrace::read(pid) {
+        Ok(capture) => return Ok(capture),
+        Err(error) if jet::DevServer::BrowserTrace::relay_path(pid).exists() || !activate => return Err(error),
+        Err(_) => {}
+    }
+    jet::DevServer::BrowserTrace::request(pid)?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if jet::DevServer::BrowserTrace::relay_path(pid).exists() {
+            std::thread::sleep(Duration::from_millis(1600));
+            return jet::DevServer::BrowserTrace::read(pid);
         }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    jet::DevServer::BrowserTrace::cancel_request(pid);
+    Err(format!("process {pid} has no browser trace relay"))
+}
+
+fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<CaptureBundle, String> {
+    let mut bundle = CaptureBundle::empty();
+    bundle.source_identity = capture.sources.iter().map(|source| SourceIdentity { path: source.path.clone(), sha256: source.sha256.clone(), symbols: source.symbols.clone() }).collect();
+    let symbols = capture.sources.iter().flat_map(|source| source.symbols.iter().map(move |(name, _)| (name.as_str(), source.path.as_str()))).collect::<BTreeMap<_, _>>();
+    for row in capture.rows {
+        let path = symbols.get(row.symbol.as_str()).ok_or_else(|| format!("browser trace named unknown compiler symbol `{}`", row.symbol))?;
         bundle.browser.push(TraceBrowser {
             class: row.class,
             duration_ns: row.duration_ns,
             start_ns: row.start_ns,
             symbol: JetSymbolRef {
-                path: capture.source.clone(),
+                path: (*path).to_string(),
                 name: row.symbol,
             },
         });
     }
     bundle.browser_rows_truncated = capture.truncated;
     Ok(bundle)
-}
-
-fn inline_handler_owner(symbol: &str) -> Option<&str> {
-    let (owner, index) = symbol.rsplit_once("$handler")?;
-    if owner.is_empty()
-        || index.is_empty()
-        || !index.bytes().all(|byte| byte.is_ascii_digit())
-        || (index.len() > 1 && index.starts_with('0'))
-    {
-        return None;
-    }
-    Some(owner.rsplit("__").next().unwrap_or(owner))
 }
 
 fn capture_from_source(

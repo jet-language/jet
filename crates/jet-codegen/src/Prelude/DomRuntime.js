@@ -54,7 +54,7 @@ const jetDomBoxRegistry = new Map();
 let jetDomTouchedBackends = new Set();
 
 export function perfNow() {
-  return typeof performance === "undefined" ? 0 : performance.now();
+  return globalThis.__jetPerfNow?.() ?? 0;
 }
 
 export function perfRecord(symbol, eventClass, started) {

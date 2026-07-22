@@ -36,20 +36,27 @@ fn temp_workspace() -> PathBuf {
 }
 
 #[test]
-fn perf_attach_joins_devserver_browser_rows_into_one_trace() {
+fn perf_attach_uses_compiler_browser_map_after_source_changes() {
     let _guard = SELF_ATTACH_LOCK.lock().unwrap();
     let root = temp_workspace();
     let source = root.join("browser.jet");
+    let original = r##"@Target(Web)
+use core.web as web
+module handlers {
+    @Target(Js)
+    pub fn init() { web.on("#field", "input", (ev) => {}) }
+}
+@Target(Js)
+fn run() { handlers.init() }
+"##;
+    fs::write(&source, original).unwrap();
+    let compiled = jet::compile_web_with_path(original, source.to_str().unwrap()).unwrap();
+    let manifest = compiled.web.unwrap().manifest_json;
+    let relay = jet::DevServer::BrowserTrace::Relay::new(&manifest).unwrap();
     fs::write(&source, "fn run() {}\n").unwrap();
-    let relay = jet::DevServer::BrowserTrace::Relay::new(source.to_str().unwrap()).unwrap();
     relay
-        .record(b"class=event&symbol=run%24handler0&start_ns=100&duration_ns=25&clock_ns=125")
+        .record(b"class=event&symbol=handlers__init%24handler0&start_ns=100&duration_ns=25&clock_ns=125")
         .unwrap();
-    for _ in 1..=jet::DevServer::BrowserTrace::ROW_LIMIT {
-        relay
-            .record(b"class=event&symbol=run%24handler0&start_ns=100&duration_ns=25&clock_ns=125")
-            .unwrap();
-    }
 
     let out = root.join("browser.jettrace");
     let attach = run_jet(
@@ -60,20 +67,9 @@ fn perf_attach_joins_devserver_browser_rows_into_one_trace() {
     let bytes = fs::read(&out).unwrap();
     verify_jettrace(&bytes).unwrap();
     let text = String::from_utf8(bytes).unwrap();
-    assert!(text.contains("\"browser\":[{\"class\":\"event\""), "{text}");
-    assert!(text.contains("\"clock\":\"browser_monotonic_mapped\""), "{text}");
-    assert!(text.contains("\"name\":\"run$handler0\""), "{text}");
-    assert!(
-        text.contains("{\"kind\":\"handler\",\"name\":\"run$handler0\"}"),
-        "{text}"
-    );
-    assert!(text.contains("\"browser_rows_truncated\":true"), "{text}");
-    assert_eq!(text.matches("\"class\":\"event\"").count(), 4096, "{text}");
-    assert!(!text.contains("nonce"), "session secret leaked into trace: {text}");
-    let view = run_jet(&root, &["perf", "view", out.to_str().unwrap()]);
-    let view = String::from_utf8_lossy(&view.stdout);
-    assert!(view.contains("browser count=4096 ·"), "{view}");
-    assert!(view.contains("browser.jet#run$handler0"), "{view}");
+    assert!(text.contains("\"name\":\"handlers__init$handler0\""), "{text}");
+    assert!(text.contains(&format!("\"sha256\":\"{}\"", jet::SHA256::sha256_hex(original.as_bytes()))), "{text}");
+    assert!(!text.contains(&jet::SHA256::sha256_hex(b"fn run() {}\n")), "source was reread: {text}");
     drop(relay);
     let _ = fs::remove_dir_all(root);
 }

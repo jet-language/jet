@@ -1233,6 +1233,12 @@ fn run() {}
     let dir = build_web_fixture("webapi", src, "tests/fixtures/web_api.jet");
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    let manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
+    let sources = jet::DevServer::BrowserTrace::sources_from_manifest(&manifest).unwrap();
+    let source = sources.iter().find(|source| source.path == "tests/fixtures/web_api.jet").unwrap();
+    assert_eq!(source.sha256, jet::SHA256::sha256_hex(src.as_bytes()));
+    assert!(source.symbols.contains(&("init".into(), "fn".into())), "{source:?}");
+    assert!(source.symbols.contains(&("init$handler0".into(), "handler".into())), "{source:?}");
     assert!(js.contains("jetDom.on(\"#new-task\", \"input\""), "{js}");
     assert!(js.contains("\"init$handler0\""), "{js}");
     assert!(!js.contains("__JET_INLINE_HANDLER__"), "{js}");
@@ -1245,6 +1251,28 @@ fn run() {}
         "web.on/web.value/web.storage.local should roundtrip through generated JS"
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_trace_map_keeps_qualified_handler_identity() {
+    let src = r##"@Target(Web)
+use core.web as web
+module handlers {
+    @Target(Js)
+    pub fn init() { web.on("#new-task", "input", (ev) => {}) }
+}
+@Target(Js)
+fn init() { handlers.init() }
+fn run() {}
+"##;
+    let dir = build_web_fixture("qualified_handler", src, "tests/fixtures/web_qualified_handler.jet");
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    let manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
+    let sources = jet::DevServer::BrowserTrace::sources_from_manifest(&manifest).unwrap();
+    assert!(js.contains("\"handlers__init$handler0\""), "{js}");
+    assert!(sources.iter().any(|source| source.symbols.contains(&("handlers__init$handler0".into(), "handler".into()))), "{sources:?}");
+    assert!(!sources.iter().any(|source| source.symbols.iter().any(|(name, _)| name == "init$handler0")), "qualified handler was attributed to an unqualified suffix: {sources:?}");
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
