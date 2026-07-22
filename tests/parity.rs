@@ -98,11 +98,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // `inner_join`/`left_join` and Packet B's `pivot_sum` route through the
     // interpreter because their closure arguments need live `Interp` access.
     //
-    // Gzip and core.archive are interpreter-resident pure byte transforms.
-    // Zstandard compressed blocks require the complete Huffman/FSE substrate;
-    // the interoperable raw-frame encoder is resident, but raw-block-only
-    // decoding is not parity, so decompression remains honest debt.
-    ("core.compress.zstd", "decompress"),
     // core.crypto.expert / core.crypto.random: security-sensitive — needs a
     // careful, independently-reviewed port (AEAD ciphers, CSPRNG), not a
     // quick approximation that could silently diverge from the audited AOT
@@ -233,6 +228,12 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.uuid", "v4"),
     ("core.uuid", "v7"),
 ];
+
+/// Calls with a production-compiled foundation that must remain private until
+/// the complete AOT contract is resident. A public comptime arm is a false
+/// parity claim while an entry remains here. Remove the entry in the same
+/// commit that completes and dispatches the call.
+const KNOWN_PARTIAL_GAPS: &[(&str, &str)] = &[];
 
 fn raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
     let mut i = match (bytes.get(start), bytes.get(start + 1)) {
@@ -1085,6 +1086,7 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
     let dispatch_src = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
     let ct_core = extract_pairs(&core_dispatch_src);
     let gaps = KNOWN_OPEN_GAPS.iter().copied().collect::<BTreeSet<_>>();
+    let partials = KNOWN_PARTIAL_GAPS.iter().copied().collect::<BTreeSet<_>>();
     let syntax_src = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
     let values = string_constant_values(&syntax_src, "");
     let mut direct_ct = builtin_constant_refs(&dispatch_src);
@@ -1142,12 +1144,28 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
             errors.push(format!("stale pure_pending gap: {module}.{method} is now comptime-covered"));
         }
     }
+    for &(module, method) in KNOWN_PARTIAL_GAPS {
+        let pair = (module.to_string(), method.to_string());
+        if !discovered.iter().any(|entry| {
+            matches!(entry.surface, Surface::Fixed | Surface::Bespoke)
+                && entry.owner == module
+                && entry.method == method
+        }) {
+            errors.push(format!("stale partial gap: {module}.{method} is no longer discovered"));
+        } else if ct_core.contains(&pair) {
+            errors.push(format!(
+                "partial gap leaked into comptime dispatch: {module}.{method}"
+            ));
+        }
+    }
     let mut out = Vec::new();
     for entry in discovered.iter().cloned() {
         let classified = match entry.surface {
             Surface::Fixed | Surface::Bespoke => {
                 let pair = (entry.owner.clone(), entry.method.clone());
-                if ct_core.contains(&pair) {
+                if partials.contains(&(entry.owner.as_str(), entry.method.as_str())) {
+                    Some((Class::PurePending, "explicit partial pure port"))
+                } else if ct_core.contains(&pair) {
                     Some((Class::Covered, "comptime core dispatch"))
                 } else if let Some(reason) = core_boundary(&entry.owner, &entry.method) {
                     Some((Class::Boundary, reason))
@@ -1593,11 +1611,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         );
         assert_eq!(
             record(&records, Surface::Fixed, "core.compress.zstd", method).class,
-            if method == "compress" {
-                Class::Covered
-            } else {
-                Class::PurePending
-            }
+            Class::Covered
         );
     }
     assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
@@ -1647,7 +1661,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 788, 1, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 789, 0, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1655,7 +1669,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        5844906304385626344,
+        4070249345243482995,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

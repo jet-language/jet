@@ -2575,6 +2575,21 @@ fn repl_zstd_compress_is_resident() {
 }
 
 #[test]
+fn repl_zstd_decompress_is_resident_and_typed() {
+    let out = run_transcript(
+        &[
+            "use core.compress.zstd as zstd",
+            "zstd.decompress([40, 181, 47, 253, 0, 88, 41, 0, 0, 104, 101, 108, 108, 111]) ?? []",
+            "zstd.decompress([40, 181, 47]) ?? [255]",
+        ],
+        None,
+    );
+    assert!(!out.contains("E0956"), "resident decoder hit fallback: {out}");
+    assert!(out.contains("[104, 101, 108, 108, 111]"), "got: {out}");
+    assert!(out.contains("[255]"), "malformed frame was not a typed Err: {out}");
+}
+
+#[test]
 fn repl_core_data_lazy_plans_and_typed_joins() {
     let inputs = &[
         "use core.data as data",
