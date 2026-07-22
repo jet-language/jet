@@ -101,6 +101,28 @@ fn run() {
     }
 }
 
+#[test]
+fn relative_atomic_write_syncs_the_current_directory_and_reports_success() {
+    if !common::have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.files as fs
+
+fn run() {
+    bytes: [U8] :: [110, 101, 119]
+    fs.write_atomic("relative.bin", bytes) ?? panic("relative atomic write failed")
+    written :: fs.read("relative.bin") ?? panic("relative read failed")
+    fs.remove("relative.bin") ?? panic("relative cleanup failed")
+    print(written)
+}
+"#;
+    let (code, stdout, stderr) =
+        common::build_and_run_in_scratch("jet_path_durability", "atomic_relative", src);
+    assert_eq!(code, 0, "relative atomic write failed: {stderr}");
+    assert_eq!(stdout, "new\n");
+}
+
 #[cfg(windows)]
 #[test]
 fn windows_atomic_replace_rejects_embedded_nul_without_touching_prefix_target() {

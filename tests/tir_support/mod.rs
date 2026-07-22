@@ -191,6 +191,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_crypto_entropy");
     let mut s = strip_scheduler_native(&s);
     s = strip_vetted_module(&s, "jet_env_windows");
+    s = strip_vetted_module(&s, "jet_watch_process_probe");
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");
@@ -225,4 +226,12 @@ fn strip_vetted_module(src: &str, name: &str) -> String {
     };
     let end_offset = start + begin.len() + relative_end + end.len();
     format!("{}{}", &src[..start], &src[end_offset..])
+}
+
+#[test]
+fn watcher_process_probe_is_vetted_without_hiding_user_unsafe() {
+    let generated = "// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe\nunsafe { ffi() }\n// JET_VETTED_UNSAFE_END: jet_watch_process_probe\nunsafe { user_pointer() }";
+    let stripped = strip_vetted_prelude_modules(generated);
+    assert!(!stripped.contains("ffi()"));
+    assert!(stripped.contains("unsafe { user_pointer() }"));
 }

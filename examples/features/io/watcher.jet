@@ -12,7 +12,7 @@ use core.watcher as watcher
 fn run() {
     args :: io.args()
     if args.len() > 1 && (args.get(1) ?? "") == "--watch-child" {
-        time.sleep(100)
+        time.sleep(60000)
         return
     }
 
@@ -72,6 +72,7 @@ fn run() {
     exited :: watcher.process_pid(child.id())
     before_exit :: exited.poll()
     print("process events before exit: {before_exit.len()}")
+    child.kill() ?? panic("child kill failed")
     _ :: child.wait() ?? panic("child wait failed")
 
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen failed")
