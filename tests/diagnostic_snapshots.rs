@@ -33,6 +33,58 @@ fn compiler_extension_env_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+struct CompilerExtensionEnvRestore(Option<std::ffi::OsString>);
+
+impl Drop for CompilerExtensionEnvRestore {
+    fn drop(&mut self) {
+        match self.0.take() {
+            Some(value) => std::env::set_var("JET_COMPILER_EXTENSION", value),
+            None => std::env::remove_var("JET_COMPILER_EXTENSION"),
+        }
+    }
+}
+
+fn compiler_extension_env(
+    compiler_extension: Option<&str>,
+) -> (std::sync::MutexGuard<'static, ()>, CompilerExtensionEnvRestore) {
+    let guard = compiler_extension_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let restore = CompilerExtensionEnvRestore(std::env::var_os("JET_COMPILER_EXTENSION"));
+    match compiler_extension {
+        Some(rel) => {
+            let wasm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
+            std::env::set_var("JET_COMPILER_EXTENSION", wasm.to_str().expect("utf-8 wasm path"));
+        }
+        None => std::env::remove_var("JET_COMPILER_EXTENSION"),
+    }
+    (guard, restore)
+}
+
+#[test]
+fn compiler_extension_env_lock_covers_plain_compile_regions() {
+    let held = compiler_extension_env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (attempting_tx, attempting_rx) = std::sync::mpsc::channel();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        attempting_tx.send(()).unwrap();
+        let _scope = compiler_extension_env(None);
+        entered_tx.send(()).unwrap();
+    });
+    attempting_rx.recv().unwrap();
+    assert!(
+        entered_rx.recv_timeout(std::time::Duration::from_millis(50)).is_err(),
+        "plain compile region entered while compiler-extension env lock was held"
+    );
+    drop(held);
+    entered_rx
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("plain compile region should enter after env lock release");
+    worker.join().unwrap();
+}
+
 // ============================================================================
 // Section: error snapshots, tests/ui/*.stderr (was tests/ui.rs)
 // ============================================================================
@@ -172,18 +224,7 @@ fn ui_snapshots() {
                 .strip_prefix("// @compiler_extension ")
                 .map(|p| p.trim().to_string())
         });
-        let _cex_env = compiler_extension.as_ref().map(|_| {
-            compiler_extension_env_lock()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-        });
-        if let Some(ref rel) = compiler_extension {
-            let wasm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
-            std::env::set_var(
-                "JET_COMPILER_EXTENSION",
-                wasm.to_str().expect("utf-8 wasm path"),
-            );
-        }
+        let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
         let actual = if jetpack_hangar_digest_mismatch {
             run_jetpack_hangar_digest_mismatch_snapshot()
         } else if programmable_build {
@@ -272,9 +313,8 @@ fn ui_snapshots() {
                 Ok(_) => "(no errors)\n".to_string(),
             }
         };
-        if compiler_extension.is_some() {
-            std::env::remove_var("JET_COMPILER_EXTENSION");
-        }
+        drop(cex_restore);
+        drop(cex_lock);
         let actual = normalize_volatile_ui_snapshot(&shown_path, actual);
 
         let expect_path = if path.file_name().unwrap() == "main.jet" {
@@ -465,32 +505,17 @@ fn lint_snapshots() {
                 .strip_prefix("// @compiler_extension ")
                 .map(|p| p.trim().to_string())
         });
-        let _cex_env = compiler_extension.as_ref().map(|_| {
-            compiler_extension_env_lock()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-        });
-        if let Some(ref rel) = compiler_extension {
-            let wasm = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
-            std::env::set_var(
-                "JET_COMPILER_EXTENSION",
-                wasm.to_str().expect("utf-8 wasm path"),
-            );
-        }
+        let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
 
         let out = jet::compile_with_path(&src, &path.to_string_lossy()).unwrap_or_else(|diags| {
-            if compiler_extension.is_some() {
-                std::env::remove_var("JET_COMPILER_EXTENSION");
-            }
             panic!(
                 "lint fixture {} must compile:\n{}",
                 name,
                 jet::render_diagnostics(&shown_path, &src, &diags)
             );
         });
-        if compiler_extension.is_some() {
-            std::env::remove_var("JET_COMPILER_EXTENSION");
-        }
+        drop(cex_restore);
+        drop(cex_lock);
         assert!(
             !out.lints.is_empty(),
             "lint fixture {} should emit at least one lint",

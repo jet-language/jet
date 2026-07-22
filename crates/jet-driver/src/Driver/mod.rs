@@ -736,15 +736,17 @@ fn compile_bundle_path_build_inner(
     // the selected runtime program replaces it.
     let (diags, effect_facts) =
         crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
+    let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
+        &bundle,
+        Some(&effect_facts),
+        &diags,
+    );
     let mut errors = Vec::new();
     let mut lints = Vec::new();
     for diag in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
-        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(
-            &bundle,
-            Some(&effect_facts),
-        ))
+        .chain(extension_diags)
     {
         match diag.severity {
             // Generated declarations do not exist during the pre-build
@@ -1090,14 +1092,16 @@ fn compile_bundle_path_build_inner(
                 crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
             (diags, Some(facts))
         };
+        let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
+            &bundle,
+            planned_facts.as_ref(),
+            &planned_diags,
+        );
         let mut planned_errors = Vec::new();
         for diag in std::mem::take(&mut bundle.parse_teaching)
             .into_iter()
             .chain(planned_diags)
-            .chain(crate::CompilerExtensionHook::post_sema_diagnostics(
-                &bundle,
-                planned_facts.as_ref(),
-            ))
+            .chain(extension_diags)
         {
             match diag.severity {
                 Severity::Error => planned_errors.push(diag),
@@ -1617,6 +1621,8 @@ fn compile_bundle_path_opts_full(
     if timing {
         timer.lap("sema");
     }
+    let extension_diags =
+        crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None, &diags);
     // U11 (D-JPK-SCRIPTDEP1=A) and any other loader-time teaching diagnostic
     // (`bundle.parse_teaching`) ride the same errors/lints split as sema's —
     // `check_file` already does this for `jet check`/LSP; `jet run`/`build`
@@ -1630,7 +1636,7 @@ fn compile_bundle_path_opts_full(
     for d in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
-        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None))
+        .chain(extension_diags)
     {
         match d.severity {
             Severity::Error => errors.push(d),
@@ -1999,10 +2005,12 @@ fn check_file_with_effect_facts_impl(
                     diags.push(bad_build_signature(build.name_span));
                 }
             }
-            diags.extend(crate::CompilerExtensionHook::post_sema_diagnostics(
+            let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
                 &bundle,
                 Some(&facts),
-            ));
+                &diags,
+            );
+            diags.extend(extension_diags);
             (diags, Some(bundle), facts, dependencies)
         }
         Err(diags) => (
@@ -2049,10 +2057,12 @@ pub fn check_file_with_overlays_and_import_root(
                 crate::Sema::CompileMode::Check,
             );
             diags.extend(check_diags);
-            diags.extend(crate::CompilerExtensionHook::post_sema_diagnostics(
+            let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
                 &bundle,
                 Some(&facts),
-            ));
+                &diags,
+            );
+            diags.extend(extension_diags);
             (diags, Some(bundle), facts)
         }
         Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
@@ -2202,6 +2212,8 @@ pub fn compile_bundle_path_with_entry(
     swap_entry_point(&mut bundle, entry_fn);
     let mode = crate::Sema::CompileMode::Run;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
+    let extension_diags =
+        crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None, &diags);
     // U11 (D-JPK-SCRIPTDEP1=A): see the matching comment in
     // `compile_bundle_path_opts_dbg` — `parse_teaching` rides along here too.
     let mut errors = Vec::new();
@@ -2211,7 +2223,7 @@ pub fn compile_bundle_path_with_entry(
     for d in std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
         .chain(diags)
-        .chain(crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None))
+        .chain(extension_diags)
     {
         match d.severity {
             Severity::Error => errors.push(d),

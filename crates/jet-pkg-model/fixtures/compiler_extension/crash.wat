@@ -2,7 +2,7 @@
   (core module $m
     (memory (export "memory") 1)
     (global $heap (mut i32) (i32.const 64))
-    
+
     (func $realloc (export "cabi_realloc") (param $ptr i32) (param $old i32) (param $align i32) (param $new i32) (result i32)
       (local $p i32)
       (local.set $p (global.get $heap))

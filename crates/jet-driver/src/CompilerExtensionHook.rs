@@ -12,7 +12,7 @@
 //! (`scripts/agent/verify-full.sh`) remains the open C5 gate.
 
 use crate::AST::{Func, Item, ProgramBundle};
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Sema::SemIndexEffectFacts;
 use jet_pkg_model::CompilerExtension::{
     self, decode_and_validate_response, message_exposes_rustc, AnalyzeResponse, Capability,
@@ -34,10 +34,15 @@ const MAX_HOST_STDERR_BYTES: usize = 64 * 1024;
 /// `effect_facts` carries solved post-sema effects when the caller ran
 /// `check_bundle_with_effect_facts`. When absent, `ReadEffects` is omitted
 /// from advertised capabilities — never invent `"pure"` or other placeholders.
+/// Any sema error suppresses guest execution; extensions observe valid programs only.
 pub fn post_sema_diagnostics(
     bundle: &ProgramBundle,
     effect_facts: Option<&SemIndexEffectFacts>,
+    sema_diagnostics: &[Diagnostic],
 ) -> Vec<Diagnostic> {
+    if sema_diagnostics.iter().any(|diagnostic| diagnostic.severity == Severity::Error) {
+        return Vec::new();
+    }
     let Ok(path) = std::env::var(ENV_COMPILER_EXTENSION) else {
         return Vec::new();
     };
@@ -402,6 +407,8 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
     static HOST_BUILD: Once = Once::new();
+    const SOURCE_X: &str = include_str!("../../jet-pkg-model/fixtures/compiler_extension/source_x.jet");
+    const SOURCE_Y: &str = include_str!("../../jet-pkg-model/fixtures/compiler_extension/source_y.jet");
 
     fn fixture_wasm(name: &str) -> PathBuf {
         ensure_jetpack_host_built();
@@ -529,11 +536,7 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
-        std::fs::write(
-            &src_path,
-            "fn run() {\n    print(1)\n}\n",
-        )
-        .unwrap();
+        std::fs::write(&src_path, SOURCE_X).unwrap();
         let wasm = fixture_wasm("lint_no_x.wasm");
         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
         let (diags, bundle, _) =
@@ -548,6 +551,24 @@ mod tests {
         assert!(lint.what.contains("prefer y"), "got {}", lint.what);
         assert!(!message_exposes_rustc(&lint.what));
         assert!(!message_exposes_rustc(&lint.why));
+    }
+
+    #[test]
+    fn post_sema_custom_lint_ignores_non_x_source() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile_dir();
+        let src_path = dir.join("main.jet");
+        std::fs::write(&src_path, SOURCE_Y).unwrap();
+        let wasm = fixture_wasm("lint_no_x.wasm");
+        std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+        let (diags, bundle, _) =
+            crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        assert!(bundle.is_some(), "sema must succeed; diags={diags:?}");
+        assert!(
+            !diags.iter().any(|d| d.code == "L1401"),
+            "non-x source must not produce no-x lint; diags={diags:?}"
+        );
     }
 
     #[test]
@@ -569,6 +590,26 @@ mod tests {
         assert!(!message_exposes_rustc(&err.what));
         assert!(!message_exposes_rustc(&err.why));
         assert!(!diags.iter().any(|d| d.code == "L1401"));
+    }
+
+    #[test]
+    fn sema_error_never_executes_crash_guest() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile_dir();
+        let src_path = dir.join("main.jet");
+        std::fs::write(&src_path, "fn run() {\n    print(missing)\n}\n").unwrap();
+        let wasm = fixture_wasm("crash.wasm");
+        std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
+        let (diags, bundle, _) =
+            crate::Driver::check_file_with_effect_facts(src_path.to_str().unwrap(), None, false);
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        assert!(bundle.is_some(), "loader should return sema-invalid bundle");
+        assert_eq!(diags.len(), 1, "only Jet sema failure should surface");
+        assert_eq!(diags[0].code, "E0107", "got {diags:?}");
+        assert!(
+            !diags.iter().any(|d| d.code == "E1402" || d.code == "L1401"),
+            "guest must not execute after sema failure; diags={diags:?}"
+        );
     }
 
     #[test]
@@ -708,7 +749,7 @@ mod tests {
         std::env::remove_var(ENV_COMPILER_EXTENSION);
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
-        std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+        std::fs::write(&src_path, SOURCE_X).unwrap();
         let path = src_path.to_str().unwrap();
 
         let mut bundle_check =
@@ -763,7 +804,7 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
-        std::fs::write(&src_path, "fn run() {\n    print(1)\n}\n").unwrap();
+        std::fs::write(&src_path, SOURCE_X).unwrap();
         let path = src_path.to_str().unwrap();
         let wasm = fixture_wasm("lint_no_x.wasm");
         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
@@ -809,11 +850,7 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let dir = tempfile_dir();
         let src_path = dir.join("main.jet");
-        std::fs::write(
-            &src_path,
-            "fn run() {\n    print(0)\n}\n\nfn dev() {\n    print(1)\n}\n",
-        )
-        .unwrap();
+        std::fs::write(&src_path, SOURCE_X).unwrap();
         let path = src_path.to_str().unwrap();
         let wasm = fixture_wasm("lint_no_x.wasm");
         std::env::set_var(ENV_COMPILER_EXTENSION, wasm.to_str().unwrap());
@@ -835,7 +872,6 @@ mod tests {
 
         let dev = crate::Driver::compile_bundle_path_with_entry(path, "dev")
             .unwrap_or_else(|errs| panic!("entry-swap must succeed with lint guest; errs={errs:?}"));
-        std::env::remove_var(ENV_COMPILER_EXTENSION);
         let dev_lint = dev
             .lints
             .iter()
@@ -844,6 +880,29 @@ mod tests {
 
         assert_eq!(aot_lint.what, dev_lint.what);
         assert_eq!(aot_lint.why, dev_lint.why);
+
+        let negative_path = dir.join("negative.jet");
+        std::fs::write(&negative_path, SOURCE_Y).unwrap();
+        let negative = negative_path.to_str().unwrap();
+        let aot_negative = crate::Driver::compile_bundle_path_opts(
+            negative,
+            crate::Sema::CompileMode::Run,
+            false,
+            false,
+            false,
+            None,
+        )
+        .expect("negative opts_full must succeed");
+        let dev_negative = crate::Driver::compile_bundle_path_with_entry(negative, "dev")
+            .expect("negative entry-swap must succeed");
+        std::env::remove_var(ENV_COMPILER_EXTENSION);
+        assert!(
+            !aot_negative.lints.iter().any(|d| d.code == "L1401")
+                && !dev_negative.lints.iter().any(|d| d.code == "L1401"),
+            "AOT/dev must both omit no-x lint for non-x facts; aot={:?}, dev={:?}",
+            aot_negative.lints,
+            dev_negative.lints
+        );
     }
 
     fn tempfile_dir() -> PathBuf {

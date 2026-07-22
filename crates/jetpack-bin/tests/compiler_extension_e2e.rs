@@ -16,9 +16,9 @@
 #![allow(non_snake_case)]
 
 use jet_pkg_model::CompilerExtension::{
-    message_exposes_rustc, parse_analyze_result, parse_load_result, AnalyzeResponse, Capability,
-    ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact, SymbolFact, TypeFact,
-    TypedSnapshot,
+    decode_and_validate_response, message_exposes_rustc, parse_analyze_result, parse_load_result,
+    AnalyzeResponse, Capability, ExtensionSession, Finding, ProtocolError, SessionPhase, SpanFact,
+    SymbolFact, TypeFact, TypedSnapshot,
 };
 #[path = "../../jet-pkg-model/src/Prelude/CompilerExtension.rs"]
 mod CompilerExtensionHost;
@@ -36,7 +36,7 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn sample_snapshot() -> TypedSnapshot {
+fn snapshot_with_symbol(name: &str) -> TypedSnapshot {
     TypedSnapshot::new(
         Capability::v1_defaults().to_vec(),
         vec![TypeFact {
@@ -45,7 +45,7 @@ fn sample_snapshot() -> TypedSnapshot {
         }],
         vec![SymbolFact {
             id: "s1".into(),
-            name: "x".into(),
+            name: name.into(),
             kind: "let".into(),
             type_id: "t1".into(),
             span_id: "sp1".into(),
@@ -60,6 +60,19 @@ fn sample_snapshot() -> TypedSnapshot {
         }],
     )
     .unwrap()
+}
+
+fn sample_snapshot() -> TypedSnapshot {
+    snapshot_with_symbol("x")
+}
+
+fn analyze_lint_guest(snapshot: &TypedSnapshot) -> AnalyzeResponse {
+    let handle = load_guest("lint_no_x.wasm").expect("load lint guest");
+    let wire = jet_compiler_extension_analyze(handle, &snapshot.encode().unwrap());
+    let raw = parse_analyze_result(&wire).expect("analyze must succeed");
+    let response = decode_and_validate_response(snapshot, &raw).expect("valid response");
+    assert!(jet_compiler_extension_close(handle));
+    response
 }
 
 fn assert_jet_owned(err: &ProtocolError) {
@@ -116,6 +129,36 @@ fn custom_lint_analyze_roundtrip_stages_finding() {
 
     assert!(session.close(jet_compiler_extension_close));
     assert_eq!(session.phase(), SessionPhase::Closed);
+}
+
+#[test]
+fn custom_lint_ignores_snapshot_without_x_fact() {
+    let response = analyze_lint_guest(&snapshot_with_symbol("y"));
+    assert!(
+        response.findings.is_empty(),
+        "non-x snapshot must not produce no-x finding: {response:?}"
+    );
+}
+
+#[test]
+fn custom_lint_ignores_empty_snapshot() {
+    let snapshot = TypedSnapshot::new(
+        Capability::v1_defaults().to_vec(),
+        Vec::new(),
+        Vec::new(),
+        vec![SpanFact {
+            id: "sp1".into(),
+            file: "main.jet".into(),
+            start: 0,
+            end: 0,
+        }],
+    )
+    .unwrap();
+    let response = analyze_lint_guest(&snapshot);
+    assert!(
+        response.findings.is_empty(),
+        "empty snapshot must not produce no-x finding: {response:?}"
+    );
 }
 
 #[test]
