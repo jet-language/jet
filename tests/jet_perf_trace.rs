@@ -7,12 +7,15 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use jet_foundation::JetTrace::{jettrace_artifact, trace_id, verify_jettrace};
 use jet_foundation::PerformanceBudget::CanonicalJson;
 
 mod common;
+
+static SELF_ATTACH_LOCK: Mutex<()> = Mutex::new(());
 
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
@@ -30,6 +33,43 @@ fn temp_workspace() -> PathBuf {
     let root = common::unique_tmp("jet-perf");
     fs::create_dir_all(&root).unwrap();
     root
+}
+
+#[test]
+fn perf_attach_joins_devserver_browser_rows_into_one_trace() {
+    let _guard = SELF_ATTACH_LOCK.lock().unwrap();
+    let root = temp_workspace();
+    let source = root.join("browser.jet");
+    fs::write(&source, "fn run() {}\n").unwrap();
+    let relay = jet::DevServer::BrowserTrace::Relay::new(source.to_str().unwrap()).unwrap();
+    relay
+        .record(b"class=event&symbol=run&start_ns=100&duration_ns=25&clock_ns=125")
+        .unwrap();
+    for _ in 1..=jet::DevServer::BrowserTrace::ROW_LIMIT {
+        relay
+            .record(b"class=event&symbol=run&start_ns=100&duration_ns=25&clock_ns=125")
+            .unwrap();
+    }
+
+    let out = root.join("browser.jettrace");
+    let attach = run_jet(
+        &root,
+        &["perf", "attach", &std::process::id().to_string(), "--out", out.to_str().unwrap()],
+    );
+    assert!(attach.status.success(), "{}", String::from_utf8_lossy(&attach.stderr));
+    let bytes = fs::read(&out).unwrap();
+    verify_jettrace(&bytes).unwrap();
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(text.contains("\"browser\":[{\"class\":\"event\""), "{text}");
+    assert!(text.contains("\"clock\":\"browser_monotonic_mapped\""), "{text}");
+    assert!(text.contains("\"name\":\"run\""), "{text}");
+    assert!(text.contains("\"browser_rows_truncated\":true"), "{text}");
+    assert_eq!(text.matches("\"class\":\"event\"").count(), 4096, "{text}");
+    assert!(!text.contains("nonce"), "session secret leaked into trace: {text}");
+    let view = run_jet(&root, &["perf", "view", out.to_str().unwrap()]);
+    assert!(String::from_utf8_lossy(&view.stdout).contains("browser count=4096 ·"));
+    drop(relay);
+    let _ = fs::remove_dir_all(root);
 }
 
 struct ChildGuard(Child);
@@ -359,6 +399,7 @@ fn run() {
 
 #[test]
 fn perf_attach_view_compare_export_share_one_jettrace_truth() {
+    let _guard = SELF_ATTACH_LOCK.lock().unwrap();
     let root = temp_workspace();
     let pid = std::process::id().to_string();
     let out = root.join("session.jettrace");
@@ -431,6 +472,7 @@ fn perf_attach_view_compare_export_share_one_jettrace_truth() {
 
 #[test]
 fn perf_view_reads_hash_valid_legacy_capture_policy_v1() {
+    let _guard = SELF_ATTACH_LOCK.lock().unwrap();
     let root = temp_workspace();
     let modern_path = root.join("modern.jettrace");
     let attach = run_jet(
@@ -460,6 +502,8 @@ fn perf_view_reads_hash_valid_legacy_capture_policy_v1() {
         panic!("modern capture policy is not an object")
     };
     for key in [
+        "browser_row_limit",
+        "browser_rows_truncated",
         "io_row_limit",
         "io_rows_truncated",
         "native_row_limit",

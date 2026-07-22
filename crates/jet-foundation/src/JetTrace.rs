@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 
 pub const TRACE_SCHEMA: &str = "jet.trace";
 pub const TRACE_VERSION: &str = "1";
-pub const CAPTURE_POLICY_SCHEMA: &str = "4";
+pub const CAPTURE_POLICY_SCHEMA: &str = "5";
+pub const TRACE_BROWSER_ROW_LIMIT: u64 = 4096;
 pub const TRACE_TASK_ROW_LIMIT: u64 = 4096;
 pub const TRACE_IO_ROW_LIMIT: u64 = 4096;
 pub const TRACE_NATIVE_ROW_LIMIT: u64 = 1;
@@ -59,6 +60,7 @@ impl TraceToolchain {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CapturePolicy {
     pub allowlist: Vec<String>,
+    pub browser_rows_truncated: bool,
     pub io_rows_truncated: bool,
     pub native_rows_truncated: bool,
     pub span_rows_truncated: bool,
@@ -69,6 +71,7 @@ impl CapturePolicy {
     pub fn default_exclusions() -> Self {
         Self {
             allowlist: Vec::new(),
+            browser_rows_truncated: false,
             io_rows_truncated: false,
             native_rows_truncated: false,
             span_rows_truncated: false,
@@ -88,6 +91,14 @@ impl CapturePolicy {
             (
                 "allowlist".into(),
                 CanonicalJson::Array(allowlist.into_iter().map(CanonicalJson::String).collect()),
+            ),
+            (
+                "browser_row_limit".into(),
+                CanonicalJson::Integer(TRACE_BROWSER_ROW_LIMIT.to_string()),
+            ),
+            (
+                "browser_rows_truncated".into(),
+                CanonicalJson::Bool(self.browser_rows_truncated),
             ),
             ("default_exclusions".into(), CanonicalJson::Array(exclusions)),
             (
@@ -411,6 +422,27 @@ impl TraceSpan {
     }
 }
 
+/// Payload-free browser or Wasm interval mapped onto the devserver session clock.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceBrowser {
+    pub class: String,
+    pub duration_ns: u64,
+    pub start_ns: u64,
+    pub symbol: JetSymbolRef,
+}
+
+impl TraceBrowser {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("class".into(), CanonicalJson::String(self.class.clone())),
+            ("clock".into(), CanonicalJson::String("browser_monotonic_mapped".into())),
+            ("duration_ns".into(), CanonicalJson::Integer(self.duration_ns.to_string())),
+            ("start_ns".into(), CanonicalJson::Integer(self.start_ns.to_string())),
+            ("symbol".into(), self.symbol.to_json()?),
+        ])
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceIdentity {
     pub path: String,
@@ -447,6 +479,7 @@ pub struct TraceSkeleton {
     pub capture_policy: CapturePolicy,
     pub samples: Vec<TraceSample>,
     pub allocations: Vec<TraceAllocation>,
+    pub browser: Vec<TraceBrowser>,
     pub tasks: Vec<TraceTask>,
     pub locks: Vec<TraceLock>,
     pub io: Vec<TraceIo>,
@@ -467,6 +500,11 @@ impl TraceSkeleton {
             .allocations
             .iter()
             .map(TraceAllocation::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
+        let browser = self
+            .browser
+            .iter()
+            .map(TraceBrowser::to_json)
             .collect::<Result<Vec<_>, _>>()?;
         let tasks = self
             .tasks
@@ -501,7 +539,7 @@ impl TraceSkeleton {
         CanonicalJson::object([
             ("allocations".into(), CanonicalJson::Array(allocations)),
             ("argv".into(), argv),
-            ("browser".into(), CanonicalJson::Array(Vec::new())),
+            ("browser".into(), CanonicalJson::Array(browser)),
             ("capture_policy".into(), self.capture_policy.to_json()?),
             ("command".into(), CanonicalJson::String(self.command.clone())),
             ("io".into(), CanonicalJson::Array(io)),
@@ -603,6 +641,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
         }
     }
     let limits = validate_capture_policy(&fields["capture_policy"])?;
+    validate_browser(&fields["browser"], limits.browser_rows)?;
     validate_samples(&fields["samples"])?;
     validate_allocations(&fields["allocations"])?;
     let tasks = validate_tasks(&fields["tasks"], limits.task_rows)?;
@@ -612,6 +651,37 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     validate_spans(&fields["spans"], &tasks, limits.span_rows)?;
     validate_source_identity(&fields["source_identity"])?;
     validate_toolchain(&fields["toolchain"])?;
+    Ok(())
+}
+
+fn validate_browser(value: &CanonicalJson, row_limit: Option<usize>) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.browser is not an array".into()),
+    };
+    if row_limit.is_some_and(|limit| items.len() > limit) {
+        return Err("content.browser exceeds capture_policy.browser_row_limit".into());
+    }
+    if row_limit.is_none() && !items.is_empty() {
+        return Err("legacy capture_policy cannot describe browser rows".into());
+    }
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.browser[{i}]");
+        let fields = object_keys(
+            item,
+            &label,
+            &["class", "clock", "duration_ns", "start_ns", "symbol"],
+        )?;
+        if !matches!(text(&fields["class"], &format!("{label}.class"))?, "event" | "wasm" | "dom") {
+            return Err(format!("{label}.class must be event, wasm, or dom"));
+        }
+        if text(&fields["clock"], &format!("{label}.clock"))? != "browser_monotonic_mapped" {
+            return Err(format!("{label}.clock must be browser_monotonic_mapped"));
+        }
+        unsigned(&fields["duration_ns"], &format!("{label}.duration_ns"))?;
+        unsigned(&fields["start_ns"], &format!("{label}.start_ns"))?;
+        validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+    }
     Ok(())
 }
 
@@ -1044,6 +1114,7 @@ fn unsigned(value: &CanonicalJson, label: &str) -> Result<u64, String> {
 
 #[derive(Clone, Copy)]
 struct CaptureLimits {
+    browser_rows: Option<usize>,
     io_rows: Option<usize>,
     native_rows: Option<usize>,
     span_rows: Option<usize>,
@@ -1065,6 +1136,7 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
             // Schema 1 declared neither limits nor truncation. Absence remains
             // unknown/unbounded legacy semantics; never normalize it to false.
             CaptureLimits {
+                browser_rows: None,
                 io_rows: None,
                 native_rows: None,
                 span_rows: None,
@@ -1086,6 +1158,7 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
                 ],
             )?,
             CaptureLimits {
+                browser_rows: None,
                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
                 native_rows: None,
                 span_rows: None,
@@ -1109,13 +1182,14 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
                 ],
             )?,
             CaptureLimits {
+                browser_rows: None,
                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
                 native_rows: Some(TRACE_NATIVE_ROW_LIMIT as usize),
                 span_rows: None,
                 task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
             },
         ),
-        Some(CanonicalJson::Integer(schema)) if schema == CAPTURE_POLICY_SCHEMA => (
+        Some(CanonicalJson::Integer(schema)) if schema == "4" => (
             object_keys(
                 value,
                 "capture_policy",
@@ -1134,6 +1208,35 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
                 ],
             )?,
             CaptureLimits {
+                browser_rows: None,
+                io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
+                native_rows: Some(TRACE_NATIVE_ROW_LIMIT as usize),
+                span_rows: Some(TRACE_SPAN_ROW_LIMIT as usize),
+                task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
+            },
+        ),
+        Some(CanonicalJson::Integer(schema)) if schema == CAPTURE_POLICY_SCHEMA => (
+            object_keys(
+                value,
+                "capture_policy",
+                &[
+                    "allowlist",
+                    "browser_row_limit",
+                    "browser_rows_truncated",
+                    "default_exclusions",
+                    "io_row_limit",
+                    "io_rows_truncated",
+                    "native_row_limit",
+                    "native_rows_truncated",
+                    "schema",
+                    "span_row_limit",
+                    "span_rows_truncated",
+                    "task_row_limit",
+                    "task_rows_truncated",
+                ],
+            )?,
+            CaptureLimits {
+                browser_rows: Some(TRACE_BROWSER_ROW_LIMIT as usize),
                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
                 native_rows: Some(TRACE_NATIVE_ROW_LIMIT as usize),
                 span_rows: Some(TRACE_SPAN_ROW_LIMIT as usize),
@@ -1166,6 +1269,16 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
             if !matches!(fields[key], CanonicalJson::Bool(_)) {
                 return Err(format!("capture_policy.{key} is not a boolean"));
             }
+        }
+    }
+    if limits.browser_rows.is_some() {
+        if unsigned(&fields["browser_row_limit"], "capture_policy.browser_row_limit")?
+            != TRACE_BROWSER_ROW_LIMIT
+        {
+            return Err("capture_policy browser row limit does not match this schema".into());
+        }
+        if !matches!(fields["browser_rows_truncated"], CanonicalJson::Bool(_)) {
+            return Err("capture_policy.browser_rows_truncated is not a boolean".into());
         }
     }
     if limits.native_rows.is_some() {
@@ -1278,6 +1391,7 @@ mod tests {
             capture_policy: CapturePolicy::default_exclusions(),
             samples: Vec::new(),
             allocations: Vec::new(),
+            browser: Vec::new(),
             tasks: Vec::new(),
             locks: Vec::new(),
             io: Vec::new(),
@@ -1616,13 +1730,16 @@ mod tests {
     fn capture_policy_audits_fixed_row_caps_and_truncation() {
         let mut skeleton = sample_skeleton();
         skeleton.capture_policy.io_rows_truncated = true;
+        skeleton.capture_policy.browser_rows_truncated = true;
         skeleton.capture_policy.native_rows_truncated = true;
         skeleton.capture_policy.span_rows_truncated = true;
         skeleton.capture_policy.task_rows_truncated = true;
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
         let text = String::from_utf8(bytes.clone()).unwrap();
         assert!(text.contains("\"capture_policy\":{\"allowlist\":[]"), "{text}");
-        assert!(text.contains("\"schema\":4,\"span_row_limit\""), "{text}");
+        assert!(text.contains("\"browser_row_limit\":4096"), "{text}");
+        assert!(text.contains("\"browser_rows_truncated\":true"), "{text}");
+        assert!(text.contains("\"schema\":5,\"span_row_limit\""), "{text}");
         assert!(text.contains("\"io_row_limit\":4096"), "{text}");
         assert!(text.contains("\"io_rows_truncated\":true"), "{text}");
         assert!(text.contains("\"native_row_limit\":1"), "{text}");
@@ -1685,6 +1802,8 @@ mod tests {
             unreachable!()
         };
         for key in [
+            "browser_row_limit",
+            "browser_rows_truncated",
             "io_row_limit",
             "io_rows_truncated",
             "native_row_limit",
@@ -1716,6 +1835,8 @@ mod tests {
         let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
             unreachable!()
         };
+        policy.remove("browser_row_limit");
+        policy.remove("browser_rows_truncated");
         policy.remove("native_row_limit");
         policy.remove("native_rows_truncated");
         policy.remove("span_row_limit");
@@ -1733,10 +1854,43 @@ mod tests {
         let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
             unreachable!()
         };
+        policy.remove("browser_row_limit");
+        policy.remove("browser_rows_truncated");
         policy.remove("span_row_limit");
         policy.remove("span_rows_truncated");
         policy.insert("schema".into(), CanonicalJson::Integer("3".into()));
         verify_jettrace(&jettrace_artifact(content).bytes()).unwrap();
+    }
+
+    #[test]
+    fn capture_policy_v4_remains_readable_with_empty_browser_domain() {
+        let mut content = sample_skeleton().content_json().unwrap();
+        let CanonicalJson::Object(fields) = &mut content else { unreachable!() };
+        let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else { unreachable!() };
+        policy.remove("browser_row_limit");
+        policy.remove("browser_rows_truncated");
+        policy.insert("schema".into(), CanonicalJson::Integer("4".into()));
+        verify_jettrace(&jettrace_artifact(content).bytes()).unwrap();
+    }
+
+    #[test]
+    fn browser_rows_are_closed_bounded_and_source_attributed() {
+        let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef { path: "app.jet".into(), name: "run".into() };
+        skeleton.browser.push(TraceBrowser {
+            class: "event".into(),
+            duration_ns: 25,
+            start_ns: 100,
+            symbol,
+        });
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        verify_jettrace(&bytes).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("\"clock\":\"browser_monotonic_mapped\""), "{text}");
+        assert!(!text.contains("nonce"), "{text}");
+
+        skeleton.browser[0].class = "payload".into();
+        assert!(verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap()).unwrap_err().contains("class must be"));
     }
 
     #[test]
@@ -1772,6 +1926,8 @@ mod tests {
         let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
             unreachable!()
         };
+        policy.remove("browser_row_limit");
+        policy.remove("browser_rows_truncated");
         policy.remove("span_row_limit");
         policy.remove("span_rows_truncated");
         policy.insert("schema".into(), CanonicalJson::Integer("3".into()));
@@ -1812,6 +1968,8 @@ mod tests {
             let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
                 unreachable!()
             };
+            policy.remove("browser_row_limit");
+            policy.remove("browser_rows_truncated");
             policy.remove("native_row_limit");
             policy.remove("native_rows_truncated");
             policy.remove("span_row_limit");

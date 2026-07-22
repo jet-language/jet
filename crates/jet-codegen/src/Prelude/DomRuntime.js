@@ -53,6 +53,14 @@ let jetDomScopeDepth = 0;
 const jetDomBoxRegistry = new Map();
 let jetDomTouchedBackends = new Set();
 
+export function perfNow() {
+  return typeof performance === "undefined" ? 0 : performance.now();
+}
+
+export function perfRecord(symbol, eventClass, started) {
+  globalThis.__jetPerfRecord?.(String(symbol), String(eventClass), started);
+}
+
 export function enterRenderScope(name) {
   if (jetDomScopeDepth === 0) {
     jetDomScopeName = name;
@@ -122,6 +130,7 @@ function jetReadableTextColor(hex) {
 }
 
 export function paint(backend, node) {
+  const perfStarted = perfNow();
   const frame = backend.frame ?? { x: 0, y: 0, width: node.width, height: node.height };
   const live = new Set();
   const activeElement = typeof document !== "undefined"
@@ -215,6 +224,7 @@ export function paint(backend, node) {
   if (backend.focusedIndex >= 0 && (activeInBackend || (!externalActive && activeKey === null))) {
     backend.focusNodes[backend.focusedIndex].focus?.();
   }
+  perfRecord(jetDomScopeName, "dom", perfStarted);
   return backend;
 }
 
@@ -265,10 +275,24 @@ function normalizeEvent(ev) {
   };
 }
 
-export function on(selector, eventName, handler) {
+export function on(selector, eventName, handler, symbol) {
   const el = query(selector);
   if (!el || !el.addEventListener) return "Missing";
-  el.addEventListener(String(eventName), (ev) => handler(normalizeEvent(ev)));
+  const handlerSymbol = symbol || jetDomScopeName;
+  el.addEventListener(String(eventName), (ev) => {
+    const started = perfNow();
+    try {
+      const result = handler(normalizeEvent(ev));
+      if (result && typeof result.finally === "function") {
+        return result.finally(() => perfRecord(handlerSymbol, "event", started));
+      }
+      perfRecord(handlerSymbol, "event", started);
+      return result;
+    } catch (error) {
+      perfRecord(handlerSymbol, "event", started);
+      throw error;
+    }
+  });
   return "Bound";
 }
 

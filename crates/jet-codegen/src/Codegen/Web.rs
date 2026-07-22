@@ -889,6 +889,7 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
                 f.key,
                 args.join(", ")
             ));
+            out.push_str("  const _perfStarted = jetDom.perfNow();\n  try {\n");
             out.push_str("  const wasm = await loadWasm();\n");
             let sym = wasm_export_symbol(&f.key);
             let mut prelude = String::new();
@@ -903,6 +904,10 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
                 call_args.join(", ")
             ));
             out.push_str("  return jetDom.unmarshalAbi(raw, \"scalar\");\n");
+            out.push_str(&format!(
+                "  }} finally {{ jetDom.perfRecord({}, \"wasm\", _perfStarted); }}\n",
+                json_quote(&f.name)
+            ));
             out.push_str("}\n\n");
         }
     }
@@ -1208,6 +1213,16 @@ fn tir_core_call(
         return Err(());
     }
     let get = |i: usize| a[i].as_str();
+    if method == "on" {
+        let symbol = match &args[2].kind {
+            TIR::TExprKind::Local(name) => {
+                let key = local_web_key(file_prefix, name);
+                funcs.iter().find(|func| func.key == key).map(|func| func.name.as_str()).unwrap_or("")
+            }
+            _ => "",
+        };
+        return Ok(format!("jetDom.on({}, {}, {}, {})", get(0), get(1), get(2), json_quote(symbol)));
+    }
     if let Some(kind) = storage {
         return Ok(match method {
             "get" => format!("jetDom.storageGet(\"{kind}\", {})", get(0)),
@@ -1234,7 +1249,6 @@ fn tir_core_call(
         "aria_role_label" => "jetDom.ariaRoleLabel()".to_string(),
         "aria_role_container" => "jetDom.ariaRoleContainer()".to_string(),
         "signal" => format!("jetDom.makeSignal({})", get(0)),
-        "on" => format!("jetDom.on({}, {}, {})", get(0), get(1), get(2)),
         "value" => format!("jetDom.value({})", get(0)),
         _ => return Err(()),
     })

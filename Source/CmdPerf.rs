@@ -11,7 +11,7 @@
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
     trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
-    TraceIo, TraceLock, TraceNative, TraceSample, TraceSkeleton, TraceSpan, TraceTask,
+    TraceBrowser, TraceIo, TraceLock, TraceNative, TraceSample, TraceSkeleton, TraceSpan, TraceTask,
     TraceToolchain, TRACE_SCHEMA, TRACE_IO_ROW_LIMIT, TRACE_SPAN_ROW_LIMIT,
     TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
 };
@@ -34,6 +34,8 @@ pub(crate) enum Outcome {
 struct CaptureBundle {
     samples: Vec<TraceSample>,
     allocations: Vec<TraceAllocation>,
+    browser: Vec<TraceBrowser>,
+    browser_rows_truncated: bool,
     tasks: Vec<TraceTask>,
     locks: Vec<TraceLock>,
     io: Vec<TraceIo>,
@@ -51,6 +53,8 @@ impl CaptureBundle {
         Self {
             samples: Vec::new(),
             allocations: Vec::new(),
+            browser: Vec::new(),
+            browser_rows_truncated: false,
             tasks: Vec::new(),
             locks: Vec::new(),
             io: Vec::new(),
@@ -305,46 +309,68 @@ fn attach(args: &[String]) -> i32 {
         return 2;
     }
 
-    let capture = match (source.as_deref(), jet::DevServer::LiveInspect::read(pid)) {
-        (Some(path), Ok(snapshot)) => {
-            let timing = process_times(pid);
-            let wall_ns = timing.map(|(wall_ns, _)| wall_ns).unwrap_or(0);
-            let cpu_ns = timing.map(|(_, cpu_ns)| cpu_ns);
-            let native_timing = timing
-                .map(|(_, duration_ns)| NativeTimingInput::Captured {
-                    duration_ns,
-                    // Attach is a point capture: trace-session origin is now.
-                    observed_at_ns: 0,
-                    process_id: pid,
-                })
-                .unwrap_or_else(|| NativeTimingInput::unavailable(wall_ns));
-            match capture_from_source(
-                path,
-                Some(&snapshot),
-                wall_ns,
-                cpu_ns,
-                None,
-                Some(&native_timing),
-            ) {
-                Ok(bundle) => bundle,
-                Err(message) => {
-                    eprintln!("Error [E2102]: {message}");
-                    return 2;
-                }
+    let browser_capture = match jet::DevServer::BrowserTrace::read(pid) {
+        Ok(capture) => Some(capture),
+        Err(_) if !jet::DevServer::BrowserTrace::relay_path(pid).exists() => None,
+        Err(message) => {
+            eprintln!("Error [E2102]: {message}");
+            return 2;
+        }
+    };
+    let capture = if let Some(browser_capture) = browser_capture {
+        if source.as_deref().is_some_and(|path| path != browser_capture.source) {
+            eprintln!("Error [E2102]: `--source` does not match the devserver browser session");
+            return 2;
+        }
+        match capture_browser(browser_capture) {
+            Ok(bundle) => bundle,
+            Err(message) => {
+                eprintln!("Error [E2102]: {message}");
+                return 2;
             }
         }
-        (Some(_), Err(message)) => {
-            eprintln!("Error [E2102]: {message}");
-            eprintln!(" Fix: start the program with `jet run --observe`, then attach");
-            return 2;
+    } else {
+        match (source.as_deref(), jet::DevServer::LiveInspect::read(pid)) {
+            (Some(path), Ok(snapshot)) => {
+                let timing = process_times(pid);
+                let wall_ns = timing.map(|(wall_ns, _)| wall_ns).unwrap_or(0);
+                let cpu_ns = timing.map(|(_, cpu_ns)| cpu_ns);
+                let native_timing = timing
+                    .map(|(_, duration_ns)| NativeTimingInput::Captured {
+                        duration_ns,
+                        // Attach is a point capture: trace-session origin is now.
+                        observed_at_ns: 0,
+                        process_id: pid,
+                    })
+                    .unwrap_or_else(|| NativeTimingInput::unavailable(wall_ns));
+                match capture_from_source(
+                    path,
+                    Some(&snapshot),
+                    wall_ns,
+                    cpu_ns,
+                    None,
+                    Some(&native_timing),
+                ) {
+                    Ok(bundle) => bundle,
+                    Err(message) => {
+                        eprintln!("Error [E2102]: {message}");
+                        return 2;
+                    }
+                }
+            }
+            (Some(_), Err(message)) => {
+                eprintln!("Error [E2102]: {message}");
+                eprintln!(" Fix: start the program with `jet run --observe`, then attach");
+                return 2;
+            }
+            (None, Ok(_)) => {
+                eprintln!("Error [E2102]: live observe snapshot found, but `--source` is required");
+                eprintln!(" Why: domain capture must attribute facts to a Jet symbol identity");
+                eprintln!(" Fix: jet perf attach {pid} --source <file.jet>");
+                return 2;
+            }
+            (None, Err(_)) => CaptureBundle::empty(),
         }
-        (None, Ok(_)) => {
-            eprintln!("Error [E2102]: live observe snapshot found, but `--source` is required");
-            eprintln!(" Why: domain capture must attribute facts to a Jet symbol identity");
-            eprintln!(" Fix: jet perf attach {pid} --source <file.jet>");
-            return 2;
-        }
-        (None, Err(_)) => CaptureBundle::empty(),
     };
 
     let mut argv = vec!["attach".into(), pid.to_string()];
@@ -362,6 +388,37 @@ fn attach(args: &[String]) -> i32 {
             2
         }
     }
+}
+
+fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<CaptureBundle, String> {
+    let mut bundle = capture_from_source(&capture.source, None, 0, None, None, None)?;
+    let symbols = bundle
+        .source_identity
+        .first()
+        .map(|source| {
+            source
+                .symbols
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    for row in capture.rows {
+        if !symbols.contains(row.symbol.as_str()) {
+            return Err(format!("browser trace named unknown Jet handler `{}`", row.symbol));
+        }
+        bundle.browser.push(TraceBrowser {
+            class: row.class,
+            duration_ns: row.duration_ns,
+            start_ns: row.start_ns,
+            symbol: JetSymbolRef {
+                path: capture.source.clone(),
+                name: row.symbol,
+            },
+        });
+    }
+    bundle.browser_rows_truncated = capture.truncated;
+    Ok(bundle)
 }
 
 fn capture_from_source(
@@ -611,6 +668,8 @@ fn capture_from_source(
     Ok(CaptureBundle {
         samples,
         allocations,
+        browser: Vec::new(),
+        browser_rows_truncated: false,
         tasks,
         locks,
         io,
@@ -1322,6 +1381,9 @@ fn view(args: &[String]) -> i32 {
             if let Some((count, bytes, symbol)) = first_allocation(&trace) {
                 println!("alloc count={count} bytes={bytes} · {symbol}");
             }
+            if let Some((n, symbol)) = browser_summary(&trace) {
+                println!("browser count={n} · {symbol}");
+            }
             if let Some((n, child_n, symbol)) = task_summary(&trace) {
                 println!("tasks count={n} children={child_n} · {symbol}");
             }
@@ -1416,13 +1478,14 @@ fn export(args: &[String]) -> i32 {
     };
     let loss = if first_sample(&trace).is_some()
         || first_allocation(&trace).is_some()
+        || browser_summary(&trace).is_some()
         || task_summary(&trace).is_some()
         || lock_summary(&trace).is_some()
         || io_summary(&trace).is_some()
         || native_summary(&trace).is_some()
         || span_summary(&trace).is_some()
     {
-        "json-envelope; domains present are wall/cpu/alloc/tasks/locks/io/native/spans only — no pprof/otel/chrome payloads"
+        "json-envelope; domains present are wall/cpu/alloc/browser/tasks/locks/io/native/spans only — no pprof/otel/chrome payloads"
     } else {
         "json-envelope-only; no pprof/otel/chrome payloads in skeleton"
     };
@@ -1446,6 +1509,7 @@ fn write_session_trace(
 ) -> Result<PathBuf, String> {
     let mut capture_policy = CapturePolicy::default_exclusions();
     capture_policy.io_rows_truncated = capture.io_rows_truncated;
+    capture_policy.browser_rows_truncated = capture.browser_rows_truncated;
     capture_policy.native_rows_truncated = capture.native_rows_truncated;
     capture_policy.span_rows_truncated = capture.span_rows_truncated;
     capture_policy.task_rows_truncated = capture.task_rows_truncated;
@@ -1456,6 +1520,7 @@ fn write_session_trace(
         capture_policy,
         samples: capture.samples,
         allocations: capture.allocations,
+        browser: capture.browser,
         tasks: capture.tasks,
         locks: capture.locks,
         io: capture.io,
@@ -1611,6 +1676,12 @@ fn first_allocation(trace: &CanonicalJson) -> Option<(String, String, String)> {
     };
     let symbol = symbol_label(fields.get("symbol")?)?;
     Some((count, bytes, symbol))
+}
+
+fn browser_summary(trace: &CanonicalJson) -> Option<(usize, String)> {
+    let items = content_array(trace, "browser")?;
+    let CanonicalJson::Object(first) = items.first()? else { return None };
+    Some((items.len(), symbol_label(first.get("symbol")?)?))
 }
 
 fn task_summary(trace: &CanonicalJson) -> Option<(usize, usize, String)> {
