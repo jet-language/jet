@@ -1575,23 +1575,27 @@ impl<'a> Interp<'a> {
 
         // Mutating list/map methods on a named variable write back in place.
         const MUTATING: &[&str] = &[
-            "push", "pop", "insert", "add", "add_new", "remove", "clear", "reverse",
-            "sort",
+            "push", "pop", "insert", "add", "add_new", "remove", "clear", "reverse", "sort",
         ];
         if MUTATING.contains(&method) && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
-            let mut argv = Vec::new();
-            for a in args {
-                argv.push(self.eval(&a.expr, scope)?);
-            }
             let mut container = match &evaluated_receiver {
                 Some(value) => value.clone(),
                 None => self.eval(receiver, scope)?,
             };
-            if !matches!(
-                &container,
-                CtValue::Struct { type_name, .. }
-                    if type_name == crate::Syntax::TYPE_BYTE_BUFFER
-            ) {
+            let handled_here = matches!(&container, CtValue::List(_) | CtValue::Map(_))
+                || matches!(
+                    &container,
+                    CtValue::Struct { type_name, .. }
+                        if method == "add" && matches!(
+                            type_name.as_str(),
+                            "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
+                        )
+                );
+            if handled_here {
+                let mut argv = Vec::new();
+                for a in args {
+                    argv.push(self.eval(&a.expr, scope)?);
+                }
                 if let Some(result) = sequence_parity::eval_sequence_method(
                     self,
                     &container,
@@ -1618,6 +1622,7 @@ impl<'a> Interp<'a> {
                 self.write_back(receiver, container, scope)?;
                 return Ok(ret);
             }
+            evaluated_receiver = Some(container);
         }
         let recv = match evaluated_receiver {
             Some(value) => value,

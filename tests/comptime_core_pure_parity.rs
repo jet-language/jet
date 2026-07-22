@@ -21,6 +21,16 @@ const CIVIL_DEV_DECLS: &str = "use core.time.date as date\nuse core.time.datetim
 const MEASUREMENT_FN: &str = "fn measurement_math() -> String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
 const MEASUREMENT_DECLS: &str = "use core.science.measurement as measurement\nfn measurement_math() -> String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
 const MEASUREMENT_EXPR: &str = "measurement_math()";
+const ADD_ARGUMENT_ONCE_DECLS: &str = r#"fn counted_measurement(hits: &Int) -> Measurement<Float> {
+    hits += 1
+    return measurement.from(1.0, 0.0)
+}
+fn add_argument_once_view() -> String {
+    hits := 0
+    measured :: measurement.from(2.0, 0.0)
+    sum :: measured.add(counted_measurement(&hits))
+    return "{sum.value()}|{hits}"
+}"#;
 const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
     i8: I8 :: -12
     i16: I16 :: -1234
@@ -596,6 +606,16 @@ fn public_transcript_covers_civil_and_measurement_value_methods_exactly() {
             "\"3.0|5.0|3.0|5.0|0.0|9.0|4.0|0.0\" : String",
         ]
     );
+}
+
+#[test]
+fn public_transcript_evaluates_pure_add_arguments_once() {
+    let values = exact_values(&[
+        "use core.science.measurement as measurement",
+        ADD_ARGUMENT_ONCE_DECLS,
+        "add_argument_once_view()",
+    ]);
+    assert_eq!(values, ["\"3.0|1\" : String"]);
 }
 
 #[test]
