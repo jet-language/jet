@@ -946,7 +946,7 @@ fn web_missing_return_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
-    let src = "@Target(Web)\n@WasmExport\nfn echo(s: ^String) -> String { return s }\nfn run() {}\n";
+    let src = "@Target(Web)\n@WasmExport\nfn echo(xs: [Float]) -> [Float] { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_wasm_abi.jet")
         .expect_err("unsupported Wasm ABI must be rejected before emission");
     assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
@@ -954,7 +954,7 @@ fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
-    let src = "@Target(Web)\nfn helper(s: ^String) -> String { return s }\nfn run() {}\n";
+    let src = "@Target(Web)\nfn helper(xs: [Float]) -> [Float] { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_internal_wasm_abi.jet")
         .expect_err("unsupported internal Wasm ABI must be rejected before emission");
     assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
@@ -1010,7 +1010,7 @@ fn run() { print("hello, web") }
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
     assert!(wasm.contains("fn jet_wasm_tools__dev() -> i64"), "module tools.dev was not emitted:\n{wasm}");
-    assert!(wasm.contains("println!(\"{}\", \"hello, web\")"), "literal TIR print was not emitted:\n{wasm}");
+    assert!(wasm.contains("println!(\"{}\", \"hello, web\".to_string())"), "literal TIR print was not emitted:\n{wasm}");
     let js = &web.js_app;
     assert!(!js.contains("function dev("), "top-level host dev leaked into JS runtime:\n{js}");
 }
@@ -1679,5 +1679,54 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
         stdout.contains("emoji🌍"),
         "Unicode scalar was lost:\n{stdout}"
     );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_map_string_int_export_hostile_roundtrip() {
+    // D-JSBIND1 / criterion #3: [String: Int] params+returns use a contiguous
+    // LE [count][key-len][utf8][i64]... blob. Live JS -> Wasm -> JS -> Wasm
+    // proof covers empty/control/Unicode keys, signed values, and ownership.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm map-string-int (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_map.jet");
+    let dir = build_web_fixture("wasm_map", src, "examples/features/web/web_wasm_map.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("fn jet_abi_map_string_i64_ret(")
+            && wasm.contains("fn jet_abi_map_string_i64_arg("),
+        "map-string-int ABI helpers missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) -> u32")
+            && wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32)"),
+        "map-string-int ownership exports missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_map_string_i64_ret(jet_wasm_")
+            && wasm.contains("jet_abi_map_string_i64_arg("),
+        "export wrappers must pack/unpack [String: Int]:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("marshalAbi(") && js.contains("\"map-string-int\""),
+        "JS bridge must marshal [String: Int] params:\n{js}"
+    );
+    assert!(
+        js.contains("unmarshalAbi(raw, \"map-string-int\", wasm)"),
+        "JS bridge must unmarshal [String: Int] returns:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_map_string_i64_alloc")
+            && runtime.contains("jet_abi_map_string_i64_free")
+            && runtime.contains("map-string-int"),
+        "runtime missing map-string-int ABI encode/decode:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_map.out");
+    assert_eq!(stdout, expected);
     let _ = fs::remove_dir_all(&dir);
 }

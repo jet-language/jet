@@ -223,6 +223,15 @@ fn is_list_string(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if matches!(**inner, Type::String))
 }
 
+fn is_map_string_int(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Map { key, value, .. }
+            if matches!(**key, Type::String)
+                && matches!(**value, Type::Int | Type::IntN { .. })
+    )
+}
+
 fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc) -> bool {
     let ty_supported = if f.web_marker == Some(WebPartitionMarker::WasmExport) {
         wasm_export_ty
@@ -231,14 +240,15 @@ fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc) -> bool {
     };
     flattened_web_params(tir)
         .iter().all(|(_, ty)| ty_supported(ty).is_some())
-        // D-JSBIND1: String / [Int] / [String] params/returns cross the export
-        // boundary as packed (ptr,len) u64 ownership transfers.
+        // D-JSBIND1: String / [Int] / [String] / [String: Int] params/returns
+        // cross the export boundary as packed (ptr,len) u64 ownership transfers.
         && f.return_type
             .as_ref()
             .map(|ty| {
                 matches!(ty, Type::String)
                     || is_list_int(ty)
                     || is_list_string(ty)
+                    || is_map_string_int(ty)
                     || wasm_export_ty(ty).is_some()
             })
             .unwrap_or(true)
@@ -310,6 +320,10 @@ fn web_wasm_expr_supported(
                 r.local_rust == *local && r.fields.iter().any(|(field, _, _)| field == field_rust)
             })
         }
+        TIR::TExprKind::Index { base, index, is_map: true, .. } => {
+            web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
+        }
         TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)),
         TIR::TExprKind::ModuleCall { form, args } => {
@@ -367,6 +381,7 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
         E::ListLit(elements) => elements.iter().all(web_expr_supported),
+        E::MapLit(entries) => entries.iter().all(|(key, value)| web_expr_supported(key) && web_expr_supported(value)),
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
@@ -686,6 +701,15 @@ fn js_abi_call_args(
             ));
             vec![format!("_{name}")]
         }
+        Type::Map { key, value, .. }
+            if matches!(**key, Type::String)
+                && matches!(**value, Type::Int | Type::IntN { .. }) =>
+        {
+            prelude.push_str(&format!(
+                "  const _{name} = jetDom.marshalAbi({name}, \"map-string-int\", wasm);\n"
+            ));
+            vec![format!("_{name}")]
+        }
         _ => vec![name.to_string()],
     }
 }
@@ -871,6 +895,80 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              }\n\n",
         );
     }
+    if need_packed_abi(&is_map_string_int) {
+        // D-JSBIND1=A: [String: Int] as contiguous LE blob —
+        // [count:u32][keyLen:u32][utf8…][val:i64 LE]… packed u64 (ptr<<32)|byte_len.
+        // Entries encoded in BTreeMap key order. Empty → 0.
+        out.push_str(
+            "fn jet_abi_map_string_i64_ret(m: std::collections::BTreeMap<String, i64>) -> u64 {\n\
+             \x20   if m.is_empty() {\n\
+             \x20       return 0;\n\
+             \x20   }\n\
+             \x20   let mut buf: Vec<u8> = Vec::new();\n\
+             \x20   let count = m.len() as u32;\n\
+             \x20   buf.extend_from_slice(&count.to_le_bytes());\n\
+             \x20   for (k, v) in &m {\n\
+             \x20       let bytes = k.as_bytes();\n\
+             \x20       let len = bytes.len() as u32;\n\
+             \x20       buf.extend_from_slice(&len.to_le_bytes());\n\
+             \x20       buf.extend_from_slice(bytes);\n\
+             \x20       buf.extend_from_slice(&v.to_le_bytes());\n\
+             \x20   }\n\
+             \x20   let boxed = buf.into_boxed_slice();\n\
+             \x20   let byte_len = boxed.len() as u32;\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   ((ptr as u64) << 32) | (byte_len as u64)\n\
+             }\n\n\
+             fn jet_abi_map_string_i64_arg(packed: u64) -> std::collections::BTreeMap<String, i64> {\n\
+             \x20   let ptr = (packed >> 32) as u32;\n\
+             \x20   let byte_len = (packed & 0xffff_ffff) as u32;\n\
+             \x20   if byte_len == 0 {\n\
+             \x20       if ptr != 0 {\n\
+             \x20           unsafe {\n\
+             \x20               let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0));\n\
+             \x20           }\n\
+             \x20       }\n\
+             \x20       return std::collections::BTreeMap::new();\n\
+             \x20   }\n\
+             \x20   unsafe {\n\
+             \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
+             \x20       let buf = boxed.into_vec();\n\
+             \x20       let mut i = 0usize;\n\
+             \x20       assert!(buf.len() >= 4, \"map-string-int header\");\n\
+             \x20       let count = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;\n\
+             \x20       i = 4;\n\
+             \x20       let mut out = std::collections::BTreeMap::new();\n\
+             \x20       for _ in 0..count {\n\
+             \x20           let len_end = i.checked_add(4).expect(\"map-string-int key len overflow\");\n\
+             \x20           assert!(len_end <= buf.len(), \"map-string-int key len\");\n\
+             \x20           let len = u32::from_le_bytes(buf[i..len_end].try_into().unwrap()) as usize;\n\
+             \x20           i = len_end;\n\
+             \x20           let key_end = i.checked_add(len).expect(\"map-string-int key overflow\");\n\
+             \x20           let value_end = key_end.checked_add(8).expect(\"map-string-int value overflow\");\n\
+             \x20           assert!(value_end <= buf.len(), \"map-string-int entry\");\n\
+             \x20           let key = String::from_utf8(buf[i..key_end].to_vec()).expect(\"JS UTF-8\");\n\
+             \x20           let val = i64::from_le_bytes(buf[key_end..value_end].try_into().unwrap());\n\
+             \x20           i = value_end;\n\
+             \x20           out.insert(key, val);\n\
+             \x20       }\n\
+             \x20       assert_eq!(i, buf.len(), \"map-string-int trailing bytes\");\n\
+             \x20       out\n\
+             \x20   }\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) -> u32 {\n\
+             \x20   let boxed = vec![0u8; byte_len as usize].into_boxed_slice();\n\
+             \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32) {\n\
+             \x20   if ptr == 0 { return; }\n\
+             \x20   unsafe {\n\
+             \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
+             \x20   }\n\
+             }\n\n",
+        );
+    }
     let mut emitted_structs = std::collections::HashSet::new();
     for f in &wasm_funcs {
         for reconstruction in &f.tir.web_param_reconstructions {
@@ -899,12 +997,14 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
     let string_ret = matches!(f.return_type.as_ref(), Some(Type::String));
     let list_ret = f.return_type.as_ref().is_some_and(is_list_int);
     let list_string_ret = f.return_type.as_ref().is_some_and(is_list_string);
+    let map_ret = f.return_type.as_ref().is_some_and(is_map_string_int);
     let flat = flattened_web_params(&f.tir);
     let string_params = flat.iter().any(|(_, ty)| matches!(ty, Type::String));
     let list_params = flat.iter().any(|(_, ty)| is_list_int(ty));
     let list_string_params = flat.iter().any(|(_, ty)| is_list_string(ty));
+    let map_params = flat.iter().any(|(_, ty)| is_map_string_int(ty));
     let reconstructed_export = export && !f.tir.web_param_reconstructions.is_empty();
-    // String / [Int] / [String] cannot be bare `extern "C"` — wrap as packed u64.
+    // String / [Int] / [String] / [String: Int] cannot be bare `extern "C"` — wrap as packed u64.
     let wrapped_export = export
         && (reconstructed_export
             || string_ret
@@ -912,7 +1012,9 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
             || list_ret
             || list_params
             || list_string_ret
-            || list_string_params);
+            || list_string_params
+            || map_ret
+            || map_params);
     if wrapped_export {
         out.push_str(&format!(
             "#[no_mangle]\npub extern \"C\" fn {}(",
@@ -925,7 +1027,7 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
             .ok_or_else(|| web_emit_error(f))?;
         out.push_str(&params.join(", "));
         out.push(')');
-        if string_ret || list_ret || list_string_ret {
+        if string_ret || list_ret || list_string_ret || map_ret {
             out.push_str(" -> u64 ");
         } else if let Some(ret) = &f.return_type {
             out.push_str(&format!(" -> {} ", wasm_ty(ret).ok_or_else(|| web_emit_error(f))?));
@@ -938,6 +1040,8 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
                 out.push_str(&format!("    let {name} = jet_abi_list_i64_arg({name});\n"));
             } else if is_list_string(ty) {
                 out.push_str(&format!("    let {name} = jet_abi_list_string_arg({name});\n"));
+            } else if is_map_string_int(ty) {
+                out.push_str(&format!("    let {name} = jet_abi_map_string_i64_arg({name});\n"));
             }
         }
         for reconstruction in &f.tir.web_param_reconstructions {
@@ -972,6 +1076,11 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
         } else if list_string_ret {
             out.push_str(&format!(
                 "    return jet_abi_list_string_ret(jet_wasm_{}({args}));\n",
+                f.key
+            ));
+        } else if map_ret {
+            out.push_str(&format!(
+                "    return jet_abi_map_string_i64_ret(jet_wasm_{}({args}));\n",
                 f.key
             ));
         } else if f.return_type.is_some() {
@@ -1032,6 +1141,12 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::String => Some("String"),
         Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("Vec<i64>"),
         Type::List(inner) if matches!(**inner, Type::String) => Some("Vec<String>"),
+        Type::Map { key, value, .. }
+            if matches!(**key, Type::String)
+                && matches!(**value, Type::Int | Type::IntN { .. }) =>
+        {
+            Some("std::collections::BTreeMap<String, i64>")
+        }
         _ => None,
     }
 }
@@ -1066,6 +1181,15 @@ fn wasm_param_rust_ty(ty: &Type, conv: AccessConvention) -> Option<&'static str>
         (AccessConvention::Move, Type::List(inner)) if matches!(**inner, Type::String) => {
             Some("Vec<String>")
         }
+        (AccessConvention::Read, ty) if is_map_string_int(ty) => {
+            Some("&std::collections::BTreeMap<String, i64>")
+        }
+        (AccessConvention::Write, ty) if is_map_string_int(ty) => {
+            Some("&mut std::collections::BTreeMap<String, i64>")
+        }
+        (AccessConvention::Move, ty) if is_map_string_int(ty) => {
+            Some("std::collections::BTreeMap<String, i64>")
+        }
         (AccessConvention::Read, t) if t.is_scalar() => wasm_ty(t),
         (AccessConvention::Read, _) => None,
         _ => wasm_ty(ty),
@@ -1088,6 +1212,8 @@ fn wasm_export_arg_expr(name: &str, ty: &Type, conv: AccessConvention) -> String
         {
             format!("&mut {name}")
         }
+        (AccessConvention::Read, ty) if is_map_string_int(ty) => format!("&{name}"),
+        (AccessConvention::Write, ty) if is_map_string_int(ty) => format!("&mut {name}"),
         _ => name.to_string(),
     }
 }
@@ -1098,6 +1224,7 @@ fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
         Type::String => Some("u64"),
         Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("u64"),
         Type::List(inner) if matches!(**inner, Type::String) => Some("u64"),
+        ty if is_map_string_int(ty) => Some("u64"),
         _ => wasm_ty(ty),
     }
 }
@@ -1232,6 +1359,11 @@ fn wasm_emit_expr(
             }
             format!("({}).{}", wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?, field_rust)
         }
+        TIR::TExprKind::Index { base, index, is_map: true, .. } => format!(
+            "({}).get(&({})).cloned().expect(\"index miss\")",
+            wasm_emit_expr(base, funcs, file_prefix, reconstructions)?,
+            wasm_emit_expr(index, funcs, file_prefix, reconstructions)?,
+        ),
         TIR::TExprKind::Call { name, args } => {
             let key = local_web_key(file_prefix, name);
             let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
@@ -1303,9 +1435,10 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<Strin
                 Some(Type::String) => "string",
                 Some(ty) if is_list_int(ty) => "list-int",
                 Some(ty) if is_list_string(ty) => "list-string",
+                Some(ty) if is_map_string_int(ty) => "map-string-int",
                 _ => "scalar",
             };
-            if ret_kind == "string" || ret_kind == "list-int" || ret_kind == "list-string" {
+            if ret_kind == "string" || ret_kind == "list-int" || ret_kind == "list-string" || ret_kind == "map-string-int" {
                 out.push_str(&format!(
                     "  return jetDom.unmarshalAbi(raw, \"{ret_kind}\", wasm);\n"
                 ));
@@ -1500,6 +1633,14 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::Field { recv, field_rust, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field_rust)),
         E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
         E::ListLit(elements) => format!("[{}]", elements.iter().map(|element| tir_js_expr(element, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", ")),
+        E::MapLit(entries) => format!(
+            "new Map([{}])",
+            entries.iter().map(|(key, value)| Ok(format!(
+                "[{}, {}]",
+                tir_js_expr(key, funcs, file_prefix)?,
+                tir_js_expr(value, funcs, file_prefix)?,
+            ))).collect::<Result<Vec<_>, ()>>()?.join(", ")
+        ),
         E::Call { name, args } => {
             let name = local_web_key(file_prefix, name);
             let args = tir_call_args(args, funcs, file_prefix)?;

@@ -90,6 +90,23 @@ fn run() {}
 }
 
 #[test]
+fn recursive_map_export_remains_an_honest_unsupported_error() {
+    let src = r#"
+@WasmExport
+fn echo(values: [String: [Int]]) -> [String: [Int]] { return ~values }
+
+@Target(Js)
+fn run() {}
+"#;
+    let diags = jet::compile_web_with_path(src, "tests/fixtures/web_recursive_map.jet")
+        .expect_err("recursive Map ABI must remain loud until an adapter exists");
+    assert_eq!(
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>(),
+        ["E-WEB-TIR-UNSUPPORTED"]
+    );
+}
+
+#[test]
 fn web_partition_report_generated_for_web_compile() {
     let src = include_str!("../examples/features/web/web_compute.jet");
     let out = jet::compile_web_with_path(src, "examples/features/web/web_compute.jet")

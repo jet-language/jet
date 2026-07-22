@@ -1,0 +1,29 @@
+// D-JSBIND1 / #123: Wasm @WasmExport [String: Int] ABI with hostile empty,
+// control-character, Unicode, signed, and multi-entry JS -> Wasm -> JS -> Wasm roundtrip.
+@WasmExport
+fn echo_scores(scores: [String: Int]) -> [String: Int] {
+    return ~scores
+}
+
+@WasmExport
+fn score(scores: [String: Int], key: String) -> Int {
+    return scores[key]
+}
+
+@Target(Js)
+fn run() {
+    empty: [String: Int] :: []
+    empty_roundtrip := echo_scores(empty)
+    _empty_twice := echo_scores(empty_roundtrip)
+    scores: [String: Int] :: [
+        "": 0,
+        "tab\tline\nbreak": -7,
+        "emoji🌍": 42,
+        "z": 99,
+    ]
+    roundtrip := echo_scores(scores)
+    print(score(roundtrip, ""))
+    print(score(roundtrip, "tab\tline\nbreak"))
+    print(score(roundtrip, "emoji🌍"))
+    print(score(roundtrip, "z"))
+}
