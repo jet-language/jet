@@ -349,7 +349,7 @@ pub(super) fn literals(
                 + (usize::from(*block.get(4)?) << 10),
         ),
     };
-    if regenerated > BLOCK_MAX || compressed == 0 {
+    if regenerated > BLOCK_MAX || compressed == 0 || (streams == 4 && regenerated < 6) {
         return None;
     }
     let payload = block.get(header..header + compressed)?;

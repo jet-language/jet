@@ -37,10 +37,8 @@ pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
     out
 }
 
-// Staged decoder foundation. Keep private until the full format-law and AOT
-// compatibility review closes; private checkpoints must not leak publicly.
-#[allow(dead_code)]
-fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+// Dictionaryless, std-only Zstandard decoder used by the resident evaluator.
+pub(super) fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     let fail = |reason: &str| format!("compress.zstd.decompress: {reason}");
     let mut input = 0usize;
     let mut out = Vec::new();
@@ -937,7 +935,7 @@ mod tests {
     use super::*;
 
     fn stock_zstd(plain: &[u8]) -> Vec<u8> {
-        stock_zstd_with(plain, &[])
+        stock_zstd_with(plain, &["--no-check"])
     }
 
     fn stock_zstd_with(plain: &[u8], args: &[&str]) -> Vec<u8> {
@@ -945,7 +943,7 @@ mod tests {
         use std::process::{Command, Stdio};
 
         let mut child = Command::new("zstd")
-            .args(["-q", "--no-check", "-c"])
+            .args(["-q", "-c"])
             .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1197,7 +1195,49 @@ mod tests {
         for shift in [0, 4, 8] {
             plain.extend(base.iter().map(|byte| byte + shift));
         }
-        let frame = stock_zstd_with(&plain, &["-19"]);
+        let frame = stock_zstd_with(&plain, &["--no-check", "-19"]);
         assert_eq!(zstd_decompress(&frame), Ok(plain));
+    }
+
+    #[test]
+    fn zstd_stock_levels_checksums_fcs_and_concatenation_decode() {
+        let corpora = [
+            Vec::new(),
+            b"z".to_vec(),
+            b"the quick brown fox jumps over the lazy dog ".repeat(200),
+            (0..20_000).map(|index| (index * 37) as u8).collect::<Vec<_>>(),
+        ];
+        for plain in corpora {
+            for level in ["-1", "-5", "-19"] {
+                let size = format!("--stream-size={}", plain.len());
+                let frame = stock_zstd_with(&plain, &[level, &size]);
+                assert_eq!(zstd_decompress(&frame), Ok(plain.clone()), "level {level}");
+            }
+        }
+
+        let one = b"checked compressed frame".repeat(200);
+        let two = b"second checked frame".repeat(300);
+        let size_one = format!("--stream-size={}", one.len());
+        let size_two = format!("--stream-size={}", two.len());
+        let mut stream = stock_zstd_with(&one, &["-5", &size_one]);
+        stream.extend([80, 42, 77, 24, 3, 0, 0, 0, b'x', b'y', b'z']);
+        stream.extend(stock_zstd_with(&two, &["-19", &size_two]));
+        assert_eq!(zstd_decompress(&stream), Ok([one, two].concat()));
+    }
+
+    #[test]
+    fn zstd_mutated_compressed_frames_are_bounded_and_never_panic() {
+        let plain = b"mutation probe mutation probe mutation probe".repeat(4);
+        let frame = stock_zstd_with(&plain, &["-5"]);
+        for end in 0..frame.len() {
+            assert!(std::panic::catch_unwind(|| zstd_decompress(&frame[..end])).is_ok());
+        }
+        for index in 0..frame.len() {
+            for bit in 0..8 {
+                let mut mutated = frame.clone();
+                mutated[index] ^= 1 << bit;
+                assert!(std::panic::catch_unwind(|| zstd_decompress(&mutated)).is_ok());
+            }
+        }
     }
 }

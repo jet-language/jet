@@ -233,9 +233,7 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
 /// the complete AOT contract is resident. A public comptime arm is a false
 /// parity claim while an entry remains here. Remove the entry in the same
 /// commit that completes and dispatches the call.
-// Zstandard frame/raw/RLE decoding exists, but compressed blocks still require
-// the complete Huffman/FSE substrate.
-const KNOWN_PARTIAL_GAPS: &[(&str, &str)] = &[("core.compress.zstd", "decompress")];
+const KNOWN_PARTIAL_GAPS: &[(&str, &str)] = &[];
 
 fn raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
     let mut i = match (bytes.get(start), bytes.get(start + 1)) {
@@ -1613,11 +1611,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         );
         assert_eq!(
             record(&records, Surface::Fixed, "core.compress.zstd", method).class,
-            if method == "compress" {
-                Class::Covered
-            } else {
-                Class::PurePending
-            }
+            Class::Covered
         );
     }
     assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
@@ -1667,7 +1661,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 788, 1, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 789, 0, 389));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1675,7 +1669,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        5859241465793181502,
+        4070249345243482995,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

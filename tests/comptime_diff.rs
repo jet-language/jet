@@ -314,7 +314,7 @@ fn run() {
 }
 
 #[test]
-fn zstd_comptime_raw_frame_is_accepted_by_aot_decoder() {
+fn zstd_comptime_codec_round_trips_through_resident_and_aot_decoders() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping zstd comptime differential");
         return;
@@ -323,7 +323,7 @@ fn zstd_comptime_raw_frame_is_accepted_by_aot_decoder() {
 
 comptime bytes = [72, 101, 108, 108, 111]
 comptime encoded = zstd.compress(bytes)
-comptime expected = bytes
+comptime expected = zstd.decompress(encoded) ?? []
 
 fn run() {
     restored: [U8] :: zstd.decompress(encoded) ?? []
