@@ -1796,6 +1796,30 @@ const bounded = {
   jet_abi_map_string_i64_alloc() { allocations += 1; return 60; },
   jet_abi_map_string_i64_free(ptr, byteLen) { frees.push([ptr, byteLen]); },
 };
+class HiddenEntryMap extends Map {
+  get size() { return 0; }
+  *[Symbol.iterator]() { yield ["hidden", 1n]; }
+}
+try {
+  marshalAbi(new HiddenEntryMap(), "map-string-int", bounded);
+  throw new Error("size-zero iterator entry accepted");
+} catch (error) {
+  check(error instanceof TypeError && error.message.includes("size/iterator mismatch"), "size-zero iterator mismatch was not rejected");
+}
+check(allocations === 0, "size-zero iterator mismatch allocated");
+
+class MissingEntryMap extends Map {
+  get size() { return 2; }
+  *[Symbol.iterator]() { yield ["visible", 1n]; }
+}
+try {
+  marshalAbi(new MissingEntryMap(), "map-string-int", bounded);
+  throw new Error("short iterator accepted");
+} catch (error) {
+  check(error instanceof TypeError && error.message.includes("size/iterator mismatch"), "short iterator mismatch was not rejected");
+}
+check(allocations === 0, "short iterator mismatch allocated");
+
 class HugeMap extends Map { get size() { return 0x1_0000_0000; } }
 try {
   marshalAbi(new HugeMap([["x", 1n]]), "map-string-int", bounded);

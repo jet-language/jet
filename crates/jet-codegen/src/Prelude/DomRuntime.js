@@ -552,8 +552,7 @@ export function marshalAbi(value, kind, wasm) {
     if (!(value instanceof Map)) {
       throw new TypeError("map-string-int ABI expects a Map");
     }
-    const count = abiU32(value.size, "map-string-int ABI entry count");
-    if (count === 0) return 0n;
+    const claimedCount = abiU32(value.size, "map-string-int ABI entry count");
     const enc = new TextEncoder();
     const entries = [];
     let byteLen = 4;
@@ -575,6 +574,11 @@ export function marshalAbi(value, kind, wasm) {
       byteLen = abiAddU32(byteLen, bytes.length, "map-string-int ABI blob length");
       byteLen = abiAddU32(byteLen, 8, "map-string-int ABI blob length");
     }
+    const count = abiU32(entries.length, "map-string-int ABI entry count");
+    if (count !== claimedCount) {
+      throw new TypeError("map-string-int ABI Map size/iterator mismatch");
+    }
+    if (count === 0) return 0n;
     const ptr = abiWasmU32(
       wasm.jet_abi_map_string_i64_alloc(byteLen),
       "map-string-int ABI allocation pointer",
