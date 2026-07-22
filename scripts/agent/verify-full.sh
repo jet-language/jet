@@ -50,10 +50,12 @@ esac
 export JET_CANVAS_PREREQUISITES=strict
 
 canvas_missing=()
-for canvas_tool in chromium node; do
+for canvas_tool in chromium firefox geckodriver node; do
   canvas_command="$canvas_tool"
   case "$canvas_tool" in
     chromium) canvas_command="${JET_CANVAS_CHROMIUM:-chromium}" ;;
+    firefox) canvas_command="${JET_CANVAS_FIREFOX:-firefox}" ;;
+    geckodriver) canvas_command="${JET_CANVAS_GECKODRIVER:-geckodriver}" ;;
     node) canvas_command="${JET_CANVAS_NODE:-node}" ;;
   esac
   canvas_resolved="$(command -v -- "$canvas_command" 2>/dev/null || true)"
@@ -63,6 +65,8 @@ for canvas_tool in chromium node; do
   fi
   case "$canvas_tool:$canvas_version" in
     chromium:*Chromium*|chromium:*Chrome*) ;;
+    firefox:*Firefox*) ;;
+    geckodriver:geckodriver*) ;;
     node:v[0-9]*) ;;
     *) canvas_resolved="" ;;
   esac
@@ -70,6 +74,10 @@ for canvas_tool in chromium node; do
     canvas_missing+=("$canvas_tool")
   elif [ "$canvas_tool" = "chromium" ]; then
     export JET_CANVAS_CHROMIUM_RESOLVED="$canvas_resolved"
+  elif [ "$canvas_tool" = "firefox" ]; then
+    export JET_CANVAS_FIREFOX_RESOLVED="$canvas_resolved"
+  elif [ "$canvas_tool" = "geckodriver" ]; then
+    export JET_CANVAS_GECKODRIVER_RESOLVED="$canvas_resolved"
   else
     export JET_CANVAS_NODE_RESOLVED="$canvas_resolved"
   fi
@@ -77,9 +85,11 @@ done
 
 if ((${#canvas_missing[@]})); then
   missing_list="$(IFS=', '; echo "${canvas_missing[*]}")"
-  echo "error: Canvas interaction tests require Chromium and Node; missing: $missing_list. Run scripts/agent/jet-env full scripts/agent/verify-full.sh." >&2
+  echo "error: Canvas interaction tests require Chromium, Firefox/geckodriver, and Node; missing: $missing_list. Run scripts/agent/jet-env full scripts/agent/verify-full.sh." >&2
   exit 1
 fi
+
+export JET_CANVAS_GECKO_SMOKE=1
 
 # tests/cffi_native_matrix.rs::required_native_c_abi_matrix never skips (card
 # #436) — it needs a real C compiler/archiver/Rust toolchain to build and run

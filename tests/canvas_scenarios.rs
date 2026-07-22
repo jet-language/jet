@@ -18,7 +18,14 @@ struct CanvasTools {
     node: PathBuf,
 }
 
+struct GeckoTools {
+    firefox: PathBuf,
+    geckodriver: PathBuf,
+    node: PathBuf,
+}
+
 static CANVAS_TOOLS: OnceLock<Option<CanvasTools>> = OnceLock::new();
+static GECKO_TOOLS: OnceLock<Result<GeckoTools, String>> = OnceLock::new();
 
 #[test]
 fn full_verification_uses_clean_short_external_tmpdir() {
@@ -83,14 +90,46 @@ fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
     ));
     fs::create_dir_all(&tools).unwrap();
     let chromium = tools.join("chromium");
+    let firefox = tools.join("firefox");
+    let geckodriver = tools.join("geckodriver");
     let node = tools.join("node");
     fs::write(&chromium, "#!/bin/sh\necho 'Chromium 1'\n").unwrap();
+    fs::write(&firefox, "#!/bin/sh\necho 'Mozilla Firefox 1'\n").unwrap();
+    fs::write(&geckodriver, "#!/bin/sh\necho 'geckodriver 1'\n").unwrap();
     fs::write(&node, "#!/bin/sh\necho 'v1.0.0'\n").unwrap();
     fs::set_permissions(&chromium, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(&firefox, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::set_permissions(&geckodriver, fs::Permissions::from_mode(0o755)).unwrap();
     fs::set_permissions(&node, fs::Permissions::from_mode(0o755)).unwrap();
-    for (missing, chromium, node) in [
-        ("chromium", tools.join("missing-chromium"), node),
-        ("node", chromium, tools.join("missing-node")),
+    for (missing, chromium, firefox, geckodriver, node) in [
+        (
+            "chromium",
+            tools.join("missing-chromium"),
+            firefox.clone(),
+            geckodriver.clone(),
+            node.clone(),
+        ),
+        (
+            "firefox",
+            chromium.clone(),
+            tools.join("missing-firefox"),
+            geckodriver.clone(),
+            node.clone(),
+        ),
+        (
+            "geckodriver",
+            chromium.clone(),
+            firefox.clone(),
+            tools.join("missing-geckodriver"),
+            node.clone(),
+        ),
+        (
+            "node",
+            chromium,
+            firefox,
+            geckodriver,
+            tools.join("missing-node"),
+        ),
     ] {
         let output = Command::new("bash")
             .current_dir(&repo)
@@ -99,19 +138,20 @@ fn strict_full_verification_rejects_each_missing_canvas_tool_once() {
             .env("JET_VERIFY_TEMP_PROBE_ONLY", "1")
             .env("JET_NIX_TMP_CLEANED", "1")
             .env("JET_CANVAS_CHROMIUM", &chromium)
+            .env("JET_CANVAS_FIREFOX", &firefox)
+            .env("JET_CANVAS_GECKODRIVER", &geckodriver)
             .env("JET_CANVAS_NODE", &node)
             .output()
             .expect("run strict Canvas prerequisite preflight");
         assert!(!output.status.success(), "missing {missing} must fail");
         let stderr = String::from_utf8_lossy(&output.stderr);
         let expected = format!(
-            "error: Canvas interaction tests require Chromium and Node; missing: {missing}. Run scripts/agent/jet-env full scripts/agent/verify-full.sh."
+            "error: Canvas interaction tests require Chromium, Firefox/geckodriver, and Node; missing: {missing}. Run scripts/agent/jet-env full scripts/agent/verify-full.sh."
         );
         assert_eq!(stderr.matches(&expected).count(), 1, "{stderr}");
         assert!(!stderr.contains("ignored:"), "{stderr}");
     }
     fs::remove_dir_all(tools).unwrap();
-
 }
 
 #[test]
@@ -123,19 +163,23 @@ fn strict_full_verification_rejects_executable_impostors() {
         .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
         .env("JET_NIX_TMP_CLEANED", "1")
         .env("JET_CANVAS_CHROMIUM", "true")
+        .env("JET_CANVAS_FIREFOX", "true")
+        .env("JET_CANVAS_GECKODRIVER", "true")
         .env("JET_CANVAS_NODE", "true")
         .output()
         .expect("run strict Canvas prerequisite preflight");
     assert!(!output.status.success(), "arbitrary executables must fail identity checks");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(stderr.matches("Canvas interaction tests require").count(), 1, "{stderr}");
-    assert!(stderr.contains("missing: chromium,node"), "{stderr}");
+    assert!(stderr.contains("missing: chromium,firefox,geckodriver,node"), "{stderr}");
 }
 
 #[test]
 fn strict_full_verification_accepts_canvas_tools_in_dev_shell() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let chromium = resolve_executable("chromium").expect("dev-shell chromium path");
+    let firefox = resolve_executable("firefox").expect("dev-shell firefox path");
+    let geckodriver = resolve_executable("geckodriver").expect("dev-shell geckodriver path");
     let node = resolve_executable("node").expect("dev-shell node path");
     let output = Command::new("bash")
         .current_dir(&repo)
@@ -143,6 +187,8 @@ fn strict_full_verification_accepts_canvas_tools_in_dev_shell() {
         .env("JET_VERIFY_CANVAS_PREREQUISITES_ONLY", "1")
         .env("JET_NIX_TMP_CLEANED", "1")
         .env("JET_CANVAS_CHROMIUM", &chromium)
+        .env("JET_CANVAS_FIREFOX", &firefox)
+        .env("JET_CANVAS_GECKODRIVER", &geckodriver)
         .env("JET_CANVAS_NODE", &node)
         .output()
         .expect("run strict Canvas prerequisite preflight");
@@ -384,11 +430,75 @@ fn harness_click_noop_selftest() {
     run_canvas_scenario("harness-click-noop-selftest");
 }
 
+#[test]
+fn gecko_smoke() {
+    if std::env::var_os("JET_CANVAS_GECKO_SMOKE").as_deref()
+        != Some(std::ffi::OsStr::new("1"))
+    {
+        eprintln!("ignored: Gecko smoke lane not selected");
+        return;
+    }
+    let tools = gecko_tools().unwrap_or_else(|error| panic!("{error}"));
+    run_gecko_cleanup_probe(tools);
+    for name in [
+        "open-and-render",
+        "pan-zoom-fit",
+        "click-select-details",
+        "palette-insert-core-fn",
+        "wire-data-and-exec",
+        "undo-restores-source",
+        "check-button-populates-panel",
+        "random-ops-source-sync",
+    ] {
+        run_browser_scenario(
+            name,
+            "firefox",
+            &tools.node,
+            &[
+                ("FIREFOX", tools.firefox.as_path()),
+                ("GECKODRIVER", tools.geckodriver.as_path()),
+            ],
+        );
+    }
+}
+
+fn run_gecko_cleanup_probe(tools: &GeckoTools) {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new(&tools.node)
+        .current_dir(&repo)
+        .env("FIREFOX", &tools.firefox)
+        .env("GECKODRIVER", &tools.geckodriver)
+        .arg("scripts/canvas-test/gecko-lifecycle.mjs")
+        .output()
+        .expect("run Gecko cleanup lifecycle probe");
+    assert!(
+        output.status.success(),
+        "Gecko cleanup lifecycle probe failed\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+}
+
 fn run_canvas_scenario(name: &str) {
     let Some(tools) = canvas_tools() else {
         eprintln!("ignored: Canvas scenario `{name}` needs dev-shell Chromium and Node");
         return;
     };
+    run_browser_scenario(
+        name,
+        "chromium",
+        &tools.node,
+        &[("CHROMIUM", tools.chromium.as_path())],
+    );
+}
+
+fn run_browser_scenario(
+    name: &str,
+    browser: &str,
+    node: &Path,
+    environment: &[(&str, &Path)],
+) {
     let _browser_permit = CanvasBrowserPermit::acquire();
     ensure_jet_built();
 
@@ -396,18 +506,22 @@ fn run_canvas_scenario(name: &str) {
     let case = CanvasCase::new(&repo, name);
     let port = free_port();
     let mut server = DevServer::start(&repo, &case.dir, &case.entry, port);
-    let output = Command::new(&tools.node)
+    let mut command = Command::new(node);
+    command
         .current_dir(&repo)
-        .env("CHROMIUM", &tools.chromium)
+        .envs(environment.iter().copied())
         .arg("scripts/canvas-test/run.mjs")
         .arg("--scenario")
         .arg(name)
+        .arg("--browser")
+        .arg(browser)
         .arg("--port")
         .arg(port.to_string())
         .arg("--out-dir")
         .arg(&case.screenshots)
         .arg("--seed")
-        .arg("373")
+        .arg("373");
+    let output = command
         .output()
         .expect("run Canvas scenario driver");
     let server_log = server.stop();
@@ -474,6 +588,27 @@ fn canvas_tools() -> Option<&'static CanvasTools> {
         .as_ref()
 }
 
+fn gecko_tools() -> Result<&'static GeckoTools, &'static str> {
+    GECKO_TOOLS
+        .get_or_init(|| {
+            let strict = std::env::var_os("JET_CANVAS_PREREQUISITES").as_deref()
+                == Some(std::ffi::OsStr::new("strict"));
+            let firefox = resolve_canvas_tool("firefox", strict)
+                .ok_or_else(|| "Gecko smoke needs a valid Firefox executable".to_owned())?;
+            let geckodriver = resolve_canvas_tool("geckodriver", strict)
+                .ok_or_else(|| "Gecko smoke needs a valid geckodriver executable".to_owned())?;
+            let node = resolve_canvas_tool("node", strict)
+                .ok_or_else(|| "Gecko smoke needs a valid Node executable".to_owned())?;
+            Ok(GeckoTools {
+                firefox,
+                geckodriver,
+                node,
+            })
+        })
+        .as_ref()
+        .map_err(String::as_str)
+}
+
 fn resolve_canvas_tool(name: &str, strict: bool) -> Option<PathBuf> {
     let resolved_key = format!("JET_CANVAS_{}_RESOLVED", name.to_ascii_uppercase());
     let override_key = format!("JET_CANVAS_{}", name.to_ascii_uppercase());
@@ -491,6 +626,8 @@ fn resolve_canvas_tool(name: &str, strict: bool) -> Option<PathBuf> {
     );
     let valid = match name {
         "chromium" => version.contains("Chromium") || version.contains("Chrome"),
+        "firefox" => version.contains("Firefox"),
+        "geckodriver" => version.starts_with("geckodriver"),
         "node" => version.starts_with('v')
             && version.as_bytes().get(1).is_some_and(u8::is_ascii_digit),
         _ => false,

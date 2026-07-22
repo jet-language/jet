@@ -215,10 +215,12 @@
             pkgs.raylib
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-            # D-CANVASTEST1=A: Canvas interaction tests drive Chromium through
-            # the repo-owned stdlib-only CDP pipe driver. nixpkgs Chromium is
-            # Linux-only, so it must not make macOS dev shells unevaluable.
+            # D-CANVASTEST1=A / #390: Canvas interaction tests drive Chromium
+            # through CDP and Firefox through WebDriver Classic. Browser tools
+            # are Linux-only so macOS dev shells remain evaluable.
             pkgs.chromium
+            pkgs.firefox
+            pkgs.geckodriver
             # The native GTK backend is Linux-first (D-UIDEVSHELL1=A); keep its
             # headers off platforms where that backend is not supported.
             pkgs.gtk4

@@ -1,18 +1,19 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { CdpDriver } from "./driver.mjs";
+import { createDriver } from "./driver.mjs";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class CanvasScenario {
-  constructor({ port, outDir, scenarioName, seed = 373 }) {
+  constructor({ port, outDir, scenarioName, seed = 373, browser = "chromium" }) {
     this.port = port;
     this.outDir = outDir;
     this.scenarioName = scenarioName;
     this.seed = Number(seed) || 373;
-    this.driver = new CdpDriver();
+    this.browser = browser;
+    this.driver = createDriver(browser);
     this.lastScreenshot = null;
   }
 
@@ -240,7 +241,7 @@ export class CanvasScenario {
     if (!state || state.undoDepth < 1) throw new Error("undo helper missing or stack empty");
     const asyncUndo = await this.driver.evaluate(`(() => {
       window.__jetCanvasHistoryPromise = window.__jetCanvasTest.undo();
-      return window.__jetCanvasHistoryPromise instanceof Promise;
+      return typeof window.__jetCanvasHistoryPromise?.then === "function";
     })()`);
     if (!asyncUndo) throw new Error("undo helper did not return asynchronous completion");
     await this.driver.evaluate(`window.__jetCanvasHistoryPromise`);
@@ -1159,13 +1160,7 @@ fn run() {
     await ctx.expectMenu("abs");
     await ctx.pickEntry("abs");
     await ctx.expectSourceContains("math.abs");
-    const undo = await ctx.driver.evaluate(`(() => {
-      const b = document.getElementById("undo-edit");
-      if (!b) return false;
-      b.click();
-      return true;
-    })()`);
-    if (!undo) throw new Error("undo button missing");
+    await ctx.driver.shortcut(["Control", "z"]);
     await ctx.waitFor(async () => {
       const source = await ctx.driver.evaluate(`fetch("/canvas/source", { cache: "no-store" }).then((r) => r.text())`);
       return source === before;
