@@ -139,6 +139,7 @@ fn run_session(action: &str, args: &[String]) -> i32 {
                             .map(|duration_ns| NativeTimingInput::Captured {
                                 duration_ns,
                                 observed_at_ns,
+                                process_id: snapshot.process_id,
                             })
                             .unwrap_or_else(|| NativeTimingInput::unavailable(observed_at_ns));
                         last_snapshot = Some(snapshot.text);
@@ -314,6 +315,7 @@ fn attach(args: &[String]) -> i32 {
                     duration_ns,
                     // Attach is a point capture: trace-session origin is now.
                     observed_at_ns: 0,
+                    process_id: pid,
                 })
                 .unwrap_or_else(|| NativeTimingInput::unavailable(wall_ns));
             match capture_from_source(
@@ -384,7 +386,12 @@ fn capture_from_source(
         path: path_text.clone(),
         name,
     });
-    let snapshot_tasks = snapshot.map(observe_tasks).unwrap_or_default();
+    let snapshot_tasks = snapshot
+        .and_then(|snapshot| {
+            let process_id = u32::try_from(json_u64(snapshot, "pid")?).ok()?;
+            Some(observe_tasks(snapshot, process_id))
+        })
+        .unwrap_or_default();
     let mut samples = Vec::new();
     // Honest wall: omit when zero; never invent 1ns via max(1).
     if let (Some(symbol), true) = (symbol.as_ref(), wall_ns > 0) {
@@ -414,17 +421,32 @@ fn capture_from_source(
         }
     }
     // Tasks: only rows observe published. Never invent ids/parents/states.
+    let mut observed_tasks = io_timeline
+        .map(IoTimeline::tasks)
+        .unwrap_or_else(|| snapshot_tasks.rows.clone());
+    observed_tasks.sort_by_key(ObservedTask::key);
+    let trace_task_ids = trace_task_id_map(&observed_tasks);
     let mut tasks = Vec::new();
     if let Some(symbol) = symbol.as_ref() {
-        let observed = io_timeline
-            .map(IoTimeline::tasks)
-            .unwrap_or_else(|| snapshot_tasks.rows.clone());
-        for observed in observed {
+        for observed in &observed_tasks {
+            let id = trace_task_ids[&observed.key()];
+            let parent = if observed.parent == 0 {
+                0
+            } else {
+                *trace_task_ids
+                    .get(&(observed.process_id, observed.parent))
+                    .ok_or_else(|| {
+                        format!(
+                            "observed task {} in process {} has missing parent {}",
+                            observed.id, observed.process_id, observed.parent
+                        )
+                    })?
+            };
             tasks.push(TraceTask {
-                id: observed.id,
-                parent: observed.parent,
-                state: observed.state,
-                wait: observed.wait,
+                id,
+                parent,
+                state: observed.state.clone(),
+                wait: observed.wait.clone(),
                 cancelled: observed.cancelled,
                 symbol: symbol.clone(),
             });
@@ -458,17 +480,20 @@ fn capture_from_source(
                         end_ns: wall_ns,
                         kind: io.kind,
                         start_ns: wall_ns,
-                        task_id: io.task_id,
+                        task: io.task,
                         wait: io.wait,
                     })
                     .collect()
             });
         for observed in observed {
+            let Some(task_id) = trace_task_ids.get(&observed.task).copied() else {
+                continue;
+            };
             io.push(TraceIo {
                 end_ns: observed.end_ns,
                 kind: observed.kind,
                 start_ns: observed.start_ns,
-                task_id: observed.task_id,
+                task_id,
                 wait: observed.wait,
                 symbol: symbol.clone(),
             });
@@ -476,14 +501,22 @@ fn capture_from_source(
     }
     let mut native = Vec::new();
     if let (Some(symbol), Some(timing)) = (symbol.as_ref(), native_timing) {
-        let root_task = tasks.iter().find(|task| task.parent == 0);
-        native.push(match (timing, root_task) {
+        let root_task_id = match timing {
+            NativeTimingInput::Captured { process_id, .. } => observed_tasks
+                .iter()
+                .find(|task| task.process_id == *process_id && task.parent == 0)
+                .and_then(|task| trace_task_ids.get(&task.key()))
+                .copied(),
+            NativeTimingInput::Unavailable { .. } => None,
+        };
+        native.push(match (timing, root_task_id) {
             (
                 NativeTimingInput::Captured {
                     duration_ns,
                     observed_at_ns,
+                    ..
                 },
-                Some(task),
+                Some(task_id),
             ) => TraceNative {
                 clock: "process_cpu".into(),
                 duration_ns: Some(*duration_ns),
@@ -492,7 +525,7 @@ fn capture_from_source(
                 status: "captured".into(),
                 symbol: symbol.clone(),
                 target: env!("JET_BUILD_TARGET").into(),
-                task_id: Some(task.id),
+                task_id: Some(task_id),
             },
             (NativeTimingInput::Captured { observed_at_ns, .. }, None) => TraceNative {
                 clock: "process_cpu".into(),
@@ -521,17 +554,33 @@ fn capture_from_source(
         match io_timeline {
             Some(timeline) if !timeline.task_spans.is_empty() => {
                 for observed in timeline.spans() {
+                    let Some(task_id) = trace_task_ids.get(&observed.task).copied() else {
+                        continue;
+                    };
+                    let parent_task_id = if observed.parent_task_id == 0 {
+                        None
+                    } else {
+                        Some(
+                            *trace_task_ids
+                                .get(&(observed.task.0, observed.parent_task_id))
+                                .ok_or_else(|| {
+                                    format!(
+                                        "observed span task {} in process {} has missing parent {}",
+                                        observed.task.1, observed.task.0, observed.parent_task_id
+                                    )
+                                })?,
+                        )
+                    };
                     spans.push(TraceSpan {
                         clock: "monotonic".into(),
                         end_ns: Some(observed.end_ns),
                         kind: "task_observed".into(),
-                        parent_task_id: (observed.parent_task_id != 0)
-                            .then_some(observed.parent_task_id),
+                        parent_task_id,
                         reason: String::new(),
                         start_ns: Some(observed.start_ns),
                         status: "captured".into(),
                         symbol: symbol.clone(),
-                        task_id: Some(observed.task_id),
+                        task_id: Some(task_id),
                     });
                 }
             }
@@ -589,7 +638,11 @@ fn capture_from_source(
 }
 
 enum NativeTimingInput {
-    Captured { duration_ns: u64, observed_at_ns: u64 },
+    Captured {
+        duration_ns: u64,
+        observed_at_ns: u64,
+        process_id: u32,
+    },
     Unavailable { observed_at_ns: u64, reason: String },
 }
 
@@ -637,6 +690,7 @@ fn observe_arena_resources(snapshot: &str) -> (u64, u64) {
 
 #[derive(Clone)]
 struct ObservedTask {
+    process_id: u32,
     id: u64,
     parent: u64,
     state: String,
@@ -644,19 +698,34 @@ struct ObservedTask {
     cancelled: bool,
 }
 
+type ObservedTaskKey = (u32, u64);
+
+impl ObservedTask {
+    fn key(&self) -> ObservedTaskKey {
+        (self.process_id, self.id)
+    }
+}
+
 #[derive(Clone, Default)]
 struct ObservedTasks {
+    process_id: u32,
     rows: Vec<ObservedTask>,
     truncated: bool,
 }
 
 /// Parse at most the artifact policy's task-row cap, in id order.
-fn observe_tasks(snapshot: &str) -> ObservedTasks {
+fn observe_tasks(snapshot: &str, process_id: u32) -> ObservedTasks {
     let Some(inner) = json_array_inner(snapshot, "tasks") else {
-        return ObservedTasks::default();
+        return ObservedTasks {
+            process_id,
+            ..ObservedTasks::default()
+        };
     };
     if inner.is_empty() {
-        return ObservedTasks::default();
+        return ObservedTasks {
+            process_id,
+            ..ObservedTasks::default()
+        };
     }
     let mut out = Vec::new();
     let (objects, truncated) = split_json_objects(inner, TRACE_TASK_ROW_LIMIT as usize);
@@ -676,6 +745,7 @@ fn observe_tasks(snapshot: &str) -> ObservedTasks {
         let wait = json_string(object, "wait").unwrap_or_default();
         let cancelled = object.contains("\"cancelled\":true");
         out.push(ObservedTask {
+            process_id,
             id,
             parent,
             state,
@@ -685,9 +755,21 @@ fn observe_tasks(snapshot: &str) -> ObservedTasks {
     }
     out.sort_by_key(|task| task.id);
     ObservedTasks {
+        process_id,
         rows: out,
         truncated,
     }
+}
+
+fn trace_task_id_map(tasks: &[ObservedTask]) -> BTreeMap<ObservedTaskKey, u64> {
+    tasks
+        .iter()
+        .map(ObservedTask::key)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .enumerate()
+        .map(|(index, key)| (key, index as u64 + 1))
+        .collect()
 }
 
 struct ObservedLock {
@@ -745,7 +827,7 @@ fn observe_locks(snapshot: &str) -> Vec<ObservedLock> {
 
 struct ObservedIo {
     kind: String,
-    task_id: u64,
+    task: ObservedTaskKey,
     wait: String,
 }
 
@@ -754,7 +836,7 @@ struct ObservedIoSpan {
     end_ns: u64,
     kind: String,
     start_ns: u64,
-    task_id: u64,
+    task: ObservedTaskKey,
     wait: String,
 }
 
@@ -763,18 +845,19 @@ struct ObservedTaskSpan {
     end_ns: u64,
     parent_task_id: u64,
     start_ns: u64,
-    task_id: u64,
+    task: ObservedTaskKey,
 }
 
 #[derive(Default)]
 struct IoTimeline {
-    active: BTreeMap<(u64, String), (String, u64)>,
+    active: BTreeMap<(ObservedTaskKey, String), (String, u64)>,
     completed: Vec<ObservedIoSpan>,
     io_rows_truncated: bool,
+    process_last_seen: BTreeMap<u32, u64>,
     span_rows_truncated: bool,
-    task_spans: BTreeMap<u64, ObservedTaskSpan>,
+    task_spans: BTreeMap<ObservedTaskKey, ObservedTaskSpan>,
     task_rows_truncated: bool,
-    tasks: BTreeMap<u64, ObservedTask>,
+    tasks: BTreeMap<ObservedTaskKey, ObservedTask>,
 }
 
 impl IoTimeline {
@@ -782,37 +865,40 @@ impl IoTimeline {
         self.task_rows_truncated |= observed_tasks.truncated;
         self.io_rows_truncated |= observed_tasks.truncated;
         self.span_rows_truncated |= observed_tasks.truncated;
+        self.process_last_seen
+            .insert(observed_tasks.process_id, now_ns);
         let current_ids = observed_tasks
             .rows
             .iter()
-            .map(|task| task.id)
+            .map(ObservedTask::key)
             .collect::<BTreeSet<_>>();
         for task in self.tasks.values_mut() {
-            if !current_ids.contains(&task.id) {
+            if task.process_id == observed_tasks.process_id && !current_ids.contains(&task.key()) {
                 task.state = "done".into();
                 task.wait.clear();
             }
         }
         for task in &observed_tasks.rows {
-            if self.tasks.contains_key(&task.id)
+            let key = task.key();
+            if self.tasks.contains_key(&key)
                 || self.tasks.len() < TRACE_TASK_ROW_LIMIT as usize
             {
-                self.tasks.insert(task.id, task.clone());
+                self.tasks.insert(key, task.clone());
             } else {
                 self.task_rows_truncated = true;
             }
-            if self.task_spans.contains_key(&task.id) {
-                if let Some(span) = self.task_spans.get_mut(&task.id) {
+            if self.task_spans.contains_key(&key) {
+                if let Some(span) = self.task_spans.get_mut(&key) {
                     span.end_ns = now_ns.max(span.start_ns);
                 }
             } else if self.task_spans.len() < TRACE_SPAN_ROW_LIMIT as usize {
                 self.task_spans.insert(
-                    task.id,
+                    key,
                     ObservedTaskSpan {
                         end_ns: now_ns,
                         parent_task_id: task.parent,
                         start_ns: now_ns,
-                        task_id: task.id,
+                        task: key,
                     },
                 );
             } else {
@@ -822,28 +908,28 @@ impl IoTimeline {
         let observed_io = observe_io(&observed_tasks.rows);
         let current = observed_io
             .iter()
-            .map(|row| (row.task_id, row.wait.clone()))
+            .map(|row| (row.task, row.wait.clone()))
             .collect::<BTreeSet<_>>();
         let ended = self
             .active
             .keys()
-            .filter(|key| !current.contains(*key))
+            .filter(|key| key.0.0 == observed_tasks.process_id && !current.contains(*key))
             .cloned()
             .collect::<Vec<_>>();
-        for (task_id, wait) in ended {
-            if let Some((kind, start_ns)) = self.active.remove(&(task_id, wait.clone())) {
+        for (task, wait) in ended {
+            if let Some((kind, start_ns)) = self.active.remove(&(task, wait.clone())) {
                 self.push(ObservedIoSpan {
                     end_ns: now_ns.max(start_ns),
                     kind,
                     start_ns,
-                    task_id,
+                    task,
                     wait,
                 });
             }
         }
         for row in observed_io {
-            let key = (row.task_id, row.wait);
-            if !self.tasks.contains_key(&row.task_id) {
+            let key = (row.task, row.wait);
+            if !self.tasks.contains_key(&row.task) {
                 self.io_rows_truncated = true;
             } else if self.active.contains_key(&key) {
                 continue;
@@ -861,12 +947,18 @@ impl IoTimeline {
             task.wait.clear();
         }
         let active = std::mem::take(&mut self.active);
-        for ((task_id, wait), (kind, start_ns)) in active {
+        for ((task, wait), (kind, start_ns)) in active {
+            let end_ns = self
+                .process_last_seen
+                .get(&task.0)
+                .copied()
+                .unwrap_or(now_ns)
+                .max(start_ns);
             self.push(ObservedIoSpan {
-                end_ns: now_ns.max(start_ns),
+                end_ns,
                 kind,
                 start_ns,
-                task_id,
+                task,
                 wait,
             });
         }
@@ -905,11 +997,11 @@ fn observe_io(tasks: &[ObservedTask]) -> Vec<ObservedIo> {
         };
         out.push(ObservedIo {
             kind: kind.into(),
-            task_id: task.id,
+            task: task.key(),
             wait: task.wait.clone(),
         });
     }
-    out.sort_by_key(|row| row.task_id);
+    out.sort_by_key(|row| row.task);
     out
 }
 
@@ -1021,6 +1113,7 @@ fn json_string(object: &str, key: &str) -> Option<String> {
 
 /// `jet run` hosts compile then exec; observe publishes under the program PID.
 struct PolledSnapshot {
+    process_id: u32,
     process_cpu_ns: Option<u64>,
     tasks: ObservedTasks,
     text: String,
@@ -1037,7 +1130,7 @@ fn poll_observe_snapshot(root_pid: u32) -> Option<PolledSnapshot> {
         }
         if let Ok(snapshot) = jet::DevServer::LiveInspect::read(pid) {
             let (count, bytes) = observe_arena_resources(&snapshot);
-            let tasks = observe_tasks(&snapshot);
+            let tasks = observe_tasks(&snapshot, pid);
             let locks = observe_locks(&snapshot);
             let io = observe_io(&tasks.rows);
             let child_tasks = tasks.rows.iter().filter(|task| task.parent > 0).count() as u64;
@@ -1051,6 +1144,7 @@ fn poll_observe_snapshot(root_pid: u32) -> Option<PolledSnapshot> {
             if score > best_score {
                 best_score = score;
                 best = Some(PolledSnapshot {
+                    process_id: pid,
                     process_cpu_ns: process_times(pid).map(|(_, cpu_ns)| cpu_ns),
                     tasks,
                     text: snapshot,
@@ -1711,7 +1805,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let snapshot = format!("{{\"tasks\":[{tasks}]}}");
-        let observed = observe_tasks(&snapshot);
+        let observed = observe_tasks(&snapshot, 10);
         assert_eq!(observed.rows.len(), TRACE_TASK_ROW_LIMIT as usize);
         assert!(observed.truncated);
 
@@ -1724,6 +1818,38 @@ mod tests {
         assert!(timeline.task_rows_truncated);
         assert!(timeline.io_rows_truncated);
         assert!(timeline.span_rows_truncated);
+    }
+
+    #[test]
+    fn sequential_processes_with_reused_runtime_task_ids_remain_distinct() {
+        let snapshot = "{\"tasks\":[{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"cancelled\":false},{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"tcp accept\",\"cancelled\":false}]}";
+        let first = observe_tasks(snapshot, 100);
+        let second = observe_tasks(snapshot, 200);
+        let mut timeline = IoTimeline::default();
+        timeline.observe(&first, 10);
+        timeline.observe(&second, 20);
+        timeline.finish(30);
+
+        let tasks = timeline.tasks();
+        let ids = trace_task_id_map(&tasks);
+        assert_eq!(tasks.len(), 4);
+        assert_eq!(timeline.spans().len(), 4);
+        assert_eq!(timeline.completed.len(), 2);
+        assert_eq!(timeline.completed[0].end_ns, 10);
+        assert_eq!(timeline.completed[1].end_ns, 20);
+        assert_ne!(ids[&(100, 1)], ids[&(200, 1)]);
+        assert_ne!(ids[&(100, 2)], ids[&(200, 2)]);
+        assert_eq!(ids[&(100, 1)], 1);
+        assert_eq!(ids[&(100, 2)], 2);
+        assert_eq!(ids[&(200, 1)], 3);
+        assert_eq!(ids[&(200, 2)], 4);
+        for process_id in [100, 200] {
+            let child = tasks
+                .iter()
+                .find(|task| task.key() == (process_id, 2))
+                .unwrap();
+            assert_eq!(ids[&(process_id, child.parent)], ids[&(process_id, 1)]);
+        }
     }
 
     #[test]
