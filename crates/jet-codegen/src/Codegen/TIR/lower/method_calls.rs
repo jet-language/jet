@@ -1634,6 +1634,10 @@ pub(crate) fn lower_method_call(
             },
             ("HttpRequest", "method" | "path") => Type::String,
             ("HttpRequest", "body") => Type::Named("HttpBody".to_string()),
+            ("HttpRequest", "trailers") => Type::Result {
+                ok: Box::new(Type::Named("HttpHeaders".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            },
             ("HttpRequest", "body_len") => Type::Int,
             ("HttpRequest", "under_limit") => Type::Bool,
             ("HttpRequest", "param" | "header") => Type::Option(Box::new(Type::String)),
@@ -1642,6 +1646,10 @@ pub(crate) fn lower_method_call(
             ("HttpResponse", "body") => Type::Named("HttpBody".to_string()),
             ("HttpResponse", "header") => Type::Option(Box::new(Type::String)),
             ("HttpResponse", "cookies") => Type::List(Box::new(Type::String)),
+            ("HttpResponse", "trailers") => Type::Result {
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            },
             ("HttpHeaders", "first") => Type::Option(Box::new(Type::String)),
             ("HttpHeaders", "all") => Type::List(Box::new(Type::String)),
             ("HttpHeaders", "append" | "set") => Type::Result {
@@ -1721,7 +1729,9 @@ pub(crate) fn lower_method_call(
             ("HttpRequest", "method" | "path" | "param" | "body_len" | "under_limit", _)
                 | ("HttpRequest", "header", 1)
                 | ("HttpRequest", "body", 0)
+                | ("HttpRequest", "trailers", 0)
                 | ("HttpResponse", "header", 2)
+                | ("HttpResponse", "trailers", 1)
         );
         let op = if kind.starts_with("HttpServer")
             || kind == "HttpMux"

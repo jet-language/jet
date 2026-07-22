@@ -2574,10 +2574,12 @@ pub enum THandleOp {
     HttpReqHeader,
     /// c109 Phase 20: HttpRequest `param(name)` → `{root}jet_http_request_param(&(recv), &(a0))`.
     HttpReqParam,
+    HttpReqTrailers,
     /// c109 Phase 20: HttpResponse `status()`/`body()` → `(recv).<field>.clone()`.
     HttpRespField(&'static str),
     /// c109 Phase 20: HttpResponse `header(name)` → `(recv).headers.get(&a0).cloned()`.
     HttpRespHeader,
+    HttpRespTrailers,
     /// D-ARGS1: ArgsSpec `.flag(name, help)` → `(recv).flag(&a0, &a1)` → `JetArgsSpec`.
     ArgsSpecFlag,
     ArgsSpecFlagShort,

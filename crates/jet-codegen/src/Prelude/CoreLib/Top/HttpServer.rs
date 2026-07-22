@@ -1382,9 +1382,46 @@ fn jet_http2_encode_response_headers(response: &JetHttpResponse, length: Option<
     output
 }
 
-fn jet_http2_request(
+fn jet_http2_encode_trailers(trailers: &JetHttpHeaders) -> Result<Vec<u8>, String> {
+    let mut output = Vec::new();
+    for (name, value) in trailers {
+        if !jet_http_trailer_name_allowed(name) {
+            return Err("HTTP/2 response trailer is forbidden".to_string());
+        }
+        jet_http2_encode_integer(&mut output, 0, 4, 0);
+        jet_http2_encode_string(&mut output, &name.to_ascii_lowercase());
+        jet_http2_encode_string(&mut output, value);
+    }
+    if output.len() > JET_HTTP2_MAX_HEADER_LIST {
+        return Err("HTTP/2 response trailer list is too large".to_string());
+    }
+    Ok(output)
+}
+
+fn jet_http2_request_trailers(headers: Vec<(String, String)>) -> Result<JetHttpHeaders, String> {
+    let mut trailers = JetHttpHeaders::new();
+    for (name, value) in headers {
+        if name.starts_with(':') {
+            return Err("HTTP/2 trailer contains a pseudo-header".to_string());
+        }
+        if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            return Err("HTTP/2 trailer name contains uppercase".to_string());
+        }
+        if !jet_http_trailer_name_allowed(&name) {
+            return Err("HTTP/2 request trailer is forbidden".to_string());
+        }
+        trailers
+            .append(&name, &value)
+            .map_err(|_| "HTTP/2 trailer is invalid".to_string())?;
+    }
+    Ok(trailers)
+}
+
+fn jet_http2_request_with_trailers(
     headers: Vec<(String, String)>,
     body: JetHttpBody,
+    trailers: std::sync::Arc<std::sync::Mutex<JetHttpHeaders>>,
+    end_stream: bool,
 ) -> Result<(JetHttpRequest, Option<usize>), String> {
     let mut method = None;
     let mut path = None;
@@ -1466,9 +1503,21 @@ fn jet_http2_request(
     }
     if let Ok(mut state) = body.state.lock() {
         state.length = content_length;
-        state.drained.store(content_length == Some(0), std::sync::atomic::Ordering::Release);
+        state.drained.store(end_stream, std::sync::atomic::Ordering::Release);
     }
-    Ok((JetHttpRequest::server_body(&method, path, body, regular), content_length))
+    Ok((JetHttpRequest::server_body_with_trailers(&method, path, body, regular, trailers), content_length))
+}
+
+fn jet_http2_request(
+    headers: Vec<(String, String)>,
+    body: JetHttpBody,
+) -> Result<(JetHttpRequest, Option<usize>), String> {
+    jet_http2_request_with_trailers(
+        headers,
+        body,
+        std::sync::Arc::new(std::sync::Mutex::new(JetHttpHeaders::new())),
+        true,
+    )
 }
 
 enum JetHttp2BodyPart {
@@ -1540,6 +1589,7 @@ struct JetHttp2RequestStream {
     response_done: bool,
     control: Option<std::sync::Arc<JetTaskControl>>,
     last_body: std::time::Instant,
+    trailers: std::sync::Arc<std::sync::Mutex<JetHttpHeaders>>,
 }
 
 impl JetHttp2RequestStream {
@@ -1574,6 +1624,7 @@ struct JetHttp2Outgoing {
     sent: usize,
     control: std::sync::Arc<JetTaskControl>,
     source_closer: Option<std::sync::Arc<JetHttpBodyCloser>>,
+    trailer_block: Vec<u8>,
 }
 
 enum JetHttp2ResponsePart {
@@ -1615,6 +1666,11 @@ fn jet_http2_start_response(
     let body_forbidden = (100..200).contains(&response.status) || matches!(response.status, 204 | 304);
     let reset_content = response.status == 205;
     let head = response.head_content_length.is_some();
+    let trailer_block = jet_http2_encode_trailers(&response.trailers)?;
+    let has_trailers = !trailer_block.is_empty();
+    if has_trailers && (body_forbidden || reset_content || head) {
+        return Err("HTTP/2 response trailers are invalid for this response".to_string());
+    }
     let length = if body_forbidden { None } else if reset_content { Some(0) }
         else { response.head_content_length.or_else(|| response.body.length()) };
     let empty = body_forbidden || reset_content || head || length == Some(0);
@@ -1629,9 +1685,24 @@ fn jet_http2_start_response(
         }
         Some(chunks)
     };
-    jet_http2_write_header_block(stream, stream_id, if empty { 0x1 } else { 0 }, &headers, max_frame)?;
+    jet_http2_write_header_block(stream, stream_id, if empty && !has_trailers { 0x1 } else { 0 }, &headers, max_frame)?;
     std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())
-        .and_then(|()| if empty { Ok(None) } else {
+        .and_then(|()| if empty && !has_trailers { Ok(None) } else {
+            if empty {
+                let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+                sender.send(JetHttp2ResponsePart::End).map_err(|_| "HTTP/2 trailer queue failed".to_string())?;
+                drop(sender);
+                return Ok(Some(JetHttp2Outgoing {
+                    receiver,
+                    chunk: Vec::new(),
+                    offset: 0,
+                    expected: Some(0),
+                    sent: 0,
+                    control: JetTaskControl::new(),
+                    source_closer: None,
+                    trailer_block,
+                }));
+            }
             let mut chunks = chunks.take().expect("non-empty HTTP/2 response has chunks");
             let source_closer = chunks.closer();
             let (sender, receiver) = std::sync::mpsc::sync_channel(1);
@@ -1666,6 +1737,7 @@ fn jet_http2_start_response(
                 sent: 0,
                 control,
                 source_closer,
+                trailer_block,
             }))
         })
 }
@@ -1697,7 +1769,11 @@ fn jet_http2_flush_body(
                         std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())?;
                         return Ok(true);
                     }
-                    jet_http2_write_frame(stream, 0, 0x1, stream_id, &[])?;
+                    if outgoing.trailer_block.is_empty() {
+                        jet_http2_write_frame(stream, 0, 0x1, stream_id, &[])?;
+                    } else {
+                        jet_http2_write_header_block(stream, stream_id, 0x1, &outgoing.trailer_block, max_frame)?;
+                    }
                     std::io::Write::flush(stream).map_err(|_| "HTTP/2 flush failed".to_string())?;
                     return Ok(true);
                 }
@@ -1936,7 +2012,8 @@ fn jet_http2_serve(
                 request.pump();
             }
             1 => {
-                if going_away || frame.stream == 0 || frame.stream % 2 == 0 || frame.stream <= last_stream {
+                let trailing = requests.contains_key(&frame.stream);
+                if going_away || frame.stream == 0 || frame.stream % 2 == 0 || !trailing && frame.stream <= last_stream {
                     if going_away && frame.stream != 0 {
                         jet_http2_write_frame(stream, 3, 0, frame.stream, &7u32.to_be_bytes())?;
                         stream.flush().map_err(|_| "HTTP/2 RST write failed".to_string())?;
@@ -1944,8 +2021,13 @@ fn jet_http2_serve(
                     }
                     return Err("HTTP/2 HEADERS stream id is invalid".to_string());
                 }
-                if requests.len() >= max_streams { return Err("HTTP/2 concurrent stream limit exceeded".to_string()); }
-                last_stream = frame.stream;
+                if trailing && requests.get(&frame.stream).is_some_and(|request| request.inbound_closed) {
+                    return Err("HTTP/2 trailing HEADERS follows end of stream".to_string());
+                }
+                if !trailing {
+                    if requests.len() >= max_streams { return Err("HTTP/2 concurrent stream limit exceeded".to_string()); }
+                    last_stream = frame.stream;
+                }
                 let mut offset = 0usize;
                 let padding = if frame.flags & 0x8 != 0 { offset = 1; usize::from(*frame.payload.first().ok_or_else(|| "HTTP/2 padded HEADERS is empty".to_string())?) } else { 0 };
                 if frame.flags & 0x20 != 0 { offset += 5; }
@@ -1965,6 +2047,21 @@ fn jet_http2_serve(
                         .map_err(|_| "HTTP/2 read timeout setup failed".to_string())?;
                 }
                 let headers = jet_http2_decode_headers(&mut decoder, &block)?;
+                if trailing {
+                    if frame.flags & 0x1 == 0 {
+                        return Err("HTTP/2 trailing HEADERS must end the stream".to_string());
+                    }
+                    let trailers = jet_http2_request_trailers(headers)?;
+                    let request = requests.get_mut(&frame.stream).expect("checked above");
+                    if request.expected.is_some_and(|expected| expected != request.received) {
+                        return Err("HTTP/2 body does not match content-length".to_string());
+                    }
+                    *request.trailers.lock().map_err(|_| "HTTP/2 trailer store failed".to_string())? = trailers;
+                    request.inbound_closed = true;
+                    request.pending.push_back(JetHttp2BodyPart::End);
+                    request.pump();
+                    continue;
+                }
                 stream_receive_windows.insert(frame.stream, 65_535);
                 stream_windows.insert(frame.stream, initial_send_window);
                 let (body_tx, body_rx) = std::sync::mpsc::sync_channel(1);
@@ -1975,11 +2072,12 @@ fn jet_http2_serve(
                     current: None,
                     ended: false,
                 }, None);
-                let (request, expected) = jet_http2_request(headers, body)?;
+                let inbound_closed = frame.flags & 0x1 != 0;
+                let trailers = std::sync::Arc::new(std::sync::Mutex::new(JetHttpHeaders::new()));
+                let (request, expected) = jet_http2_request_with_trailers(headers, body, trailers.clone(), inbound_closed)?;
                 if expected.is_some_and(|length| length > options.max_body_bytes) {
                     return Err("HTTP/2 request body is too large".to_string());
                 }
-                let inbound_closed = frame.flags & 0x1 != 0;
                 if inbound_closed && expected.is_some_and(|length| length != 0) {
                     return Err("HTTP/2 body does not match content-length".to_string());
                 }
@@ -2002,6 +2100,7 @@ fn jet_http2_serve(
                     response_done: false,
                     control: Some(control),
                     last_body: std::time::Instant::now(),
+                    trailers,
                 };
                 if inbound_closed { request.pending.push_back(JetHttp2BodyPart::End); }
                 request.pump();
@@ -3726,6 +3825,16 @@ fn jet_http_srv_req_param(req: &JetHttpRequest, name: &String) -> Option<String>
 fn jet_http_srv_req_body(req: &JetHttpRequest) -> JetHttpBody {
     req.body.clone()
 }
+fn jet_http_srv_req_trailers(req: &JetHttpRequest) -> Result<JetHttpHeaders, JetHttpError> {
+    if !req.body.is_drained() {
+        return Err(JetHttpError::InvalidFraming);
+    }
+    req.trailers.lock().map(|trailers| trailers.clone()).map_err(|_| {
+        JetHttpError::Internal {
+            incident_id: "request-trailers-lock".to_string(),
+        }
+    })
+}
 fn jet_http_srv_req_header(req: &JetHttpRequest, name: &String) -> Option<String> {
     req.headers.get(name).cloned()
 }
@@ -3746,6 +3855,17 @@ fn jet_http_srv_sse(data: &String) -> JetHttpResponse {
         &"text/event-stream".to_string(),
     );
     jet_http_srv_response_header(resp, &"cache-control".to_string(), &"no-cache".to_string())
+}
+
+fn jet_http_srv_response_trailers(
+    mut response: JetHttpResponse,
+    trailers: JetHttpHeaders,
+) -> Result<JetHttpResponse, JetHttpError> {
+    if (&trailers).into_iter().any(|(name, _)| !jet_http_trailer_name_allowed(name)) {
+        return Err(JetHttpError::InvalidHeader);
+    }
+    response.trailers = trailers;
+    Ok(response)
 }
 
 fn jet_http_srv_static_file(path: &String, mime: &String) -> Result<JetHttpResponse, String> {

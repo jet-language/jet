@@ -241,8 +241,9 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
             "method" | "path" | "param" | "body_len" | "under_limit" | "header" | "body"
                 | "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
                 | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" | "send"
+                | "trailers"
         ),
-        Some("HttpResponse") => matches!(method, "status" | "body" | "header" | "cookies"),
+        Some("HttpResponse") => matches!(method, "status" | "body" | "header" | "cookies" | "trailers"),
         Some("HttpHeaders") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
         Some("HttpBody") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
         Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"),

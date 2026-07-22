@@ -271,6 +271,14 @@ fn h2_literal_header(name_index: u8, value: &str) -> Vec<u8> {
     headers
 }
 
+fn h2_literal_named_header(name: &str, value: &str) -> Vec<u8> {
+    let mut headers = vec![0, name.len() as u8];
+    headers.extend_from_slice(name.as_bytes());
+    headers.push(value.len() as u8);
+    headers.extend_from_slice(value.as_bytes());
+    headers
+}
+
 fn h2_connect_headers(authority: &str) -> Vec<u8> {
     let mut headers = h2_literal_header(0x02, "CONNECT");
     headers.extend_from_slice(&h2_literal_header(0x01, authority));
@@ -502,6 +510,13 @@ fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
         String::from_utf8(response).expect("response UTF-8")
     }
 
+    let forbidden_response = jet_http_srv_response(200, &"body".to_string());
+    let mut forbidden_trailers = JetHttpHeaders::new();
+    forbidden_trailers.append("Content-Length", "4").unwrap();
+    assert!(matches!(
+        jet_http_srv_response_trailers(forbidden_response, forbidden_trailers),
+        Err(JetHttpError::InvalidHeader),
+    ));
     let mut forbidden_response = jet_http_srv_response(200, &"body".to_string());
     forbidden_response.trailers.append("Content-Length", "4").unwrap();
     let mut unpublished = Vec::new();
@@ -511,8 +526,12 @@ fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
     );
     assert!(unpublished.is_empty(), "forbidden trailers published response headers");
 
-    let mut http10_response = jet_http_srv_response(200, &"body".to_string());
-    http10_response.trailers.append("X-Checksum", "done").unwrap();
+    let mut http10_trailers = JetHttpHeaders::new();
+    http10_trailers.append("X-Checksum", "done").unwrap();
+    let http10_response = jet_http_srv_response_trailers(
+        jet_http_srv_response(200, &"body".to_string()),
+        http10_trailers,
+    ).unwrap();
     assert_eq!(
         jet_http_srv_write_response(&mut unpublished, &http10_response, "HTTP/1.0", true),
         Err(JetHttpError::InvalidFraming),
@@ -546,21 +565,20 @@ fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
     let calls = std::sync::Arc::new(AtomicUsize::new(0));
     let handler_calls = calls.clone();
     jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(move |req| {
+        assert!(matches!(jet_http_srv_req_trailers(&req), Err(JetHttpError::InvalidFraming)));
         let body = req.body.text(1024)?;
-        let trailers = req.trailers.lock().map_err(|_| JetHttpError::Internal {
-            incident_id: "request-trailers-lock".to_string(),
-        })?;
+        let trailers = jet_http_srv_req_trailers(&req)?;
         assert_eq!(trailers.first("x-checksum"), Some("abc123"));
         assert_eq!(trailers.all("x-trace"), vec!["one", "two"]);
-        drop(trailers);
         handler_calls.fetch_add(1, Ordering::AcqRel);
 
         let mut response = jet_http_srv_response(200, &String::new());
         response.body = JetHttpBody::reader(std::io::Cursor::new(format!("stream:{body}")), None);
-        response.trailers.append("X-Checksum", "done").unwrap();
-        response.trailers.append("X-Trace", "first").unwrap();
-        response.trailers.append("x-trace", "second").unwrap();
-        Ok(response)
+        let mut trailers = JetHttpHeaders::new();
+        trailers.append("X-Checksum", "done").unwrap();
+        trailers.append("X-Trace", "first").unwrap();
+        trailers.append("x-trace", "second").unwrap();
+        jet_http_srv_response_trailers(response, trailers)
     }));
     jet_http_mux_add(&mux, "GET", "/next", |_| {
         jet_http_srv_response(200, &"next".to_string())
@@ -3366,6 +3384,102 @@ fn builtin_request_id_crosses_cleartext_http2() {
 }
 
 #[test]
+fn http2_request_and_response_trailers_use_message_level_api() {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let mux = jet_http_mux_new();
+    jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(|request| {
+        assert!(matches!(
+            jet_http_srv_req_trailers(&request),
+            Err(JetHttpError::InvalidFraming),
+        ));
+        let body = request.body.text(64)?;
+        let trailers = jet_http_srv_req_trailers(&request)?;
+        assert_eq!(trailers.all("x-trace"), vec!["one", "two"]);
+
+        let mut response = jet_http_srv_response(200, &format!("h2:{body}"));
+        let mut trailers = JetHttpHeaders::new();
+        trailers.append("X-Trace", "first").unwrap();
+        trailers.append("x-trace", "second").unwrap();
+        response = jet_http_srv_response_trailers(response, trailers)?;
+        Ok(response)
+    }));
+    let saw_empty = std::sync::Arc::new(AtomicBool::new(false));
+    let handler_saw_empty = saw_empty.clone();
+    jet_http_mux_add_handler(&mux, "GET", "/empty", std::sync::Arc::new(move |request| {
+        let trailers = jet_http_srv_req_trailers(&request)?;
+        assert!(trailers.entries.is_empty());
+        handler_saw_empty.store(true, Ordering::Release);
+        Ok(jet_http_srv_response(200, &"empty".to_string()))
+    }));
+
+    assert_eq!(
+        jet_http2_request_trailers(vec![("content-length".into(), "0".into())]).unwrap_err(),
+        "HTTP/2 request trailer is forbidden",
+    );
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut client = std::net::TcpStream::connect(addr).unwrap();
+    let (mut server_stream, _) = listener.accept().unwrap();
+    let server = std::thread::spawn(move || {
+        jet_http2_serve(
+            &mut server_stream,
+            &mux,
+            &JetHttpServerOptions::safe(),
+            &std::sync::atomic::AtomicBool::new(false),
+            None,
+            None,
+        )
+    });
+    client.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+    client.write_all(JET_HTTP2_PREFACE).unwrap();
+    client.write_all(&h2_frame(4, 0, 0, &[])).unwrap();
+    client.write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/trailers"))).unwrap();
+    client.write_all(&h2_frame(0, 0, 1, b"body")).unwrap();
+    let mut request_trailers = h2_literal_named_header("x-trace", "one");
+    request_trailers.extend_from_slice(&h2_literal_named_header("x-trace", "two"));
+    client.write_all(&h2_frame(1, 0x5, 1, &request_trailers)).unwrap();
+    client.write_all(&h2_frame(1, 0x5, 3, &h2_request_headers(0x82, "/empty"))).unwrap();
+    client.flush().unwrap();
+
+    let mut body = Vec::new();
+    let mut response_trailers = Vec::new();
+    let mut stream_one_done = false;
+    let mut stream_three_done = false;
+    let mut decoder = JetHttp2Hpack::new();
+    while !stream_one_done || !stream_three_done {
+        let (kind, flags, stream, payload) = h2_read_frame(&mut client);
+        if stream == 1 && kind == 0 {
+            body.extend_from_slice(&payload);
+            assert_eq!(flags & 0x1, 0, "DATA ended before response trailers");
+        } else if stream == 1 && kind == 1 {
+            let headers = jet_http2_decode_headers(&mut decoder, &payload).unwrap();
+            if flags & 0x1 != 0 {
+                response_trailers = headers;
+                stream_one_done = true;
+            }
+        } else if stream == 3 && flags & 0x1 != 0 {
+            stream_three_done = true;
+        }
+    }
+    assert_eq!(body, b"h2:body");
+    assert_eq!(
+        response_trailers
+            .into_iter()
+            .filter_map(|(name, value)| (name == "x-trace").then_some(value))
+            .collect::<Vec<_>>(),
+        vec!["first", "second"],
+    );
+    assert!(saw_empty.load(Ordering::Acquire));
+
+    client.write_all(&h2_frame(7, 0, 0, &[0; 8])).unwrap();
+    client.flush().unwrap();
+    assert!(server.join().unwrap().is_ok());
+}
+
+#[test]
 fn server_safe_defaults_static_files_ranges_and_access_events_are_bounded() {
     let options = JetHttpServerOptions::safe();
     assert_eq!(options.max_body_bytes, 1024 * 1024);
@@ -4639,17 +4753,16 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     }));
     let trailer_calls = calls.clone();
     jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(move |req| {
+        assert!(matches!(jet_http_srv_req_trailers(&req), Err(JetHttpError::InvalidFraming)));
         let body = req.body.text(1024)?;
-        let trailers = req.trailers.lock().map_err(|_| JetHttpError::Internal {
-            incident_id: "tls-request-trailers-lock".to_string(),
-        })?;
+        let trailers = jet_http_srv_req_trailers(&req)?;
         assert_eq!(trailers.first("x-checksum"), Some("tls-in"));
-        drop(trailers);
         trailer_calls.fetch_add(1, Ordering::AcqRel);
         let mut response = jet_http_srv_response(200, &String::new());
         response.body = JetHttpBody::reader(std::io::Cursor::new(body), None);
-        response.trailers.append("X-Checksum", "tls-out").unwrap();
-        Ok(response)
+        let mut trailers = JetHttpHeaders::new();
+        trailers.append("X-Checksum", "tls-out").unwrap();
+        jet_http_srv_response_trailers(response, trailers)
     }));
     jet_http_mux_add_handler(&mux, "GET", "/error", std::sync::Arc::new(|_| {
         Err(JetHttpError::Internal {

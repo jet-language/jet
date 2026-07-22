@@ -1,0 +1,53 @@
+// D-HTTP-TRAILER-API1=A: trailers live on HTTP messages, not Body.
+use core.http.server as http_server
+use core.net as net
+use core.tasks as tasks
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
+    addr :: listener.local_addr() ?? panic("address")
+    mux :: http_server.mux()
+    mux.post("/", (req: HttpRequest) => {
+        body :: req.body().text(1024) ?? panic("body")
+        // Request trailers are available only after Body reaches EOF.
+        trailers :: req.trailers() ?? panic("trailers")
+        response :: http_server.response(200, body)
+        return response.trailers(^trailers)
+    })
+
+    serving :: tasks.spawn(take(listener, mux) () =>
+        http_server.serve_once_listener(listener, mux) ?? panic("serve")
+    )
+    stream :: net.tcp_connect(addr) ?? panic("connect")
+    request := "".bytes()
+    loop line; [
+        "POST / HTTP/1.1",
+        "Host: local",
+        "Transfer-Encoding: chunked",
+        "Trailer: X-Trace",
+        "Connection: close",
+        "",
+        "4",
+        "body",
+        "0",
+        "X-Trace: first",
+        "x-trace: second",
+        "",
+    ] {
+        loop byte; line.bytes() { request.push(byte) }
+        request.push(13)
+        request.push(10)
+    }
+    stream.write_all(request) ?? panic("write")
+    response := ""
+    loop _; 0..32 {
+        part :: stream.read_text(8192) ?? panic("read")
+        if part == "" { break }
+        response = "{response}{part}"
+    }
+    print(response.contains("Trailer: X-Trace"))
+    print(response.contains("X-Trace: first"))
+    print(response.contains("x-trace: second"))
+    print(response.contains("body"))
+    serving.join()
+}

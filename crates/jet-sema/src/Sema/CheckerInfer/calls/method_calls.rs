@@ -1712,6 +1712,16 @@ impl<'a> Checker<'a> {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg("close_write", 0, &Type::Named("Duration".to_string()), arg);
                         }
+                    } else if handle_ty == "HttpResponse" && method == "trailers" {
+                        if let Some(arg) = args.first_mut() {
+                            self.expect_core_arg_moving(
+                                "Response.trailers",
+                                0,
+                                &Type::Named("HttpHeaders".to_string()),
+                                arg,
+                            );
+                            arg.convention = AccessConvention::Move;
+                        }
                     } else {
                         for a in args.iter_mut() {
                             self.infer(&mut a.expr);

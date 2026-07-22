@@ -337,9 +337,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("HttpRequest", "body", 0) => THandleOp::HttpReqField("body"),
         ("HttpRequest", "header", 1) => THandleOp::HttpReqHeader,
         ("HttpRequest", "param", 1) => THandleOp::HttpReqParam,
+        ("HttpRequest", "trailers", 0) => THandleOp::HttpReqTrailers,
         ("HttpResponse", "status", 0) => THandleOp::HttpRespField("status"),
         ("HttpResponse", "body", 0) => THandleOp::HttpRespField("body"),
         ("HttpResponse", "header", 1) => THandleOp::HttpRespHeader,
+        ("HttpResponse", "trailers", 1) => THandleOp::HttpRespTrailers,
         // D-SERDE-ACCESS=B: DataTree accessor methods.
         ("DataTree", "field", 1) => THandleOp::DataTreeField,
         ("DataTree", "at", 1) => THandleOp::DataTreeAt,
