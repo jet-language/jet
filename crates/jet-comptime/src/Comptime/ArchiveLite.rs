@@ -22,27 +22,7 @@ const U32_MAX_U64: u64 = u32::MAX as u64;
 pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
     let mut out =
         Vec::with_capacity(data.len().saturating_add(16 + data.len() / ZSTD_BLOCK_MAX * 3));
-    out.extend_from_slice(&0xfd2f_b528u32.to_le_bytes());
-
-    let len = data.len() as u64;
-    match len {
-        0..=255 => {
-            out.push(0x20); // single segment, one-byte frame content size
-            out.push(len as u8);
-        }
-        256..=65_791 => {
-            out.push(0x60); // single segment, two-byte frame content size
-            put_u16(&mut out, (len - 256) as u16);
-        }
-        65_792..=U32_MAX_U64 => {
-            out.push(0xa0); // single segment, four-byte frame content size
-            put_u32(&mut out, len as u32);
-        }
-        _ => {
-            out.push(0xe0); // single segment, eight-byte frame content size
-            out.extend_from_slice(&len.to_le_bytes());
-        }
-    }
+    zstd_frame_header(&mut out, data.len() as u64);
 
     if data.is_empty() {
         put_u24(&mut out, 1); // last raw block, zero bytes
@@ -55,6 +35,23 @@ pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
         }
     }
     out
+}
+
+fn zstd_frame_header(out: &mut Vec<u8>, len: u64) {
+    out.extend_from_slice(&0xfd2f_b528u32.to_le_bytes());
+    out.push(match len {
+        0..=255 => 0,
+        256..=65_791 => 0x40,
+        65_792..=U32_MAX_U64 => 0x80,
+        _ => 0xc0,
+    });
+    out.push(0x38); // fixed 128 KiB decode window
+    match len {
+        0..=255 => {} // streaming frame, no content-size field
+        256..=65_791 => put_u16(out, (len - 256) as u16),
+        65_792..=U32_MAX_U64 => put_u32(out, len as u32),
+        _ => out.extend_from_slice(&len.to_le_bytes()),
+    }
 }
 
 pub(super) fn gzip_compress(data: &[u8]) -> Vec<u8> {
@@ -819,17 +816,60 @@ mod tests {
     fn zstd_encoder_uses_standard_raw_frame_layout() {
         assert_eq!(
             zstd_compress(b"hello"),
-            [40, 181, 47, 253, 32, 5, 41, 0, 0, 104, 101, 108, 108, 111]
+            [40, 181, 47, 253, 0, 56, 41, 0, 0, 104, 101, 108, 108, 111]
         );
 
         let frame = zstd_compress(&vec![42; ZSTD_BLOCK_MAX + 1]);
-        assert_eq!(&frame[..5], &[40, 181, 47, 253, 160]);
+        assert_eq!(&frame[..6], &[40, 181, 47, 253, 128, 56]);
         assert_eq!(
-            &frame[5..9],
+            &frame[6..10],
             &((ZSTD_BLOCK_MAX + 1) as u32).to_le_bytes()
         );
-        assert_eq!(&frame[9..12], &[0, 0, 16]); // non-final 128 KiB raw block
-        let second = 12 + ZSTD_BLOCK_MAX;
+        assert_eq!(&frame[10..13], &[0, 0, 16]); // non-final 128 KiB raw block
+        let second = 13 + ZSTD_BLOCK_MAX;
         assert_eq!(&frame[second..second + 3], &[9, 0, 0]); // final one-byte raw block
+    }
+
+    #[test]
+    fn zstd_frame_header_boundaries_keep_a_bounded_window() {
+        let header = |len| {
+            let mut out = Vec::new();
+            zstd_frame_header(&mut out, len);
+            out
+        };
+        assert_eq!(header(0), [40, 181, 47, 253, 0, 56]);
+        assert_eq!(header(255), [40, 181, 47, 253, 0, 56]);
+        assert_eq!(header(256), [40, 181, 47, 253, 64, 56, 0, 0]);
+        assert_eq!(header(65_791), [40, 181, 47, 253, 64, 56, 255, 255]);
+        assert_eq!(header(65_792), [40, 181, 47, 253, 128, 56, 0, 1, 1, 0]);
+        assert_eq!(
+            header(u64::from(u32::MAX)),
+            [40, 181, 47, 253, 128, 56, 255, 255, 255, 255]
+        );
+        assert_eq!(
+            header(u64::from(u32::MAX) + 1),
+            [40, 181, 47, 253, 192, 56, 0, 0, 0, 0, 1, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn zstd_default_decoder_accepts_frame_larger_than_128_mib() {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        let frame = zstd_compress(&vec![42; 128 * 1024 * 1024 + 1]);
+        let mut child = Command::new("zstd")
+            .args(["-q", "-t"])
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("zstd must be available in the Jet test environment");
+        let written = child.stdin.take().unwrap().write_all(&frame);
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            written.is_ok() && output.status.success(),
+            "default zstd decoder rejected bounded-window frame: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
