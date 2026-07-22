@@ -2545,6 +2545,41 @@ fn run() {
 }
 
 #[test]
+fn zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping zstd dev differential");
+        return;
+    }
+    let source = r#"use core.compress.zstd as zstd
+
+fn run() {
+    frame :: zstd.compress([72, 101, 108, 108, 111])
+    m0: U8 :: 40
+    m1: U8 :: 181
+    m2: U8 :: 47
+    m3: U8 :: 253
+    print(frame.len() > 9)
+    print(frame[0] == m0 && frame[1] == m1 && frame[2] == m2 && frame[3] == m3)
+}
+"#;
+    let dir = common::unique_tmp("jet_dev_zstd_compress");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("zstd_compress.jet");
+    fs::write(&path, source).unwrap();
+    let file = path.to_string_lossy();
+    let expected = compiled_binary_output(&dir, "zstd_compress", 0, "zstd-compress", &file);
+    let actual = match dev_iteration(&file, false, true) {
+        RunOutcome::Ran { stdout, stderr, exit_code } => {
+            ProgramOutput::ran(stdout, stderr, exit_code)
+        }
+        RunOutcome::Problems(diags) => panic!("forced zstd compressor failed: {diags:?}"),
+    };
+    assert_eq!(actual, expected);
+    assert_eq!(actual.stdout, "true\ntrue\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn resident_jit_checked_numeric_and_distinct_conversion_matrix_is_native() {
     if skip_if_cranelift_host_unsupported() {
         return;

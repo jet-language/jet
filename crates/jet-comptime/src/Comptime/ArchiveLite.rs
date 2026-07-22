@@ -5,6 +5,7 @@
 //! `ZipWriter::start_file(FileOptions::default())`; reads accept stored and
 //! DEFLATE entries. TAR reads ordinary ustar/GNU archives and writes GNU
 //! archives. GZIP writes stored DEFLATE and reads stored/fixed/dynamic DEFLATE.
+//! Zstandard writes ordinary raw-block frames.
 //! Invalid inputs stay bounded and follow each public API's existing
 //! empty/`Err` contract.
 
@@ -12,6 +13,49 @@ use std::path::{Component, Path};
 
 const TAR_BLOCK: usize = 512;
 const MAX_CODEC_OUTPUT: usize = 64 * 1024 * 1024;
+const ZSTD_BLOCK_MAX: usize = 128 * 1024;
+const U32_MAX_U64: u64 = u32::MAX as u64;
+
+/// Emit a standards-valid Zstandard frame without bringing the native `zstd`
+/// dependency into the compiler seam. Compression ratio is deliberately zero;
+/// AOT's full decoder accepts the resulting raw blocks.
+pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
+    let mut out =
+        Vec::with_capacity(data.len().saturating_add(16 + data.len() / ZSTD_BLOCK_MAX * 3));
+    out.extend_from_slice(&0xfd2f_b528u32.to_le_bytes());
+
+    let len = data.len() as u64;
+    match len {
+        0..=255 => {
+            out.push(0x20); // single segment, one-byte frame content size
+            out.push(len as u8);
+        }
+        256..=65_791 => {
+            out.push(0x60); // single segment, two-byte frame content size
+            put_u16(&mut out, (len - 256) as u16);
+        }
+        65_792..=U32_MAX_U64 => {
+            out.push(0xa0); // single segment, four-byte frame content size
+            put_u32(&mut out, len as u32);
+        }
+        _ => {
+            out.push(0xe0); // single segment, eight-byte frame content size
+            out.extend_from_slice(&len.to_le_bytes());
+        }
+    }
+
+    if data.is_empty() {
+        put_u24(&mut out, 1); // last raw block, zero bytes
+    } else {
+        let mut blocks = data.chunks(ZSTD_BLOCK_MAX).peekable();
+        while let Some(block) = blocks.next() {
+            let header = ((block.len() as u32) << 3) | u32::from(blocks.peek().is_none());
+            put_u24(&mut out, header);
+            out.extend_from_slice(block);
+        }
+    }
+    out
+}
 
 pub(super) fn gzip_compress(data: &[u8]) -> Vec<u8> {
     let mut out = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
@@ -447,6 +491,10 @@ fn put_u32(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
+fn put_u24(out: &mut Vec<u8>, value: u32) {
+    out.extend_from_slice(&value.to_le_bytes()[..3]);
+}
+
 fn crc32(data: &[u8]) -> u32 {
     let mut crc = !0u32;
     for byte in data {
@@ -765,5 +813,23 @@ mod tests {
         assert_eq!(gzip_decompress(&with_hcrc), Ok(b"hello".to_vec()));
         with_hcrc[10] ^= 1;
         assert!(gzip_decompress(&with_hcrc).is_err());
+    }
+
+    #[test]
+    fn zstd_encoder_uses_standard_raw_frame_layout() {
+        assert_eq!(
+            zstd_compress(b"hello"),
+            [40, 181, 47, 253, 32, 5, 41, 0, 0, 104, 101, 108, 108, 111]
+        );
+
+        let frame = zstd_compress(&vec![42; ZSTD_BLOCK_MAX + 1]);
+        assert_eq!(&frame[..5], &[40, 181, 47, 253, 160]);
+        assert_eq!(
+            &frame[5..9],
+            &((ZSTD_BLOCK_MAX + 1) as u32).to_le_bytes()
+        );
+        assert_eq!(&frame[9..12], &[0, 0, 16]); // non-final 128 KiB raw block
+        let second = 12 + ZSTD_BLOCK_MAX;
+        assert_eq!(&frame[second..second + 3], &[9, 0, 0]); // final one-byte raw block
     }
 }

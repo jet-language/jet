@@ -665,6 +665,12 @@ pub(super) fn apply_core_call(
                 Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
             })
         }
+        // A raw-block Zstandard frame is fully interoperable despite choosing
+        // ratio zero. Keep this pure encoder resident; decompression remains
+        // pending until compressed-block FSE/Huffman support is complete.
+        ("core.compress.zstd", "compress") => Ok(CtValue::Bytes(
+            super::super::ArchiveLite::zstd_compress(&as_bytes(one(0)?, span)?),
+        )),
         // D-CORE-COMPRESS1=A / card #392 C4: archive containers are pure byte
         // transforms. Keep them interpreter-resident; never route through the
         // native FFI bridge or an AOT fallback.
