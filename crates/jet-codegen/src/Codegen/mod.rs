@@ -48,6 +48,7 @@ pub use Web::{emit_web, validate_web_tir_support, WebArtifacts, WebTirUnsupporte
 const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core.rs"),
+    include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
     include_str!("../Prelude/Observe.rs"),
     include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),
@@ -1313,17 +1314,30 @@ mod tests {
     fn core_prelude_stays_split_by_runtime_ownership() {
         const MAX_MODULE_LINES: usize = 2500;
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let unicode =
+            std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
+        let collections =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Collections.rs")).unwrap();
         let runtime_control =
             std::fs::read_to_string(root.join("src/Prelude/Core/RuntimeControl.rs")).unwrap();
         let observe = std::fs::read_to_string(root.join("src/Prelude/Observe.rs")).unwrap();
+        let exact_units =
+            std::fs::read_to_string(root.join("../jet-foundation/src/ExactUnitConversion.rs"))
+                .unwrap();
         for (relative, source) in [
+            ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core.rs", core.as_str()),
+            ("src/Prelude/Core/Collections.rs", collections.as_str()),
             (
                 "src/Prelude/Core/RuntimeControl.rs",
                 runtime_control.as_str(),
             ),
             ("src/Prelude/Observe.rs", observe.as_str()),
+            (
+                "../jet-foundation/src/ExactUnitConversion.rs",
+                exact_units.as_str(),
+            ),
         ] {
             assert!(
                 source.lines().count() < MAX_MODULE_LINES,
@@ -1337,8 +1351,14 @@ mod tests {
 
         let codegen = std::fs::read_to_string(root.join("src/Codegen/mod.rs")).unwrap();
         let production_codegen = codegen.split("#[cfg(test)]\nmod tests").next().unwrap();
+        let unicode_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/UnicodeString.rs\")")
+            .unwrap();
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
+            .unwrap();
+        let collections_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Collections.rs\")")
             .unwrap();
         let control_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/RuntimeControl.rs\")")
@@ -1346,29 +1366,51 @@ mod tests {
         let observe_pos = production_codegen
             .find("include_str!(\"../Prelude/Observe.rs\")")
             .unwrap();
+        let exact_units_pos = production_codegen
+            .find("include_str!(\"../../../jet-foundation/src/ExactUnitConversion.rs\")")
+            .unwrap();
         assert!(
-            core_pos < control_pos && control_pos < observe_pos,
+            unicode_pos < core_pos
+                && core_pos < collections_pos
+                && collections_pos < control_pos
+                && control_pos < observe_pos
+                && observe_pos < exact_units_pos,
             "prelude ownership order is generated-byte order"
         );
         assert!(production_codegen.contains("for part in PRELUDE_PARTS"));
         assert!(!production_codegen.contains("include!("));
         assert_eq!(
             PRELUDE_PARTS,
-            [core.as_str(), runtime_control.as_str(), observe.as_str()],
+            [
+                unicode.as_str(),
+                core.as_str(),
+                collections.as_str(),
+                runtime_control.as_str(),
+                observe.as_str(),
+                exact_units.as_str(),
+            ],
             "PRELUDE_PARTS must list every owned module exactly once in generated-byte order"
         );
 
         let mut emitted = String::new();
         push_prelude(&mut emitted);
+        let expected = [
+            unicode.as_str(),
+            core.as_str(),
+            collections.as_str(),
+            runtime_control.as_str(),
+            observe.as_str(),
+            exact_units.as_str(),
+        ]
+        .concat();
         assert_eq!(
-            emitted,
-            format!("{core}{runtime_control}{observe}"),
+            emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 106_304, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 213_486, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "ba9e9adf8b288e25f2d054ee06f913496623e6176babcd8058d20442501fb0e4",
+            "5a35651ab05524187bcf8152cdd08c93955550d9d0e3e4377a0265e03f2413e9",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }

@@ -897,15 +897,15 @@ fn mk() {
         // A `T ? Error` return (default-error fallible) with `ok`/`err` over scalar
         // values and `?` propagation of a covered fallible call — all in-subset
         // (Phase 8). (`Error` lowers to `String`; the constructors here take a scalar
-        // and a String literal, which parse as `Expr::Ok`/`Expr::Err` directly — no
-        // sema EnumLit rewrite needed, so `build_cx` alone proves the gate. A
+        // and a String literal. Full sema owns the resolved fallible types and
+        // constructor rewrites consumed by the TIR gate. A
         // scalar-payload *error enum* literal is `Bad.Code(1)`, which parses as a
         // MethodCall and is only rewritten to an `EnumLit` by full sema; that path is
         // proven end-to-end by
         // `tests/tir_collections_and_methods.rs::fallible_try_and_or_fallback`.)
-        let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n :: f(x)?\n return Ok((n + 1))\n}\n";
-        assert!(covers(src, "f"));
-        assert!(covers(src, "g"));
+        let src = "fn f(x: Int) -> Int ? Error {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn g(x: Int) -> Int ? Error {\n n :: f(x)?\n return Ok((n + 1))\n}\nfn run() {}\n";
+        assert!(covers_after_sema(src, "f"));
+        assert!(covers_after_sema(src, "g"));
     }
 
     #[test]
@@ -1034,8 +1034,8 @@ fn mk() {
         // covered — the error enum is a covered (String-payload) enum, and its
         // construction (`Err(Oops.Msg("bad"))`) reproduces `emit_boxed_enum_arg`
         // (a String literal arg, no borrowed clone) byte-for-byte.
-        let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int ? Oops {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\n";
-        assert!(covers(src, "f"));
+        let src = "enum Oops {\n Msg(String)\n}\nfn f(x: Int) -> Int ? Oops {\n if x == 0 {\n return Err(Oops.Msg(\"bad\"))\n }\n return Ok(x)\n}\nfn run() {}\n";
+        assert!(covers_after_sema(src, "f"));
     }
 
     #[test]
