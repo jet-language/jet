@@ -2,8 +2,8 @@
 //!
 //! `run`/`test`/`bench` spawn the exact base-intent driver (`jet run|test|bench …`)
 //! with observe enabled, poll live facts while the child runs, then write one
-//! `.jettrace` with wall/alloc/tasks/locks/io/native timing before exiting with
-//! the child's code.
+//! `.jettrace` with wall/alloc/tasks/locks/io/native/task-observation spans before
+//! exiting with the child's code.
 //! `attach`/`view`/`compare`/`export` share the same artifact verify seam.
 //! Capture reuses the observe live snapshot (D-OBSERVE-LIVE1) attributed to a
 //! Jet source symbol.
@@ -11,8 +11,9 @@
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
     trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
-    TraceIo, TraceLock, TraceNative, TraceSample, TraceSkeleton, TraceTask, TraceToolchain,
-    TRACE_SCHEMA, TRACE_IO_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
+    TraceIo, TraceLock, TraceNative, TraceSample, TraceSkeleton, TraceSpan, TraceTask,
+    TraceToolchain, TRACE_SCHEMA, TRACE_IO_ROW_LIMIT, TRACE_SPAN_ROW_LIMIT,
+    TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
@@ -39,6 +40,8 @@ struct CaptureBundle {
     io_rows_truncated: bool,
     native: Vec<TraceNative>,
     native_rows_truncated: bool,
+    spans: Vec<TraceSpan>,
+    span_rows_truncated: bool,
     source_identity: Vec<SourceIdentity>,
     task_rows_truncated: bool,
 }
@@ -54,6 +57,8 @@ impl CaptureBundle {
             io_rows_truncated: false,
             native: Vec::new(),
             native_rows_truncated: false,
+            spans: Vec::new(),
+            span_rows_truncated: false,
             source_identity: Vec::new(),
             task_rows_truncated: false,
         }
@@ -511,6 +516,49 @@ fn capture_from_source(
             },
         });
     }
+    let mut spans = Vec::new();
+    if let Some(symbol) = symbol.as_ref() {
+        match io_timeline {
+            Some(timeline) if !timeline.task_spans.is_empty() => {
+                for observed in timeline.spans() {
+                    spans.push(TraceSpan {
+                        clock: "monotonic".into(),
+                        end_ns: Some(observed.end_ns),
+                        kind: "task_observed".into(),
+                        parent_task_id: (observed.parent_task_id != 0)
+                            .then_some(observed.parent_task_id),
+                        reason: String::new(),
+                        start_ns: Some(observed.start_ns),
+                        status: "captured".into(),
+                        symbol: symbol.clone(),
+                        task_id: Some(observed.task_id),
+                    });
+                }
+            }
+            Some(_) => spans.push(TraceSpan {
+                clock: "monotonic".into(),
+                end_ns: None,
+                kind: "task_observed".into(),
+                parent_task_id: None,
+                reason: "task presence was not observable".into(),
+                start_ns: None,
+                status: "unavailable".into(),
+                symbol: symbol.clone(),
+                task_id: None,
+            }),
+            None => spans.push(TraceSpan {
+                clock: "monotonic".into(),
+                end_ns: None,
+                kind: "task_observed".into(),
+                parent_task_id: None,
+                reason: "task span requires multiple live observations".into(),
+                start_ns: None,
+                status: "unavailable".into(),
+                symbol: symbol.clone(),
+                task_id: None,
+            }),
+        }
+    }
     Ok(CaptureBundle {
         samples,
         allocations,
@@ -522,6 +570,10 @@ fn capture_from_source(
             .unwrap_or(snapshot_tasks.truncated),
         native,
         native_rows_truncated: false,
+        spans,
+        span_rows_truncated: io_timeline
+            .map(|timeline| timeline.span_rows_truncated)
+            .unwrap_or(false),
         source_identity: vec![SourceIdentity {
             path: path_text,
             sha256,
@@ -706,11 +758,21 @@ struct ObservedIoSpan {
     wait: String,
 }
 
+#[derive(Clone)]
+struct ObservedTaskSpan {
+    end_ns: u64,
+    parent_task_id: u64,
+    start_ns: u64,
+    task_id: u64,
+}
+
 #[derive(Default)]
 struct IoTimeline {
     active: BTreeMap<(u64, String), (String, u64)>,
     completed: Vec<ObservedIoSpan>,
     io_rows_truncated: bool,
+    span_rows_truncated: bool,
+    task_spans: BTreeMap<u64, ObservedTaskSpan>,
     task_rows_truncated: bool,
     tasks: BTreeMap<u64, ObservedTask>,
 }
@@ -719,6 +781,7 @@ impl IoTimeline {
     fn observe(&mut self, observed_tasks: &ObservedTasks, now_ns: u64) {
         self.task_rows_truncated |= observed_tasks.truncated;
         self.io_rows_truncated |= observed_tasks.truncated;
+        self.span_rows_truncated |= observed_tasks.truncated;
         let current_ids = observed_tasks
             .rows
             .iter()
@@ -738,8 +801,24 @@ impl IoTimeline {
             } else {
                 self.task_rows_truncated = true;
             }
+            if self.task_spans.contains_key(&task.id) {
+                if let Some(span) = self.task_spans.get_mut(&task.id) {
+                    span.end_ns = now_ns.max(span.start_ns);
+                }
+            } else if self.task_spans.len() < TRACE_SPAN_ROW_LIMIT as usize {
+                self.task_spans.insert(
+                    task.id,
+                    ObservedTaskSpan {
+                        end_ns: now_ns,
+                        parent_task_id: task.parent,
+                        start_ns: now_ns,
+                        task_id: task.id,
+                    },
+                );
+            } else {
+                self.span_rows_truncated = true;
+            }
         }
-
         let observed_io = observe_io(&observed_tasks.rows);
         let current = observed_io
             .iter()
@@ -803,6 +882,10 @@ impl IoTimeline {
 
     fn tasks(&self) -> Vec<ObservedTask> {
         self.tasks.values().cloned().collect()
+    }
+
+    fn spans(&self) -> Vec<ObservedTaskSpan> {
+        self.task_spans.values().cloned().collect()
     }
 }
 
@@ -1157,6 +1240,9 @@ fn view(args: &[String]) -> i32 {
             if let Some(summary) = native_summary(&trace) {
                 println!("{summary}");
             }
+            if let Some(summary) = span_summary(&trace) {
+                println!("{summary}");
+            }
             0
         }
         Err(message) => {
@@ -1240,8 +1326,9 @@ fn export(args: &[String]) -> i32 {
         || lock_summary(&trace).is_some()
         || io_summary(&trace).is_some()
         || native_summary(&trace).is_some()
+        || span_summary(&trace).is_some()
     {
-        "json-envelope; domains present are wall/cpu/alloc/tasks/locks/io/native only — no pprof/otel/chrome payloads"
+        "json-envelope; domains present are wall/cpu/alloc/tasks/locks/io/native/spans only — no pprof/otel/chrome payloads"
     } else {
         "json-envelope-only; no pprof/otel/chrome payloads in skeleton"
     };
@@ -1266,6 +1353,7 @@ fn write_session_trace(
     let mut capture_policy = CapturePolicy::default_exclusions();
     capture_policy.io_rows_truncated = capture.io_rows_truncated;
     capture_policy.native_rows_truncated = capture.native_rows_truncated;
+    capture_policy.span_rows_truncated = capture.span_rows_truncated;
     capture_policy.task_rows_truncated = capture.task_rows_truncated;
     let skeleton = TraceSkeleton {
         command: command.into(),
@@ -1278,6 +1366,7 @@ fn write_session_trace(
         locks: capture.locks,
         io: capture.io,
         native: capture.native,
+        spans: capture.spans,
         source_identity: capture.source_identity,
     };
     let bytes = build_skeleton_bytes(&skeleton)?;
@@ -1546,6 +1635,54 @@ fn native_summary(trace: &CanonicalJson) -> Option<String> {
     }
 }
 
+fn span_summary(trace: &CanonicalJson) -> Option<String> {
+    let items = content_array(trace, "spans")?;
+    let CanonicalJson::Object(first) = items.first()? else {
+        return None;
+    };
+    let status = match first.get("status")? {
+        CanonicalJson::String(value) => value.as_str(),
+        _ => return None,
+    };
+    let symbol = first
+        .get("symbol")
+        .and_then(symbol_label)
+        .unwrap_or_else(|| "?".into());
+    if status == "unavailable" {
+        let reason = match first.get("reason")? {
+            CanonicalJson::String(value) => value.as_str(),
+            _ => return None,
+        };
+        return Some(format!("spans unavailable reason={reason} · {symbol}"));
+    }
+    if status != "captured" {
+        return None;
+    }
+    let mut start = u64::MAX;
+    let mut end = 0u64;
+    let mut children = 0usize;
+    for item in items {
+        let CanonicalJson::Object(fields) = item else {
+            return None;
+        };
+        let CanonicalJson::Integer(item_start) = fields.get("start_ns")? else {
+            return None;
+        };
+        let CanonicalJson::Integer(item_end) = fields.get("end_ns")? else {
+            return None;
+        };
+        start = start.min(item_start.parse().ok()?);
+        end = end.max(item_end.parse().ok()?);
+        if !matches!(fields.get("parent_task_id"), Some(CanonicalJson::Null)) {
+            children += 1;
+        }
+    }
+    Some(format!(
+        "spans count={} children={children} window={start}..{end}ns · {symbol}",
+        items.len()
+    ))
+}
+
 fn symbol_label(value: &CanonicalJson) -> Option<String> {
     let CanonicalJson::Object(fields) = value else { return None };
     let path = match fields.get("path")? {
@@ -1583,8 +1720,10 @@ mod tests {
         timeline.finish(20);
         assert_eq!(timeline.tasks.len(), TRACE_TASK_ROW_LIMIT as usize);
         assert_eq!(timeline.completed.len(), TRACE_IO_ROW_LIMIT as usize);
+        assert_eq!(timeline.task_spans.len(), TRACE_SPAN_ROW_LIMIT as usize);
         assert!(timeline.task_rows_truncated);
         assert!(timeline.io_rows_truncated);
+        assert!(timeline.span_rows_truncated);
     }
 
     #[test]

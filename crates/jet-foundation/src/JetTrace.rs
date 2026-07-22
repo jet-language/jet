@@ -10,10 +10,11 @@ use std::collections::BTreeMap;
 
 pub const TRACE_SCHEMA: &str = "jet.trace";
 pub const TRACE_VERSION: &str = "1";
-pub const CAPTURE_POLICY_SCHEMA: &str = "3";
+pub const CAPTURE_POLICY_SCHEMA: &str = "4";
 pub const TRACE_TASK_ROW_LIMIT: u64 = 4096;
 pub const TRACE_IO_ROW_LIMIT: u64 = 4096;
 pub const TRACE_NATIVE_ROW_LIMIT: u64 = 1;
+pub const TRACE_SPAN_ROW_LIMIT: u64 = 4096;
 
 /// Default privacy exclusions from D-PERFSESSION1 (sorted for A-canonical bytes).
 pub const DEFAULT_EXCLUSIONS: &[&str] = &[
@@ -60,6 +61,7 @@ pub struct CapturePolicy {
     pub allowlist: Vec<String>,
     pub io_rows_truncated: bool,
     pub native_rows_truncated: bool,
+    pub span_rows_truncated: bool,
     pub task_rows_truncated: bool,
 }
 
@@ -69,6 +71,7 @@ impl CapturePolicy {
             allowlist: Vec::new(),
             io_rows_truncated: false,
             native_rows_truncated: false,
+            span_rows_truncated: false,
             task_rows_truncated: false,
         }
     }
@@ -102,6 +105,14 @@ impl CapturePolicy {
             (
                 "native_rows_truncated".into(),
                 CanonicalJson::Bool(self.native_rows_truncated),
+            ),
+            (
+                "span_row_limit".into(),
+                CanonicalJson::Integer(TRACE_SPAN_ROW_LIMIT.to_string()),
+            ),
+            (
+                "span_rows_truncated".into(),
+                CanonicalJson::Bool(self.span_rows_truncated),
             ),
             ("schema".into(), CanonicalJson::Integer(CAPTURE_POLICY_SCHEMA.into())),
             (
@@ -364,6 +375,42 @@ impl TraceNative {
     }
 }
 
+/// One task-presence interval on the trace-session monotonic clock. Payloads,
+/// arguments, locals, and generated frames are never captured.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceSpan {
+    pub clock: String,
+    pub end_ns: Option<u64>,
+    pub kind: String,
+    pub parent_task_id: Option<u64>,
+    pub reason: String,
+    pub start_ns: Option<u64>,
+    pub status: String,
+    pub symbol: JetSymbolRef,
+    pub task_id: Option<u64>,
+}
+
+impl TraceSpan {
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        let optional = |value: Option<u64>| {
+            value
+                .map(|value| CanonicalJson::Integer(value.to_string()))
+                .unwrap_or(CanonicalJson::Null)
+        };
+        CanonicalJson::object([
+            ("clock".into(), CanonicalJson::String(self.clock.clone())),
+            ("end_ns".into(), optional(self.end_ns)),
+            ("kind".into(), CanonicalJson::String(self.kind.clone())),
+            ("parent_task_id".into(), optional(self.parent_task_id)),
+            ("reason".into(), CanonicalJson::String(self.reason.clone())),
+            ("start_ns".into(), optional(self.start_ns)),
+            ("status".into(), CanonicalJson::String(self.status.clone())),
+            ("symbol".into(), self.symbol.to_json()?),
+            ("task_id".into(), optional(self.task_id)),
+        ])
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceIdentity {
     pub path: String,
@@ -404,6 +451,7 @@ pub struct TraceSkeleton {
     pub locks: Vec<TraceLock>,
     pub io: Vec<TraceIo>,
     pub native: Vec<TraceNative>,
+    pub spans: Vec<TraceSpan>,
     pub source_identity: Vec<SourceIdentity>,
 }
 
@@ -440,6 +488,11 @@ impl TraceSkeleton {
             .iter()
             .map(TraceNative::to_json)
             .collect::<Result<Vec<_>, _>>()?;
+        let spans = self
+            .spans
+            .iter()
+            .map(TraceSpan::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
         let source_identity = self
             .source_identity
             .iter()
@@ -456,7 +509,7 @@ impl TraceSkeleton {
             ("native".into(), CanonicalJson::Array(native)),
             ("samples".into(), CanonicalJson::Array(samples)),
             ("source_identity".into(), CanonicalJson::Array(source_identity)),
-            ("spans".into(), CanonicalJson::Array(Vec::new())),
+            ("spans".into(), CanonicalJson::Array(spans)),
             ("tasks".into(), CanonicalJson::Array(tasks)),
             ("toolchain".into(), self.toolchain.to_json()?),
         ])
@@ -556,6 +609,7 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     validate_locks(&fields["locks"])?;
     validate_io(&fields["io"], &tasks, limits.io_rows)?;
     validate_native(&fields["native"], &tasks, limits.native_rows)?;
+    validate_spans(&fields["spans"], &tasks, limits.span_rows)?;
     validate_source_identity(&fields["source_identity"])?;
     validate_toolchain(&fields["toolchain"])?;
     Ok(())
@@ -851,6 +905,102 @@ fn validate_native(
     Ok(())
 }
 
+fn validate_spans(
+    value: &CanonicalJson,
+    tasks: &BTreeMap<u64, (u64, String, String, CanonicalJson)>,
+    row_limit: Option<usize>,
+) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.spans is not an array".into()),
+    };
+    if let Some(row_limit) = row_limit {
+        if items.len() > row_limit {
+            return Err("content.spans exceeds capture_policy.span_row_limit".into());
+        }
+    }
+    let mut captured = 0usize;
+    let mut unavailable = 0usize;
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.spans[{i}]");
+        let fields = object_keys(
+            item,
+            &label,
+            &[
+                "clock",
+                "end_ns",
+                "kind",
+                "parent_task_id",
+                "reason",
+                "start_ns",
+                "status",
+                "symbol",
+                "task_id",
+            ],
+        )?;
+        if text(&fields["clock"], &format!("{label}.clock"))? != "monotonic" {
+            return Err(format!("{label}.clock must be monotonic"));
+        }
+        if text(&fields["kind"], &format!("{label}.kind"))? != "task_observed" {
+            return Err(format!("{label}.kind must be task_observed"));
+        }
+        let reason = text(&fields["reason"], &format!("{label}.reason"))?;
+        let status = text(&fields["status"], &format!("{label}.status"))?;
+        validate_symbol(&fields["symbol"], &format!("{label}.symbol"))?;
+        match status {
+            "captured" => {
+                captured += 1;
+                let start = unsigned(&fields["start_ns"], &format!("{label}.start_ns"))?;
+                let end = unsigned(&fields["end_ns"], &format!("{label}.end_ns"))?;
+                if end < start {
+                    return Err(format!("{label} ends before it starts"));
+                }
+                let task_id = unsigned(&fields["task_id"], &format!("{label}.task_id"))?;
+                let Some((parent, _, _, task_symbol)) = tasks.get(&task_id) else {
+                    return Err(format!("{label}.task_id refers to missing task {task_id}"));
+                };
+                if &fields["symbol"] != task_symbol {
+                    return Err(format!("{label}.symbol does not match its task"));
+                }
+                if *parent == 0 {
+                    if fields["parent_task_id"] != CanonicalJson::Null {
+                        return Err(format!("{label} root span must not claim a parent"));
+                    }
+                } else {
+                    let parent_task_id = unsigned(
+                        &fields["parent_task_id"],
+                        &format!("{label}.parent_task_id"),
+                    )?;
+                    if parent_task_id != *parent || !tasks.contains_key(&parent_task_id) {
+                        return Err(format!("{label}.parent_task_id does not match its task"));
+                    }
+                }
+                if !reason.is_empty() {
+                    return Err(format!("{label}.reason must be empty when captured"));
+                }
+            }
+            "unavailable" => {
+                unavailable += 1;
+                if fields["start_ns"] != CanonicalJson::Null
+                    || fields["end_ns"] != CanonicalJson::Null
+                    || fields["task_id"] != CanonicalJson::Null
+                    || fields["parent_task_id"] != CanonicalJson::Null
+                {
+                    return Err(format!("{label} unavailable span must not claim data"));
+                }
+                if reason.is_empty() {
+                    return Err(format!("{label}.reason is empty"));
+                }
+            }
+            _ => return Err(format!("{label}.status must be captured or unavailable")),
+        }
+    }
+    if unavailable > 1 || (unavailable == 1 && captured != 0) {
+        return Err("content.spans unavailable state must be the only row".into());
+    }
+    Ok(())
+}
+
 fn validate_source_identity(value: &CanonicalJson) -> Result<(), String> {
     let items = match value {
         CanonicalJson::Array(items) => items,
@@ -896,6 +1046,7 @@ fn unsigned(value: &CanonicalJson, label: &str) -> Result<u64, String> {
 struct CaptureLimits {
     io_rows: Option<usize>,
     native_rows: Option<usize>,
+    span_rows: Option<usize>,
     task_rows: Option<usize>,
 }
 
@@ -916,6 +1067,7 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
             CaptureLimits {
                 io_rows: None,
                 native_rows: None,
+                span_rows: None,
                 task_rows: None,
             },
         ),
@@ -936,10 +1088,11 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
             CaptureLimits {
                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
                 native_rows: None,
+                span_rows: None,
                 task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
             },
         ),
-        Some(CanonicalJson::Integer(schema)) if schema == CAPTURE_POLICY_SCHEMA => (
+        Some(CanonicalJson::Integer(schema)) if schema == "3" => (
             object_keys(
                 value,
                 "capture_policy",
@@ -958,6 +1111,32 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
             CaptureLimits {
                 io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
                 native_rows: Some(TRACE_NATIVE_ROW_LIMIT as usize),
+                span_rows: None,
+                task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
+            },
+        ),
+        Some(CanonicalJson::Integer(schema)) if schema == CAPTURE_POLICY_SCHEMA => (
+            object_keys(
+                value,
+                "capture_policy",
+                &[
+                    "allowlist",
+                    "default_exclusions",
+                    "io_row_limit",
+                    "io_rows_truncated",
+                    "native_row_limit",
+                    "native_rows_truncated",
+                    "schema",
+                    "span_row_limit",
+                    "span_rows_truncated",
+                    "task_row_limit",
+                    "task_rows_truncated",
+                ],
+            )?,
+            CaptureLimits {
+                io_rows: Some(TRACE_IO_ROW_LIMIT as usize),
+                native_rows: Some(TRACE_NATIVE_ROW_LIMIT as usize),
+                span_rows: Some(TRACE_SPAN_ROW_LIMIT as usize),
                 task_rows: Some(TRACE_TASK_ROW_LIMIT as usize),
             },
         ),
@@ -997,6 +1176,16 @@ fn validate_capture_policy(value: &CanonicalJson) -> Result<CaptureLimits, Strin
         }
         if !matches!(fields["native_rows_truncated"], CanonicalJson::Bool(_)) {
             return Err("capture_policy.native_rows_truncated is not a boolean".into());
+        }
+    }
+    if limits.span_rows.is_some() {
+        if unsigned(&fields["span_row_limit"], "capture_policy.span_row_limit")?
+            != TRACE_SPAN_ROW_LIMIT
+        {
+            return Err("capture_policy span row limit does not match this schema".into());
+        }
+        if !matches!(fields["span_rows_truncated"], CanonicalJson::Bool(_)) {
+            return Err("capture_policy.span_rows_truncated is not a boolean".into());
         }
     }
     match &fields["allowlist"] {
@@ -1093,6 +1282,7 @@ mod tests {
             locks: Vec::new(),
             io: Vec::new(),
             native: Vec::new(),
+            spans: Vec::new(),
             source_identity: Vec::new(),
         }
     }
@@ -1370,19 +1560,75 @@ mod tests {
     }
 
     #[test]
+    fn task_observation_spans_round_trip_with_parent_causality_and_unavailable_state() {
+        let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
+        for (id, parent) in [(1, 0), (2, 1)] {
+            skeleton.tasks.push(TraceTask {
+                id,
+                parent,
+                state: "done".into(),
+                wait: String::new(),
+                cancelled: false,
+                symbol: symbol.clone(),
+            });
+            skeleton.spans.push(TraceSpan {
+                clock: "monotonic".into(),
+                end_ns: Some(90 + id),
+                kind: "task_observed".into(),
+                parent_task_id: (parent != 0).then_some(parent),
+                reason: String::new(),
+                start_ns: Some(10 + id),
+                status: "captured".into(),
+                symbol: symbol.clone(),
+                task_id: Some(id),
+            });
+        }
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("\"spans\":[{"), "{text}");
+        assert!(text.contains("\"parent_task_id\":1"), "{text}");
+        verify_jettrace(&bytes).unwrap();
+
+        skeleton.spans[1].parent_task_id = Some(99);
+        let error = verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap()).unwrap_err();
+        assert!(error.contains("parent_task_id does not match"), "{error}");
+
+        skeleton.tasks.clear();
+        skeleton.spans = vec![TraceSpan {
+            clock: "monotonic".into(),
+            end_ns: None,
+            kind: "task_observed".into(),
+            parent_task_id: None,
+            reason: "task span requires multiple live observations".into(),
+            start_ns: None,
+            status: "unavailable".into(),
+            symbol,
+            task_id: None,
+        }];
+        verify_jettrace(&build_skeleton_bytes(&skeleton).unwrap()).unwrap();
+    }
+
+    #[test]
     fn capture_policy_audits_fixed_row_caps_and_truncation() {
         let mut skeleton = sample_skeleton();
         skeleton.capture_policy.io_rows_truncated = true;
         skeleton.capture_policy.native_rows_truncated = true;
+        skeleton.capture_policy.span_rows_truncated = true;
         skeleton.capture_policy.task_rows_truncated = true;
         let bytes = build_skeleton_bytes(&skeleton).unwrap();
         let text = String::from_utf8(bytes.clone()).unwrap();
         assert!(text.contains("\"capture_policy\":{\"allowlist\":[]"), "{text}");
-        assert!(text.contains("\"schema\":3,\"task_row_limit\""), "{text}");
+        assert!(text.contains("\"schema\":4,\"span_row_limit\""), "{text}");
         assert!(text.contains("\"io_row_limit\":4096"), "{text}");
         assert!(text.contains("\"io_rows_truncated\":true"), "{text}");
         assert!(text.contains("\"native_row_limit\":1"), "{text}");
         assert!(text.contains("\"native_rows_truncated\":true"), "{text}");
+        assert!(text.contains("\"span_row_limit\":4096"), "{text}");
+        assert!(text.contains("\"span_rows_truncated\":true"), "{text}");
         assert!(text.contains("\"task_row_limit\":4096"), "{text}");
         assert!(text.contains("\"task_rows_truncated\":true"), "{text}");
         verify_jettrace(&bytes).unwrap();
@@ -1416,6 +1662,17 @@ mod tests {
                 .unwrap_err()
                 .contains("exceeds capture_policy.task_row_limit")
         );
+
+        let mut content = skeleton.content_json().unwrap();
+        let CanonicalJson::Object(fields) = &mut content else {
+            unreachable!()
+        };
+        fields.insert(
+            "spans".into(),
+            CanonicalJson::Array(vec![CanonicalJson::Null; TRACE_SPAN_ROW_LIMIT as usize + 1]),
+        );
+        let error = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
+        assert!(error.contains("exceeds capture_policy.span_row_limit"), "{error}");
     }
 
     #[test]
@@ -1432,6 +1689,8 @@ mod tests {
             "io_rows_truncated",
             "native_row_limit",
             "native_rows_truncated",
+            "span_row_limit",
+            "span_rows_truncated",
             "task_row_limit",
             "task_rows_truncated",
         ] {
@@ -1459,8 +1718,65 @@ mod tests {
         };
         policy.remove("native_row_limit");
         policy.remove("native_rows_truncated");
+        policy.remove("span_row_limit");
+        policy.remove("span_rows_truncated");
         policy.insert("schema".into(), CanonicalJson::Integer("2".into()));
         verify_jettrace(&jettrace_artifact(content).bytes()).unwrap();
+    }
+
+    #[test]
+    fn capture_policy_v3_remains_readable_with_unknown_span_limit() {
+        let mut content = sample_skeleton().content_json().unwrap();
+        let CanonicalJson::Object(fields) = &mut content else {
+            unreachable!()
+        };
+        let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+            unreachable!()
+        };
+        policy.remove("span_row_limit");
+        policy.remove("span_rows_truncated");
+        policy.insert("schema".into(), CanonicalJson::Integer("3".into()));
+        verify_jettrace(&jettrace_artifact(content).bytes()).unwrap();
+    }
+
+    #[test]
+    fn legacy_capture_policy_v3_still_rejects_malformed_spans() {
+        let mut skeleton = sample_skeleton();
+        let symbol = JetSymbolRef {
+            path: "app.jet".into(),
+            name: "run".into(),
+        };
+        skeleton.tasks.push(TraceTask {
+            id: 1,
+            parent: 0,
+            state: "done".into(),
+            wait: String::new(),
+            cancelled: false,
+            symbol: symbol.clone(),
+        });
+        skeleton.spans.push(TraceSpan {
+            clock: "monotonic".into(),
+            end_ns: Some(10),
+            kind: "task_observed".into(),
+            parent_task_id: None,
+            reason: String::new(),
+            start_ns: Some(20),
+            status: "captured".into(),
+            symbol,
+            task_id: Some(1),
+        });
+        let mut content = skeleton.content_json().unwrap();
+        let CanonicalJson::Object(fields) = &mut content else {
+            unreachable!()
+        };
+        let CanonicalJson::Object(policy) = fields.get_mut("capture_policy").unwrap() else {
+            unreachable!()
+        };
+        policy.remove("span_row_limit");
+        policy.remove("span_rows_truncated");
+        policy.insert("schema".into(), CanonicalJson::Integer("3".into()));
+        let error = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
+        assert!(error.contains("ends before it starts"), "{error}");
     }
 
     #[test]
@@ -1498,6 +1814,8 @@ mod tests {
             };
             policy.remove("native_row_limit");
             policy.remove("native_rows_truncated");
+            policy.remove("span_row_limit");
+            policy.remove("span_rows_truncated");
             if schema == "1" {
                 for key in [
                     "io_row_limit",

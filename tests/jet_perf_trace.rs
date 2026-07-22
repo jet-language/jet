@@ -1,7 +1,7 @@
 //! D-PERFSESSION1=D: `jet perf` writes/reads a versioned `.jettrace`.
 //! C1: command family + verify. C2: run/attach capture
-//! wall/alloc/tasks/locks/io/native timing with Jet symbol identity from the
-//! observe live snapshot.
+//! wall/alloc/tasks/locks/io/native/task-observation spans with Jet symbol identity
+//! from the observe live snapshot.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -249,6 +249,60 @@ fn assert_honest_native(text: &str, expect_elapsed: bool, expect_cpu_work: bool)
     assert!(text.contains("\"native_rows_truncated\":false"), "{text}");
 }
 
+fn assert_honest_spans(text: &str, expect_captured: bool) {
+    let spans = text
+        .split_once("\"spans\":[")
+        .and_then(|(_, tail)| tail.split_once("],\"tasks\""))
+        .map(|(array, _)| array)
+        .unwrap_or_else(|| panic!("missing spans array: {text}"));
+    assert!(spans.contains("\"clock\":\"monotonic\""), "{text}");
+    assert!(spans.contains("\"kind\":\"task_observed\""), "{text}");
+    assert!(text.contains("\"span_row_limit\":4096"), "{text}");
+    assert!(text.contains("\"span_rows_truncated\":false"), "{text}");
+    if !expect_captured {
+        assert!(spans.contains("\"status\":\"unavailable\""), "{text}");
+        assert!(spans.contains("\"start_ns\":null"), "{text}");
+        assert!(spans.contains("\"end_ns\":null"), "{text}");
+        assert!(spans.contains("\"task_id\":null"), "{text}");
+        assert!(spans.contains("\"parent_task_id\":null"), "{text}");
+        assert!(
+            spans.contains("task span requires multiple live observations"),
+            "{text}"
+        );
+        return;
+    }
+    assert!(!spans.is_empty(), "empty captured span set: {text}");
+    assert!(!spans.contains("\"status\":\"unavailable\""), "{text}");
+    let tasks = text
+        .split_once("\"tasks\":[")
+        .and_then(|(_, tail)| tail.split_once("],\"toolchain\""))
+        .map(|(array, _)| array)
+        .unwrap_or_else(|| panic!("missing task array: {text}"));
+    let wall_at = text.find("\"domain\":\"wall\"").unwrap();
+    let wall = json_u64_after(&text[wall_at..], "duration_ns").unwrap();
+    let mut count = 0usize;
+    for span in spans.split("},{") {
+        assert!(span.contains("\"status\":\"captured\""), "{span}");
+        let task_id = json_u64_after(span, "task_id").unwrap();
+        let task = tasks
+            .split("},{")
+            .find(|task| json_u64_after(task, "id") == Some(task_id))
+            .unwrap_or_else(|| panic!("span task {task_id} missing: {text}"));
+        let start = json_u64_after(span, "start_ns").unwrap();
+        let end = json_u64_after(span, "end_ns").unwrap();
+        assert!(end >= start, "span runs backward: {span}");
+        assert!(end <= wall, "span ends after trace wall: {span}");
+        let parent = json_u64_after(task, "parent").unwrap();
+        if parent == 0 {
+            assert!(span.contains("\"parent_task_id\":null"), "{span}");
+        } else {
+            assert_eq!(json_u64_after(span, "parent_task_id"), Some(parent), "{span}");
+        }
+        count += 1;
+    }
+    assert_eq!(count, tasks.split("},{").count(), "span/task count drift: {text}");
+}
+
 #[test]
 fn perf_run_keeps_completed_socket_echo_io_span() {
     if !common::have_rustc() {
@@ -410,6 +464,8 @@ fn perf_view_reads_hash_valid_legacy_capture_policy_v1() {
         "io_rows_truncated",
         "native_row_limit",
         "native_rows_truncated",
+        "span_row_limit",
+        "span_rows_truncated",
         "task_row_limit",
         "task_rows_truncated",
     ] {
@@ -488,7 +544,8 @@ fn perf_run_captures_wall_and_alloc_into_jettrace() {
     // Child blocks on channel receive so poll sees contention + parent link.
     fs::write(
         &source,
-        r#"use core.mem as mem
+        r#"use core.crypto as crypto
+use core.mem as mem
 use core.net as net
 use core.tasks as tasks
 use core.time as time
@@ -517,11 +574,11 @@ fn run() {
     arena :: mem.Arena.new()
     x :: arena.alloc(42)
     probe_work()
-    checksum := 0
-    loop i; 0..5000000 {
-        checksum += i % 97
+    digest := crypto.sha256("trace-work".bytes())
+    loop i; 0..200000 {
+        digest = crypto.sha256(digest.hex().bytes())
     }
-    print("READY {checksum}")
+    print("READY {digest.hex().len()}")
     time.sleep(800)
 }
 "#,
@@ -553,6 +610,7 @@ fn run() {
     assert_honest_locks(&text);
     assert_honest_io(&text);
     assert_honest_native(&text, true, true);
+    assert_honest_spans(&text, true);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("session.jet"), "{text}");
@@ -580,6 +638,8 @@ fn run() {
     assert!(stdout.contains("io count="), "{stdout}");
     assert!(!stdout.contains("io count=0 "), "zero io in view: {stdout}");
     assert!(stdout.contains("native process_cpu="), "{stdout}");
+    assert!(stdout.contains("spans count="), "{stdout}");
+    assert!(stdout.contains("window="), "{stdout}");
     assert!(stdout.contains("target="), "{stdout}");
     assert!(stdout.contains("session.jet#run"), "{stdout}");
     assert!(stdout.contains("command run"), "{stdout}");
@@ -708,6 +768,7 @@ fn run() {
     assert_honest_locks(&text);
     assert_honest_io(&text);
     assert_honest_native(&text, false, false);
+    assert_honest_spans(&text, false);
     assert!(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}");
     assert!(text.contains("\"name\":\"run\""), "{text}");
     assert!(text.contains("live.jet"), "{text}");
@@ -735,6 +796,7 @@ fn run() {
     assert!(stdout.contains("io count="), "{stdout}");
     assert!(!stdout.contains("io count=0 "), "zero io in view: {stdout}");
     assert!(stdout.contains("native process_cpu="), "{stdout}");
+    assert!(stdout.contains("spans unavailable reason="), "{stdout}");
     assert!(stdout.contains("live.jet#run"), "{stdout}");
 
     let _ = fs::remove_dir_all(&root);
