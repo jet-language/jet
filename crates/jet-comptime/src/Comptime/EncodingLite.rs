@@ -1603,187 +1603,25 @@ fn yaml_needs_quote(s: &str) -> bool {
 // ── core.encoding.xml ────────────────────────────────────────────────────────
 // Runtime and comptime share one parser/folder. These adapters only translate
 // the ordinary DataTree algebra to and from comptime's tagged representation.
-fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
+fn xml_to_ct(mut value: jet_foundation::XmlPull::Value) -> CtValue {
+    jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
+    xml_value_to_ct(value)
+}
+
+fn xml_value_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
     use jet_foundation::XmlPull::Value;
     match value {
         Value::Null => json_variant("Null", None),
         Value::Bool(value) => json_variant("Bool", Some(CtValue::Bool(value))),
         Value::Int(value) => json_variant("Int", Some(CtValue::Int(value))),
         Value::Text(value) => json_variant("Text", Some(CtValue::Str(value))),
-        Value::Array(values) => json_array(values.into_iter().map(xml_to_ct).collect()),
-        Value::Object(mut entries) => {
-            if has_exact_xml_keys(&entries, &["raw_text", "raw_bytes", "semantic"])
-                && !entries
-                    .iter()
-                    .find_map(|(key, value)| (key == "semantic").then_some(value))
-                    .is_some_and(xml_snapshot_order_is_valid)
-            {
-                for (key, value) in &mut entries {
-                    if matches!(key.as_str(), "raw_text" | "raw_bytes") {
-                        *value = Value::Null;
-                    }
-                }
-            }
-            json_object(
-                entries
-                    .into_iter()
-                    .map(|(key, value)| (key, xml_to_ct(value)))
-                    .collect(),
-            )
-        }
-    }
-}
-
-fn has_exact_xml_keys(
-    entries: &[(String, jet_foundation::XmlPull::Value)],
-    keys: &[&str],
-) -> bool {
-    entries.len() == keys.len()
-        && keys
-            .iter()
-            .all(|key| entries.iter().any(|(candidate, _)| candidate == key))
-}
-
-fn xml_schema_order(
-    entries: &[(String, jet_foundation::XmlPull::Value)],
-) -> Option<&'static [&'static str]> {
-    use jet_foundation::XmlPull::Value;
-
-    let text_field = |key: &str| {
-        entries.iter().find_map(|(candidate, value)| {
-            (candidate == key).then_some(value).and_then(|value| match value {
-                Value::Text(value) => Some(value.as_str()),
-                _ => None,
-            })
-        })
-    };
-    let has = |key: &str| entries.iter().any(|(candidate, _)| candidate == key);
-    let order: &[&str] = if let Some(tag) = text_field("$xml") {
-        match tag {
-            "document" => &["$xml", "encoding", "bom", "children"],
-            "document_whitespace" if has("lexical") => &["$xml", "value", "lexical"],
-            "document_whitespace" => &["$xml", "value"],
-            "declaration" if has("lexical") => {
-                &["$xml", "version", "encoding", "standalone", "lexical"]
-            }
-            "declaration" => &["$xml", "version", "encoding", "standalone"],
-            "doctype" if has("lexical") => &[
-                "$xml",
-                "name",
-                "public_id",
-                "system_id",
-                "internal_subset",
-                "lexical",
-            ],
-            "doctype" => &["$xml", "name", "public_id", "system_id", "internal_subset"],
-            "element" if has("open_lexical") => &[
-                "$xml",
-                "name",
-                "namespaces",
-                "attributes",
-                "children",
-                "empty_style",
-                "open_lexical",
-                "close_lexical",
-            ],
-            "element" => &[
-                "$xml",
-                "name",
-                "namespaces",
-                "attributes",
-                "children",
-                "empty_style",
-            ],
-            "namespace" if has("lexical") => {
-                &["$xml", "prefix", "namespace_uri", "quote", "lexical"]
-            }
-            "namespace" => &["$xml", "prefix", "namespace_uri", "quote"],
-            "attribute" if has("lexical") => &[
-                "$xml",
-                "name",
-                "parts",
-                "normalized_value",
-                "quote",
-                "lexical",
-            ],
-            "attribute" => &["$xml", "name", "parts", "normalized_value", "quote"],
-            "text" | "cdata" | "comment" if has("lexical") => {
-                &["$xml", "value", "lexical"]
-            }
-            "text" | "cdata" | "comment" => &["$xml", "value"],
-            "entity_ref" if has("lexical") => {
-                &["$xml", "name", "resolved_value", "lexical"]
-            }
-            "entity_ref" => &["$xml", "name", "resolved_value"],
-            "processing_instruction" if has("lexical") => {
-                &["$xml", "target", "value", "lexical"]
-            }
-            "processing_instruction" => &["$xml", "target", "value"],
-            _ => return None,
-        }
-    } else if let Some(tag) = text_field("$xml_event") {
-        match tag {
-            "document_start" => &["$xml_event", "encoding", "bom"],
-            "document_whitespace" => &["$xml_event", "value", "lexical"],
-            "declaration" => {
-                &["$xml_event", "version", "encoding", "standalone", "lexical"]
-            }
-            "doctype" => &[
-                "$xml_event",
-                "name",
-                "public_id",
-                "system_id",
-                "internal_subset",
-                "lexical",
-            ],
-            "element_start" => &[
-                "$xml_event",
-                "name",
-                "namespaces",
-                "attributes",
-                "empty_style",
-                "open_lexical",
-            ],
-            "text" | "cdata" | "comment" => &["$xml_event", "value", "lexical"],
-            "entity_ref" => &["$xml_event", "name", "resolved_value", "lexical"],
-            "processing_instruction" => &["$xml_event", "target", "value", "lexical"],
-            "element_end" => &["$xml_event", "name", "close_lexical"],
-            "document_end" => &["$xml_event"],
-            _ => return None,
-        }
-    } else {
-        [
-            &["raw", "prefix", "local", "namespace_uri"][..],
-            &["raw_text", "raw_bytes", "semantic"],
-            &["name", "namespaces", "attributes", "empty_style"],
-            &["encoding", "bom"],
-            &["version", "encoding", "standalone"],
-            &["name", "public_id", "system_id", "internal_subset"],
-            &["name", "resolved_value"],
-            &["target", "value"],
-            &["value"],
-            &["name"],
-        ]
-        .into_iter()
-        .find(|keys| has_exact_xml_keys(entries, keys))?
-    };
-    has_exact_xml_keys(entries, order).then_some(order)
-}
-
-fn xml_snapshot_order_is_valid(value: &jet_foundation::XmlPull::Value) -> bool {
-    use jet_foundation::XmlPull::Value;
-    match value {
-        Value::Array(values) => values.iter().all(xml_snapshot_order_is_valid),
-        Value::Object(entries) => xml_schema_order(entries).is_some_and(|order| {
+        Value::Array(values) => json_array(values.into_iter().map(xml_value_to_ct).collect()),
+        Value::Object(entries) => json_object(
             entries
-                .iter()
-                .map(|(key, _)| key.as_str())
-                .eq(order.iter().copied())
-                && entries
-                    .iter()
-                    .all(|(_, value)| xml_snapshot_order_is_valid(value))
-        }),
-        _ => true,
+                .into_iter()
+                .map(|(key, value)| (key, xml_value_to_ct(value)))
+                .collect(),
+        ),
     }
 }
 
@@ -1791,7 +1629,7 @@ fn restore_xml_snapshot_order(
     mut entries: Vec<(String, jet_foundation::XmlPull::Value)>,
 ) -> Vec<(String, jet_foundation::XmlPull::Value)> {
     // CtValue maps sort keys; D-ENCXML1 closed schemas preserve exact field order.
-    if let Some(order) = xml_schema_order(&entries) {
+    if let Some(order) = jet_foundation::XmlPull::xml_schema_order(&entries) {
         entries.sort_by_key(|(key, _)| {
             order
                 .iter()
@@ -2048,11 +1886,12 @@ mod xml_tests {
     fn hostile_deep_snapshots_match_runtime_rejection() {
         const SOURCE: &str = "<r xmlns='urn:\troot' xmlns:p='urn:p' a='x\t y' b='z'><?go   now?></r>";
         let parsed = || jet_foundation::XmlPull::parse_document(SOURCE).expect("parse XML");
-        let assert_parity = |value: jet_foundation::XmlPull::Value, label: &str| {
+        let assert_parity =
+            |value: jet_foundation::XmlPull::Value, source: &str, label: &str| {
             let runtime = jet_foundation::XmlPull::render_document(&value).expect("runtime render");
             let comptime = xml_render(&xml_to_ct(value));
             assert_eq!(comptime, runtime, "{label}");
-            assert_ne!(runtime, SOURCE, "{label} trusted stale raw");
+            assert_ne!(runtime, source, "{label} trusted stale raw");
         };
 
         let mut reordered_name = parsed();
@@ -2062,7 +1901,7 @@ mod xml_tests {
             panic!("name object")
         };
         name.reverse();
-        assert_parity(reordered_name, "reordered XMLName snapshot");
+        assert_parity(reordered_name, SOURCE, "reordered XMLName snapshot");
 
         let mut reordered_attributes = parsed();
         let root = first(field_mut(&mut reordered_attributes, "children"));
@@ -2073,7 +1912,7 @@ mod xml_tests {
             panic!("attribute array")
         };
         attributes.reverse();
-        assert_parity(reordered_attributes, "reordered attribute snapshot");
+        assert_parity(reordered_attributes, SOURCE, "reordered attribute snapshot");
 
         let mut stale_namespace = parsed();
         let root = first(field_mut(&mut stale_namespace, "children"));
@@ -2081,7 +1920,7 @@ mod xml_tests {
         let namespace = first(field_mut(semantic, "namespaces"));
         *field_mut(namespace, "namespace_uri") =
             jet_foundation::XmlPull::Value::Text("urn:stale".to_string());
-        assert_parity(stale_namespace, "stale namespace snapshot");
+        assert_parity(stale_namespace, SOURCE, "stale namespace snapshot");
 
         let mut stale_leaf = parsed();
         let root = first(field_mut(&mut stale_leaf, "children"));
@@ -2092,7 +1931,39 @@ mod xml_tests {
         );
         *field_mut(semantic, "value") =
             jet_foundation::XmlPull::Value::Text("stale".to_string());
-        assert_parity(stale_leaf, "stale leaf snapshot");
+        assert_parity(stale_leaf, SOURCE, "stale leaf snapshot");
+
+        const SIMPLE: &str = "<r  a='x'/>";
+        let simple = || jet_foundation::XmlPull::parse_document(SIMPLE).expect("parse XML");
+
+        let mut reordered_live_name = simple();
+        let root = first(field_mut(&mut reordered_live_name, "children"));
+        let jet_foundation::XmlPull::Value::Object(name) = field_mut(root, "name") else {
+            panic!("name object")
+        };
+        name.reverse();
+        assert_parity(reordered_live_name, SIMPLE, "reordered live XMLName");
+
+        let mut extra_lexical_key = simple();
+        let root = first(field_mut(&mut extra_lexical_key, "children"));
+        let jet_foundation::XmlPull::Value::Object(lexical) = field_mut(root, "open_lexical")
+        else {
+            panic!("lexical object")
+        };
+        lexical.push(("extra".to_string(), jet_foundation::XmlPull::Value::Null));
+        assert_parity(extra_lexical_key, SIMPLE, "extra lexical key");
+
+        let mut both_raw_forms = simple();
+        let root = first(field_mut(&mut both_raw_forms, "children"));
+        *field_mut(field_mut(root, "open_lexical"), "raw_bytes") =
+            jet_foundation::XmlPull::Value::Array(vec![jet_foundation::XmlPull::Value::Int(60)]);
+        assert_parity(both_raw_forms, SIMPLE, "both lexical raw forms");
+
+        let mut wrong_raw_type = simple();
+        let root = first(field_mut(&mut wrong_raw_type, "children"));
+        *field_mut(field_mut(root, "open_lexical"), "raw_text") =
+            jet_foundation::XmlPull::Value::Int(1);
+        assert_parity(wrong_raw_type, SIMPLE, "wrong lexical raw type");
     }
 }
 

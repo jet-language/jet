@@ -317,6 +317,327 @@ fn strip_lexical(value: &Value) -> Value {
     }
 }
 
+fn has_exact_xml_keys(entries: &[(String, Value)], keys: &[&str]) -> bool {
+    entries.len() == keys.len()
+        && keys
+            .iter()
+            .all(|key| entries.iter().any(|(candidate, _)| candidate == key))
+}
+
+fn xml_entry<'a>(entries: &'a [(String, Value)], key: &str) -> Option<&'a Value> {
+    entries
+        .iter()
+        .find(|(candidate, _)| candidate == key)
+        .map(|(_, value)| value)
+}
+
+/// Exact field order for every closed D-ENCXML1 object shape.
+pub fn xml_schema_order(entries: &[(String, Value)]) -> Option<&'static [&'static str]> {
+    let text_field = |key: &str| {
+        entries.iter().find_map(|(candidate, value)| {
+            (candidate == key).then_some(value).and_then(|value| match value {
+                Value::Text(value) => Some(value.as_str()),
+                _ => None,
+            })
+        })
+    };
+    let has = |key: &str| entries.iter().any(|(candidate, _)| candidate == key);
+    let order: &[&str] = if let Some(tag) = text_field("$xml") {
+        match tag {
+            "document" => &["$xml", "encoding", "bom", "children"],
+            "document_whitespace" if has("lexical") => &["$xml", "value", "lexical"],
+            "document_whitespace" => &["$xml", "value"],
+            "declaration" if has("lexical") => {
+                &["$xml", "version", "encoding", "standalone", "lexical"]
+            }
+            "declaration" => &["$xml", "version", "encoding", "standalone"],
+            "doctype" if has("lexical") => &[
+                "$xml",
+                "name",
+                "public_id",
+                "system_id",
+                "internal_subset",
+                "lexical",
+            ],
+            "doctype" => &["$xml", "name", "public_id", "system_id", "internal_subset"],
+            "element" if has("open_lexical") => &[
+                "$xml",
+                "name",
+                "namespaces",
+                "attributes",
+                "children",
+                "empty_style",
+                "open_lexical",
+                "close_lexical",
+            ],
+            "element" => &[
+                "$xml",
+                "name",
+                "namespaces",
+                "attributes",
+                "children",
+                "empty_style",
+            ],
+            "namespace" if has("lexical") => {
+                &["$xml", "prefix", "namespace_uri", "quote", "lexical"]
+            }
+            "namespace" => &["$xml", "prefix", "namespace_uri", "quote"],
+            "attribute" if has("lexical") => &[
+                "$xml",
+                "name",
+                "parts",
+                "normalized_value",
+                "quote",
+                "lexical",
+            ],
+            "attribute" => &["$xml", "name", "parts", "normalized_value", "quote"],
+            "text" | "cdata" | "comment" if has("lexical") => {
+                &["$xml", "value", "lexical"]
+            }
+            "text" | "cdata" | "comment" => &["$xml", "value"],
+            "entity_ref" if has("lexical") => {
+                &["$xml", "name", "resolved_value", "lexical"]
+            }
+            "entity_ref" => &["$xml", "name", "resolved_value"],
+            "processing_instruction" if has("lexical") => {
+                &["$xml", "target", "value", "lexical"]
+            }
+            "processing_instruction" => &["$xml", "target", "value"],
+            _ => return None,
+        }
+    } else if let Some(tag) = text_field("$xml_event") {
+        match tag {
+            "document_start" => &["$xml_event", "encoding", "bom"],
+            "document_whitespace" => &["$xml_event", "value", "lexical"],
+            "declaration" => {
+                &["$xml_event", "version", "encoding", "standalone", "lexical"]
+            }
+            "doctype" => &[
+                "$xml_event",
+                "name",
+                "public_id",
+                "system_id",
+                "internal_subset",
+                "lexical",
+            ],
+            "element_start" => &[
+                "$xml_event",
+                "name",
+                "namespaces",
+                "attributes",
+                "empty_style",
+                "open_lexical",
+            ],
+            "text" | "cdata" | "comment" => &["$xml_event", "value", "lexical"],
+            "entity_ref" => &["$xml_event", "name", "resolved_value", "lexical"],
+            "processing_instruction" => &["$xml_event", "target", "value", "lexical"],
+            "element_end" => &["$xml_event", "name", "close_lexical"],
+            "document_end" => &["$xml_event"],
+            _ => return None,
+        }
+    } else {
+        [
+            &["raw", "prefix", "local", "namespace_uri"][..],
+            &["raw_text", "raw_bytes", "semantic"],
+            &["name", "namespaces", "attributes", "empty_style"],
+            &["encoding", "bom"],
+            &["version", "encoding", "standalone"],
+            &["name", "public_id", "system_id", "internal_subset"],
+            &["name", "resolved_value"],
+            &["target", "value"],
+            &["value"],
+            &["name"],
+        ]
+        .into_iter()
+        .find(|keys| has_exact_xml_keys(entries, keys))?
+    };
+    has_exact_xml_keys(entries, order).then_some(order)
+}
+
+fn xml_schema_types_are_valid(entries: &[(String, Value)]) -> bool {
+    let text = |key| matches!(xml_entry(entries, key), Some(Value::Text(_)));
+    let optional_text = |key| matches!(xml_entry(entries, key), Some(Value::Text(_) | Value::Null));
+    let array = |key| matches!(xml_entry(entries, key), Some(Value::Array(_)));
+    let object = |key| matches!(xml_entry(entries, key), Some(Value::Object(_)));
+    let object_or_null = |key| matches!(xml_entry(entries, key), Some(Value::Object(_) | Value::Null));
+    let bool_or_null = |key| matches!(xml_entry(entries, key), Some(Value::Bool(_) | Value::Null));
+    let has = |key| xml_entry(entries, key).is_some();
+    let bytes = |key| match xml_entry(entries, key) {
+        Some(Value::Array(values)) => values
+            .iter()
+            .all(|value| matches!(value, Value::Int(byte) if (0..=255).contains(byte))),
+        _ => false,
+    };
+    let tag = |key| match xml_entry(entries, key) {
+        Some(Value::Text(value)) => Some(value.as_str()),
+        _ => None,
+    };
+
+    if let Some(tag) = tag("$xml") {
+        return match tag {
+            "document" => optional_text("encoding") && bytes("bom") && array("children"),
+            "document_whitespace" => text("value") && (!has("lexical") || object("lexical")),
+            "declaration" => text("version") && optional_text("encoding") && bool_or_null("standalone") && (!has("lexical") || object("lexical")),
+            "doctype" => text("name") && optional_text("public_id") && optional_text("system_id") && optional_text("internal_subset") && (!has("lexical") || object("lexical")),
+            "element" => object("name") && array("namespaces") && array("attributes") && array("children") && text("empty_style") && (!has("open_lexical") || (object("open_lexical") && object_or_null("close_lexical"))),
+            "namespace" => optional_text("prefix") && text("namespace_uri") && text("quote") && (!has("lexical") || object("lexical")),
+            "attribute" => object("name") && array("parts") && optional_text("normalized_value") && text("quote") && (!has("lexical") || object("lexical")),
+            "text" | "cdata" | "comment" => text("value") && (!has("lexical") || object("lexical")),
+            "entity_ref" => text("name") && optional_text("resolved_value") && (!has("lexical") || object("lexical")),
+            "processing_instruction" => text("target") && text("value") && (!has("lexical") || object("lexical")),
+            _ => false,
+        };
+    }
+    if let Some(tag) = tag("$xml_event") {
+        return match tag {
+            "document_start" => optional_text("encoding") && bytes("bom"),
+            "document_whitespace" => text("value") && object("lexical"),
+            "declaration" => text("version") && optional_text("encoding") && bool_or_null("standalone") && object("lexical"),
+            "doctype" => text("name") && optional_text("public_id") && optional_text("system_id") && optional_text("internal_subset") && object("lexical"),
+            "element_start" => object("name") && array("namespaces") && array("attributes") && text("empty_style") && object("open_lexical"),
+            "text" | "cdata" | "comment" => text("value") && object("lexical"),
+            "entity_ref" => text("name") && optional_text("resolved_value") && object("lexical"),
+            "processing_instruction" => text("target") && text("value") && object("lexical"),
+            "element_end" => object("name") && object("close_lexical"),
+            "document_end" => true,
+            _ => false,
+        };
+    }
+    match entries.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>().as_slice() {
+        ["raw", "prefix", "local", "namespace_uri"] => text("raw") && optional_text("prefix") && text("local") && optional_text("namespace_uri"),
+        ["raw_text", "raw_bytes", "semantic"] => true,
+        ["name", "namespaces", "attributes", "empty_style"] => object("name") && array("namespaces") && array("attributes") && text("empty_style"),
+        ["encoding", "bom"] => optional_text("encoding") && bytes("bom"),
+        ["version", "encoding", "standalone"] => text("version") && optional_text("encoding") && bool_or_null("standalone"),
+        ["name", "public_id", "system_id", "internal_subset"] => text("name") && optional_text("public_id") && optional_text("system_id") && optional_text("internal_subset"),
+        ["name", "resolved_value"] => text("name") && optional_text("resolved_value"),
+        ["target", "value"] => text("target") && text("value"),
+        ["value"] => text("value"),
+        ["name"] => object("name"),
+        _ => false,
+    }
+}
+
+fn has_canonical_xml_object(value: &Value) -> bool {
+    let Value::Object(entries) = value else { return false };
+    xml_schema_order(entries).is_some_and(|order| {
+        entries
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .eq(order.iter().copied())
+    }) && xml_schema_types_are_valid(entries)
+}
+
+fn has_canonical_xml_shape(value: &Value) -> bool {
+    match value {
+        Value::Array(values) => values.iter().all(has_canonical_xml_shape),
+        Value::Object(entries) => has_canonical_xml_object(value)
+            && entries
+                .iter()
+                .all(|(_, value)| has_canonical_xml_shape(value)),
+        _ => true,
+    }
+}
+
+fn lexical_evidence_matches(lexical: &Value, expected: &Value) -> bool {
+    let Value::Object(entries) = lexical else { return false };
+    if !entries
+        .iter()
+        .map(|(key, _)| key.as_str())
+        .eq(["raw_text", "raw_bytes", "semantic"])
+        || !has_canonical_xml_shape(expected)
+    {
+        return false;
+    }
+    let Some(semantic) = field(lexical, "semantic") else { return false };
+    if !has_canonical_xml_shape(semantic) || semantic != expected {
+        return false;
+    }
+    match (field(lexical, "raw_text"), field(lexical, "raw_bytes")) {
+        (Some(Value::Text(_)), Some(Value::Null)) | (Some(Value::Null), Some(Value::Null)) => true,
+        (Some(Value::Null), Some(Value::Array(bytes))) => bytes
+            .iter()
+            .all(|byte| matches!(byte, Value::Int(value) if (0..=255).contains(value))),
+        _ => false,
+    }
+}
+
+fn lexical_semantic(value: &Value, key: &str) -> Option<Value> {
+    if !has_canonical_xml_object(value) {
+        return None;
+    }
+    let whole_tag = match field(value, "$xml") {
+        Some(Value::Text(tag)) => Some(tag.as_str()),
+        _ => None,
+    };
+    let event_tag = match field(value, "$xml_event") {
+        Some(Value::Text(tag)) => Some(tag.as_str()),
+        _ => None,
+    };
+    match (whole_tag, event_tag, key) {
+        (Some("element"), _, "open_lexical") | (_, Some("element_start"), "open_lexical") => {
+            Some(strip_lexical(&object(vec![
+                ("name", field(value, "name")?.clone()),
+                ("namespaces", field(value, "namespaces")?.clone()),
+                ("attributes", field(value, "attributes")?.clone()),
+                ("empty_style", field(value, "empty_style")?.clone()),
+            ])))
+        }
+        (Some("element"), _, "close_lexical") | (_, Some("element_end"), "close_lexical") => {
+            Some(object(vec![("name", field(value, "name")?.clone())]))
+        }
+        (Some(tag), _, "lexical")
+            if matches!(tag, "document_whitespace" | "declaration" | "doctype" | "namespace" | "attribute" | "text" | "cdata" | "entity_ref" | "comment" | "processing_instruction") =>
+        {
+            Some(strip_lexical(value))
+        }
+        (_, Some(tag), "lexical")
+            if matches!(tag, "document_whitespace" | "declaration" | "doctype" | "text" | "cdata" | "entity_ref" | "comment" | "processing_instruction") =>
+        {
+            let Value::Object(entries) = value else { return None };
+            Some(Value::Object(entries.iter().filter(|(name, _)| name != "$xml_event" && name != "lexical" && name != "open_lexical" && name != "close_lexical").map(|(name, value)| (name.clone(), strip_lexical(value))).collect()))
+        }
+        _ => None,
+    }
+}
+
+/// Remove raw forms that would become falsely trusted after ordered Objects
+/// cross comptime's sorted Map representation.
+pub fn invalidate_untrusted_lexical_evidence(value: &mut Value) {
+    for key in ["lexical", "open_lexical", "close_lexical"] {
+        let Some(lexical) = field(value, key) else { continue };
+        let trusted = lexical_semantic(value, key)
+            .as_ref()
+            .is_some_and(|expected| lexical_evidence_matches(lexical, expected));
+        if !trusted {
+            if let Value::Object(entries) = value {
+                if let Some((_, Value::Object(lexical))) =
+                    entries.iter_mut().find(|(candidate, _)| candidate == key)
+                {
+                    for (field, value) in lexical {
+                        if matches!(field.as_str(), "raw_text" | "raw_bytes") {
+                            *value = Value::Null;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                invalidate_untrusted_lexical_evidence(value);
+            }
+        }
+        Value::Object(entries) => {
+            for (_, value) in entries {
+                invalidate_untrusted_lexical_evidence(value);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn leaf(tag: &str, fields: Vec<(&str, Value)>, raw: String) -> Value {
     let mut semantic_fields = vec![("$xml", text(tag))];
     semantic_fields.extend(fields.clone());
@@ -574,7 +895,7 @@ pub fn parse_document_with(source: &str, options: &ParseOptions) -> Result<Value
 
 fn lexical_raw<'a>(value: &'a Value, key: &str, semantic: &Value) -> Option<&'a str> {
     let lexical_value = field(value, key)?;
-    if field(lexical_value, "semantic")? != semantic {
+    if !has_canonical_xml_object(value) || !lexical_evidence_matches(lexical_value, semantic) {
         return None;
     }
     match field(lexical_value, "raw_text")? {
@@ -1032,13 +1353,10 @@ fn deterministic_event_node(event: &Value, tag: &str) -> Result<String, Error> {
 
 fn valid_event_raw_bytes(event: &Value, tag: &str) -> Option<Vec<u8>> {
     let key = match tag { "element_start" => "open_lexical", "element_end" => "close_lexical", "document_start" | "document_end" => return None, _ => "lexical" };
-    let Value::Object(lexical) = field(event, key)? else { return None; };
-    let (_, raw_value) = lexical.iter().find(|(name, _)| name == "raw_bytes")?;
-    let raw = byte_array(raw_value).ok()?;
-    let semantic = &lexical.iter().find(|(name, _)| name == "semantic")?.1;
-    let Value::Object(entries) = event else { return None; };
-    let expected = Value::Object(entries.iter().filter(|(name, _)| name != "$xml_event" && name != "lexical" && name != "open_lexical" && name != "close_lexical").map(|(name, value)| (name.clone(), strip_lexical(value))).collect());
-    (*semantic == expected).then_some(raw)
+    let lexical = field(event, key)?;
+    let expected = lexical_semantic(event, key)?;
+    if !lexical_evidence_matches(lexical, &expected) { return None; }
+    byte_array(field(lexical, "raw_bytes")?).ok()
 }
 
 fn source_encoding_matches(source: Option<&str>, bom: &[u8], target: RenderEncoding) -> bool {
