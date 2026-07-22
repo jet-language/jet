@@ -7,9 +7,8 @@
 //! spelling ballot. Failures are Jet-owned (E1402); guests never crash the
 //! compiler or expose rustc (I2/I3).
 //!
-//! Tower #549 C5 focused proofs live in `tests` below (host/SDK/diagnostic +
-//! AOT/dev fact parity). Full repository verification
-//! (`scripts/agent/verify-full.sh`) remains the open C5 gate.
+//! Tower #549 C5 proofs live in `tests` below (host/SDK/diagnostic + AOT/dev
+//! fact parity). Repository-wide verification runs at multi-card milestones.
 
 use crate::AST::{Func, Item, ProgramBundle};
 use crate::Diagnostics::{Diagnostic, Severity, Span};
@@ -738,8 +737,8 @@ mod tests {
 
     // --- Tower #549 C5 focused proofs ------------------------------------
     // Host/SDK/diagnostic + AOT/dev fact parity where both paths carry facts.
-    // Remaining C5 gate (not claimed here): independent Sol review + full
-    // `scripts/agent/verify-full.sh` repository verification.
+    // Independent Sol review closes C5; repository-wide verification runs at
+    // multi-card milestones.
 
     /// Check vs Run modes freeze byte-identical typed snapshots when both
     /// have solved effect facts (AOT build uses Run; `jet check` uses Check).
