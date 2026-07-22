@@ -20,7 +20,6 @@ struct JetHttpMuxRoute {
 struct JetHttpMux(
     std::sync::Arc<std::sync::Mutex<Vec<JetHttpMuxRoute>>>,
     std::sync::Arc<std::sync::Mutex<Vec<JetHttpMiddleware>>>,
-    std::sync::Arc<std::sync::atomic::AtomicBool>,
 );
 
 #[derive(Clone)]
@@ -625,7 +624,6 @@ impl JetHttpMux {
         JetHttpMux(
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
     }
     fn add<F>(&self, method: &str, pattern: &str, f: F)
@@ -3495,43 +3493,29 @@ fn jet_http_mux_dispatch(
 
 fn jet_http_mux_run_handler(
     mux: &JetHttpMux,
-    mut req: JetHttpRequest,
+    req: JetHttpRequest,
     handler: JetHttpHandler,
 ) -> JetHttpResponse {
-    let request_id = mux.2.load(std::sync::atomic::Ordering::Acquire).then(|| {
-        let id = match req.headers.get("x-request-id") {
-            Some(value) if jet_http_request_id_valid(value) => value.clone(),
-            _ => jet_http_new_request_id(),
+    let mut handler = jet_http_mux_total_handler(handler);
+    let middlewares = mux.1.lock().unwrap().clone();
+    for middleware in middlewares.iter().rev() {
+        let next = handler.clone();
+        handler = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| middleware(next))) {
+            Ok(handler) => jet_http_mux_total_handler(handler),
+            Err(_) => std::sync::Arc::new(|_| Ok(jet_http_srv_internal_response())),
         };
-        let _ = req.headers.set("x-request-id", &id);
-        id
-    });
-    let mut handler: JetHttpHandler = std::sync::Arc::new(move |req| {
+    }
+    handler(req).unwrap_or_else(jet_http_srv_error_response)
+}
+
+fn jet_http_mux_total_handler(handler: JetHttpHandler) -> JetHttpHandler {
+    std::sync::Arc::new(move |req| {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
             Ok(Ok(response)) => Ok(response),
             Ok(Err(error)) => Ok(jet_http_srv_error_response(error)),
             Err(_) => Ok(jet_http_srv_internal_response()),
         }
-    });
-    let middlewares = mux.1.lock().unwrap().clone();
-    for middleware in middlewares.iter().rev() {
-        let next = handler.clone();
-        handler = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| middleware(next))) {
-            Ok(handler) => handler,
-            Err(_) => std::sync::Arc::new(|_| Ok(jet_http_srv_internal_response())),
-        };
-    }
-    let mut response = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req))) {
-        Ok(Ok(response)) => response,
-        Ok(Err(error)) => jet_http_srv_error_response(error),
-        Err(_) => jet_http_srv_internal_response(),
-    };
-    if let Some(id) = request_id {
-        if response.headers.get("x-request-id").is_none() {
-            let _ = response.headers.set("x-request-id", &id);
-        }
-    }
-    response
+    })
 }
 
 fn jet_http_srv_internal_response() -> JetHttpResponse {
@@ -4069,9 +4053,9 @@ fn jet_http_srv_access_log(req: &JetHttpRequest, status: i64) -> String {
     format!("{} {} {}", req.method, route, status)
 }
 
-/// D-HTTP-SERVER2 built-in `request_id` middleware response boundary. Keeps a
-/// valid inbound `x-request-id`, otherwise assigns one, and correlates every
-/// router, handler, and recovery response unless that response chose its own.
+/// D-HTTP-SERVER2 built-in `request_id` middleware: ordinary Handler wrapper.
+/// Keeps a valid inbound `x-request-id`, otherwise assigns one, and echoes it
+/// on responses reached through its declaration-ordered layer.
 fn jet_http_request_id_valid(value: &str) -> bool {
     let len = value.len();
     (1..=128).contains(&len) && value.bytes().all(|byte| byte.is_ascii_graphic())
@@ -4088,6 +4072,21 @@ fn jet_http_new_request_id() -> String {
     format!("req-{nanos:x}-{seq:x}")
 }
 
+fn jet_http_srv_request_id(next: JetHttpHandler) -> JetHttpHandler {
+    std::sync::Arc::new(move |mut request| {
+        let id = match request.headers.get("x-request-id") {
+            Some(value) if jet_http_request_id_valid(value) => value.clone(),
+            _ => jet_http_new_request_id(),
+        };
+        let _ = request.headers.set("x-request-id", &id);
+        let mut response = next(request)?;
+        if response.headers.get("x-request-id").is_none() {
+            let _ = response.headers.set("x-request-id", &id);
+        }
+        Ok(response)
+    })
+}
+
 fn jet_http_srv_install_request_id(mux: &JetHttpMux) {
-    mux.2.store(true, std::sync::atomic::Ordering::Release);
+    jet_http_mux_middleware(mux, jet_http_srv_request_id);
 }

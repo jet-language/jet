@@ -2957,6 +2957,69 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     assert_eq!(jet_http_mux_dispatch(&short, request("/")).unwrap().status, 403);
     assert_eq!(handler_calls.load(std::sync::atomic::Ordering::Relaxed), 0);
 
+    let short_before_id = jet_http_mux_new();
+    jet_http_mux_middleware(&short_before_id, |_| {
+        std::sync::Arc::new(|_| Ok(jet_http_srv_response(403, &"outer short".to_string())))
+    });
+    jet_http_srv_install_request_id(&short_before_id);
+    jet_http_mux_add(&short_before_id, "GET", "/", |_| {
+        jet_http_srv_response(200, &"must not run".to_string())
+    });
+    let response = jet_http_mux_dispatch(&short_before_id, request("/")).unwrap();
+    assert_eq!(response.status, 403);
+    assert_eq!(response.headers.get("x-request-id"), None);
+
+    let id_before_short = jet_http_mux_new();
+    jet_http_srv_install_request_id(&id_before_short);
+    jet_http_mux_middleware(&id_before_short, |_| {
+        std::sync::Arc::new(|_| Ok(jet_http_srv_response(403, &"inner short".to_string())))
+    });
+    jet_http_mux_add(&id_before_short, "GET", "/", |_| {
+        jet_http_srv_response(200, &"must not run".to_string())
+    });
+    let response = jet_http_mux_dispatch(&id_before_short, request("/")).unwrap();
+    assert_eq!(response.status, 403);
+    assert!(response
+        .headers
+        .get("x-request-id")
+        .is_some_and(|value| value.starts_with("req-")));
+
+    let runtime_error = jet_http_mux_new();
+    jet_http_srv_install_request_id(&runtime_error);
+    jet_http_mux_middleware(&runtime_error, |_| {
+        std::sync::Arc::new(|_| {
+            Err(JetHttpError::Internal {
+                incident_id: "private-middleware-error".to_string(),
+            })
+        })
+    });
+    jet_http_mux_add(&runtime_error, "GET", "/", |_| {
+        jet_http_srv_response(200, &"must not run".to_string())
+    });
+    let response = jet_http_mux_dispatch(&runtime_error, request("/")).unwrap();
+    assert_eq!(response.status, 500);
+    assert_eq!(response.body.text(64).unwrap(), "500 Internal Server Error");
+    assert!(response
+        .headers
+        .get("x-request-id")
+        .is_some_and(|value| value.starts_with("req-")));
+
+    let runtime_panic = jet_http_mux_new();
+    jet_http_srv_install_request_id(&runtime_panic);
+    jet_http_mux_middleware(&runtime_panic, |_| {
+        std::sync::Arc::new(|_| panic!("private middleware runtime panic"))
+    });
+    jet_http_mux_add(&runtime_panic, "GET", "/", |_| {
+        jet_http_srv_response(200, &"must not run".to_string())
+    });
+    let response = jet_http_mux_dispatch(&runtime_panic, request("/")).unwrap();
+    assert_eq!(response.status, 500);
+    assert_eq!(response.body.text(64).unwrap(), "500 Internal Server Error");
+    assert!(response
+        .headers
+        .get("x-request-id")
+        .is_some_and(|value| value.starts_with("req-")));
+
     let mut threads = Vec::new();
     for id in 0..16 {
         let mux = mux.clone();
