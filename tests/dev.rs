@@ -2554,12 +2554,15 @@ fn zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape() {
 
 fn run() {
     frame :: zstd.compress([72, 101, 108, 108, 111])
+    restored: [U8] :: zstd.decompress([40, 181, 47, 253, 0, 88, 41, 0, 0, 104, 101, 108, 108, 111]) ?? []
     m0: U8 :: 40
     m1: U8 :: 181
     m2: U8 :: 47
     m3: U8 :: 253
     print(frame.len() > 9)
     print(frame[0] == m0 && frame[1] == m1 && frame[2] == m2 && frame[3] == m3)
+    print(restored.len() == 5)
+    print(restored[0] == (U8.from_int(104) ?? 0) && restored[4] == (U8.from_int(111) ?? 0))
 }
 "#;
     let dir = common::unique_tmp("jet_dev_zstd_compress");
@@ -2575,7 +2578,7 @@ fn run() {
         RunOutcome::Problems(diags) => panic!("forced zstd compressor failed: {diags:?}"),
     };
     assert_eq!(actual, expected);
-    assert_eq!(actual.stdout, "true\ntrue\n");
+    assert_eq!(actual.stdout, "true\ntrue\ntrue\ntrue\n");
     let _ = fs::remove_dir_all(&dir);
 }
 

@@ -2562,8 +2562,10 @@ fn repl_zstd_compress_is_resident() {
         &[
             "use core.compress.zstd as zstd",
             "frame :: zstd.compress([72, 101, 108, 108, 111])",
+            "restored :: zstd.decompress([40, 181, 47, 253, 0, 88, 41, 0, 0, 104, 101, 108, 108, 111]) ?? []",
             "frame.len() > 9",
             "frame[0] == (U8.from_int(40) ?? 0) && frame[1] == (U8.from_int(181) ?? 0) && frame[2] == (U8.from_int(47) ?? 0) && frame[3] == (U8.from_int(253) ?? 0)",
+            "restored.len() == 5 && restored[0] == (U8.from_int(104) ?? 0) && restored[4] == (U8.from_int(111) ?? 0)",
         ],
         None,
     );
@@ -2571,7 +2573,7 @@ fn repl_zstd_compress_is_resident() {
         !out.contains("E0956"),
         "zstd compressor hit comptime fallback: {out}"
     );
-    assert_eq!(out.matches("true : Bool").count(), 2, "got: {out}");
+    assert_eq!(out.matches("true : Bool").count(), 3, "got: {out}");
 }
 
 #[test]
