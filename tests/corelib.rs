@@ -7195,6 +7195,69 @@ fn run() {
 }
 
 #[test]
+fn xml_attribute_whitespace_normalization_matches_comptime_aot_and_dev() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML attribute normalization parity test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_xml_attribute_normalization_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.xml as xml
+
+fn summarize(source: String) -> String {
+    doc := xml.parse(source) ?? panic("xml")
+    root := (doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
+    namespace := ((root.field("namespaces") ?? panic("namespaces")).at(0) ?? panic("namespace")).field("namespace_uri") ?? panic("namespace URI")
+    attributes := root.field("attributes") ?? panic("attributes")
+    literal := ((attributes.at(0) ?? panic("literal attribute")).field("normalized_value") ?? panic("literal normalized value")).text() ?? "bad"
+    reference := ((attributes.at(1) ?? panic("reference attribute")).field("normalized_value") ?? panic("reference normalized value")).text() ?? "bad"
+    namespace_ok := (namespace.text() ?? "bad") == "urn: foo bar"
+    literal_ok := literal == "A B C D E"
+    lexical_ok := xml.to_string(doc) == source
+    return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
+}
+
+comptime cr = String.from_bytes([13]) ?? panic("CR")
+comptime close = "/>"
+comptime source = "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{cr}\nD{cr}E' b='&#xD;&#xA;&#x9;'{close}"
+comptime normalized = summarize(source)
+
+fn run() {
+    runtime := summarize(source)
+    print("{normalized}|{runtime}")
+}
+"#;
+    let expected = "true|true|3|true|true|true|3|true\n";
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "xml_attribute_normalization", source, &[], None);
+    assert_eq!(
+        code, 0,
+        "XML attribute normalization AOT fixture failed: {stderr}"
+    );
+    assert_eq!(stdout, expected);
+    assert_eq!(stderr, "");
+
+    let dev_path = dir.join("xml_attribute_normalization.jet");
+    fs::write(&dev_path, source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(
+                (exit_code, stdout, stderr),
+                (0, expected.to_string(), String::new())
+            );
+        }
+        other => panic!("XML attribute normalization default-dev fixture failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

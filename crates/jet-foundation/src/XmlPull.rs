@@ -1386,6 +1386,78 @@ mod tests {
     }
 
     #[test]
+    fn xml_10_attribute_whitespace_normalizes_without_losing_lexical_identity() {
+        let source = "<r xmlns='urn:\tfoo\r\nbar' a='x\t y\r\nz\ru\nv' b='&#xD;&#xA;&#x9;'/>";
+        let events = scan(source).expect("valid XML");
+        let Event::ElementStart {
+            namespaces,
+            attributes,
+            ..
+        } = &events[1]
+        else {
+            panic!("root start")
+        };
+        assert_eq!(namespaces[0].namespace_uri, "urn: foo bar");
+        assert_eq!(attributes[0].normalized.as_deref(), Some("x  y z u v"));
+        assert!(matches!(
+            &attributes[0].parts[..],
+            [Part::Text { value, raw }]
+                if value == "x  y z u v" && raw == "x\t y\r\nz\ru\nv"
+        ));
+        assert_eq!(attributes[1].normalized.as_deref(), Some("\r\n\t"));
+
+        let resolved_source =
+            "<!DOCTYPE r [<!ENTITY ws 'ignored'>]><r xmlns='&ws;' a='&ws;' b='&#xD;&#xA;&#x9;'/>";
+        let mut replacements = BTreeMap::new();
+        replacements.insert(
+            "ws".to_string(),
+            "urn:\talpha\r\nbeta\rgamma\ndelta".to_string(),
+        );
+        let options = ParseOptions {
+            entities: EntityPolicy::Resolve(replacements),
+            limits: Limits::safe(),
+        };
+        let mut scanner =
+            Scanner::with_options(resolved_source, options.clone()).expect("options");
+        let (namespace, attribute, numeric) = loop {
+            match scanner.next().expect("resolved XML") {
+                Some(Event::ElementStart {
+                    namespaces,
+                    attributes,
+                    ..
+                }) => break (
+                    namespaces[0].clone(),
+                    attributes[0].clone(),
+                    attributes[1].clone(),
+                ),
+                Some(_) => {}
+                None => panic!("root start"),
+            }
+        };
+        let expected = "urn: alpha beta gamma delta";
+        assert_eq!(namespace.namespace_uri, expected);
+        assert_eq!(attribute.normalized.as_deref(), Some(expected));
+        assert_eq!(numeric.normalized.as_deref(), Some("\r\n\t"));
+        assert!(matches!(
+            &attribute.parts[..],
+            [Part::Entity { resolved: Some(value), .. }] if value == expected
+        ));
+        let tree = parse_document_with(resolved_source, &options).expect("resolved tree");
+        assert_eq!(render_document(&tree), Ok(resolved_source.to_string()));
+
+        let tree = parse_document(source).expect("whole tree");
+        assert_eq!(render_document(&tree), Ok(source.to_string()));
+        for split in 0..=source.len() {
+            let mut writer = StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::PreserveValid);
+            let mut output = Vec::new();
+            for event in stream_values(source.as_bytes(), split) {
+                output.extend(writer.write(&event).expect("write event"));
+            }
+            assert_eq!(output, source.as_bytes(), "split {split}");
+        }
+    }
+
+    #[test]
     fn folds_lossless_tagged_tree_and_round_trips() {
         let source = "<?xml version='1.0'?>\n<!DOCTYPE r PUBLIC 'pub' 'sys' [<!ENTITY e 'v'>]><r xmlns='u' xmlns:p='v' p:a='x&amp;y'>a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\n";
         let tree = parse_document(source).expect("valid XML");
@@ -2064,6 +2136,23 @@ fn valid_xml_char(character: char) -> bool {
         0x9 | 0xA | 0xD | 0x20..=0xD7FF | 0xE000..=0xFFFD | 0x10000..=0x10FFFF
     )
 }
+fn normalize_attribute_text(raw: &str) -> String {
+    let mut normalized = String::with_capacity(raw.len());
+    let mut characters = raw.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '\r' => {
+                if characters.peek() == Some(&'\n') {
+                    characters.next();
+                }
+                normalized.push(' ');
+            }
+            '\n' | '\t' => normalized.push(' '),
+            character => normalized.push(character),
+        }
+    }
+    normalized
+}
 fn split_name(raw: &str) -> (Option<String>, String) {
     match raw.split_once(':') {
         Some((p, l)) => (Some(p.to_string()), l.to_string()),
@@ -2504,9 +2593,10 @@ impl<'a> Scanner<'a> {
             if let Some(rel) = raw[at..].find('&') {
                 if rel > 0 {
                     let v = &raw[at..at + rel];
-                    normalized.push_str(v);
+                    let value = normalize_attribute_text(v);
+                    normalized.push_str(&value);
                     parts.push(Part::Text {
-                        value: v.into(),
+                        value,
                         raw: v.into(),
                     });
                 }
@@ -2518,10 +2608,17 @@ impl<'a> Scanner<'a> {
                     ));
                 };
                 let name = &raw[start + 1..start + end];
-                let resolved = self.resolve_entity(name).map_err(|mut error| {
+                let mut resolved = self.resolve_entity(name).map_err(|mut error| {
                     error.offset = source_base + start;
                     error
                 })?;
+                if !name.starts_with('#')
+                    && !matches!(name, "lt" | "gt" | "amp" | "apos" | "quot")
+                {
+                    if let Some(value) = &mut resolved {
+                        *value = normalize_attribute_text(value);
+                    }
+                }
                 if let Some(v) = &resolved {
                     normalized.push_str(v)
                 }
@@ -2536,9 +2633,10 @@ impl<'a> Scanner<'a> {
                 at = start + end + 1;
             } else {
                 let v = &raw[at..];
-                normalized.push_str(v);
+                let value = normalize_attribute_text(v);
+                normalized.push_str(&value);
                 parts.push(Part::Text {
-                    value: v.into(),
+                    value,
                     raw: v.into(),
                 });
                 break;

@@ -1564,7 +1564,10 @@ Each adapter is a full serde equivalent, not a lossy subset:
 pull handles, base32/base64url, and an infallible key-sorting `json.canonical`
 exist. XML whole and stream parsing enforce the exact XML 1.0 Fifth Edition
 `Char` production for literal scalars and numeric references, with identical
-typed errors across every byte split. CBOR's
+typed errors across every byte split. XML attribute and namespace values apply
+XML 1.0 line-end and whitespace normalization, including explicit general-entity
+replacement text, while numeric references remain literal and lexical tokens
+remain exact for preserving writers in comptime, AOT, and dev. CBOR's
 typed whole-value byte verbs, closed errors/options, native `[U8]`, original-wire
 Core deterministic validation, live allocation limits, and normal-mode
 indefinite values execute in the native runtime; pull handles also exist. Exact

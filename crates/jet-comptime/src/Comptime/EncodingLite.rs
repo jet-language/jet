@@ -1617,6 +1617,26 @@ fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
     }
 }
 
+fn restore_xml_snapshot_order(
+    mut entries: Vec<(String, jet_foundation::XmlPull::Value)>,
+) -> Vec<(String, jet_foundation::XmlPull::Value)> {
+    // CtValue maps sort keys; this snapshot's schema order is identity-significant.
+    const ELEMENT_OPEN: [&str; 4] = ["name", "namespaces", "attributes", "empty_style"];
+    if entries.len() == ELEMENT_OPEN.len()
+        && entries
+            .iter()
+            .all(|(key, _)| ELEMENT_OPEN.contains(&key.as_str()))
+    {
+        entries.sort_by_key(|(key, _)| {
+            ELEMENT_OPEN
+                .iter()
+                .position(|expected| *expected == key)
+                .expect("checked element-open key")
+        });
+    }
+    entries
+}
+
 pub(super) fn xml_from_ct(
     value: &CtValue,
 ) -> Result<jet_foundation::XmlPull::Value, String> {
@@ -1646,12 +1666,15 @@ pub(super) fn xml_from_ct(
         ));
     }
     if let Some(CtValue::Map(entries)) = json_payload(value, "Object") {
-        return Ok(Value::Object(
-            entries.iter().map(|(key, value)| match key {
-                CtKey::Str(key) => Ok((key.clone(), xml_from_ct(value)?)),
-                _ => Err("XML object key must be text".to_string()),
-            }).collect::<Result<Vec<_>, _>>()?,
-        ));
+        return Ok(Value::Object(restore_xml_snapshot_order(
+            entries
+                .iter()
+                .map(|(key, value)| match key {
+                    CtKey::Str(key) => Ok((key.clone(), xml_from_ct(value)?)),
+                    _ => Err("XML object key must be text".to_string()),
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )));
     }
     Err("XML tree contains a non-DataTree value".to_string())
 }
@@ -1768,6 +1791,19 @@ pub(super) fn xml_render(value: &CtValue) -> String {
         .and_then(|value| jet_foundation::XmlPull::render_document(&value))
         .unwrap_or_default()
 }
+
+#[cfg(test)]
+mod xml_tests {
+    use super::*;
+
+    #[test]
+    fn parse_render_preserves_element_open_lexical_snapshot() {
+        let source = "<r xmlns='urn:\tfoo\r\nbar' a='x\t y\r\nz\ru\nv' b='&#xD;&#xA;&#x9;'/>";
+        let tree = xml_parse(&source).expect("parse XML");
+        assert_eq!(xml_render(&tree), source);
+    }
+}
+
 // ── core.encoding.cbor ──────────────────────────────────────────────────────
 // Ported from `EncodingCodecs.rs`'s `jet_cbor_*`/`jet_std_cbor_*`, target
 // type swapped from `DataTree` to the `Json`-tagged `CtValue`.
