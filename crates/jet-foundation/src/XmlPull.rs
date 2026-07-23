@@ -589,7 +589,27 @@ fn lexical_semantic(value: &Value, key: &str) -> Option<Value> {
         (Some(tag), _, "lexical")
             if matches!(tag, "document_whitespace" | "declaration" | "doctype" | "namespace" | "attribute" | "text" | "cdata" | "entity_ref" | "comment" | "processing_instruction") =>
         {
-            Some(strip_lexical(value))
+            let mut semantic = strip_lexical(value);
+            if matches!(
+                tag,
+                "document_whitespace"
+                    | "declaration"
+                    | "doctype"
+                    | "text"
+                    | "cdata"
+                    | "entity_ref"
+                    | "comment"
+                    | "processing_instruction"
+            ) && matches!(
+                field(field(value, key)?, "raw_bytes"),
+                Some(Value::Array(_))
+            ) {
+                let Value::Object(entries) = &mut semantic else {
+                    return None;
+                };
+                entries.retain(|(name, _)| name != "$xml");
+            }
+            Some(semantic)
         }
         (_, Some(tag), "lexical")
             if matches!(tag, "document_whitespace" | "declaration" | "doctype" | "text" | "cdata" | "entity_ref" | "comment" | "processing_instruction") =>

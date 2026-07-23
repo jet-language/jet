@@ -1915,6 +1915,56 @@ mod xml_tests {
     }
 
     #[test]
+    fn byte_round_trip_preserves_detected_encoding_bom_and_lexical_evidence() {
+        let utf8_source = "<?xml version='1.0' encoding='UTF-8'?><r>é🙂</r>";
+        let mut utf8 = vec![0xef, 0xbb, 0xbf];
+        utf8.extend_from_slice(utf8_source.as_bytes());
+
+        let utf16_source = "<?xml version='1.0' encoding='UTF-16'?><r>é🙂</r>";
+        let mut utf16 = vec![0xff, 0xfe];
+        utf16.extend(
+            utf16_source
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes),
+        );
+
+        for (variant, bytes) in [("UTF8BOM", utf8), ("UTF16LE", utf16)] {
+            let expected =
+                jet_foundation::XmlPull::parse_document_bytes(&bytes).expect("parse XML bytes");
+            let comptime = xml_to_ct(expected.clone());
+            let actual = xml_from_ct(&comptime).expect("reconstruct XML bytes");
+            assert_eq!(actual, expected, "{variant} metadata and evidence");
+
+            let options = CtValue::Struct {
+                type_name: "XMLRenderOptions".to_string(),
+                fields: vec![
+                    (
+                        "encoding".to_string(),
+                        CtValue::Enum {
+                            type_name: "XMLEncoding".to_string(),
+                            variant: variant.to_string(),
+                            args: Vec::new(),
+                        },
+                    ),
+                    (
+                        "lexical".to_string(),
+                        CtValue::Enum {
+                            type_name: "XMLLexicalPolicy".to_string(),
+                            variant: "PreserveValid".to_string(),
+                            args: Vec::new(),
+                        },
+                    ),
+                ],
+            };
+            assert_eq!(
+                xml_to_bytes(&comptime, Some(&options)).expect("render XML bytes"),
+                bytes,
+                "{variant} byte identity",
+            );
+        }
+    }
+
+    #[test]
     fn round_trip_restores_every_xml_event_schema_order() {
         let source = b"<?xml version='1.0'?>\n<!DOCTYPE r [<!ENTITY e 'v'>]>\n<r xmlns='urn:r' xmlns:p='urn:p' a='x&amp;y'>t&amp;<![CDATA[c]]><!--m--><?go now?><p:c/></r>\n";
         let mut scanner = jet_foundation::XmlPull::StreamScanner::new(
