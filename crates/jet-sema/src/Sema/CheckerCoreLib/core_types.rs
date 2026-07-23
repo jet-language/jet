@@ -163,7 +163,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "TlsRootCertificates" | "TlsRootCertificatesType" | "TlsClientIdentity" | "TlsClientIdentityType"
         | "TlsClientTrust" | "TlsVersion" | "TlsPeerIdentity" | "TlsCertificate"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
-        | "HttpRequest" | "HttpResponse" | "HttpRouter"
+        | "HttpRequest" | "HttpResponse" | "HttpRouter" | "HttpClient" | "HttpClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.
         | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey"
@@ -239,7 +239,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName" | "HttpHeaderValue"
-        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
+        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpCookieJar" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -689,6 +689,50 @@ pub(crate) fn core_http_variants(
         for name in ["ClientConnect", "ServerBind", "ServeListener"] {
             variants.insert(name.to_string(), (zero, VariantPayload::Unit));
         }
+        return Some(variants);
+    }
+    if enum_name == "HttpProxy" {
+        variants.insert("FromEnvironment".to_string(), (zero, VariantPayload::Unit));
+        variants.insert("None".to_string(), (zero, VariantPayload::Unit));
+        variants.insert(
+            "Url".to_string(),
+            (zero, VariantPayload::Single(Type::String, zero)),
+        );
+        return Some(variants);
+    }
+    if enum_name == "HttpRedirectPolicy" {
+        // D-HTTP-CLIENT2=A: `.Follow(max:, same_origin_credentials:)`.
+        variants.insert(
+            "Follow".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![
+                    VariantField {
+                        name: "max".to_string(),
+                        name_span: zero,
+                        ty: Type::Int,
+                        ty_span: zero,
+                    },
+                    VariantField {
+                        name: "same_origin_credentials".to_string(),
+                        name_span: zero,
+                        ty: Type::Bool,
+                        ty_span: zero,
+                    },
+                ]),
+            ),
+        );
+        return Some(variants);
+    }
+    if enum_name == "HttpRetryPolicy" {
+        // D-HTTP-CLIENT2=A: `.None` / `.Safe` / `.Idempotent`.
+        for name in ["None", "Safe", "Idempotent"] {
+            variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+        }
+        return Some(variants);
+    }
+    if enum_name == "HttpCookieJar" {
+        variants.insert("Memory".to_string(), (zero, VariantPayload::Unit));
         return Some(variants);
     }
     if enum_name != "HttpError" {

@@ -222,6 +222,7 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
         recv_type,
         Some(
             "HttpRequest"
+                | "HttpClient"
                 | "HttpResponse"
                 | "HttpHeaders"
                 | "HttpBody"
@@ -240,10 +241,12 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
             method,
             "method" | "path" | "param" | "body_len" | "under_limit" | "header" | "body"
                 | "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
+                | "dns_timeout" | "tls_timeout" | "write_timeout" | "first_byte_timeout"
                 | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" | "send"
                 | "trailers"
         ),
-        Some("HttpResponse") => matches!(method, "status" | "body" | "header" | "cookies" | "trailers"),
+        Some("HttpResponse") => matches!(method, "status" | "body" | "header" | "cookies" | "trailers" | "protocol" | "remote_address" | "redirect_history" | "timings" | "reused_connection" | "raw_content_encoding"),
+        Some("HttpClient") => matches!(method, "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries" | "send"),
         Some("HttpHeaders") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
         Some("HttpBody") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
         Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"),

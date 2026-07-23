@@ -3,10 +3,11 @@ use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::user_type_rust;
 use crate::Codegen::TIR::emit::collect_select_arms;
+use crate::Codegen::TIR::emit::emit_http_bridge_error;
+use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
 use crate::Codegen::TIR::emit_tir_call_args;
 use crate::Codegen::TIR::emit_tir_core_call;
-use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit_tir_orfallback_rhs;
 use crate::Codegen::TIR::emit_tir_str;
 use crate::Codegen::TIR::emit_tir_value_block;
@@ -1631,6 +1632,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "{}jet_tls_client_config_with_version_bounds(({}).clone(), ({}).clone(), ({}).clone())",
                     root, recv, a(0), a(1),
                 ),
+                THandleOp::HttpClientNew => {
+                    let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    format!(
+                        "JetHttpClient::new({ffi}::jet_http_client_new_impl(), {ffi}::jet_http_client_drop_impl)"
+                    )
+                }
                 THandleOp::GameSceneOnFrame => {
                     format!("{}jet_game_scene_on_frame(&mut ({}), {})", root, recv, a(0))
                 }
@@ -2130,7 +2137,92 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // "body"/"header" dispatch by arity: 0-arg=response accessor, 1-arg=request builder.
                 THandleOp::HttpClientMethod { kind, method } => {
                     let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                    if kind == "HttpBody" {
+                    if kind == "HttpClient" {
+                        let policy = |call: String| {
+                            let error = emit_http_bridge_error(ffi, "error");
+                            format!(
+                                "{{ let _client = ({}); let _next = ({call}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                recv,
+                            )
+                        };
+                        match method.as_str() {
+                            "cookies" => policy(format!(
+                                "{{ let _jar = &({}); match _jar {{ JetHttpCookieJar::Memory => {ffi}::jet_http_client_cookies_impl(_client.owner.handle, true), }} }}",
+                                a(0),
+                            )),
+                            "redirects" => {
+                                let error = emit_http_bridge_error(ffi, "error");
+                                format!(
+                                    "{{ let _client = ({recv}); let _policy = &({arg}); let _next = (match _policy {{ JetHttpRedirectPolicy::Follow {{ max, same_origin_credentials }} => {ffi}::jet_http_client_redirects_impl(_client.owner.handle, *max, *same_origin_credentials), }}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    recv = recv,
+                                    arg = a(0),
+                                    ffi = ffi,
+                                    error = error,
+                                )
+                            }
+                            "protocols" => policy(format!(
+                                "{ffi}::jet_http_client_protocols_impl(_client.owner.handle, {}, {}, {})",
+                                a(0), a(1), a(2)
+                            )),
+                            "timeouts" => policy(format!(
+                                "{ffi}::jet_http_client_timeouts_impl(_client.owner.handle, {}, {}, {}, {}, {}, {}, Some({}))",
+                                a(0), a(1), a(2), a(3), a(4), a(5), a(6)
+                            )),
+                            "raw_encoding" => policy(format!(
+                                "{ffi}::jet_http_client_decompression_impl(_client.owner.handle, false)"
+                            )),
+                            "proxy" => {
+                                let error = emit_http_bridge_error(ffi, "error");
+                                format!(
+                                    "{{ let _client = ({recv}); let _proxy = &({arg}); let _next = (match _proxy {{ JetHttpProxy::FromEnvironment => {ffi}::jet_http_client_proxy_from_environment_impl(_client.owner.handle), JetHttpProxy::None => {ffi}::jet_http_client_proxy_impl(_client.owner.handle, None), JetHttpProxy::Url(url) => {ffi}::jet_http_client_proxy_impl(_client.owner.handle, Some(url.as_str())), }}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    recv = recv,
+                                    arg = a(0),
+                                    ffi = ffi,
+                                    error = error,
+                                )
+                            }
+                            "tls" => {
+                                let error = emit_http_bridge_error(ffi, "error");
+                                format!(
+                                    "{{ let _client = ({recv}); let (_trust, _roots, _cert, _key, _min, _max) = jet_tls_client_config_http_parts(&({arg})); let _next = {ffi}::jet_http_client_tls_impl(_client.owner.handle, _trust, &_roots, &_cert, &_key, _min, _max).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    recv = recv,
+                                    arg = a(0),
+                                    ffi = ffi,
+                                    error = error,
+                                )
+                            }
+                            "allow_http_downgrade" => policy(format!(
+                                "{ffi}::jet_http_client_allow_http_downgrade_impl(_client.owner.handle, {})",
+                                a(0)
+                            )),
+                            "retries" => {
+                                let error = emit_http_bridge_error(ffi, "error");
+                                format!(
+                                    "{{ let _client = ({recv}); let _policy = &({arg}); let _mode = match _policy {{ JetHttpRetryPolicy::None => 0_i64, JetHttpRetryPolicy::Safe => 1_i64, JetHttpRetryPolicy::Idempotent => 2_i64, }}; let _next = {ffi}::jet_http_client_retries_impl(_client.owner.handle, _mode).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    recv = recv,
+                                    arg = a(0),
+                                    ffi = ffi,
+                                    error = error,
+                                )
+                            },
+                            "send" => {
+                                let call = format!(
+                                    "{ffi}::jet_http_client_send_with_stream_impl(_client.owner.handle, &_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.dns_timeout_ms, _r.tls_timeout_ms, _r.write_timeout_ms, _r.first_byte_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)"
+                                );
+                                let response = emit_http_response_from_bridge(call, ffi);
+                                let error = emit_http_bridge_error(ffi, "error");
+                                format!(
+                                    "{{ let _client = &({recv}); match &_client.policy_error {{ Some(error) => Err(error.clone()), None => {{ let _r = &({arg}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).map_err(|error| {error}).and_then(|_ambient| jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHttpBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHttpBridgeError::Io) }} }} }}; {response} }})) }} }} }} }} }}",
+                                    recv = recv,
+                                    arg = a(0),
+                                    ffi = ffi,
+                                    error = error,
+                                    response = response,
+                                )
+                            }
+                            _ => unreachable!("unknown HttpClient method {method}"),
+                        }
+                    } else if kind == "HttpBody" {
                         match method.as_str() {
                             "bytes" => format!("{}jet_http_body_bytes(&({}), {})", root, recv, a(0)),
                             "text" => format!("{}jet_http_body_text(&({}), {})", root, recv, a(0)),
@@ -2169,12 +2261,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 a(0),
                                 a(1)
                             ),
-                            "body" => format!(
-                                "{}jet_http_client_request_body({}, &({}))",
-                                root,
-                                recv,
-                                a(0)
-                            ),
+                            "body" => {
+                                let arg = &args[0];
+                                if matches!(&arg.ty, Type::Named(name) if name == "HttpBody") {
+                                    format!(
+                                        "{}jet_http_client_request_body_stream({}, ({}))",
+                                        root,
+                                        recv,
+                                        a(0)
+                                    )
+                                } else {
+                                    format!(
+                                        "{}jet_http_client_request_body({}, &({}))",
+                                        root,
+                                        recv,
+                                        a(0)
+                                    )
+                                }
+                            }
                             "timeout" => format!(
                                 "{}jet_http_client_request_timeout({}, {})",
                                 root,
@@ -2195,6 +2299,30 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             ),
                             "total_timeout" => format!(
                                 "{}jet_http_client_request_total_timeout({}, {})",
+                                root,
+                                recv,
+                                a(0)
+                            ),
+                            "dns_timeout" => format!(
+                                "{}jet_http_client_request_dns_timeout({}, {})",
+                                root,
+                                recv,
+                                a(0)
+                            ),
+                            "tls_timeout" => format!(
+                                "{}jet_http_client_request_tls_timeout({}, {})",
+                                root,
+                                recv,
+                                a(0)
+                            ),
+                            "write_timeout" => format!(
+                                "{}jet_http_client_request_write_timeout({}, {})",
+                                root,
+                                recv,
+                                a(0)
+                            ),
+                            "first_byte_timeout" => format!(
+                                "{}jet_http_client_request_first_byte_timeout({}, {})",
                                 root,
                                 recv,
                                 a(0)
@@ -2235,13 +2363,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             "send" => {
                                 // call bridge with req fields; assemble JetHttpResponse
                                 let call = format!(
-                                    "{}::jet_http_client_send_impl(&_r.method, &_r.url, &_r.headers.to_flat(), body.as_deref(), _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)",
-                                    ffi
+                                    "{ffi}::jet_http_client_send_stream_impl(&_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.dns_timeout_ms, _r.tls_timeout_ms, _r.write_timeout_ms, _r.first_byte_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)",
+                                    ffi = ffi
                                 );
                                 let response = emit_http_response_from_bridge(call, ffi);
+                                let error = emit_http_bridge_error(ffi, "error");
                                 format!(
-                                    "{{ let _r = &({}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ let _body = if _r.body_set {{ _r.body.bytes(1024 * 1024 * 1024).map(Some) }} else {{ Ok(None) }}; _body.and_then(|body| {}) }} }} }}",
-                                    recv, response
+                                    "{{ let _r = &({recv}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).map_err(|error| {error}).and_then(|_ambient| jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHttpBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHttpBridgeError::Io) }} }} }}; {response} }})) }} }} }}",
+                                    recv = recv,
+                                    ffi = ffi,
+                                    error = error,
+                                    response = response,
                                 )
                             }
                             _ => format!("({}).{}()", recv, method),
@@ -2262,6 +2394,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             "cookies" => {
                                 format!("{}jet_http_response_cookies(&({}))", root, recv)
                             }
+                            "protocol" => format!(
+                                "{}jet_http_client_response_protocol(&({}))", root, recv
+                            ),
+                            "remote_address" => format!(
+                                "{}jet_http_client_response_remote_address(&({}))", root, recv
+                            ),
+                            "redirect_history" => format!(
+                                "{}jet_http_client_response_redirect_history(&({}))", root, recv
+                            ),
+                            "timings" => format!(
+                                "{}jet_http_client_response_timings(&({}))", root, recv
+                            ),
+                            "reused_connection" => format!(
+                                "{}jet_http_client_response_reused(&({}))", root, recv
+                            ),
+                            "raw_content_encoding" => format!(
+                                "{}jet_http_client_response_raw_encoding(&({}))", root, recv
+                            ),
                             _ => format!("({}).{}()", recv, method),
                         }
                     }

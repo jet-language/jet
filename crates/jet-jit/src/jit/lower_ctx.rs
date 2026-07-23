@@ -2657,6 +2657,7 @@ impl LowerCtx<'_, '_> {
             | THandleOp::TlsStreamCloseWrite
             | THandleOp::TlsStreamPeerIdentity
             | THandleOp::TlsClientConfigDefault
+            | THandleOp::HttpClientNew
             | THandleOp::TlsClientConfigWithAlpn
             | THandleOp::TlsRootCertificatesFromPem
             | THandleOp::TlsClientIdentityFromPem

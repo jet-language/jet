@@ -34,7 +34,8 @@ pub fn net_method_return(
         })),
         ("HttpRequest", "header") if n_args == 1 => Some(Some(Type::Option(Box::new(str_ty.clone())))),
         ("HttpRequest", "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
-            | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text") => {
+            | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
+            | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text") => {
                 Some(Some(Type::Named("HttpRequest".to_string())))
             }
         ("HttpRequest", "send") => Some(Some(Type::Result {
@@ -339,12 +340,21 @@ pub fn http_type_method_return(
             })),
             "param" | "header" if _args.len() == 1 => mk_opt_str(),
             "body" | "header" | "timeout" | "connect_timeout" | "read_timeout"
-            | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" => {
+            | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
+            | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" => {
                 mk("HttpRequest")
             }
             "body_len" => mk_int(),
             "under_limit" => Some(Some(Type::Bool)),
             "send" => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            })),
+            _ => None,
+        },
+        Type::Named(n) if n == "HttpClient" => match (method, _args.len()) {
+            ("cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries", _) => mk("HttpClient"),
+            ("send", 1) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HttpResponse".to_string())),
                 err: Box::new(Type::Named("HttpError".to_string())),
             })),
@@ -360,6 +370,11 @@ pub fn http_type_method_return(
                 err: Box::new(Type::Named("HttpError".to_string())),
             })),
             "cookies" => Some(Some(Type::List(Box::new(Type::String)))),
+            "protocol" | "remote_address" => mk_str(),
+            "redirect_history" => Some(Some(Type::List(Box::new(Type::String)))),
+            "timings" => Some(Some(Type::List(Box::new(Type::Int)))),
+            "reused_connection" => Some(Some(Type::Bool)),
+            "raw_content_encoding" => mk_opt_str(),
             _ => None,
         },
         Type::Named(n) if n == "HttpMux" => match method {

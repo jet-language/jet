@@ -278,6 +278,17 @@ impl<'a> Checker<'a> {
                             *recv_type_out = Some("TlsClientConfigType".to_string());
                             return Some(Type::Named("TlsClientConfig".to_string()));
                         }
+                        if ns == "core.http.client" && leaf == "Client" && method == "new" {
+                            if !args.is_empty() {
+                                self.diags
+                                    .push(wrong_core_arity("Client.new", 0, args.len(), span));
+                                for arg in args.iter_mut() {
+                                    self.infer(&mut arg.expr);
+                                }
+                            }
+                            *recv_type_out = Some("HttpClientType".to_string());
+                            return Some(Type::Named("HttpClient".to_string()));
+                        }
                         if ns == "core.tls" && leaf == "RootCertificates" && method == "from_pem" {
                             if args.len() != 1 {
                                 self.diags.push(wrong_core_arity("RootCertificates.from_pem", 1, args.len(), span));
@@ -336,7 +347,7 @@ impl<'a> Checker<'a> {
                             let type_name = if matches!(ns.as_str(), "jet.http" | "core.http.client" | "core.http.server") {
                                 match leaf.as_str() {
                                     "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
-                                    | "Headers" | "Request" | "Response" | "Body" | "Handler" | "Error" => {
+                                    | "Headers" | "Request" | "Response" | "Body" | "Handler" | "Error" | "Proxy" => {
                                         format!("Http{leaf}")
                                     }
                                     "HttpError" => "HttpError".to_string(),
@@ -2118,6 +2129,35 @@ impl<'a> Checker<'a> {
                         },
                         &mut args[1],
                     );
+                } else if matches!(&recv_ty, Type::Named(name) if name == "HttpClient") {
+                    let want = match method {
+                        "cookies" | "redirects" | "send" | "proxy" | "tls" | "allow_http_downgrade" | "retries" => 1,
+                        "protocols" => 3,
+                        "timeouts" => 7,
+                        "raw_encoding" => 0,
+                        _ => args.len(),
+                    };
+                    if args.len() != want {
+                        self.diags.push(wrong_core_arity(method, want, args.len(), span));
+                    }
+                    let expected = match method {
+                        "cookies" => Some(Type::Named("HttpCookieJar".to_string())),
+                        "protocols" | "allow_http_downgrade" => Some(Type::Bool),
+                        "timeouts" => Some(Type::Int),
+                        "redirects" => Some(Type::Named("HttpRedirectPolicy".to_string())),
+                        "retries" => Some(Type::Named("HttpRetryPolicy".to_string())),
+                        "send" => Some(Type::Named("HttpRequest".to_string())),
+                        "proxy" => Some(Type::Named("HttpProxy".to_string())),
+                        "tls" => Some(Type::Named("TlsClientConfig".to_string())),
+                        _ => None,
+                    };
+                    for (index, arg) in args.iter_mut().enumerate() {
+                        if let Some(expected) = &expected {
+                            self.expect_core_arg(method, index, expected, arg);
+                        } else {
+                            self.infer(&mut arg.expr);
+                        }
+                    }
                 } else {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);

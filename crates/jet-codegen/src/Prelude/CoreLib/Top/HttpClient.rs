@@ -4,6 +4,74 @@
 // bridge functions use only primitive types (i64, String, Vec<String>) and are
 // called through wrappers here. This is the I6-safe pattern.
 
+#[derive(Clone)]
+enum JetHttpProxy {
+    FromEnvironment,
+    None,
+    Url(String),
+}
+
+/// D-HTTP-CLIENT2=A: typed redirect policy for `Client.redirects`.
+#[derive(Clone)]
+enum JetHttpRedirectPolicy {
+    Follow {
+        max: i64,
+        same_origin_credentials: bool,
+    },
+}
+
+/// D-HTTP-CLIENT2=A: stale-pool connection retry policy for `Client.retries`.
+/// Default unset is Safe (GET/HEAD/OPTIONS/TRACE), max one attempt, never
+/// status-based. Idempotent opts in PUT/DELETE; None disables.
+#[derive(Clone)]
+enum JetHttpRetryPolicy {
+    None,
+    Safe,
+    Idempotent,
+}
+
+/// D-HTTP-CLIENT2=A: explicit in-memory RFC6265bis cookie jar.
+#[derive(Clone)]
+enum JetHttpCookieJar {
+    Memory,
+}
+
+struct JetHttpClientOwner {
+    handle: i64,
+    drop_handle: fn(i64),
+}
+
+impl Drop for JetHttpClientOwner {
+    fn drop(&mut self) {
+        (self.drop_handle)(self.handle);
+    }
+}
+
+#[derive(Clone)]
+struct JetHttpClient {
+    owner: std::sync::Arc<JetHttpClientOwner>,
+    policy_error: Option<JetHttpError>,
+}
+
+impl JetHttpClient {
+    fn new(handle: i64, drop_handle: fn(i64)) -> Self {
+        Self {
+            owner: std::sync::Arc::new(JetHttpClientOwner { handle, drop_handle }),
+            policy_error: None,
+        }
+    }
+
+    fn policy(self, next: Result<i64, JetHttpError>, drop_handle: fn(i64)) -> Self {
+        match next {
+            Ok(handle) => Self::new(handle, drop_handle),
+            Err(error) => Self {
+                policy_error: Some(error),
+                ..self
+            },
+        }
+    }
+}
+
 fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpRequest {
     JetHttpRequest {
         method: method.clone(),
@@ -21,6 +89,10 @@ fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpRequest 
         connect_timeout_ms: None,
         read_timeout_ms: None,
         total_timeout_ms: None,
+        dns_timeout_ms: None,
+        tls_timeout_ms: None,
+        write_timeout_ms: None,
+        first_byte_timeout_ms: None,
         redirects: None,
         proxy: None,
         cookies: Vec::new(),
@@ -47,6 +119,23 @@ fn jet_http_client_request_body(mut req: JetHttpRequest, body: &String) -> JetHt
     req
 }
 
+fn jet_http_client_request_body_stream(mut req: JetHttpRequest, body: JetHttpBody) -> JetHttpRequest {
+    req.body = body;
+    req.body_set = true;
+    req
+}
+
+fn jet_http_client_body_upload(
+    req: &JetHttpRequest,
+) -> Result<(Option<i64>, bool, Option<JetHttpBodyChunks>), JetHttpError> {
+    if !req.body_set {
+        return Ok((None, false, None));
+    }
+    let length = req.body.length().map(|length| length as i64);
+    let chunks = req.body.chunks(64 * 1024)?;
+    Ok((length, true, Some(chunks)))
+}
+
 fn jet_http_client_request_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
     req.timeout_ms = Some(ms);
     req
@@ -67,6 +156,29 @@ fn jet_http_client_request_read_timeout(mut req: JetHttpRequest, ms: i64) -> Jet
 
 fn jet_http_client_request_total_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
     req.total_timeout_ms = Some(ms);
+    req
+}
+
+fn jet_http_client_request_dns_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+    req.dns_timeout_ms = Some(ms);
+    req
+}
+
+fn jet_http_client_request_tls_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+    req.tls_timeout_ms = Some(ms);
+    req
+}
+
+fn jet_http_client_request_write_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+    req.write_timeout_ms = Some(ms);
+    req
+}
+
+fn jet_http_client_request_first_byte_timeout(
+    mut req: JetHttpRequest,
+    ms: i64,
+) -> JetHttpRequest {
+    req.first_byte_timeout_ms = Some(ms);
     req
 }
 
@@ -121,6 +233,12 @@ fn jet_http_client_response_new(
     headers: Vec<String>,
     body_read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHttpError>,
     body_close: fn(i64),
+    protocol: String,
+    remote_address: String,
+    redirect_history: Vec<String>,
+    timings_ms: Vec<i64>,
+    reused_connection: bool,
+    raw_content_encoding: Option<String>,
 ) -> Result<JetHttpResponse, JetHttpError> {
     let body_length = body_length
         .map(usize::try_from)
@@ -134,6 +252,12 @@ fn jet_http_client_response_new(
         trailers: JetHttpHeaders::new(),
         head_content_length: None,
         suppress_body: false,
+        protocol,
+        remote_address,
+        redirect_history,
+        timings_ms,
+        reused_connection,
+        raw_content_encoding,
     })
 }
 fn jet_http_client_response_body(resp: &JetHttpResponse) -> JetHttpBody {
@@ -149,4 +273,23 @@ fn jet_http_response_cookies(resp: &JetHttpResponse) -> Vec<String> {
         .into_iter()
         .map(str::to_string)
         .collect()
+}
+
+fn jet_http_client_response_protocol(resp: &JetHttpResponse) -> String {
+    resp.protocol.clone()
+}
+fn jet_http_client_response_remote_address(resp: &JetHttpResponse) -> String {
+    resp.remote_address.clone()
+}
+fn jet_http_client_response_redirect_history(resp: &JetHttpResponse) -> Vec<String> {
+    resp.redirect_history.clone()
+}
+fn jet_http_client_response_timings(resp: &JetHttpResponse) -> Vec<i64> {
+    resp.timings_ms.clone()
+}
+fn jet_http_client_response_reused(resp: &JetHttpResponse) -> bool {
+    resp.reused_connection
+}
+fn jet_http_client_response_raw_encoding(resp: &JetHttpResponse) -> Option<String> {
+    resp.raw_content_encoding.clone()
 }

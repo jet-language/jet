@@ -30,7 +30,6 @@ pub struct ExternEntry {
     pub line_hint: String,
     pub inline: Option<InlineEntry>,
 }
-
 /// A `#FFI` body carried through the existing hidden bridge. Keeping it on the
 /// same entry prevents a second call/link mechanism from growing beside S50.
 #[derive(Debug, Clone)]
@@ -181,8 +180,8 @@ pub fn prepare_for_target(
             || u == "core.compress.zstd"
             || u.starts_with("core.compress.zstd::")
     });
-    // D-NETDEP1=A / D-HTTPLIB4=B / D-TLS1=A: ureq + rustls with system trust
-    // roots for core.http.client TLS support.
+    // D-HTTP-CLIENT2=A / D-DEP-HTTP2=B: the native HTTP client uses only the
+    // separately-ratified rustls/system-root TLS bridge.
     let needs_http_client = bundle
         .used_core
         .iter()
@@ -339,14 +338,11 @@ pub const TAR_CRATE_SPEC: (&str, &str) = ("tar", "0");
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
 
-/// The `ureq` crate version that backs `core.http.client`
-/// (D-NETDEP1=A, D-HTTPLIB4=B, D-TLS1=A).
-/// rustls is pulled in by `tls`; system roots by `native-certs`.
-/// Lives only here — never in the compiler's Cargo.toml (I6).
-pub const HTTP_CLIENT_CRATE_SPEC: (&str, &str) = ("ureq", "2");
-
-/// Hand-written HTTP client runtime emitted into the bridge crate when `core.http.client` is used.
+/// Native HTTP client runtime emitted into the bridge crate when `core.http.client` is used.
 const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/Http.rs");
+/// Mozilla Public Suffix List snapshot, IDNA-ToASCII and whitespace compacted.
+/// Source: https://publicsuffix.org/list/public_suffix_list.dat (MPL-2.0).
+const HTTP_PUBLIC_SUFFIX_LIST: &str = include_str!("Prelude/public_suffix_list.dat");
 
 /// The `rustls` crate version that backs `core.http.server` TLS
 /// (D-TLSSERVE1=A). Lives only here — never in the compiler's Cargo.toml (I6).
@@ -1333,10 +1329,6 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
         "{ version = \"0.31\", features = [\"bundled\"] }",
     ),
     (
-        "ureq",
-        "{ version = \"2\", default-features = false, features = [\"tls\", \"native-certs\"] }",
-    ),
-    (
         "rustls",
         "{ version = \"0.23\", default-features = false, features = [\"ring\", \"std\", \"tls12\"] }",
     ),
@@ -1541,8 +1533,12 @@ fn build_bridge_full(
     }
     if needs_http_client {
         deps.insert(
-            HTTP_CLIENT_CRATE_SPEC.0.to_string(),
-            HTTP_CLIENT_CRATE_SPEC.1.to_string(),
+            HTTP_SERVER_TLS_CRATE_SPEC.0.to_string(),
+            HTTP_SERVER_TLS_CRATE_SPEC.1.to_string(),
+        );
+        deps.insert(
+            RUSTLS_NATIVE_CERTS_CRATE_SPEC.0.to_string(),
+            RUSTLS_NATIVE_CERTS_CRATE_SPEC.1.to_string(),
         );
     }
     if needs_http_server_tls {
@@ -2253,6 +2249,7 @@ fn cache_key_full(
     if needs_http_client {
         needs_http_client.hash(&mut h);
         HTTP_CLIENT_RUNTIME.hash(&mut h);
+        HTTP_PUBLIC_SUFFIX_LIST.hash(&mut h);
     }
     if needs_http_server_tls {
         needs_http_server_tls.hash(&mut h);
@@ -2532,7 +2529,10 @@ fn emit_wrapper_lib(
         out.push('\n');
     }
     if needs_http_client {
-        // D-NETDEP1=A: the HTTP client runtime is the only place `ureq` is touched.
+        // D-HTTP-CLIENT2=A: native HTTP; rustls is the separately-ratified TLS seam.
+        out.push_str("const HTTP_PUBLIC_SUFFIX_LIST: &str = r################\"");
+        out.push_str(HTTP_PUBLIC_SUFFIX_LIST);
+        out.push_str("\"################;\n");
         out.push_str(HTTP_CLIENT_RUNTIME);
         out.push('\n');
     }
@@ -2544,8 +2544,16 @@ fn emit_wrapper_lib(
     }
     if needs_net_tls {
         // D-NETSOCKET1=A / D-TLS1=A: client stream TLS over an existing TcpStream.
-        out.push_str(NET_TLS_RUNTIME);
-        out.push('\n');
+        // When the native HTTP client is also present, nest the stream runtime so
+        // its std imports do not collide with Http.rs at the bridge crate root.
+        if needs_http_client {
+            out.push_str("mod __jet_net_tls {\n");
+            out.push_str(NET_TLS_RUNTIME);
+            out.push_str("}\npub use __jet_net_tls::*;\n");
+        } else {
+            out.push_str(NET_TLS_RUNTIME);
+            out.push('\n');
+        }
     }
     if needs_crypto {
         // D-DEP-CRYPTO1=A: the crypto runtime is the only place RustCrypto is touched.
