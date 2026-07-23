@@ -244,7 +244,7 @@ loading the whole file:
 use core.files as files
 
 fn count_lines(path: String) -> Int ? IOError {
-    handle :: files.open(copy path)?
+    handle :: files.open(~path)?
     n := 0
     loop line; handle.lines() {
         n = (n + 1)
@@ -577,7 +577,7 @@ persist; it contains public identity metadata, never key bytes.
 use core.crypto as crypto
 use core.vault as vault
 
-fn provision() -> Void ? vault.VaultError #(Secret) {
+fn provision() --[Secret]-> Void ? vault.VaultError {
     plan :: vault.prepare_generate<crypto.SigningKey>("release")?
     write :: vault.authorize_write(&plan, reason: "create release signer")?
     key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))?
@@ -1936,8 +1936,8 @@ fn run() {
 `tasks.channel<T>()` returns the send/receive pair directly (D-TUPLE-DESTRUCT1) —
 destructure it with `(tx, rx) := tasks.channel<T>()`. `tasks.channel<T>(capacity:
 N)` creates a bounded channel; `send` parks when the queue already holds `N`
-values and resumes when a receiver drains space. A second sender is `copy tx`
-(D-CAP2's one copy verb — a cheap handle duplicate, not a method on the channel;
+values and resumes when a receiver drains space. A second sender is `~tx`
+(D-SHAPE-COPY1's copy sigil makes a cheap handle duplicate;
 there's no combined channel value).
 
 | Function / type | Returns | What it does |
@@ -1954,7 +1954,7 @@ there's no combined channel value).
 | `tasks.after(ms: N)` | `Receiver<Unit>` | One-shot timer channel |
 | `tasks.after(ms: N, value: fallback)` | `Receiver<T>` | One-shot typed timer channel for timeout values |
 | `tasks.interval(ms: N)` | `Receiver<Int>` | Interval timer channel sending `1`, `2`, ... |
-| `copy sender` | `Sender<T>` | Create another send half (cheap handle duplicate, `copy` verb — not a method) |
+| `~sender` | `Sender<T>` | Create another send half with the copy sigil |
 | `sender.send(value)` | nothing | Move one value into the channel |
 | `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
 

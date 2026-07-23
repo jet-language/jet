@@ -1207,7 +1207,7 @@ already-freed arena), these track the views themselves.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0631 | `{view}` cannot be shared — it does not live long enough to {escape}. | `{view}` is a view into `{arena}`; sharing it outside the region would let it outlive `{arena}` and point into freed memory. | Keep the view inside the arena's region, or copy what you need out with `.clone()` before it leaves. |
+| E0631 | `{view}` cannot be shared — it does not live long enough to {escape}. | `{view}` is a view into `{arena}`; sharing it outside the region would let it outlive `{arena}` and point into freed memory. | Keep the view inside the arena's region, or copy what you need out with `~` before it leaves. |
 | E0632 | `{arena}` was reset here, so the value `{view}` points into is gone. | `reset` invalidates every value allocated in the arena; reading the view afterward would read reused memory. | Use the view before `reset`, or re-`alloc` after to get a fresh value. |
 
 ## Dynamic type diagnostics

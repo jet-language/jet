@@ -1293,7 +1293,9 @@ expression (`Expr::Copy`), parses on any expression, formatter round-trips
 it. `.clone()` is not user-typable Jet syntax — `clone` falls through to the
 ordinary "no such method" path (I8). `copy x` on a non-cloneable type is
 E0211; on a scalar it's legal but redundant (already `Copy`). Every fix-it
-that used to suggest `.clone()` now suggests `copy name`. **S5 shipped
+that used to suggest `.clone()` now suggests `copy name`.
+*Supersession:* D-SHAPE-COPY1=A replaces this S4 spelling with `~name`; the
+retired word produces E0991. **S5 shipped
 (2026-07-04)**: `[T]` slice views were already live (`View<T>`, D-DYNARRAY1,
 predates this migration — nothing to build). `String.trim()`/`.after(sep)`/
 `.before(sep)` bound to a local return a zero-copy string view instead of an

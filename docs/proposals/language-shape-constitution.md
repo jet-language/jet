@@ -12,6 +12,7 @@ for ratified language law. Tower is the source for current work state.
 
 ## Package graph
 
-- Card #532 must settle the remaining Package and jetos graph boundary.
-- Its dependent cards must settle composition, overrides, file layout,
-  aliases, and output links before #560 can finish its package conformance.
+- Card #532 must close only after #610, #653, #654, #587, and #609 implement
+  and independently verify the ratified one-Package-graph law.
+- Card #560 must then verify that the compiler and every tool expose the same
+  graph facts.

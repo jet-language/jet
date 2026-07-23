@@ -219,9 +219,10 @@ package/environment/CLI program.
 ### UL1 — P0 semantic and security stop-line
 
 Card #436 is governed by `D-CABI-CALLBACK1=A`, `D-CABI-RESULT1=C`, and
-`D-CABI-PLATFORM1=A`. C callbacks are non-null, monomorphic, C-safe,
-capture-free or named `#Pure`, and restricted to the foreign-thread-safe
-subset. Generic Result stays outside C declarations; raw status/out-pointer
+`D-CABI-PLATFORM1=A`. C callbacks are non-null, monomorphic, and C-safe.
+They must be capture-free or have an explicit `--[]->` bound. They remain
+restricted to the foreign-thread-safe subset. Generic Result stays outside C
+declarations; raw status/out-pointer
 functions get ordinary Jet wrappers. Alternate native conventions use a local
 per-function `#Abi` marker, with C as the default, the exact target matrix in
 the syntax ledger, no module inheritance, and no invented symbol decoration.
@@ -311,7 +312,7 @@ the syntax ledger, no module inheritance, and no invented symbol decoration.
   source, and target facts invalidate exactly their dependents.
 - Make the already-advertised `jet run --watch` real. `jet dev` adds the richer
   server/overlay/session surface over the same engine.
-- Preserve compatible `@persist` state through typed migration; incompatible
+- Preserve compatible `#Persist` state through typed migration; incompatible
   state explains the reset. Client and server updates are one transaction.
 - Exit: edit-to-visible budgets, crash/reconnect, rename/delete, dependency
   update, and state-migration lanes pass in real browsers and native apps.
