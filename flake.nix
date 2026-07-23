@@ -144,6 +144,8 @@
               "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"
             fi
             export JET_NIX_TMP_CLEANED=1
+            # Nix owns this shell; do not stack the global Jet env auto-hook.
+            export JET_ENV_DISABLE=1
           '';
         };
 
@@ -242,6 +244,8 @@
               "$JET_ROOT/scripts/agent/clean-nix-tmp.sh"
             fi
             export JET_NIX_TMP_CLEANED=1
+            # Nix owns this shell; do not stack the global Jet env auto-hook.
+            export JET_ENV_DISABLE=1
 
             # banner on stderr: `nix develop -c <cmd>` stdout stays clean for
             # grepping/capture (agents misread results otherwise)

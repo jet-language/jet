@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 768,
-    "rev": 12301,
+    "nextNum": 773,
+    "rev": 12313,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -22506,18 +22506,70 @@
       "id": "c06ekrib",
       "num": 741,
       "title": "Script-speed run loop: cached re-run, jet dev signpost, start budget",
-      "body": "Persona audit 2026-07-23: every `jet run` costs 12-14s, even when the file did not change. `jet dev` runs the same file in 4.7s, but `jet run` never mentions it. Python starts at once. This one gap decides the script persona (Priya) and drags two more verdicts (Maya, Sam).\n\nWork:\n- An unchanged file re-runs from cache with no recompile.\n- `jet run` prints one tip line when a compile is slow: point at `jet dev`.\n- Measure and publish a script start budget against `python script.py`, tested in CI.\n\nRides #687 (jet run = JIT lens) and #439 (watch engine). The self-host era work (#666/#669) is the long game; this card is the near-term feel.",
+      "body": "Persona audit 2026-07-23: every `jet run` costs 12-14s, even when the file did not change. `jet dev` runs the same file in 4.7s, but `jet run` never mentions it. Python starts at once. The focused agent audit also measured an unchanged process example at 36.38s through the required development environment. This gap decides the script persona and blocks Jet from replacing Bash, Python, and Node for short agent tasks.\n\nWork:\n- An unchanged file re-runs from cache with no recompile.\n- `jet run` prints one tip line when a compile is slow: point at `jet dev`.\n- Measure and enforce cold/warm script budgets against matched Bash, Python, and Node tasks.\n\nRides #687/#688 (jet run = JIT lens) and #439 (watch engine). The self-host era work (#666/#669) is the long game; this card owns the Epoch 3 daily-driver feel.",
       "kind": "feature",
       "track": "epoch",
       "epoch": "e3",
-      "milestoneId": null,
+      "milestoneId": "e3-universal-product-parity",
       "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Reuse the canonical JIT lens, dependency graph, compiler cache, and watch service. First trace cold and unchanged runs to separate environment entry, compiler startup, parse/check/lower, link/load, and program time. Cache the compiled JIT artifact with exact source, dependency, compiler, target, capability, and configuration invalidation; unchanged `jet run` must skip compiler work. Measure no-op, file/JSON, and subprocess-shaped tasks against Bash, Python, and Node under the agent workload corpus. Add one slow-run tip to `jet dev`, with NO_COLOR/TTY behavior and no repeated noise. CI records stable medians and tail latency. No daemon, second runner, or hidden AOT fallback unless a separate ratified decision changes the one-lens law.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-07-23",
+          "by": "codex-root",
+          "text": "Agent-language audit hardening: attached the E3 parity milestone and made Bash/Python/Node cold/warm performance, exact cache invalidation, truthful JIT behavior, cross-platform proof, and the measured 36.38s required-environment rerun binding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An unchanged `jet run` performs no parse, check, TIR lowering, code generation, or link work; trace proof shows exact cache hits and source/dependency/compiler/configuration changes invalidate the right entries.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.242Z"
+        },
+        {
+          "n": 2,
+          "text": "Cold and warm no-op, file/JSON, and subprocess tasks are benchmarked against matched Bash, Python, and Node programs; the ratified script-start budget is enforced in CI with machine metadata and stable median/tail methodology.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.242Z"
+        },
+        {
+          "n": 3,
+          "text": "A slow `jet run` prints one concise `jet dev` signpost only when useful, respects TTY and NO_COLOR, stays off captured program stdout, and does not repeat during the same workflow.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.242Z"
+        },
+        {
+          "n": 4,
+          "text": "Program stdout, stderr, exit, effects, diagnostics, capabilities, and cache invalidation match uncached execution; default run stays JIT and never falls back silently to AOT.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.242Z"
+        },
+        {
+          "n": 5,
+          "text": "Linux, macOS, and Windows agent-shaped script fixtures, docs, regression tests, performance evidence, and independent review pass without adding a second runner or cache mechanism.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.242Z"
+        }
+      ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-23T16:45:54.003Z",
@@ -23039,10 +23091,15 @@
       "priority": "P1",
       "plan": null,
       "blockedBy": [
-        "#384"
+        "c00zbmhz"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-23",
+          "by": "codex-root",
+          "text": "Tower durability repair: normalized the existing ratified #384 blocker to canonical card id c00zbmhz; dependency and scope unchanged."
+        },
         {
           "at": "2026-07-23",
           "by": "fable",
@@ -23636,6 +23693,431 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T18:55:23.721Z",
+      "updated": "2026-07-23"
+    },
+    {
+      "id": "c0lpd9yg",
+      "num": 768,
+      "title": "First-party MCP client/server and agent tool SDK",
+      "body": "Make Jet a first-class language for AI-agent tools in Epoch 9. Ship one standards-conforming Model Context Protocol stack for both clients and servers. It must cover local stdio tools and authenticated remote tools, while reusing Jet's existing Codable/data-tree, typed reflection/CLI schema, core.http, core.process, effects, diagnostics, and structured-concurrency mechanisms. No MCP-only schema language, reflection engine, async model, or new syntax. Planning must ballot any new public module/type/function names and any external dependency before code.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e9",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "blockedBy: none — protocol planning and owner ballots are leaf work. Define one versioned protocol core with transport adapters, then split implementation only if independently testable child slices are needed. Implement the current MCP specification at build time while declaring the oldest supported baseline. Map one Jet function schema into CLI validation, JSON Schema, MCP tool metadata, docs, and runtime validation through existing ArgsSpec/Codable/reflection paths. Use core.process for stdio and core.http for Streamable HTTP. Treat remote metadata, tool output, resource links, and elicited input as untrusted. Before moving to ready, attach any still-live transport, reflection, security, or JIT dependencies; do not duplicate them.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One Jet package supports MCP client and server roles with lifecycle initialization, capability negotiation, tools, resources, prompts, roots, sampling, elicitation, structured outputs, resource links, progress, cancellation, pagination, logging, and protocol errors.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.076Z"
+        },
+        {
+          "n": 2,
+          "text": "Stdio and Streamable HTTP transports interoperate with the current MCP specification; transport framing, reconnect/resume behavior, deadlines, bounded messages, cancellation, and shutdown have hostile tests.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.076Z"
+        },
+        {
+          "n": 3,
+          "text": "Remote authorization follows the current MCP security profile, including protected-resource discovery, OAuth authorization-code flow with PKCE, resource indicators, audience validation, token storage/redaction, and no token passthrough.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.076Z"
+        },
+        {
+          "n": 4,
+          "text": "A single Jet function/type description produces CLI validation, JSON Schema, MCP metadata, runtime decoding, and generated docs without a second reflection or schema mechanism.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.076Z"
+        },
+        {
+          "n": 5,
+          "text": "A repository-work tool server and a remote-service example run end to end against at least three independent conforming agent hosts, plus Jet client-to-Jet server conformance; transcripts are deterministic and redact secrets.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.076Z"
+        },
+        {
+          "n": 6,
+          "text": "Malformed peers, oversized messages, schema lies, prompt/tool injection in metadata, cancellation races, transport loss, and authorization failures produce registered Jet diagnostics or typed protocol errors without crashes, hangs, leaked children, or ambient authority.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.076Z"
+        },
+        {
+          "n": 7,
+          "text": "AOT and JIT behavior, docs, examples/goldens, protocol fixtures, security tests, and independent review pass; the self-hosted Jet compiler can expose a useful read-only MCP tool set as Epoch 9 dogfood.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.076Z"
+        }
+      ],
+      "refs": [
+        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
+        "docs/spec/architecture.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/diagnostics.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-23T19:55:54.737Z",
+      "updated": "2026-07-23"
+    },
+    {
+      "id": "c0h9cjc7",
+      "num": 769,
+      "title": "Agent workload conformance corpus: Jet vs Bash, Python, and Node",
+      "body": "Turn the 'last programming language' goal into a binding, repeatable product gate. Build a corpus from real anonymized AI-agent work: repository discovery, search, semantic inspection, edits and patches, Git, builds/tests, subprocess orchestration, structured data, databases, HTTP APIs, browser/desktop work, documents/media, MCP/hooks, interactive terminals, long-running services, and failure recovery. Compare shipped Jet against shipped Bash, Python, and Node on the same work. Age, adoption, trust, and package counts are not findings.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-universal-product-parity",
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "blockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The versioned corpus contains real executable tasks across every named agent-work domain, including success, malformed input, cancellation, timeout, partial failure, large-output, and cleanup cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.159Z"
+        },
+        {
+          "n": 2,
+          "text": "Jet, Bash, Python, and Node adapters receive equivalent inputs and authority and must produce the same declared outcome; no adapter wins through fixture-specific shortcuts, hidden services, or uncounted setup.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.160Z"
+        },
+        {
+          "n": 3,
+          "text": "The runner records task success, source tokens, agent tool calls and repair turns, cold/warm wall time, peak memory, output stability, diagnostic quality, orphan processes, sandbox escapes, and cross-platform behavior with reproducible machine metadata.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.160Z"
+        },
+        {
+          "n": 4,
+          "text": "Jet meets or exceeds the strongest peer on task success and safety, has no unowned workload gap, and publishes any performance or ergonomics loss with the exact blocking Tower card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.160Z"
+        },
+        {
+          "n": 5,
+          "text": "Relevant tasks run natively on Linux, macOS, and Windows; unavailable hardware or services are labeled explicitly and never counted as passing through mocks.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.160Z"
+        },
+        {
+          "n": 6,
+          "text": "A generated report maps every task to shipped proof and canonical cards, detects regressions in CI at the appropriate tier, and cannot silently drop or reclassify a failing task.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:20.160Z"
+        }
+      ],
+      "refs": [
+        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
+        "docs/spec/philosophy.md",
+        "docs/spec/architecture.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-23T19:56:00.999Z",
+      "updated": "2026-07-23"
+    },
+    {
+      "id": "c0vrs94y",
+      "num": 770,
+      "title": "Agent command executor: workspace authority, isolation, and audit receipts",
+      "body": "Give Jet programs and AI agents one safe way to execute untrusted commands. The beginner default grants only declared workspace reads/writes and no network or secrets. Experts can grant exact capabilities and receive a complete plan and receipt. This is the application-facing consumer of #398's native Linux/macOS/Windows isolation boundary, not a second sandbox engine. It extends the shipped #291 core.process model instead of adding a shell DSL or parallel process API.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-universal-product-parity",
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "blockedBy: none — API/policy planning and owner ballots are leaf work. Before moving to ready, attach #398 as the implementation blocker and preserve D-JPK-EPOCHBOUNDARY1=B: Epoch 3 owns the agent-facing policy and integration card, while #398 remains the sole native hostile-isolation implementation and proof in Epoch 8. Ballot the exact public API and command spelling. Reuse core.process, effects/capabilities, RuntimePolicy, diagnostics, and existing receipt/provenance shapes. No status-only facade and no alternate container/sandbox backend.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The implementation uses the same native isolation boundary and hostile proof as #398; no second namespace, macOS policy, Windows token/job, container, or authority engine exists.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.821Z"
+        },
+        {
+          "n": 2,
+          "text": "Policy declares workspace read/write roots, network deny/default plus exact host grants, environment and secret allowlists, executable allowlists, CPU, memory, process, output, and time limits, device access, inherited handles, and working directory.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.821Z"
+        },
+        {
+          "n": 3,
+          "text": "No ambient home-directory, credential, network, device, process, or inherited-handle authority reaches the command; unsupported isolation fails closed and reports the exact missing backend.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.821Z"
+        },
+        {
+          "n": 4,
+          "text": "Cancellation, timeout, crash, parent exit, and output-limit paths terminate and reap the complete descendant tree and leave no daemon, temporary authority, writable mount, secret, or partial receipt behind.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.821Z"
+        },
+        {
+          "n": 5,
+          "text": "A dry-run plan and final human/JSON audit receipt record argv, executable identity, inputs, outputs, authority, sandbox class, resource use, exit cause, truncation, descendants, and denied attempts with secret redaction.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.821Z"
+        },
+        {
+          "n": 6,
+          "text": "One-call safe defaults serve beginner scripts; expert controls remain explicit and auditable. Safe argv execution remains canonical and no shell interpolation path is introduced.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.821Z"
+        },
+        {
+          "n": 7,
+          "text": "Native Linux, macOS, and Windows hostile agent-work fixtures prove filesystem, network, child, handle, signal, cancellation, and cleanup boundaries; docs, examples, diagnostics, AOT/JIT behavior, and independent review pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.821Z"
+        }
+      ],
+      "refs": [
+        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
+        "crates/jetpack/src/RuntimePolicy.rs",
+        "crates/jetpack/src/Recipe.rs",
+        "docs/reference/core-library.md",
+        "docs/spec/architecture.md",
+        "docs/spec/diagnostics.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-23T19:56:04.053Z",
+      "updated": "2026-07-23"
+    },
+    {
+      "id": "c0ft6gme",
+      "num": 771,
+      "title": "Interactive process sessions: PTY/ConPTY, process trees, and resource control",
+      "body": "Complete the shipped #291 core.process model for interactive agent and developer tools. Add terminal-backed child sessions, binary streams, process-tree control, and resource limits without creating a second process API or a shell parser. Non-interactive argv execution remains the safe default; terminal semantics are explicit opt-in. Planning must ballot any new public Core type or function name before code.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-universal-product-parity",
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "blockedBy: none — planning and the public-surface ballot are leaf work. Extend ProcessSpec/ProcessChild and the existing TIR/runtime path. Use native PTY on Unix and ConPTY on Windows. Keep text line streams as convenience over one bounded byte-stream mechanism. Process groups/jobs, cancellation, signals, waits, transcript capture, and resource accounting must share one child lifecycle. Reuse core.watcher/core.event for readiness and exit events. Add no terminal-emulator dependency unless hostile conformance proves the native/stdlib route insufficient and the owner approves it.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One core.process session model supports Unix PTY and Windows ConPTY allocation, terminal size and resize, raw mode, environment/cwd, explicit encoding, and separate or combined byte-stream input/output as the platform permits.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.991Z"
+        },
+        {
+          "n": 2,
+          "text": "Binary stdin/stdout/stderr, file and native handle/fd redirection, bounded buffering, backpressure, incremental reads/writes, transcript caps, and deterministic truncation work without UTF-8 assumptions or deadlock.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.991Z"
+        },
+        {
+          "n": 3,
+          "text": "Process groups/jobs and the complete descendant tree support structured wait, interrupt, terminate, kill, cancellation, timeout, parent-drop cleanup, and exit detail without orphaned or zombie processes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.991Z"
+        },
+        {
+          "n": 4,
+          "text": "Portable resource controls cover wall time, CPU, memory, process count, and output; unsupported platform limits are explicit typed capability results rather than silent no-ops.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.991Z"
+        },
+        {
+          "n": 5,
+          "text": "Interactive fixtures exercise prompts, full-screen terminal mode, resize, signals, binary output, blocked pipes, grandchildren, cancellation races, and crash cleanup natively on Linux, macOS, and Windows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.991Z"
+        },
+        {
+          "n": 6,
+          "text": "The existing #291 API and examples remain compatible and canonical; terminal use is explicit, shell-free argv remains default, and effects, taint sinks, diagnostics, docs, AOT/JIT parity, and independent review pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.991Z"
+        }
+      ],
+      "refs": [
+        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
+        "examples/features/io/process_builder.jet",
+        "tests/corelib.rs",
+        "docs/reference/core-library.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/architecture.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-23T19:56:07.441Z",
+      "updated": "2026-07-23"
+    },
+    {
+      "id": "c0dixxk4",
+      "num": 772,
+      "title": "First-party browser automation for agent and test workflows",
+      "body": "Ship public, typed browser automation so Jet replaces Node/Python browser scripts instead of calling them. Use a standards-first WebDriver BiDi transport over the existing core.http/WebSocket work, with an explicit expert protocol supplement only where a required browser capability is not portable. Reuse the existing browser interaction harness where it is product-safe, but do not expose test-only internals as a facade. Planning must ballot the public package/module surface and any dependency.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-universal-product-parity",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "blockedBy: none — protocol/API planning and owner ballots are leaf work. Before ready, attach the canonical #301 HTTP/WebSocket implementation and any live browser-runtime dependency. Define one Browser/Context/Page lifecycle with typed commands, events, timeouts, cancellation, and trace receipts. Prefer WebDriver BiDi for portable behavior; isolate CDP or platform-driver gaps behind explicit capability checks, not silent fallback. Use #180 only for unavoidable native bridges. Do not invent a second async/event or selector mechanism.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Headless and headed sessions support browser/context/page lifecycle, navigation, frames, tabs, DOM queries, role/text/label/test-id locators, click/type/keyboard/pointer, forms, dialogs, downloads/uploads, cookies/storage, screenshots, print/PDF, and deterministic waits.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.908Z"
+        },
+        {
+          "n": 2,
+          "text": "Typed events cover console, page errors, network requests/responses, downloads, navigation, dialogs, and lifecycle; interception, authentication, headers, offline/throttle controls, cancellation, and bounded trace capture are explicit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.908Z"
+        },
+        {
+          "n": 3,
+          "text": "Browser processes and profiles are isolated and cleaned on success, failure, cancellation, timeout, and parent exit; secrets and page data are redacted from default logs and receipts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.908Z"
+        },
+        {
+          "n": 4,
+          "text": "The portable surface runs against current Chromium, Firefox, and WebKit/Safari lanes where the host platform permits; unsupported capabilities are declared and tested, never silently emulated or skipped.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.908Z"
+        },
+        {
+          "n": 5,
+          "text": "Real agent-shaped examples browse a site, use semantic locators, upload/download a file, inspect API traffic, capture evidence, and recover from a changed/failed page without JavaScript, Python, or Node escape.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.908Z"
+        },
+        {
+          "n": 6,
+          "text": "Protocol conformance, hostile pages, race/timeout cases, docs, examples/goldens, diagnostics, AOT/JIT behavior, native CI, and independent review pass; the internal harness and public API share mechanisms without becoming mutually dependent products.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-23T19:56:19.908Z"
+        }
+      ],
+      "refs": [
+        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
+        "docs/spec/architecture.md",
+        "docs/spec/diagnostics.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-23T19:56:11.657Z",
       "updated": "2026-07-23"
     }
   ],
@@ -40361,6 +40843,90 @@
   ],
   "events": [
     {
+      "at": "2026-07-23T19:56:50.140Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0sad0nq",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-23T19:56:20.242Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c06ekrib",
+      "note": "milestoneId,body,plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-23T19:56:20.160Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0h9cjc7",
+      "note": "title,body,kind,track,epoch,milestoneId,phase,priority,plan,criteria,refs"
+    },
+    {
+      "at": "2026-07-23T19:56:20.076Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0lpd9yg",
+      "note": "title,body,kind,track,epoch,phase,priority,plan,criteria,refs"
+    },
+    {
+      "at": "2026-07-23T19:56:19.991Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "title,body,kind,track,epoch,milestoneId,phase,priority,plan,criteria,refs"
+    },
+    {
+      "at": "2026-07-23T19:56:19.908Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0dixxk4",
+      "note": "title,body,kind,track,epoch,milestoneId,phase,priority,plan,criteria,refs"
+    },
+    {
+      "at": "2026-07-23T19:56:19.821Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0vrs94y",
+      "note": "title,body,kind,track,epoch,milestoneId,phase,priority,plan,criteria,refs"
+    },
+    {
+      "at": "2026-07-23T19:56:11.657Z",
+      "by": "codex-root",
+      "action": "card.add",
+      "ref": "c0dixxk4",
+      "note": "First-party browser automation for agent and test workflows"
+    },
+    {
+      "at": "2026-07-23T19:56:07.441Z",
+      "by": "codex-root",
+      "action": "card.add",
+      "ref": "c0ft6gme",
+      "note": "Interactive process sessions: PTY/ConPTY, process trees, and resource control"
+    },
+    {
+      "at": "2026-07-23T19:56:04.053Z",
+      "by": "codex-root",
+      "action": "card.add",
+      "ref": "c0vrs94y",
+      "note": "Agent command executor: workspace authority, isolation, and audit receipts"
+    },
+    {
+      "at": "2026-07-23T19:56:00.999Z",
+      "by": "codex-root",
+      "action": "card.add",
+      "ref": "c0h9cjc7",
+      "note": "Agent workload conformance corpus: Jet vs Bash, Python, and Node"
+    },
+    {
+      "at": "2026-07-23T19:55:54.737Z",
+      "by": "codex-root",
+      "action": "card.add",
+      "ref": "c0lpd9yg",
+      "note": "First-party MCP client/server and agent tool SDK"
+    },
+    {
       "at": "2026-07-23T19:14:04.699Z",
       "by": "sidequest-732-review",
       "action": "card.criteria-verify",
@@ -43778,90 +44344,6 @@
       "action": "card.claim",
       "ref": "csivxv0",
       "note": ""
-    },
-    {
-      "at": "2026-07-22T20:03:23.019Z",
-      "by": "codex-root",
-      "action": "card.release",
-      "ref": "c0mwjrp1",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-22T20:03:22.899Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0mwjrp1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-22T19:56:30.697Z",
-      "by": "codex-root",
-      "action": "card.claim",
-      "ref": "c0mwjrp1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-22T19:54:29.413Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0d1a7ds",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-22T19:52:24.949Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "caffiunify",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-22T19:52:24.752Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0xede68",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-22T19:52:24.547Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0n6vj96",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-22T19:52:24.345Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0dbcwz5",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-22T19:51:41.613Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0q08oaj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-22T19:51:41.473Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c05e21g2",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-22T19:51:41.335Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0tpn16q",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-22T19:51:41.193Z",
-      "by": "codex-root",
-      "action": "card.update",
-      "ref": "c0j678mt",
-      "note": "workOrder"
     }
   ],
   "nextNum": 368,
