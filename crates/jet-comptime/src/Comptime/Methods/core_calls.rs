@@ -1215,8 +1215,21 @@ pub(super) fn apply_core_call(
                 Err(e) => Ok(CtValue::ResErr(Box::new(super::super::EncodingLite::xml_error_value(e)))),
             }
         }
+        ("core.encoding.xml", "parse_bytes") => {
+            let bytes = as_bytes(one(0)?, span)?;
+            match super::super::EncodingLite::xml_parse_bytes(&bytes, args.get(1)) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(super::super::EncodingLite::xml_source_error_value(e)))),
+            }
+        }
         ("core.encoding.xml", "to_string") => {
             Ok(CtValue::Str(super::super::EncodingLite::xml_render(one(0)?)))
+        }
+        ("core.encoding.xml", "to_bytes") => {
+            match super::super::EncodingLite::xml_to_bytes(one(0)?, args.get(1)) {
+                Ok(bytes) => Ok(CtValue::ResOk(Box::new(CtValue::Bytes(bytes)))),
+                Err(error) => Ok(CtValue::ResErr(Box::new(error))),
+            }
         }
         // --- core.encoding.cbor (ported verbatim, `EncodingLite.rs`) ---
         // D-ENC-CBOR-SURFACE1: current whole-value names return the same

@@ -7310,6 +7310,201 @@ fn run() {
 }
 
 #[test]
+fn xml_whole_byte_verbs_match_comptime_aot_and_dev() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML whole-byte parity test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_xml_whole_bytes_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.xml as xml
+
+fn same_bytes(left: [U8], right: [U8]) -> Bool {
+    if left.len() != right.len() { return false }
+    for index in 0..left.len() {
+        if left[index] != right[index] { return false }
+    }
+    return true
+}
+
+fn summarize() -> String {
+    plain: [U8] :: [60, 114, 62, 111, 107, 60, 47, 114, 62]
+    utf8_bom: [U8] :: [239, 187, 191, 60, 63, 120, 109, 108, 32, 118, 101, 114, 115, 105, 111, 110, 61, 39, 49, 46, 48, 39, 32, 101, 110, 99, 111, 100, 105, 110, 103, 61, 39, 85, 84, 70, 45, 56, 39, 63, 62, 60, 114, 62, 195, 169, 240, 159, 153, 130, 60, 47, 114, 62]
+    utf16: [U8] :: [255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0]
+    conflict: [U8] :: [255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 56, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 47, 0, 62, 0]
+
+    plain_doc := xml.parse_bytes(plain) ?? panic("plain parse")
+    plain_out := xml.to_bytes(plain_doc) ?? panic("plain render")
+    utf8_doc := xml.parse_bytes(utf8_bom) ?? panic("UTF-8 BOM parse")
+    utf8_out := xml.to_bytes(utf8_doc, xml.XMLRenderOptions.{ encoding: .UTF8BOM, lexical: .PreserveValid }) ?? panic("UTF-8 BOM render")
+    utf16_doc := xml.parse_bytes(utf16) ?? panic("UTF-16 parse")
+    utf16_out := xml.to_bytes(utf16_doc, xml.XMLRenderOptions.{ encoding: .UTF16LE, lexical: .PreserveValid }) ?? panic("UTF-16 render")
+
+    conflict_result: DataTree ? XMLError :: xml.parse_bytes(conflict)
+    if conflict_result == {
+        Ok(_) -> return "encoding-conflict-missed"
+        Err(error) -> {
+            reason_ok :: error.reason == "XML declaration conflicts with detected input encoding"
+            return "{same_bytes(plain_out, plain)}|{same_bytes(utf8_out, utf8_bom)}|{same_bytes(utf16_out, utf16)}|{reason_ok}|{error.byte_offset}|{error.line}|{error.column}|{error.path}|{error.reason}"
+        }
+    }
+    return "unreachable"
+}
+
+comptime expected = summarize()
+
+fn run() {
+    print(expected)
+    print(summarize())
+}
+"#;
+    let expected = concat!(
+        "true|true|true|true|2|1|1|$|XML declaration conflicts with detected input encoding\n",
+        "true|true|true|true|2|1|1|$|XML declaration conflicts with detected input encoding\n",
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_whole_bytes", source, &[], None);
+    assert_eq!(code, 0, "XML whole-byte AOT fixture failed: {stderr}");
+    assert_eq!(stdout, expected);
+    assert_eq!(stderr, "");
+
+    let dev_path = dir.join("xml_whole_bytes.jet");
+    fs::write(&dev_path, source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
+        }
+        other => panic!("XML whole-byte default-dev fixture failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML character parity test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_xml_chars_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.xml as xml
+
+fn show(result: DataTree ? XMLError) -> String {
+    if result == {
+        Ok(_) -> { return "accepted" }
+        Err(error) -> {
+            return "{error.byte_offset}|{error.line}|{error.column}|{error.path}|{error.reason}"
+        }
+    }
+    return "unreachable"
+}
+
+comptime numeric = show(xml.parse("<r>&#0;</r>"))
+comptime attribute = show(xml.parse("<r a='&#0;'/>"))
+comptime namespace = show(xml.parse("<r xmlns='&#0;'/>"))
+
+fn run() {
+    runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
+    runtime_attribute :: show(xml.parse("<r a='&#0;'/>"))
+    runtime_namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
+    print("{numeric}|{runtime_numeric}")
+    print("{attribute}|{runtime_attribute}")
+    print("{namespace}|{runtime_namespace}")
+}
+"#;
+    let expected = concat!(
+        "3|1|4|$/r|invalid numeric character reference|3|1|4|$/r|invalid numeric character reference\n",
+        "6|1|7|$|invalid numeric character reference|6|1|7|$|invalid numeric character reference\n",
+        "10|1|11|$|invalid numeric character reference|10|1|11|$|invalid numeric character reference\n",
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_chars", &source, &[], None);
+    assert_eq!(code, 0, "XML character AOT fixture failed: {stderr}");
+    assert_eq!(stdout, expected);
+    assert_eq!(stderr, "");
+
+    let dev_path = dir.join("xml_chars.jet");
+    fs::write(&dev_path, &source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
+        }
+        other => panic!("XML character default-dev fixture failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn xml_attribute_whitespace_normalization_matches_comptime_aot_and_dev() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML attribute normalization parity test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_xml_attribute_normalization_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.xml as xml
+
+fn summarize(source: String) -> String {
+    doc := xml.parse(source) ?? panic("xml")
+    root := (doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
+    namespace := ((root.field("namespaces") ?? panic("namespaces")).at(0) ?? panic("namespace")).field("namespace_uri") ?? panic("namespace URI")
+    attributes := root.field("attributes") ?? panic("attributes")
+    literal := ((attributes.at(0) ?? panic("literal attribute")).field("normalized_value") ?? panic("literal normalized value")).text() ?? "bad"
+    reference := ((attributes.at(1) ?? panic("reference attribute")).field("normalized_value") ?? panic("reference normalized value")).text() ?? "bad"
+    namespace_ok := (namespace.text() ?? "bad") == "urn: foo bar"
+    literal_ok := literal == "A B C D E"
+    lexical_ok := xml.to_string(doc) == source
+    return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
+}
+
+comptime cr = String.from_bytes([13]) ?? panic("CR")
+comptime close = "/>"
+comptime source = "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{cr}\nD{cr}E' b='&#xD;&#xA;&#x9;'{close}"
+comptime normalized = summarize(source)
+
+fn run() {
+    runtime := summarize(source)
+    print("{normalized}|{runtime}")
+}
+"#;
+    let expected = "true|true|3|true|true|true|3|true\n";
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "xml_attribute_normalization", source, &[], None);
+    assert_eq!(
+        code, 0,
+        "XML attribute normalization AOT fixture failed: {stderr}"
+    );
+    assert_eq!(stdout, expected);
+    assert_eq!(stderr, "");
+
+    let dev_path = dir.join("xml_attribute_normalization.jet");
+    fs::write(&dev_path, source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!(
+                (exit_code, stdout, stderr),
+                (0, expected.to_string(), String::new())
+            );
+        }
+        other => panic!("XML attribute normalization default-dev fixture failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
@@ -7472,10 +7667,22 @@ fn xml_stream_reader_is_incremental_exact_and_terminal() {
         .join(", ");
     let malformed = dir.join("malformed.xml");
     fs::write(&malformed, "<r>").unwrap();
+    let invalid_char = dir.join("invalid-char.xml");
+    fs::write(&invalid_char, b"<r>\x01</r>").unwrap();
     let limited = dir.join("limited.xml");
     fs::write(&limited, "<root>text</root>").unwrap();
+    let encoding_conflict = dir.join("encoding-conflict.xml");
+    let mut encoding_conflict_bytes = vec![0xff, 0xfe];
+    encoding_conflict_bytes.extend(
+        "<?xml version='1.0' encoding='UTF-8'?><r/>"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes),
+    );
+    fs::write(&encoding_conflict, encoding_conflict_bytes).unwrap();
     let malformed = malformed.to_string_lossy().replace('\\', "\\\\");
+    let invalid_char = invalid_char.to_string_lossy().replace('\\', "\\\\");
     let limited = limited.to_string_lossy().replace('\\', "\\\\");
+    let encoding_conflict = encoding_conflict.to_string_lossy().replace('\\', "\\\\");
 
     let source = format!(
         r#"
@@ -7542,6 +7749,34 @@ fn run() {{
         }}
     }}
 
+    invalid_char_input :: files.open("{invalid_char}") ?? panic("open invalid character")
+    invalid_char_reader :: xml.reader(^invalid_char_input) ?? panic("invalid character reader")
+    loop true {{
+        result :: invalid_char_reader.next()
+        if result == {{
+            Ok(maybe) -> {{
+                if maybe == {{
+                    Val(_) -> {{}}
+                    None -> {{ print("invalid-character-missed"); break }}
+                }}
+            }}
+            Err(first) -> {{
+                print(first.kind == encoding.EncodingErrorKind.Syntax)
+                print(first.byte_offset)
+                print(first.line ?? -1)
+                print(first.column ?? -1)
+                print(first.path)
+                print(first.reason)
+                again :: invalid_char_reader.next()
+                if again == {{
+                    Ok(_) -> {{ print("invalid-character-terminal-missed") }}
+                    Err(second) -> {{ print(first.reason == second.reason) }}
+                }}
+                break
+            }}
+        }}
+    }}
+
     total_limits := encoding.EncodingLimits.safe()
     total_limits.max_total_bytes = Val(6)
     total_input :: files.open("{limited}") ?? panic("open total")
@@ -7565,12 +7800,29 @@ fn run() {{
             }}
         }}
     }}
+
+    conflict_input :: files.open("{encoding_conflict}") ?? panic("open encoding conflict")
+    conflict_reader :: xml.reader(^conflict_input) ?? panic("encoding conflict reader")
+    conflict_start :: conflict_reader.next() ?? panic("encoding conflict document start")
+    if conflict_start == None {{ panic("missing document start") }}
+    conflict :: conflict_reader.next()
+    if conflict == {{
+        Ok(_) -> {{ print("encoding-conflict-missed") }}
+        Err(error) -> {{
+            print(error.kind == encoding.EncodingErrorKind.Syntax)
+            print(error.byte_offset)
+            print(error.reason)
+        }}
+    }}
 }}
 "#
     );
     let (code, stdout, stderr) = build_and_run(&dir, "xml_stream", &source, &[], None);
     assert_eq!(code, 0, "XML stream test failed: {stderr}");
-    assert_eq!(stdout, "33\ntrue\n7\ntrue\n");
+    assert_eq!(
+        stdout,
+        "33\ntrue\ntrue\n3\n1\n4\n$/r\nXML contains forbidden character U+0001\ntrue\n7\ntrue\ntrue\n2\nXML declaration conflicts with detected input encoding\n"
+    );
     assert_eq!(stderr, "");
     let _ = fs::remove_dir_all(&dir);
 }
