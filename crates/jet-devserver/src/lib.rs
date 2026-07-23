@@ -6,6 +6,7 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 pub mod Canvas;
+pub mod BrowserTrace;
 pub mod LiveInspect;
 pub mod WebHost;
 
@@ -38,6 +39,9 @@ impl Request {
             if let Some(value) = header.to_ascii_lowercase().strip_prefix("content-length:") {
                 content_length = value.trim().parse().unwrap_or(0);
             }
+        }
+        if content_length > 1024 * 1024 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "devserver request body exceeds 1 MiB"));
         }
         let mut body = vec![0; content_length];
         reader.read_exact(&mut body)?;

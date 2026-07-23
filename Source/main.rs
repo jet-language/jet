@@ -25,6 +25,7 @@ mod CmdExpand;
 mod CmdGc;
 mod CmdImpact;
 mod CmdImport;
+mod CmdPerf;
 mod CmdPkg;
 mod CmdProve;
 mod CmdSchema;
@@ -882,6 +883,14 @@ fn main() {
     }
 
     normalize_frequency_ring_argv(&mut raw);
+
+    // D-PERFSESSION1=D: `jet perf` owns the full family, including run/test/bench
+    // sessions that spawn the exact base-intent driver and write .jettrace.
+    if raw.first().map(String::as_str) == Some("perf") {
+        match CmdPerf::run(&raw) {
+            CmdPerf::Outcome::Exit(code) => exit(code),
+        }
+    }
 
     if raw.iter().any(|a| a == "--version") {
         run_version();

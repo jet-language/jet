@@ -56,6 +56,8 @@ struct DevStatus {
     version: AtomicU64,
     clients: Mutex<HashMap<String, Instant>>,
     state: Mutex<DevStatusSnapshot>,
+    browser_relay: Mutex<Option<crate::BrowserTrace::Relay>>,
+    browser_trace_enabled: AtomicBool,
     command_receipt: Mutex<Option<String>>,
     /// The file `jet dev` is watching — used in the `building` parity line
     /// and the `save <file> → …` verbose log lines.
@@ -115,6 +117,8 @@ impl DevStatus {
                 diagnostic: String::new(),
                 last_build_ms: 0,
             }),
+            browser_relay: Mutex::new(None),
+            browser_trace_enabled: AtomicBool::new(false),
             command_receipt: Mutex::new(None),
             watched_file: file.to_string(),
             port: AtomicU64::new(0),
@@ -374,6 +378,7 @@ impl DevStatus {
     }
 
     fn mark_building(&self) {
+        self.browser_relay.lock().unwrap().take();
         let mut state = self.state.lock().unwrap();
         let last_build_ms = state.last_build_ms;
         *state = DevStatusSnapshot {
@@ -387,6 +392,12 @@ impl DevStatus {
     }
 
     fn mark_ready(&self, elapsed_ms: u128, is_rebuild: bool) {
+        let mut browser_relay = self.browser_relay.lock().unwrap();
+        if self.browser_trace_enabled.load(Ordering::SeqCst) {
+            browser_relay.take();
+            *browser_relay = fs::read_to_string("build/web.manifest.json").ok().and_then(|manifest| crate::BrowserTrace::Relay::new(&manifest).ok());
+        }
+        drop(browser_relay);
         if is_rebuild {
             self.version.fetch_add(1, Ordering::SeqCst);
         }
@@ -494,6 +505,23 @@ impl DevStatus {
     fn command_receipt(&self) -> Option<String> {
         self.command_receipt.lock().unwrap().clone()
     }
+
+    fn activate_browser_trace(&self, manifest: &str) -> Result<(), String> {
+        let relay = crate::BrowserTrace::Relay::new(manifest)?;
+        *self.browser_relay.lock().unwrap() = Some(relay);
+        self.browser_trace_enabled.store(true, Ordering::SeqCst);
+        self.version.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn activate_requested_browser_trace(&self) {
+        if !matches!(crate::BrowserTrace::take_request(), Ok(true)) {
+            return;
+        }
+        if let Ok(manifest) = fs::read_to_string("build/web.manifest.json") {
+            let _ = self.activate_browser_trace(&manifest);
+        }
+    }
 }
 
 pub struct WebHost {
@@ -529,6 +557,7 @@ impl WebHost {
             let status = Arc::clone(&self.status);
             thread::spawn(move || loop {
                 thread::sleep(Duration::from_millis(LIVE_RELOAD_POLL_MS));
+                status.activate_requested_browser_trace();
                 status.expire_clients();
             });
         }
@@ -1150,11 +1179,66 @@ fn handle_connection(
             b"ok",
         );
     }
+    if path == "/__jet_perf_browser" {
+        if method != "POST" {
+            return method_not_allowed(&mut stream);
+        }
+        let relay = status.browser_relay.lock().unwrap();
+        let Some(relay) = relay.as_ref() else {
+            return write_response(
+                &mut stream,
+                "503 Service Unavailable",
+                "text/plain; charset=utf-8",
+                b"browser trace relay unavailable",
+            );
+        };
+        if query_param(target, "nonce").as_deref() != Some(relay.nonce()) {
+            return write_response(
+                &mut stream,
+                "403 Forbidden",
+                "text/plain; charset=utf-8",
+                b"stale or foreign browser trace session",
+            );
+        }
+        return match relay.record(&body) {
+            Ok(()) => write_response(
+                &mut stream,
+                "204 No Content",
+                "text/plain; charset=utf-8",
+                b"",
+            ),
+            Err(crate::BrowserTrace::RecordError::Oversized) => write_response(
+                &mut stream,
+                "413 Payload Too Large",
+                "text/plain; charset=utf-8",
+                b"browser trace envelope exceeds 512 bytes",
+            ),
+            Err(crate::BrowserTrace::RecordError::Malformed) => write_response(
+                &mut stream,
+                "400 Bad Request",
+                "text/plain; charset=utf-8",
+                b"browser trace envelope is malformed",
+            ),
+            Err(crate::BrowserTrace::RecordError::Unavailable) => write_response(
+                &mut stream,
+                "503 Service Unavailable",
+                "text/plain; charset=utf-8",
+                b"browser trace relay unavailable",
+            ),
+        };
+    }
     // Only page/asset GETs are worth a request-log line (D-FE-DEVSRV1=D's
     // verbose log shows `GET / 200 2ms`, not the 400ms `/__jet_dev_version`
     // poll noise) — those are handled above and already returned.
     let started = Instant::now();
-    let code = serve_static(&mut stream, path)?;
+    let nonce = status
+        .browser_relay
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|relay| relay.nonce().to_string())
+        .unwrap_or_default();
+    let code = serve_static(&mut stream, path, &nonce)?;
     status.log_request(method, path, code, started.elapsed());
     Ok(())
 }
@@ -1172,7 +1256,7 @@ fn method_not_allowed(stream: &mut TcpStream) -> std::io::Result<()> {
 /// `index.html` on the way out. GET-only, no directory listing, no range
 /// requests, no compression — a dev tool serving a few small files needs
 /// none of that.
-fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<u16> {
+fn serve_static(stream: &mut TcpStream, path: &str, nonce: &str) -> std::io::Result<u16> {
     let file_path = match static_path(Path::new("build"), path) {
         Ok(path) => path,
         Err(()) => {
@@ -1202,7 +1286,7 @@ fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<u16> {
     let content_type = content_type_for(&file_path);
     if file_path.file_name().and_then(|f| f.to_str()) == Some("index.html") {
         let html = String::from_utf8_lossy(&bytes).into_owned();
-        let injected = inject_live_reload(&html);
+        let injected = inject_live_reload(&html, nonce);
         write_response(stream, "200 OK", content_type, injected.as_bytes())?;
         return Ok(200);
     }
@@ -1221,10 +1305,25 @@ fn serve_static(stream: &mut TcpStream, path: &str) -> std::io::Result<u16> {
 /// (I4 — `s.diagnostic` is written via `textContent`, never re-escaped or
 /// reworded); a clean rebuild (browser strip is dumb — it just re-renders
 /// whatever the poll says) collapses it back to the pill.
-fn live_reload_script() -> String {
+fn live_reload_script(nonce: &str) -> String {
+    let perf_script = if nonce.is_empty() { String::new() } else { format!(r#"  var jetPerfNonce = "{nonce}";
+  self.__jetPerfNow = function () {{ return performance.now(); }};
+  self.__jetPerfRecord = function (symbol, eventClass, startMs) {{
+    if (!symbol || typeof performance === "undefined") return;
+    var endMs = performance.now();
+    var body = new URLSearchParams({{
+      class: String(eventClass), symbol: String(symbol),
+      start_ns: String(Math.max(0, Math.floor(startMs * 1000000))),
+      duration_ns: String(Math.max(0, Math.floor((endMs - startMs) * 1000000))),
+      clock_ns: String(Math.max(0, Math.floor(endMs * 1000000)))
+    }});
+    try {{ navigator.sendBeacon("/__jet_perf_browser?nonce=" + jetPerfNonce, body); }} catch (_) {{}}
+  }};
+"#) };
     format!(
         r##"<script>
 (function () {{
+{perf_script}
   var jetDevVersion = null, reconnectAttempt = 0;
   var jetDevClient = null;
   try {{ jetDevClient = sessionStorage.getItem("jet-dev-client"); }} catch (_) {{}}
@@ -1339,12 +1438,13 @@ fn live_reload_script() -> String {
 }})();
 </script>
 "##,
-        poll_ms = LIVE_RELOAD_POLL_MS
+        poll_ms = LIVE_RELOAD_POLL_MS,
+        perf_script = perf_script
     )
 }
 
-fn inject_live_reload(html: &str) -> String {
-    let script = live_reload_script();
+fn inject_live_reload(html: &str, nonce: &str) -> String {
+    let script = live_reload_script(nonce);
     // Find the insertion point case-insensitively (HTML tags are ASCII, so a
     // lowercase search never shifts a byte offset), but splice into the
     // ORIGINAL bytes so the rest of the page is untouched.
@@ -1371,7 +1471,7 @@ mod tests {
     #[test]
     fn injects_before_closing_body_tag() {
         let html = "<html><body><p>hi</p></BODY></html>";
-        let out = inject_live_reload(html);
+        let out = inject_live_reload(html, "nonce");
         assert!(out.contains("<script>"));
         assert!(out.find("<script>").unwrap() < out.find("</BODY>").unwrap());
     }
@@ -1379,7 +1479,7 @@ mod tests {
     #[test]
     fn appends_when_no_body_tag() {
         let html = "<html><p>hi</p></html>";
-        let out = inject_live_reload(html);
+        let out = inject_live_reload(html, "nonce");
         assert!(out.starts_with(html));
         assert!(out.contains("<script>"));
     }
@@ -1387,12 +1487,14 @@ mod tests {
     #[test]
     fn injected_script_shows_verbatim_overlay_and_parity_pill() {
         let html = "<html><body></body></html>";
-        let out = inject_live_reload(html);
+        let out = inject_live_reload(html, "nonce");
         // The browser overlay's title is a static literal, not derived from
         // the diagnostic — the diagnostic body is written via `textContent`
         // (never re-escaped/re-worded, I4).
         assert!(out.contains("Build failed"));
         assert!(out.contains("__jet_dev_status"));
+        assert!(out.contains("var jetPerfNonce = \"nonce\""));
+        assert!(out.contains("/__jet_perf_browser?nonce="));
         assert!(out.contains("overlayBody.textContent = s.diagnostic"));
         assert!(out.contains("pill.querySelector(\".label\").textContent = s.message"));
         assert!(out.contains("state === \"building\" || state === \"reconnecting\""));
