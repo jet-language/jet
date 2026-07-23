@@ -350,7 +350,26 @@ impl BuildProfile {
     }
 }
 
+fn command_group_usage(name: &str) -> String {
+    let group = jet::CLI::command_group(name).expect("command group must exist");
+    group
+        .actions
+        .iter()
+        .map(|action| {
+            format!(
+                "  {} {} {:<18} {}\n",
+                jet::Syntax::BINARY_NAME,
+                group.name,
+                action.name,
+                action.summary
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn usage() -> String {
+    let inspect_commands = command_group_usage("inspect");
+    let registry_commands = command_group_usage("registry");
     format!(
         "\
 Welcome to {lang}! (v{ver})
@@ -398,14 +417,6 @@ usage:
   {bin} self lsp                    language server (stdio JSON-RPC)
   {bin} gc report                   explain automatic-GC promotions and ownership rewrites
   {bin} self devtools <verb>        run checked developer generators
-  {bin} inspect bind <header.h> --pkg <lib>   generate a C binding cache (S59)
-  {bin} inspect bind cpp <header.hpp> --target <triple> --clang <path> --ar <path>   generate an audited C++ shim and Jet binding
-  {bin} inspect dossier <file.{ext}> [symbol]   explain semantic facts
-  {bin} inspect schema <verb>        inspect saved schema versions
-  {bin} inspect expand <file.{ext}> print semantic facts (D-EXPANDCLI1)
-  {bin} inspect live <pid>           watch a running Jet process
-  {bin} inspect semindex <file.{ext}>   emit stable semantic-index facts
-  {bin} inspect unsafe <file.{ext}> audit unsafe policy and typed obligations
   {bin} version                     print compiler version
   {bin} help                        print this help text
   {bin} ?                           same as help
@@ -421,10 +432,6 @@ package management (M12.1):
   {bin} store fetch --locked        verify lock only, no network
   {bin} update                      refresh @latest / branch selectors
   {bin} update <dep>                update one moving selector
-  {bin} inspect outdated            report Jetpack channel refs with newer locks available
-  {bin} inspect search <query>      search local offline Jetpack package index
-  {bin} inspect info <source>.<package>   show local offline Jetpack package metadata
-  {bin} inspect logs <pkg>          show latest Jetpack build logs
   {bin} store verify                re-check all store entry hashes
   {bin} store generations           list recorded store generations (D-PURE3)
   {bin} store rollback <gen>        roll back to a prior generation (D-PURE3)
@@ -432,15 +439,12 @@ package management (M12.1):
   {bin} store lock <script.jet>     write a script dependency lock
   {bin} clean                       optimize and collect stale Jetpack hangar entries
 
+inspect commands:
+{inspect_commands}
+registry commands:
+{registry_commands}
 supply chain (E2-M8):
-  {bin} registry publish            publish the current package to the registry
-  {bin} registry keygen             create a package-signing key
-  {bin} registry key backup         back up a package-signing key
-  {bin} registry yank <version>     stop new installs of a published version
-  {bin} registry vendor             copy all dependencies into vendor/
   {bin} build  --sbom <file>        also write an SPDX SBOM next to the binary
-  {bin} inspect audit               check dependencies against the advisory database
-  {bin} inspect sbom                emit a software bill of materials
 
 flags:
   emit --rust <file.{ext}>     print generated Rust source
@@ -468,6 +472,8 @@ flags:
         lang = jet::Syntax::LANG_NAME,
         ver = env!("CARGO_PKG_VERSION"),
         ext = jet::Syntax::FILE_EXT,
+        inspect_commands = inspect_commands,
+        registry_commands = registry_commands,
     )
 }
 

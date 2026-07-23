@@ -1029,18 +1029,12 @@ fn shape6_inspect_routes_and_retired_bare_snapshots() {
     let help = std::process::Command::new(&bin).arg("help").output().unwrap();
     assert!(help.status.success());
     let help = String::from_utf8(help.stdout).unwrap();
-    for command in [
-        "jet inspect dossier",
-        "jet inspect schema",
-        "jet inspect expand",
-        "jet inspect live",
-        "jet inspect semindex",
-        "jet registry publish",
-        "jet registry keygen",
-        "jet registry key backup",
-        "jet registry yank",
-    ] {
-        assert!(help.contains(command), "jet help omitted {command}");
+    for group_name in ["inspect", "registry"] {
+        let group = jet::CLI::command_group(group_name).unwrap();
+        for action in group.actions {
+            let command = format!("jet {} {}", group.name, action.name);
+            assert!(help.contains(&command), "jet help omitted {command}");
+        }
     }
 
     for verb in ["build", "run", "test", "fmt"] {
