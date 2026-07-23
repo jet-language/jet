@@ -315,7 +315,7 @@ fn run() {
 }
 
 #[test]
-fn zstd_comptime_raw_frame_is_accepted_by_aot_decoder() {
+fn zstd_comptime_codec_round_trips_through_resident_and_aot_decoders() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping zstd comptime differential");
         return;
@@ -324,7 +324,7 @@ fn zstd_comptime_raw_frame_is_accepted_by_aot_decoder() {
 
 comptime bytes = [72, 101, 108, 108, 111]
 comptime encoded = zstd.compress(bytes)
-comptime expected = bytes
+comptime expected = zstd.decompress(encoded) ?? []
 
 fn run() {
     restored: [U8] :: zstd.decompress(encoded) ?? []
@@ -333,6 +333,25 @@ fn run() {
 }
 "#;
     check_comptime_src(32_002, "zstd resident encoder accepted by AOT decoder", src);
+}
+
+#[test]
+fn zstd_72_mib_advertised_window_matches_resident_and_aot() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping zstd window differential");
+        return;
+    }
+    let src = r#"use core.compress.zstd as zstd
+
+comptime expected = zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [255]
+
+fn run() {
+    actual: [U8] :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [255]
+    print("{expected}")
+    print("{actual}")
+}
+"#;
+    check_comptime_src(32_003, "zstd 72 MiB advertised window", src);
 }
 
 #[test]

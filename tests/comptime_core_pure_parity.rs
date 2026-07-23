@@ -1379,3 +1379,76 @@ fn archive_rejects_invalid_tar_names_across_aot_comptime_and_forced_interpreter(
         );
     }
 }
+
+const UI_DECLS: &str = r##"use core.ui as ui
+fn ui_value_view() -> String {
+    point :: ui.point(1.5, -2.0)
+    size :: ui.size(80.0, 24.0)
+    rect :: ui.rect(1.0, 2.0, 3.0, 4.0)
+    constraint :: ui.constraint(0.0, 1.0, 80.0, 24.0)
+    plain :: ui.node("plain", 5.0, 2.0)
+    role :: ui.node_role("save", 8.0, 1.0, ui.aria_role_button())
+    colored :: ui.node_color("blue", 4.0, 1.0, "#0000ff")
+    row :: ui.box([ui.text("hi"), ui.button("Save")])
+    return "{point.x}:{point.y}|{size.width}:{size.height}|{rect.width}:{rect.height}|{constraint.min_height}:{constraint.max_width}|{plain.label}:{plain.width}:{plain.height}|{role.label}:{role.width}|{colored.label}:{colored.width}|{row.width}:{row.height}"
+}"##;
+
+const UI_EXPECTED: &str = "1.5:-2.0|80.0:24.0|3.0:4.0|1.0:80.0|plain:5.0:2.0|save:8.0|blue:4.0|8.0:2.0";
+
+#[test]
+fn ui_values_match_aot_comptime_forced_interpreter_and_default_dev() {
+    let source = parity_source("ui_value_view()", UI_DECLS);
+    assert_eq!(check_aot_comptime("ui/value-constructors", &source), UI_EXPECTED);
+    check_dev_tiers_with_boundary("ui-value-constructors", &source, UI_EXPECTED, true);
+}
+
+const CRYPTO_DECLS: &str = r#"use core.crypto.expert as expert
+fn crypto_value_view() -> String {
+    ikm: [U8] :: [11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11]
+    salt: [U8] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    info: [U8] :: [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]
+    x_secret: [U8] :: [119, 7, 109, 10, 115, 24, 165, 125, 60, 22, 193, 114, 81, 178, 102, 69, 223, 76, 47, 135, 235, 192, 153, 42, 177, 119, 251, 165, 29, 185, 44, 42]
+    x_public: [U8] :: [222, 158, 219, 125, 123, 125, 193, 180, 211, 91, 97, 194, 236, 228, 53, 55, 63, 131, 67, 200, 91, 120, 103, 77, 173, 252, 126, 20, 111, 136, 43, 79]
+    ed_public: [U8] :: [215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26]
+    ed_signature: [U8] :: [229, 86, 67, 0, 195, 96, 172, 114, 144, 134, 226, 204, 128, 110, 130, 138, 132, 135, 127, 30, 184, 229, 217, 116, 216, 115, 224, 101, 34, 73, 1, 85, 95, 184, 130, 21, 144, 163, 59, 172, 198, 30, 57, 112, 28, 249, 180, 107, 210, 91, 245, 240, 89, 91, 190, 36, 101, 81, 65, 67, 142, 122, 16, 11]
+    output := ""
+    #Unsafe("fixed RFC interop vectors") {
+        derived :: expert.hkdf_sha256(ikm, salt, info, 42) ?? panic("hkdf")
+        shared :: expert.x25519(x_secret, x_public, true) ?? panic("x25519")
+        valid :: expert.ed25519_verify_strict(ed_public, [], ed_signature) ?? false
+        invalid :: expert.ed25519_verify_strict(ed_public, [1], ed_signature) ?? true
+        output = "{expert.secret_bytes(derived)}|{expert.secret_bytes(shared)}|{valid}|{invalid}"
+    }
+    return output
+}"#;
+
+const CRYPTO_EXPECTED: &str = "[60, 178, 95, 37, 250, 172, 213, 122, 144, 67, 79, 100, 208, 54, 47, 42, 45, 45, 10, 144, 207, 26, 90, 76, 93, 176, 45, 86, 236, 196, 197, 191, 52, 0, 114, 8, 213, 184, 135, 24, 88, 101]|[74, 93, 157, 91, 164, 206, 45, 225, 114, 142, 59, 244, 128, 53, 15, 37, 224, 126, 33, 201, 71, 209, 158, 51, 118, 240, 155, 60, 30, 22, 23, 66]|true|false";
+
+#[test]
+fn crypto_values_match_aot_comptime_forced_interpreter_and_default_dev() {
+    let source = parity_source("crypto_value_view()", CRYPTO_DECLS);
+    assert_eq!(check_aot_comptime("crypto/expert-pure-values", &source), CRYPTO_EXPECTED);
+    check_dev_tiers_with_boundary("crypto-expert-pure-values", &source, CRYPTO_EXPECTED, true);
+}
+
+const NET_STYLE_DECLS: &str = r#"use core.io as io
+use core.net as net
+fn net_style_view() -> String {
+    ip4 :: net.ip_addr("127.0.0.1") ?? panic("ip4")
+    ip6 :: net.ip_addr("2001:0db8:0:0:0:0:0:1") ?? panic("ip6")
+    socket :: net.socket_addr_parse("[2001:db8::1]:443") ?? panic("socket")
+    return "{net.ip_to_string(ip4)}:{net.ip_is_ipv4(ip4)}|{net.ip_to_string(ip6)}:{net.ip_is_ipv4(ip6)}|{net.socket_host(socket)}:{net.socket_port(socket)}:{net.socket_to_string(socket)}|{io.style_force("red", "x").len()}:{io.style_force("unknown", "plain")}"
+}"#;
+
+const NET_STYLE_EXPECTED: &str =
+    "127.0.0.1:true|2001:db8::1:false|2001:db8::1:443:[2001:db8::1]:443|10:plain";
+
+#[test]
+fn net_and_forced_style_values_match_all_execution_tiers_exactly() {
+    let source = parity_source("net_style_view()", NET_STYLE_DECLS);
+    assert_eq!(
+        check_aot_comptime("net/pure-values-and-style-force", &source),
+        NET_STYLE_EXPECTED
+    );
+    check_dev_tiers("net-pure-values-and-style-force", &source, NET_STYLE_EXPECTED);
+}

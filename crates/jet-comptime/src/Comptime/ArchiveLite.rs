@@ -14,6 +14,7 @@ use std::path::{Component, Path};
 const TAR_BLOCK: usize = 512;
 const MAX_CODEC_OUTPUT: usize = 64 * 1024 * 1024;
 const ZSTD_BLOCK_MAX: usize = 128 * 1024;
+const ZSTD_WINDOW_MAX: u64 = 128 * 1024 * 1024;
 const U32_MAX_U64: u64 = u32::MAX as u64;
 
 /// Emit a standards-valid Zstandard frame without bringing the native `zstd`
@@ -35,6 +36,149 @@ pub(super) fn zstd_compress(data: &[u8]) -> Vec<u8> {
         }
     }
     out
+}
+
+// Dictionaryless, std-only Zstandard decoder used by the resident evaluator.
+pub(super) fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
+    let fail = |reason: &str| format!("compress.zstd.decompress: {reason}");
+    let mut input = 0usize;
+    let mut out = Vec::new();
+    while input < data.len() {
+        let magic = read_u32(data, input).ok_or_else(|| fail("invalid zstd data"))?;
+        input += 4;
+        if (0x184d_2a50..=0x184d_2a5f).contains(&magic) {
+            let size = read_u32(data, input).ok_or_else(|| fail("invalid zstd data"))? as usize;
+            input = input
+                .checked_add(4 + size)
+                .filter(|end| *end <= data.len())
+                .ok_or_else(|| fail("invalid zstd data"))?;
+            continue;
+        }
+        if magic != 0xfd2f_b528 {
+            return Err(fail("invalid zstd data"));
+        }
+        let frame_start = out.len();
+        let descriptor = *data.get(input).ok_or_else(|| fail("invalid zstd data"))?;
+        input += 1;
+        if descriptor & 0x08 != 0 {
+            return Err(fail("invalid zstd data"));
+        }
+        let single_segment = descriptor & 0x20 != 0;
+        let checksum = descriptor & 0x04 != 0;
+        let dict_size = [0usize, 1, 2, 4][usize::from(descriptor & 3)];
+        let fcs_size = match (descriptor >> 6, single_segment) {
+            (0, false) => 0,
+            (0, true) => 1,
+            (1, _) => 2,
+            (2, _) => 4,
+            _ => 8,
+        };
+        let window = if single_segment {
+            None
+        } else {
+            let byte = *data.get(input).ok_or_else(|| fail("invalid zstd data"))?;
+            input += 1;
+            let base = 1u64 << (10 + u32::from(byte >> 3));
+            Some(base + base / 8 * u64::from(byte & 7))
+        };
+        let dictionary = read_le(data, input, dict_size).ok_or_else(|| fail("invalid zstd data"))?;
+        input += dict_size;
+        if dictionary != 0 {
+            return Err(fail("dictionary frames are unsupported"));
+        }
+        let mut expected = read_le(data, input, fcs_size).ok_or_else(|| fail("invalid zstd data"))?;
+        input += fcs_size;
+        if fcs_size == 2 {
+            expected += 256;
+        }
+        let expected = (fcs_size != 0).then_some(expected);
+        let window = if single_segment {
+            expected.ok_or_else(|| fail("invalid zstd data"))?
+        } else {
+            window.ok_or_else(|| fail("invalid zstd data"))?
+        };
+        if window > ZSTD_WINDOW_MAX {
+            return Err(fail("frame exceeds the 128 MiB window limit"));
+        }
+        if expected.is_some_and(|n| n > MAX_CODEC_OUTPUT as u64) {
+            return Err(fail("frame exceeds the 64 MiB output limit"));
+        }
+        let block_max = window.min(ZSTD_BLOCK_MAX as u64) as usize;
+        let mut huffman = super::ZstdEntropy::HuffmanState::default();
+        let mut sequences = super::ZstdEntropy::SequenceState::default();
+        loop {
+            let header = read_le(data, input, 3).ok_or_else(|| fail("invalid zstd data"))? as u32;
+            input += 3;
+            let last = header & 1 != 0;
+            let kind = (header >> 1) & 3;
+            let size = (header >> 3) as usize;
+            if size > block_max
+                || (kind != 2
+                    && out
+                        .len()
+                        .checked_add(size)
+                        .is_none_or(|len| len > MAX_CODEC_OUTPUT))
+            {
+                return Err(fail("frame exceeds the 64 MiB output limit"));
+            }
+            match kind {
+                0 => {
+                    let end = input
+                        .checked_add(size)
+                        .filter(|end| *end <= data.len())
+                        .ok_or_else(|| fail("invalid zstd data"))?;
+                    out.extend_from_slice(&data[input..end]);
+                    input = end;
+                }
+                1 => {
+                    let byte = *data.get(input).ok_or_else(|| fail("invalid zstd data"))?;
+                    input += 1;
+                    out.resize(out.len() + size, byte);
+                }
+                2 => {
+                    let end = input
+                        .checked_add(size)
+                        .filter(|end| *end <= data.len())
+                        .ok_or_else(|| fail("invalid zstd data"))?;
+                    let block = &data[input..end];
+                    let (literals, used) = super::ZstdEntropy::literals(block, &mut huffman)
+                        .ok_or_else(|| fail("invalid compressed literals"))?;
+                    super::ZstdEntropy::sequences(
+                        block.get(used..).ok_or_else(|| fail("invalid compressed sequences"))?,
+                        &literals,
+                        &mut sequences,
+                        &mut out,
+                        frame_start,
+                        window as usize,
+                        block_max,
+                        MAX_CODEC_OUTPUT,
+                    )
+                    .ok_or_else(|| fail("invalid compressed sequences"))?;
+                    input = end;
+                }
+                _ => return Err(fail("invalid zstd data")),
+            }
+            if last {
+                break;
+            }
+        }
+        let frame = &out[frame_start..];
+        if expected.is_some_and(|size| size != frame.len() as u64) {
+            return Err(fail("frame content size mismatch"));
+        }
+        if checksum {
+            let stored = read_u32(data, input).ok_or_else(|| fail("invalid zstd data"))?;
+            input += 4;
+            if stored != xxh64(frame) as u32 {
+                return Err(fail("checksum mismatch"));
+            }
+        }
+    }
+    if data.is_empty() {
+        Err(fail("invalid zstd data"))
+    } else {
+        Ok(out)
+    }
 }
 
 fn zstd_frame_header(out: &mut Vec<u8>, len: u64) {
@@ -480,6 +624,16 @@ fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
     ))
 }
 
+fn read_le(data: &[u8], offset: usize, size: usize) -> Option<u64> {
+    let bytes = data.get(offset..offset.checked_add(size)?)?;
+    (size <= 8).then(|| {
+        bytes
+            .iter()
+            .enumerate()
+            .fold(0u64, |value, (shift, byte)| value | (u64::from(*byte) << (shift * 8)))
+    })
+}
+
 fn put_u16(out: &mut Vec<u8>, value: u16) {
     out.extend_from_slice(&value.to_le_bytes());
 }
@@ -501,6 +655,62 @@ fn crc32(data: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+fn xxh64(data: &[u8]) -> u64 {
+    const P1: u64 = 11_400_714_785_074_694_791;
+    const P2: u64 = 14_029_467_366_897_019_727;
+    const P3: u64 = 1_609_587_929_392_839_161;
+    const P4: u64 = 9_650_029_242_287_828_579;
+    const P5: u64 = 2_870_177_450_012_600_261;
+    let round = |acc: u64, lane: u64| {
+        acc.wrapping_add(lane.wrapping_mul(P2))
+            .rotate_left(31)
+            .wrapping_mul(P1)
+    };
+    let mut offset = 0usize;
+    let mut hash = if data.len() >= 32 {
+        let mut lanes = [P1.wrapping_add(P2), P2, 0, 0u64.wrapping_sub(P1)];
+        while offset + 32 <= data.len() {
+            for lane in &mut lanes {
+                *lane = round(*lane, u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()));
+                offset += 8;
+            }
+        }
+        let mut hash = lanes[0]
+            .rotate_left(1)
+            .wrapping_add(lanes[1].rotate_left(7))
+            .wrapping_add(lanes[2].rotate_left(12))
+            .wrapping_add(lanes[3].rotate_left(18));
+        for lane in lanes {
+            hash ^= round(0, lane);
+            hash = hash.wrapping_mul(P1).wrapping_add(P4);
+        }
+        hash
+    } else {
+        P5
+    };
+    hash = hash.wrapping_add(data.len() as u64);
+    while offset + 8 <= data.len() {
+        hash ^= round(0, u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()));
+        hash = hash.rotate_left(27).wrapping_mul(P1).wrapping_add(P4);
+        offset += 8;
+    }
+    if offset + 4 <= data.len() {
+        hash ^= u64::from(u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()))
+            .wrapping_mul(P1);
+        hash = hash.rotate_left(23).wrapping_mul(P2).wrapping_add(P3);
+        offset += 4;
+    }
+    for byte in &data[offset..] {
+        hash ^= u64::from(*byte).wrapping_mul(P5);
+        hash = hash.rotate_left(11).wrapping_mul(P1);
+    }
+    hash ^= hash >> 33;
+    hash = hash.wrapping_mul(P2);
+    hash ^= hash >> 29;
+    hash = hash.wrapping_mul(P3);
+    hash ^ (hash >> 32)
 }
 
 struct Bits<'a> {
@@ -727,6 +937,27 @@ fn inflate_codes(
 mod tests {
     use super::*;
 
+    fn stock_zstd(plain: &[u8]) -> Vec<u8> {
+        stock_zstd_with(plain, &["--no-check"])
+    }
+
+    fn stock_zstd_with(plain: &[u8], args: &[&str]) -> Vec<u8> {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        let mut child = Command::new("zstd")
+            .args(["-q", "-c"])
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("zstd must be available in the Jet test environment");
+        child.stdin.take().unwrap().write_all(plain).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        output.stdout
+    }
+
     #[test]
     fn stored_zip_and_tar_round_trip() {
         let zip = zip_compress("hello.txt", b"hello");
@@ -871,5 +1102,152 @@ mod tests {
             "default zstd decoder rejected bounded-window frame: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn zstd_raw_rle_skippable_and_concatenated_frames_decode() {
+        assert_eq!(zstd_decompress(&zstd_compress(b"hello")), Ok(b"hello".to_vec()));
+
+        let rle = [40, 181, 47, 253, 32, 10, 83, 0, 0, b'a'];
+        assert_eq!(zstd_decompress(&rle), Ok(vec![b'a'; 10]));
+
+        // zstd 1.5.7: `printf hello | zstd --no-check -c`. Unlike our encoder,
+        // this independently produced frame carries a window descriptor.
+        let external = [40, 181, 47, 253, 0, 88, 41, 0, 0, 104, 101, 108, 108, 111];
+        assert_eq!(zstd_decompress(&external), Ok(b"hello".to_vec()));
+
+        let mut stream = [80, 42, 77, 24, 3, 0, 0, 0, b'a', b'b', b'c'].to_vec();
+        stream.extend(zstd_compress(b"one"));
+        stream.extend(zstd_compress(b"two"));
+        assert_eq!(zstd_decompress(&stream), Ok(b"onetwo".to_vec()));
+    }
+
+    #[test]
+    fn zstd_raw_decoder_checks_headers_sizes_and_checksum() {
+        // zstd 1.5.7's independently produced checksum-bearing `hello` frame.
+        let checksummed = [
+            40, 181, 47, 253, 4, 88, 41, 0, 0, 104, 101, 108, 108, 111, 163, 109, 159, 136,
+        ];
+        assert_eq!(zstd_decompress(&checksummed), Ok(b"hello".to_vec()));
+        let mut corrupt = checksummed;
+        corrupt[14] ^= 1;
+        assert!(zstd_decompress(&corrupt).unwrap_err().contains("checksum mismatch"));
+
+        let wrong_size = [40, 181, 47, 253, 32, 6, 41, 0, 0, 104, 101, 108, 108, 111];
+        assert!(zstd_decompress(&wrong_size)
+            .unwrap_err()
+            .contains("content size mismatch"));
+        let dictionary = [40, 181, 47, 253, 33, 1, 1, 1, 0, 0];
+        assert!(zstd_decompress(&dictionary)
+            .unwrap_err()
+            .contains("dictionary frames are unsupported"));
+        let oversized = [40, 181, 47, 253, 160, 1, 0, 0, 4];
+        assert!(zstd_decompress(&oversized).unwrap_err().contains("64 MiB"));
+        let max_window = [40, 181, 47, 253, 0, 136, 41, 0, 0, 104, 101, 108, 108, 111];
+        assert_eq!(zstd_decompress(&max_window), Ok(b"hello".to_vec()));
+        let oversized_window =
+            [40, 181, 47, 253, 0, 137, 41, 0, 0, 104, 101, 108, 108, 111];
+        assert!(zstd_decompress(&oversized_window)
+            .unwrap_err()
+            .contains("128 MiB"));
+        assert!(zstd_decompress(&[]).is_err());
+        assert!(zstd_decompress(&[40, 181, 47]).is_err());
+    }
+
+    #[test]
+    fn zstd_stock_compressed_sequence_golden_decodes() {
+        // zstd 1.5.7 compressed-block frame for a repeated pangram.
+        let compressed = [
+            40, 181, 47, 253, 0, 88, 181, 1, 0, 180, 2, 116, 104, 101, 32, 113, 117, 105,
+            99, 107, 32, 98, 114, 111, 119, 110, 32, 102, 111, 120, 32, 106, 117, 109, 112,
+            115, 32, 111, 118, 101, 114, 32, 116, 104, 101, 32, 108, 97, 122, 121, 32, 100,
+            111, 103, 2, 0, 253, 169, 4, 6, 194, 44, 3,
+        ];
+        assert_eq!(
+            zstd_decompress(&compressed),
+            Ok(b"the quick brown fox jumps over the lazy dog ".repeat(4))
+        );
+    }
+
+    #[test]
+    fn zstd_stock_multiblock_sequences_use_prior_output() {
+        let mut value = 1u32;
+        let base = (0..120_000)
+            .map(|_| {
+                value ^= value << 13;
+                value ^= value >> 17;
+                value ^= value << 5;
+                value as u8
+            })
+            .collect::<Vec<_>>();
+        let plain = base.repeat(3);
+        let frame = stock_zstd(&plain);
+        assert_eq!(zstd_decompress(&frame), Ok(plain));
+
+        let mut value = 1u32;
+        let plain = (0..300_000)
+            .map(|_| {
+                value = value.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                b'A' + (value % 3) as u8
+            })
+            .collect::<Vec<_>>();
+        let frame = stock_zstd(&plain);
+        assert_eq!(zstd_decompress(&frame), Ok(plain));
+
+        let mut value = 1u32;
+        let base = (0..ZSTD_BLOCK_MAX)
+            .map(|_| {
+                value = value.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                (value % 3) as u8
+            })
+            .collect::<Vec<_>>();
+        let mut plain = Vec::with_capacity(ZSTD_BLOCK_MAX * 3);
+        for shift in [0, 4, 8] {
+            plain.extend(base.iter().map(|byte| byte + shift));
+        }
+        let frame = stock_zstd_with(&plain, &["--no-check", "-19"]);
+        assert_eq!(zstd_decompress(&frame), Ok(plain));
+    }
+
+    #[test]
+    fn zstd_stock_levels_checksums_fcs_and_concatenation_decode() {
+        let corpora = [
+            Vec::new(),
+            b"z".to_vec(),
+            b"the quick brown fox jumps over the lazy dog ".repeat(200),
+            (0..20_000).map(|index| (index * 37) as u8).collect::<Vec<_>>(),
+        ];
+        for plain in corpora {
+            for level in ["-1", "-5", "-19"] {
+                let size = format!("--stream-size={}", plain.len());
+                let frame = stock_zstd_with(&plain, &[level, &size]);
+                assert_eq!(zstd_decompress(&frame), Ok(plain.clone()), "level {level}");
+            }
+        }
+
+        let one = b"checked compressed frame".repeat(200);
+        let two = b"second checked frame".repeat(300);
+        let size_one = format!("--stream-size={}", one.len());
+        let size_two = format!("--stream-size={}", two.len());
+        let mut stream = stock_zstd_with(&one, &["-5", &size_one]);
+        stream.extend([80, 42, 77, 24, 3, 0, 0, 0, b'x', b'y', b'z']);
+        stream.extend(stock_zstd_with(&two, &["-19", &size_two]));
+        assert_eq!(zstd_decompress(&stream), Ok([one, two].concat()));
+    }
+
+    #[test]
+    fn zstd_mutated_compressed_frames_are_bounded_and_never_panic() {
+        let plain = b"mutation probe mutation probe mutation probe".repeat(4);
+        let frame = stock_zstd_with(&plain, &["-5"]);
+        for end in 0..frame.len() {
+            assert!(std::panic::catch_unwind(|| zstd_decompress(&frame[..end])).is_ok());
+        }
+        for index in 0..frame.len() {
+            for bit in 0..8 {
+                let mut mutated = frame.clone();
+                mutated[index] ^= 1 << bit;
+                assert!(std::panic::catch_unwind(|| zstd_decompress(&mutated)).is_ok());
+            }
+        }
     }
 }

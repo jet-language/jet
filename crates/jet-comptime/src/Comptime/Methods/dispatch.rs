@@ -77,6 +77,18 @@ fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
     unique
 }
 
+fn is_pure_tier2_call(module: &str, method: &str) -> bool {
+    matches!((module, method),
+        ("core.io", "style_force")
+        | ("core.net", "ip_addr" | "ip_to_string" | "ip_is_ipv4")
+        | ("core.net", "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string")
+        | ("core.net", "ready_readable" | "ready_writable")
+        | ("core.net", "error_operation" | "error_address" | "error_name" | "error_message" | "error_os_code")
+        | ("core.net", "dns_srv_target" | "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight")
+        | ("core.net", "udp_packet_data" | "udp_packet_addr" | "udp_packet_bytes" | "udp_packet_original_len" | "udp_packet_truncated")
+    )
+}
+
 fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
     items.sort_by(|left, right| match cmp(right.clone(), left.clone(), span) {

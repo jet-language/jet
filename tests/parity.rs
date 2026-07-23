@@ -98,11 +98,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // `inner_join`/`left_join` and Packet B's `pivot_sum` route through the
     // interpreter because their closure arguments need live `Interp` access.
     //
-    // Gzip and core.archive are interpreter-resident pure byte transforms.
-    // Zstandard compressed blocks require the complete Huffman/FSE substrate;
-    // the interoperable raw-frame encoder is resident, but raw-block-only
-    // decoding is not parity, so decompression remains honest debt.
-    ("core.compress.zstd", "decompress"),
     // core.crypto.expert / core.crypto.random: security-sensitive — needs a
     // careful, independently-reviewed port (AEAD ciphers, CSPRNG), not a
     // quick approximation that could silently diverge from the audited AOT
@@ -111,13 +106,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.crypto.expert", "aes256gcm_seal"),
     ("core.crypto.expert", "argon2id"),
     ("core.crypto.expert", "ed25519_sign"),
-    ("core.crypto.expert", "ed25519_verify_strict"),
-    ("core.crypto.expert", "hkdf_sha256"),
-    ("core.crypto.expert", "secret_bytes"),
-    ("core.crypto.expert", "shared_secret_bytes"),
-    ("core.crypto.expert", "signing_key_bytes"),
-    ("core.crypto.expert", "x25519"),
-    ("core.crypto.expert", "x25519_secret_bytes"),
     ("core.crypto.expert", "xchacha20poly1305_open"),
     ("core.crypto.expert", "xchacha20poly1305_seal"),
     ("core.crypto.random", "bytes"),
@@ -168,7 +156,6 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.raylib", "begin_drawing"),
     ("core.raylib", "clear_background"),
     ("core.raylib", "close_window"),
-    ("core.raylib", "color"),
     ("core.raylib", "draw_rectangle"),
     ("core.raylib", "draw_text"),
     ("core.raylib", "end_drawing"),
@@ -177,21 +164,8 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.raylib", "window_open"),
     ("core.raylib", "window_ready"),
     ("core.raylib", "window_should_close"),
-    ("core.ui", "aria_role_button"),
-    ("core.ui", "aria_role_container"),
-    ("core.ui", "aria_role_label"),
-    ("core.ui", "aria_role_text_input"),
-    ("core.ui", "constraint"),
     ("core.ui", "gtk_backend"),
-    ("core.ui", "key_event"),
-    ("core.ui", "node"),
-    ("core.ui", "node_color"),
-    ("core.ui", "node_role"),
     ("core.ui", "null_backend"),
-    ("core.ui", "point"),
-    ("core.ui", "rect"),
-    ("core.ui", "resize_event"),
-    ("core.ui", "size"),
     ("core.ui", "tui_backend"),
     ("core.term", "read_key"),
     ("core.web", "on"),
@@ -233,6 +207,12 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     ("core.uuid", "v4"),
     ("core.uuid", "v7"),
 ];
+
+/// Calls with a production-compiled foundation that must remain private until
+/// the complete AOT contract is resident. A public comptime arm is a false
+/// parity claim while an entry remains here. Remove the entry in the same
+/// commit that completes and dispatches the call.
+const KNOWN_PARTIAL_GAPS: &[(&str, &str)] = &[];
 
 fn raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
     let mut i = match (bytes.get(start), bytes.get(start + 1)) {
@@ -906,7 +886,11 @@ fn ct_build_context_methods() -> BTreeSet<String> {
         "let result = match method {",
         Some("_ => return None.ok_or_else"),
     ));
-    let dispatch = read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch");
+    let dispatch = format!(
+        "{}\n{}",
+        read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs"),
+        read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch"),
+    );
     for method in ["find", "fetch", "embed"] {
         if dispatch.contains(&format!("method == \"{method}\""))
             || dispatch.contains(&format!("\"{method}\" =>"))
@@ -1085,10 +1069,15 @@ fn discover_inventory() -> BTreeSet<Entry> {
 fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, Vec<String>> {
     let core_dispatch_src = read_rust_tree("crates/jet-comptime/src/Comptime");
     let builtin_dispatch_src = read("crates/jet-comptime/src/Comptime/Builtins.rs");
-    let dispatch_src = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
     let dispatch_tree = read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch");
+    let dispatch_src = format!(
+        "{}\n{}",
+        read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs"),
+        dispatch_tree,
+    );
     let ct_core = extract_pairs(&core_dispatch_src);
     let gaps = KNOWN_OPEN_GAPS.iter().copied().collect::<BTreeSet<_>>();
+    let partials = KNOWN_PARTIAL_GAPS.iter().copied().collect::<BTreeSet<_>>();
     let syntax_src = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
     let values = string_constant_values(&syntax_src, "");
     let mut direct_ct = builtin_constant_refs(&dispatch_src);
@@ -1146,12 +1135,28 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
             errors.push(format!("stale pure_pending gap: {module}.{method} is now comptime-covered"));
         }
     }
+    for &(module, method) in KNOWN_PARTIAL_GAPS {
+        let pair = (module.to_string(), method.to_string());
+        if !discovered.iter().any(|entry| {
+            matches!(entry.surface, Surface::Fixed | Surface::Bespoke)
+                && entry.owner == module
+                && entry.method == method
+        }) {
+            errors.push(format!("stale partial gap: {module}.{method} is no longer discovered"));
+        } else if ct_core.contains(&pair) {
+            errors.push(format!(
+                "partial gap leaked into comptime dispatch: {module}.{method}"
+            ));
+        }
+    }
     let mut out = Vec::new();
     for entry in discovered.iter().cloned() {
         let classified = match entry.surface {
             Surface::Fixed | Surface::Bespoke => {
                 let pair = (entry.owner.clone(), entry.method.clone());
-                if ct_core.contains(&pair) {
+                if partials.contains(&(entry.owner.as_str(), entry.method.as_str())) {
+                    Some((Class::PurePending, "explicit partial pure port"))
+                } else if ct_core.contains(&pair) {
                     Some((Class::Covered, "comptime core dispatch"))
                 } else if let Some(reason) = core_boundary(&entry.owner, &entry.method) {
                     Some((Class::Boundary, reason))
@@ -1597,11 +1602,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
         );
         assert_eq!(
             record(&records, Surface::Fixed, "core.compress.zstd", method).class,
-            if method == "compress" {
-                Class::Covered
-            } else {
-                Class::PurePending
-            }
+            Class::Covered
         );
     }
     assert_eq!(record(&records, Surface::Fixed, "core.args", "spec").class, Class::Boundary);
@@ -1651,7 +1652,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 788, 1, 389));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_178, 837, 0, 341));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1659,7 +1660,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        3969329998197754179,
+        1735070472196747529,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

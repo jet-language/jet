@@ -16,7 +16,9 @@
 
 pub mod Build;
 mod Builtins;
+mod CryptoLite;
 mod ArchiveLite;
+mod ZstdEntropy;
 mod DataLite;
 mod DataPipeline;
 mod Diagnostics;

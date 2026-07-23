@@ -633,7 +633,17 @@ impl<'a> Interp<'a> {
                 restore_binding(scope, &init.name, previous);
                 result
             }
-            Stmt::Unsafe { span, .. } => Err(unsupported("an `#Unsafe` block", *span)),
+            // An audited unsafe region is only a lexical capability. The
+            // operations inside still pass through the ordinary comptime
+            // dispatcher, which rejects unsupported raw/native work. Keep the
+            // interactive REPL's deliberate E1802 hard stop unchanged.
+            Stmt::Unsafe { body, span, .. } => {
+                if self.repl_mode {
+                    Err(unsupported("an `#Unsafe` block", *span))
+                } else {
+                    self.exec_block(body, scope)
+                }
+            }
             Stmt::Reactive { span, .. } => Err(unsupported("a `#Reactive` block", *span)),
             // D-CTEFFECT1: `#Impure("reason") { … }` — gate for Tier-2 ambient
             // comptime effects. Increments impure_depth around the body so that

@@ -1,0 +1,38 @@
+# Tower #392 C4: pure UI values run inside tier-0; backend handles stay runtime-only.
+> use core.ui as ui
+ok
+> p :: ui.point(1.5, -2.0)
+> p.x
+1.5 : Float
+> p.y
+-2.0 : Float
+> s :: ui.size(80.0, 24.0)
+> s.width
+80.0 : Float
+> r :: ui.rect(1.0, 2.0, 3.0, 4.0)
+> r.height
+4.0 : Float
+> c :: ui.constraint(0.0, 1.0, 80.0, 24.0)
+> c.max_width
+80.0 : Float
+> ui.aria_role_button()
+user_Button : UiAriaRole
+> ui.aria_role_label()
+user_Label : UiAriaRole
+> ui.key_event("Enter")
+user_Key { code: "Enter" } : InputEvent
+> ui.resize_event(80.0, 24.0)
+user_Resize { size: user_Size { width: 80.0, height: 24.0 } } : InputEvent
+> node :: ui.node("plain", 5.0, 2.0)
+> node.label
+"plain" : String
+> ui.node_color("blue", 4.0, 1.0, "#0000ff")
+UiNode(label: blue, width: 4.0, height: 1.0, role: user_Label, color: #0000ff, kind: user_Custom, children: []) : UiNode
+> button :: ui.button("Save")
+> button.width
+8.0 : Float
+> row :: ui.box([ui.text("hi"), button])
+> row.width
+8.0 : Float
+> row.height
+2.0 : Float

@@ -1329,9 +1329,6 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     if t.contains("core.db") || t.contains("jet.db") {
         return Some("`core.db` (SQLite)");
     }
-    if t.contains("core.net") {
-        return Some("network sockets (`core.net`)");
-    }
     if import != Some("core.reactive.loadable")
         && (t.contains("core.reactive") || t.contains("jet.reactive"))
     {

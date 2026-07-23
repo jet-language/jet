@@ -637,6 +637,10 @@ pub(super) fn apply_core_call(
     span: Span,
     repl_mode: bool,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
+        return result;
+    }
+
     if repl_mode {
         if let Some(_) = repl_native_only_module(module) {
             return Err(repl_native_module_diag(module, method, span));
@@ -648,10 +652,6 @@ pub(super) fn apply_core_call(
             unsupported(&format!("{}.{}(): missing arg {}", module, method, i), span)
         })
     };
-
-    if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
-        return result;
-    }
 
     match (module, method) {
         // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside
@@ -665,12 +665,17 @@ pub(super) fn apply_core_call(
                 Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
             })
         }
-        // A raw-block Zstandard frame is fully interoperable despite choosing
-        // ratio zero. Keep this pure encoder resident; decompression remains
-        // pending until compressed-block FSE/Huffman support is complete.
+        // The std-only resident codec accepts ordinary dictionaryless zstd
+        // frames. The encoder deliberately chooses interoperable raw blocks.
         ("core.compress.zstd", "compress") => Ok(CtValue::Bytes(
             super::super::ArchiveLite::zstd_compress(&as_bytes(one(0)?, span)?),
         )),
+        ("core.compress.zstd", "decompress") => {
+            Ok(match super::super::ArchiveLite::zstd_decompress(&as_bytes(one(0)?, span)?) {
+                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+            })
+        }
         // D-CORE-COMPRESS1=A / card #392 C4: archive containers are pure byte
         // transforms. Keep them interpreter-resident; never route through the
         // native FFI bridge or an AOT fallback.
