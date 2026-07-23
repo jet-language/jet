@@ -683,6 +683,11 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         "// JET_VETTED_UNSAFE_BEGIN: jet_env_windows",
         "// JET_VETTED_UNSAFE_END: jet_env_windows",
     );
+    s = strip_region(
+        &s,
+        "// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe",
+        "// JET_VETTED_UNSAFE_END: jet_watch_process_probe",
+    );
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");
@@ -704,4 +709,12 @@ fn strip_region(src: &str, begin: &str, end: &str) -> String {
         }
         _ => src.to_string(),
     }
+}
+
+#[test]
+fn watcher_process_probe_is_vetted_without_hiding_user_unsafe() {
+    let generated = "// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe\nunsafe { ffi() }\n// JET_VETTED_UNSAFE_END: jet_watch_process_probe\nunsafe { user_pointer() }";
+    let stripped = strip_vetted_prelude_modules(generated);
+    assert!(!stripped.contains("ffi()"));
+    assert!(stripped.contains("unsafe { user_pointer() }"));
 }

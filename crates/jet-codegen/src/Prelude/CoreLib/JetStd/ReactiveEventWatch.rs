@@ -1930,20 +1930,51 @@
         }
     }
 
+    // JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe
+    #[cfg(unix)]
     fn jet_process_alive(pid: i64) -> bool {
         if pid <= 0 {
             return false;
         }
-        #[cfg(target_os = "linux")]
-        {
-            std::path::Path::new(&format!("/proc/{}", pid)).exists()
+        unsafe extern "C" {
+            fn kill(pid: i32, signal: i32) -> i32;
         }
-        #[cfg(not(target_os = "linux"))]
-        {
-            let current = std::process::id() as i64;
-            pid == current
-        }
+        let Some(pid) = i32::try_from(pid).ok() else {
+            return false;
+        };
+        let result = unsafe { kill(pid, 0) };
+        result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1)
     }
+
+    #[cfg(windows)]
+    fn jet_process_alive(pid: i64) -> bool {
+        if pid <= 0 {
+            return false;
+        }
+        const SYNCHRONIZE: u32 = 0x0010_0000;
+        const WAIT_TIMEOUT: u32 = 0x0000_0102;
+        unsafe extern "system" {
+            fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
+            fn WaitForSingleObject(handle: *mut std::ffi::c_void, milliseconds: u32) -> u32;
+            fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+        }
+        let Some(pid) = u32::try_from(pid).ok() else {
+            return false;
+        };
+        let handle = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
+        if handle.is_null() {
+            return false;
+        }
+        let alive = unsafe { WaitForSingleObject(handle, 0) == WAIT_TIMEOUT };
+        unsafe { CloseHandle(handle) };
+        alive
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn jet_process_alive(pid: i64) -> bool {
+        pid > 0 && pid == std::process::id() as i64
+    }
+    // JET_VETTED_UNSAFE_END: jet_watch_process_probe
 
     impl super::JetShow for Closed {
         fn jet_show(&self) -> String {

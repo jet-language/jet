@@ -102,7 +102,6 @@ mod jet_atomic_windows {
     const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
     const ERROR_FILE_NOT_FOUND: i32 = 2;
     const ERROR_PATH_NOT_FOUND: i32 = 3;
-
     extern "system" {
         fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
         fn ReplaceFileW(
@@ -193,7 +192,7 @@ fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::
     use std::io::Write;
 
     let path_s = p.inner.to_string_lossy();
-    let dir = p.inner.parent().ok_or_else(|| {
+    let parent = p.inner.parent().ok_or_else(|| {
         jet_std::io_error_at(
             jet_std::IoOperation::Write,
             &path_s,
@@ -203,6 +202,14 @@ fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::
             ),
         )
     })?;
+    // Path::parent("file") is Some(""). Treat that lexical parent as the
+    // current directory so the post-rename directory sync cannot turn a
+    // successful relative replacement into an error.
+    let dir = if parent.as_os_str().is_empty() {
+        std::path::Path::new(".")
+    } else {
+        parent
+    };
     let existing_permissions = std::fs::metadata(&p.inner)
         .ok()
         .map(|metadata| metadata.permissions());

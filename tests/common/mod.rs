@@ -379,6 +379,25 @@ impl Drop for FfiBridgeLock {
 /// code (I2). `prefix` names the scratch dir (e.g. "jet_tir_test") so suites
 /// stay distinguishable in /tmp. Callers must gate on `have_rustc()` first.
 pub fn build_and_run(prefix: &str, name: &str, src: &str) -> (i32, String, String) {
+    build_and_run_with_cwd(prefix, name, src, false)
+}
+
+/// `build_and_run`, with the generated binary's working directory isolated to
+/// its unique scratch directory.
+pub fn build_and_run_in_scratch(
+    prefix: &str,
+    name: &str,
+    src: &str,
+) -> (i32, String, String) {
+    build_and_run_with_cwd(prefix, name, src, true)
+}
+
+fn build_and_run_with_cwd(
+    prefix: &str,
+    name: &str,
+    src: &str,
+    run_in_scratch: bool,
+) -> (i32, String, String) {
     let dir = unique_tmp(prefix);
     fs::create_dir_all(&dir).unwrap();
     // `compile_with_path` loads the entry from disk, so write the .jet first.
@@ -418,7 +437,11 @@ pub fn build_and_run(prefix: &str, name: &str, src: &str) -> (i32, String, Strin
         "rustc rejected generated code (I2 violation):\n{}",
         String::from_utf8_lossy(&rustc.stderr)
     );
-    let run = Command::new(&bin).output().unwrap();
+    let mut run_cmd = Command::new(&bin);
+    if run_in_scratch {
+        run_cmd.current_dir(&dir);
+    }
+    let run = run_cmd.output().unwrap();
     (
         run.status.code().unwrap_or(0),
         String::from_utf8_lossy(&run.stdout).into_owned(),
@@ -471,6 +494,7 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let s = strip_mod(&s, "jet_crypto_entropy");
     let mut s = strip_scheduler_native(&s);
     s = strip_vetted_module(&s, "jet_env_windows");
+    s = strip_vetted_module(&s, "jet_watch_process_probe");
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");
@@ -516,13 +540,13 @@ pub fn strip_vetted_module(src: &str, name: &str) -> String {
 #[test]
 fn vetted_module_stripping_cannot_swallow_following_user_unsafe() {
     let generated = r##"before
-// JET_VETTED_UNSAFE_BEGIN: audited
+// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe
 #[cfg(windows)]
 mod audited { const TEXT: &str = r#"{ comment-like }"#; unsafe { ffi() } }
-// JET_VETTED_UNSAFE_END: audited
+// JET_VETTED_UNSAFE_END: jet_watch_process_probe
 fn user() { unsafe { user_pointer() } }
 "##;
-    let stripped = strip_vetted_module(generated, "audited");
+    let stripped = strip_vetted_prelude_modules(generated);
     assert!(!stripped.contains("ffi()"));
     assert!(stripped.contains("unsafe { user_pointer() }"));
 }
