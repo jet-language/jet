@@ -1,0 +1,15 @@
+// D-WEBBACKEND1 / #123: Wasm compute lowers inclusive `loop i; start..end`
+// through checked TIR (parity with JS range emission).
+#WasmExport
+fn sum_to(n: Int) -> Int {
+    total := 0
+    loop i; 0..n {
+        total = total + i
+    }
+    return total
+}
+
+#Target(Js)
+fn run() {
+    print(sum_to(5))
+}

@@ -7,7 +7,7 @@ use super::{
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
 use crate::Syntax;
-use crate::AST::{FfiLink, Func, Item, ProgramBundle, Type};
+use crate::AST::{AccessConvention, FfiLink, Func, Item, ProgramBundle, Type};
 use jet_foundation::WebPartition::{WebBucket, WebPartitionMarker};
 
 /// Generated web backend artifacts (WASM Rust, JS loader/app, DOM shim, manifest).
@@ -217,6 +217,23 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
     })
 }
 
+fn is_list_int(ty: &Type) -> bool {
+    matches!(ty, Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }))
+}
+
+fn is_list_string(ty: &Type) -> bool {
+    matches!(ty, Type::List(inner) if matches!(**inner, Type::String))
+}
+
+fn is_map_string_int(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Map { key, value, .. }
+            if matches!(**key, Type::String)
+                && matches!(**value, Type::Int)
+    )
+}
+
 fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc) -> bool {
     let ty_supported = if f.web_marker == Some(WebPartitionMarker::WasmExport) {
         wasm_export_ty
@@ -225,9 +242,18 @@ fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc) -> bool {
     };
     flattened_web_params(tir)
         .iter().all(|(_, ty)| ty_supported(ty).is_some())
-        // Owned strings can stay inside an internal Rust/Wasm parameter list,
-        // but this emitter has no string return representation yet.
-        && f.return_type.as_ref().map(|ty| wasm_export_ty(ty).is_some()).unwrap_or(true)
+        // D-JSBIND1: String / [Int] / [String] / [String: Int] params/returns
+        // cross the export boundary as packed (ptr,len) u64 ownership transfers.
+        && f.return_type
+            .as_ref()
+            .map(|ty| {
+                matches!(ty, Type::String)
+                    || is_list_int(ty)
+                    || is_list_string(ty)
+                    || is_map_string_int(ty)
+                    || wasm_export_ty(ty).is_some()
+            })
+            .unwrap_or(true)
 }
 
 fn web_wasm_stmts_supported(
@@ -245,6 +271,31 @@ fn web_wasm_stmts_supported(
                 && web_wasm_stmts_supported(then_body, bundle, file_prefix, reconstructions)
                 && else_body.as_deref().map(|body| web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)).unwrap_or(true)
         }
+        // Inclusive `loop i; start..end` (D-SG8 / S22). Same covered Int arithmetic
+        // already used by Wasm if/let — close the JS/Wasm TIR gap for compute loops.
+        TIR::TStmt::Range { start, end, step, body, .. } => {
+            web_wasm_expr_supported(start, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(end, bundle, file_prefix, reconstructions)
+                && step
+                    .as_ref()
+                    .map(|s| web_wasm_expr_supported(s, bundle, file_prefix, reconstructions))
+                    .unwrap_or(true)
+                && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+        }
+        // Plain `loop x; xs` over a list/local (JS already emits `for…of`).
+        // Keep method/map/stride/columnar forms on the honest unsupported path.
+        TIR::TStmt::ForIn {
+            var2: None,
+            step: None,
+            method_kind: None,
+            columnar: false,
+            collection,
+            body,
+            ..
+        } => {
+            web_wasm_expr_supported(collection, bundle, file_prefix, reconstructions)
+                && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+        }
         _ => false,
     })
 }
@@ -259,7 +310,10 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::IntLit(..) | TIR::TExprKind::FloatLit(_) | TIR::TExprKind::BoolLit(_) | TIR::TExprKind::Local(_) => true,
         TIR::TExprKind::StrLit(parts) => parts.iter().all(|part| matches!(part, TIR::TStrPart::Lit(_))),
         TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions) && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions),
-        TIR::TExprKind::Unary { operand, .. } | TIR::TExprKind::Clone(operand) | TIR::TExprKind::Print(operand) => {
+        TIR::TExprKind::Unary { operand, .. }
+        | TIR::TExprKind::Clone(operand)
+        | TIR::TExprKind::MaterializeView(operand)
+        | TIR::TExprKind::Print(operand) => {
             web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
@@ -267,6 +321,15 @@ fn web_wasm_expr_supported(
             reconstructions.iter().any(|r| {
                 r.local_rust == *local && r.fields.iter().any(|(field, _, _)| field == field_rust)
             })
+        }
+        TIR::TExprKind::Index {
+            base,
+            index,
+            is_map: true,
+            ..
+        } => {
+            web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)),
@@ -325,6 +388,9 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
         E::ListLit(elements) => elements.iter().all(web_expr_supported),
+        E::MapLit(entries) => entries
+            .iter()
+            .all(|(key, value)| web_expr_supported(key) && web_expr_supported(value)),
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
@@ -459,7 +525,22 @@ fn collect_module_funcs(
 }
 
 fn json_quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    // JS/JSON string literal — escape controls so Wasm bridge call sites with
+    // tab/newline (D-JSBIND1 hostile String params) stay valid source.
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn emit_manifest(bundle: &ProgramBundle, funcs: &[FuncWeb], handlers: &[(String, String)]) -> String {
@@ -635,9 +716,27 @@ fn js_abi_call_args(
     }
     match ty {
         Type::Int | Type::IntN { .. } => vec![format!("BigInt({name})")],
+        Type::String => {
+            prelude.push_str(&format!(
+                "  const _{name} = jetDom.marshalAbi({name}, \"string\", wasm);\n"
+            ));
+            vec![format!("_{name}")]
+        }
         Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => {
             prelude.push_str(&format!(
-                "  const _{name} = jetDom.marshalAbi({name}, \"list-int\");\n"
+                "  const _{name} = jetDom.marshalAbi({name}, \"list-int\", wasm);\n"
+            ));
+            vec![format!("_{name}")]
+        }
+        Type::List(inner) if matches!(**inner, Type::String) => {
+            prelude.push_str(&format!(
+                "  const _{name} = jetDom.marshalAbi({name}, \"list-string\", wasm);\n"
+            ));
+            vec![format!("_{name}")]
+        }
+        ty if is_map_string_int(ty) => {
+            prelude.push_str(&format!(
+                "  const _{name} = jetDom.marshalAbi({name}, \"map-string-int\", wasm);\n"
             ));
             vec![format!("_{name}")]
         }
@@ -662,6 +761,243 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     if wasm_funcs.is_empty() {
         out.push_str("#[no_mangle]\npub extern \"C\" fn jet_wasm_nop() {}\n");
         return Ok(out);
+    }
+    let need_packed_abi = |pred: &dyn Fn(&Type) -> bool| {
+        wasm_funcs.iter().any(|f| {
+            let export = f.marker == Some(WebPartitionMarker::WasmExport)
+                || (f.key == "run"
+                    && f.bucket == WebBucket::Wasm
+                    && bundle.modules[bundle.entry].html_path.is_none());
+            if !export {
+                return false;
+            }
+            f.return_type.as_ref().is_some_and(pred)
+                || flattened_web_params(&f.tir).iter().any(|(_, ty)| pred(ty))
+        })
+    };
+    if need_packed_abi(&|ty| matches!(ty, Type::String)) {
+        // D-JSBIND1=A: UTF-8 ownership transfer — packed u64 (ptr<<32)|len.
+        // Returns: Wasm owns → JS copies → jet_abi_string_free.
+        // Params: JS TextEncoder → jet_abi_string_alloc → Wasm takes via jet_abi_string_arg.
+        out.push_str(
+            "fn jet_abi_string_ret(s: String) -> u64 {\n\
+             \x20   let boxed = s.into_bytes().into_boxed_slice();\n\
+             \x20   let len = boxed.len() as u32;\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   ((ptr as u64) << 32) | (len as u64)\n\
+             }\n\n\
+             fn jet_abi_string_arg(packed: u64) -> String {\n\
+             \x20   let ptr = (packed >> 32) as u32;\n\
+             \x20   let len = (packed & 0xffff_ffff) as u32;\n\
+             \x20   if len == 0 {\n\
+             \x20       if ptr != 0 {\n\
+             \x20           unsafe {\n\
+             \x20               let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0));\n\
+             \x20           }\n\
+             \x20       }\n\
+             \x20       return String::new();\n\
+             \x20   }\n\
+             \x20   unsafe {\n\
+             \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));\n\
+             \x20       String::from_utf8(boxed.into_vec()).expect(\"JS TextEncoder UTF-8\")\n\
+             \x20   }\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_string_alloc(len: u32) -> u32 {\n\
+             \x20   let boxed = vec![0u8; len as usize].into_boxed_slice();\n\
+             \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_string_free(ptr: u32, len: u32) {\n\
+             \x20   if ptr == 0 { return; }\n\
+             \x20   unsafe {\n\
+             \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, len as usize));\n\
+             \x20   }\n\
+             }\n\n",
+        );
+    }
+    if need_packed_abi(&is_list_int) {
+        // D-JSBIND1=A: [Int] as little-endian i64 payload — packed u64 (ptr<<32)|len.
+        // Returns: Wasm owns → JS copies → jet_abi_list_i64_free.
+        // Params: JS BigInt64Array → jet_abi_list_i64_alloc → Wasm takes via jet_abi_list_i64_arg.
+        out.push_str(
+            "fn jet_abi_list_i64_ret(v: Vec<i64>) -> u64 {\n\
+             \x20   let boxed = v.into_boxed_slice();\n\
+             \x20   let len = boxed.len() as u32;\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut i64 as u32;\n\
+             \x20   ((ptr as u64) << 32) | (len as u64)\n\
+             }\n\n\
+             fn jet_abi_list_i64_arg(packed: u64) -> Vec<i64> {\n\
+             \x20   let ptr = (packed >> 32) as u32;\n\
+             \x20   let len = (packed & 0xffff_ffff) as u32;\n\
+             \x20   if len == 0 {\n\
+             \x20       if ptr != 0 {\n\
+             \x20           unsafe {\n\
+             \x20               let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut i64, 0));\n\
+             \x20           }\n\
+             \x20       }\n\
+             \x20       return Vec::new();\n\
+             \x20   }\n\
+             \x20   unsafe {\n\
+             \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut i64, len as usize));\n\
+             \x20       boxed.into_vec()\n\
+             \x20   }\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) -> u32 {\n\
+             \x20   let boxed = vec![0i64; len as usize].into_boxed_slice();\n\
+             \x20   Box::into_raw(boxed) as *mut i64 as u32\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_list_i64_free(ptr: u32, len: u32) {\n\
+             \x20   if ptr == 0 { return; }\n\
+             \x20   unsafe {\n\
+             \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut i64, len as usize));\n\
+             \x20   }\n\
+             }\n\n",
+        );
+    }
+    if need_packed_abi(&is_list_string) {
+        // D-JSBIND1=A: [String] as contiguous LE blob —
+        // [count:u32][len0:u32][utf8…][len1:u32][utf8…]… packed u64 (ptr<<32)|byte_len.
+        // Empty → 0. Returns: Wasm owns → JS copies → jet_abi_list_string_free.
+        // Params: JS TextEncoder → jet_abi_list_string_alloc → jet_abi_list_string_arg.
+        out.push_str(
+            "fn jet_abi_list_string_ret(v: Vec<String>) -> u64 {\n\
+             \x20   if v.is_empty() {\n\
+             \x20       return 0;\n\
+             \x20   }\n\
+             \x20   let mut buf: Vec<u8> = Vec::new();\n\
+             \x20   let count = v.len() as u32;\n\
+             \x20   buf.extend_from_slice(&count.to_le_bytes());\n\
+             \x20   for s in &v {\n\
+             \x20       let bytes = s.as_bytes();\n\
+             \x20       let len = bytes.len() as u32;\n\
+             \x20       buf.extend_from_slice(&len.to_le_bytes());\n\
+             \x20       buf.extend_from_slice(bytes);\n\
+             \x20   }\n\
+             \x20   let boxed = buf.into_boxed_slice();\n\
+             \x20   let byte_len = boxed.len() as u32;\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   ((ptr as u64) << 32) | (byte_len as u64)\n\
+             }\n\n\
+             fn jet_abi_list_string_arg(packed: u64) -> Vec<String> {\n\
+             \x20   let ptr = (packed >> 32) as u32;\n\
+             \x20   let byte_len = (packed & 0xffff_ffff) as u32;\n\
+             \x20   if byte_len == 0 {\n\
+             \x20       if ptr != 0 {\n\
+             \x20           unsafe {\n\
+             \x20               let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0));\n\
+             \x20           }\n\
+             \x20       }\n\
+             \x20       return Vec::new();\n\
+             \x20   }\n\
+             \x20   unsafe {\n\
+             \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
+             \x20       let buf = boxed.into_vec();\n\
+             \x20       let mut i = 0usize;\n\
+             \x20       assert!(buf.len() >= 4, \"list-string header\");\n\
+             \x20       let count = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;\n\
+             \x20       i = 4;\n\
+             \x20       let mut out = Vec::with_capacity(count);\n\
+             \x20       for _ in 0..count {\n\
+             \x20           assert!(i + 4 <= buf.len(), \"list-string len\");\n\
+             \x20           let len = u32::from_le_bytes(buf[i..i + 4].try_into().unwrap()) as usize;\n\
+             \x20           i += 4;\n\
+             \x20           assert!(i + len <= buf.len(), \"list-string bytes\");\n\
+             \x20           out.push(String::from_utf8(buf[i..i + len].to_vec()).expect(\"JS UTF-8\"));\n\
+             \x20           i += len;\n\
+             \x20       }\n\
+             \x20       out\n\
+             \x20   }\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_list_string_alloc(byte_len: u32) -> u32 {\n\
+             \x20   let boxed = vec![0u8; byte_len as usize].into_boxed_slice();\n\
+             \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_list_string_free(ptr: u32, byte_len: u32) {\n\
+             \x20   if ptr == 0 { return; }\n\
+             \x20   unsafe {\n\
+             \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
+             \x20   }\n\
+             }\n\n",
+        );
+    }
+    if need_packed_abi(&is_map_string_int) {
+        // D-JSBIND1=A: [String: Int] as contiguous LE blob —
+        // [count:u32][keyLen:u32][utf8…][val:i64 LE]… packed u64 (ptr<<32)|byte_len.
+        // Entries encoded in BTreeMap key order. Empty → 0.
+        out.push_str(
+            "fn jet_abi_map_string_i64_ret(m: std::collections::BTreeMap<String, i64>) -> u64 {\n\
+             \x20   if m.is_empty() {\n\
+             \x20       return 0;\n\
+             \x20   }\n\
+             \x20   let mut buf: Vec<u8> = Vec::new();\n\
+             \x20   let count = m.len() as u32;\n\
+             \x20   buf.extend_from_slice(&count.to_le_bytes());\n\
+             \x20   for (k, v) in &m {\n\
+             \x20       let bytes = k.as_bytes();\n\
+             \x20       let len = bytes.len() as u32;\n\
+             \x20       buf.extend_from_slice(&len.to_le_bytes());\n\
+             \x20       buf.extend_from_slice(bytes);\n\
+             \x20       buf.extend_from_slice(&v.to_le_bytes());\n\
+             \x20   }\n\
+             \x20   let boxed = buf.into_boxed_slice();\n\
+             \x20   let byte_len = boxed.len() as u32;\n\
+             \x20   let ptr = Box::into_raw(boxed) as *mut u8 as u32;\n\
+             \x20   ((ptr as u64) << 32) | (byte_len as u64)\n\
+             }\n\n\
+             fn jet_abi_map_string_i64_arg(packed: u64) -> std::collections::BTreeMap<String, i64> {\n\
+             \x20   let ptr = (packed >> 32) as u32;\n\
+             \x20   let byte_len = (packed & 0xffff_ffff) as u32;\n\
+             \x20   if byte_len == 0 {\n\
+             \x20       if ptr != 0 {\n\
+             \x20           unsafe {\n\
+             \x20               let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, 0));\n\
+             \x20           }\n\
+             \x20       }\n\
+             \x20       return std::collections::BTreeMap::new();\n\
+             \x20   }\n\
+             \x20   unsafe {\n\
+             \x20       let boxed = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
+             \x20       let buf = boxed.into_vec();\n\
+             \x20       let mut i = 0usize;\n\
+             \x20       assert!(buf.len() >= 4, \"map-string-int header\");\n\
+             \x20       let count = u32::from_le_bytes(buf[0..4].try_into().unwrap()) as usize;\n\
+             \x20       i = 4;\n\
+             \x20       let mut out = std::collections::BTreeMap::new();\n\
+             \x20       for _ in 0..count {\n\
+             \x20           let len_end = i.checked_add(4).expect(\"map-string-int key len overflow\");\n\
+             \x20           assert!(len_end <= buf.len(), \"map-string-int key len\");\n\
+             \x20           let len = u32::from_le_bytes(buf[i..len_end].try_into().unwrap()) as usize;\n\
+             \x20           i = len_end;\n\
+             \x20           let key_end = i.checked_add(len).expect(\"map-string-int key overflow\");\n\
+             \x20           let value_end = key_end.checked_add(8).expect(\"map-string-int value overflow\");\n\
+             \x20           assert!(value_end <= buf.len(), \"map-string-int entry\");\n\
+             \x20           let key = String::from_utf8(buf[i..key_end].to_vec()).expect(\"JS UTF-8\");\n\
+             \x20           let val = i64::from_le_bytes(buf[key_end..value_end].try_into().unwrap());\n\
+             \x20           i = value_end;\n\
+             \x20           out.insert(key, val);\n\
+             \x20       }\n\
+             \x20       assert_eq!(i, buf.len(), \"map-string-int trailing bytes\");\n\
+             \x20       out\n\
+             \x20   }\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) -> u32 {\n\
+             \x20   let boxed = vec![0u8; byte_len as usize].into_boxed_slice();\n\
+             \x20   Box::into_raw(boxed) as *mut u8 as u32\n\
+             }\n\n\
+             #[no_mangle]\n\
+             pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32) {\n\
+             \x20   if ptr == 0 { return; }\n\
+             \x20   unsafe {\n\
+             \x20       let _ = Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr as *mut u8, byte_len as usize));\n\
+             \x20   }\n\
+             }\n\n",
+        );
     }
     let mut emitted_structs = std::collections::HashSet::new();
     for f in &wasm_funcs {
@@ -688,24 +1024,58 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
 }
 
 fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String, funcs: &[FuncWeb]) -> WebEmitResult<()> {
+    let string_ret = matches!(f.return_type.as_ref(), Some(Type::String));
+    let list_ret = f.return_type.as_ref().is_some_and(is_list_int);
+    let list_string_ret = f.return_type.as_ref().is_some_and(is_list_string);
+    let map_ret = f.return_type.as_ref().is_some_and(is_map_string_int);
+    let flat = flattened_web_params(&f.tir);
+    let string_params = flat.iter().any(|(_, ty)| matches!(ty, Type::String));
+    let list_params = flat.iter().any(|(_, ty)| is_list_int(ty));
+    let list_string_params = flat.iter().any(|(_, ty)| is_list_string(ty));
+    let map_params = flat.iter().any(|(_, ty)| is_map_string_int(ty));
     let reconstructed_export = export && !f.tir.web_param_reconstructions.is_empty();
-    if reconstructed_export {
+    // String / [Int] / [String] / [String: Int] cannot be bare `extern "C"` — wrap as packed u64.
+    let wrapped_export = export
+        && (reconstructed_export
+            || string_ret
+            || string_params
+            || list_ret
+            || list_params
+            || list_string_ret
+            || list_string_params
+            || map_ret
+            || map_params);
+    if wrapped_export {
         out.push_str(&format!(
             "#[no_mangle]\npub extern \"C\" fn {}(",
             wasm_export_symbol(&f.key)
         ));
-        let flat = flattened_web_params(&f.tir);
         let params: Vec<String> = flat
             .iter()
-            .map(|(name, ty)| wasm_ty(ty).map(|t| format!("{name}: {t}")))
+            .map(|(name, ty)| wasm_export_ty(ty).map(|t| format!("{name}: {t}")))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| web_emit_error(f))?;
         out.push_str(&params.join(", "));
         out.push(')');
-        if let Some(ret) = &f.return_type {
+        if string_ret || list_ret || list_string_ret || map_ret {
+            out.push_str(" -> u64 ");
+        } else if let Some(ret) = &f.return_type {
             out.push_str(&format!(" -> {} ", wasm_ty(ret).ok_or_else(|| web_emit_error(f))?));
         }
         out.push_str("{\n");
+        for (name, ty) in &flat {
+            if matches!(ty, Type::String) {
+                out.push_str(&format!("    let {name} = jet_abi_string_arg({name});\n"));
+            } else if is_list_int(ty) {
+                out.push_str(&format!("    let {name} = jet_abi_list_i64_arg({name});\n"));
+            } else if is_list_string(ty) {
+                out.push_str(&format!("    let {name} = jet_abi_list_string_arg({name});\n"));
+            } else if is_map_string_int(ty) {
+                out.push_str(&format!(
+                    "    let {name} = jet_abi_map_string_i64_arg({name});\n"
+                ));
+            }
+        }
         for reconstruction in &f.tir.web_param_reconstructions {
             let fields = reconstruction
                 .fields
@@ -722,10 +1092,30 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
             .tir
             .params
             .iter()
-            .map(|(name, _, _)| name.as_str())
+            .map(|(name, ty, conv)| wasm_export_arg_expr(name, ty, *conv))
             .collect::<Vec<_>>()
             .join(", ");
-        if f.return_type.is_some() {
+        if string_ret {
+            out.push_str(&format!(
+                "    return jet_abi_string_ret(jet_wasm_{}({args}));\n",
+                f.key
+            ));
+        } else if list_ret {
+            out.push_str(&format!(
+                "    return jet_abi_list_i64_ret(jet_wasm_{}({args}));\n",
+                f.key
+            ));
+        } else if list_string_ret {
+            out.push_str(&format!(
+                "    return jet_abi_list_string_ret(jet_wasm_{}({args}));\n",
+                f.key
+            ));
+        } else if map_ret {
+            out.push_str(&format!(
+                "    return jet_abi_map_string_i64_ret(jet_wasm_{}({args}));\n",
+                f.key
+            ));
+        } else if f.return_type.is_some() {
             out.push_str(&format!("    return jet_wasm_{}({args});\n", f.key));
         } else {
             out.push_str(&format!("    jet_wasm_{}({args});\n", f.key));
@@ -733,7 +1123,7 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
         out.push_str("}\n\n");
     }
 
-    if export && !reconstructed_export {
+    if export && !wrapped_export {
         out.push_str(&format!(
             "#[no_mangle]\npub extern \"C\" fn {}(",
             wasm_export_symbol(&f.key)
@@ -743,14 +1133,14 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
     }
     let params: Vec<String> = f.tir.params
         .iter()
-        .map(|(name, ty, _)| {
+        .map(|(name, ty, conv)| {
             let rust_ty = f
                 .tir
                 .web_param_reconstructions
                 .iter()
                 .find(|r| r.local_rust == *name)
-                .map(|r| r.rust_type.as_str())
-                .or_else(|| wasm_ty(ty));
+                .map(|r| r.rust_type.clone())
+                .or_else(|| wasm_param_rust_ty(ty, *conv).map(str::to_string));
             rust_ty.map(|t| format!("{name}: {t}"))
         })
         .collect::<Option<Vec<_>>>()
@@ -781,13 +1171,91 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
         Type::Float | Type::Float32 => Some("f64"),
         Type::Bool => Some("bool"),
         Type::String => Some("String"),
+        Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("Vec<i64>"),
+        Type::List(inner) if matches!(**inner, Type::String) => Some("Vec<String>"),
+        Type::Map { key, value, .. }
+            if matches!(**key, Type::String) && matches!(**value, Type::Int) =>
+        {
+            Some("std::collections::BTreeMap<String, i64>")
+        }
         _ => None,
+    }
+}
+
+/// Rust param type matching TIR `param_place` borrow rules (Read String → &String).
+fn wasm_param_rust_ty(ty: &Type, conv: AccessConvention) -> Option<&'static str> {
+    match (conv, ty) {
+        (AccessConvention::Read, Type::String) => Some("&String"),
+        (AccessConvention::Write, Type::String) => Some("&mut String"),
+        (AccessConvention::Move, Type::String) => Some("String"),
+        (AccessConvention::Read, Type::List(inner))
+            if matches!(**inner, Type::Int | Type::IntN { .. }) =>
+        {
+            Some("&Vec<i64>")
+        }
+        (AccessConvention::Write, Type::List(inner))
+            if matches!(**inner, Type::Int | Type::IntN { .. }) =>
+        {
+            Some("&mut Vec<i64>")
+        }
+        (AccessConvention::Move, Type::List(inner))
+            if matches!(**inner, Type::Int | Type::IntN { .. }) =>
+        {
+            Some("Vec<i64>")
+        }
+        (AccessConvention::Read, Type::List(inner)) if matches!(**inner, Type::String) => {
+            Some("&Vec<String>")
+        }
+        (AccessConvention::Write, Type::List(inner)) if matches!(**inner, Type::String) => {
+            Some("&mut Vec<String>")
+        }
+        (AccessConvention::Move, Type::List(inner)) if matches!(**inner, Type::String) => {
+            Some("Vec<String>")
+        }
+        (AccessConvention::Read, ty) if is_map_string_int(ty) => {
+            Some("&std::collections::BTreeMap<String, i64>")
+        }
+        (AccessConvention::Write, ty) if is_map_string_int(ty) => {
+            Some("&mut std::collections::BTreeMap<String, i64>")
+        }
+        (AccessConvention::Move, ty) if is_map_string_int(ty) => {
+            Some("std::collections::BTreeMap<String, i64>")
+        }
+        (AccessConvention::Read, t) if t.is_scalar() => wasm_ty(t),
+        (AccessConvention::Read, _) => None,
+        _ => wasm_ty(ty),
+    }
+}
+
+fn wasm_export_arg_expr(name: &str, ty: &Type, conv: AccessConvention) -> String {
+    match (conv, ty) {
+        (AccessConvention::Read, Type::String) => format!("&{name}"),
+        (AccessConvention::Write, Type::String) => format!("&mut {name}"),
+        (AccessConvention::Read, Type::List(inner))
+            if matches!(**inner, Type::Int | Type::IntN { .. })
+                || matches!(**inner, Type::String) =>
+        {
+            format!("&{name}")
+        }
+        (AccessConvention::Write, Type::List(inner))
+            if matches!(**inner, Type::Int | Type::IntN { .. })
+                || matches!(**inner, Type::String) =>
+        {
+            format!("&mut {name}")
+        }
+        (AccessConvention::Read, ty) if is_map_string_int(ty) => format!("&{name}"),
+        (AccessConvention::Write, ty) if is_map_string_int(ty) => format!("&mut {name}"),
+        _ => name.to_string(),
     }
 }
 
 fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
     match ty {
-        Type::String => None,
+        // Packed (ptr,len) u64 on the C ABI; internal jet_wasm_* still uses String / Vec.
+        Type::String => Some("u64"),
+        Type::List(inner) if matches!(**inner, Type::Int | Type::IntN { .. }) => Some("u64"),
+        Type::List(inner) if matches!(**inner, Type::String) => Some("u64"),
+        ty if is_map_string_int(ty) => Some("u64"),
         _ => wasm_ty(ty),
     }
 }
@@ -816,6 +1284,59 @@ fn emit_wasm_body(
                 }
                 out.push_str(&format!("{pad}}}\n"));
             }
+            TIR::TStmt::Range { var, start, end, step, body, .. } => {
+                let start = wasm_emit_expr(start, funcs, file_prefix, reconstructions)?;
+                let end = wasm_emit_expr(end, funcs, file_prefix, reconstructions)?;
+                let loop_var = mangle(var);
+                match step {
+                    Some(step) => {
+                        let step = wasm_emit_expr(step, funcs, file_prefix, reconstructions)?;
+                        out.push_str(&format!("{pad}{{\n"));
+                        out.push_str(&format!("{pad}    let _jet_loop_start = {start};\n"));
+                        out.push_str(&format!("{pad}    let _jet_loop_end = {end};\n"));
+                        out.push_str(&format!("{pad}    let _jet_loop_stride = {step};\n"));
+                        out.push_str(&format!(
+                            "{pad}    assert!(_jet_loop_stride > 0, \"E0123: loop stride must be positive\");\n"
+                        ));
+                        out.push_str(&format!(
+                            "{pad}    for {loop_var} in (_jet_loop_start..=_jet_loop_end).step_by(_jet_loop_stride as usize) {{\n"
+                        ));
+                        emit_wasm_body(body, out, indent + 2, funcs, file_prefix, reconstructions)?;
+                        out.push_str(&format!("{pad}    }}\n"));
+                        out.push_str(&format!("{pad}}}\n"));
+                    }
+                    None => {
+                        out.push_str(&format!(
+                            "{pad}for {loop_var} in ({start})..=({end}) {{\n"
+                        ));
+                        emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                        out.push_str(&format!("{pad}}}\n"));
+                    }
+                }
+            }
+            // Plain list/local ForIn — mirror native `.iter().cloned()` (or by-value).
+            TIR::TStmt::ForIn {
+                var,
+                var2: None,
+                step: None,
+                method_kind: None,
+                columnar: false,
+                by_value,
+                collection,
+                body,
+                ..
+            } => {
+                let collection = wasm_emit_expr(collection, funcs, file_prefix, reconstructions)?;
+                let loop_var = mangle(var);
+                let iter = if *by_value {
+                    format!("({collection})")
+                } else {
+                    format!("({collection}).iter().cloned()")
+                };
+                out.push_str(&format!("{pad}for {loop_var} in {iter} {{\n"));
+                emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                out.push_str(&format!("{pad}}}\n"));
+            }
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
             TIR::TStmt::LineMarker(_) => {}
             _ => return Err(()),
@@ -840,7 +1361,8 @@ fn wasm_emit_expr(
                 let TIR::TStrPart::Lit(text) = part else { return Err(()) };
                 value.push_str(text);
             }
-            json_quote(&value)
+            // Owned String — export returns and Jet String locals need String, not &str.
+            format!("{}.to_string()", json_quote(&value))
         }
         TIR::TExprKind::Local(name) => name.clone(),
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
@@ -850,7 +1372,14 @@ fn wasm_emit_expr(
             wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?
         ),
         TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs, file_prefix, reconstructions)?),
-        TIR::TExprKind::Clone(inner) => wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?,
+        TIR::TExprKind::Clone(inner) => format!(
+            "({}).clone()",
+            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
+        ),
+        TIR::TExprKind::MaterializeView(inner) => format!(
+            "({}).to_string()",
+            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
+        ),
         TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?),
         TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
             let TIR::TExprKind::Local(local) = &recv.kind else { return Err(()) };
@@ -861,6 +1390,16 @@ fn wasm_emit_expr(
             }
             format!("({}).{}", wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?, field_rust)
         }
+        TIR::TExprKind::Index {
+            base,
+            index,
+            is_map: true,
+            ..
+        } => format!(
+            "({}).get(&({})).cloned().expect(\"index miss\")",
+            wasm_emit_expr(base, funcs, file_prefix, reconstructions)?,
+            wasm_emit_expr(index, funcs, file_prefix, reconstructions)?,
+        ),
         TIR::TExprKind::Call { name, args } => {
             let key = local_web_key(file_prefix, name);
             let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
@@ -930,7 +1469,26 @@ fn emit_js_app(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<(Stri
                 "  const raw = wasm.{sym}({});\n",
                 call_args.join(", ")
             ));
-            out.push_str("  return jetDom.unmarshalAbi(raw, \"scalar\");\n");
+            let ret_kind = match f.return_type.as_ref() {
+                Some(Type::String) => "string",
+                Some(ty) if is_list_int(ty) => "list-int",
+                Some(ty) if is_list_string(ty) => "list-string",
+                Some(ty) if is_map_string_int(ty) => "map-string-int",
+                _ => "scalar",
+            };
+            if ret_kind == "string"
+                || ret_kind == "list-int"
+                || ret_kind == "list-string"
+                || ret_kind == "map-string-int"
+            {
+                out.push_str(&format!(
+                    "  return jetDom.unmarshalAbi(raw, \"{ret_kind}\", wasm);\n"
+                ));
+            } else {
+                out.push_str(&format!(
+                    "  return jetDom.unmarshalAbi(raw, \"{ret_kind}\");\n"
+                ));
+            }
             out.push_str(&format!(
                 "  }} finally {{ jetDom.perfRecord({}, \"wasm\", _perfStarted); }}\n",
                 json_quote(&f.key)
@@ -1124,6 +1682,35 @@ fn tir_plain_args(args: &[TIR::TExpr], funcs: &[FuncWeb], file_prefix: Option<&s
     args.iter().map(|a| tir_js_expr(a, funcs, file_prefix)).collect()
 }
 
+fn tir_js_abi_int_expr(
+    expr: &TIR::TExpr,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+) -> Result<String, ()> {
+    use TIR::TExprKind as E;
+    match &expr.kind {
+        E::IntLit(n, _) => Ok(format!("{n}n")),
+        E::Unary { op, operand } => Ok(format!(
+            "({}{})",
+            unop(op),
+            tir_js_abi_int_expr(operand, funcs, file_prefix)?
+        )),
+        E::Binary { op, lhs, rhs, .. } => Ok(format!(
+            "({} {} {})",
+            tir_js_abi_int_expr(lhs, funcs, file_prefix)?,
+            binop(op),
+            tir_js_abi_int_expr(rhs, funcs, file_prefix)?
+        )),
+        E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => {
+            tir_js_abi_int_expr(inner, funcs, file_prefix)
+        }
+        _ => Ok(format!(
+            "BigInt({})",
+            tir_js_expr(expr, funcs, file_prefix)?
+        )),
+    }
+}
+
 fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<String, ()> {
     use TIR::TExprKind as E;
     Ok(match &expr.kind {
@@ -1141,6 +1728,22 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::Field { recv, field_rust, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field_rust)),
         E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
         E::ListLit(elements) => format!("[{}]", elements.iter().map(|element| tir_js_expr(element, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", ")),
+        E::MapLit(entries) => format!(
+            "new Map([{}])",
+            entries
+                .iter()
+                .map(|(key, value)| Ok(format!(
+                    "[{}, {}]",
+                    tir_js_expr(key, funcs, file_prefix)?,
+                    if matches!(&value.ty, Type::Int) {
+                        tir_js_abi_int_expr(value, funcs, file_prefix)?
+                    } else {
+                        tir_js_expr(value, funcs, file_prefix)?
+                    },
+                )))
+                .collect::<Result<Vec<_>, ()>>()?
+                .join(", ")
+        ),
         E::Call { name, args } => {
             let name = local_web_key(file_prefix, name);
             let args = tir_call_args(args, funcs, file_prefix)?;

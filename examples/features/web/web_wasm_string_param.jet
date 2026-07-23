@@ -1,0 +1,14 @@
+// D-JSBIND1 / #123: Wasm #WasmExport String *param* ABI (packed ptr/len) with
+// hostile empty / tab+newline / Unicode roundtrip through the JS bridge.
+#WasmExport
+fn echo_str(s: String) -> String {
+    return ~s
+}
+
+#Target(Js)
+fn run() {
+    print(echo_str(""))
+    print(echo_str("ascii-ok"))
+    print(echo_str("tab\tline\nbreak"))
+    print(echo_str("emoji🌍"))
+}

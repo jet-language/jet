@@ -1,0 +1,15 @@
+// D-JSBIND1 / #123: Wasm #WasmExport [Int] ABI (packed ptr/len i64 payload)
+// with hostile empty / zero / signed / mixed roundtrip through the JS bridge.
+#WasmExport
+fn echo_list(xs: [Int]) -> [Int] {
+    return ~xs
+}
+
+#Target(Js)
+fn run() {
+    empty: [Int] :: []
+    print(echo_list(empty))
+    print(echo_list([0]))
+    print(echo_list([-1, 2, -3]))
+    print(echo_list([42, 0, -7, 99]))
+}

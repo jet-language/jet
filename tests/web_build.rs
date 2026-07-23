@@ -946,18 +946,25 @@ fn web_missing_return_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\n#WasmExport\nfn echo(s: ^String) -> String { return s }\nfn run() {}\n";
+    let src =
+        "#Target(Web)\n#WasmExport\nfn echo(xs: [Float]) -> [Float] { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_wasm_abi.jet")
         .expect_err("unsupported Wasm ABI must be rejected before emission");
-    assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
+    assert!(
+        diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"),
+        "{diags:?}"
+    );
 }
 
 #[test]
 fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\nfn helper(s: ^String) -> String { return s }\nfn run() {}\n";
+    let src = "#Target(Web)\nfn helper(xs: [Float]) -> [Float] { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_internal_wasm_abi.jet")
         .expect_err("unsupported internal Wasm ABI must be rejected before emission");
-    assert!(diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:?}");
+    assert!(
+        diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"),
+        "{diags:?}"
+    );
 }
 
 #[test]
@@ -984,7 +991,10 @@ fn run() { print(summarize(4)) }
     let wasm = &out.web.expect("web artifacts").wasm_rust;
     assert!(wasm.contains("if (user_total > 10)"), "TIR if was not emitted:\n{wasm}");
     assert!(wasm.contains("println!(\"{}\""), "TIR print was not emitted:\n{wasm}");
-    assert!(wasm.contains("user_text: String"), "internal owned String parameter was rejected:\n{wasm}");
+    assert!(
+        wasm.contains("user_text: &String") || wasm.contains("user_text: String"),
+        "internal String parameter was rejected:\n{wasm}"
+    );
 }
 
 #[test]
@@ -1006,10 +1016,19 @@ fn run() { print("hello, web") }
         .expect("host dev entry and web run body must compile through their own execution paths");
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
-    assert!(wasm.contains("fn jet_wasm_tools__dev() -> i64"), "module tools.dev was not emitted:\n{wasm}");
-    assert!(wasm.contains("println!(\"{}\", \"hello, web\")"), "literal TIR print was not emitted:\n{wasm}");
+    assert!(
+        wasm.contains("fn jet_wasm_tools__dev() -> i64"),
+        "module tools.dev was not emitted:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("println!(\"{}\", \"hello, web\".to_string())"),
+        "literal TIR print was not emitted:\n{wasm}"
+    );
     let js = &web.js_app;
-    assert!(!js.contains("function dev("), "top-level host dev leaked into JS runtime:\n{js}");
+    assert!(
+        !js.contains("function dev("),
+        "top-level host dev leaked into JS runtime:\n{js}"
+    );
 }
 
 #[test]
@@ -1407,5 +1426,507 @@ fn web_showcase_dashboard_roundtrip() {
         );
     }
 
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_range_loop_bridge_roundtrip() {
+    // D-WEBBACKEND1 / criterion #1: Wasm compute must lower inclusive
+    // `loop i; start..end` from checked TIR (JS already could). Live
+    // rustc+node proof — not emit-shape only.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm range (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_range.jet");
+    let dir = build_web_fixture("wasm_range", src, "examples/features/web/web_wasm_range.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("for user_i in (0)..=(user_n)"),
+        "inclusive range loop was not emitted:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("user_total = (user_total + user_i)"),
+        "loop body assign was dropped:\n{wasm}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_range.out");
+    assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_for_in_bridge_roundtrip() {
+    // D-WEBBACKEND1 / criterion #1: Wasm compute must lower plain
+    // `loop x; xs` ForIn from checked TIR (JS already could). Live
+    // rustc+node proof — not emit-shape only. Reuses [Int] ABI; does not
+    // reopen String/[Int] packing.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm for-in (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_for_in.jet");
+    let dir = build_web_fixture("wasm_for_in", src, "examples/features/web/web_wasm_for_in.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains(".iter().cloned()")
+            && (wasm.contains("for user_x in") || wasm.contains("for x in")),
+        "plain ForIn was not emitted:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("user_total = (user_total + user_x)")
+            || wasm.contains("total = (total + x)"),
+        "ForIn body assign was dropped:\n{wasm}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_for_in.out");
+    assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_string_export_hostile_roundtrip() {
+    // D-JSBIND1 / criterion #3: String export returns as packed (ptr,len) u64;
+    // JS copies UTF-8 then frees. Hostile: empty, interior NUL, non-ASCII.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm string (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_string.jet");
+    let dir = build_web_fixture("wasm_string", src, "examples/features/web/web_wasm_string.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("fn jet_abi_string_ret(s: String) -> u64"),
+        "string return helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_string_free(ptr: u32, len: u32)"),
+        "string free export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("-> u64 ")
+            && wasm.contains("jet_abi_string_ret(jet_wasm_")
+            && wasm.contains("pub extern \"C\" fn jet_export_"),
+        "export must pack String as u64:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("unmarshalAbi(raw, \"string\", wasm)"),
+        "JS bridge must unmarshal String returns:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_string_free") && runtime.contains("TextDecoder"),
+        "runtime missing string ABI decode/free:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_string.out");
+    assert_eq!(stdout, expected);
+    // Explicit byte-level hostility: tab + newline survived the ABI.
+    assert!(
+        stdout.as_bytes().contains(&b'\t'),
+        "TAB byte was lost in String roundtrip:\n{stdout:?}"
+    );
+    assert!(
+        stdout.contains("emoji🌍"),
+        "Unicode scalar was lost:\n{stdout}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_string_param_export_hostile_roundtrip() {
+    // D-JSBIND1: String *params* into #WasmExport — JS TextEncoder + alloc,
+    // packed u64, Wasm jet_abi_string_arg ownership. Hostile empty/tab/emoji.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm string param (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_string_param.jet");
+    let dir = build_web_fixture(
+        "wasm_string_param",
+        src,
+        "examples/features/web/web_wasm_string_param.jet",
+    );
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_string_alloc(len: u32) -> u32"),
+        "string alloc export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("fn jet_abi_string_arg(packed: u64) -> String"),
+        "string arg helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("let user_s = jet_abi_string_arg(user_s)")
+            || wasm.contains("let s = jet_abi_string_arg(s)"),
+        "export wrapper must unpack String param:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("&user_s") || wasm.contains("&s"),
+        "wrapper must pass borrowed String into jet_wasm_*:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("marshalAbi(") && js.contains("\"string\""),
+        "JS bridge must marshal String params:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_string_alloc") && runtime.contains("TextEncoder"),
+        "runtime missing string ABI encode/alloc:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_string_param.out");
+    assert_eq!(stdout, expected);
+    assert!(
+        stdout.as_bytes().contains(&b'\t'),
+        "TAB byte was lost in String param roundtrip:\n{stdout:?}"
+    );
+    assert!(
+        stdout.contains("emoji🌍"),
+        "Unicode scalar was lost:\n{stdout}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_list_int_export_hostile_roundtrip() {
+    // D-JSBIND1 / criterion #3: [Int] export params+returns as packed (ptr,len)
+    // u64 over little-endian i64 payload; JS BigInt64Array + free. Hostile:
+    // empty, zero, signed, mixed.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm list-int (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_list.jet");
+    let dir = build_web_fixture("wasm_list", src, "examples/features/web/web_wasm_list.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("fn jet_abi_list_i64_ret(v: Vec<i64>) -> u64"),
+        "list-int return helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("fn jet_abi_list_i64_arg(packed: u64) -> Vec<i64>"),
+        "list-int arg helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) -> u32"),
+        "list-int alloc export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_free(ptr: u32, len: u32)"),
+        "list-int free export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("let user_xs = jet_abi_list_i64_arg(user_xs)")
+            || wasm.contains("let xs = jet_abi_list_i64_arg(xs)"),
+        "export wrapper must unpack [Int] param:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_list_i64_ret(jet_wasm_")
+            && wasm.contains("-> u64 "),
+        "export must pack [Int] return as u64:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("&user_xs") || wasm.contains("&xs"),
+        "wrapper must pass borrowed Vec into jet_wasm_*:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("marshalAbi(") && js.contains("\"list-int\""),
+        "JS bridge must marshal [Int] params:\n{js}"
+    );
+    assert!(
+        js.contains("unmarshalAbi(raw, \"list-int\", wasm)"),
+        "JS bridge must unmarshal [Int] returns:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_list_i64_alloc")
+            && runtime.contains("jet_abi_list_i64_free")
+            && runtime.contains("BigInt64Array"),
+        "runtime missing list-int ABI encode/decode:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_list.out");
+    assert_eq!(stdout, expected);
+    assert!(
+        stdout.contains("-1,2,-3"),
+        "signed ints lost in [Int] roundtrip:\n{stdout:?}"
+    );
+    assert!(
+        stdout.contains("42,0,-7,99"),
+        "mixed ints lost in [Int] roundtrip:\n{stdout:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_list_string_export_hostile_roundtrip() {
+    // D-JSBIND1 / criterion #3: [String] export params+returns as contiguous
+    // LE [count][len][utf8]… packed u64; JS TextEncoder/Decoder + free.
+    // Hostile: empty list, empty elem, tab/newline, emoji, multi.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm list-string (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_list_string.jet");
+    let dir = build_web_fixture(
+        "wasm_list_string",
+        src,
+        "examples/features/web/web_wasm_list_string.jet",
+    );
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("fn jet_abi_list_string_ret(v: Vec<String>) -> u64"),
+        "list-string return helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("fn jet_abi_list_string_arg(packed: u64) -> Vec<String>"),
+        "list-string arg helper missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_list_string_alloc(byte_len: u32) -> u32"),
+        "list-string alloc export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_list_string_free(ptr: u32, byte_len: u32)"),
+        "list-string free export missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("let user_xs = jet_abi_list_string_arg(user_xs)")
+            || wasm.contains("let xs = jet_abi_list_string_arg(xs)"),
+        "export wrapper must unpack [String] param:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_list_string_ret(jet_wasm_")
+            && wasm.contains("-> u64 "),
+        "export must pack [String] return as u64:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("marshalAbi(") && js.contains("\"list-string\""),
+        "JS bridge must marshal [String] params:\n{js}"
+    );
+    assert!(
+        js.contains("unmarshalAbi(raw, \"list-string\", wasm)"),
+        "JS bridge must unmarshal [String] returns:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_list_string_alloc")
+            && runtime.contains("jet_abi_list_string_free")
+            && runtime.contains("list-string"),
+        "runtime missing list-string ABI encode/decode:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_list_string.out");
+    assert_eq!(stdout, expected);
+    assert!(
+        stdout.as_bytes().contains(&b'\t'),
+        "TAB byte was lost in [String] roundtrip:\n{stdout:?}"
+    );
+    assert!(
+        stdout.contains("emoji🌍"),
+        "Unicode scalar was lost:\n{stdout}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_wasm_map_string_int_export_hostile_roundtrip() {
+    // D-JSBIND1 / criterion #3: [String: Int] params+returns use a contiguous
+    // LE [count][key-len][utf8][i64]... blob. Live JS -> Wasm -> JS -> Wasm
+    // proof covers empty/control/Unicode keys, signed values, and ownership.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm map-string-int (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_map.jet");
+    let dir = build_web_fixture("wasm_map", src, "examples/features/web/web_wasm_map.jet");
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        wasm.contains("fn jet_abi_map_string_i64_ret(")
+            && wasm.contains("fn jet_abi_map_string_i64_arg("),
+        "map-string-int ABI helpers missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) -> u32")
+            && wasm.contains(
+                "pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32)"
+            ),
+        "map-string-int ownership exports missing:\n{wasm}"
+    );
+    assert!(
+        wasm.contains("jet_abi_map_string_i64_ret(jet_wasm_")
+            && wasm.contains("jet_abi_map_string_i64_arg("),
+        "export wrappers must pack/unpack [String: Int]:\n{wasm}"
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("marshalAbi(") && js.contains("\"map-string-int\""),
+        "JS bridge must marshal [String: Int] params:\n{js}"
+    );
+    assert!(
+        js.contains("unmarshalAbi(raw, \"map-string-int\", wasm)"),
+        "JS bridge must unmarshal [String: Int] returns:\n{js}"
+    );
+    let runtime = fs::read_to_string(dir.join("build/jet_dom_runtime.js")).unwrap();
+    assert!(
+        runtime.contains("jet_abi_map_string_i64_alloc")
+            && runtime.contains("jet_abi_map_string_i64_free")
+            && runtime.contains("map-string-int"),
+        "runtime missing map-string-int ABI encode/decode:\n{runtime}"
+    );
+    let stdout = run_web_app(&dir);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_map.out");
+    assert_eq!(stdout, expected);
+
+    let harness = r#"
+import { marshalAbi, unmarshalAbi } from "./jet_dom_runtime.js";
+
+function check(ok, message) {
+  if (!ok) throw new Error(message);
+}
+
+let cursor = 16;
+const frees = [];
+const wasm = {
+  memory: { buffer: new ArrayBuffer(4096) },
+  jet_abi_map_string_i64_alloc(byteLen) {
+    const ptr = cursor;
+    cursor += byteLen;
+    return ptr;
+  },
+  jet_abi_map_string_i64_free(ptr, byteLen) {
+    frees.push([ptr, byteLen]);
+  },
+};
+const limits = new Map([
+  ["min", -9223372036854775808n],
+  ["max", 9223372036854775807n],
+  ["above-safe", 9007199254740993n],
+  ["below-safe", -9007199254740993n],
+  ["small", 7n],
+]);
+const packed = marshalAbi(limits, "map-string-int", wasm);
+const decoded = unmarshalAbi(packed, "map-string-int", wasm);
+for (const [key, value] of limits) {
+  check(typeof decoded.get(key) === "bigint", `${key} was not BigInt`);
+  check(decoded.get(key) === value, `${key} changed`);
+}
+const repacked = marshalAbi(decoded, "map-string-int", wasm);
+const decodedTwice = unmarshalAbi(repacked, "map-string-int", wasm);
+for (const [key, value] of limits) check(decodedTwice.get(key) === value, `${key} changed on re-marshal`);
+try {
+  marshalAbi(new Map([["number", 1]]), "map-string-int", wasm);
+  throw new Error("Number-backed Int accepted");
+} catch (error) {
+  check(error instanceof TypeError, "Number-backed Int was not rejected");
+}
+
+let allocations = 0;
+const bounded = {
+  memory: { buffer: new ArrayBuffer(64) },
+  jet_abi_map_string_i64_alloc() { allocations += 1; return 60; },
+  jet_abi_map_string_i64_free(ptr, byteLen) { frees.push([ptr, byteLen]); },
+};
+class HiddenEntryMap extends Map {
+  get size() { return 0; }
+  *[Symbol.iterator]() { yield ["hidden", 1n]; }
+}
+try {
+  marshalAbi(new HiddenEntryMap(), "map-string-int", bounded);
+  throw new Error("size-zero iterator entry accepted");
+} catch (error) {
+  check(error instanceof TypeError && error.message.includes("size/iterator mismatch"), "size-zero iterator mismatch was not rejected");
+}
+check(allocations === 0, "size-zero iterator mismatch allocated");
+
+class MissingEntryMap extends Map {
+  get size() { return 2; }
+  *[Symbol.iterator]() { yield ["visible", 1n]; }
+}
+try {
+  marshalAbi(new MissingEntryMap(), "map-string-int", bounded);
+  throw new Error("short iterator accepted");
+} catch (error) {
+  check(error instanceof TypeError && error.message.includes("size/iterator mismatch"), "short iterator mismatch was not rejected");
+}
+check(allocations === 0, "short iterator mismatch allocated");
+
+class HugeMap extends Map { get size() { return 0x1_0000_0000; } }
+try {
+  marshalAbi(new HugeMap([["x", 1n]]), "map-string-int", bounded);
+  throw new Error("count overflow accepted");
+} catch (error) {
+  check(error instanceof RangeError, "count overflow was not a RangeError");
+}
+check(allocations === 0, "count overflow allocated");
+
+const RealTextEncoder = globalThis.TextEncoder;
+globalThis.TextEncoder = class { encode() { return { length: 0x1_0000_0000 }; } };
+try {
+  marshalAbi(new Map([["x", 1n]]), "map-string-int", bounded);
+  throw new Error("key length overflow accepted");
+} catch (error) {
+  check(error instanceof RangeError, "key length overflow was not a RangeError");
+}
+check(allocations === 0, "key length overflow allocated");
+
+globalThis.TextEncoder = class { encode() { return { length: 0xfffffff4 }; } };
+try {
+  marshalAbi(new Map([["x", 1n]]), "map-string-int", bounded);
+  throw new Error("blob length overflow accepted");
+} catch (error) {
+  check(error instanceof RangeError, "blob length overflow was not a RangeError");
+}
+check(allocations === 0, "blob length overflow allocated");
+globalThis.TextEncoder = RealTextEncoder;
+
+try {
+  marshalAbi(new Map([["x", 1n]]), "map-string-int", bounded);
+  throw new Error("bounded write unexpectedly succeeded");
+} catch (error) {
+  check(error instanceof RangeError, "bounded write did not fail at the memory boundary");
+}
+check(frees.some(([ptr]) => ptr === 60), "post-allocation write failure leaked");
+
+const highBit = {
+  memory: { buffer: new ArrayBuffer(64) },
+  jet_abi_map_string_i64_alloc() { return -2147483648; },
+  jet_abi_map_string_i64_free(ptr, byteLen) { frees.push([ptr, byteLen]); },
+};
+try {
+  marshalAbi(new Map([["x", 1n]]), "map-string-int", highBit);
+  throw new Error("high-bit pointer unexpectedly fit bounded memory");
+} catch (error) {
+  check(error instanceof RangeError, "high-bit pointer did not reach the memory boundary");
+}
+check(frees.some(([ptr, len]) => ptr === 0x80000000 && len > 0), "signed allocation pointer was not freed as u32");
+
+try {
+  unmarshalAbi((0x80000000n << 32n) | 4n, "map-string-int", highBit);
+  throw new Error("high-bit return pointer unexpectedly fit bounded memory");
+} catch (error) {
+  check(error instanceof RangeError, "high-bit return pointer did not reach the memory boundary");
+}
+check(frees.some(([ptr, len]) => ptr === 0x80000000 && len === 4), "high-bit return pointer was not freed as u32");
+console.log("ok");
+"#;
+    fs::write(dir.join("build/map_abi_harness.mjs"), harness).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg("map_abi_harness.mjs")
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "map ABI hostile harness failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&node.stdout), "ok\n");
     let _ = fs::remove_dir_all(&dir);
 }
