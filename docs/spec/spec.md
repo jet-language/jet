@@ -2890,11 +2890,15 @@ reader ignores; the three identity fields keep this exact `key: value` shape.
 
 ## Command grouping and typed inputs (D-SHAPE6, D-SHAPE-CLI1)
 
-Tool families use one noun-then-verb grammar: `jet inspect dossier` and
-`jet registry publish`. Daily lifecycle commands such as `jet run`, `jet build`,
-and `jet test` stay flat. A bare moved action is E2101 and names its canonical
-grouped route; it is never a compatibility alias. Help, completion, manual, typo
-suggestion, and dispatch views are generated from the same command registry.
+Tool families use one noun-then-verb grammar. The shipped inspection routes are
+`jet inspect dossier`, `jet inspect schema`, `jet inspect expand`,
+`jet inspect live`, and `jet inspect semindex`. The shipped registry routes are
+`jet registry publish`, `jet registry keygen`, `jet registry key`, and
+`jet registry yank`.
+The daily commands `jet run`, `jet build`, `jet test`, and `jet fmt` stay flat.
+A bare moved action is E2101 and names its canonical grouped route. It is never
+a compatibility alias. Help, completion, manual, typo suggestion, and dispatch
+views use the same command registry.
 
 ### Typed entry-signature CLI parsing (D-CLIFLAG1, D-SHAPE-CLI1, c7cliflag)
 

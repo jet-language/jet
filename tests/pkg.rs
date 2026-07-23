@@ -69,6 +69,33 @@ fn jet_cmd_env(args: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> std::process
     cmd.output().expect("jet binary should run")
 }
 
+#[test]
+fn shape6_registry_routes_and_retired_bare_snapshots() {
+    let tmp = tmp_dir("shape6_registry");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    let key = jet_cmd(&["registry", "key"], &tmp, &store);
+    assert!(!key.status.success());
+    assert_eq!(
+        String::from_utf8(key.stderr).unwrap(),
+        "error: `jet registry key` needs a subcommand — try `jet registry key backup`.\n"
+    );
+
+    for verb in ["publish", "keygen", "key", "yank"] {
+        let bare = jet_cmd(&[verb, "sentinel"], &tmp, &store);
+        assert_eq!(bare.status.code(), Some(2), "bare jet {verb}");
+        assert_eq!(
+            String::from_utf8(bare.stderr).unwrap(),
+            format!(
+                "Error [E2101]: `{verb}` moved under `jet registry`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet registry {verb} sentinel`.\n"
+            )
+        );
+    }
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
 fn isolated_crypto_helper_paths(home: &Path) -> (PathBuf, PathBuf) {
     let helper = jetpack::FFI::cached_crypto_helper_path();
     let cache_key = helper

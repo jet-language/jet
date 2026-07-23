@@ -400,7 +400,11 @@ usage:
   {bin} self devtools <verb>        run checked developer generators
   {bin} inspect bind <header.h> --pkg <lib>   generate a C binding cache (S59)
   {bin} inspect bind cpp <header.hpp> --target <triple> --clang <path> --ar <path>   generate an audited C++ shim and Jet binding
+  {bin} inspect dossier <file.{ext}> [symbol]   explain semantic facts
+  {bin} inspect schema <verb>        inspect saved schema versions
   {bin} inspect expand <file.{ext}> print semantic facts (D-EXPANDCLI1)
+  {bin} inspect live <pid>           watch a running Jet process
+  {bin} inspect semindex <file.{ext}>   emit stable semantic-index facts
   {bin} inspect unsafe <file.{ext}> audit unsafe policy and typed obligations
   {bin} version                     print compiler version
   {bin} help                        print this help text
@@ -430,6 +434,9 @@ package management (M12.1):
 
 supply chain (E2-M8):
   {bin} registry publish            publish the current package to the registry
+  {bin} registry keygen             create a package-signing key
+  {bin} registry key backup         back up a package-signing key
+  {bin} registry yank <version>     stop new installs of a published version
   {bin} registry vendor             copy all dependencies into vendor/
   {bin} build  --sbom <file>        also write an SPDX SBOM next to the binary
   {bin} inspect audit               check dependencies against the advisory database
@@ -1179,7 +1186,7 @@ fn main() {
                 .and_then(|value| value.parse::<u32>().ok())
                 .unwrap_or_else(|| {
                     eprintln!("error: jet inspect live needs a process id");
-                    eprintln!(" fix: run jet inspect live --attach <pid>");
+                    eprintln!(" fix: run jet inspect live <pid>");
                     exit(ExitCodes::USAGE);
                 });
             let once = raw.iter().any(|arg| arg == "--once")
@@ -1456,8 +1463,8 @@ fn main() {
             return;
         }
         "expand" => {
-            // D-EXPANDCLI1=A: `jet inspect expand --facts <lens> <file>` / bare `jet
-            // expand <file>` — the transparency command (card #183).
+            // D-EXPANDCLI1=A: `jet inspect expand --facts <lens> <file>` / bare
+            // `jet inspect expand <file>` — the transparency command (card #183).
             let expand_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_expand(&expand_args, mode.json);
             return;

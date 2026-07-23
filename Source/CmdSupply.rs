@@ -787,7 +787,9 @@ pub(crate) fn run_yank(version: Option<&str>, message: Option<&str>) {
                 "error: `{}` v{} is not published in the registry index — nothing to yank.",
                 name, version
             );
-            eprintln!(" Fix: publish the version first, or check the version number.");
+            eprintln!(
+                " Fix: run `jet registry publish` for the version first, or check the version number."
+            );
             exit(ExitCodes::USER_ERROR);
         }
         Err(e) => {

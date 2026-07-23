@@ -1022,3 +1022,57 @@ fn jet_dossier_cli_json_smoke() {
     assert!(text.contains("\"target\":\"Square\""));
     assert!(text.contains("\"members\""));
 }
+
+#[test]
+fn shape6_inspect_routes_and_retired_bare_snapshots() {
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+    let help = std::process::Command::new(&bin).arg("help").output().unwrap();
+    assert!(help.status.success());
+    let help = String::from_utf8(help.stdout).unwrap();
+    for command in [
+        "jet inspect dossier",
+        "jet inspect schema",
+        "jet inspect expand",
+        "jet inspect live",
+        "jet inspect semindex",
+        "jet registry publish",
+        "jet registry keygen",
+        "jet registry key backup",
+        "jet registry yank",
+    ] {
+        assert!(help.contains(command), "jet help omitted {command}");
+    }
+
+    for verb in ["build", "run", "test", "fmt"] {
+        assert!(jet::CLI::is_canonical_top_level(verb), "jet {verb} must stay flat");
+        assert!(jet::CLI::moved_command(verb).is_none(), "jet {verb} must not redirect");
+    }
+
+    for (verb, handler_text) in [
+        ("dossier", "`jet inspect dossier` needs an entry file"),
+        ("schema", "`jet inspect schema` needs a verb"),
+        ("expand", "`jet inspect expand` needs an entry file"),
+        ("live", "jet inspect live needs a process id"),
+        ("semindex", "`jet inspect semindex` needs an entry file"),
+    ] {
+        let grouped = std::process::Command::new(&bin)
+            .args(["inspect", verb])
+            .output()
+            .unwrap();
+        assert!(!grouped.status.success(), "jet inspect {verb} needs test input");
+        let stderr = String::from_utf8(grouped.stderr).unwrap();
+        assert!(stderr.contains(handler_text), "jet inspect {verb}: {stderr}");
+
+        let bare = std::process::Command::new(&bin)
+            .args([verb, "sentinel"])
+            .output()
+            .unwrap();
+        assert_eq!(bare.status.code(), Some(2), "bare jet {verb}");
+        assert_eq!(
+            String::from_utf8(bare.stderr).unwrap(),
+            format!(
+                "Error [E2101]: `{verb}` moved under `jet inspect`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet inspect {verb} sentinel`.\n"
+            )
+        );
+    }
+}
