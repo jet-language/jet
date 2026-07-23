@@ -81,12 +81,12 @@ fn load_example_seeds(root: &PathBuf) -> Vec<(String, String)> {
             }
             let src = fs::read_to_string(&path).unwrap();
             let shown = format!("examples/features/{}.{}", stem, ext);
-            if src.contains("@Unsafe") {
+            if src.contains("#Unsafe") {
                 continue;
             }
             // Skip examples whose *baseline* output legitimately contains vetted
             // `unsafe` from a prelude/runtime-support module (smart context's
-            // `@Context` pointer cell, mem/Ptr, etc.). The fuzz body's I1 guard is
+            // `#Context` pointer cell, mem/Ptr, etc.). The fuzz body's I1 guard is
             // a crude `contains("unsafe")` substring check that can't tell vetted
             // prelude `unsafe` from user-visible `unsafe`, so such a seed would
             // false-trip it regardless of the mutation. The mutation only appends a
@@ -137,7 +137,7 @@ fn run() {
         (
             "curated/refined_index".to_string(),
             r#"
-@Invariant("value >= 0 && value < 3")
+#Invariant("value >= 0 && value < 3")
 Index3 :: distinct Int
 
 fn pick(xs: [Int#3], i: Index3) -> Int {
@@ -190,7 +190,7 @@ fn mutate_source(rng: &mut Rng, src: &str, variant: usize) -> String {
         3 => format!("{src}\nfn _fuzz_id_{n}<T>(x: T) -> T {{\n    return x\n}}\n"),
         4 => format!("{src}\nfn _fuzz_fixed_{n}(xs: [Int#3]) -> Int {{\n    return xs[1]\n}}\n"),
         5 => format!(
-            "{src}\n@Invariant(\"value >= 0 && value < 3\")\n_FuzzIndex{n} :: distinct Int\nfn _fuzz_refined_{n}(xs: [Int#3], i: _FuzzIndex{n}) -> Int {{\n    return xs[i]\n}}\n"
+            "{src}\n#Invariant(\"value >= 0 && value < 3\")\n_FuzzIndex{n} :: distinct Int\nfn _fuzz_refined_{n}(xs: [Int#3], i: _FuzzIndex{n}) -> Int {{\n    return xs[i]\n}}\n"
         ),
         _ => format!(
             "{src}\nfn _fuzz_inc_{n}(x: Int) -> Int {{\n    return x + 1\n}}\nfn _fuzz_fanout_{n}() -> [Int#3] {{\n    return _fuzz_inc_{n}.[1, 2, 3]\n}}\n"
@@ -293,7 +293,7 @@ fn fuzz_sema_rustc_agreement() {
 // I1 pin (card #447 / durability W2): the ungated-unsafe grep must apply to
 // fuzz_sema-generated programs, not just the examples corpus (tests/golden.rs
 // checks examples only). Unlike `fuzz_sema_rustc_agreement` above, this test
-// does NOT gate on `have_rustc()` — the I1 (no ungated `@[Unsafe]`-less
+// does NOT gate on `have_rustc()` — the I1 (no ungated `#[Unsafe]`-less
 // `unsafe`) check must run even when rustc is unavailable, since I1 is a sema
 // invariant, not an I2 rustc-agreement check.
 // ---------------------------------------------------------------------------
@@ -313,13 +313,13 @@ fn fuzz_sema_i1_unsafe_gate_is_ungated_on_rustc() {
     for i in 0..fuzz_variants() {
         let (shown, src) = rng.pick(&seeds).clone();
         let mutated = mutate_source(&mut rng, &src, i);
-        if mutated.contains("@Unsafe") {
+        if mutated.contains("#Unsafe") {
             continue;
         }
         if let Ok(out) = jet::compile_with_path(&mutated, &format!("fuzz_variant_{i}.jet")) {
             if strip_vetted_prelude_modules(&out.rust).contains("unsafe") {
                 violations.push(format!(
-                    "variant {i} from {shown}: source has no @Unsafe but generated code contains `unsafe`"
+                    "variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`"
                 ));
             }
         }
@@ -336,10 +336,10 @@ fn fuzz_sema_i1_unsafe_gate_is_ungated_on_rustc() {
 fn check_fuzz_variant(i: usize, shown: &str, mutated: &str, file_str: &str) {
     match jet::compile_with_path(mutated, file_str) {
         Ok(out) => {
-            if !mutated.contains("@Unsafe") {
+            if !mutated.contains("#Unsafe") {
                 assert!(
                     !strip_vetted_prelude_modules(&out.rust).contains("unsafe"),
-                    "I1 violated in fuzz variant {i} from {shown}: source has no @Unsafe but generated code contains `unsafe`"
+                    "I1 violated in fuzz variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`"
                 );
             }
             if out.rust.contains("extern crate jet_ffi_") {

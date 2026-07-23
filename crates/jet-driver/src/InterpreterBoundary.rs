@@ -77,7 +77,7 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
                 Item::Func(function) => {
                     if function.is_unsafe {
                         return Some(Boundary {
-                            feature: "uses an `@Unsafe` function".to_string(),
+                            feature: "uses an `#Unsafe` function".to_string(),
                             span: Some(function.name_span),
                         });
                     }
@@ -124,7 +124,7 @@ fn scan_stmts_for_unsafe(stmts: &[Stmt]) -> Option<Boundary> {
 fn scan_stmt_for_unsafe(stmt: &Stmt) -> Option<Boundary> {
     match stmt {
         Stmt::Unsafe { span, .. } => Some(Boundary {
-            feature: "uses an `@Unsafe` block".to_string(),
+            feature: "uses an `#Unsafe` block".to_string(),
             span: Some(*span),
         }),
         Stmt::If(statement) => scan_if_for_unsafe(statement),

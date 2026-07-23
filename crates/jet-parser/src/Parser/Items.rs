@@ -1,4 +1,4 @@
-/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): what a `@Target(…)` marker parsed to — a
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): what a `#Target(…)` marker parsed to — a
 /// partition-ceiling `Bucket` (`Wasm`/`Js`, existing D-WASM1 meaning),
 /// `DefaultWeb` (`Web` — this file's default CLI backend, a different axis),
 /// or `Os` (D-OSTARGET1=A: `Os.Linux`/`Os.Macos`/`Os.Windows` — the native

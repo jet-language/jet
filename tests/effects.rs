@@ -1,5 +1,5 @@
 //! Effect system tests (D-EFF1, D-QUAL1): per-function effect inference over the
-//! call graph, the `#(…)` boundary check (E0740), and `@Pure` reconciliation.
+//! call graph, the `#(…)` boundary check (E0740), and `#Pure` reconciliation.
 
 mod common;
 
@@ -89,7 +89,7 @@ fn reserve() {{
     close(^arena)
 }}
 
-@Policy(arena_bounded({bound})) fn run() {{
+#Policy(arena_bounded({bound})) fn run() {{
     loop item; [1, 2, 3, 4, 5]; {stride} {{
         print(item)
         reserve()
@@ -124,8 +124,8 @@ fn reserve() {{
     ));
 
     let dynamic = source(12, "stride").replace(
-        "@Policy(arena_bounded(12)) fn run() {",
-        "@Policy(arena_bounded(12)) fn run() {\n    stride := 2",
+        "#Policy(arena_bounded(12)) fn run() {",
+        "#Policy(arena_bounded(12)) fn run() {\n    stride := 2",
     );
     let (diagnostics, facts) = check("jet_stride_arena_dynamic", &dynamic);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
@@ -176,7 +176,7 @@ fn run() {}
     assert!(codes(source).iter().any(|code| code == "E0740"));
 }
 
-/// I3 / D-EFF1: effect annotations (`#(…)`, `@Pure`, trait-method bounds) are a
+/// I3 / D-EFF1: effect annotations (`#(…)`, `#Pure`, trait-method bounds) are a
 /// compile-time proof only — they must leave NO trace in generated Rust. The
 /// annotated program and its annotation-stripped twin generate byte-identical
 /// Rust.
@@ -208,14 +208,14 @@ fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
     );
 }
 
-/// I3: a `@Caps(…)` region lowers to a plain lexical block — the generated Rust
+/// I3: a `#Caps(…)` region lowers to a plain lexical block — the generated Rust
 /// carries no effect machinery (no `Caps`, no `#(`, no effect runtime), and the
 /// body runs unchanged.
 #[test]
 fn caps_region_erases_to_plain_block() {
     let src = r#"
 fn run() {
-    @Caps(Io) {
+    #Caps(Io) {
         print("inside");
     }
     print("outside");
@@ -344,7 +344,7 @@ fn run() { print(calc()); }
     assert_eq!(codes(src), vec!["E0066"]);
 }
 
-/// D-EFF3: an impl of a `@Pure` trait method that reaches an effect is E0742.
+/// D-EFF3: an impl of a `#Pure` trait method that reaches an effect is E0742.
 #[test]
 fn trait_impl_exceeding_bound_is_e0742() {
     let src = r#"
@@ -358,7 +358,7 @@ fn run() { d :: Doc.{ path: "x" }; print(d.hash()); }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0742"),
-        "impl exceeding @Pure bound should be E0742: {:?}",
+        "impl exceeding #Pure bound should be E0742: {:?}",
         codes(src)
     );
 }
@@ -400,14 +400,14 @@ fn run() { print(caller()); }
 }
 
 /// A lambda callback's effects flow into the enclosing function too (the lambda
-/// body is walked inline), so a `@Caps` region catches an effect inside it.
+/// body is walked inline), so a `#Caps` region catches an effect inside it.
 #[test]
 fn lambda_callback_flows_into_region() {
     let src = r#"
 use core.files as fs
 fn apply(f: fn() -> String) -> String { return f(); }
 fn run() {
-    @Caps(Net) {
+    #Caps(Net) {
         r :: apply(() => fs.read("x") ?? "");
         print(r);
     }
@@ -436,8 +436,8 @@ fn run() { caller(); }
     );
 }
 
-/// D-EFF1 reconciliation: `@Pure` is the empty effect set, so an effectful Core
-/// call (here `Fs`) inside a `@Pure fn` is a purity violation (E3401) — even
+/// D-EFF1 reconciliation: `#Pure` is the empty effect set, so an effectful Core
+/// call (here `Fs`) inside a `#Pure fn` is a purity violation (E3401) — even
 /// though the legacy purity list only knew about stdin/time/random.
 #[test]
 fn pure_fn_with_core_effect_is_e3401() {
@@ -448,18 +448,18 @@ fn run() { print(readit("x")); }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E3401"),
-        "Fs in @Pure fn should be E3401: {:?}",
+        "Fs in #Pure fn should be E3401: {:?}",
         codes(src)
     );
 }
 
-/// A `@Caps(…)` region whose body stays within the cap set compiles clean.
+/// A `#Caps(…)` region whose body stays within the cap set compiles clean.
 #[test]
 fn caps_region_within_set_ok() {
     let src = r#"
 fn announce(n: Int) --[Io]-> { print("{n}"); }
 fn run() {
-    @Caps(Io) {
+    #Caps(Io) {
         announce(1);
     }
 }
@@ -471,13 +471,13 @@ fn run() {
     );
 }
 
-/// An effect used inside a `@Caps(…)` region but not in its cap list is E0741.
+/// An effect used inside a `#Caps(…)` region but not in its cap list is E0741.
 #[test]
 fn caps_region_out_of_set_is_e0741() {
     let src = r#"
 use core.files as fs
 fn run() {
-    @Caps(Net) {
+    #Caps(Net) {
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -490,7 +490,7 @@ fn run() {
     );
 }
 
-/// A `@Caps(…)` region restriction is transitive: an effect reached only through
+/// A `#Caps(…)` region restriction is transitive: an effect reached only through
 /// a call still trips E0741.
 #[test]
 fn caps_region_transitive_is_e0741() {
@@ -498,7 +498,7 @@ fn caps_region_transitive_is_e0741() {
 use core.files as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn run() {
-    @Caps(Io) {
+    #Caps(Io) {
         text :: helper("x");
         print(text);
     }
@@ -529,14 +529,14 @@ fn run() { work(); }
 
 // ── Scoped capabilities (D-SCAP1) ─────────────────────────────────────────────
 
-/// D-SCAP1: a `@Grant(Fs) { caps -> … }` whose body stays within the granted set
+/// D-SCAP1: a `#Grant(Fs) { caps -> … }` whose body stays within the granted set
 /// compiles clean — the grant authorizes the listed effects.
 #[test]
 fn grant_within_set_ok() {
     let src = r#"
 use core.files as fs
 fn run() {
-    @Grant(Fs, Io) { caps ->
+    #Grant(Fs, Io) { caps ->
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -549,14 +549,14 @@ fn run() {
     );
 }
 
-/// D-SCAP1: an effect used inside a `@Grant(…)` that the grant doesn't authorize
+/// D-SCAP1: an effect used inside a `#Grant(…)` that the grant doesn't authorize
 /// has no capability — E0712 (the dual of E0741).
 #[test]
 fn grant_out_of_set_is_e0712() {
     let src = r#"
 use core.files as fs
 fn run() {
-    @Grant(Net) { caps ->
+    #Grant(Net) { caps ->
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -577,7 +577,7 @@ fn grant_transitive_is_e0712() {
 use core.files as fs
 fn helper(p: String) -> String { return fs.read(p) ?? ""; }
 fn run() {
-    @Grant(Io) { caps ->
+    #Grant(Io) { caps ->
         text :: helper("x");
         print(text);
     }
@@ -596,7 +596,7 @@ fn run() {
 fn grant_handle_alias_is_e0711() {
     let src = r#"
 fn run() {
-    @Grant(Io) { caps ->
+    #Grant(Io) { caps ->
         alias :: caps;
         print("hi");
     }
@@ -615,7 +615,7 @@ fn run() {
 fn grant_unused_handle_ok() {
     let src = r#"
 fn run() {
-    @Grant(Io) { caps ->
+    #Grant(Io) { caps ->
         print("granted");
     }
 }
@@ -627,13 +627,13 @@ fn run() {
     );
 }
 
-/// D-SCAP1: an unknown effect name in a `@Grant(…)` list is E0119 (shared with
-/// `@Caps`/`#(…)`), and suppresses the E0712 subset check.
+/// D-SCAP1: an unknown effect name in a `#Grant(…)` list is E0119 (shared with
+/// `#Caps`/`#(…)`), and suppresses the E0712 subset check.
 #[test]
 fn grant_unknown_effect_is_e0119() {
     let src = r#"
 fn run() {
-    @Grant(Bogus) { caps ->
+    #Grant(Bogus) { caps ->
         print("hi");
     }
 }
@@ -647,14 +647,14 @@ fn run() {
     );
 }
 
-/// I3: a `@Grant(…)` region lowers to a plain lexical block — the generated Rust
+/// I3: a `#Grant(…)` region lowers to a plain lexical block — the generated Rust
 /// carries no capability machinery (no handle value, no grant/revoke), no effect
 /// annotation, and NO `unsafe`. The body runs unchanged.
 #[test]
 fn grant_region_erases_to_plain_block() {
     let src = r#"
 fn run() {
-    @Grant(Io) { caps ->
+    #Grant(Io) { caps ->
         print("inside");
     }
     print("outside");
@@ -683,15 +683,15 @@ fn run() {
     );
 }
 
-/// I3 (D-SCAP1): a `@Grant(…)` region lowers to the SAME plain Rust block as the
-/// already-erased `@Caps(…)` region — the grant carries no machinery `@Caps`
-/// doesn't, so swapping `@Grant(E) { h -> … }` for `@Caps(E) { … }` is identical
+/// I3 (D-SCAP1): a `#Grant(…)` region lowers to the SAME plain Rust block as the
+/// already-erased `#Caps(…)` region — the grant carries no machinery `#Caps`
+/// doesn't, so swapping `#Grant(E) { h -> … }` for `#Caps(E) { … }` is identical
 /// generated code (the handle is sema-only and erased).
 #[test]
 fn grant_lowers_like_caps_region() {
     let granted = r#"
 fn run() {
-    @Grant(Io) { caps ->
+    #Grant(Io) { caps ->
         print("a");
         print("b");
     }
@@ -699,7 +699,7 @@ fn run() {
 "#;
     let caps = r#"
 fn run() {
-    @Caps(Io) {
+    #Caps(Io) {
         print("a");
         print("b");
     }
@@ -709,20 +709,20 @@ fn run() {
     let b = jet::compile(caps).expect("caps compiles").rust;
     assert_eq!(
         a, b,
-        "@Grant region must lower identically to the erased @Caps region (I3)"
+        "#Grant region must lower identically to the erased #Caps region (I3)"
     );
 }
 
 // ── Transactions (D-TXN1–D-TXN4) ──────────────────────────────────────────────
 
 /// D-TXN2: an irreversible Core effect (Fs) reached DIRECTLY inside a
-/// `@Transact` block is E0746 at the call site.
+/// `#Transact` block is E0746 at the call site.
 #[test]
 fn transact_irreversible_fs_is_e0746() {
     let src = r#"
 use core.files as fs
 fn run() {
-    @Transact(tx) {
+    #Transact(tx) {
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -730,7 +730,7 @@ fn run() {
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0746"),
-        "Fs in @Transact should be E0746: {:?}",
+        "Fs in #Transact should be E0746: {:?}",
         codes(src)
     );
 }
@@ -741,7 +741,7 @@ fn transact_irreversible_net_is_e0746() {
     let src = r#"
 use core.http as http
 fn run() {
-    @Transact(tx) {
+    #Transact(tx) {
         r :: http.get("http://x") ?? "";
         print(r);
     }
@@ -749,25 +749,25 @@ fn run() {
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0746"),
-        "Net in @Transact should be E0746: {:?}",
+        "Net in #Transact should be E0746: {:?}",
         codes(src)
     );
 }
 
 /// D-TXN2: a reversible-or-benign effect (Io via `print`) is NOT rejected inside
-/// a `@Transact` block.
+/// a `#Transact` block.
 #[test]
 fn transact_reversible_io_ok() {
     let src = r#"
 fn run() {
-    @Transact(tx) {
+    #Transact(tx) {
         print("reversible work");
     }
 }
 "#;
     assert!(
         codes(src).is_empty(),
-        "Io in @Transact should compile: {:?}",
+        "Io in #Transact should compile: {:?}",
         codes(src)
     );
 }
@@ -779,7 +779,7 @@ fn transact_fs_in_on_commit_ok() {
     let src = r#"
 use core.files as fs
 fn run() {
-    @Transact(tx) {
+    #Transact(tx) {
         print("reversible work");
         tx.on_commit(() => {
             fs.write("x", "done") ?? panic("write failed");
@@ -799,7 +799,7 @@ fn run() {
 fn transact_on_commit_needs_zero_param_lambda() {
     let src = r#"
 fn run() {
-    @Transact(tx) {
+    #Transact(tx) {
         tx.on_commit((n: Int) => { print("{n}"); });
     }
 }
@@ -811,13 +811,13 @@ fn run() {
     );
 }
 
-/// I3: a `@Transact` block + `on_commit` carry no effect/transaction machinery
+/// I3: a `#Transact` block + `on_commit` carry no effect/transaction machinery
 /// that leaks user-visible effect annotations; and generated Rust has NO `unsafe`.
 #[test]
 fn transact_generates_no_unsafe() {
     let src = r#"
 fn run() {
-    @Transact(tx) {
+    #Transact(tx) {
         print("work");
         tx.on_commit(() => { print("hook"); });
     }
@@ -843,13 +843,13 @@ fn run() {
 }
 
 /// D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` — the mirror of
-/// `on_commit`. A zero-param lambda on a `@Transact` handle compiles clean and lowers
+/// `on_commit`. A zero-param lambda on a `#Transact` handle compiles clean and lowers
 /// to a boxed rollback hook on the transaction guard.
 #[test]
 fn transact_on_rollback_ok() {
     let src = r#"
 fn run() {
-    @Transact(tx) {
+    #Transact(tx) {
         print("work");
         tx.on_rollback(() => { print("undo"); });
     }
@@ -874,7 +874,7 @@ fn run() {
 fn transact_on_rollback_needs_zero_param_lambda() {
     let src = r#"
 fn run() {
-    @Transact(tx) {
+    #Transact(tx) {
         tx.on_rollback((n: Int) => { print("{n}"); });
     }
 }
@@ -886,7 +886,7 @@ fn run() {
     );
 }
 
-/// D-TXN-ROLLBACK (layer 1): a value mutated inside a `@Transact` block is
+/// D-TXN-ROLLBACK (layer 1): a value mutated inside a `#Transact` block is
 /// auto-snapshotted on entry — the generated Rust calls the `jet_txn::snapshot`
 /// prelude helper against the transaction guard for the mutated root.
 #[test]
@@ -894,7 +894,7 @@ fn transact_auto_snapshot_mutated_value() {
     let src = r#"
 enum Fail { Bad }
 fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
-    @Transact(tx) {
+    #Transact(tx) {
         from -= amount;
         to += amount;
         if amount > 100 {
@@ -935,7 +935,7 @@ fn transact_auto_snapshot_unsafe_only_in_prelude() {
     let src = r#"
 enum Fail { Bad }
 fn bump(x: &Int) -> Int ? Fail {
-    @Transact(tx) {
+    #Transact(tx) {
         x += 1;
         return Err(Fail.Bad);
     }
@@ -958,19 +958,19 @@ fn run() { a: Int := 0; n :: bump(&a) ?? (-1); print("{n}"); }
     );
 }
 
-/// D-TXN4: a bare `@Transact { … }` with no handle stays legal (no hooks).
+/// D-TXN4: a bare `#Transact { … }` with no handle stays legal (no hooks).
 #[test]
 fn transact_bare_no_handle_ok() {
     let src = r#"
 fn run() {
-    @Transact {
+    #Transact {
         print("bare transaction");
     }
 }
 "#;
     assert!(
         codes(src).is_empty(),
-        "bare @Transact should compile: {:?}",
+        "bare #Transact should compile: {:?}",
         codes(src)
     );
 }
@@ -991,7 +991,7 @@ fn run() { print("{transform([1, 2], inc)}"); }
 "#;
     assert!(
         codes(src).is_empty(),
-        "pure callback to a @Pure bound is clean: {:?}",
+        "pure callback to a #Pure bound is clean: {:?}",
         codes(src)
     );
 }
@@ -1009,7 +1009,7 @@ fn run() { print("{transform([1, 2], noisy)}"); }
     assert_eq!(
         codes(src),
         vec!["E0747"],
-        "impure callback to a @Pure bound is E0747"
+        "impure callback to a #Pure bound is E0747"
     );
 }
 
@@ -1080,7 +1080,7 @@ fn run() { print("{invoke(0, value)}"); }
     assert!(!rust.contains("..E"), "effect rows erase before codegen");
 }
 
-/// Lever 2: `#(via f)` publishes the callback's effects — a `@Pure fn` calling a
+/// Lever 2: `#(via f)` publishes the callback's effects — a `#Pure fn` calling a
 /// via-fn whose callback carries `Io` is rejected (E3401), proving the
 /// pass-through surfaced the effect even though the body only calls a fn-value.
 #[test]

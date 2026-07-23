@@ -225,18 +225,18 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0429",
                         format!(
-                            "`{}` is not ambient here — this file opted out with `@{}`",
+                            "`{}` is not ambient here — this file opted out with `#{}`",
                             Syntax::BUILTIN_PRINT,
                             Syntax::MARKER_NO_PRELUDE
                         ),
                         format!(
-                            "`@{}` disables the curated prelude auto-imports (`{}` / `{}`)",
+                            "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
                             Syntax::MARKER_NO_PRELUDE,
                             Syntax::BUILTIN_PRINT,
                             Syntax::BUILTIN_INPUT
                         ),
                         format!(
-                            "write `use core.io as io` and call `io.{}(…)`, or remove `@{}`",
+                            "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
                             Syntax::BUILTIN_PRINT,
                             Syntax::MARKER_NO_PRELUDE
                         ),
@@ -296,7 +296,7 @@ impl<'a> Checker<'a> {
             // D-PRELUDE1 = B: `input` is ambient — no `use core.io` needed.
             // Resolves to the same semantics as `io.input`: optional String prompt,
             // returns Result(String, IoError). Shadowed by any user-defined `input`.
-            // D-PRELUDEX1=A: `@NoPrelude` turns the ambient off.
+            // D-PRELUDEX1=A: `#NoPrelude` turns the ambient off.
             if call.name == Syntax::BUILTIN_INPUT
                 && self.funcs.get(Syntax::BUILTIN_INPUT).is_none()
                 && self.lookup(Syntax::BUILTIN_INPUT).is_none()
@@ -305,18 +305,18 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0429",
                         format!(
-                            "`{}` is not ambient here — this file opted out with `@{}`",
+                            "`{}` is not ambient here — this file opted out with `#{}`",
                             Syntax::BUILTIN_INPUT,
                             Syntax::MARKER_NO_PRELUDE
                         ),
                         format!(
-                            "`@{}` disables the curated prelude auto-imports (`{}` / `{}`)",
+                            "`#{}` disables the curated prelude auto-imports (`{}` / `{}`)",
                             Syntax::MARKER_NO_PRELUDE,
                             Syntax::BUILTIN_PRINT,
                             Syntax::BUILTIN_INPUT
                         ),
                         format!(
-                            "write `use core.io as io` and call `io.{}(…)`, or remove `@{}`",
+                            "write `use core.io as io` and call `io.{}(…)`, or remove `#{}`",
                             Syntax::BUILTIN_INPUT,
                             Syntax::MARKER_NO_PRELUDE
                         ),
@@ -380,9 +380,9 @@ impl<'a> Checker<'a> {
     
             // D-LIN1-DROP (ratified 2026-06-25): `drop(x)` deliberately discards a
             // value by moving it to nowhere — its `Drop` runs. The blessed use is to
-            // satisfy a `@SingleUse` value's consume duty when there is genuinely no
+            // satisfy a `#SingleUse` value's consume duty when there is genuinely no
             // job left to do; that decision must be audited, so `drop` of a
-            // `@SingleUse` value is legal only inside an `@Unsafe("reason")`
+            // `#SingleUse` value is legal only inside an `#Unsafe("reason")`
             // region/fn (the reason IS the audit note) — otherwise E0143. Shadowed
             // by any user `drop` fn or local of that name.
             if call.name == Syntax::BUILTIN_CONSUME
@@ -752,15 +752,15 @@ impl<'a> Checker<'a> {
                 }
             }
 
-            // E3103 (S58): an `@Unsafe fn` is a whole-function contract; callers
-            // must take responsibility inside their own `@Unsafe` block.
+            // E3103 (S58): an `#Unsafe fn` is a whole-function contract; callers
+            // must take responsibility inside their own `#Unsafe` block.
             if sig.is_unsafe && !self.in_unsafe {
                 self.diags.push(Diagnostic::error(
                     "E3103",
-                    format!("`{}` is an `@Unsafe` function", call.name),
+                    format!("`{}` is an `#Unsafe` function", call.name),
                     "its contract can't be checked by the compiler, so the caller must vouch for it"
                         .to_string(),
-                    format!("call it inside `@{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
+                    format!("call it inside `#{}(\"…\") {{ … }}`", Syntax::KW_UNSAFE),
                     Some(call.name_span),
                 ));
             }
@@ -1202,7 +1202,7 @@ impl<'a> Checker<'a> {
                     }
                 }
     
-                // D-LIN1 / E0142: a `@SingleUse` value may only be moved/consumed. If
+                // D-LIN1 / E0142: a `#SingleUse` value may only be moved/consumed. If
                 // it reaches a parameter that does not take ownership (`^`), the call
                 // would borrow it (`&`/`view`/read) or copy it (an implicit clone) —
                 // both are forbidden, since the value has exactly one use to give.

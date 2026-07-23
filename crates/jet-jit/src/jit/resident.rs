@@ -57,7 +57,7 @@ fn jit_deadline_diag(rendered: &str) -> Diagnostic {
     Diagnostic::error(
         "E3003",
         wait.to_string(),
-        "this wait point observed the task context deadline from `@Context(deadline: …)`"
+        "this wait point observed the task context deadline from `#Context(deadline: …)`"
             .to_string(),
         "raise the deadline budget or shorten the work before this wait point".to_string(),
         None,

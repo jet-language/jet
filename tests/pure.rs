@@ -36,7 +36,7 @@ fn run() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_ok(), "@Pure fn should compile: {:?}", res.err());
+    assert!(res.is_ok(), "#Pure fn should compile: {:?}", res.err());
 }
 
 /// Impure call inside `pure fn` fires E3401.
@@ -52,7 +52,7 @@ fn run() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "impure call in @Pure fn should fail");
+    assert!(res.is_err(), "impure call in #Pure fn should fail");
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E3401"),
@@ -114,7 +114,7 @@ fn run() {
 }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "@Pure fn calling impure user fn should fail");
+    assert!(res.is_err(), "#Pure fn calling impure user fn should fail");
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E3401"),
@@ -534,12 +534,12 @@ fn eval_normal_void_run_passes_sema() {
     );
 }
 
-/// D-REACTCORE1: `@Reactive { … }` parses in statement position.
+/// D-REACTCORE1: `#Reactive { … }` parses in statement position.
 #[test]
 fn parse_reactive_block_stmt() {
     let src = r#"
 fn run() {
-    @Reactive {
+    #Reactive {
         print(1)
     }
 }

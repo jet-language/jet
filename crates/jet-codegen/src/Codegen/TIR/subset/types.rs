@@ -267,7 +267,7 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
 /// but the param convention (`Read`→deref for a non-scalar Named) is decided exactly as
 /// for a struct, so passing/binding/returning one is byte-identical to the AST path with
 /// no new emit. Construction is the `is_distinct_ctor` `Call` shape; `.raw()` is the
-/// dedicated DistinctRaw method shape; `+`/`==` on a `@Numeric` distinct emit the native
+/// dedicated DistinctRaw method shape; `+`/`==` on a `#Numeric` distinct emit the native
 /// operator (`ast_operand_is_integer` returns `None` for a distinct-typed operand, so the
 /// overflow trap is never claimed — matching the AST path's plain `+`).
 pub(crate) fn is_covered_distinct_ty(ty: &Type, cx: &Cx) -> bool {

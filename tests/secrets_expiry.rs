@@ -395,7 +395,7 @@ fn run() {
     key := crypto.SigningKey.generate() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => {
-        @Unsafe("attempt to discard a loan") { consume(borrowed) }
+        #Unsafe("attempt to discard a loan") { consume(borrowed) }
         return 0
     })
 }

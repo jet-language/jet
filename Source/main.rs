@@ -366,7 +366,7 @@ usage:
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
   {bin} test  <file> --shuffle      run tests in a random (printed) order
   {bin} test  <file> --serial       run one test at a time (default: parallel)
-  {bin} fuzz  <file> [<test-name>]  fuzz a parameterized `@Test fn` (D-TEST1 property test)
+  {bin} fuzz  <file> [<test-name>]  fuzz a parameterized `#Test fn` (D-TEST1 property test)
   {bin} new   <name>                create a new project folder with pkg.jet
   {bin} new   <name> --annotated    same, with commented example deps
   {bin} env                         enter the project dev shell (delegates to `jetpack enter`)
@@ -1686,15 +1686,15 @@ fn main() {
             // its own `jet dev` behavior as ordinary Jet code — a top-level
             // `fn dev()` becomes the program's real (native) entry point,
             // normally configuring and starting a `core.web.devserver` value.
-            // Checked FIRST, ahead of the @Target(Web)-inferred built-in web
+            // Checked FIRST, ahead of the #Target(Web)-inferred built-in web
             // server below: `fn dev()` is the more specific, user-authored
-            // override, so a file that carries BOTH `@Target(Web)` (a build
+            // override, so a file that carries BOTH `#Target(Web)` (a build
             // default) and `fn dev()` (an explicit dev-command override) must
             // run the override, not silently fall back to the built-in server
             // because a *different* marker also happened to be present. (This
             // ordering bug was caught during manual verification — the first
-            // cut checked @Target(Web) first, which made `fn dev()` totally
-            // unreachable on any file that also declared @Target(Web), e.g.
+            // cut checked #Target(Web) first, which made `fn dev()` totally
+            // unreachable on any file that also declared #Target(Web), e.g.
             // ui_web_click.jet, which has both.)
             if has_dev_entry_fn(file) {
                 run_dev_entry(file, mode);
@@ -1706,7 +1706,7 @@ fn main() {
             // loop above, so it's a separate function, not a new branch
             // inside `run_dev`'s interpreter machinery.
             // D-WEBDEFAULT1 (ratified 2026-07-01, c134): no explicit --target= falls back to the
-            // file's own `@Target(Web)` marker, if any.
+            // file's own `#Target(Web)` marker, if any.
             if effective_target("dev", file, cross_target.as_deref()).as_deref()
                 == Some(jet::Syntax::BUILD_TARGET_WEB)
             {
@@ -2058,7 +2058,7 @@ fn main() {
             run_bench(target, mode);
         }
         // D-TESTKIT1=A (c308 pass 2): `jet fuzz <file> [<test-name>]` — fuzz a
-        // parameterized `@Test fn` (D-TEST1's property-test form).
+        // parameterized `#Test fn` (D-TEST1's property-test form).
         "fuzz" => {
             let test_name = args.get(2).map(|s| s.as_str());
             let iterations = jet_argv
@@ -2134,7 +2134,7 @@ fn main() {
                 target.to_string()
             };
             // D-JPK-TASKRUN1: `jet run --task <name> <file>` swaps the named
-            // `@Task fn` in as the entry before codegen (same path as `fn dev`).
+            // `#Task fn` in as the entry before codegen (same path as `fn dev`).
             if cmd == "run" {
                 if let Some(task) = task_name.as_deref() {
                     if task.is_empty() {
@@ -2180,7 +2180,7 @@ fn main() {
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): resolve the effective `--target=` value for
 /// `file`. Precedence: an explicit CLI flag always wins; else `pkg.jet`'s
 /// `target: "web"` (a managed package's project-level default); else a
-/// lightweight parse of `file` for a top-level `@Target(Web)` marker (a loose
+/// lightweight parse of `file` for a top-level `#Target(Web)` marker (a loose
 /// file's own default, for standalone examples with no manifest at all).
 /// Reparses the file/manifest — wasteful compared to threading the fact
 /// through the real compile pipeline, but `jet` recompiles from scratch on

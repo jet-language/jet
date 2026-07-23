@@ -1,7 +1,7 @@
 //! D-PROTO1 / D-PROTO2: protocol/session type expansion.
 //!
 //! A `protocol Name { … }` block declares an ordered message exchange. Sema expands
-//! it into `@SingleUse` `.Client`/`.Server` handle structs plus `state`/`@Transition`
+//! it into `#SingleUse` `.Client`/`.Server` handle structs plus `state`/`#Transition`
 //! impl methods, then re-parses the fragments through the normal front end (R11).
 
 use crate::Diagnostics::Diagnostic;
@@ -36,7 +36,7 @@ pub fn expand_module_protocols(items: &mut Vec<Item>, diags: &mut Vec<Diagnostic
                         "protocol `{}` failed to expand into handle types",
                         decl.name
                     ),
-                    "the compiler generates `@SingleUse` `.Client`/`.Server` stubs from \
+                    "the compiler generates `#SingleUse` `.Client`/`.Server` stubs from \
                      the protocol block — a fragment did not parse"
                         .to_string(),
                     "check the protocol declaration for typos; if this persists, file a bug"
@@ -74,17 +74,17 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
     out.push_str(&format!("state {client} {{ {state_list} }}\n"));
     out.push_str(&format!("state {server} {{ {state_list} }}\n\n"));
     out.push_str(&format!(
-        "@{} struct {client} {{\n    _token: Int,\n}}\n\n",
+        "#{} struct {client} {{\n    _token: Int,\n}}\n\n",
         Syntax::ATTR_SINGLE_USE
     ));
     out.push_str(&format!(
-        "@{} struct {server} {{\n    _token: Int,\n}}\n\n",
+        "#{} struct {server} {{\n    _token: Int,\n}}\n\n",
         Syntax::ATTR_SINGLE_USE
     ));
 
     out.push_str(&format!("impl {client} {{\n"));
     out.push_str(&format!(
-        "    @{}(_ -> S0) fn client() -> {client} {{\n        return {client}.{{ _token: 0 }}\n    }}\n\n",
+        "    #{}(_ -> S0) fn client() -> {client} {{\n        return {client}.{{ _token: 0 }}\n    }}\n\n",
         Syntax::KW_TRANSITION
     ));
     for (idx, msg) in decl.messages.iter().enumerate() {
@@ -99,7 +99,7 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
 
     out.push_str(&format!("impl {server} {{\n"));
     out.push_str(&format!(
-        "    @{}(_ -> S0) fn server() -> {server} {{\n        return {server}.{{ _token: 0 }}\n    }}\n\n",
+        "    #{}(_ -> S0) fn server() -> {server} {{\n        return {server}.{{ _token: 0 }}\n    }}\n\n",
         Syntax::KW_TRANSITION
     ));
     for (idx, msg) in decl.messages.iter().enumerate() {
@@ -132,13 +132,13 @@ fn append_send_method(
     };
     if terminal {
         out.push_str(&format!(
-            "    @{}({from} -> {to}) fn {}(self: ^{handle}{param_suffix}) {{\n        return\n    }}\n\n",
+            "    #{}({from} -> {to}) fn {}(self: ^{handle}{param_suffix}) {{\n        return\n    }}\n\n",
             Syntax::KW_TRANSITION,
             msg.name,
         ));
     } else {
         out.push_str(&format!(
-            "    @{}({from} -> {to}) fn {}(self: ^{handle}{param_suffix}) -> {handle} ? Error {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from} -> {to}) fn {}(self: ^{handle}{param_suffix}) -> {handle} ? Error {{\n        return Ok(self)\n    }}\n\n",
             Syntax::KW_TRANSITION,
             msg.name,
         ));
@@ -158,12 +158,12 @@ fn append_recv_method(
     let method = format!("recv_{}", msg.name);
     if terminal {
         out.push_str(&format!(
-            "    @{}({from} -> {to}) fn {method}(self: ^{handle}) {{\n        return\n    }}\n\n",
+            "    #{}({from} -> {to}) fn {method}(self: ^{handle}) {{\n        return\n    }}\n\n",
             Syntax::KW_TRANSITION,
         ));
     } else {
         out.push_str(&format!(
-            "    @{}({from} -> {to}) fn {method}(self: ^{handle}) -> {handle} ? Error {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from} -> {to}) fn {method}(self: ^{handle}) -> {handle} ? Error {{\n        return Ok(self)\n    }}\n\n",
             Syntax::KW_TRANSITION,
         ));
     }

@@ -455,7 +455,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "sha512",
             "constant_time_equal",
         ],
-        // D-CRYPTO-API1=A: exact expert surface — every call is @Unsafe-gated.
+        // D-CRYPTO-API1=A: exact expert surface — every call is #Unsafe-gated.
         "core.crypto.expert" => &[
             "xchacha20poly1305_seal",
             "xchacha20poly1305_open",

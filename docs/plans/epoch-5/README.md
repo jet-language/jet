@@ -25,7 +25,7 @@ plan; do not duplicate it here).
 |---|---|---|---|
 | E4-M1 | build entry: detection, `BuildContext`/`BuildPlan`, plan→compile | §15.2 | none — buildable now |
 | E4-M2 | generated source: materialize, additive-only, lock-hashed, `--locked` | §15.3 | E4-M1 |
-| E4-M3 | authority: tiers, `@Impure` + permit, dependency deny, provenance | §15.4 | E4-M1; flag seam awaits D-BUILDFLAGS1 |
+| E4-M3 | authority: tiers, `#Impure` + permit, dependency deny, provenance | §15.4 | E4-M1; flag seam awaits D-BUILDFLAGS1 |
 | E4-M4 | observe + enforce: `ProgramInfo` snapshot, `b.error` | §15.6 | E4-M1 (parallel with M2/M3) |
 | E4-M5 | scope: entry homes, grant chain flag ⊂ pkg ⊂ workspace, `jet inspect audit` | §15.5 | E4-M1 + E4-M3 |
 | E4-M6 | build-graph expansion (targets/actions/…) | §12 | decisions ratified; implement typed graph cards #219-#227 |

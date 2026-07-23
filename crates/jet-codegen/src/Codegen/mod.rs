@@ -152,7 +152,7 @@ fn jet_test_shuffle_order(len: usize, seed: u64) -> Vec<usize> {
 }
 "#;
 /// D-TEST1 (ratified 2026-06-22, option B): property-test runtime. Emitted into
-/// the `jet test` harness only when the file declares a parameterized `@Test fn`.
+/// the `jet test` harness only when the file declares a parameterized `#Test fn`.
 /// Std-only (I6): a deterministic splitmix64 PRNG, a `JetGen` trait that
 /// generates and shrinks values per type, and the driver loop that runs N cases
 /// and minimizes a failing input. The seed defaults to a fixed constant so a
@@ -565,7 +565,7 @@ fn strip_unused_raylib_prelude(out: String) -> String {
 /// D-TXN-ROLLBACK layer 1: the `jet_txn` module carries the auto-snapshot
 /// restore mechanism, whose Drop-backed writeback uses one vetted raw-pointer
 /// deref (sound: the transaction guard outlives nothing it points at). A program
-/// that never auto-snapshots a `@Transact` value must carry no `unsafe`, so strip
+/// that never auto-snapshots a `#Transact` value must carry no `unsafe`, so strip
 /// `mod jet_txn { … }` whenever nothing references `jet_txn::` — exactly like
 /// `strip_unused_mem_prelude`.
 fn strip_unused_txn_prelude(out: String) -> String {
@@ -1561,7 +1561,7 @@ mod tests {
 }
 
 /// Emit a test harness binary: all definitions plus one `main` that runs
-/// every `@Test "…" { }` block (M6 phase 2).
+/// every `#Test "…" { }` block (M6 phase 2).
 pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     let tests: Vec<&TestDef> = prog
         .items
@@ -1838,9 +1838,9 @@ fn whole_test_skip(test: &TestDef) -> bool {
     )
 }
 
-/// D-TEST1: emit the per-test functions. A unit test (`@Test "name" { … }`, no
+/// D-TEST1: emit the per-test functions. A unit test (`#Test "name" { … }`, no
 /// params) becomes `fn jet_test_N() -> Result<(), String>` exactly as before. A
-/// property test (`@Test fn name(p…) { … }`) becomes a body fn `jet_prop_N(p…)`
+/// property test (`#Test fn name(p…) { … }`) becomes a body fn `jet_prop_N(p…)`
 /// plus a driver `jet_test_N()` that generates inputs, runs cases, and shrinks
 /// the first failure to a minimal counterexample. Either way `jet_test_N()` is
 /// the single entry the main loop calls, so the reporting loop is shared.
@@ -1951,10 +1951,10 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
     }
 }
 
-/// c109: emit a `@Test` block body through the TIR (R7 — the only codegen seam). A test
+/// c109: emit a `#Test` block body through the TIR (R7 — the only codegen seam). A test
 /// body is a bare statement list (no params, unit context), emitted at indent 1 inside the
 /// `fn jet_test_N()` wrapper the caller opened. A gate-miss is an internal compiler error
-/// (I2-class), never an AST fallback — every `@Test` body routes through the TIR.
+/// (I2-class), never an AST fallback — every `#Test` body routes through the TIR.
 fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
     if TIR::tir_covers_test_body(body, cx) {
         TIR::emit_tir_test_body(body, cx, out);
@@ -1962,7 +1962,7 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
     }
     jet_foundation::ice!(
         None,
-        "codegen reached a @Test body construct the typed IR does not cover — compiler bug (I2/R7)"
+        "codegen reached a #Test body construct the typed IR does not cover — compiler bug (I2/R7)"
     );
 }
 
@@ -1991,7 +1991,7 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
 ///
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `active_os` is the resolved
 /// native OS bucket this build targets (from `--target=<triple>`, or the host
-/// OS when absent) — an `impl` gated to a different `@Target(Os.*)` is
+/// OS when absent) — an `impl` gated to a different `#Target(Os.*)` is
 /// skipped entirely (`Codegen/Imports.rs::emit_program_items`).
 pub fn emit_bundle_dbg(
     bundle: &ProgramBundle,
@@ -2245,7 +2245,7 @@ pub fn emit_bundle_tests_cov(
     ))))
 }
 
-/// D-TESTKIT1=A (c308 pass 2, gap #1): pick which property `@Test fn` a `jet
+/// D-TESTKIT1=A (c308 pass 2, gap #1): pick which property `#Test fn` a `jet
 /// fuzz` run targets. `test_name` is the CLI's optional second positional
 /// (`jet fuzz <file> [<name>]`).
 ///   - named: must exist and must be a property test (have params) — else a
@@ -2261,10 +2261,10 @@ fn select_fuzz_target<'a>(
         match tests.iter().position(|t| t.name == name) {
             Some(i) if !tests[i].params.is_empty() => Ok(i),
             Some(_) => Err(format!(
-                "`{}` is a unit `@Test`, not a property test — `jet fuzz` needs a parameterized `@Test fn` (D-TEST1)",
+                "`{}` is a unit `#Test`, not a property test — `jet fuzz` needs a parameterized `#Test fn` (D-TEST1)",
                 name
             )),
-            None => Err(format!("no `@Test` named `{}` in this file", name)),
+            None => Err(format!("no `#Test` named `{}` in this file", name)),
         }
     } else {
         let candidates: Vec<usize> = tests
@@ -2275,8 +2275,8 @@ fn select_fuzz_target<'a>(
             .collect();
         match candidates.len() {
             0 => Err(
-                "no property `@Test fn` (D-TEST1) found to fuzz — `jet fuzz` needs one \
-                 parameterized `@Test fn(...)`, not a unit `@Test(\"name\") { ... }`"
+                "no property `#Test fn` (D-TEST1) found to fuzz — `jet fuzz` needs one \
+                 parameterized `#Test fn(...)`, not a unit `#Test(\"name\") { ... }`"
                     .to_string(),
             ),
             1 => Ok(candidates[0]),
@@ -2325,7 +2325,7 @@ pub fn emit_bundle_fuzz(
         .collect();
     if tests.is_empty() {
         return Err(
-            "no `@Test` blocks in this file — `jet fuzz` needs a parameterized `@Test fn(...)`"
+            "no `#Test` blocks in this file — `jet fuzz` needs a parameterized `#Test fn(...)`"
                 .to_string(),
         );
     }
@@ -2551,10 +2551,10 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
 }
 
 /// D-BENCH1: emit a benchmark harness binary — every definition plus a `main`
-/// that times each `@Bench("…") { }` region and reports ns/iter + ops/sec.
+/// that times each `#Bench("…") { }` region and reports ns/iter + ops/sec.
 /// Mirrors `emit_bundle_tests`; the only divergence is the per-block tail,
 /// which wraps each body in an auto-scaled timed loop instead of a pass/fail
-/// check. Each body is emitted exactly like a `@Test` body (a bare statement
+/// check. Each body is emitted exactly like a `#Test` body (a bare statement
 /// list in a `Result<(), String>` fn), so `return Err(…)` from `require` stays
 /// valid; the timing wrapper ignores that result.
 pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {

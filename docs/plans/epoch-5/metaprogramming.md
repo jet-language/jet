@@ -18,7 +18,7 @@ flagged, but §15 tracks the ratified option shapes exactly.
 
 - **comptime** — evaluation during compilation. Value-level only (S26): it
   computes values, it never creates types.
-- **derive** — code generated from a type's shape (`@[Codable]`, user
+- **derive** — code generated from a type's shape (`#[Codable]`, user
   `derive T.Wire`). The boilerplate killer.
 - **reflection** — reading a type's shape at compile time (`T.reflect()` →
   `TypeInfo`). The read half of derives.
@@ -67,7 +67,7 @@ jobs (I8). A beginner lives on rungs 0–1 and never learns the rest exist.
 
 | Rung | Job | Mechanism | Status |
 |---|---|---|---|
-| 0 | type-driven boilerplate | built-in derives (`@[Codable]`, …) | shipped (S55) |
+| 0 | type-driven boilerplate | built-in derives (`#[Codable]`, …) | shipped (S55) |
 | 1 | compile-time values | `comptime x = f();`, `comptime if`, `comptime { }` | shipped (S26/S57, D-CTMARKER1) |
 | 2 | pure eval + data embedding | whitelist Core (D-CTCORE1), `embed_file`/`embed_bytes` (D-CTIO1), `find` (D-CTFIND1), `fetch(url, sha256:)` (D-NETDEP1) | shipped |
 | 3 | user derives | `T.reflect()` (D-METAREFLECT1) + `derive T.Trait` emitting source fragments with `$` splices (D-METADERIVE1) | shipped |
@@ -139,7 +139,7 @@ D-CTEFFECT1 (ratified) gives the tiers:
   sweet spot — most of Jai's build-time convenience with nothing hidden from
   caches, CI, or auditors.
 - **Tier 2 — ambient effects.** env, exec, clock, random, unpinned network,
-  arbitrary fs. Requires BOTH the audited `@Impure("reason")` gate in source
+  arbitrary fs. Requires BOTH the audited `#Impure("reason")` gate in source
   AND permission at build time. CI is hermetic unless an expert opens it.
 
 On top of the tiers, one grant chain with three layers — each a different
@@ -148,7 +148,7 @@ spelling open as **D-BUILDSCOPE1** / **D-BUILDPOLICY1**):
 
 | Layer | Lives | Job |
 |---|---|---|
-| **Declare** | on the code: `@Impure("why") --[Fs, Net]->` | what this build fn needs; travels with the file; statically readable |
+| **Declare** | on the code: `#Impure("why") --[Fs, Net]->` | what this build fn needs; travels with the file; statically readable |
 | **Permit** | pkg.jet `build:` block, or a flag/prompt for a lone file | whether this project grants it |
 | **Cap** | workspace.jet policy block | org ceiling no member grant can exceed |
 
@@ -269,7 +269,7 @@ box.
 - generated source hashes
 - build profile, target, compiler version
 - selected build entry + its declared effects
-- executed `@Impure` regions, including reason text
+- executed `#Impure` regions, including reason text
 - policy-allowed external tool invocations (argv + tool digest)
 
 Derived from it: SBOM, SLSA-style provenance (builder identity, external
@@ -499,7 +499,7 @@ Jai's model structurally cannot deliver this list. It is Jet's moat.
 
 **Ratified substrate (already law):** S26/S57 comptime bindings ·
 D-CTMARKER1 `$` splices + `comptime { }` · D-CTCORE1 pure whitelist ·
-D-CTIO1 embed · D-CTFIND1/2 find · D-CTEFFECT1 tiers + `@Impure` ·
+D-CTIO1 embed · D-CTFIND1/2 find · D-CTEFFECT1 tiers + `#Impure` ·
 D-NETDEP1 fetch backend (shipped — `Comptime/Methods.rs::eval_net_fetch`,
 sha256-pinned, lock-recorded) · D-CTCODEGEN1 source re-entry ·
 D-METAREFLECT1 reflection (shipped) · D-METADERIVE1 user derives (shipped) ·
@@ -511,7 +511,7 @@ D-WORKSPACE1/2 + D-MONOREF1 workspace · U10 `pkg.jet`.
 | Ballot | Outcome | Decides |
 |---|---|---|
 | D-BUILDENTRY1 | B | `fn build(b: BuildContext) -> BuildPlan ?`, run by `jet build` when root defines one, else default pipeline |
-| D-BUILDPOLICY1 | A | tiered authority, `BuildContext`-only; Tier 2 needs `@Impure` + permission; deps denied Tier 2 by default |
+| D-BUILDPOLICY1 | A | tiered authority, `BuildContext`-only; Tier 2 needs `#Impure` + permission; deps denied Tier 2 by default |
 | D-BUILDSCOPE1 | A | entry lives in the unit's own file at every rung; grant chain flag → pkg.jet `build:` → workspace `policy:` |
 | D-BUILDGEN1 | A | generated modules materialize under `.jet/generated/<package>/`, never committed, additive-only, lock-hashed |
 | D-METADEPTH2 | B | read-only post-sema program snapshot + structured `b.error` from the build entry only |
@@ -716,7 +716,7 @@ example runs.
 **Ratified semantics.** Build code gets Tier 0 (pure) + locked Tier 1
 (`find`/`embed`/`fetch`, content-addressed, lock-recorded) by default. Tier 2
 (env, exec, clock, random, unpinned net, arbitrary fs) requires **both** the
-audited `@Impure("reason")` gate in source **and** permission at build time
+audited `#Impure("reason")` gate in source **and** permission at build time
 (CLI flag/prompt, or project/org policy). `BuildContext` is the only authority
 path — a step has exactly its granted handles, never "a machine." Dependencies
 get **no** Tier 2 even when the root grants itself Tier 2, unless policy names
@@ -726,7 +726,7 @@ that dependency. Every granted capability is recorded in lock/provenance.
 ```jet
 fn build(b: BuildContext) --[Fs]-> BuildPlan ? {        // Tier-1 effect declaration
     migrations :: b.find("schema/*.sql")                 // Tier 1: locked, ambient-free
-    @Impure("probe local openssl for a legacy C dep") {  // Tier 2: gated + permitted
+    #Impure("probe local openssl for a legacy C dep") {  // Tier 2: gated + permitted
         b.exec(["pkg-config", "--libs", "openssl"])?
     }
     return b.plan(sources: ["src/main.jet"])
@@ -740,14 +740,14 @@ D-CTEFFECT1/E3411; the build-grant spelling is balloted as D-BUILDFLAGS1);
 **Lands in.**
 - Tier gating: extend `crates/jet-comptime/src/Comptime/Purity.rs` (the shipped
   D-CTEFFECT1 tier machinery) so a BuildContext Tier-2 method
-  (`exec`/`env`/unpinned `fetch`) is legal only inside a `@Impure` region
-  **and** only when the resolved grant permits that effect. `@Impure` parsing
+  (`exec`/`env`/unpinned `fetch`) is legal only inside a `#Impure` region
+  **and** only when the resolved grant permits that effect. `#Impure` parsing
   already exists; reuse it.
 - Grant resolution: new `crates/jet-driver/src/Jetpack/BuildPolicy.rs` — merges
   CLI flag/prompt + pkg.jet `build:` + workspace `policy:` into an effective
   capability set handed to the interpreter run.
 - Provenance: extend `Lock.rs` with the selected entry, its declared effects,
-  executed `@Impure` regions (+ reason text), and allowed external tool
+  executed `#Impure` regions (+ reason text), and allowed external tool
   invocations (argv + tool digest). `jet inspect audit-effects` reads statically in
   `Source/CmdDevTools.rs`.
 
@@ -757,10 +757,10 @@ crate in `Source/`/`crates/jet-*` compiler code. Unpinned network is Tier 2 by
 construction; pinned `fetch` (Tier 1) is the D-NETDEP1 backend.
 
 **Diagnostics.**
-- **E3502** — Tier-2 build effect used without a `@Impure` gate. what:
-  "`b.{op}` touches the ambient world and must be inside `@Impure(\"reason\")`"
+- **E3502** — Tier-2 build effect used without a `#Impure` gate. what:
+  "`b.{op}` touches the ambient world and must be inside `#Impure(\"reason\")`"
   · why: "build effects that aren't pure or locked have to be declared where an
-  auditor can see them" · fix: "wrap it in `@Impure(\"why you need it\")`" ·
+  auditor can see them" · fix: "wrap it in `#Impure(\"why you need it\")`" ·
   fixture `tests/ui/build_effect_ungated.{jet,stderr}`.
 - **E3503** — Tier-2 effect gated but not permitted by policy. what: "this
   build asks for `{Effect}`, which the project has not granted" · why: "ambient
@@ -774,12 +774,12 @@ construction; pinned `fetch` (Tier 1) is the D-NETDEP1 backend.
   dependency" · fixture `tests/ui/build_dep_authority.{jet,stderr}`.
 
 **Example (I5).** `metaprogramming/build_effects.jet` — Tier-1 `find` plus a
-Tier-2 `exec` gated by `@Impure` and permitted via the file's per-invocation
+Tier-2 `exec` gated by `#Impure` and permitted via the file's per-invocation
 grant; expected summary shows the effect line.
 
 **Targeted tests.** `crates/jet-driver/tests/build_policy.rs` — Tier-1 runs
 with zero grant; ungated Tier-2 → E3502; gated-but-unpermitted → E3503;
-dependency Tier-2 denied → E3504; lock records the `@Impure` reason + argv.
+dependency Tier-2 denied → E3504; lock records the `#Impure` reason + argv.
 
 **Exit criteria.** Default build is Tier-0/1 only; Tier-2 needs gate + permit;
 three fixtures blessed; provenance visible in `.jet/lock` and via

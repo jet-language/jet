@@ -259,12 +259,12 @@ fn parallel_collection_adapters_select_across_runtime_failure_carriers() {
     let values = (0..130).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
     let src = format!(
         "use core.time as time\n\
-         @Pre(n != 65, \"contract-high\") fn checked(n: Int) -> Int {{ return n }}\n\
+         #Pre(n != 65, \"contract-high\") fn checked(n: Int) -> Int {{ return n }}\n\
          fn callback(n: Int) -> Int {{\n\
              if n == 0 {{ print(\"worker-0-start\") }}\n\
              if n == 64 {{ print(\"worker-1-start\") }}\n\
              if n == 128 {{ print(\"worker-2-complete\") }}\n\
-             if n == 1 {{ @Context(deadline: time.now() - 1) {{ time.sleep(1) }} }}\n\
+             if n == 1 {{ #Context(deadline: time.now() - 1) {{ time.sleep(1) }} }}\n\
              if n == 65 {{ return checked(n) }}\n\
              return n\n\
          }}\n\
@@ -286,7 +286,7 @@ fn parallel_collection_adapters_select_across_runtime_failure_carriers() {
     assert_eq!(
         stderr,
         "Error [E3003]: deadline exceeded while waiting in time sleep\n\
-         Why: this wait point observed the task context deadline from `@Context(deadline: …)`\n\
+         Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
          Fix: raise the deadline budget or shorten the work before this wait point\n"
     );
     assert!(!stderr.contains("contract-high"), "{stderr}");

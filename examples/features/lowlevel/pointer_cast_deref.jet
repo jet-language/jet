@@ -3,12 +3,12 @@
 // is rejected outright as a single expression. Jet's low-level tier keeps
 // the cast and the deref as two explicit, audited lines instead of one
 // terse chain — reinterpret the address through `mem.Ptr<T>.from_addr`,
-// then dereference with postfix `.*`, both inside `@Unsafe`.
+// then dereference with postfix `.*`, both inside `#Unsafe`.
 use core.mem
 
 fn run() {
     flag: Bool :: true
-    @Unsafe("flag is live on this stack frame and the pointer never escapes") {
+    #Unsafe("flag is live on this stack frame and the pointer never escapes") {
         addr: Int :: mem.address_of(flag)
         p :: mem.Ptr<Bool>.from_addr(addr)
         print(p.*)

@@ -31,7 +31,7 @@
         "members": [
           {
             "type": "STRING",
-            "value": "@"
+            "value": "#"
           },
           {
             "type": "FIELD",
@@ -61,7 +61,7 @@
       "members": [
         {
           "type": "STRING",
-          "value": "@"
+          "value": "#"
         },
         {
           "type": "STRING",
@@ -3598,24 +3598,41 @@
       ]
     },
     "break_stmt": {
-      "type": "PREC_RIGHT",
-      "value": 0,
+      "type": "PREC",
+      "value": 3,
       "content": {
-        "type": "SEQ",
+        "type": "CHOICE",
         "members": [
           {
             "type": "STRING",
             "value": "break"
           },
           {
-            "type": "CHOICE",
+            "type": "SEQ",
             "members": [
               {
-                "type": "SYMBOL",
-                "name": "loop_label"
+                "type": "FIELD",
+                "name": "label",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "identifier"
+                }
               },
               {
-                "type": "BLANK"
+                "type": "STRING",
+                "value": "."
+              },
+              {
+                "type": "STRING",
+                "value": "break"
+              },
+              {
+                "type": "STRING",
+                "value": "("
+              },
+              {
+                "type": "STRING",
+                "value": ")"
               }
             ]
           }
@@ -3623,24 +3640,41 @@
       }
     },
     "next_stmt": {
-      "type": "PREC_RIGHT",
-      "value": 0,
+      "type": "PREC",
+      "value": 3,
       "content": {
-        "type": "SEQ",
+        "type": "CHOICE",
         "members": [
           {
             "type": "STRING",
             "value": "next"
           },
           {
-            "type": "CHOICE",
+            "type": "SEQ",
             "members": [
               {
-                "type": "SYMBOL",
-                "name": "loop_label"
+                "type": "FIELD",
+                "name": "label",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "identifier"
+                }
               },
               {
-                "type": "BLANK"
+                "type": "STRING",
+                "value": "."
+              },
+              {
+                "type": "STRING",
+                "value": "next"
+              },
+              {
+                "type": "STRING",
+                "value": "("
+              },
+              {
+                "type": "STRING",
+                "value": ")"
               }
             ]
           }
@@ -3875,12 +3909,16 @@
         "type": "SEQ",
         "members": [
           {
-            "type": "SYMBOL",
-            "name": "identifier"
+            "type": "FIELD",
+            "name": "name",
+            "content": {
+              "type": "SYMBOL",
+              "name": "identifier"
+            }
           },
           {
             "type": "STRING",
-            "value": "@"
+            "value": "::"
           }
         ]
       }

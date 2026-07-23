@@ -594,7 +594,7 @@ impl<'a> Interp<'a> {
                 let text = match args.first() {
                     // D-DISPLAYDBG1/2: same Display-impl-aware rendering as
                     // `{value}` string interpolation (`show_value`) — `print`
-                    // is bare-Display too, never the `@Debug` form.
+                    // is bare-Display too, never the `#Debug` form.
                     Some(a) => {
                         let v = self.eval(&a.expr, scope)?;
                         self.show_value(&v, a.expr.span())?
@@ -755,7 +755,7 @@ impl<'a> Interp<'a> {
             Some(f) => f,
             None => {
                 // c139 JIT/interpreter-parity: `Name(expr)` where `Name` isn't a
-                // known function is the distinct-type / `@UnitFamily` constructor
+                // known function is the distinct-type / `#UnitFamily` constructor
                 // call — the only capitalized-name *call* form Jet has (struct
                 // literals use `.{ }`, enum variants use `.Variant`).
                 if let Some(range) = self.distinct_ranges.get(name).copied() {
@@ -1119,7 +1119,7 @@ impl<'a> Interp<'a> {
         })
     }
 
-    /// c139: `Name(expr)` — the distinct-type / `@UnitFamily` constructor.
+    /// c139: `Name(expr)` — the distinct-type / `#UnitFamily` constructor.
     /// `range` is the type's `distinct Base(lo..hi)` bound, if any
     /// (D-RANGETYPE1). Distinct types have zero runtime representation
     /// difference from their base (D-DIST1), so an unranged constructor is
@@ -1336,7 +1336,7 @@ impl<'a> Interp<'a> {
     ///
     /// **Stub — backend pending.** D-NETDEP1=A ratified `ureq`/`minreq` as the
     /// HTTP backend (runtime-side, in a `jet-net/` workspace member; I6 holds).
-    /// This stub preserves the correct Tier-1 routing (no `@Impure` gate) so
+    /// This stub preserves the correct Tier-1 routing (no `#Impure` gate) so
     /// the architecture is in place; replace the `E3412` body below with the
     /// real download once the workspace member is wired.
     ///

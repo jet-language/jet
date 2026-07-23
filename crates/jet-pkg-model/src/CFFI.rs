@@ -4,9 +4,9 @@
 //! `extern "C"` shims (I2/I3). This module runs after the loader has read every
 //! `.jet` file and before sema:
 //!
-//! 1. Gather every `@Extern module c.<lib>` (overlay) and
-//!    `@Bindgen module c.<lib>.__bindgen__` (generated cache) item.
-//! 2. Enforce the location rule: `@Bindgen` only in a generated
+//! 1. Gather every `#Extern module c.<lib>` (overlay) and
+//!    `#Bindgen module c.<lib>.__bindgen__` (generated cache) item.
+//! 2. Enforce the location rule: `#Bindgen` only in a generated
 //!    `.jet/bindings/c/<lib>.jet` file (E3207).
 //! 3. Merge per library — **bindgen ∪ overlay, overlay wins** on a clash;
 //!    incompatible signatures are E3205 (D-CFFI2-SYN-4).
@@ -76,7 +76,7 @@ fn synthetic_alias(lib: &str) -> String {
     format!("__c_{lib}")
 }
 
-/// Identify compiler-owned binding cache locations. `@Bindgen` is legal only
+/// Identify compiler-owned binding cache locations. `#Bindgen` is legal only
 /// in one of these generated directories (E3207).
 fn generated_cache_language(display: &str) -> Option<ForeignLanguage> {
     let display = display.replace('\\', "/");
@@ -109,16 +109,16 @@ fn same_signature(a: &ExternFn, b: &ExternFn) -> bool {
         .all(|(x, y)| x.convention == y.convention && x.ty == y.ty)
 }
 
-/// E3207 — `@Bindgen` used outside a generated cache file.
+/// E3207 — `#Bindgen` used outside a generated cache file.
 fn e3207(lib: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3207",
         format!(
-            "`@{}` is only allowed in generated cache files",
+            "`#{}` is only allowed in generated cache files",
             Syntax::ATTR_BINDGEN
         ),
         format!(
-            "`{}/{}/{}.{}` is written by `{} inspect bind`; hand-written sources use `@{} module`",
+            "`{}/{}/{}.{}` is written by `{} inspect bind`; hand-written sources use `#{} module`",
             Syntax::SOURCE_ROOT_DIR,
             ForeignLanguage::C.bindings_subdir(),
             lib,
@@ -127,7 +127,7 @@ fn e3207(lib: &str, span: Span) -> Diagnostic {
             Syntax::ATTR_EXTERN_MODULE,
         ),
         format!(
-            "edit your overlay file with `@{} module`, or regenerate the cache with `{} inspect bind`",
+            "edit your overlay file with `#{} module`, or regenerate the cache with `{} inspect bind`",
             Syntax::ATTR_EXTERN_MODULE,
             Syntax::BINARY_NAME,
         ),
@@ -141,7 +141,7 @@ fn e3205(lib: &str, name: &str, span: Span) -> Diagnostic {
         "E3205",
         format!("overlay `{}` disagrees with the generated binding", name),
         format!(
-            "user `@{} module {}.{}` may override bindgen symbols, but the signature must stay compatible when replacing",
+            "user `#{} module {}.{}` may override bindgen symbols, but the signature must stay compatible when replacing",
             Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib,
         ),
         "match the generated signature, or rename your overlay function".to_string(),
@@ -483,7 +483,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
 /// (`use "lib.h" as l`), the bind backend is invoked automatically (D-CBIND2
 /// auto half, E3 deferred piece). When the cache exists, its sidecar `.hash`
 /// file (Phase 3) is checked; a hash mismatch triggers re-bind before loading.
-/// Parsed `@Bindgen` modules are appended as ordinary loaded modules so the
+/// Parsed `#Bindgen` modules are appended as ordinary loaded modules so the
 /// main drain/merge pass (step 1) folds them like any other.
 fn load_binding_caches(bundle: &mut ProgramBundle, diags: &mut Vec<Diagnostic>) {
     // Collect libs and, for the header-path `use "x.h"` form, the header path.
@@ -627,7 +627,7 @@ fn e3208(header: &str, lib: &str) -> Diagnostic {
         format!("Could not generate bindings from `{header}`."),
         "Header parsing or translation failed in the bind backend.".to_string(),
         format!(
-            "fix the header, run `jet inspect bind` manually for details, or hand-write `@Extern module c.{lib}`."
+            "fix the header, run `jet inspect bind` manually for details, or hand-write `#Extern module c.{lib}`."
         ),
         None,
     )
@@ -1048,7 +1048,7 @@ pub fn e3210(lib: &str, attr: &str, reason: &str) -> Diagnostic {
         "E3210",
         format!("Couldn't fetch C library `{}` from nixpkgs.", lib),
         format!(
-            "`{lib}: {}@{}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}",
+            "`{lib}: {}#{}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}",
             Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
         ),
         format!(
@@ -1082,7 +1082,7 @@ fn e3201(lib: &str) -> Diagnostic {
             Syntax::DEP_PROVIDER_C, Syntax::PAYLOAD_FILE,
         ),
         format!(
-            "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {}@{}` in `deps:`.",
+            "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {}#{}` in `deps:`.",
             Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
         ),
         None,
@@ -1102,7 +1102,7 @@ pub fn e3209(lib: &str) -> Diagnostic {
             "Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path.",
         ),
         format!(
-            "Declare it in `deps:` so Jet provisions it: `{lib}: {}@{}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.",
+            "Declare it in `deps:` so Jet provisions it: `{lib}: {}#{}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.",
             Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
             Syntax::DEP_PROVIDER_C,
         ),

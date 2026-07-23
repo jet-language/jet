@@ -298,7 +298,7 @@ mod serde_source_tests {
 
     #[test]
     fn builtin_codecs_remain_parsed_top_level_impls() {
-        let source = "@[Codable]\nstruct Point { x: Int }\n";
+        let source = "#[Codable]\nstruct Point { x: Int }\n";
         let (tokens, lex_diags) = crate::Lexer::lex(source);
         assert!(lex_diags.is_empty());
         let mut program = crate::Parser::parse(&tokens).expect("source parses");

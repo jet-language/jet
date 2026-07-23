@@ -279,7 +279,7 @@ fn panic_context_uses_only_lexically_live_locals() {
         ),
         (
             "region",
-            "@Region(inner) { region_only :: 7; print(region_only) }",
+            "#Region(inner) { region_only :: 7; print(region_only) }",
             &["region_only"],
         ),
         (
@@ -289,41 +289,41 @@ fn panic_context_uses_only_lexically_live_locals() {
         ),
         (
             "unsafe",
-            "@Unsafe(\"scope audit\") { unsafe_only :: 7; print(unsafe_only) }",
+            "#Unsafe(\"scope audit\") { unsafe_only :: 7; print(unsafe_only) }",
             &["unsafe_only"],
         ),
         (
             "impure",
-            "@Impure(\"scope audit\") { impure_only :: 7; print(impure_only) }",
+            "#Impure(\"scope audit\") { impure_only :: 7; print(impure_only) }",
             &["impure_only"],
         ),
         (
             "shield",
-            "@Shield { shield_only :: 7; print(shield_only) }",
+            "#Shield { shield_only :: 7; print(shield_only) }",
             &["shield_only"],
         ),
         (
             "caps",
-            "@Caps(Io) { caps_only :: 7; print(caps_only) }",
+            "#Caps(Io) { caps_only :: 7; print(caps_only) }",
             &["caps_only"],
         ),
         (
             "grant",
-            "@Grant(Io) { caps -> grant_only :: 7; print(grant_only) }",
+            "#Grant(Io) { caps -> grant_only :: 7; print(grant_only) }",
             &["grant_only"],
         ),
-        // `assume_deterministic { … }` was renamed to `@Nondeterministic("reason") { … }`
-        // (D-BLOCKPLANE1), legal only inside a `@Pure fn` — inexpressible in this
+        // `assume_deterministic { … }` was renamed to `#Nondeterministic("reason") { … }`
+        // (D-BLOCKPLANE1), legal only inside a `#Pure fn` — inexpressible in this
         // impure print/panic template, so the block-plane liveness coverage for it
         // lives with the other `#`-marker cases above.
         (
             "transact",
-            "@Transact { transact_only :: 7; print(transact_only) }",
+            "#Transact { transact_only :: 7; print(transact_only) }",
             &["transact_only"],
         ),
         (
             "context",
-            "@Context(logger: 0) { context_only :: 7; print(context_only) }",
+            "#Context(logger: 0) { context_only :: 7; print(context_only) }",
             &["context_only"],
         ),
         (
@@ -375,10 +375,10 @@ fn run() {{
 
 #[test]
 fn unsafe_block_locals_not_leaked() {
-    // D-OBS2: locals inside @Unsafe blocks must never appear in panic reports.
+    // D-OBS2: locals inside #Unsafe blocks must never appear in panic reports.
     // This is enforced structurally: safe_locals_expr only includes Copy scalars
     // that are in the *safe* env, never raw pointer slots from core.mem.
-    // The sema gate (E3101/E3102/E3103) prevents unsafe ops outside @Unsafe blocks,
+    // The sema gate (E3101/E3102/E3103) prevents unsafe ops outside #Unsafe blocks,
     // so the only unsafe values are Ptr types — which are not Int/Float/Bool
     // and are therefore always excluded by the type filter.
     // This test confirms the invariant holds by checking that a panic inside an

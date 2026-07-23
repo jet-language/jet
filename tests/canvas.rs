@@ -290,7 +290,7 @@ fn checked() -> Int ? String {
 }
 
 fn run() -> Void ? {
-    @Unsafe("Canvas proof rail fixture") {
+    #Unsafe("Canvas proof rail fixture") {
         marker := 1
     }
     print(checked()?)
@@ -298,14 +298,14 @@ fn run() -> Void ? {
 "#;
 
 const CANVAS_SHIELD_FIXTURE: &str = r#"fn run() {
-    @Shield {
+    #Shield {
         print("before")
     }
 }
 "#;
 
 const CANVAS_POLICY_FIXTURE: &str = r#"fn run() {
-    @Policy(arena_bounded(8192)) {
+    #Policy(arena_bounded(8192)) {
         print("bounded")
     }
 }
@@ -637,7 +637,7 @@ fn canvas_link_transactions_break_and_move_source_wires() {
         jet::Canvas::apply_transaction_json(&break_path, &break_req).expect("break link");
     assert!(break_out.contains("\"changed\":true"), "{break_out}");
     let broken = fs::read_to_string(&break_path).unwrap();
-    assert!(broken.contains("return @Todo"), "{broken}");
+    assert!(broken.contains("return #Todo"), "{broken}");
 
     let move_path = write_fixture("move_link", CANVAS_WIRE_FIXTURE);
     let graph = jet::Canvas::graph_json_for_file(&move_path).expect("canvas graph");
@@ -1656,9 +1656,9 @@ fn canvas_preserves_via_effect_row_for_signature_edits() {
 fn canvas_projects_meta_attribute_on_functions_and_bindings() {
     let path = write_fixture(
         "meta_attribute",
-        r#"@Meta(category: "Movement", tunable)
+        r#"#Meta(category: "Movement", tunable)
 fn run() {
-    @Meta(category: "Movement", tunable)
+    #Meta(category: "Movement", tunable)
     speed :: 3
     print("{speed}")
 }
@@ -2888,7 +2888,7 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("originalSignature.includes(\"--[\")"), "{js}");
     assert!(js.contains("fnMeta.effect_via ? \"via \" + fnMeta.effect_via"), "{js}");
     assert!(js.contains("\" --[\" + effects + \"]->\""), "{js}");
-    assert!(!js.contains("fnMeta.pure ? \"@Pure \""), "{js}");
+    assert!(!js.contains("fnMeta.pure ? \"#Pure \""), "{js}");
     assert!(js.contains("data-project-file"), "{js}");
     assert!(js.contains("function actionInsertsNode"), "{js}");
     assert!(js.contains("toolbarSearch.addEventListener"), "{js}");
@@ -3194,7 +3194,7 @@ fn canvas_projects_and_source_edits_shield_region() {
     let graph = jet::Canvas::graph_json_for_file(&path).expect("shield graph");
     for field in [
         "\"kind\":\"shield\"",
-        "\"title\":\"@Shield\"",
+        "\"title\":\"#Shield\"",
         "\"source_span\":{\"start\":",
         "\"title\":\"print\"",
         "\"title\":\"\\\"before\\\"\"",
@@ -3209,13 +3209,13 @@ fn canvas_projects_and_source_edits_shield_region() {
     let before = fs::read_to_string(&path).unwrap();
     let revision = jet::Canvas::source_revision(&before);
     let edit = format!(
-        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"fn run() {{\\n    @Shield {{\\n        print(\\\"after\\\")\\n    }}\\n}}\\n\",\"source_edit\":true}}",
+        "{{\"schema_version\":1,\"op\":\"replace_source\",\"revision\":\"{}\",\"source\":\"fn run() {{\\n    #Shield {{\\n        print(\\\"after\\\")\\n    }}\\n}}\\n\",\"source_edit\":true}}",
         revision
     );
     let out = jet::Canvas::apply_transaction_json(&path, &edit).expect("edit Shield source");
     assert!(out.contains("\"changed\":true"), "{out}");
     let after = fs::read_to_string(&path).unwrap();
-    assert!(after.contains("@Shield {"), "{after}");
+    assert!(after.contains("#Shield {"), "{after}");
     assert!(after.contains("print(\"after\")"), "{after}");
     let graph = jet::Canvas::graph_json_for_file(&path).expect("shield graph after edit");
     assert!(graph.contains("\"kind\":\"shield\""), "{graph}");
@@ -3229,7 +3229,7 @@ fn canvas_projects_policy_region() {
 
     for field in [
         "\"kind\":\"policy\"",
-        "\"title\":\"@Policy(arena_bounded)\"",
+        "\"title\":\"#Policy(arena_bounded)\"",
         "\"source_span\":{\"start\":",
         "\"title\":\"print\"",
         "\"title\":\"\\\"bounded\\\"\"",

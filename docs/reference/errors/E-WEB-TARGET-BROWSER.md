@@ -12,7 +12,7 @@ the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned fun
 
 ## Fix
 
-remove the `@Target(Wasm)` pin, move browser work into a `@Target(Js)` function, or drop the browser API calls
+remove the `#Target(Wasm)` pin, move browser work into a `#Target(Js)` function, or drop the browser API calls
 
 ## Example
 

@@ -96,7 +96,7 @@ pub struct SymbolDB {
     pub hover: Vec<HoverEntry>,
     pub inlay: Vec<InlayHint>,
     pub nodes: Vec<StructuralNode>,
-    /// D-LINTPOLICY1=A: every spelled bypass (`@Unsafe`, `.drop(reason)`,
+    /// D-LINTPOLICY1=A: every spelled bypass (`#Unsafe`, `.drop(reason)`,
     /// `#[allow(lint)]`) collected during the walk.
     pub bypasses: Vec<BypassFact>,
     /// Sema-owned returned-view summaries keyed by semantic function identity.
@@ -910,7 +910,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
             let mut hover_text = hover_for_fn(f);
             for (active, name) in [(f.is_unsafe, Syntax::KW_UNSAFE), (f.is_pure, Syntax::KW_PURE), (f.is_sanitizer, Syntax::KW_SANITIZER), (f.is_replayable, Syntax::ATTR_REPLAYABLE)] {
                 if active && jet_foundation::Policy::rule_allows(name, jet_foundation::Policy::RuleSite::Function) {
-                    hover_text.push_str(&format!("\nrule: @{name} (function, site-bound)"));
+                    hover_text.push_str(&format!("\nrule: #{name} (function, site-bound)"));
                 }
             }
             let declarations = module.policy_declarations.iter().filter(|d| matches!(d.scope, jet_foundation::Policy::PolicyScope::Organization | jet_foundation::Policy::PolicyScope::Package | jet_foundation::Policy::PolicyScope::Module) || (d.scope == jet_foundation::Policy::PolicyScope::Function && d.target == Some(f.span))).cloned().collect::<Vec<_>>();
@@ -926,8 +926,8 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 text: hover_text,
             });
             ctx.db.defs.push(sym);
-            // D-LINTPOLICY1=A: `@Unsafe("reason") fn …` is a spelled
-            // whole-function bypass, distinct from an in-body `@Unsafe`
+            // D-LINTPOLICY1=A: `#Unsafe("reason") fn …` is a spelled
+            // whole-function bypass, distinct from an in-body `#Unsafe`
             // region.
             if f.is_unsafe {
                 ctx.db.bypasses.push(BypassFact {
@@ -1578,6 +1578,29 @@ fn collect_stmts(stmts: &[AST::Stmt], mp: &str, module: &LoadedModule, ctx: &mut
     }
 }
 
+fn collect_loop_label_def(label: &Option<(String, Span)>, mp: &str, ctx: &mut WalkCtx<'_>) {
+    if let Some((name, span)) = label {
+        ctx.db.defs.push(SymDef {
+            identity: scoped_local_identity(ctx, "loop_label", name),
+            name: name.clone(),
+            def_span: *span,
+            module_path: mp.to_string(),
+            // Loop labels share the ordinary namespace but carry no runtime type.
+            kind: SymKind::Local {
+                mutable: false,
+                ty: None,
+            },
+        });
+    }
+}
+
+fn collect_loop_label_ref(name: &str, span: Span, mp: &str, ctx: &mut WalkCtx<'_>) {
+    let name_span = Span::new(span.start, span.start.saturating_add(name.len()));
+    ctx.db
+        .refs
+        .push(scoped_ref(name.to_string(), name_span, mp, ctx));
+}
+
 fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<'_>) {
     let span = match stmt {
         AST::Stmt::If(if_stmt) => if_stmt.span,
@@ -1604,7 +1627,10 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::If(if_stmt) => {
             collect_if(if_stmt, mp, module, ctx);
         }
-        AST::Stmt::While { cond, body, .. } => {
+        AST::Stmt::While {
+            cond, body, label, ..
+        } => {
+            collect_loop_label_def(label, mp, ctx);
             structural_slot(ctx, "condition", StructuralSlotKind::Scalar, |ctx| collect_expr(cond, mp, ctx));
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
@@ -1614,8 +1640,10 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             var2,
             kind,
             body,
+            label,
             ..
         } => {
+            collect_loop_label_def(label, mp, ctx);
             ctx.db.defs.push(SymDef {
                 identity: scoped_local_identity(ctx, "local", var),
                 name: var.clone(),
@@ -1697,8 +1725,9 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             }
         }
         AST::Stmt::CountedLoop {
-            cond, body, init, step, ..
+            cond, body, init, step, label, ..
         } => {
+            collect_loop_label_def(label, mp, ctx);
             ctx.db.defs.push(SymDef {
                 identity: scoped_local_identity(ctx, "local", &init.name),
                 name: init.name.clone(),
@@ -1716,7 +1745,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             }
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
-        // D-LINTPOLICY1=A: an `@Unsafe("reason") { … }` audited region is a
+        // D-LINTPOLICY1=A: an `#Unsafe("reason") { … }` audited region is a
         // spelled bypass — record it before recursing into its body.
         AST::Stmt::Unsafe { audit, body, span } => {
             ctx.db.bypasses.push(BypassFact {
@@ -1728,8 +1757,11 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             });
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
-        AST::Stmt::Loop { body, .. }
-        | AST::Stmt::Impure { body, .. }
+        AST::Stmt::Loop { body, label, .. } => {
+            collect_loop_label_def(label, mp, ctx);
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
+        }
+        AST::Stmt::Impure { body, .. }
         | AST::Stmt::Reactive { body, .. }
         | AST::Stmt::Shield { body, .. }
         | AST::Stmt::Off { body, .. }
@@ -1744,10 +1776,10 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         | AST::Stmt::AssumeDet { body, .. } => {
             structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx));
         }
-        AST::Stmt::Break(_)
-        | AST::Stmt::Continue(_)
-        | AST::Stmt::BreakLabel(..)
-        | AST::Stmt::ContinueLabel(..) => {}
+        AST::Stmt::Break(_) | AST::Stmt::Continue(_) => {}
+        AST::Stmt::BreakLabel(name, span) | AST::Stmt::ContinueLabel(name, span) => {
+            collect_loop_label_ref(name, *span, mp, ctx);
+        }
         // D-CTMARKER1: collect symbols from comptime block body.
         AST::Stmt::ComptimeBlock { body, .. } => structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx)),
         AST::Stmt::ComptimeIf {
@@ -2026,6 +2058,10 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                     }
                 }
                 AST::OrFallback::Break(_) | AST::OrFallback::Continue(_) => {}
+                AST::OrFallback::BreakLabel(name, span)
+                | AST::OrFallback::ContinueLabel(name, span) => {
+                    collect_loop_label_ref(name, *span, mp, ctx);
+                }
             }
         }
         AST::Expr::PatternTest { subject, .. } => structural_slot(ctx, "subject", StructuralSlotKind::Scalar, |ctx| collect_expr(subject, mp, ctx)),

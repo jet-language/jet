@@ -249,7 +249,7 @@ pub(super) fn apply_visible_conversion(
 }
 
 pub(super) fn apply_break_link(path: &Path, src: &str, wire_id: &str) -> Result<String, String> {
-    rewrite_wire_expr(path, src, wire_id, "@Todo")
+    rewrite_wire_expr(path, src, wire_id, "#Todo")
 }
 
 pub(super) fn apply_move_link(
@@ -828,7 +828,7 @@ pub(super) fn extract_inline_candidate(
         ));
     };
     let expr = snippet(src, Span::new(inline.span.start, inline.span.end));
-    if expr.contains("@Unsafe") {
+    if expr.contains("#Unsafe") {
         return Err(edit_error(
             "diagnostic",
             "Error [E2203]: Canvas extract cannot cross an unsafe source span",

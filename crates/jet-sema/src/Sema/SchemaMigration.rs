@@ -1,7 +1,7 @@
 //! D-MIGRATE1 / D-MIGRATE2 (ratified 2026-06-22): sema diff pass for
-//! `@PublishedSchema` structs.
+//! `#PublishedSchema` structs.
 //!
-//! After struct registration, for each `@PublishedSchema` struct:
+//! After struct registration, for each `#PublishedSchema` struct:
 //! 1. Load the prior snapshot from `.jet/cache/schema/<TypeName>.snapshot` (if any).
 //! 2. Diff old vs new field layout (keyed by name, so field *order* is ignored —
 //!    D-MIGRATE2F: reordering is never a breaking change).
@@ -21,7 +21,7 @@
 //! through the normal pipeline), and codegen
 //! (`Codegen/Items.rs::emit_struct_migration`) emits per-block step functions
 //! plus a `jet_decode_traced` chain-walker for each decodable
-//! `@PublishedSchema` type with migration blocks.
+//! `#PublishedSchema` type with migration blocks.
 //!
 //! I3: all checking here; codegen only performs the mechanical lowering.
 
@@ -50,7 +50,7 @@ fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String
 }
 
 /// D-MIGRATE4: rewrite each runtime-relevant migration op on a decodable
-/// `@PublishedSchema` type into synthetic top-level `fn`s so the runtime step
+/// `#PublishedSchema` type into synthetic top-level `fn`s so the runtime step
 /// functions (codegen, `Codegen/Items.rs::emit_struct_migration`) can call
 /// them, and so the op expressions are type-checked and lowered through the
 /// normal pipeline:
@@ -62,13 +62,13 @@ fn add_default_fn_name(type_name: &str, block_idx: usize, field: &str) -> String
 /// (zero cost).
 pub fn desugar_migrations(bundle: &mut ProgramBundle) {
     for module in &mut bundle.modules {
-        // Types that have a runtime decode path: `@PublishedSchema` + `Decode`,
+        // Types that have a runtime decode path: `#PublishedSchema` + `Decode`,
         // concrete (a generic published schema has no single runtime shape).
         let mut decodable_published: HashSet<String> = HashSet::new();
         for item in &module.items {
             if let Item::Struct(s) = item {
-                // `@PublishedSchema struct` sets the flag; the grouped
-                // `@[PublishedSchema, Codable]` spelling leaves the marker in
+                // `#PublishedSchema struct` sets the flag; the grouped
+                // `#[PublishedSchema, Codable]` spelling leaves the marker in
                 // `derives` — accept both.
                 let published = s.is_published_schema
                     || s.derives
@@ -364,7 +364,7 @@ pub fn check_schema_migrations(
         }
     }
 
-    // Check each @PublishedSchema struct.
+    // Check each #PublishedSchema struct.
     for item in items {
         let Item::Struct(s) = item else {
             continue;
@@ -414,7 +414,7 @@ pub fn check_schema_migrations(
                             diags.push(e0910_add_type_mismatch(&s.name, field, ty, new_ty, span));
                         } else if is_decode_only(s) {
                             // Currently unreachable in any shape codegen/parsing can
-                            // produce today (a Decode-only `@PublishedSchema` struct
+                            // produce today (a Decode-only `#PublishedSchema` struct
                             // with an `add` op is not yet a shipped combination), but
                             // guard it explicitly rather than let a future shape emit
                             // rejected Rust (I2): a Decode-only record only ever
@@ -564,7 +564,7 @@ fn e0910_dropped(type_name: &str, field: &str, version: &str, span: Span) -> Dia
             type_name, field, version
         ),
         format!(
-            "`@PublishedSchema` pins a record's saved shape at release; old data written with `{}` could no longer be read",
+            "`#PublishedSchema` pins a record's saved shape at release; old data written with `{}` could no longer be read",
             field
         ),
         format!(
@@ -589,7 +589,7 @@ fn e0910_changed_type(
             "the published record `{}` changed `{}` from `{}` to `{}`, with no migration to bridge it",
             type_name, field, old_ty, new_ty
         ),
-        "`@PublishedSchema` pins a record's saved shape at release; old data stored at the previous type could no longer be read".to_string(),
+        "`#PublishedSchema` pins a record's saved shape at release; old data stored at the previous type could no longer be read".to_string(),
         format!(
             "add `migration {} {{ change {}: {} -> {} via {{ (old) => … }} }}`, or bump the major version",
             type_name, field, old_ty, new_ty
@@ -630,7 +630,7 @@ fn e0910_added_required(type_name: &str, field: &str, span: Span) -> Diagnostic 
             "the published record `{}` added `{}`, but old data has no value for it",
             type_name, field
         ),
-        "`@PublishedSchema` records already written without this field can't be read unless there's a default to fill it in".to_string(),
+        "`#PublishedSchema` records already written without this field can't be read unless there's a default to fill it in".to_string(),
         format!(
             "add `migration {} {{ add {}: <Type> = <default> }}` to supply the value, or bump the major version",
             type_name, field
@@ -647,7 +647,7 @@ fn e0910_remove_still_present(type_name: &str, field: &str, span: Span) -> Diagn
             "the migration removes `{}`, but `{}` still has that field",
             field, type_name
         ),
-        "a `remove` op declares a field is gone, but the current `@PublishedSchema` struct still defines it".to_string(),
+        "a `remove` op declares a field is gone, but the current `#PublishedSchema` struct still defines it".to_string(),
         format!("delete the field from `struct {}`, or drop the `remove {}` line", type_name, field),
         Some(span),
     )
@@ -709,7 +709,7 @@ fn e0910_add_type_mismatch(
     )
 }
 
-/// E0910: an `add f: T` op on a Decode-only `@PublishedSchema` record names a
+/// E0910: an `add f: T` op on a Decode-only `#PublishedSchema` record names a
 /// type `T` that doesn't itself satisfy `Decode`. A Decode-only record only
 /// ever deserializes; a field it can't decode would make the generated
 /// `decode` impl call a decoder that doesn't exist for `T`.
@@ -922,7 +922,7 @@ mod tests {
         assert!(run_with_snapshot(SNAP_ONE, &items).is_empty());
     }
 
-    /// D-MIGRATE1 (I2 guard, bug #185/4): a Decode-only `@PublishedSchema` struct
+    /// D-MIGRATE1 (I2 guard, bug #185/4): a Decode-only `#PublishedSchema` struct
     /// (derives `Decode`, not `Encode`) adds a field whose type is registered as
     /// local but does NOT implement `Decode` — currently unreachable in any
     /// shape parsing/codegen produce today, but guarded explicitly so a future

@@ -114,7 +114,7 @@ fn scalar(value: &str) -> Option<Scalar> { match value { "int64" => Some(Scalar:
 
 fn render(lib: &str, functions: &[Function]) -> String {
     let abi = format!("jet_go_{lib}");
-    let mut out = format!("@Extern module c.{abi} {{\n");
+    let mut out = format!("#Extern module c.{abi} {{\n");
     for function in functions {
         out.push_str("    fn ");
         out.push_str(&function.name);

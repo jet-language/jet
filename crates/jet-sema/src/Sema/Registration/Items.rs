@@ -274,12 +274,12 @@ fn comptime_builtin_fixed_return_type(
     }
 }
 
-/// Card #131 / D-SERDE5: pre-evaluate every `@[Default(expr)]` argument on a
-/// `@[Codable]`/`@[Encode]`/`@[Decode]` struct field to a compile-time value,
+/// Card #131 / D-SERDE5: pre-evaluate every `#[Default(expr)]` argument on a
+/// `#[Codable]`/`#[Encode]`/`#[Decode]` struct field to a compile-time value,
 /// stashed on the marker (`Marker::ct`). Runs after `eval_comptime_items`, so a
 /// default may reference a `comptime` const. Codegen serializes this value and
 /// the comptime decode tier reuses it, so the two tiers bake the same default —
-/// a non-primitive `@[Default(expr)]` never silently degrades to
+/// a non-primitive `#[Default(expr)]` never silently degrades to
 /// `Default::default()` (R11/R12). A non-const argument is E2414.
 pub(crate) fn eval_default_markers(
     items: &mut [Item],
@@ -287,8 +287,8 @@ pub(crate) fn eval_default_markers(
     diags: &mut Vec<Diagnostic>,
     core_imports: &HashMap<String, String>,
 ) {
-    // Every struct that carries `@[Default(expr)]` needs the baked value —
-    // Codable decode absents AND `@Cli` entry-arg absents read it (one
+    // Every struct that carries `#[Default(expr)]` needs the baked value —
+    // Codable decode absents AND `#Cli` entry-arg absents read it (one
     // mechanism, I8); gating on Codable silently zeroed CLI defaults.
     let any = items.iter().any(|i| matches!(i, Item::Struct(s)
         if s.fields.iter().any(|f| f.serde_markers.iter().any(|m|
@@ -530,14 +530,14 @@ pub(crate) fn register_struct(
                 diags.push(Diagnostic::error(
                     "E1104",
                     format!(
-                        "`@Layout(c)` struct `{}` has a growable field `{}` ({})",
+                        "`#Layout(c)` struct `{}` has a growable field `{}` ({})",
                         s.name,
                         f.name,
                         f.ty.name()
                     ),
                     "growable types (`[T]`, `Map`, `String`) don't have a stable C layout"
                         .to_string(),
-                    "use a fixed-size array `[T#N]` instead, or remove `@Layout(c)`".to_string(),
+                    "use a fixed-size array `[T#N]` instead, or remove `#Layout(c)`".to_string(),
                     Some(layout_span),
                 ));
             }

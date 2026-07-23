@@ -25,7 +25,7 @@ The report distinguishes three kinds of evidence:
 
 The research produced twelve repeated lessons.
 
-1. **Safety cannot be retrofitted cleanly.** C, C++, D, Java, C#, Eiffel, Python, TypeScript, Kotlin interop, and Swift concurrency all show the cost of adding safety after unsafe or underspecified behavior has become normal. Jet's non-null, memory-safe, type-safe default and reason-bearing `@Unsafe` gate are the right foundation. No build profile may weaken them.
+1. **Safety cannot be retrofitted cleanly.** C, C++, D, Java, C#, Eiffel, Python, TypeScript, Kotlin interop, and Swift concurrency all show the cost of adding safety after unsafe or underspecified behavior has become normal. Jet's non-null, memory-safe, type-safe default and reason-bearing `#Unsafe` gate are the right foundation. No build profile may weaken them.
 2. **One semantic job must have one mechanism.** Kotlin's five scope functions, C/C++ parallel “safe” APIs, D's reflection families, Python packaging, Nix override layers, JavaScript module systems, and Haskell extension/tool stacks all became permanent teaching and tooling taxes.
 3. **Visible failure needs low ceremony, not hidden control flow.** Go's repetitive error checks and rejected `try`, Java's checked-exception evolution problems, C#'s `async void`, and exception-heavy proof systems all support Jet's typed fallibility plus visible `?`. The compiler must keep the path concise without making exits invisible.
 4. **Concurrency is a semantic system, not syntax sugar.** Rust async, Swift 6 concurrency, Kotlin coroutines, C# scheduler capture, Python's GIL, and BEAM hot upgrades show that cancellation, cleanup, sendability, scheduling, failure observation, FFI, and live state must be designed together.
@@ -44,7 +44,7 @@ The strongest lessons are already reflected in Jet law:
 
 | Repeated failure | Current Jet defense | Remaining verification |
 |---|---|---|
-| Unsafe defaults and safety profiles | I1; no safe-source escape except reason-bearing `@Unsafe`; optimization cannot change safety | Unsafe-region audit, FFI hostile corpus, memory fact matrix cards #642–#649 |
+| Unsafe defaults and safety profiles | I1; no safe-source escape except reason-bearing `#Unsafe`; optimization cannot change safety | Unsafe-region audit, FFI hostile corpus, memory fact matrix cards #642–#649 |
 | Backend/typechecker disagreement | I2, I3, R1–R3; front end owns checking and diagnostics | Keep every new backend on executable TIR parity lanes |
 | Multiple mechanisms | I8; syntax registry with decision IDs; one canonical Core operation | Continue naming/coherence audits before new surface ships |
 | Null and sentinel absence | `Option`; no `null` | Validate every FFI/codec boundary before safe construction |

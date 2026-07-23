@@ -1,7 +1,7 @@
-Error [E0721]: untrusted (`@Tainted`) data reaches `process.run` without being sanitized
+Error [E0721]: untrusted (`#Tainted`) data reaches `process.run` without being sanitized
   --> tests/ui/taint_sink_unsanitized.jet:8:23
     |
   8 |     result := process.run(["echo", name]) ?? return
     |                       ^^^
- Why: `process.run` runs a subprocess command — a `Exec` sink; a `@Tainted` value used there unchecked is the classic injection bug
- Fix: pass the value through a `@Sanitizer fn` first — its result is trusted, so it may reach the sink
+ Why: `process.run` runs a subprocess command — a `Exec` sink; a `#Tainted` value used there unchecked is the classic injection bug
+ Fix: pass the value through a `#Sanitizer fn` first — its result is trusted, so it may reach the sink

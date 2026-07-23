@@ -11,7 +11,7 @@
 //! interpreter calls before every statement; the hook decides whether to pause
 //! and run the interactive `(jet)` prompt. Because it reuses the dev
 //! interpreter, it covers the same deterministic subset and declines the same
-//! boundary (FFI / tasks / `@Unsafe` / native std) with **E2203**, pointing at
+//! boundary (FFI / tasks / `#Unsafe` / native std) with **E2203**, pointing at
 //! the native lldb-backed adapter shipped by D-DBG3 step 2.
 //!
 //! Command surface (D-DBG3, ratified A): the prompt is `(jet)`; the step verbs
@@ -572,7 +572,7 @@ pub fn run_session(file: &str, inputs: &[&str]) -> String {
 }
 
 /// D-DBG3 step 2 (dap-debugger): whether this program needs the native backend
-/// — the interpreter's boundary scan (E2203) found an FFI/task/`@Unsafe`/
+/// — the interpreter's boundary scan (E2203) found an FFI/task/`#Unsafe`/
 /// native-std construct step-1 can't step through. `None` means the file
 /// couldn't even be loaded; the caller should fall through to [`run_debug`],
 /// which reports that error the normal way (no duplicated error path here).
@@ -582,7 +582,7 @@ pub fn needs_native(file: &str) -> Option<bool> {
 }
 
 /// D-DBG3 step 2: the native lldb-backed `(jet)` terminal session — steps the
-/// FULL feature set (FFI/tasks/`@Unsafe`/native std) the interpreter declines.
+/// FULL feature set (FFI/tasks/`#Unsafe`/native std) the interpreter declines.
 /// `binary` is the already-built debug binary (full debuginfo); `rust_file`/
 /// `rust_src` are the generated Rust this build produced (with `// jet:line N`
 /// markers from `emit_bundle_dbg`); `jet_file`/`jet_src` are the original

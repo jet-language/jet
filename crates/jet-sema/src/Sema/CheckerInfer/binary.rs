@@ -640,15 +640,15 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0127",
                             format!("operator `{}` is not available on `{}`", op.spell(), distinct_name),
-                            format!("`{}` is a distinct type but isn't marked `@Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
-                            format!("add `@Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"),
+                            format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
+                            format!("add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value"),
                             Some(span),
                         ));
                     } else {
                         self.diags.push(Diagnostic::error(
                             "E0127",
                             format!("operator `{}` is not available between `{}` and `{}`", op.spell(), lt.name(), rt.name()),
-                            format!("`@Numeric` distinct types only support arithmetic between the same type"),
+                            format!("`#Numeric` distinct types only support arithmetic between the same type"),
                             format!("both sides must be `{}`", distinct_name),
                             Some(span),
                         ));
@@ -660,8 +660,8 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0127",
                         format!("operator `{}` is not available on `{}`", op.spell(), distinct_name),
-                        format!("`{}` is a distinct type but isn't marked `@Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
-                        "add `@Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value".to_string(),
+                        format!("`{}` is a distinct type but isn't marked `#Numeric`, so it doesn't inherit arithmetic operators — only `==` is available", distinct_name),
+                        "add `#Numeric` before the declaration if this is a quantity, or use `.raw()` to work on the underlying value".to_string(),
                         Some(span),
                     ));
                     return None;
@@ -669,7 +669,7 @@ impl<'a> Checker<'a> {
                 if self.registry.distinct_range(distinct_name).is_some() {
                     return self.registry.distinct_base(distinct_name).cloned();
                 }
-                // Same @Numeric distinct type — arithmetic is allowed, returns the same type.
+                // Same #Numeric distinct type — arithmetic is allowed, returns the same type.
                 return Some(lt);
             }
             if (lt_is_distinct || rt_is_distinct) && is_eq {

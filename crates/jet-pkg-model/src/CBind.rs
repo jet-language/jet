@@ -1,13 +1,13 @@
-//! Native C-header → Jet `@Bindgen` cache generator (E2-M14).
+//! Native C-header → Jet `#Bindgen` cache generator (E2-M14).
 //!
 //! Owner 2026-06-18: this supersedes the D-CBIND3=B `bindgen` route. The shipped
 //! `jet` stays std-only (I6) — no `bindgen`, no libclang. This is a focused
 //! parser for **C function prototypes** over the type subset Jet's FFI binds
 //! (scalars, `char*` strings, `void`). A declaration it cannot map is *skipped
 //! and reported* — never faked (I3). Anything beyond this subset is hand-written
-//! as an `@Extern module c.<lib>` overlay, which still wins on merge.
+//! as an `#Extern module c.<lib>` overlay, which still wins on merge.
 //!
-//! Output is a `@Bindgen module c.<lib>.__bindgen__ { … }` cache as parsed by
+//! Output is a `#Bindgen module c.<lib>.__bindgen__ { … }` cache as parsed by
 //! `src/cffi.rs`; each binding is `fn name(p: T, …) [-> R] = "c_symbol";`.
 
 /// Compute the bind hash for a header + cflags pair (Phase 3 invalidation).
@@ -47,7 +47,7 @@ pub fn write_bind_hash(
 
 /// Result of translating a header: the cache source plus what was/wasn't bound.
 pub struct BindResult {
-    /// The `@Bindgen module …` cache file text.
+    /// The `#Bindgen module …` cache file text.
     pub source: String,
     /// Function names successfully bound.
     pub bound: Vec<String>,
@@ -55,7 +55,7 @@ pub struct BindResult {
     pub skipped: Vec<(String, String)>,
 }
 
-/// Translate C header source into a `@Bindgen` cache for library `lib`.
+/// Translate C header source into a `#Bindgen` cache for library `lib`.
 /// `Err` only on a structural failure (no bindable function found at all), so
 /// the caller can surface E3208 honestly instead of writing an empty cache.
 pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
@@ -90,7 +90,7 @@ pub fn generate(header_src: &str, lib: &str) -> Result<BindResult, String> {
         ));
     }
 
-    let source = format!("@Bindgen module c.{}.__bindgen__ {{\n{}}}\n", lib, lines);
+    let source = format!("#Bindgen module c.{}.__bindgen__ {{\n{}}}\n", lib, lines);
     Ok(BindResult {
         source,
         bound,
@@ -253,7 +253,7 @@ fn split_params(src: &str) -> Option<Vec<String>> {
     Some(out)
 }
 
-/// Render one prototype as a Jet `@Bindgen` line, or Err(reason) if a type in it
+/// Render one prototype as a Jet `#Bindgen` line, or Err(reason) if a type in it
 /// isn't bindable in this subset.
 fn render_binding(p: &Proto) -> Result<String, String> {
     let ret_jet = match map_return_type(&p.ret) {
@@ -423,7 +423,7 @@ mod tests {
             bool is_ready();
         "#;
         let r = generate(h, "jetc").unwrap();
-        assert!(r.source.contains("@Bindgen module c.jetc.__bindgen__ {"));
+        assert!(r.source.contains("#Bindgen module c.jetc.__bindgen__ {"));
         assert!(r
             .source
             .contains("fn jetc_add(a: Int, b: Int) -> Int = \"jetc_add\";"));

@@ -7,7 +7,7 @@
 //! the real build does. This mirrors `tests/comptime_diff.rs`.
 //!
 //! Also tested:
-//!   - the E2201 honest-boundary note (tasks/FFI/`@Unsafe`/native std),
+//!   - the E2201 honest-boundary note (tasks/FFI/`#Unsafe`/native std),
 //!   - the per-iteration `dev_iteration` function the watch loop is built on,
 //!   - the save-to-diagnostic latency budget (D-DEV3, <200ms check-only).
 
@@ -514,12 +514,12 @@ fn print_jit_op_report() {
 ///   - E0953: a deliberate user-authored panic (`require(false, …)`), which is
 ///     the program legitimately failing, not a silent skip.
 ///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.files`/`core.io`/
-///     `core.env`/…) reached with no `@Impure` gate, or a gate present but
+///     `core.env`/…) reached with no `#Impure` gate, or a gate present but
 ///     `--allow-impure` not passed — an honest, named boundary (the golden
 ///     corpus runs with neither), not a silent skip.
 ///   - E1265 (U13, D-JPK-SECRETCRYPTO1): `core.vault.get` reached through the
 ///     same comptime/interpreter evaluation path — unconditionally denied
-///     (no `@Impure` escape hatch), so an example exercising it always stops
+///     (no `#Impure` escape hatch), so an example exercising it always stops
 ///     here under the interpreter/JIT tiers even though the AOT-compiled
 ///     binary runs it fine (it never goes through this evaluator).
 const BOUNDARY_CODES: &[&str] = &[
@@ -1023,7 +1023,7 @@ fn interpreter_matches_expected_golden() {
     for stem in all_example_stems() {
         let file = example_path(&stem);
         // D-JPK-TASKRUN1 / R12 (card #476): task_runner's meaningful entries are
-        // its `@Task` fns, not the `fn run()` usage hint. Mirror golden.rs's
+        // its `#Task` fns, not the `fn run()` usage hint. Mirror golden.rs's
         // AOT `--task` battery on the interpreter tier via `run_named_task`,
         // proving the same TIR dispatches each task identically. The bare
         // `fn run()` output is not a golden.
@@ -1371,7 +1371,7 @@ fn run() {
     print("before replace: {before_replace}")
     replaced = [42, 43]
     after_replace :: &replaced[1]
-    @DebugOnly { print("unrelated debug") }
+    #DebugOnly { print("unrelated debug") }
     after_replace = 49
     print("after replace: {after_replace}")
 }
@@ -2589,9 +2589,9 @@ fn resident_jit_checked_numeric_and_distinct_conversion_matrix_is_native() {
         return;
     }
     let src = r#"
-@Numeric UserId :: distinct Int
-@Numeric Severity :: distinct Int(0..10)
-@UnitFamily(Currency) { usd }
+#Numeric UserId :: distinct Int
+#Numeric Severity :: distinct Int(0..10)
+#UnitFamily(Currency) { usd }
 
 fn run() {
     print(I64.from_u8(255))
@@ -2631,12 +2631,12 @@ fn run() {
 fn physical_quantities_run_in_resident_jit_without_fallback() {
     if skip_if_cranelift_host_unsupported() { return; }
     let out = run_cranelift_without_fallback(r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     millimeter(scale: 1/1000)
     thirdish(scale: 2/3)
 }
-@UnitFamily(Time) { second }
+#UnitFamily(Time) { second }
 fn run() -> Void ? {
     distance :: 12meter
     elapsed :: 3second
@@ -2652,7 +2652,7 @@ fn run() -> Void ? {
     assert_eq!(out.stdout, "1.0\n3.0 1.0\n");
 
     let failed = run_cranelift_without_fallback(r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     thirdish(scale: 2/3)
 }
@@ -2666,7 +2666,7 @@ fn run() -> Void ? {
     );
 
     let beyond_f64 = run_cranelift_without_fallback(r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     almost(scale: 9007199254740993/9007199254740992)
 }
@@ -2680,14 +2680,14 @@ fn run() -> Void ? {
     );
 
     let rational_edges = run_cranelift_without_fallback(r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     almost(scale: 9007199254740993/9007199254740992)
     half(scale: 1/2)
     above_half(scale: 9007199254740993/18014398509481984)
     three_halves(scale: 3/2)
 }
-@UnitFamily(Temperature, base: kelvin) {
+#UnitFamily(Temperature, base: kelvin) {
     kelvin
     tie_offset(scale: 1, offset: 1/2)
     above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
@@ -2713,7 +2713,7 @@ fn run() -> Void ? {
     );
 
     let overflow = r#"
-@UnitFamily(Length, base: meter) { meter double(scale: 2) }
+#UnitFamily(Length, base: meter) { meter double(scale: 2) }
 fn run() -> Void ? {
     source :: Double.from_float(1.7976931348623157e308)
     Meter.from_double_rounded(source, .NearestEven, digits: 0)?
@@ -2735,13 +2735,13 @@ fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
         return;
     }
     let src = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     half(scale: 1/2)
     near_quarter(scale: 249/1000)
     near_three_quarters(scale: 751/1000)
 }
-@UnitFamily(Temperature, base: kelvin) {
+#UnitFamily(Temperature, base: kelvin) {
     kelvin
     shifted(scale: 1, offset: 249/1000)
 }
@@ -2837,12 +2837,12 @@ impl $name {{
 """)
 }
 
-@Access
+#Access
 struct Box<T: Printable> { value: T }
-@Access
+#Access
 struct StaticOnly<T: Printable> { value: T }
 struct Wrapper<U: Printable> { boxed: Box<U> }
-@NumericAccess
+#NumericAccess
 struct NumericBox<T: [Printable, Add, Equatable]> { value: T }
 
 fn run() {
@@ -2949,7 +2949,7 @@ derive T.GenericMethod {
     name :: info.name
     emit("impl $name {{ fn keep<T>(self, value: ^T) -> T {{ return value }} }}")
 }
-@GenericMethod
+#GenericMethod
 struct Shadow<T: Printable> { value: T }
 fn run() {
     item := Shadow<Int>.{ value: 1 }
@@ -3004,7 +3004,7 @@ derive T.Access {
     emit("impl $name {{ fn get_value(self) -> $param {{ return ~self.value }} }}")
 }
 
-@Access
+#Access
 struct Inner<T: Printable> { value: T }
 
 struct Outer<T: Printable> {
@@ -3482,18 +3482,49 @@ fn resident_jit_safety_detail_smoke() {
 
 #[test]
 fn resident_jit_safe_labeled_loop_control() {
-    let file = "examples/features/basics/labeled_loops.jet";
-    let mut bundle = jet::Loader::load_entry(file).expect("load");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    let errors: Vec<_> = diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(errors.is_empty(), "labeled loop example must type-check");
-    assert!(
-        jet_jit::resident_jit_safe_bundle(&bundle),
-        "labeled break/continue should stay JIT-covered: {}",
-        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    outer :: loop i := 0; i < 2; i++ {
+        loop {
+            if i == 0 {
+                outer.next()
+            }
+            outer.break()
+        }
+    }
+    print("done")
+}
+"#;
+    assert_eq!(
+        run_cranelift_without_fallback(src, "labeled_loop_control"),
+        ProgramOutput::ran("done\n".into(), "".into(), 0)
+    );
+}
+
+#[test]
+fn resident_jit_named_or_fallback_loop_control() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    values := [7]
+    outer :: loop i := 0; i < 2; i++ {
+        loop {
+            value :: values.get(1 - i) ?? outer.next()
+            print(value)
+            values.get(99) ?? outer.break()
+        }
+    }
+    print("done")
+}
+"#;
+    assert_eq!(
+        run_cranelift_without_fallback(src, "named_or_fallback_loop_control"),
+        ProgramOutput::ran("7\ndone\n".into(), "".into(), 0)
     );
 }
 
@@ -3698,7 +3729,7 @@ fn cranelift_covers_string_interpolation() {
 #[test]
 fn cranelift_covers_shield_region() {
     let out = run_cranelift_without_fallback(
-        "fn run() {\n    @Shield {\n        print(7)\n    }\n}\n",
+        "fn run() {\n    #Shield {\n        print(7)\n    }\n}\n",
         "shield_region",
     );
     assert_eq!(out.stdout, "7\n");
@@ -3712,7 +3743,7 @@ fn run() {
     (sender, ch) :: tasks.channel<Int>()
     (ack_sender, ack) :: tasks.channel<Int>()
     slow :: tasks.spawn(take(ch, ack_sender) () => {
-               @Shield {
+               #Shield {
                    value :: ch.receive() ?? panic("closed")
                    print(value)
                    ack_sender.send(1)
@@ -4232,11 +4263,11 @@ fn enum_variant_change_emits_e2210() {
     }
 }
 
-/// D-PERSIST1: `@Persist` is inert in a release build — the marker carries no
+/// D-PERSIST1: `#Persist` is inert in a release build — the marker carries no
 /// runtime-carry-across machinery yet (named gate: a module+name-keyed value
 /// store in the JIT resident runtime, `crates/jet-jit`, doesn't exist). This
 /// asserts that by construction: the generated Rust for a module-level
-/// `const` is byte-for-byte identical with and without `@Persist`.
+/// `const` is byte-for-byte identical with and without `#Persist`.
 #[test]
 fn persist_marker_is_codegen_inert() {
     let dir = std::env::temp_dir().join(format!("jet_persist_parity_{}", std::process::id()));
@@ -4268,12 +4299,12 @@ fn persist_marker_is_codegen_inert() {
     ));
     fs::remove_file(dir.join("counter.jet")).ok();
     let persisted = strip_source_map(compile(
-        "@Persist const counter = 0;\nfn run() {\n    print(counter)\n}\n",
+        "#Persist const counter = 0;\nfn run() {\n    print(counter)\n}\n",
         "counter.jet",
     ));
     assert_eq!(
         plain, persisted,
-        "@Persist must not change generated Rust (inert in release)"
+        "#Persist must not change generated Rust (inert in release)"
     );
 }
 
@@ -4281,7 +4312,7 @@ fn persist_marker_is_codegen_inert() {
 // A hand `impl T.Encode`/`impl T.Decode` round-trips under the native build (see
 // tests/corelib.rs::hand_written_encode_decode_round_trips). The dev interpreter
 // does not cover the json typed-decode path — and it doesn't for a DERIVED
-// `@[Codable]` either — so the honest behavior for BOTH is to stop at the E2201
+// `#[Codable]` either — so the honest behavior for BOTH is to stop at the E2201
 // pre-scan boundary and defer to native, never emit a divergent result. This test
 // pins that parity: the dev tier must not silently produce a wrong round trip.
 #[test]
@@ -4337,9 +4368,9 @@ fn run() {
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-task tick
-/// consumer. `scheduled_tasks` must enumerate every `@Task @Every(…)` fn
-/// with its resolved schedule (and skip a plain `@Task fn` with no
-/// `@Every(…)`), and `run_named_task` must actually execute one by name
+/// consumer. `scheduled_tasks` must enumerate every `#Task #Every(…)` fn
+/// with its resolved schedule (and skip a plain `#Task fn` with no
+/// `#Every(…)`), and `run_named_task` must actually execute one by name
 /// through the same interpreter tier `dev_iteration` uses — golden-testing
 /// the loop's per-tick logic without the long-running file watcher, same
 /// spirit as `dev_iteration` itself (see the module doc above).
@@ -4367,8 +4398,8 @@ fn schedule_every_dev_loop_consumer() {
     assert_eq!(
         names,
         vec!["nightly_backup", "prune_sessions"],
-        "scheduled_tasks must list every @Task fn carrying @Every(…), and skip the \
-         @Every(…)-less `manual_only` task"
+        "scheduled_tasks must list every #Task fn carrying #Every(…), and skip the \
+         #Every(…)-less `manual_only` task"
     );
     let schedules: std::collections::HashMap<&str, &jet::AST::EverySchedule> =
         tasks.iter().map(|(n, s)| (n.as_str(), s)).collect();
@@ -4377,12 +4408,12 @@ fn schedule_every_dev_loop_consumer() {
         jet::AST::EverySchedule::Interval {
             nanos: 5 * 60 * 1_000_000_000
         },
-        "`@Every(5min)` must resolve to a 5-minute interval"
+        "`#Every(5min)` must resolve to a 5-minute interval"
     );
     assert_eq!(
         *schedules["nightly_backup"],
         jet::AST::EverySchedule::DailyAt { hour: 3, minute: 0 },
-        "`@Every(\"03:00\")` must resolve to 03:00 daily"
+        "`#Every(\"03:00\")` must resolve to 03:00 daily"
     );
 
     // Actually invoking a named task runs it like an ordinary call.

@@ -166,7 +166,7 @@ fn selected_target_profile_validates_direct_mmio_accesses() {
 use core.mem as mem
 
 fn run() {
-    @Unsafe("timer register is mapped by board.sensor_v1") {
+    #Unsafe("timer register is mapped by board.sensor_v1") {
         p :: mem.Ptr<Int>.from_addr(0x40000100)
         mem.volatile_write(p, 7)
         _seen :: mem.volatile_read(p)
@@ -199,7 +199,7 @@ fn selected_target_profile_rejects_direct_mmio_outside_region() {
 use core.mem as mem
 
 fn run() {
-    @Unsafe("this address is intentionally outside the board MMIO region") {
+    #Unsafe("this address is intentionally outside the board MMIO region") {
         p :: mem.Ptr<Int>.from_addr(0x50000000)
         mem.volatile_write(p, 7)
     }

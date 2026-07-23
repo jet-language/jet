@@ -259,7 +259,7 @@ Current transactions:
 | `append_multi_input` | `node_start`, `node_end`, optional `element` | Appends an element to a list literal or fan-out `f.[...]` source node. Clients normally supply a type-derived default element and open inline edit after reproject. |
 | `remove_multi_input_element` | `node_start`, `node_end`, `element_start`, `element_end` | Removes one list/fan-out element, including the adjacent comma, then formats, checks, and reprojects. |
 | `create_trait_impl` | `type_name`, `trait_name` | Appends an ordinary `impl Type.Trait { ... }` block with source-checked member stubs. |
-| `break_link` | `wire_id` | Replaces the source expression behind a wire with `@Todo`, preserving Jet type checking. |
+| `break_link` | `wire_id` | Replaces the source expression behind a wire with `#Todo`, preserving Jet type checking. |
 | `move_link` | `wire_id`, `replacement` | Rewrites the source expression behind a wire to another visible Jet name/path. |
 | `replace_source` | `source` | Replaces the file with exact prior/future Jet source after formatting and front-end validation. Used by local undo/redo. |
 | `insert_branch` | `graph_id` | Inserts an ordinary checked `if true { ... } else { ... }` branch skeleton. |
@@ -424,7 +424,7 @@ Every function graph carries source-backed metadata:
 {"function":{"name":"on_start","signature":"pub fn on_start(limit: Int = <default@31-32>) -> Int","visibility":"public","docs":"Starts the scene.","pure":false,"unsafe":false,"returns":"Int","params":[{"name":"limit","type":"Int","default":true,"default_source":"1"}],"meta":{"category":"Movement","tunable":true},"edit_affordances":["rename_function","edit_function_signature","create_function","source_jump"]}}
 ```
 
-`@Meta(category: "...", tunable)` projects as `meta: {"category": <string|null>,
+`#Meta(category: "...", tunable)` projects as `meta: {"category": <string|null>,
 "tunable": <bool>}` on annotated function metadata and binding nodes. Unannotated
 items use `meta: null`. The field is source-backed and read-only in v1.
 

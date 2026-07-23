@@ -28,7 +28,7 @@ pub fn lex_generated(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     (toks, diags)
 }
 
-/// `@UnitFamily` conversion metadata is parsed as arbitrary-precision source
+/// `#UnitFamily` conversion metadata is parsed as arbitrary-precision source
 /// integers. Keep ordinary E0007 integer limits everywhere else.
 fn retain_non_metadata_integer_errors(toks: &[Token], diags: &mut Vec<Diagnostic>) {
     let significant: Vec<_> = toks
@@ -38,7 +38,7 @@ fn retain_non_metadata_integer_errors(toks: &[Token], diags: &mut Vec<Diagnostic
     let mut exact_spans = Vec::new();
     let mut i = 0;
     while i + 2 < significant.len() {
-        if !matches!(significant[i].kind, TokKind::At)
+        if !matches!(significant[i].kind, TokKind::Hash)
             || !matches!(&significant[i + 1].kind, TokKind::Ident(name) if name == crate::Syntax::ATTR_UNIT_FAMILY)
             || !matches!(significant[i + 2].kind, TokKind::LParen)
         {

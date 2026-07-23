@@ -254,7 +254,7 @@ fn translate_file(raw: &str, source: &Path, target: &Path) -> Translation {
             Ok(body) => {
                 let marker = if function.name.starts_with("test_") && function.params.is_empty() {
                     tests += 1;
-                    "@Test "
+                    "#Test "
                 } else {
                     ""
                 };

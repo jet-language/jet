@@ -5,9 +5,9 @@
 //
 //   state Reservation { Pending, Confirmed, CheckedIn }
 //
-//   @Transition(_ -> Pending)  fn book(...)      -- entry: value starts in `Pending`
-//   @Transition(Pending -> Confirmed) fn pay(self) -> R   -- advances the state
-//   @State(Confirmed) fn check_in(self)          -- valid only in `Confirmed`
+//   #Transition(_ -> Pending)  fn book(...)      -- entry: value starts in `Pending`
+//   #Transition(Pending -> Confirmed) fn pay(self) -> R   -- advances the state
+//   #State(Confirmed) fn check_in(self)          -- valid only in `Confirmed`
 //
 // Calling an operation in the wrong state is the compile error E0150 (see the ui
 // snapshot `typestate_wrong_state` for the rejected case: `check_in` on a still
@@ -21,12 +21,12 @@ struct Reservation {
 }
 
 impl Reservation {
-    @Transition(_ -> Pending) fn book(guest: String) -> Reservation {
+    #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
         // Entry transition: a fresh booking starts life in `Pending`.
         return Reservation.{guest: guest}
     }
 
-    @Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
+    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
         // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
         // value (`^self` — a move), matching the ratified mechanism: a fn takes the old
         // state and returns the next. Calling `pay` on anything but a pending
@@ -35,13 +35,13 @@ impl Reservation {
         return self
     }
 
-    @Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation {
+    #Transition(Confirmed -> CheckedIn) fn check_in(self: ^Reservation) -> Reservation {
         // Checking in advances `Confirmed -> CheckedIn`.
         print("{self.guest} checked in")
         return self
     }
 
-    @State(CheckedIn) fn room_key(self) -> String {
+    #State(CheckedIn) fn room_key(self) -> String {
         // A plain guarded read: only legal once checked in. No state change.
         return "key for {self.guest}"
     }

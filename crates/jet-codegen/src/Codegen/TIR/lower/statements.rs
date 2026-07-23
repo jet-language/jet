@@ -1130,9 +1130,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // D-CTMARKER1 (ratified 2026-06-25, piece 2): `comptime { … }` runs at
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
-        // D-CANVASSTATE1=D: `@Off` type-checks in sema but emits no runtime TIR.
+        // D-CANVASSTATE1=D: `#Off` type-checks in sema but emits no runtime TIR.
         Stmt::Off { .. } => TStmt::Inline(vec![]),
-        // D-CANVASSTATE1=D: `@DebugOnly` is a lexical debug-only region. Lower
+        // D-CANVASSTATE1=D: `#DebugOnly` is a lexical debug-only region. Lower
         // on a cloned env so declarations cannot be required by release code.
         Stmt::DebugOnly { body, .. } => {
             let mut scoped = clone_env(env);
@@ -1162,27 +1162,27 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             };
             TStmt::Inline(lower_stmts(chosen, cx, env))
         }
-        // c109 Phase 18: an audited `@Unsafe { … }` region (`Stmt::Unsafe`). Emission
+        // c109 Phase 18: an audited `#Unsafe { … }` region (`Stmt::Unsafe`). Emission
         // adds a Rust lexical block, so lower its declarations in a child env. The `#Audit("…")`
         // annotation is dropped (codegen is dumb — it emits nothing, matching the AST).
-        // I1: the source `@Unsafe` gate is 1:1 with this node, the only producer of a
+        // I1: the source `#Unsafe` gate is 1:1 with this node, the only producer of a
         // Rust `unsafe` block.
         Stmt::Unsafe { body, .. } => {
             let mut scoped = clone_env(env);
             TStmt::Unsafe(lower_stmts(body, cx, &mut scoped))
         }
-        // D-CTEFFECT1: `@Impure` erases to a plain block at codegen (comptime-only gate, I3).
+        // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (comptime-only gate, I3).
         Stmt::Impure { body, .. } => {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // D-REACTCORE1: `@Reactive { … }` lowers to `jet_reactive_effect(closure)`.
+        // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
         // Clone outer captures into the closure (same as a stored lambda).
         Stmt::Reactive { body, .. } => {
             let closure = render_reactive_block_closure(body, cx, env);
             TStmt::Reactive { closure }
         }
-        // D-SHIELDNAME1=A: `@Shield { … }` lowers to a shield-guarded lexical block.
+        // D-SHIELDNAME1=A: `#Shield { … }` lowers to a shield-guarded lexical block.
         Stmt::Shield { body, .. } => {
             let mut scoped = clone_env(env);
             TStmt::Shield {
@@ -1223,7 +1223,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 body: lowered_body,
             }
         }
-        // c109 Phase 26: a `@Caps(Io) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
+        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
         // `Stmt::Caps` arm is byte-for-byte `Stmt::Region`; effects erase at codegen (I3).
         Stmt::Caps { body, .. } => {
             let mut scoped = clone_env(env);
@@ -1237,7 +1237,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // c109 Phase 19: a `@Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
+        // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1/D-DEADLINE1).
         // Resolve each field against the outer env, then lower the guarded Rust block
         // in a lexical child env.
         Stmt::ContextBlock { fields, body, .. } => {
@@ -1258,7 +1258,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 body: lower_stmts(body, cx, &mut scoped),
             }
         }
-        // D-DOTSCOPE1: a `@Test` scope member (`.setup`/`.expect_fail`/`.timeout`/
+        // D-DOTSCOPE1: a `#Test` scope member (`.setup`/`.expect_fail`/`.timeout`/
         // `.skip`). Legality/args were checked in sema; here we pick the lowering
         // kind and fold `.timeout`'s duration literal to a nanosecond budget.
         // `.setup` emits inline, so its bindings are visible to the rest of the test;
@@ -1296,7 +1296,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // D-TXN1–D-TXN4 (ratified 2026-06-24): `@Transact(name) { … }` block. Bind the
+        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block. Bind the
         // handle (typed `Transaction`) in a child env so `name.on_commit(…)` lowers
         // against it without escaping the emitted Rust block. The
         // `let mut <handle> = jet_transaction(); … <handle>.commit();` framing is
@@ -1314,7 +1314,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             });
             // D-TXN-ROLLBACK layer 1 (auto-snapshot): collect the root local names
             // assigned anywhere in the block (recursing into nested control flow, but
-            // NOT into nested `@Transact` blocks or lambda bodies — those own their
+            // NOT into nested `#Transact` blocks or lambda bodies — those own their
             // own rollback scope / are deferred). Snapshot only roots ALREADY in scope
             // at block entry (params / outer locals): a local declared inside the block
             // needs no snapshot, since rollback discards it when the block scope ends.
@@ -1343,7 +1343,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // `Shared<T>.edit` inside routes to the deferred `edit_txn`. `stm_touched`
             // is reset first and read after, so `uses_stm` reflects THIS block only
             // (save/restore isolates nested blocks); a Shared edit in a nested
-            // `@Transact` attaches to that inner block's own transaction, not this one.
+            // `#Transact` attaches to that inner block's own transaction, not this one.
             let prev_in = cx.in_stm_transact.replace(true);
             let prev_touched = cx.stm_touched.replace(false);
             let lowered_body = lower_stmts(body, cx, &mut scoped);

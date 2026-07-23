@@ -128,10 +128,10 @@ fn run() {
 }
 
 // ===========================================================================
-// c109 Phase 23: @Pure / @Todo / default params / named args / distinct / tuples
+// c109 Phase 23: #Pure / #Todo / default params / named args / distinct / tuples
 // ===========================================================================
 
-/// c109 Phase 23: a `@Pure fn` (S60) routes through the TIR — purity is a sema-only
+/// c109 Phase 23: a `#Pure fn` (S60) routes through the TIR — purity is a sema-only
 /// check (E3401), erased at codegen, so the fn lowers byte-identically to a plain fn.
 #[test]
 fn pure_fn() {
@@ -155,8 +155,8 @@ fn run() {
     assert_eq!(stdout, "42\nhi, jet\n");
 }
 
-/// c109 Phase 23: a `@Todo` typed hole (`Expr::Todo`) emits a diverging
-/// `todo!("@Todo at … — expected <ty>")`. The fn compiles + routes; the hole is never
+/// c109 Phase 23: a `#Todo` typed hole (`Expr::Todo`) emits a diverging
+/// `todo!("#Todo at … — expected <ty>")`. The fn compiles + routes; the hole is never
 /// reached at runtime here (only the implemented fn is called).
 #[test]
 fn todo_hole() {
@@ -168,7 +168,7 @@ fn double(n: Int) -> Int {
     return (n * 2)
 }
 fn not_yet(n: Int) -> Int {
-    return @Todo
+    return #Todo
 }
 fn run() {
     print(double(21))
@@ -226,7 +226,7 @@ fn run() {
 
 /// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Destination conversion
 /// `Name.from_kind(x)` → newtype
-/// `user_Name(x)`; `.raw()` → `(recv).0`; `@Numeric` distinct `+`/`==` use the native
+/// `user_Name(x)`; `.raw()` → `(recv).0`; `#Numeric` distinct `+`/`==` use the native
 /// operator. A distinct value type passes/returns/binds byte-identically.
 #[test]
 fn distinct_types() {
@@ -235,8 +235,8 @@ fn distinct_types() {
     }
     let src = "\
 UserId :: distinct Int;
-@Numeric Meters :: distinct Float;
-@UnitFamily(Currency) { usd }
+#Numeric Meters :: distinct Float;
+#UnitFamily(Currency) { usd }
 
 fn greet(id: UserId) -> String {
     return \"user {(id.raw())}\"
@@ -272,7 +272,7 @@ fn distinct_and_unit_numeric_source_matrix() {
     let src = "\
 UserId :: distinct Int;
 Label :: distinct String;
-@UnitFamily(Currency) { usd }
+#UnitFamily(Currency) { usd }
 
 fn checked_user(value: U64) -> UserId ? String { return UserId.from_u64(value) }
 fn pass_user(value: UserId ? String) -> UserId ? String { return ~value }
@@ -321,7 +321,7 @@ fn range_type_runtime_try_and_arithmetic_widens() {
         return;
     }
     let src = "\
-@Numeric Severity :: distinct Int(0..10);
+#Numeric Severity :: distinct Int(0..10);
 
 fn checked(raw: Int) -> Severity ? String {
     return Ok(Severity.from_int(raw)?)
@@ -346,7 +346,7 @@ fn run() {
 #[test]
 fn range_type_literal_proofs_cover_every_numeric_source_family() {
     let src = r#"
-@Numeric Severity :: distinct Int(0..10)
+#Numeric Severity :: distinct Int(0..10)
 
 fn run() {
     signed :: Severity.from_i8(11)
@@ -871,7 +871,7 @@ fn run() {
     assert_eq!(stdout, "ok\n");
 }
 
-/// c109 Phase 26: a `@Caps(Io) { … }` effect-restriction region (D-EFF1, effect_caps)
+/// c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1, effect_caps)
 /// erases to a plain block in codegen; the body runs unchanged.
 #[test]
 fn caps_block() {
@@ -883,7 +883,7 @@ fn announce(label: String, n: Int) --[Io]-> {
     print(\"{label}: {n}\")
 }
 fn run() {
-    @Caps(Io) {
+    #Caps(Io) {
         announce(\"answer\", 42)
     }
 }

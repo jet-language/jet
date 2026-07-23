@@ -1,6 +1,6 @@
 //! D-MIGRATE2C (ratified 2026-06-22): `jet inspect schema` subcommand handlers.
 //!
-//! `jet inspect schema status` — report every `@PublishedSchema` type in the project:
+//! `jet inspect schema status` — report every `#PublishedSchema` type in the project:
 //! its pinned published version, field count, and field list. If the working-tree
 //! struct has a pending breaking change vs its snapshot, note it (reuses the
 //! E0910 diff, so the output matches what `jet build` would refuse).
@@ -56,7 +56,7 @@ fn project_root() -> PathBuf {
     )
 }
 
-/// `jet inspect schema status` — list every snapshotted `@PublishedSchema` type.
+/// `jet inspect schema status` — list every snapshotted `#PublishedSchema` type.
 fn run_status() {
     let root = project_root();
     let snaps = jet::Publish::load_all_snapshots(&root);
@@ -64,7 +64,7 @@ fn run_status() {
     if snaps.is_empty() {
         println!("no published schemas yet.");
         println!(
-            "note: a `@PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`."
+            "note: a `#PublishedSchema` struct is snapshotted into .jet/cache/schema/ on `jet registry publish`."
         );
         return;
     }
@@ -97,7 +97,7 @@ fn run_status() {
 }
 
 /// Run the schema-migration diff against the working tree and return the set of
-/// `@PublishedSchema` type names that currently have a pending breaking change.
+/// `#PublishedSchema` type names that currently have a pending breaking change.
 /// Reuses the exact pass `jet build` runs, then attributes each E0910 to the
 /// struct it names (every E0910 message backticks the type name).
 fn pending_breaks(root: &std::path::Path) -> Vec<String> {
@@ -171,7 +171,7 @@ fn run_squash(before: Option<&str>) {
         Err(_) => "0.0.0".to_string(),
     };
 
-    // Load the current working-tree @PublishedSchema structs so we re-baseline to
+    // Load the current working-tree #PublishedSchema structs so we re-baseline to
     // the *current* shape (not whatever the old snapshot held).
     let entry = find_project_entry(&root);
     let entry_str = entry.to_string_lossy().to_string();
@@ -203,7 +203,7 @@ fn run_squash(before: Option<&str>) {
     }
 
     if count == 0 {
-        println!("no `@PublishedSchema` structs found — nothing to squash.");
+        println!("no `#PublishedSchema` structs found — nothing to squash.");
     } else {
         println!(
             "\nok: {} snapshot(s) re-baselined. Migration blocks for versions before {} are no longer required.",

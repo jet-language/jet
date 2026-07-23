@@ -426,7 +426,7 @@ struct Holder<T> {
         return 1
     }
 
-    fn copy_tagged(self, value: @Tainted T) -> @Tainted T {
+    fn copy_tagged(self, value: #Tainted T) -> #Tainted T {
         return ~value
     }
 }
@@ -442,7 +442,7 @@ fn run() {
     strings: Holder<String> :: Holder<String>.{reader: read_string}
     print(callbacks.inspect())
     print(measures.inspect())
-    copied :: strings.copy_tagged(@Tainted "copy")
+    copied :: strings.copy_tagged(#Tainted "copy")
     print(3)
 }
 "#;

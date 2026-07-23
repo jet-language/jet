@@ -3,7 +3,7 @@
 
 use crate::Sema::Schema::{save_snapshot, snapshot_from_struct};
 
-/// Write schema snapshots for all `@PublishedSchema` structs in the entry bundle.
+/// Write schema snapshots for all `#PublishedSchema` structs in the entry bundle.
 /// Called during `jet registry publish`. Returns the number of snapshots written.
 pub fn write_schema_snapshots_for_entry(
     project_root: &std::path::Path,

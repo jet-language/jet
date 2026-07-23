@@ -692,7 +692,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
             }
             // D-LIN1-DROP: `drop(x)` — discard the value (move-to-nowhere). Sema
-            // proved the discard is audited when the value is `@SingleUse`. Lowers
+            // proved the discard is audited when the value is `#SingleUse`. Lowers
             // to a plain `drop(arg)`; no `unsafe` (I3). Disjoint from a user `drop`
             // fn or local of that name (`cx.sigs`/`env.locals` would be set then).
             if call.name == Syntax::BUILTIN_CONSUME
@@ -2009,7 +2009,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
-        // D-TAINT1: `@Tainted expr` — the value-fact tag is **erased in codegen**
+        // D-TAINT1: `#Tainted expr` — the value-fact tag is **erased in codegen**
         // (I3). Lower the inner expression unchanged; taint exists only as a
         // compile-time sema proof, never a runtime value.
         Expr::Tainted(inner, _, _) => lower_expr(inner, cx, env),
@@ -2029,7 +2029,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: Type::Option(Box::new(Type::Int)),
             kind: TExprKind::Absent,
         },
-        // c109 Phase 23: a `@Todo` typed hole → diverging `todo!(…)`. The expected-type
+        // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. The expected-type
         // STRING is the total sema fact (gate guarantees `Some`); the source line is
         // resolved here. The result `ty` is never load-bearing (a `todo!()` diverges and
         // is never an arithmetic operand), so a placeholder suffices — the emitted Rust
@@ -2135,6 +2135,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 OrFallback::Break(_) => TOrFallback::Break,
                 OrFallback::Continue(_) => TOrFallback::Continue,
+                OrFallback::BreakLabel(name, _) => TOrFallback::BreakLabel(name.clone()),
+                OrFallback::ContinueLabel(name, _) => TOrFallback::ContinueLabel(name.clone()),
             };
             TExpr {
                 ty: result_ty,

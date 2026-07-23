@@ -23,7 +23,7 @@
 //! snapshot is the *function-signature* surface specifically.
 //!
 //! Lives at `.jet/cache/api/<package>.api` (committed, durable contract — the same
-//! discipline as the D-MIGRATE1 `@PublishedSchema` snapshot).
+//! discipline as the D-MIGRATE1 `#PublishedSchema` snapshot).
 
 use crate::Syntax;
 use crate::AST::{Dimension, Func, Item, TraitMethodSig, Type};

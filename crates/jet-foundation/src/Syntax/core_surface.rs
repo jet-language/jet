@@ -50,7 +50,7 @@ pub const KW_FN: &str = "fn";
 /// S18 (ratified): marks an item as visible to other files (via `use`).
 pub const KW_PUB: &str = "pub";
 
-/// D-VISDEFAULT2=A (ratified): marks an item private inside a `@PubFile` file.
+/// D-VISDEFAULT2=A (ratified): marks an item private inside a `#PubFile` file.
 pub const KW_PRIV: &str = "priv";
 
 /// D-VISDEFAULT2=A (ratified): file-scope marker that flips default visibility to
@@ -89,28 +89,28 @@ pub const SIGIL_BIND_IMMUT: &str = "::";
 pub const SIGIL_BIND_MUT: &str = ":=";
 
 /// D-PROVENANCE1=B: binding-level tracking marker, written before the binding:
-/// `@Track name :: expr` / `@Track name := expr`.
+/// `#Track name :: expr` / `#Track name := expr`.
 pub const ATTR_TRACK: &str = "Track";
 
 /// D-CANVASSTATE1=D (ratified 2026-07-09): statement switch-off attribute.
-/// `@Off <stmt>` parses and type-checks the statement, then emits no code.
+/// `#Off <stmt>` parses and type-checks the statement, then emits no code.
 pub const ATTR_OFF: &str = "Off";
 
 /// D-CANVASSTATE1=D (ratified 2026-07-09): debug-only statement attribute.
-/// `@DebugOnly <stmt>` emits only in debug/dev builds; release builds strip it.
+/// `#DebugOnly <stmt>` emits only in debug/dev builds; release builds strip it.
 pub const ATTR_DEBUG_ONLY: &str = "DebugOnly";
 
 /// D-CANVASMETA1=B (ratified 2026-07-09): tooling metadata attribute for
 /// bindings, top-level consts, and functions.
 pub const ATTR_META: &str = "Meta";
 
-/// D-CANVASMETA1=B: `@Meta` category field name.
+/// D-CANVASMETA1=B: `#Meta` category field name.
 pub const META_FIELD_CATEGORY: &str = "category";
 
-/// D-CANVASMETA1=B: `@Meta` tunable flag field name.
+/// D-CANVASMETA1=B: `#Meta` tunable flag field name.
 pub const META_FIELD_TUNABLE: &str = "tunable";
 
-/// D-MARK-META1=B: `@Meta` maturity field name.
+/// D-MARK-META1=B: `#Meta` maturity field name.
 pub const META_FIELD_MATURITY: &str = "maturity";
 
 /// S3 (ratified): block delimiters.
@@ -279,74 +279,74 @@ pub const TYPE_STREAM: &str = "Stream";
 
 /// D-UNSAFE2 (ratified 2026-06-22, opt B; prev S58 2026-06-12) and
 /// D-UNSAFE-REASON1=B (ratified 2026-07-06): the audited
-/// expert gate. Block form: `@Unsafe("reason") { … }`. Whole-function form:
-/// `@Unsafe("reason") fn`. Bare `@Unsafe { … }` / `@Unsafe fn` compile and
-/// emit L3101. The reason is the argument of `@Unsafe` itself; the separate
+/// expert gate. Block form: `#Unsafe("reason") { … }`. Whole-function form:
+/// `#Unsafe("reason") fn`. Bare `#Unsafe { … }` / `#Unsafe fn` compile and
+/// emit L3101. The reason is the argument of `#Unsafe` itself; the separate
 /// `#Audit` marker is retired (E0055). The bare lowercase `unsafe` keyword
 /// (FOREIGN_UNSAFE) is the rejected foreign spelling, recognized only to emit a
 /// teaching error.
 pub const KW_UNSAFE: &str = "Unsafe";
 
-/// D-SHIELDNAME1=A (ratified 2026-07-11): `@Shield { … }` — the cancellation-shield
-/// block marker, joining the `@Unsafe`/`@Context` sigil family. Any cancellation
+/// D-SHIELDNAME1=A (ratified 2026-07-11): `#Shield { … }` — the cancellation-shield
+/// block marker, joining the `#Unsafe`/`#Context` sigil family. Any cancellation
 /// (or blown deadline) pending against a task running inside the block is deferred
 /// until the block exits; at exit the deadline lands first, then the cancel. Bare
-/// `@Shield {` only — no argument list (`@Shield(...)` is a parse error). Lowers to
+/// `#Shield {` only — no argument list (`#Shield(...)` is a parse error). Lowers to
 /// the `jet_scheduler_shield_enter`/`_leave` runtime (SHIELD_DEPTH thread-local);
 /// a no-op outside a task. Expert-tier concurrency marker.
 pub const KW_SHIELD: &str = "Shield";
 
-/// D-CTEFFECT1 (ratified 2026-06-25): `@Impure("reason") { … }` — the audited
+/// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the audited
 /// Tier-2 comptime effect gate. Both this block AND `--allow-impure` at build
 /// are required to execute ambient comptime I/O (Fs/Env/Exec/Io). PascalCase
 /// per D-CASING1 (consistent with `Unsafe`).
 pub const KW_IMPURE: &str = "Impure";
 
-/// D-REACTCORE1 (ratified 2026-06-27, opt D): `@Reactive fn` / `@Reactive { … }` —
+/// D-REACTCORE1 (ratified 2026-06-27, opt D): `#Reactive fn` / `#Reactive { … }` —
 /// an explicit opt-in scope marker. Inside it, signal `.get()` reads register with
 /// the active reactive observer (library machinery in `core.reactive`). Lowers to
 /// `jet_reactive_scope` / `jet_reactive_effect` — no new evaluation semantics.
 pub const KW_REACTIVE: &str = "Reactive";
 
 /// D-WASM1=A (ratified 2026-06-28, c123), respelled by D-MARK-TARGET1=A
-/// (ratified 2026-07-11, card #498): `@Target(Wasm|Js)` is the one target-
+/// (ratified 2026-07-11, card #498): `#Target(Wasm|Js)` is the one target-
 /// marker family, covering both the module-/file-level partition ceiling
 /// AND the per-function bucket override (the retired bare `#Wasm`/`#Js`
 /// spellings). Sema validates it against inferred `Browser` effects.
 pub const ATTR_TARGET: &str = "Target";
 
 /// D-WASM1=A: export this WASM function to the generated JS loader. A
-/// different job (export surface) from the `@Target(Wasm|Js)` partition
+/// different job (export surface) from the `#Target(Wasm|Js)` partition
 /// family above — D-MARK-TARGET1=A leaves it untouched.
 pub const ATTR_WASM_EXPORT: &str = "WasmExport";
 
-/// D-WASM1=A: `@Target(Js)` argument spelling.
+/// D-WASM1=A: `#Target(Js)` argument spelling.
 pub const WEB_BUCKET_JS: &str = "Js";
 
-/// D-WASM1=A: `@Target(Wasm)` argument spelling.
+/// D-WASM1=A: `#Target(Wasm)` argument spelling.
 pub const WEB_BUCKET_WASM: &str = "Wasm";
 
 /// D-WEBKIND1=A (c123): `jet build --target=web` Jet backend target (not a rustc triple).
 pub const BUILD_TARGET_WEB: &str = "web";
 
-/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `@Target(Web)` argument spelling — a file-level
+/// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` argument spelling — a file-level
 /// marker distinct from the `Wasm`/`Js` partition-ceiling values above (same
-/// `@Target(...)` marker, different axis: "build me for the web backend by
+/// `#Target(...)` marker, different axis: "build me for the web backend by
 /// default" rather than "cap this file's partition ceiling").
 pub const WEB_TARGET_DEFAULT_WEB: &str = "Web";
 
-/// D-HTMLPAIR1 (ratified 2026-07-01, c134): `@Html("path.html")` — an explicit, file-level
+/// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — an explicit, file-level
 /// declaration of this program's companion host page for `--target=web`
 /// builds, replacing the silent `<stem>.html` filename convention.
 pub const ATTR_HTML: &str = "Html";
 
-/// D-DSLBLOCK1=A (ratified 2026-07-06): `@Sql<Row> { ... }` — a stdlib-owned,
+/// D-DSLBLOCK1=A (ratified 2026-07-06): `#Sql<Row> { ... }` — a stdlib-owned,
 /// checked DSL block. Third-party DSL block markers are not user-extensible.
 pub const DSL_BLOCK_SQL: &str = "Sql";
 
 /// D-DSLBLOCK1=A: initial fixed stdlib DSL block marker whitelist. `Html`
-/// reuses `ATTR_HTML`; block form (`@Html { ... }`) is distinct from the
-/// existing file-level companion-page form (`@Html("path.html")`).
+/// reuses `ATTR_HTML`; block form (`#Html { ... }`) is distinct from the
+/// existing file-level companion-page form (`#Html("path.html")`).
 pub const STDLIB_DSL_BLOCK_MARKERS: &[&str] = &[DSL_BLOCK_SQL, ATTR_HTML];
 
 /// D-TYPEDTEXT2: parser-only sentinels for `sql"..."` / `html"..."` literals.
@@ -359,19 +359,19 @@ pub const TYPE_SH: &str = "Sh";
 /// D-FFI-SH1=A / D-TYPEDTEXT2: parser sentinel for user spelling `sh"…"`.
 pub const TYPED_TEXT_SH_PREFIX_CALL: &str = "$typed_text_sh";
 
-/// D-OSTARGET1=A (ratified 2026-07-01, c134): `@Target(Os. … )` namespace — the
-/// second, mutually-exclusive axis of the `@Target(...)` marker family
+/// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os. … )` namespace — the
+/// second, mutually-exclusive axis of the `#Target(...)` marker family
 /// (`Wasm`/`Js`/`Web` above are the first, web-bucket axis). Attaches at
 /// `impl` block scope, not file/module scope.
 pub const TARGET_OS_NAMESPACE: &str = "Os";
 
-/// D-OSTARGET1=A: `@Target(Os.Linux)`.
+/// D-OSTARGET1=A: `#Target(Os.Linux)`.
 pub const TARGET_OS_LINUX: &str = "Linux";
 
-/// D-OSTARGET1=A: `@Target(Os.Macos)`.
+/// D-OSTARGET1=A: `#Target(Os.Macos)`.
 pub const TARGET_OS_MACOS: &str = "Macos";
 
-/// D-OSTARGET1=A: `@Target(Os.Windows)`.
+/// D-OSTARGET1=A: `#Target(Os.Windows)`.
 pub const TARGET_OS_WINDOWS: &str = "Windows";
 
 /// D-OSTARGET2=B (ratified 2026-07-03): the compiler-known comptime value
@@ -385,7 +385,7 @@ pub const BUILD_INFO: &str = "build";
 pub const BUILD_INFO_OS: &str = "os";
 
 /// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
-/// only for teaching errors (E0031 / E0003) pointing at the `@Unsafe` marker.
+/// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
 pub const FOREIGN_UNSAFE: &str = "unsafe";
 
 /// S58 (ratified 2026-06-12): discovery gate — naming any low-level item
@@ -435,12 +435,12 @@ pub const MEM_VOLATILE_READ: &str = "volatile_read";
 pub const MEM_VOLATILE_WRITE: &str = "volatile_write";
 
 /// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
-/// an Int (taking a pointer is inert; using it needs `@Unsafe`).
+/// an Int (taking a pointer is inert; using it needs `#Unsafe`).
 pub const MEM_ADDRESS_OF: &str = "address_of";
 
 /// D-ALLOC1 (ratified 2026-06-19): arena allocator type name.
 /// Construct with `mem.Arena.new()`, allocate with `arena.alloc(value)`.
-/// Gated by `use core.mem` (E3102); no `@Unsafe` needed.
+/// Gated by `use core.mem` (E3102); no `#Unsafe` needed.
 pub const MEM_ARENA: &str = "Arena";
 
 /// D-ALLOC-C (ratified 2026-06-19): bump allocator (append-only, O(1)).
@@ -504,7 +504,7 @@ pub const CORE_EMAIL_SMTP_FN: &str = "smtp";
 pub const CORE_EMAIL_SMTP_FROM_ENV_FN: &str = "smtp_from_env";
 
 /// D-REGION1 / D-BLOCKPLANE1: explicit allocation-region block
-/// `@Region(r) { … }`.
+/// `#Region(r) { … }`.
 /// Names a region spanning multiple arenas or narrower than the enclosing
 /// function; arena `view`s allocated inside may not escape the region (E0631).
 /// The beginner default is an implicit scope-inferred region (opt A) and never
@@ -522,7 +522,7 @@ pub const KW_TASKGROUP: &str = "taskgroup";
 pub const CTX_BLOCK: &str = "Context";
 
 /// D-CTX1 + D-DEADLINE1 (ratified 2026-06-22/2026-06-28): allowed field names
-/// inside `@Context(…)`.
+/// inside `#Context(…)`.
 pub const CTX_FIELD_ALLOCATOR: &str = "allocator";
 /// D-CTX1 (ratified 2026-06-22): logger field (v1 bundle).
 pub const CTX_FIELD_LOGGER: &str = "logger";
@@ -531,7 +531,7 @@ pub const CTX_FIELD_LOGGER: &str = "logger";
 pub const CTX_FIELD_DEADLINE: &str = "deadline";
 
 /// D-TERM1 / D-BLOCKPLANE1: terminal direct-input block marker.
-/// `@Live { … }` enters un-buffered/no-echo input mode for its body and
+/// `#Live { … }` enters un-buffered/no-echo input mode for its body and
 /// guarantees terminal-state restore on every exit path including panic
 /// (implemented with the D-DEFER1 scope-guard mechanism). "raw mode" jargon
 /// is deliberately avoided; `live` is the user-facing name. A contextual
@@ -539,7 +539,7 @@ pub const CTX_FIELD_DEADLINE: &str = "deadline";
 pub const ATTR_LIVE: &str = "Live"; // D-BLOCKPLANE1
 
 /// D-DET1 / D-BLOCKPLANE1: expert determinism-escape marker.
-/// `@Nondeterministic("reason") { … }` inside a `@Pure fn` suspends determinism
+/// `#Nondeterministic("reason") { … }` inside a `#Pure fn` suspends determinism
 /// rejections (E3401/E3403) for its body — the "I know this is deterministic"
 /// hatch. A semantic footgun, v1-legal per the card. A contextual keyword:
 /// recognised only when followed by `{`, so a name `assume_deterministic` still
@@ -547,14 +547,14 @@ pub const ATTR_LIVE: &str = "Live"; // D-BLOCKPLANE1
 pub const ATTR_NONDETERMINISTIC: &str = "Nondeterministic"; // D-BLOCKPLANE1
 
 /// D-DET1 (ratified 2026-06-22): the deterministic injected `Clock` capability
-/// type. A `@Pure fn` taking a `Clock` param may read time **through it**
+/// type. A `#Pure fn` taking a `Clock` param may read time **through it**
 /// (`clock.now()` / `clock.tick(ms)`) — reproducible, because the caller seeded
 /// it (`time.clock(seed)`) — while the ambient `time.now()` stays E3403. An
 /// ordinary value type, not a module alias; methods are pure-from-the-fn's-view.
 pub const CLOCK_TYPE: &str = "Clock";
 
 /// D-DET1 (ratified 2026-06-22): the deterministic injected `Rng` capability
-/// type. A `@Pure fn` taking an `Rng` param may draw randomness **through it**
+/// type. A `#Pure fn` taking an `Rng` param may draw randomness **through it**
 /// (`rng.int(lo, hi)` / `rng.float()`) — reproducible from the caller's seed
 /// (`random.rng(seed)`) — while the ambient `random.int(…)` stays E3403.
 /// D-DET-CAPAPI (ratified 2026-06-25) widens `Rng` with `bool()` / `pick(list)`

@@ -432,7 +432,7 @@ fn parse_module_name(source: &str) -> Option<String> {
 
 fn render(lib: &str, routines: &[Routine]) -> String {
     let abi = format!("jet_fortran_{lib}");
-    let mut out = format!("@Bindgen module c.{abi}.__bindgen__ {{\n");
+    let mut out = format!("#Bindgen module c.{abi}.__bindgen__ {{\n");
     for routine in routines {
         for (name, param) in &routine.params {
             if let Param::Array { extents, .. } = param {

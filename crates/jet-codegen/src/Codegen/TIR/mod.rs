@@ -641,22 +641,22 @@ pub struct TFunc {
     /// D-COV1: the 1-based Jet source line of this function's name, for the
     /// `jet_cov(line)` coverage probe. Only read in coverage mode.
     pub line: usize,
-    /// c109 Phase 18: an `@Unsafe fn` (S58, E2-M13/D-LL1) lowers to a Rust `unsafe fn`
+    /// c109 Phase 18: an `#Unsafe fn` (S58, E2-M13/D-LL1) lowers to a Rust `unsafe fn`
     /// (the `unsafe ` keyword prefixes the signature), so the body may use gated pointer
-    /// ops directly — calling it is already gated to an `@Unsafe` block in sema (E3103).
-    /// I1: this is true ONLY when the source function was `@Unsafe fn`; no `unsafe` is
+    /// ops directly — calling it is already gated to an `#Unsafe` block in sema (E3103).
+    /// I1: this is true ONLY when the source function was `#Unsafe fn`; no `unsafe` is
     /// ever emitted without that source gate. Applies to `TopLevel`/`Method`; a trait
     /// method carries its own `is_unsafe` on `TFuncKind::TraitMethod`.
     pub is_unsafe: bool,
     /// D-CABI-CALLBACK1: named pure, monomorphic top-level functions expose a
     /// stable C-convention symbol; sema alone decides whether it may cross C.
     pub is_pure: bool,
-    /// D-REACTCORE1: `@Reactive fn` — the body is emitted inside `jet_reactive_effect`.
+    /// D-REACTCORE1: `#Reactive fn` — the body is emitted inside `jet_reactive_effect`.
     pub is_reactive: bool,
-    /// D-METHODMACRO1=A: `@Inline fn` — emits `#[inline]`. Soft hint; sema never
+    /// D-METHODMACRO1=A: `#Inline fn` — emits `#[inline]`. Soft hint; sema never
     /// rejects it.
     pub is_inline: bool,
-    /// D-METHODMACRO1=A: `@InlineAlways fn` — emits `#[inline(always)]`. Only ever
+    /// D-METHODMACRO1=A: `#InlineAlways fn` — emits `#[inline(always)]`. Only ever
     /// `true` here once sema has confirmed the function can actually inline
     /// (E0917/E0918/E0919 would have failed the build otherwise) — I3: sema
     /// decides, codegen just emits.
@@ -706,8 +706,8 @@ pub enum TFuncKind {
     /// `user_` mangle) and there is NO `pub`. `self_conv` is the receiver convention
     /// (`Read`→`&self`, `Mutate`→`&mut self`, `Move`→`self`) — D-MUTSELF1: a `mut self`
     /// trait method gets `&mut self` and may mutate the receiver in place. `is_unsafe`
-    /// reproduces the `unsafe fn` prefix for an `@Unsafe fn` trait method (S58/D-LL1 —
-    /// the body may use gated ops; calling it is already gated to an `@Unsafe` block).
+    /// reproduces the `unsafe fn` prefix for an `#Unsafe fn` trait method (S58/D-LL1 —
+    /// the body may use gated ops; calling it is already gated to an `#Unsafe` block).
     TraitMethod {
         is_unsafe: bool,
         self_conv: AccessConvention,
@@ -794,7 +794,7 @@ pub enum TIfCond {
     Matches { pat_str: String, subj: TExpr },
 }
 
-/// D-DOTSCOPE1: which `@Test` scope member a `TStmt::ScopeMember` is.
+/// D-DOTSCOPE1: which `#Test` scope member a `TStmt::ScopeMember` is.
 pub enum ScopeMemberKind {
     /// `.setup { … }` — the body's statements are spliced inline (bindings leak
     /// to the rest of the test), running first.
@@ -955,7 +955,7 @@ pub enum TStmt {
         else_is_elseif: bool,
     },
     /// `loop { … }` — an infinite loop (`Stmt::Loop`). `label` is the optional
-    /// `@name` rendered as `'jet_<name>:` (resolved at lowering, never re-derived).
+    /// `name :: loop` rendered as `'jet_<name>:` (resolved at lowering, never re-derived).
     Loop {
         label: Option<String>,
         body: Vec<TStmt>,
@@ -987,9 +987,9 @@ pub enum TStmt {
         step: Option<TExpr>,
         body: Vec<TStmt>,
     },
-    /// `break` / `break @name` (label resolved at lowering).
+    /// `break` / `name.break()` (label resolved at lowering).
     Break(Option<String>),
-    /// Source `next` / `next name@`; internally retained as Continue.
+    /// Source `next` / `name.next()`; internally retained as Continue.
     Continue(Option<String>),
     /// c109 Phase 4: an exhaustive `when`/match on an enum subject (`Stmt::Switch`
     /// whose arms are all variant patterns). Lowers to a Rust `match`, mirroring
@@ -1094,9 +1094,9 @@ pub enum TStmt {
     /// selected branch is `else` but there is no else-body (or sema didn't resolve),
     /// this holds an empty vec (emits nothing).
     Inline(Vec<TStmt>),
-    /// D-CANVASSTATE1=D: `@DebugOnly <stmt>` / `@DebugOnly { … }`.
+    /// D-CANVASSTATE1=D: `#DebugOnly <stmt>` / `#DebugOnly { … }`.
     /// AOT emission gates this behind `#[cfg(not(jet_release))]`; dev/JIT tiers
-    /// lower it as ordinary debug code. `@Off` has no TIR node: it lowers to an
+    /// lower it as ordinary debug code. `#Off` has no TIR node: it lowers to an
     /// empty `Inline`.
     DebugOnly(Vec<TStmt>),
     /// c109 Phase 15: a MIXED comparison/Bool `when` switch (`emit_mixed_switch`,
@@ -1113,14 +1113,14 @@ pub enum TStmt {
         arms: Vec<(TExpr, Vec<TStmt>)>,
         else_body: Option<Vec<TStmt>>,
     },
-    /// c109 Phase 18: an audited `@Unsafe { … }` gate region (`Stmt::Unsafe`, S58,
+    /// c109 Phase 18: an audited `#Unsafe { … }` gate region (`Stmt::Unsafe`, S58,
     /// E2-M13/D-LL1). The AST `emit_stmts` lowers it straight to a Rust `unsafe { … }`
     /// block; the `#Audit("…")` annotation (the `audit` field) emits NOTHING (codegen is
     /// dumb — sema validated the audit). I1: this TIR node exists ONLY for a source
-    /// `@Unsafe` region, so the emitted `unsafe { … }` is always 1:1 with a source gate.
+    /// `#Unsafe` region, so the emitted `unsafe { … }` is always 1:1 with a source gate.
     /// Body bindings use the `unsafe` block's child lexical env.
     Unsafe(Vec<TStmt>),
-    /// D-REACTCORE1: `@Reactive { … }` — register a reactive effect at this point.
+    /// D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
     Reactive {
         closure: String,
     },
@@ -1144,7 +1144,7 @@ pub enum TStmt {
         label: String,
         body: Vec<TStmt>,
     },
-    /// c109 Phase 19: a `@Context(field: value) { … }` smart-context block (D-CTX1). Lowers
+    /// c109 Phase 19: a `#Context(field: value) { … }` smart-context block (D-CTX1). Lowers
     /// to a plain block with one RAII/no-op guard per field (in declaration order)
     /// BEFORE the body: `allocator`/`deadline` push a dynamic context guard in
     /// `jet_mem`; `logger` stays a v1 no-op value bind. Each `(field_name, value)`
@@ -1162,7 +1162,7 @@ pub enum TStmt {
     Live {
         body: Vec<TStmt>,
     },
-    /// D-SHIELDNAME1=A (ratified 2026-07-11): `@Shield { … }` — a cancellation-shield
+    /// D-SHIELDNAME1=A (ratified 2026-07-11): `#Shield { … }` — a cancellation-shield
     /// region. Lowers to:
     ///   `{ jet_scheduler_shield_enter(); let _shield_guard = jet_scope_guard(|| jet_scheduler_shield_leave()); <body> }`
     /// The scope guard guarantees `jet_scheduler_shield_leave()` runs on every exit
@@ -1173,7 +1173,7 @@ pub enum TStmt {
     Shield {
         body: Vec<TStmt>,
     },
-    /// D-DOTSCOPE1: a `@Test` scope-member region — `.setup` / `.expect_fail` /
+    /// D-DOTSCOPE1: a `#Test` scope-member region — `.setup` / `.expect_fail` /
     /// `.timeout(dur)` / `.skip`. Emitted only inside a `jet test` harness fn
     /// (`fn jet_test_N() -> Result<(), String>`); see `emit_tir_stmt` for the
     /// per-kind lowering. Whole-test `.skip` (a `.skip` first statement) is
@@ -1182,7 +1182,7 @@ pub enum TStmt {
         kind: ScopeMemberKind,
         body: Vec<TStmt>,
     },
-    /// D-TXN1–D-TXN4 (ratified 2026-06-24): `@Transact(name) { … }` — a transaction
+    /// D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` — a transaction
     /// block. Lowers to:
     ///   `{ let mut <handle> = jet_transaction(); <body>; <handle>.commit(); }`
     /// `<handle>.on_commit(() => { … })` inside the body lowers to
@@ -1193,7 +1193,7 @@ pub enum TStmt {
     /// codegen is dumb (I3): effects/transaction state are a compile-time fact.
     Transact {
         /// The mangled Rust name of the transaction handle (`user_<name>`), or `None`
-        /// for a bare `@Transact { … }` with no handle (no `on_commit`/`on_rollback`
+        /// for a bare `#Transact { … }` with no handle (no `on_commit`/`on_rollback`
         /// hooks). When `snapshots` is non-empty a handle is synthesized even for a
         /// bare block, so the auto-snapshot has a transaction to register on.
         handle: Option<String>,
@@ -1205,7 +1205,7 @@ pub enum TStmt {
         /// D-STM1=A (card #506): true when the block touches the `Shared<T>` plane
         /// (some `.edit` inside routed to `edit_txn`), so emission wraps the body in
         /// `jet_stm::begin()` … `.commit()` — the atomic multi-handle commit. False
-        /// for a plain local-only `@Transact` (byte-identical to the pre-STM output).
+        /// for a plain local-only `#Transact` (byte-identical to the pre-STM output).
         uses_stm: bool,
         body: Vec<TStmt>,
     },
@@ -1325,9 +1325,9 @@ pub enum TExprKind {
     /// `print(x)` — the one builtin the subset covers.
     Print(Box<TExpr>),
     /// D-LIN1-DROP (ratified 2026-06-25): `drop(x)` — deliberately discard a
-    /// value (a `@SingleUse` value's audited terminal consumption). Lowers to a
+    /// value (a `#SingleUse` value's audited terminal consumption). Lowers to a
     /// plain `drop(arg)` in Rust: a move-to-nowhere whose `Drop` runs. No
-    /// `unsafe` is emitted (I3) — the `@Unsafe` gate is a sema-only audit.
+    /// `unsafe` is emitted (I3) — the `#Unsafe` gate is a sema-only audit.
     Drop(Box<TExpr>),
     /// D-SHAPE-RESOURCE2=A: ambient `close(^value)` after sema has proved the
     /// concrete value implements the nominal `Close` trait.
@@ -1451,7 +1451,7 @@ pub enum TExprKind {
     },
     /// c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr`, S58, E2-M13).
     /// Builds a raw `*mut T` from an integer address. The cast itself is safe in Rust
-    /// (only *using* the pointer needs `unsafe`, supplied by the surrounding `@Unsafe`
+    /// (only *using* the pointer needs `unsafe`, supplied by the surrounding `#Unsafe`
     /// region/fn), so this introduces no `unsafe` by itself. `elem_rust` is the already
     /// resolved Rust element type (`cx.rust_type(elem)`); `addr` is the address expr.
     /// Reproduces `emit_expr`'s `PtrFromAddr` arm: `(({addr}) as usize as *mut {elem})`.
@@ -1461,11 +1461,11 @@ pub enum TExprKind {
     },
     /// D-CAP9: postfix `p.*` — dereference a raw pointer. Emits Rust `(*(p))`. The
     /// `unsafe` needed to read through a raw pointer is supplied by the enclosing
-    /// `@Unsafe` region/fn (sema-gated by E0208), so this node adds no `unsafe`.
+    /// `#Unsafe` region/fn (sema-gated by E0208), so this node adds no `unsafe`.
     Deref(Box<TExpr>),
     /// D-CAP9: prefix `*x` — take a raw pointer to `x`. Emits `(&(x) as *const _)`.
-    /// Forming a pointer is safe Rust; *using* it needs the surrounding `@Unsafe`
-    /// region. Gated by E0208 in sema (raw-of only legal inside `@Unsafe`).
+    /// Forming a pointer is safe Rust; *using* it needs the surrounding `#Unsafe`
+    /// region. Gated by E0208 in sema (raw-of only legal inside `#Unsafe`).
     RawOf(Box<TExpr>),
     /// Allocator constructor. Ordinary families carry the rendered runtime call;
     /// Fixed.new carries its comptime byte count to statement emission so the
@@ -1689,8 +1689,8 @@ pub enum TExprKind {
         else_body: Vec<TStmt>,
         else_value: Box<TExpr>,
     },
-    /// c109 Phase 23: a `@Todo` typed hole (`Expr::Todo`, D-TOOL2, E2-M11). Emits a
-    /// diverging `todo!("@Todo at {file}:{line} — expected {ty}")` (Expression.rs
+    /// c109 Phase 23: a `#Todo` typed hole (`Expr::Todo`, D-TOOL2, E2-M11). Emits a
+    /// diverging `todo!("#Todo at {file}:{line} — expected {ty}")` (Expression.rs
     /// `Expr::Todo`). The `expected_type` is the TOTAL sema fact (sema fills it onto
     /// the AST node); `line` is the source line resolved at lowering. `cx.file` is
     /// program-level (read at emit, like every other `cx.file` use). `todo!()` is
@@ -2150,6 +2150,10 @@ pub enum TOrFallback {
     Break,
     /// D-ORRETURN-ERG1=B: `?? next` — loop skip.
     Continue,
+    /// D-LOOPLABEL3=A: `?? label.break()`.
+    BreakLabel(String),
+    /// D-LOOPLABEL3=A: `?? label.next()`.
+    ContinueLabel(String),
 }
 
 pub enum TStrPart {

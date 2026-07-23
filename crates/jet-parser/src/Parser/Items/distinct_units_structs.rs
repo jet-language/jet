@@ -14,7 +14,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-CAPBUNDLE1: is `name` one of the four capability-bundle marker names
-        /// (`@Numeric`, `@Comparable`, `@Printable`, `@CodableAsBase`) that may
+        /// (`#Numeric`, `#Comparable`, `#Printable`, `#CodableAsBase`) that may
         /// stack before a `distinct` type declaration?
         fn is_capability_bundle_marker(name: &str) -> bool {
             name == Syntax::ATTR_NUMERIC
@@ -29,9 +29,9 @@ impl<'a> Parser<'a> {
     
         /// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified 2026-06-20 /
         /// 2026-07-01): true when a stack of one or more capability-bundle
-        /// markers (`@Numeric`, `@Comparable`, `@Printable`, `@CodableAsBase`,
+        /// markers (`#Numeric`, `#Comparable`, `#Printable`, `#CodableAsBase`,
         /// any order, retired `#` spelling included so `distinct_def` can teach
-        /// E0062) precedes `Name :: distinct` at the cursor. The `@Numeric`-only
+        /// E0062) precedes `Name :: distinct` at the cursor. The `#Numeric`-only
         /// sibling of the old `at_numeric_distinct_def` predicate, generalized to
         /// the four fixed bundles.
         pub(super) fn at_bundle_distinct_def(&self) -> bool {
@@ -39,7 +39,7 @@ impl<'a> Parser<'a> {
             let mut saw_marker = false;
             loop {
                 match self.toks.get(i).map(|t| &t.kind) {
-                    Some(TokKind::At) => {
+                    Some(TokKind::Hash) => {
                         match self.toks.get(i + 1).map(|t| &t.kind) {
                             Some(TokKind::Ident(n)) if Self::is_distinct_prefix_marker(n) => {
                                 saw_marker = true;
@@ -91,7 +91,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-DIST1/D-DIST3/D-CAPBUNDLE1/D-MARKERMOVE1: parse
-        /// `[@Numeric] [@Comparable] [@Printable] [@CodableAsBase] Name :: distinct BaseType`
+        /// `[#Numeric] [#Comparable] [#Printable] [#CodableAsBase] Name :: distinct BaseType`
         /// — a stack of zero or more capability-bundle markers, any order.
         pub(super) fn distinct_def(
             &mut self,
@@ -113,7 +113,7 @@ impl<'a> Parser<'a> {
                 while matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
                 }
-                if !(matches!(&self.peek().kind, TokKind::At)
+                if !(matches!(&self.peek().kind, TokKind::Hash)
                     && matches!(&self.peek2().kind, TokKind::Ident(n) if Self::is_distinct_prefix_marker(n)))
                 {
                     break;
@@ -144,7 +144,7 @@ impl<'a> Parser<'a> {
             // An `@` here that isn't one of the four bundle markers is a
             // mistake — teach the closed set instead of falling through to a
             // confusing "expected a name" error.
-            if matches!(&self.peek().kind, TokKind::At) {
+            if matches!(&self.peek().kind, TokKind::Hash) {
                 let attr_span = self.peek2().span;
                 let attr = if let TokKind::Ident(n) = &self.peek2().kind {
                     n.clone()
@@ -158,7 +158,7 @@ impl<'a> Parser<'a> {
                         "@",
                         attr
                     ),
-                    "only the four capability bundles — `@Numeric`, `@Comparable`, `@Printable`, `@CodableAsBase` — are supported before a distinct type".to_string(),
+                    "only the four capability bundles — `#Numeric`, `#Comparable`, `#Printable`, `#CodableAsBase` — are supported before a distinct type".to_string(),
                     "use one of the four capability bundles, or remove the attribute".to_string(),
                     Some(attr_span),
                 ));
@@ -294,12 +294,12 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// D-REFINE1: first shipped `@Invariant` prover accepts a quoted linear
+        /// D-REFINE1: first shipped `#Invariant` prover accepts a quoted linear
         /// integer range over the reserved value name:
-        /// `@Invariant("value >= 0 && value < 4")`.
+        /// `#Invariant("value >= 0 && value < 4")`.
         fn parse_invariant_range(&mut self, attr_span: Span) -> Result<(i64, i64, Span), Diagnostic> {
             let open = self.peek().span;
-            self.expect(TokKind::LParen, "after `@Invariant`")?;
+            self.expect(TokKind::LParen, "after `#Invariant`")?;
             let text_span = self.peek().span;
             let text = match &self.peek().kind {
                 TokKind::Str(parts) => string_literal_value(parts)?,
@@ -307,8 +307,8 @@ impl<'a> Parser<'a> {
                     return Err(Diagnostic::error(
                         "E0003",
                         format!("expected invariant text, found {}", describe(other)),
-                        "`@Invariant` takes a quoted linear integer bound over `value`".to_string(),
-                        "write `@Invariant(\"value >= 0 && value < 10\")`".to_string(),
+                        "`#Invariant` takes a quoted linear integer bound over `value`".to_string(),
+                        "write `#Invariant(\"value >= 0 && value < 10\")`".to_string(),
                         Some(self.peek().span),
                     ));
                 }
@@ -323,12 +323,12 @@ impl<'a> Parser<'a> {
                     "E0137",
                     format!("this invariant range is empty — {} is after {}", lo, hi),
                     "a refinement's low bound must not be greater than its high bound".to_string(),
-                    "fix the `@Invariant` bounds".to_string(),
+                    "fix the `#Invariant` bounds".to_string(),
                     Some(text_span),
                 )),
                 None => Err(Diagnostic::error(
                     "E0003",
-                    "`@Invariant` only supports linear integer bounds over `value`".to_string(),
+                    "`#Invariant` only supports linear integer bounds over `value`".to_string(),
                     "the first D-REFINE1 prover accepts comparisons joined with `&&`".to_string(),
                     "write `value >= lo && value < hi`, `lo <= value && value <= hi`, or `value == n`".to_string(),
                     Some(attr_span),
@@ -363,27 +363,27 @@ impl<'a> Parser<'a> {
     
         // --- unit families (D-QUAL3) --------------------------------------------
     
-        /// D-QUAL3 (ratified 2026-06-24): true when `@UnitFamily(` is at the cursor.
+        /// D-QUAL3 (ratified 2026-06-24): true when `#UnitFamily(` is at the cursor.
         /// Token stream: `@ UnitFamily (`.
         pub(super) fn at_unit_family_def(&self) -> bool {
-            matches!(&self.peek().kind, TokKind::At)
+            matches!(&self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
                 && matches!(&self.peek3().kind, TokKind::LParen)
         }
     
-        /// D-QUAL3: parse `@UnitFamily(Family) { m1, m2, … }`. Each member mints a
-        /// `@Numeric` distinct type erasing to `Float` (lowered in sema/codegen).
+        /// D-QUAL3: parse `#UnitFamily(Family) { m1, m2, … }`. Each member mints a
+        /// `#Numeric` distinct type erasing to `Float` (lowered in sema/codegen).
         pub(super) fn unit_family_def(
             &mut self,
             is_pub: bool,
             is_package_pub: bool,
         ) -> Result<crate::AST::UnitFamilyDef, Diagnostic> {
             let start = self.peek().span;
-            self.expect(TokKind::At, "before `UnitFamily`")?;
+            self.expect(TokKind::Hash, "before `UnitFamily`")?;
             // consume the `UnitFamily` marker ident
             let (marker, _) = self.expect_ident("after `@`")?;
             debug_assert_eq!(marker, Syntax::ATTR_UNIT_FAMILY);
-            self.expect(TokKind::LParen, "after `@UnitFamily`")?;
+            self.expect(TokKind::LParen, "after `#UnitFamily`")?;
             let (family, family_span) = self.expect_ident("as the unit family name")?;
             let base = if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
@@ -470,7 +470,7 @@ impl<'a> Parser<'a> {
                         format!("unit `{member}` has conversion metadata but its family has no base"),
                         "scale and offset are defined relative to one canonical family member"
                             .to_string(),
-                        format!("write `@UnitFamily({family}, base: member_name)`"),
+                        format!("write `#UnitFamily({family}, base: member_name)`"),
                         Some(member_span),
                     ));
                 }
@@ -572,7 +572,7 @@ impl<'a> Parser<'a> {
         /// D-REPRC1: true when `#layout(…) struct` or `#layout(…) pub struct` is at
         /// the cursor. Token stream: `# layout ( variant ) [struct | pub]`.
         pub(super) fn at_layout_struct(&self) -> bool {
-            if !matches!(&self.peek().kind, TokKind::At) {
+            if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
             if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT) {
@@ -582,7 +582,7 @@ impl<'a> Parser<'a> {
             matches!(&self.peek3().kind, TokKind::LParen)
         }
     
-        /// D-REPRC1 / D-SOA1: parse `@Layout(variant) [pub] struct Name { … }`.
+        /// D-REPRC1 / D-SOA1: parse `#Layout(variant) [pub] struct Name { … }`.
         /// `c` (C-compatible) and `columnar` (struct-of-arrays) are supported;
         /// `packed`, `align` parse-and-error; the partial form `columnar: f, g`
         /// (D-SOA2B) is rejected (deferred post-v1).
@@ -594,8 +594,8 @@ impl<'a> Parser<'a> {
             self.bump(); // consume `@`
             let (attr_name, attr_name_span) = self.expect_ident("after `@`")?;
             debug_assert_eq!(attr_name, Syntax::ATTR_LAYOUT);
-            self.expect(TokKind::LParen, "after `@Layout`")?;
-            let (variant, variant_span) = self.expect_ident("inside `@Layout(…)`")?;
+            self.expect(TokKind::LParen, "after `#Layout`")?;
+            let (variant, variant_span) = self.expect_ident("inside `#Layout(…)`")?;
             let mut tag_width = None;
             if variant == Syntax::LAYOUT_C && matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
@@ -603,14 +603,14 @@ impl<'a> Parser<'a> {
                     let span = self.bump().span;
                     ("tag".to_string(), span)
                 } else {
-                    self.expect_ident("after `,` in `@Layout(c, …)`")?
+                    self.expect_ident("after `,` in `#Layout(c, …)`")?
                 };
                 if label != "tag" {
                     return Err(Diagnostic::error("E1105", format!("`{label}` isn't a C enum layout option"),
                         "D-REPRC2 supports only the enum tag width override here.".to_string(),
-                        "Write `@Layout(c, tag: U8)` or use `@Layout(c)`.".to_string(), Some(label_span)));
+                        "Write `#Layout(c, tag: U8)` or use `#Layout(c)`.".to_string(), Some(label_span)));
                 }
-                self.expect(TokKind::Colon, "after `tag` in `@Layout(c, tag: …)`")?;
+                self.expect(TokKind::Colon, "after `tag` in `#Layout(c, tag: …)`")?;
                 tag_width = Some(self.expect_ident("for the C enum tag width")?);
             }
             // D-SOA2B: partial columnar (`#layout(columnar: x, y)`) is deferred — a
@@ -619,9 +619,9 @@ impl<'a> Parser<'a> {
                 let colon_span = self.peek().span;
                 return Err(Diagnostic::error(
                     "E1109",
-                    "partial `@Layout(columnar: …)` isn't supported yet".to_string(),
+                    "partial `#Layout(columnar: …)` isn't supported yet".to_string(),
                     "v1 supports whole-struct columnar only — every field becomes a column".to_string(),
-                    "write `@Layout(columnar)` to convert the whole struct".to_string(),
+                    "write `#Layout(columnar)` to convert the whole struct".to_string(),
                     Some(Span::new(variant_span.start, colon_span.end)),
                 ));
             }
@@ -631,24 +631,24 @@ impl<'a> Parser<'a> {
                 v if v == Syntax::LAYOUT_PACKED || v == Syntax::LAYOUT_ALIGN => {
                     return Err(Diagnostic::error(
                         "E1105",
-                        format!("`@Layout({})` is reserved and not yet supported", v),
+                        format!("`#Layout({})` is reserved and not yet supported", v),
                         "the supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays)".to_string(),
-                        "use `@Layout(c)` or `@Layout(columnar)`, or omit `@Layout` for the default".to_string(),
+                        "use `#Layout(c)` or `#Layout(columnar)`, or omit `#Layout` for the default".to_string(),
                         Some(variant_span),
                     ));
                 }
                 _ => {
                     return Err(Diagnostic::error(
                         "E1105",
-                        format!("`@Layout({})` isn't a known layout variant", variant),
+                        format!("`#Layout({})` isn't a known layout variant", variant),
                         "the supported variants are `c` (C-compatible) and `columnar` (struct-of-arrays)".to_string(),
-                        "write `@Layout(c)` or `@Layout(columnar)`".to_string(),
+                        "write `#Layout(c)` or `#Layout(columnar)`".to_string(),
                         Some(variant_span),
                     ));
                 }
             };
             let attr_end = self.peek().span;
-            self.expect(TokKind::RParen, "to close `@Layout(…)`")?;
+            self.expect(TokKind::RParen, "to close `#Layout(…)`")?;
             let attr_span = Span::new(attr_start.start, attr_end.end);
             // Consume optional semicolons (newline-inserted) before `struct`/`pub`.
             while matches!(&self.peek().kind, TokKind::Semi) {
@@ -666,7 +666,7 @@ impl<'a> Parser<'a> {
                 if layout != Some(crate::AST::StructLayout::C) {
                     return Err(Diagnostic::error("E1105", "Only C layout applies to enums.".to_string(),
                         "Columnar layout describes struct collections, not enum representation.".to_string(),
-                        "Use `@Layout(c)` on this enum.".to_string(), Some(variant_span)));
+                        "Use `#Layout(c)` on this enum.".to_string(), Some(variant_span)));
                 }
                 let mut def = self.enum_def_after_pub(is_pub, false)?;
                 let mut args = vec![crate::AST::Expr::Ident("c".to_string(), variant_span)];
@@ -689,14 +689,14 @@ impl<'a> Parser<'a> {
         // --- published-schema marker + migration blocks (D-MIGRATE1) -----------
     
         /// D-MIGRATE1 / D-MARKERMOVE1 (ratified 2026-06-22 / 2026-07-01): true when
-        /// `@PublishedSchema struct` or `@PublishedSchema pub struct` is at the
-        /// cursor. Also matches the retired `@PublishedSchema` spelling so
+        /// `#PublishedSchema struct` or `#PublishedSchema pub struct` is at the
+        /// cursor. Also matches the retired `#PublishedSchema` spelling so
         /// `published_schema_struct_def` can teach E0062.
         /// Note: the lexer inserts a `Semi` after an identifier at end-of-line, so the
         /// token stream is `@ PublishedSchema [Semi] struct` — we check peek4 (pos+3)
         /// when peek3 is a `Semi`, or peek3 when the marker is on the same line.
         pub(super) fn at_published_schema_struct(&self) -> bool {
-            if !matches!(&self.peek().kind, TokKind::At) {
+            if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
             if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA) {
@@ -715,11 +715,11 @@ impl<'a> Parser<'a> {
             false
         }
     
-        /// D-LIN1 (ratified 2026-06-21): true when `@SingleUse struct` / `@SingleUse enum`
+        /// D-LIN1 (ratified 2026-06-21): true when `#SingleUse struct` / `#SingleUse enum`
         /// (with an optional newline `Semi` after the marker) is at the cursor. The
-        /// `pub @SingleUse …` case is handled inline in the `KwPub` dispatch arm.
+        /// `pub #SingleUse …` case is handled inline in the `KwPub` dispatch arm.
         pub(super) fn at_single_use_type(&self) -> bool {
-            if !matches!(&self.peek().kind, TokKind::At) {
+            if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
             if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE) {
@@ -736,7 +736,7 @@ impl<'a> Parser<'a> {
             false
         }
     
-        /// D-LIN1 (ratified 2026-06-21): parse `@SingleUse [pub] (struct|enum) Name { … }`.
+        /// D-LIN1 (ratified 2026-06-21): parse `#SingleUse [pub] (struct|enum) Name { … }`.
         /// Sets the `is_single_use` flag on the produced struct/enum so sema can enforce
         /// must-consume-once (E0140/E0141) and no-alias (E0142). The marker erases in
         /// codegen (I3).
@@ -751,7 +751,7 @@ impl<'a> Parser<'a> {
             while matches!(&self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
-            // optional `pub` after the marker (the `pub @SingleUse` form already ate it)
+            // optional `pub` after the marker (the `pub #SingleUse` form already ate it)
             let want_pub = outer_is_pub || matches!(&self.peek().kind, TokKind::KwPub);
             if !outer_is_pub && matches!(&self.peek().kind, TokKind::KwPub) {
                 self.bump();
@@ -771,19 +771,19 @@ impl<'a> Parser<'a> {
                 }
                 _ => Err(Diagnostic::error(
                     "E0003",
-                    "`@SingleUse` marks a `struct` or `enum`".to_string(),
+                    "`#SingleUse` marks a `struct` or `enum`".to_string(),
                     "the marker says values of this type must be used exactly once — only a type can carry that rule".to_string(),
-                    "write `@SingleUse struct Name { … }` or `@SingleUse enum Name { … }`".to_string(),
+                    "write `#SingleUse struct Name { … }` or `#SingleUse enum Name { … }`".to_string(),
                     Some(attr_span),
                 )),
             }
         }
     
-        /// D-MUSTUSE1 (c18iwxqx) / D-MARKERMOVE1: true when `@MustUse struct` /
-        /// `@MustUse enum` is at the cursor. Also matches the retired `@MustUse`
+        /// D-MUSTUSE1 (c18iwxqx) / D-MARKERMOVE1: true when `#MustUse struct` /
+        /// `#MustUse enum` is at the cursor. Also matches the retired `#MustUse`
         /// spelling so `must_use_type_def` can teach E0062.
         pub(super) fn at_must_use_type(&self) -> bool {
-            if !matches!(&self.peek().kind, TokKind::At) {
+            if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
             if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE) {
@@ -800,7 +800,7 @@ impl<'a> Parser<'a> {
             false
         }
     
-        /// D-MUSTUSE1/D-MARKERMOVE1: parse `@MustUse [pub] (struct|enum) Name { … }`.
+        /// D-MUSTUSE1/D-MARKERMOVE1: parse `#MustUse [pub] (struct|enum) Name { … }`.
         pub(super) fn must_use_type_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::Item, Diagnostic> {
             let attr_start = self.peek().span;
             self.bump(); // consume `@`
@@ -829,9 +829,9 @@ impl<'a> Parser<'a> {
                 }
                 _ => Err(Diagnostic::error(
                     "E0003",
-                    "`@MustUse` marks a `struct` or `enum`".to_string(),
+                    "`#MustUse` marks a `struct` or `enum`".to_string(),
                     "the marker says values of this type must not be silently ignored — only a type can carry that rule".to_string(),
-                    "write `@MustUse struct Name { … }` or `@MustUse enum Name { … }`".to_string(),
+                    "write `#MustUse struct Name { … }` or `#MustUse enum Name { … }`".to_string(),
                     Some(attr_span),
                 )),
             }
@@ -845,7 +845,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-MIGRATE1/D-MARKERMOVE1 (ratified 2026-06-22 / 2026-07-01): parse
-        /// `@PublishedSchema [pub] struct Name { … }`. The retired `@PublishedSchema`
+        /// `#PublishedSchema [pub] struct Name { … }`. The retired `#PublishedSchema`
         /// spelling teaches E0062.
         pub(super) fn published_schema_struct_def(
             &mut self,
@@ -862,8 +862,8 @@ impl<'a> Parser<'a> {
                         "@",
                         attr
                     ),
-                    "only `@PublishedSchema` is supported here".to_string(),
-                    "write `@PublishedSchema` before the struct".to_string(),
+                    "only `#PublishedSchema` is supported here".to_string(),
+                    "write `#PublishedSchema` before the struct".to_string(),
                     Some(attr_name_span),
                 ));
             }
@@ -914,7 +914,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                // D-SHAPE2: field rules share one `@[…]` group.
+                // D-SHAPE2: field rules share one `#[…]` group.
                 if self.at_marker_list() {
                     let field_markers = self.parse_field_markers()?;
                     let mut f = self.field()?;

@@ -81,7 +81,10 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn declare(&mut self, name: &str, name_span: Span, info: LocalInfo) {
-            if self.lookup(name).is_some() || self.consts.contains_key(name) {
+            if self.lookup(name).is_some()
+                || self.consts.contains_key(name)
+                || self.loop_labels.iter().any(|label| label == name)
+            {
                 self.diags.push(already_defined(name, name_span));
             }
             // D-CONFUSE1=A (L0503): homoglyph confusable pairs in one scope.
@@ -122,7 +125,10 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn declare_loop_var(&mut self, name: String, name_span: Span, ty: &Type) {
-            if self.lookup(&name).is_some() || self.consts.contains_key(&name) {
+            if self.lookup(&name).is_some()
+                || self.consts.contains_key(&name)
+                || self.loop_labels.iter().any(|label| label == &name)
+            {
                 self.diags.push(already_defined(&name, name_span));
             } else {
                 self.scopes.last_mut().unwrap().insert(
@@ -140,6 +146,16 @@ impl<'a> Checker<'a> {
                     },
                 );
             }
+        }
+
+        pub(crate) fn declare_loop_label(&mut self, name: &str, name_span: Span) {
+            if self.lookup(name).is_some()
+                || self.consts.contains_key(name)
+                || self.loop_labels.iter().any(|label| label == name)
+            {
+                self.diags.push(already_defined(name, name_span));
+            }
+            self.loop_labels.push(name.to_string());
         }
     
 }

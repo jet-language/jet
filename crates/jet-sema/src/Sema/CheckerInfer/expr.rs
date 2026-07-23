@@ -458,7 +458,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-UNITLIT1: `500ms` — resolve the suffix against an in-scope
-            // `@UnitFamily` member (PascalCased to its minted `@Numeric
+            // `#UnitFamily` member (PascalCased to its minted `#Numeric
             // distinct Float` type name) and rewrite this node in place to an
             // ordinary destination-owned conversion — sugar over the existing
             // distinct-type path, so every downstream check (cross-unit
@@ -480,7 +480,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0134",
                         format!("`{}` isn't a unit in scope", suffix),
-                        "a unit suffix names a member of a `@UnitFamily` you've imported; this suffix isn't one here".to_string(),
+                        "a unit suffix names a member of a `#UnitFamily` you've imported; this suffix isn't one here".to_string(),
                         format!("import the family that defines `{}`, or write the number without a suffix", suffix),
                         Some(*suffix_span),
                     ));
@@ -578,13 +578,13 @@ impl<'a> Checker<'a> {
                                         if let Type::Named(n) = &t {
                                             // D-CAPBUNDLE1: a nominal `distinct` type
                                             // starts inert — interpolating one without
-                                            // `@Printable` names the granted bundles
+                                            // `#Printable` names the granted bundles
                                             // instead of the generic E0915 wording.
                                             if self.registry.is_distinct(n) {
                                                 self.diags.push(e0138(
                                                     n,
                                                     "string interpolation",
-                                                    "@Printable",
+                                                    "#Printable",
                                                     self.registry.distinct_granted_bundles(n),
                                                     inner.span(),
                                                 ));
@@ -598,7 +598,7 @@ impl<'a> Checker<'a> {
                                                     format!(
                                                         "`{n}` has no `Display` impl — bare `{{}}` will require one soon"
                                                     ),
-                                                    "Display is the user-facing interpolation hook; Debug is for `{value@Debug}`"
+                                                    "Display is the user-facing interpolation hook; Debug is for `{value#Debug}`"
                                                         .to_string(),
                                                     format!(
                                                         "add `impl {n}.Display {{ fn display(self) -> String {{ … }} }}`"
@@ -624,7 +624,7 @@ impl<'a> Checker<'a> {
                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                                             self.diags.push(Diagnostic::error(
                                                 "E0112",
-                                                format!("secret-bearing `{}` cannot use `@Debug`", t.name()),
+                                                format!("secret-bearing `{}` cannot use `#Debug`", t.name()),
                                                 "Debug output could copy cryptographic secret material into logs or diagnostics".to_string(),
                                                 "remove the interpolation; log a public operation label or key identifier instead".to_string(),
                                                 Some(inner.span()),
@@ -633,7 +633,7 @@ impl<'a> Checker<'a> {
                                         }
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
-                                            format!("{} can't be shown with @Debug yet", t.show()),
+                                            format!("{} can't be shown with #Debug yet", t.show()),
                                             "debug interpolation needs a debuggable value"
                                                 .to_string(),
                                             "implement `Debug` or use a debuggable part"
@@ -684,15 +684,28 @@ impl<'a> Checker<'a> {
                 None
             }
             Expr::Ident(name, span) => {
+                // D-LOOPLABEL3=A: loop labels share the ordinary namespace but
+                // are control names, not runtime values.
+                if self.loop_labels.iter().any(|label| label == name) {
+                    self.diags.push(Diagnostic::error(
+                        "E0988",
+                        format!("loop label `{name}` is not a runtime value"),
+                        "a loop label names a control-flow destination, so it cannot be read, passed, or stored"
+                            .to_string(),
+                        format!("use `{name}.break()` or `{name}.next()` to control the loop"),
+                        Some(*span),
+                    ));
+                    return None;
+                }
                 // D-PREPOST1 (E0144): `result` names the return value inside a
-                // `@Post` condition; at function entry (a `@Pre` condition)
+                // `#Post` condition; at function entry (a `#Pre` condition)
                 // there is no return value yet.
                 if self.in_pre_clause && name == "result" {
                     self.diags.push(Diagnostic::error(
                         "E0144",
-                        "`result` isn't available in a `@Pre` condition".to_string(),
-                        "`result` names the return value, which only exists once the function has returned — a `@Pre` condition runs at entry, before there is one".to_string(),
-                        "use `result` only in a `@Post` condition".to_string(),
+                        "`result` isn't available in a `#Pre` condition".to_string(),
+                        "`result` names the return value, which only exists once the function has returned — a `#Pre` condition runs at entry, before there is one".to_string(),
+                        "use `result` only in a `#Post` condition".to_string(),
                         Some(*span),
                     ));
                     return None;
@@ -967,15 +980,15 @@ impl<'a> Checker<'a> {
             }
             Expr::Deref(inner, span) => {
                 // D-CAP9: postfix `p.*` dereferences a raw pointer — a raw
-                // memory access, gated to `@Unsafe`. The result type is the
+                // memory access, gated to `#Unsafe`. The result type is the
                 // pointer's element type.
                 if !self.in_unsafe {
                     self.diags.push(Diagnostic::error(
                         "E0208",
-                        "reading through a raw pointer requires `@Unsafe`".to_string(),
-                        "`p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `@Unsafe { … }` region"
+                        "reading through a raw pointer requires `#Unsafe`".to_string(),
+                        "`p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `#Unsafe { … }` region"
                             .to_string(),
-                        "wrap this in `@Unsafe(\"why this is safe\") { … }`".to_string(),
+                        "wrap this in `#Unsafe(\"why this is safe\") { … }`".to_string(),
                         Some(*span),
                     ));
                 }
@@ -987,14 +1000,14 @@ impl<'a> Checker<'a> {
             }
             Expr::RawOf(inner, span) => {
                 // D-CAP9: prefix `*x` takes a raw pointer to `x` (raw-pointer-of),
-                // legal only inside `@Unsafe`. Result type is `*T` (`Ptr<T>`).
+                // legal only inside `#Unsafe`. Result type is `*T` (`Ptr<T>`).
                 if !self.in_unsafe {
                     self.diags.push(Diagnostic::error(
                         "E0208",
-                        "taking a raw pointer requires `@Unsafe`".to_string(),
-                        "`*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `@Unsafe { … }` region"
+                        "taking a raw pointer requires `#Unsafe`".to_string(),
+                        "`*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region"
                             .to_string(),
-                        "wrap this in `@Unsafe(\"why this is safe\") { … }` — to dereference a pointer use postfix `p.*`"
+                        "wrap this in `#Unsafe(\"why this is safe\") { … }` — to dereference a pointer use postfix `p.*`"
                             .to_string(),
                         Some(*span),
                     ));
@@ -1399,7 +1412,7 @@ impl<'a> Checker<'a> {
                 // that owns heap data (directly or transitively) allocates.
                 Some(self.check_enum_lit(type_name, variant, args, *span))
             }
-            // D-TAINT1: `@Tainted expr` — the value-fact tag is type-transparent.
+            // D-TAINT1: `#Tainted expr` — the value-fact tag is type-transparent.
             // Its type is exactly the inner's type; taint propagation + the E0721
             // sink check run in the dedicated taint pass (Sema/Taint.rs), erased
             // in codegen (I3).
@@ -1462,10 +1475,10 @@ impl<'a> Checker<'a> {
             Expr::ReduceMarker(name, span) => {
                 self.diags.push(Diagnostic::error(
                     "E2510",
-                    format!("`@{}` is only valid inside a lane `.reduce(…)`", name),
+                    format!("`#{}` is only valid inside a lane `.reduce(…)`", name),
                     "a reduce-op marker names the fold operation; it isn't a value on its own"
                         .to_string(),
-                    "write `v.reduce(@Add)` / `@Mul` / `@Min` / `@Max`".to_string(),
+                    "write `v.reduce(#Add)` / `#Mul` / `#Min` / `#Max`".to_string(),
                     Some(*span),
                 ));
                 None
@@ -1595,7 +1608,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0963",
                     format!(
-                        "this list has {} element{}, but `[T@{}]` expects exactly {}",
+                        "this list has {} element{}, but `[T#{}]` expects exactly {}",
                         elems.len(),
                         if elems.len() == 1 { "" } else { "s" },
                         len,
@@ -1774,7 +1787,7 @@ impl<'a> Checker<'a> {
         let callee_span = callee.span();
 
                 // `print` is a builtin that doesn't live in scope as an ident — special-case it so
-        // `print.[a, b, c]` works without triggering E0107. D-PRELUDEX1=A: skipped under `@NoPrelude`.
+        // `print.[a, b, c]` works without triggering E0107. D-PRELUDEX1=A: skipped under `#NoPrelude`.
         if let Expr::Ident(name, _) = callee.as_ref() {
             if name == Syntax::BUILTIN_PRINT && !self.no_prelude {
                 self.borrow_ctx = true;
@@ -2044,7 +2057,7 @@ impl<'a> Checker<'a> {
                                     name, lo, hi
                                 ),
                                 format!(
-                                    "this `[T@{}]` value only has proven indexes 0 through {}",
+                                    "this `[T#{}]` value only has proven indexes 0 through {}",
                                     len,
                                     len.saturating_sub(1)
                                 ),
@@ -2270,9 +2283,9 @@ impl<'a> Checker<'a> {
                                 "slicing isn't supported on a columnar list `{}` yet",
                                 Type::List(inner.clone()).show()
                             ),
-                            "`@Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+                            "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
                             format!(
-                                "drop `@Layout(columnar)` from `{}` to slice, or index the elements you need in a loop",
+                                "drop `#Layout(columnar)` from `{}` to slice, or index the elements you need in a loop",
                                 elem
                             ),
                             Some(span),

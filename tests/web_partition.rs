@@ -38,7 +38,7 @@ fn dom_fn() {
     _b :: ui.null_backend()
 }
 
-@Target(Wasm)
+#Target(Wasm)
 fn compute() -> Int {
     return 1
 }
@@ -76,7 +76,7 @@ fn codable_struct_wasm_export_is_abi_safe() {
 fn ordinary_wasm_struct_field_does_not_gain_export_boundary_support() {
     let src = r#"struct Point { x: Int, y: Int }
 
-@Target(Wasm)
+#Target(Wasm)
 fn read_x(p: Point) -> Int { return p.x }
 
 fn run() {}

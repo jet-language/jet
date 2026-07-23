@@ -260,7 +260,7 @@ fn run() {
     assert_eq!(stdout, "15\n0\n2\n4\n6\n8\n10\n");
 }
 
-/// Labeled loops: a `next outer@` and a `break outer@` driving a nested
+/// Labeled loops: `outer.next()` and `outer.break()` driving a nested
 /// range loop. The `'jet_<name>:` labels are resolved at lowering.
 #[test]
 fn labeled_break_and_continue() {
@@ -269,14 +269,14 @@ fn labeled_break_and_continue() {
     }
     let src = "\
 fn run() {
-    outer@ loop i; 1..3 {
+    outer :: loop i; 1..3 {
         loop j; 1..3 {
             if (j == 2) {
-                next outer@
+                outer.next()
             }
             print(\"{i}-{j}\")
             if (i == 2) {
-                break outer@
+                outer.break()
             }
         }
     }
@@ -285,9 +285,33 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_labeled", src);
     assert_eq!(code, 0);
-    // i=1: j=1 prints 1-1, i!=2 so j=2 -> next outer@.
-    // i=2: j=1 prints 2-1, i==2 -> break outer@.
+    // i=1: j=1 prints 1-1, i!=2 so j=2 -> outer.next().
+    // i=2: j=1 prints 2-1, i==2 -> outer.break().
     assert_eq!(stdout, "1-1\n2-1\ndone\n");
+}
+
+/// D-LOOPLABEL3 / D-ORRETURN-CANON1: named dot exits are also valid `??`
+/// fallbacks and target the named loop's normal continuation/break edges.
+#[test]
+fn labeled_break_and_continue_fallbacks() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    outer :: loop text; ["skip", "7"] {
+        loop {
+            value :: Int.parse(text) ?? outer.next()
+            print(value)
+            Int.parse("stop") ?? outer.break()
+        }
+    }
+    print("done")
+}
+"#;
+    let (code, stdout) = build_and_run("tir_labeled_fallbacks", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "7\ndone\n");
 }
 
 /// D-LOOP-HEADER2/D-LOOP-ADVANCE2/D-LOOP-CONTROLWORD1: every loop header uses
@@ -315,9 +339,9 @@ fn run() {
         if item == 0 { next }
     }
 
-    outer@ loop i := 0; i < 3; i += 1 {
+    outer :: loop i := 0; i < 3; i += 1 {
         loop {
-            if i < 2 { next outer@ }
+            if i < 2 { outer.next() }
             break
         }
         print("state {i}")

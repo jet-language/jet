@@ -561,14 +561,14 @@ mod jet_mem {
 
     // ── D-CTX1 (ratified 2026-06-22, G2): Smart Context runtime ──────────────
     //
-    // `@Context(allocator: a) { … }` compiles to a `JetContextGuard` RAII value
+    // `#Context(allocator: a) { … }` compiles to a `JetContextGuard` RAII value
     // that saves the old ambient allocator pointer and restores it on Drop.
     // Restore fires on all exit paths: normal exit, `return`, `break`, `?`,
     // and panic unwind — satisfying Q2 = Cβ (per-block restore).
     //
     // The thread-local holds a raw `*const u8` (type-erased allocator pointer).
     // Safety: Jet sema guarantees the allocator variable is declared before the
-    // `@Context` block and lives for at least the block's duration, so the
+    // `#Context` block and lives for at least the block's duration, so the
     // pointer is always valid while the guard is live. This is the same
     // lifetime-extension trust as the `alloc` helper above (D-LL1 vetted zone).
     //
@@ -610,7 +610,7 @@ mod jet_mem {
         let saved = JET_CTX_ALLOC.with(|c| c.get());
         // SAFETY: we store a *const u8 alias of `alloc`. Dereferencing it is only
         // valid as long as `alloc` is live; the Jet sema ensures the arena variable
-        // is declared before the `@Context` block and lives for its duration.
+        // is declared before the `#Context` block and lives for its duration.
         // This is the same audited lifetime-extension trust as `JetArena::alloc`.
         let ptr = alloc as *const T as *const u8;
         JET_CTX_ALLOC.with(|c| c.set(Some(ptr)));

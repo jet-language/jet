@@ -1,5 +1,5 @@
 // ── core.encoding: Encode / Decode traits + blanket impls (D-SERDE1/2/4) ──────
-// The built-in `@[Codable]`/`@[Encode]`/`@[Decode]` derive (D-ENC1) lowers to
+// The built-in `#[Codable]`/`#[Encode]`/`#[Decode]` derive (D-ENC1) lowers to
 // these traits. `jet_encode`/`jet_decode` are codegen-internal method names the
 // user never types (they write the verbs `encode`/`decode` only in a hand-impl,
 // D-SERDE2 — a later increment). Pure safe std Rust, no proc-macros (I1/I6).
@@ -11,10 +11,10 @@ pub trait user_Encode {
 pub trait user_Decode: Sized {
     fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError>;
     /// D-MIGRATE4: decode this value, reporting whether it arrived as an older
-    /// `@PublishedSchema` shape and was walked forward through the migration
+    /// `#PublishedSchema` shape and was walked forward through the migration
     /// chain. The default is the zero-cost identity: no migrations declared, so
     /// decode the current shape and report `fresh`. Codegen overrides this only
-    /// for a `@PublishedSchema` type that has `migration { }` blocks and a
+    /// for a `#PublishedSchema` type that has `migration { }` blocks and a
     /// runtime decode path — every other type keeps this default, so no
     /// per-type code is emitted and the decode path is byte-for-byte unchanged.
     fn jet_decode_traced(

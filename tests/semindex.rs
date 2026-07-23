@@ -110,8 +110,8 @@ fn numeric_destination_conversions_and_parse_are_cataloged() {
 #[test]
 fn source_distinct_and_unit_conversion_members_are_cataloged() {
     let src = r#"
-@Numeric UserId :: distinct Int
-@UnitFamily(Currency) { usd }
+#Numeric UserId :: distinct Int
+#UnitFamily(Currency) { usd }
 
 fn run() {}
 "#;
@@ -132,7 +132,7 @@ fn run() {}
         .expect("unit-family conversion member");
     assert_eq!(unit.owner.as_deref(), Some("Usd"));
 
-    let user_offset = src.find("@Numeric UserId").unwrap();
+    let user_offset = src.find("#Numeric UserId").unwrap();
     assert!(symbols
         .complete_visible_at(
             "from_u",
@@ -150,7 +150,7 @@ fn run() {}
 #[test]
 fn affine_unit_point_and_delta_members_are_cataloged() {
     let src = r#"
-@UnitFamily(Temperature, base: kelvin) {
+#UnitFamily(Temperature, base: kelvin) {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
@@ -836,6 +836,24 @@ fn semindex_references() {
 }
 
 #[test]
+fn semindex_indexes_loop_label_definition_and_dot_exit_references() {
+    let path = temp_fixture(
+        "loop_label_refs.jet",
+        "fn run() {\n    outer :: loop {\n        if true { outer.next() }\n        outer.break()\n    }\n}\n",
+    );
+    let idx = open(&path).expect("loop label fixture indexes");
+    let outer = idx.lookup("outer").expect("loop label definition");
+    assert!(matches!(
+        outer.kind,
+        SymbolKind::Local {
+            mutable: false,
+            ty: None
+        }
+    ));
+    assert_eq!(idx.references_to("outer").len(), 2);
+}
+
+#[test]
 fn semindex_dossier_stitches_scattered_members() {
     let src = r#"
 trait DrawThing {
@@ -894,7 +912,7 @@ fn run() {
 #[test]
 fn semindex_dossier_bypass_facts() {
     // D-LINTPOLICY1=A (the override law, card #505): every spelled bypass
-    // — `@Unsafe(reason)` region, `@Unsafe(reason) fn`, `.drop(reason)`, and
+    // — `#Unsafe(reason)` region, `#Unsafe(reason) fn`, `.drop(reason)`, and
     // `#[allow(lint)]` — surfaces as a fact in the dossier, program-wide.
     let src = r#"
 struct Invoice {
@@ -902,15 +920,15 @@ struct Invoice {
     price: Float,
 }
 
-@Unsafe("caller must ensure the pointer is valid") fn risky_fn() {
+#Unsafe("caller must ensure the pointer is valid") fn risky_fn() {
     print("danger")
 }
 
 fn run() {
-    @Unsafe("index checked against len") {
+    #Unsafe("index checked against len") {
         print("audited")
     }
-    @Unsafe("risky_fn's contract is upheld here") {
+    #Unsafe("risky_fn's contract is upheld here") {
         risky_fn()
     }
     fetch_it().drop("telemetry only")

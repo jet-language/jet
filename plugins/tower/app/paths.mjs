@@ -7,8 +7,11 @@
 //   3. TOOL_ROOT/.tower when that vendored board exists
 //   4. nowhere → commands that need data fail with a "run `tower init`" hint
 import { fileURLToPath } from 'node:url';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, copyFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import {
+  closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync,
+  readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync,
+} from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const TOOL_ROOT = dirname(here);            // plugin root
@@ -67,24 +70,55 @@ export const historyFile = (dir) => (dir ? join(dir, 'history.json') : null);
 export const readJSON = (p, fallback) =>
   p && existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : fallback;
 
-// Atomic write: tmp file + rename, so a crash mid-write never corrupts data.
-export function writeJSON(p, v) {
-  const tmp = `${p}.tmp.${process.pid}`;
-  writeFileSync(tmp, JSON.stringify(v, null, 2) + '\n');
-  renameSync(tmp, p);
+export function syncFile(p) {
+  const fd = openSync(p, 'r');
+  try { fsyncSync(fd); } finally { closeSync(fd); }
 }
 
-// Rolling backups: keep the last N copies in <dataDir>/backups/.
-export function backup(p, keep = 20) {
+export function syncDir(p) {
+  const fd = openSync(p, 'r');
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+
+// Durable atomic write: sync contents, rename, then sync the directory entry.
+export function writeTextAtomic(p, text) {
+  const tmp = `${p}.tmp.${process.pid}`;
+  const fd = openSync(tmp, 'w');
   try {
-    if (!existsSync(p)) return;
-    const dir = join(dirname(p), 'backups');
-    mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    copyFileSync(p, join(dir, `tower-${stamp}.json`));
-    const old = readdirSync(dir).filter(f => f.startsWith('tower-')).sort();
-    for (const f of old.slice(0, Math.max(0, old.length - keep))) unlinkSync(join(dir, f));
-  } catch { /* backups are best-effort; never block a write */ }
+    writeFileSync(fd, text);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(tmp, p);
+  syncDir(dirname(p));
+}
+
+export function writeJSON(p, v) {
+  writeTextAtomic(p, JSON.stringify(v, null, 2) + '\n');
+}
+
+// Rolling backups: keep the last N copies per store in <dataDir>/backups/.
+export function backupRequired(p, keep = 20) {
+  if (!existsSync(p)) throw new Error(`cannot back up missing file ${p}`);
+  const dir = join(dirname(p), 'backups');
+  mkdirSync(dir, { recursive: true });
+  syncDir(dirname(p));
+  const prefix = `${basename(p, extname(p))}-`;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const dest = join(dir, `${prefix}${stamp}.json`);
+  copyFileSync(p, dest);
+  syncFile(dest);
+  syncDir(dir);
+  const old = readdirSync(dir).filter(f => f.startsWith(prefix)).sort();
+  for (const f of old.slice(0, Math.max(0, old.length - keep))) unlinkSync(join(dir, f));
+  syncDir(dir);
+  return dest;
+}
+
+export function backup(p, keep = 20) {
+  try { return backupRequired(p, keep); }
+  catch { /* routine writes keep backups best-effort */ }
 }
 
 let seq = 0;

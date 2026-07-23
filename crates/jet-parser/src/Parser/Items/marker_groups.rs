@@ -11,7 +11,7 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::LParen) {
                 self.bump(); // `(`
                 while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
-                    // D-REPRC2's expert spelling is `@Layout(c, tag: U8)`.
+                    // D-REPRC2's expert spelling is `#Layout(c, tag: U8)`.
                     // Marker arguments otherwise use ordinary expressions; retain the
                     // width as the second expression while the fixed `tag:` label is
                     // reconstructed by the formatter.
@@ -41,7 +41,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// D-SHAPE2: parse one `@[ Name (, …)* ]` group; cursor on `@`.
+        /// D-SHAPE2: parse one `#[ Name (, …)* ]` group; cursor on `@`.
         fn parse_marker_bracket_group(&mut self) -> Result<Vec<Marker>, Diagnostic> {
             self.bump(); // `@`
             self.bump(); // `[`
@@ -55,14 +55,14 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
-            self.expect(TokKind::RBracket, "to close an `@[…]` rule list")?;
+            self.expect(TokKind::RBracket, "to close an `#[…]` rule list")?;
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
             Ok(group)
         }
     
-        /// D-SHAPE2: parse `@[ … ]` applied-rule groups. A second consecutive
+        /// D-SHAPE2: parse `#[ … ]` applied-rule groups. A second consecutive
         /// group is teaching error E0999 (merge into one list).
         pub(super) fn parse_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
             let mut out = Vec::new();
@@ -72,9 +72,9 @@ impl<'a> Parser<'a> {
                 if groups > 1 {
                     self.diags.push(Diagnostic::error(
                         "E0999",
-                        "multiple `@[…]` rule lines belong in one comma-separated list".to_string(),
-                        "Jet attaches every applied rule on a type in a single `@[A, B]` group (D-SHAPE2); one rule alone is `@A`".to_string(),
-                        "merge them: `@[RenameAll(camel), Skip]`, or use `@RenameAll(camel)` when there is only one".to_string(),
+                        "multiple `#[…]` rule lines belong in one comma-separated list".to_string(),
+                        "Jet attaches every applied rule on a type in a single `#[A, B]` group (D-SHAPE2); one rule alone is `#A`".to_string(),
+                        "merge them: `#[RenameAll(camel), Skip]`, or use `#RenameAll(camel)` when there is only one".to_string(),
                         Some(self.peek().span),
                     ));
                 }
@@ -83,17 +83,17 @@ impl<'a> Parser<'a> {
             Ok(out)
         }
     
-        /// D-SHAPE2: parse a lone `@Marker` (or `@Marker(args)`) before `struct`/`enum`.
+        /// D-SHAPE2: parse a lone `#Marker` (or `#Marker(args)`) before `struct`/`enum`.
         fn parse_single_type_prefix_marker(&mut self) -> Result<Marker, Diagnostic> {
             self.bump(); // `@`
             let m = self.parse_one_marker()?;
             Ok(m)
         }
     
-        /// D-SHAPE2: parse leading `@[…]` applied-rule groups before a
-        /// struct/enum field (e.g. `@[Redact, Rename("x")]`).
+        /// D-SHAPE2: parse leading `#[…]` applied-rule groups before a
+        /// struct/enum field (e.g. `#[Redact, Rename("x")]`).
         /// Used at field position, which only ever supports the bracket form
-        /// (no bare `@Redact`/`@Rename` without brackets).
+        /// (no bare `#Redact`/`#Rename` without brackets).
         pub(super) fn parse_field_markers(&mut self) -> Result<Vec<Marker>, Diagnostic> {
             let mut out = Vec::new();
             loop {
@@ -130,7 +130,7 @@ impl<'a> Parser<'a> {
                     | Syntax::ATTR_DEFAULT
                     | Syntax::ATTR_FLATTEN => serde.push(m),
                     // Any other name is a derive-trait: the D-MARKERMOVE3 built-ins
-                    // (`@[Debug]`, `@[Summarize]`, `@[Comparable]`) or a user
+                    // (`#[Debug]`, `#[Summarize]`, `#[Comparable]`) or a user
                     // derive-trait name.
                     _ => derives.push((m.name.clone(), m.name_span)),
                 }
@@ -143,11 +143,11 @@ impl<'a> Parser<'a> {
             match item {
                 Item::Struct(mut s) => {
                     // D-MIGRATE1 (I2/E0910 fix): `PublishedSchema` appearing inside an
-                    // item-level `@[…]` bracket LIST (e.g. `@[PublishedSchema, Codable]
+                    // item-level `#[…]` bracket LIST (e.g. `#[PublishedSchema, Codable]
                     // struct …`) previously only got recorded in `type_markers` — the
                     // dedicated `is_published_schema`/`published_schema_span` fields
                     // (which `SchemaMigration.rs`'s E0910 check guards on) were only ever
-                    // set by the single-prefix `@PublishedSchema struct …` form
+                    // set by the single-prefix `#PublishedSchema struct …` form
                     // (`published_schema_struct_def`). A schema published this way
                     // silently skipped E0910 migration validation. Mirror that form here.
                     if let Some(m) = markers
@@ -182,7 +182,7 @@ impl<'a> Parser<'a> {
             match &self.peek().kind {
                 TokKind::KwStruct => self.struct_def_after_pub(is_pub).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def_after_pub(is_pub, false).map(Item::Enum),
-                TokKind::At
+                TokKind::Hash
                     if matches!(
                         &self.peek2().kind,
                         TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT
@@ -190,7 +190,7 @@ impl<'a> Parser<'a> {
                 {
                     self.layout_type_def(is_pub)
                 }
-                TokKind::At
+                TokKind::Hash
                     if matches!(
                         &self.peek2().kind,
                         TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA
@@ -204,16 +204,16 @@ impl<'a> Parser<'a> {
                         "type markers must sit before a struct or enum, found {}",
                         describe(other)
                     ),
-                    "derive markers like `@Codable` / `@[Codable]` and serde attributes attach to a type"
+                    "derive markers like `#Codable` / `#[Codable]` and serde attributes attach to a type"
                         .to_string(),
-                    "write `@Codable struct Name { … }` or `@[Codable, RenameAll(camel)] struct …`"
+                    "write `#Codable struct Name { … }` or `#[Codable, RenameAll(camel)] struct …`"
                         .to_string(),
                     Some(self.peek().span),
                 )),
             }
         }
     
-        /// D-SHAPE2: parse leading `@[…]`/`@Name` applied rules, then the
+        /// D-SHAPE2: parse leading `#[…]`/`#Name` applied rules, then the
         /// struct/enum they attach to.
         pub(in crate::Parser) fn type_def_with_any_markers(&mut self) -> Result<Item, Diagnostic> {
             let mut markers = Vec::new();
@@ -264,7 +264,7 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 }
-                // D-EFF3 / D-MARKERMOVE2: a trait method may carry a `@Pure` prefix
+                // D-EFF3 / D-MARKERMOVE2: a trait method may carry a `#Pure` prefix
                 // declaring the empty effect set as its upper bound.
                 let is_pure = if self.at_pure_fn() {
                     self.bump_pure_marker();

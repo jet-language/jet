@@ -399,7 +399,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         };
     }
     // D-MIGRATE3=A: `MigrationStatus` — `.migrated` false + `.from`/`.steps`
-    // empty for fresh data and for non-`@PublishedSchema` types.
+    // empty for fresh data and for non-`#PublishedSchema` types.
     if type_name == "MigrationStatus" {
         return match field {
             "migrated" => Some(Type::Bool),

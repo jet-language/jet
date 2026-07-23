@@ -14,6 +14,7 @@ import { ConfigError, DEFAULTS } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
 import * as scratch from './scratch.mjs';
+import { applyRepairManifest } from './repair.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
@@ -647,6 +648,27 @@ function cmdArchive(store, { pos, flags }) {
   }
 }
 
+function cmdRepair(store, { pos, flags }) {
+  const [verb] = pos;
+  if (verb !== 'apply')
+    throw new TowerError('E_USAGE', 'repair supports only: apply --manifest FILE --expect-rev N --by X [--dry-run]');
+  if (!flags.manifest || flags.manifest === true)
+    throw new TowerError('E_USAGE', 'repair apply requires --manifest FILE');
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(resolve(flags.manifest), 'utf8')); }
+  catch (error) { throw new TowerError('E_MANIFEST', `cannot read repair manifest: ${error.message}`); }
+  const result = applyRepairManifest(store.dataDir, manifest, {
+    expectRev: flags.expectRev,
+    by: flags.by,
+    dryRun: !!flags.dryRun,
+    backups: store.config.backups,
+  });
+  const mode = result.dryRun ? 'dry-run valid' : `applied at rev ${result.rev}`;
+  return out(flags,
+    `repair ${mode}: ${result.fields} fields, ${result.substitutions} substitutions, manifest ${result.manifestHash}`,
+    result);
+}
+
 function cmdEvents(store, { flags }) {
   const s = store.load();
   const es = s.events.slice(0, Number(flags.limit || 30));
@@ -784,6 +806,8 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower archive  status|show <id>|restore <id> --by owner
                                             done cards + ratified decisions retire here on their own
                                             after config.retireAfterDays (default 3); restore brings one back
+  tower repair apply --manifest FILE --expect-rev N --by X [--dry-run]
+                                            exact, rev-guarded two-store leaf repair
   tower question list|ask|answer|delete
   tower idea     list|add|promote|delete
   tower epoch    list|add|update|current
@@ -856,6 +880,7 @@ export async function run(argv) {
       case 'scratch':   return cmdScratch(store, sub);
       case 'verdict':   return cmdVerdict(store, sub);
       case 'archive':   return cmdArchive(store, sub);
+      case 'repair':    return cmdRepair(store, sub);
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
       case 'githook':

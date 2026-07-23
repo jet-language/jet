@@ -541,7 +541,7 @@
             f(&mut *guard)
         }
         // D-STM1=A (ratified 2026-07-12, card #506): the Shared plane of
-        // `@Transact`. Inside a transaction block, `handle.edit(f)` lowers to
+        // `#Transact`. Inside a transaction block, `handle.edit(f)` lowers to
         // `edit_txn` — the mutation is DEFERRED, not applied now. Every deferred
         // edit across every touched handle is buffered on the current thread's
         // transaction, then applied together at the block's commit under all the

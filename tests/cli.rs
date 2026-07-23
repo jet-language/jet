@@ -53,7 +53,7 @@ fn spawn_with_retry(cmd: &mut Command) -> Child {
 #[test]
 fn inspect_unsafe_reports_policy_provenance_and_operations() {
     let dir = isolated_cwd("inspect_unsafe");
-    fs::write(dir.join("main.jet"), "use core.mem\nfn run() {\n value: Int :: 7\n @Unsafe(\"local\", obligations: .Track) {\n  pointer: *Int :: *value\n  assert no_alias\n  print(pointer.*)\n  assert valid_ptr, aligned\n }\n}\n").unwrap();
+    fs::write(dir.join("main.jet"), "use core.mem\nfn run() {\n value: Int :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer: *Int :: *value\n  assert no_alias\n  print(pointer.*)\n  assert valid_ptr, aligned\n }\n}\n").unwrap();
     let output = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -371,7 +371,7 @@ fn benchmark_budget_project(tag: &str) -> PathBuf {
         enforcement: .Warn,
     }],
 }
-@Bench("parse") {
+#Bench("parse") {
     total := 0
     loop value; 0..100 { total = total + value }
     require_eq(total, 4950)
@@ -408,7 +408,7 @@ module perf.package {
         },
     ],
 }
-@Bench("arena") {
+#Bench("arena") {
     arena :: mem.Arena.new()
     value :: arena.alloc(42)
     require_eq(value, 42)
@@ -1315,10 +1315,10 @@ fn shape_cli_entry_type_drives_shell_inputs_but_remains_optional() {
     let dir = isolated_cwd("shape_cli_entry_source");
     fs::write(
         dir.join("typed.jet"),
-        r#"@Cli
+        r#"#Cli
 struct RunArgs {
-    @[Doc("person to greet")] name: String
-    @[Default(2)] retries: Int
+    #[Doc("person to greet")] name: String
+    #[Default(2)] retries: Int
     verbose: Bool
 }
 
@@ -1437,10 +1437,10 @@ fn typed_cli_entry_accepts_an_imported_argument_type() {
     let dir = isolated_cwd("shape_cli_imported_entry_type");
     fs::write(
         dir.join("args.jet"),
-        r#"@Cli
+        r#"#Cli
 pub struct RunArgs {
-    @[Doc("person to greet")] pub name: String
-    @[Default(2)] pub retries: Int
+    #[Doc("person to greet")] pub name: String
+    #[Default(2)] pub retries: Int
     pub verbose: Bool
 }
 "#,
@@ -1497,10 +1497,10 @@ fn typed_cli_entry_accepts_an_imported_subcommand_type() {
     let dir = isolated_cwd("shape_cli_imported_subcommand_type");
     fs::write(
         dir.join("commands.jet"),
-        r#"@Cli
+        r#"#Cli
 pub struct ServeArgs { pub port: Int }
 
-@Cli
+#Cli
 pub struct ImportArgs { pub file: String }
 
 pub enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
@@ -1550,7 +1550,7 @@ fn colliding_imported_cli_type_resolution_stays_in_codegen_sync() {
     let dir = isolated_cwd("shape_cli_ambiguous_imported_type");
     fs::write(
         dir.join("cli.jet"),
-        "@Cli\npub struct RunArgs { pub name: String }\n",
+        "#Cli\npub struct RunArgs { pub name: String }\n",
     )
     .unwrap();
     fs::write(
@@ -1589,7 +1589,7 @@ fn local_cli_type_wins_over_same_named_import() {
         dir.join("run.jet"),
         r#"use "other"
 
-@Cli
+#Cli
 struct RunArgs { name: String }
 
 fn run(args: RunArgs) { print(args.name) }
@@ -1710,9 +1710,9 @@ fn external_completion_rejects_hostile_files_and_names() {
 #[test]
 fn external_completion_preserves_checked_subcommands() {
     let dir = isolated_cwd("shape_cli_subcommands");
-    fs::write(dir.join("commands.jet"), r#"@Cli
+    fs::write(dir.join("commands.jet"), r#"#Cli
 struct ServeArgs { port: Int }
-@Cli
+#Cli
 struct ImportArgs { file: String }
 enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
 fn run(cmd: Cmd) {}
@@ -3776,8 +3776,8 @@ build: { staging: Build.{ optimize: basic } }
 
 // ── D-EXPANDCLI1 (card #183): `jet inspect expand` transparency command ────
 
-/// Fixture exercising the `inline` lens: an `@Inline` fn and an
-/// `@InlineAlways` method.
+/// Fixture exercising the `inline` lens: an `#Inline` fn and an
+/// `#InlineAlways` method.
 fn expand_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_facts.jet")
 }

@@ -26,7 +26,7 @@ pub fn bind(source:&str,lib:&str,cache:&Path)->Result<BindResult,BindError>{
     Ok(BindResult{source:render_jet(lib),archive,lib_dir,provenance:format!("schema=jet-tcl-bind-v1\nsha256={}\n",crate::SHA256::sha256_hex(&identity))})
 }
 
-fn render_jet(lib:&str)->String{let abi=format!("jet_tcl_{lib}");format!(r#"@Extern module c.{abi} {{
+fn render_jet(lib:&str)->String{let abi=format!("jet_tcl_{lib}");format!(r#"#Extern module c.{abi} {{
     fn open() -> Int = "{abi}_open"
     fn eval(handle: Int, code: String) -> String = "{abi}_eval"
     fn eval_once(code: String) -> String = "{abi}_eval_once"

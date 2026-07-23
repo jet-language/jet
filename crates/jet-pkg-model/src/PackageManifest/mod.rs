@@ -147,7 +147,7 @@ pub struct PackageMeta {
     pub layer: Option<crate::Syntax::RuntimeLayer>,
     /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `target: "web"` — this package's default
     /// CLI backend, the manifest-level counterpart to a loose file's
-    /// `@Target(Web)` marker. `--target=<x>` on the command line still wins.
+    /// `#Target(Web)` marker. `--target=<x>` on the command line still wins.
     pub target: Option<String>,
 }
 
@@ -162,7 +162,7 @@ pub enum PackageKind {
 
 /// One build target of a package (D-TGT1/D-TGT2, ratified 2026-06-21). The six
 /// shipped targets. `benchmark` (c80) routes `jet bench` at the package entry
-/// via the existing `@Bench`/`jet bench` engine — it is not a new mechanism
+/// via the existing `#Bench`/`jet bench` engine — it is not a new mechanism
 /// (I8). `plugin` (c81, D-PLUGIN1=B/D-DEP-WASM1=A) builds a sandboxed `wasm32`
 /// Component Model module instead of a native binary — a package is *loaded*,
 /// not imported or PATH-installed, so it maps to no `PackageKind`.
@@ -173,7 +173,7 @@ pub enum Target {
     Test,
     Example,
     /// c80 / D-TGT2: this package's entry is a benchmark; `jet bench` runs its
-    /// `@Bench` regions via the shipped `compile_benches_with_path` path.
+    /// `#Bench` regions via the shipped `compile_benches_with_path` path.
     Benchmark,
     /// c81 / D-PLUGIN1=B: this package builds to a sandboxed WASM Component
     /// Model module. `export` is the `.wit` world name (D-PLUGIN-EXPORT1=A,

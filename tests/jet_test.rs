@@ -187,7 +187,7 @@ fn jet_scope_timeout_exceeded_fails() {
 
 #[test]
 fn jet_bench_example_regions() {
-    // D-BENCH1: `jet bench` on a file with `@Bench` blocks times each region
+    // D-BENCH1: `jet bench` on a file with `#Bench` blocks times each region
     // and reports `<name>  <ns> ns/iter (...)  <ops> ops/sec`. Timing values
     // are non-deterministic, so this asserts structure: every block runs and
     // every name + the ns/iter and ops/sec labels appear.
@@ -220,7 +220,7 @@ fn jet_bench_example_regions() {
             stdout
         );
     }
-    // One report line per `@Bench` block.
+    // One report line per `#Bench` block.
     assert_eq!(
         stdout.lines().filter(|l| l.contains("ns/iter")).count(),
         2,
@@ -263,7 +263,7 @@ fn jet_test_fail_then_fixed() {
 
 #[test]
 fn jet_property_test_passes() {
-    // D-TEST1: a parameterized `@Test fn` is a property test. The example's three
+    // D-TEST1: a parameterized `#Test fn` is a property test. The example's three
     // properties all hold, so every line passes and the run succeeds.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
@@ -445,7 +445,7 @@ fn jet_test_coverage_reports_hit_and_miss() {
 #[test]
 fn jet_bench_target_integration() {
     // c80 / D-TGT2: a package whose pkg.jet declares `target: benchmark` runs
-    // its `@Bench` regions via the existing `jet bench` engine (no new mechanism).
+    // its `#Bench` regions via the existing `jet bench` engine (no new mechanism).
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let jet = jet_bin();
     let have_rustc = have_rustc();
@@ -482,7 +482,7 @@ fn jet_bench_target_integration() {
             stdout
         );
     }
-    // Exactly one `@Bench` region in this example.
+    // Exactly one `#Bench` region in this example.
     assert_eq!(
         stdout.lines().filter(|l| l.contains("ns/iter")).count(),
         1,
@@ -526,17 +526,17 @@ fn jet_test_dir_recurses_into_subdirectories() {
     fs::create_dir_all(dir.join("nested/deeper")).unwrap();
     fs::write(
         dir.join("a.jet"),
-        "@Test(\"top level\") { require(true) }\n",
+        "#Test(\"top level\") { require(true) }\n",
     )
     .unwrap();
     fs::write(
         dir.join("nested/b.jet"),
-        "@Test(\"one level down\") { require(true) }\n",
+        "#Test(\"one level down\") { require(true) }\n",
     )
     .unwrap();
     fs::write(
         dir.join("nested/deeper/c.jet"),
-        "@Test(\"two levels down\") { require(true) }\n",
+        "#Test(\"two levels down\") { require(true) }\n",
     )
     .unwrap();
     let out = Command::new(&jet).arg("test").arg(&dir).output().unwrap();
@@ -735,7 +735,7 @@ fn jet_fuzz_no_property_test_errors() {
     assert!(!out.status.success(), "no property test must fail");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("no property `@Test fn`"),
+        stderr.contains("no property `#Test fn`"),
         "expected the no-property-test message:\n{}",
         stderr
     );

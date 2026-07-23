@@ -68,7 +68,7 @@ pub enum TokKind {
     /// existing `TokKind::Int`/`Float` match across the parser is completely
     /// unaffected when no suffix is present. The lexer only carries the
     /// value + suffix text; resolving the suffix against an in-scope
-    /// `@UnitFamily` member is sema's job (imports aren't known here).
+    /// `#UnitFamily` member is sema's job (imports aren't known here).
     UnitNumber {
         /// Exact source digits, retained for policy/config consumers that require
         /// rational normalization without an f64 round-trip.

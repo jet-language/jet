@@ -1,15 +1,63 @@
-Error [E0988]: loop label is a suffix, not a prefix
+Error [E0988]: named loops use `::`, not `@`
   --> tests/ui/loop_label_prefix_old_form.jet:2:5
     |
-  2 |     @outer loop i; [1, 2, 3] {
+  2 |     outer@ loop i; [1, 2, 3] {
     |     ^^^^^^
- Why: the label `@` moved to the suffix position (D-LOOPLABEL2)
- Fix: write `outer@ loop { … }`
+ Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Fix: write `outer :: loop { … }`
 
-Error [E0988]: loop label is a suffix, not a prefix
+Error [E0988]: named loop exits use dot calls
   --> tests/ui/loop_label_prefix_old_form.jet:3:15
     |
-  3 |         break @outer
+  3 |         break outer@
     |               ^^^^^^
- Why: the label `@` moved to the suffix position (D-LOOPLABEL2)
- Fix: write `break outer@`
+ Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Fix: write `outer.break()`
+
+Error [E0988]: named loops use `::`, not `@`
+  --> tests/ui/loop_label_prefix_old_form.jet:8:5
+    |
+  8 |     outer@ loop i; [1, 2, 3] {
+    |     ^^^^^^
+ Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Fix: write `outer :: loop { … }`
+
+Error [E0988]: named loop exits use dot calls
+  --> tests/ui/loop_label_prefix_old_form.jet:9:14
+    |
+  9 |         next outer@
+    |              ^^^^^^
+ Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Fix: write `outer.next()`
+
+Error [E0988]: named loops use `::`, not `@`
+  --> tests/ui/loop_label_prefix_old_form.jet:14:5
+    |
+ 14 |     @outer loop {
+    |     ^^^^^^
+ Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Fix: write `outer :: loop { … }`
+
+Error [E0988]: named loop exits use dot calls
+  --> tests/ui/loop_label_prefix_old_form.jet:15:15
+    |
+ 15 |         break @outer
+    |               ^^^^^^
+ Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Fix: write `outer.break()`
+
+Error [E0988]: named loops use `::`, not `@`
+  --> tests/ui/loop_label_prefix_old_form.jet:20:5
+    |
+ 20 |     @outer loop {
+    |     ^^^^^^
+ Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Fix: write `outer :: loop { … }`
+
+Error [E0988]: named loop exits use dot calls
+  --> tests/ui/loop_label_prefix_old_form.jet:21:14
+    |
+ 21 |         next @outer
+    |              ^^^^^^
+ Why: `@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)
+ Fix: write `outer.next()`

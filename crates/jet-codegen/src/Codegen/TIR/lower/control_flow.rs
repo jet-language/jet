@@ -72,7 +72,7 @@ pub(super) fn static_call_type_name_lower(receiver: &Expr, env: &LowerEnv) -> Op
     }
 }
 
-/// Pull the bare label name out of an `@name` loop label, dropping the span. The
+/// Pull the bare name out of a `name :: loop` declaration, dropping the span. The
 /// emitter renders it as `'jet_<name>:` (mirroring `loop_label_prefix`).
 pub(crate) fn label_name(label: &Option<(String, Span)>) -> Option<String> {
     label.as_ref().map(|(n, _)| n.clone())

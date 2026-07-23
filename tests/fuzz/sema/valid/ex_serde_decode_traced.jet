@@ -4,7 +4,7 @@
 // `DecodeResult<T>` — `{ value, migration }` — so a caller can ask whether the
 // record it just decoded arrived as an old schema version.
 //
-// Decoding a `@PublishedSchema` type tries the current shape first; on
+// Decoding a `#PublishedSchema` type tries the current shape first; on
 // mismatch the runtime chain detects which historical shape the data matches
 // (by field-name set, newest matching version preferred) and walks the
 // `migration { }` steps forward. Plain `decode` applies the same chain
@@ -14,7 +14,7 @@
 use core.encoding.json as json
 
 // A plain type — decode_traced still works, `.migration.migrated` is false.
-@Codable
+#Codable
 struct Point {
     x: Int
     y: Int
@@ -23,7 +23,7 @@ struct Point {
 // A published record, currently at its v2 shape. The migration block is the
 // v1 -> v2 step: v1 records were { id, name } — the block renames `name` to
 // `display_name` and fills `verified` with a default.
-@[PublishedSchema, Codable]
+#[PublishedSchema, Codable]
 struct UserRecord {
     id: Int
     display_name: String

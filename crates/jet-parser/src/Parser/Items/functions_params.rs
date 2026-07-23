@@ -484,7 +484,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                // D-SHAPE2: field rules share one `@[…]` group.
+                // D-SHAPE2: field rules share one `#[…]` group.
                 if self.at_marker_list() {
                     let field_markers = self.parse_field_markers()?;
                     let mut f = self.field()?;

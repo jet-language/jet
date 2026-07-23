@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
                     && apply_serde_ok(leaf, args, reg, trait_name, elem_ok))
         }
 
-        /// D-SERDE: a value type the `@[Codable]`/`@[Encode]` derive (or a blanket impl)
+        /// D-SERDE: a value type the `#[Codable]`/`#[Encode]` derive (or a blanket impl)
         /// can serialize. Primitives, the dynamic `Json` tree, and lists/options/maps of
         /// encodables qualify; a user type must derive `Encode`.
         pub(crate) fn is_encodable(&self, t: &Type) -> bool {

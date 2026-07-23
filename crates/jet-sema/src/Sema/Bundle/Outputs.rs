@@ -14,18 +14,18 @@ pub(super) fn is_fallible_void_entry_return(ty: &Type, state: &ModuleState) -> b
 }
 /// D-CLIFLAG1: what `fn run`'s single parameter type turned out to be.
 pub(super) enum CliEntryShape {
-    /// A `@[Cli]`-derived struct — flags come straight from its fields.
+    /// A `#[Cli]`-derived struct — flags come straight from its fields.
     Struct,
-    /// An `enum` whose every variant carries a `@[Cli]` struct payload.
+    /// An `enum` whose every variant carries a `#[Cli]` struct payload.
     Enum,
-    /// An `enum` parameter with at least one non-`@[Cli]` variant (E1307).
+    /// An `enum` parameter with at least one non-`#[Cli]` variant (E1307).
     EnumBadVariants(Vec<Diagnostic>),
     /// Neither of the above (E1308).
     Invalid,
 }
 
 /// D-CLIFLAG1: classify `fn run`'s parameter type against its defining module.
-/// The entry signature stays in the entry file; its public `@[Cli]` type may
+/// The entry signature stays in the entry file; its public `#[Cli]` type may
 /// live in one directly imported module.
 pub(super) fn cli_entry_param_shape(items: &[Item], ty: &Type, reg: &TraitRegistry) -> CliEntryShape {
     let Type::Named(name) = ty else {

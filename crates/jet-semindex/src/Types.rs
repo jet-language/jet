@@ -160,9 +160,9 @@ pub struct MemberFact {
 /// audited the same way — named at the site, never hidden.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BypassKind {
-    /// `@Unsafe("reason") { … }` — an audited region (S58).
+    /// `#Unsafe("reason") { … }` — an audited region (S58).
     UnsafeRegion,
-    /// `@Unsafe("reason") fn …` — an audited whole-function contract (S58).
+    /// `#Unsafe("reason") fn …` — an audited whole-function contract (S58).
     UnsafeFn,
     /// `.drop("reason")` — the sole intentional-discard spelling (D-IGNORERET2).
     ExplicitDrop,
@@ -184,7 +184,7 @@ impl BypassKind {
 /// D-LINTPOLICY1=A: one spelled bypass, as the override law's audit clause
 /// requires — every bypass lands in the record, not just the flag/marker at
 /// the site. `site` names what was bypassed (a function, a call's receiver
-/// expression, a field); `detail` carries the reason string (`@Unsafe`/
+/// expression, a field); `detail` carries the reason string (`#Unsafe`/
 /// `.drop`) or the suppressed lint name (`#[allow(...)]`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BypassFact {
@@ -203,7 +203,7 @@ pub struct TypeDossier {
     pub members: Vec<MemberFact>,
     pub references: Vec<SymbolRef>,
     /// D-LINTPOLICY1=A: every spelled bypass in the whole checked program
-    /// (`@Unsafe(reason)`, `.drop(reason)`, `#[allow(lint)]`) — the override
+    /// (`#Unsafe(reason)`, `.drop(reason)`, `#[allow(lint)]`) — the override
     /// law's audit clause made concrete. Program-wide, not scoped to
     /// `target`, so a dossier is where a reviewer sees every expert escape
     /// hatch at once.

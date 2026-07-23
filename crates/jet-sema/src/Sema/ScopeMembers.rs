@@ -3,11 +3,11 @@
 //! A statement-position `.name { … }` / `.name(args) { … }` (parsed context-free
 //! as `Stmt::ScopeMember`) is legal only as a **direct** statement of a marker
 //! block that declares a vocabulary (`Syntax::scope_members`). Today the only
-//! such marker is `@Test`, whose members are `.setup` / `.expect_fail` /
+//! such marker is `#Test`, whose members are `.setup` / `.expect_fail` /
 //! `.timeout` / `.skip`. This pass is the single owner of the member rules:
 //!
 //! - E0614 — unknown member (lists the vocabulary), or a member used inside a
-//!   marker that declares none (e.g. `@Bench`).
+//!   marker that declares none (e.g. `#Bench`).
 //! - E0615 — a member statement outside any member-declaring marker block.
 //! - E0616 — `.setup` is not the first statement.
 //! - E0617 — wrong argument shape (`.timeout` needs one duration; `.setup` /
@@ -17,7 +17,7 @@
 //!
 //! Everything here is compile-time only (I3): the checker recurses into member
 //! bodies for ordinary type-checking, and codegen lowers the members into the
-//! `jet test` harness. `@Test`/`@Bench` bodies are validated only under their
+//! `jet test` harness. `#Test`/`#Bench` bodies are validated only under their
 //! own modes (they are not compiled otherwise, mirroring the rest of sema).
 
 use crate::Diagnostics::{Diagnostic, Span};
@@ -131,9 +131,9 @@ fn reject_all(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
                 "`.{}` only works inside a marker block that declares it",
                 name
             ),
-            "a leading-dot member statement resolves against the enclosing `@Marker`'s vocabulary — here there is no such block".to_string(),
+            "a leading-dot member statement resolves against the enclosing `#Marker`'s vocabulary — here there is no such block".to_string(),
             format!(
-                "move it inside a `@{}(\"…\") {{ … }}` block, or write an ordinary statement",
+                "move it inside a `#{}(\"…\") {{ … }}` block, or write an ordinary statement",
                 Syntax::KW_TEST
             ),
             Some(dot_span),
@@ -157,9 +157,9 @@ fn validate_member(
         None => {
             diags.push(Diagnostic::error(
                 "E0614",
-                format!("`@{}` blocks have no members", marker),
+                format!("`#{}` blocks have no members", marker),
                 format!(
-                    "only some rule blocks declare a `.member {{ … }}` vocabulary; `@{}` isn't one of them",
+                    "only some rule blocks declare a `.member {{ … }}` vocabulary; `#{}` isn't one of them",
                     marker
                 ),
                 format!("remove this `.{}` block", name),
@@ -171,9 +171,9 @@ fn validate_member(
     if !vocab.contains(&name) {
         diags.push(Diagnostic::error(
             "E0614",
-            format!("`.{}` isn't a member of `@{}`", name, marker),
+            format!("`.{}` isn't a member of `#{}`", name, marker),
             format!(
-                "a `@{}` block understands these members: {}",
+                "a `#{}` block understands these members: {}",
                 marker,
                 vocab_list(vocab)
             ),
@@ -247,7 +247,7 @@ fn validate_args(
 }
 
 /// A duration literal usable by `.timeout` — a bare unit literal whose suffix is
-/// a recognized time unit (D-UNITLIT1; no `@UnitFamily` in scope required).
+/// a recognized time unit (D-UNITLIT1; no `#UnitFamily` in scope required).
 fn is_duration(e: &Expr) -> bool {
     matches!(e, Expr::UnitLit { suffix, .. } if Syntax::duration_suffix_nanos(suffix).is_some())
 }

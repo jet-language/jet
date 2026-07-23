@@ -89,12 +89,12 @@ fn safe_envelope_raw_argument(
         "nonce" => (
             CryptoMisuseReason::RawNonce,
             format!("`{name}` would use a caller-supplied nonce, which violates the safe envelope requirement that Jet manages nonces internally"),
-            "remove the `nonce:` argument, or use a raw expert primitive inside `@Unsafe` for protocol interop".to_string(),
+            "remove the `nonce:` argument, or use a raw expert primitive inside `#Unsafe` for protocol interop".to_string(),
         ),
         "algorithm" => (
             CryptoMisuseReason::RawAlgorithm,
             format!("`{name}` would select a caller-supplied algorithm, which violates the safe envelope requirement that Jet selects the algorithm internally"),
-            "remove the `algorithm:` argument, or use a raw expert primitive inside `@Unsafe` for protocol interop".to_string(),
+            "remove the `algorithm:` argument, or use a raw expert primitive inside `#Unsafe` for protocol interop".to_string(),
         ),
         _ => return None,
     };
@@ -123,7 +123,7 @@ fn crypto_misuse_diagnostic(
     if matches!(module, "jet.crypto" | "core.crypto") && name == "password_hash_with_salt" {
         return Some(Diagnostic::crypto_misuse_fact(
             "`password_hash_with_salt` would use caller-controlled salt bytes, which makes a deterministic entropy seam reachable from a release build".to_string(),
-            "use `crypto.password_hash` so Jet generates the salt, or move a fixed vector to `expert.argon2id` inside `@Unsafe`".to_string(),
+            "use `crypto.password_hash` so Jet generates the salt, or move a fixed vector to `expert.argon2id` inside `#Unsafe`".to_string(),
             args.get(1)?.expr.span(),
             CryptoMisuseReason::DeterministicEntropy,
             "password_hash_with_salt",
@@ -357,7 +357,7 @@ impl<'a> Checker<'a> {
                 self.record_effect(e.name(), span);
                 // D-TXN2: an irreversible effect (Net/Fs/Exec — a network/file/
                 // subprocess effect) can't be rolled back, so it is rejected when it
-                // occurs directly inside a `@Transact { … }` block (E0746). The fix
+                // occurs directly inside a `#Transact { … }` block (E0746). The fix
                 // is to move it after the block, or register it via
                 // `name.on_commit(() => { … })` so it runs only on a clean commit.
                 if self.txn_depth > 0 && is_irreversible_effect(e) {
@@ -400,8 +400,8 @@ impl<'a> Checker<'a> {
                 }
                 return resolved_core_fixed_sig(module, name).and_then(|(_, ret)| ret);
             }
-            // D-EFF1: `@Pure` is the empty effect set, so any effectful Core call —
-            // `Fs`/`Net`/`Env`/`Exec`/`Db`/`Log`/`Io` — is impure inside a `@Pure fn`.
+            // D-EFF1: `#Pure` is the empty effect set, so any effectful Core call —
+            // `Fs`/`Net`/`Env`/`Exec`/`Db`/`Log`/`Io` — is impure inside a `#Pure fn`.
             // (Time/Rand return early above via E3403; stdin via the E3401 check
             // above, so this catches the remaining effect-carrying Core modules.)
             if self.in_pure && self.det_suppress == 0 && core_effect(module, name).is_some() {
@@ -720,7 +720,7 @@ impl<'a> Checker<'a> {
                 }
                 // D-ENC1 / D-SERDE6: typed encode/decode over the Encode/Decode model.
                 // `to_string`/`to_string_pretty` accept any encodable value (the dynamic
-                // `Json` / `[[String]]` / `Map` forms AND a `@[Codable]` value); the
+                // `Json` / `[[String]]` / `Map` forms AND a `#[Codable]` value); the
                 // codegen routes by the lowered arg type. `decode<T>` is the typed decode
                 // (→ `T`, or `[T]` for CSV) keyed by the call-site type argument.
                 (
@@ -1274,14 +1274,14 @@ impl<'a> Checker<'a> {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                         return None;
                     }
-                    // Taking an address is inert (S58): legal outside `@Unsafe`.
+                    // Taking an address is inert (S58): legal outside `#Unsafe`.
                     let arg = args.get_mut(0)?;
                     self.infer(&mut arg.expr);
                     let _ = alias_span;
                     return Some(Type::Int);
                 }
                 ("core.io", "print") => {
-                    // D-PRELUDEX1=A: qualified twin of ambient `print` for `@NoPrelude` files.
+                    // D-PRELUDEX1=A: qualified twin of ambient `print` for `#NoPrelude` files.
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                     }
@@ -2590,7 +2590,7 @@ impl<'a> Checker<'a> {
                         args: vec![value_ty],
                     });
                 }
-                // D-CRYPTOENV1=A: expert-only raw crypto — requires import + @Unsafe gate.
+                // D-CRYPTOENV1=A: expert-only raw crypto — requires import + #Unsafe gate.
                 ("core.crypto.expert" | "core.vault.expert", _) => {
                     let has_import = self
                         .core_imports
@@ -2601,13 +2601,13 @@ impl<'a> Checker<'a> {
                             (
                                 format!("`core.crypto.expert.{name}` bypasses the misuse-resistant envelope"),
                                 "raw AES/ChaCha primitives are expert-only and hide none of the footguns that `crypto.seal`/`open` prevent (D-CRYPTOENV1)".to_string(),
-                                "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `@Unsafe(\"reason\")` region".to_string(),
+                                "use `core.crypto.seal` / `core.crypto.open` for encryption, or add `use core.crypto.expert` inside an audited `#Unsafe(\"reason\")` region".to_string(),
                             )
                         } else {
                             (
                                 format!("`{module}.{name}` is an expert-only key material operation"),
                                 "raw key material operations bypass the misuse-resistant typed surface".to_string(),
-                                format!("import `{module}` and call it inside an audited `@Unsafe(\"reason\")` region"),
+                                format!("import `{module}` and call it inside an audited `#Unsafe(\"reason\")` region"),
                             )
                         };
                         self.diags.push(Diagnostic::error(
@@ -2620,15 +2620,15 @@ impl<'a> Checker<'a> {
                     } else if !self.in_unsafe {
                         let (what, why, fix) = if module == "core.crypto.expert" {
                             (
-                                format!("`core.crypto.expert.{name}` requires an audited `@Unsafe` region"),
+                                format!("`core.crypto.expert.{name}` requires an audited `#Unsafe` region"),
                                 "raw crypto primitives may only run inside an explicit expert-tier gate (I1)".to_string(),
-                                "wrap the call in `@Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
+                                "wrap the call in `#Unsafe(\"crypto expert: …\") { … }` or use `crypto.seal`/`open` instead".to_string(),
                             )
                         } else {
                             (
-                                format!("`{module}.{name}` requires an audited `@Unsafe` region"),
+                                format!("`{module}.{name}` requires an audited `#Unsafe` region"),
                                 "raw key import may only run inside an explicit expert-tier gate (I1)".to_string(),
-                                "wrap the call in `@Unsafe(\"vault key import: …\") { … }`".to_string(),
+                                "wrap the call in `#Unsafe(\"vault key import: …\") { … }`".to_string(),
                             )
                         };
                         self.diags.push(Diagnostic::error(

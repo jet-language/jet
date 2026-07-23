@@ -1,7 +1,7 @@
 //! E0927 (card #518): the closed marker vocabulary.
 //!
-//! `@Name` rules are structurally accepted by the parser for any PascalCase
-//! identifier (including the `@[…]` bracket-list path) — the parser
+//! `#Name` rules are structurally accepted by the parser for any PascalCase
+//! identifier (including the `#[…]` bracket-list path) — the parser
 //! only knows "this looks like a marker," not "this is a marker Jet knows
 //! about." An unregistered name used to silently do nothing (I3: codegen
 //! never saw it, so nothing rejected it either). This module is the one
@@ -28,11 +28,11 @@ const DEBUG_OWNED_ELSEWHERE: &str = "Debug";
 fn retired_marker_fix(name: &str) -> Option<&'static str> {
     match name {
         "Wasm" => Some(
-            "write `@Target(Wasm)` instead — one target-rule family covers every backend \
+            "write `#Target(Wasm)` instead — one target-rule family covers every backend \
              (D-MARK-TARGET1=A).",
         ),
         "Js" => Some(
-            "write `@Target(Js)` instead — one target-rule family covers every backend \
+            "write `#Target(Js)` instead — one target-rule family covers every backend \
              (D-MARK-TARGET1=A).",
         ),
         "Suppress" => Some(
@@ -57,9 +57,9 @@ fn e0927_unknown_marker(name: &str, vocab: &[String], span: Span) -> Diagnostic 
     if let Some(fix) = retired_marker_fix(name) {
         return Diagnostic::error(
             "E0927",
-            format!("`@{name}` is retired — it no longer does anything"),
+            format!("`#{name}` is retired — it no longer does anything"),
             format!(
-                "`@{name}` used to be a real rule; it was removed and nothing takes \
+                "`#{name}` used to be a real rule; it was removed and nothing takes \
                  its place under that name, so writing it here silently did nothing before \
                  this check existed."
             ),
@@ -68,14 +68,14 @@ fn e0927_unknown_marker(name: &str, vocab: &[String], span: Span) -> Diagnostic 
         );
     }
     let fix = match crate::Sema::Diagnostics::suggest_field(name, vocab) {
-        Some(s) => format!("did you mean `@{s}`?"),
+        Some(s) => format!("did you mean `#{s}`?"),
         None => format!(
             "check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list."
         ),
     };
     Diagnostic::error(
         "E0927",
-        format!("`@{name}` isn't a known applied rule"),
+        format!("`#{name}` isn't a known applied rule"),
         format!("`{name}` isn't registered as an applied rule — Jet rules are a closed, \
                  registered vocabulary (I7), not any PascalCase word."),
         fix,
@@ -92,7 +92,7 @@ fn is_legal_rule_name(name: &str, known_derive_names: &HashSet<String>) -> bool 
 /// legal, or already reported elsewhere:
 /// - a name known on the OTHER plane already got E0062/E0063 from the
 ///   parser (`check_marker_plane` in `jet-parser`) — never double-report.
-/// - `@Debug` is E0922's job (see module docs).
+/// - `#Debug` is E0922's job (see module docs).
 fn check_one(m: &Marker, known_derive_names: &HashSet<String>) -> Option<Diagnostic> {
     if m.name == DEBUG_OWNED_ELSEWHERE || is_legal_rule_name(&m.name, known_derive_names) {
         return None;
@@ -110,7 +110,7 @@ fn check_one(m: &Marker, known_derive_names: &HashSet<String>) -> Option<Diagnos
 /// (`s.type_markers`/`e.type_markers`, the full pre-classification list —
 /// `Syntax.rs` module docs — so plane info from `Marker.sigil` survives)
 /// and field/variant-level bracket markers (`f.serde_markers`,
-/// `v.serde_markers`, which keep their `Marker`s whole; only `@Redact` is
+/// `v.serde_markers`, which keep their `Marker`s whole; only `#Redact` is
 /// pulled out into `f.redact` upstream). `known_derive_names` is the set of
 /// `derive T.Name { … }` providers visible to this build (bundle-wide in
 /// `Bundle.rs`, so a cross-module user derive is never a false unknown).

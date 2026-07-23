@@ -444,11 +444,10 @@ fn marker_modifier(tokens: &[Token], idx: usize) -> Option<u32> {
     let tok = &tokens[idx];
     match tok.kind {
         TokKind::Hash => marker_kind_after(tokens, idx).map(|kind| kind.modifier()),
-        TokKind::At => marker_kind_after(tokens, idx).map(|kind| kind.modifier()),
         _ => {
             let prev = previous_significant(tokens, idx)?;
             match tokens[prev].kind {
-                TokKind::Hash | TokKind::At if marker_name(tokens, idx).is_some() => {
+                TokKind::Hash if marker_name(tokens, idx).is_some() => {
                     marker_kind_for(&tokens[prev], tokens, idx).map(|kind| kind.modifier())
                 }
                 _ => None,
@@ -478,7 +477,7 @@ fn marker_kind_after(tokens: &[Token], idx: usize) -> Option<MarkerKind> {
 fn marker_kind_for(prefix: &Token, tokens: &[Token], name_idx: usize) -> Option<MarkerKind> {
     let name = marker_name(tokens, name_idx)?;
     match prefix.kind {
-        TokKind::At if crate::Syntax::APPLIED_RULES.contains(&name) => {
+        TokKind::Hash if crate::Syntax::APPLIED_RULES.contains(&name) => {
             Some(MarkerKind::Rule)
         }
         _ => None,
@@ -520,15 +519,6 @@ fn is_contextual_next(tokens: &[Token], idx: usize) -> bool {
         return false;
     }
     matches!(next, Some(TokKind::Semi | TokKind::RBrace))
-        || next_idx.is_some_and(|label_idx| {
-            matches!(tokens[label_idx].kind, TokKind::Ident(_))
-                && next_significant(tokens, label_idx).is_some_and(|at_idx| {
-                    matches!(tokens[at_idx].kind, TokKind::At)
-                        && next_significant(tokens, at_idx).is_some_and(|end_idx| {
-                            matches!(tokens[end_idx].kind, TokKind::Semi | TokKind::RBrace)
-                        })
-                })
-        })
 }
 
 fn is_trivia(tok: &Token) -> bool {

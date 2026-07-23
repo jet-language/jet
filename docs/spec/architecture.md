@@ -28,7 +28,7 @@ Codegen does not read the AST plus side registries; it lowers the checked AST to
 **typed IR** (`crates/jet-codegen/src/Codegen/TIR/`) that carries only sema-approved facts, then emits
 Rust from the TIR with **zero inference** (every type/convention/mangle/overflow decision
 is resolved at lowering — R1/I3). The TIR is the **only** codegen seam (R7) for every emitted
-body: free functions, methods, trait methods, `@Test` block bodies, and error-conversion
+body: free functions, methods, trait methods, `#Test` block bodies, and error-conversion
 `impl Old -> New` bodies all lower through it. A per-surface gate (`tir_covers*`) decides
 coverage, and a construct **outside** the TIR subset is an **internal compiler error** (R5 ICE),
 never an AST fallback or a miscompile. The legacy AST codegen path (`emit_expr`/`emit_stmt`/
@@ -332,14 +332,14 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   **I1 amendment (D-LL1, ratified 2026-06-16, E2-M13).** I1 originally read
   *"no `unsafe` in the language or generated code, ever (v1)."* The expert
   low-level tier (S58) amends it: generated `unsafe` appears **only** inside
-  user-written gated regions — an `@Unsafe("reason") { … }` block (or bare
-  `@Unsafe { … }`, which emits lint L3101) or an `@Unsafe fn` contract, both
+  user-written gated regions — an `#Unsafe("reason") { … }` block (or bare
+  `#Unsafe { … }`, which emits lint L3101) or an `#Unsafe fn` contract, both
   unlocked by `use core.mem` — plus vetted std/mem internals. Ordinary,
   memory-safe Jet still emits **zero** `unsafe`; the boundary is enforced by
   sema (E3101/E3102/E3103) and tested in `tests/golden.rs` (every example but
   the audited `48_lowlevel` must contain no `unsafe`, and even there every
   `unsafe` must be a gated `unsafe {`/`unsafe fn` form). Codegen stays dumb:
-  it lowers an already-checked `@Unsafe` region straight to a Rust `unsafe`
+  it lowers an already-checked `#Unsafe` region straight to a Rust `unsafe`
   region and makes no safety decision of its own.
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must
   produce Rust that compiles. New language features land as: spec →
@@ -401,7 +401,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   generation), and any error in generated output surfaces as a **real sema
   diagnostic pinned to the user's trigger site** — the struct, field, or
   derive marker that caused it — with the generated fragment shown only as
-  optional context, never as raw rustc output. The shipped `@[Codable]` derive
+  optional context, never as raw rustc output. The shipped `#[Codable]` derive
   already works this way; it is the required shape for all future derives and
   build-time steps (S56 user derives, comptime). (D-CTCODEGEN1=A, ratified
   2026-06-25; pairs with D-METADERIVE1=A, which makes a user derive's output a

@@ -138,8 +138,8 @@ pub(crate) struct Cx {
     /// M10 helpers proven reachable by sema.
     pub(crate) used_core: HashSet<String>,
     /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
-    /// stable C callback symbol at some `@Extern` call site. Emission must give
-    /// exactly these functions `extern "C" fn` — never every `@Pure fn` (that
+    /// stable C callback symbol at some `#Extern` call site. Emission must give
+    /// exactly these functions `extern "C" fn` — never every `#Pure fn` (that
     /// leaked the purity lever into codegen and broke I3 erasure; 14dd68a5).
     pub(crate) ffi_callback_fns: HashSet<String>,
     /// Empty at the entry module, `super::` inside generated import modules.
@@ -213,20 +213,20 @@ pub(crate) struct Cx {
     pub(crate) needed_variadic_arities:
         std::cell::RefCell<std::collections::BTreeMap<String, std::collections::BTreeSet<usize>>>,
     /// D-OSTARGET1=A (ratified 2026-07-01, c134): the native OS bucket this
-    /// build is compiling for — an `impl` gated to a different `@Target(Os.*)`
+    /// build is compiling for — an `impl` gated to a different `#Target(Os.*)`
     /// is skipped entirely (mirrors how `Codegen/Web.rs` filters by
     /// `WebBucket`). Defaults to the host OS; the real build pipeline
     /// (`emit_bundle_dbg`) overwrites it from the resolved `--target=<triple>`.
     pub(crate) active_os: crate::Syntax::OsTarget,
-    /// D-STM1=A (card #506): true while lowering the body of a `@Transact` block,
+    /// D-STM1=A (card #506): true while lowering the body of a `#Transact` block,
     /// so a `Shared<T>.edit(f)` inside it routes to the deferred `edit_txn` (the
     /// atomic Shared plane) instead of taking a lock immediately. Set/restored
     /// around the block body in `lower_stmt`'s `Stmt::Transact` arm.
     pub(crate) in_stm_transact: std::cell::Cell<bool>,
     /// D-STM1=A (card #506): set true when a `Shared.edit` inside the current
-    /// `@Transact` body routed to `edit_txn` — i.e. the block actually touches the
+    /// `#Transact` body routed to `edit_txn` — i.e. the block actually touches the
     /// Shared plane and so needs the `jet_stm::begin()/commit()` scaffold emitted.
-    /// Save/restored per block so each `@Transact` reports its own use.
+    /// Save/restored per block so each `#Transact` reports its own use.
     pub(crate) stm_touched: std::cell::Cell<bool>,
 }
 
@@ -1532,7 +1532,7 @@ impl Cx {
                 format!("std::collections::VecDeque<{}>", self.rust_type(&args[0]))
             }
             // S58 (E2-M13): `Ptr<T>` lowers to a Rust raw pointer `*mut T`.
-            // Memory safety is enforced in sema (the `@Unsafe` gate); codegen
+            // Memory safety is enforced in sema (the `#Unsafe` gate); codegen
             // is dumb.
             Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*mut {}", self.rust_type(&args[0]))
@@ -2332,7 +2332,7 @@ pub(crate) fn build_cx_items(
             // D-MIGRATE4: collect migration blocks per type (source order = the
             // chain, oldest step first) so `emit_struct_migration` can emit the
             // runtime step functions + chain-walker for decodable
-            // `@PublishedSchema` types. Types without blocks get nothing.
+            // `#PublishedSchema` types. Types without blocks get nothing.
             Item::Migration(m) => {
                 cx.migrations
                     .entry(m.type_name.clone())
@@ -2359,7 +2359,7 @@ pub(crate) fn build_cx_items(
                     cx.distinct_ranges.insert(d.name.clone(), (lo, hi));
                 }
             }
-            // D-QUAL3: each unit-family member registers as a `@Numeric` distinct
+            // D-QUAL3: each unit-family member registers as a `#Numeric` distinct
             // type erasing to `Float`.
             Item::UnitFamily(uf) => {
                 let dimension = crate::AST::Dimension::for_family(&uf.family);

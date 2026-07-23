@@ -196,11 +196,26 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         } => {
             if *is_option {
                 resident_safe_expr(value, callees)
-                    && matches!(fallback, TOrFallback::Value(_) | TOrFallback::Panic(_))
+                    && matches!(
+                        fallback,
+                        TOrFallback::Value(_)
+                            | TOrFallback::Panic(_)
+                            | TOrFallback::Break
+                            | TOrFallback::Continue
+                            | TOrFallback::BreakLabel(_)
+                            | TOrFallback::ContinueLabel(_)
+                    )
             } else {
                 !is_option
                     && resident_safe_expr(value, callees)
-                    && matches!(fallback, TOrFallback::Panic(_))
+                    && matches!(
+                        fallback,
+                        TOrFallback::Panic(_)
+                            | TOrFallback::Break
+                            | TOrFallback::Continue
+                            | TOrFallback::BreakLabel(_)
+                            | TOrFallback::ContinueLabel(_)
+                    )
             }
         }
         TExprKind::ListLit(elems) => {

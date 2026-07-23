@@ -1792,7 +1792,7 @@ pub(super) fn apply_core_call(
                 .collect(),
         )),
         // --- impure / build-time I/O → teaching diagnostic (reached only when
-        // no @Impure gate intercepts first in eval_method) ---
+        // no #Impure gate intercepts first in eval_method) ---
         ("core.files", _)
         | ("core.env", _)
         | ("core.io", _)
@@ -1801,14 +1801,14 @@ pub(super) fn apply_core_call(
         | ("core.tls", _) => Err(Diagnostic::error(
             "E3410",
             format!(
-                "`{}.{}()` is a Tier-2 comptime effect — it requires a `@Impure` gate",
+                "`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate",
                 module, method
             ),
             "ambient I/O (filesystem, environment, process) is not allowed in \
                  pure comptime evaluation"
                 .to_string(),
             format!(
-                "wrap the comptime binding in `@Impure(\"reason\") {{ … }}` and \
+                "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and \
                          pass `--allow-impure` to the build"
             ),
             Some(span),

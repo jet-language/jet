@@ -315,7 +315,7 @@ pub(crate) fn check_pure_stmt(
             }
             None
         }
-        // D-DOTSCOPE1: a `@Test` scope-member region — check its body for purity.
+        // D-DOTSCOPE1: a `#Test` scope-member region — check its body for purity.
         Stmt::ScopeMember { body, .. } => {
             for st in body {
                 if let Some(d) = check_pure_stmt(st, pure_fn, funcs) {
@@ -504,7 +504,12 @@ fn check_pure_expr_with_path(
             use crate::AST::OrFallback as OF;
             match fallback {
                 OF::Value(fe) => rec!(fe),
-                OF::Return(..) | OF::Panic { .. } | OF::Break(_) | OF::Continue(_) => None,
+                OF::Return(..)
+                | OF::Panic { .. }
+                | OF::Break(_)
+                | OF::Continue(_)
+                | OF::BreakLabel(..)
+                | OF::ContinueLabel(..) => None,
             }
         }),
         Expr::CallValue { callee, args, .. } => {
@@ -744,7 +749,7 @@ fn check_pure_stmt_with_path(
             }
             None
         }
-        // D-DOTSCOPE1: a `@Test` scope-member region — recurse into its body.
+        // D-DOTSCOPE1: a `#Test` scope-member region — recurse into its body.
         Stmt::ScopeMember { body, .. } => {
             for st in body {
                 if let Some(d) = rec_s!(st) {
@@ -1309,7 +1314,7 @@ fn walk_stmt_for_calls(
                 }
             }
         }
-        // D-DOTSCOPE1: a `@Test` scope-member region — walk its body for calls.
+        // D-DOTSCOPE1: a `#Test` scope-member region — walk its body for calls.
         Stmt::ScopeMember { body, .. } => {
             for st in body {
                 walk_stmt_for_calls(st, root_fn, funcs_sig, ast_funcs, path, visited, diags);

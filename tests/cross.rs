@@ -143,7 +143,7 @@ fn e3301_snapshot() {
 
 // ── D-OSTARGET1=A: native OS platform gating (c134 Phase 9.3) ───────────────
 
-/// `@Target(Os.Linux)` / `@Target(Os.Macos)` impls, both present in source —
+/// `#Target(Os.Linux)` / `#Target(Os.Macos)` impls, both present in source —
 /// only the `impl` matching `--target=<triple>`'s OS reaches the generated
 /// Rust (mirrors how `Codegen/Web.rs` filters function membership by
 /// `WebBucket`, E2-M15's cross-compile flag reused, no new flag). The
@@ -256,7 +256,7 @@ fn os_target_gating_defaults_to_host_os_with_no_target_flag() {
 
 // ── D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend ────────────────
 //
-// Phase 8 is the real native backend behind the `@Target(Os.Linux)` / `comptime
+// Phase 8 is the real native backend behind the `#Target(Os.Linux)` / `comptime
 // if build.os` frame. These structural tests are the headless proof (this
 // environment has no reliable display): they inspect the generated Rust to show
 // (a) a Linux build emits the vetted `jet_gtk` FFI module and wires real

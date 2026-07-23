@@ -40,7 +40,7 @@ impl<'a> Checker<'a> {
     /// D-FFI-INLINE1=A / D-FFI-ASM1=A / D-FFI-CPP1=A (card #501): validate an
     /// inline foreign tier function (`#FFI(<lang>) fn`). The systems floor ships
     /// `c`, `cpp`, and `asm`; every one is an unsafe foreign language, so an
-    /// inline body requires the enclosing `@Unsafe("reason")` gate (I1/S58).
+    /// inline body requires the enclosing `#Unsafe("reason")` gate (I1/S58).
     /// Any other language name has no inline binder yet (E3220).
     fn check_inline_foreign_fn(&mut self, f: &Func) {
         let Some(inl) = &f.inline_foreign else {
@@ -62,17 +62,17 @@ impl<'a> Checker<'a> {
             ));
             return;
         }
-        // I1/S58: an unsafe-language inline body must sit behind an `@Unsafe`
+        // I1/S58: an unsafe-language inline body must sit behind an `#Unsafe`
         // gate so the author states why calling it is sound.
         if !f.is_unsafe {
             self.diags.push(Diagnostic::error(
                 "E3215",
-                format!("`#FFI({})` needs an `@Unsafe(\"reason\")` gate", inl.lang),
+                format!("`#FFI({})` needs an `#Unsafe(\"reason\")` gate", inl.lang),
                 format!(
                     "`{}` is an unsafe foreign language — an inline `{}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)",
                     inl.lang, inl.lang
                 ),
-                format!("add the gate: `@Unsafe(\"…\") #FFI({}) fn …`", inl.lang),
+                format!("add the gate: `#Unsafe(\"…\") #FFI({}) fn …`", inl.lang),
                 Some(inl.marker_span),
             ));
             return;
@@ -235,7 +235,7 @@ impl<'a> Checker<'a> {
                     pty
                 };
                 // D-LIN1: a parameter never carries the consume duty. Passing a
-                // `@SingleUse` value to a `^` parameter IS its terminal consumption
+                // `#SingleUse` value to a `^` parameter IS its terminal consumption
                 // (spec: "passed to a take parameter … or returned"), so the `^`
                 // recipient is where linearity is satisfied — making the param
                 // re-consume would be infinite regress. Borrow/read params can't
@@ -265,15 +265,15 @@ impl<'a> Checker<'a> {
             self.check_inline_foreign_fn(f);
             return;
         }
-        // D-UNSAFE2 / D-LIN1-DROP: an `@Unsafe fn` body is an audited region just
-        // like an `@Unsafe { … }` block — its reason is the audit note. Mark the
-        // whole body unsafe so `drop(x)` of a `@SingleUse` value is permitted
+        // D-UNSAFE2 / D-LIN1-DROP: an `#Unsafe fn` body is an audited region just
+        // like an `#Unsafe { … }` block — its reason is the audit note. Mark the
+        // whole body unsafe so `drop(x)` of a `#SingleUse` value is permitted
         // (and any other unsafe-gated operation is reachable directly).
         if f.is_reactive {
             if f.is_pure {
                 self.diags.push(Diagnostic::error(
                     "E2914",
-                    "`@Reactive fn` can't also declare `--[]->`".to_string(),
+                    "`#Reactive fn` can't also declare `--[]->`".to_string(),
                     "a reactive effect re-runs when signals change, so it is not a pure function"
                         .to_string(),
                     "drop the `--[]->` bound or use `reactive.effect` inside a plain `fn`".to_string(),
@@ -286,24 +286,24 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(Diagnostic::error(
                     "E2914",
-                    "`@Reactive fn` must not return a value".to_string(),
-                    "`@Reactive fn` lowers to a reactive effect scope — effects don't produce a value (D-REACTCORE1)"
+                    "`#Reactive fn` must not return a value".to_string(),
+                    "`#Reactive fn` lowers to a reactive effect scope — effects don't produce a value (D-REACTCORE1)"
                         .to_string(),
-                    "drop the return type, or use `@Reactive { … }` inside a plain `fn`"
+                    "drop the return type, or use `#Reactive { … }` inside a plain `fn`"
                         .to_string(),
                     Some(f.name_span),
                 ));
             }
         }
-        // D-PREPOST1: check `@Pre`/`@Post` contract clauses. Params are already
-        // in scope above; a condition is pure (same checker as `@Pure fn`,
-        // E0139) and must be `Bool` (E0110 via `require_bool`). `@Post`
+        // D-PREPOST1: check `#Pre`/`#Post` contract clauses. Params are already
+        // in scope above; a condition is pure (same checker as `#Pure fn`,
+        // E0139) and must be `Bool` (E0110 via `require_bool`). `#Post`
         // additionally binds `result` to the return type while its own
-        // conditions are checked — `result` inside a `@Pre` is E0144 (see
+        // conditions are checked — `result` inside a `#Pre` is E0144 (see
         // the `Expr::Ident` dispatch in `CheckerInfer/expr.rs`).
         for clause in &mut f.pre {
             self.in_pre_clause = true;
-            self.require_bool(&mut clause.cond, "a `@Pre` condition");
+            self.require_bool(&mut clause.cond, "a `#Pre` condition");
             self.in_pre_clause = false;
             if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs) {
                 self.diags.push(e0139(Syntax::CONTRACT_PRE, d.span));
@@ -332,7 +332,7 @@ impl<'a> Checker<'a> {
                 },
             );
             for clause in &mut f.post {
-                self.require_bool(&mut clause.cond, "a `@Post` condition");
+                self.require_bool(&mut clause.cond, "a `#Post` condition");
                 if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs) {
                     self.diags.push(e0139(Syntax::CONTRACT_POST, d.span));
                 }
@@ -351,7 +351,7 @@ impl<'a> Checker<'a> {
         self.check_variadic_bound_body_shape(f);
         self.lint_unjoined_tasks_in_current_scope();
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
-        // never `pop_scope`d, so check its `@SingleUse` locals here (E0140).
+        // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).
         self.check_single_use_consumed_in_current_scope();
         // D-STREAMYIELD1: a generator (`-> Stream<T>`) falling off the end is
         // exactly a bare `return;` — it just ends the stream. Never E0114.
@@ -390,7 +390,7 @@ impl<'a> Checker<'a> {
     /// unrolls per call-site arity. `parts` has no zero-cost Rust representation
     /// outside that loop (heterogeneous elements, boxing is disallowed), so any
     /// other reference — a bare read, `.len()`, indexing, a second loop, passing
-    /// it to another call, use inside a nested block (`@Unsafe { }`, `if`, …) —
+    /// it to another call, use inside a nested block (`#Unsafe { }`, `if`, …) —
     /// is E1314. v1 scope, matching the plan's "conservative v1" call for this
     /// card: exactly the shape the ballot's own `log_all` example needs.
     fn check_variadic_bound_body_shape(&mut self, f: &Func) {
@@ -569,8 +569,8 @@ fn scan_stmt_for_variadic_uses(
                 scan_stmt_for_variadic_uses(st, name, false, for_hits, other);
             }
         }
-        // Every other statement kind (lexical-scope wrappers like `@Unsafe { }`,
-        // `region`, `taskgroup`, `@Transact`, `comptime { }`, …) is out of scope
+        // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
+        // `region`, `taskgroup`, `#Transact`, `comptime { }`, …) is out of scope
         // for v1 — a trait-bounded variadic used inside one of these isn't
         // caught here; codegen's own "internal compiler error" guard
         // (`VariadicBound.rs`) is the backstop.
@@ -888,7 +888,7 @@ pub(crate) fn check_effect_boundaries(
         if let Item::Trait(t) = item {
             for m in &t.methods {
                 let bound = match (m.is_pure, &m.declared_effects) {
-                    (true, _) => Some(EffectSet::new()), // `@Pure` → empty bound
+                    (true, _) => Some(EffectSet::new()), // `#Pure` → empty bound
                     (false, Some(list)) => {
                         let mut set = EffectSet::new();
                         let mut ok = true;

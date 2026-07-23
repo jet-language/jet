@@ -300,19 +300,19 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             };
             chosen.iter().all(|s| stmt_in_subset(s, cx, locals))
         }
-        // c109 Phase 18: an audited `@Unsafe { … }` gate region (`Stmt::Unsafe`). It
+        // c109 Phase 18: an audited `#Unsafe { … }` gate region (`Stmt::Unsafe`). It
         // emits a Rust lexical block, so body declarations stay in a child locals set.
         // The `#Audit("…")` annotation emits
         // nothing. I1: this is the source gate — the only place a Rust `unsafe` block is
         // produced — so admitting it here cannot introduce an ungated `unsafe`.
         Stmt::Unsafe { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        // D-CTEFFECT1: `@Impure` erases to a plain block at codegen (I3).
+        // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (I3).
         Stmt::Impure { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // Reactive bodies emit as closures, another lexical boundary.
         Stmt::Reactive { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-SHIELDNAME1=A: runtime enter/RAII-leave guards wrap a lexical block.
         Stmt::Shield { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        // D-CANVASSTATE1=D: `@Off` erases; `@DebugOnly` lowers in a lexical
+        // D-CANVASSTATE1=D: `#Off` erases; `#DebugOnly` lowers in a lexical
         // debug-only block, so its local declarations do not extend `locals`.
         Stmt::Off { .. } => true,
         Stmt::DebugOnly { body, .. } => {
@@ -332,13 +332,13 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             locals.insert(name.clone());
             body.iter().all(|s| stmt_in_subset(s, cx, locals))
         }
-        // c109 Phase 19: a `@Context(field: value) { … }` block (D-CTX1) — a plain block
+        // c109 Phase 19: a `#Context(field: value) { … }` block (D-CTX1) — a plain block
         // with a per-field guard. Field values use the outer scope; the body is lexical.
         Stmt::ContextBlock { fields, body, .. } => {
             fields.iter().all(|(_, v, _)| expr_in_subset(v, cx, locals))
                 && scoped_stmts_in_subset(body, cx, locals)
         }
-        // c109 Phase 26: a `@Caps(Io) { … }` effect-restriction region (D-EFF1/D-QUAL1)
+        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1/D-QUAL1)
         // erases to a plain Rust block — `emit_stmt`'s `Stmt::Caps` arm is byte-for-byte
         // identical to `Stmt::Region` (`{ <body> }`). The cap set is enforced entirely
         // in sema (E0741); codegen is dumb (I3).
@@ -350,7 +350,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         Stmt::Grant { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-TERM1 (ratified 2026-06-22): `live { … }` lowers to a guarded Rust block.
         Stmt::Live { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        // D-DOTSCOPE1: a `@Test` scope member — in-subset iff its region body is.
+        // D-DOTSCOPE1: a `#Test` scope member — in-subset iff its region body is.
         // Args are literals folded at lowering, not lowered as exprs, so only the
         // body gates the subset. `.setup` emits inline and intentionally extends the
         // test scope; every other member emits a Rust lexical block.
@@ -361,7 +361,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         // D-DET1: `assume_deterministic { … }` erases to a plain Rust block (the
         // determinism suspension is a compile-time fact, I3).
         Stmt::AssumeDet { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        // D-TXN1–D-TXN4 (ratified 2026-06-24): `@Transact(name) { … }` lowers to a
+        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` lowers to a
         // transaction-guarded Rust block. The handle `name` is a covered local
         // inside the body (so `name.on_commit(…)` resolves); check the body with it
         // in scope.

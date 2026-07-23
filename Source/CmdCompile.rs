@@ -316,7 +316,7 @@ pub(crate) fn run_compile_cmd(
         jet::compile_allow_impure(file)
     } else {
         // D-OSTARGET1=A: thread the real `--target=<triple>` through so
-        // codegen only emits/links `@Target(Os.*)`-gated impls for the OS
+        // codegen only emits/links `#Target(Os.*)`-gated impls for the OS
         // that triple builds for (host OS when the flag is absent).
         jet::compile_with_target(&src, file, cross_target)
     };
@@ -613,7 +613,7 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
 }
 
 /// D-JPK-TASKRUN1 (card #476): `jet run --task <name> <file>` — compile with
-/// the named `@Task fn` as the entry via a synthetic `fn run { task(…) }`
+/// the named `#Task fn` as the entry via a synthetic `fn run { task(…) }`
 /// wrapper (same `compile_with_entry` path `fn dev()` uses; the task keeps
 /// its source name so plain-call deps stay resolvable), then run the binary
 /// with `program_args` (typed CLI args via D-CLIFLAG1 ride for free).
@@ -651,8 +651,8 @@ pub(crate) fn run_task_entry(
         let diag = jet::Diagnostics::Diagnostic::error(
             "E1294",
             format!("no task named `{task}`"),
-            format!("`jet run --task` / `jetpack run` only invoke functions marked `@Task` (D-JPK-TASKRUN1)."),
-            "mark a function `@Task` to make it runnable, or check the spelling.".to_string(),
+            format!("`jet run --task` / `jetpack run` only invoke functions marked `#Task` (D-JPK-TASKRUN1)."),
+            "mark a function `#Task` to make it runnable, or check the spelling.".to_string(),
             None,
         )
         .with_detail(format!("declared tasks: {list}\n"));
@@ -700,7 +700,7 @@ pub(crate) fn run_task_entry(
     exit(status.code().unwrap_or(ExitCodes::OK));
 }
 
-/// Cheap lex+parse: names of top-level `@Task fn`s in `src`.
+/// Cheap lex+parse: names of top-level `#Task fn`s in `src`.
 fn list_task_names(src: &str) -> Vec<String> {
     let (toks, lex_diags) = jet::Lexer::lex(src);
     if !lex_diags.is_empty() {
@@ -718,7 +718,7 @@ fn list_task_names(src: &str) -> Vec<String> {
         .collect()
 }
 
-/// `Some(true)` if `name` is a `@Task fn`; `Some(false)` if the file parsed
+/// `Some(true)` if `name` is a `#Task fn`; `Some(false)` if the file parsed
 /// but has no such task; `None` on lex/parse failure.
 fn task_is_marked(src: &str, name: &str) -> Option<bool> {
     let (toks, lex_diags) = jet::Lexer::lex(src);
@@ -962,12 +962,12 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
         }
     };
     // D-TEST4: discover and run any `///` doctest examples first. They are
-    // independent of `@Test` blocks, so a file with only doctests is testable.
+    // independent of `#Test` blocks, so a file with only doctests is testable.
     let has_doctests = !jet::Doctest::discover(&src).is_empty();
     let doctests_ok = run_doctests(path, &shown, &src, update_snapshots, mode);
 
-    // A file with doctests but no `@Test` blocks is testable on its doctests
-    // alone — skip the test harness (which would otherwise error E0601 "no @Test
+    // A file with doctests but no `#Test` blocks is testable on its doctests
+    // alone — skip the test harness (which would otherwise error E0601 "no #Test
     // blocks"). A file with NEITHER falls through so the harness reports E0601.
     if has_doctests && !jet::has_test_blocks(&shown) {
         return doctests_ok;
@@ -1740,7 +1740,7 @@ pub(crate) struct FuzzRunOpts {
 }
 
 /// D-TESTKIT1=A (c308 pass 2, gap #1): `jet fuzz <file> [<name>]` — fuzz a
-/// parameterized `@Test fn` (D-TEST1's property-test form) with generated
+/// parameterized `#Test fn` (D-TEST1's property-test form) with generated
 /// inputs: corpus dir persistence (failing seeds saved, replayed first next
 /// run), minimization (the same greedy shrink `jet test` uses), a deterministic
 /// seeded PRNG (`JetRng`, std-only, I6 — the same splitmix64 generator D-TEST1
@@ -2215,7 +2215,7 @@ pub(crate) fn write_web_artifacts(
     let wasm_path = out_dir.join("app.wasm");
     let html_path = out_dir.join("index.html");
     // D-HTMLPAIR1 (ratified 2026-07-01, c134): precedence for the served HTML source —
-    // (1) an explicit `@Html("path.html")` marker, relative to the source
+    // (1) an explicit `#Html("path.html")` marker, relative to the source
     //     file's own directory; a path that doesn't resolve is a hard error
     //     naming the missing file, never a silent fallback;
     // (2) the legacy `<stem>.html` sibling-filename convention, kept for
@@ -2226,7 +2226,7 @@ pub(crate) fn write_web_artifacts(
         let explicit_path = source_dir.join(rel);
         fs::read_to_string(&explicit_path).map_err(|e| {
             format!(
-                "error: `@Html(\"{}\")` names a file that doesn't exist: {} ({})",
+                "error: `#Html(\"{}\")` names a file that doesn't exist: {} ({})",
                 rel,
                 explicit_path.display(),
                 e

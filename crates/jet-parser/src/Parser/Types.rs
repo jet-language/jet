@@ -42,8 +42,8 @@ impl<'a> Parser<'a> {
         // callback-bound parser can teach E0062. `fn(…) --[E]->` — the general
         // effect-bound list — stays on `#`.
         || (matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
-            && matches!(self.peek().kind, TokKind::At))
-        || (matches!(self.peek().kind, TokKind::At)
+            && matches!(self.peek().kind, TokKind::Hash))
+        || (matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if !n.is_empty() && n.chars().next().map_or(false, |c| c.is_uppercase())))
         || (matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LParen))
     }
@@ -424,7 +424,7 @@ impl<'a> Parser<'a> {
                     "E1107",
                     "the `columnar [T]` per-container layout form is reserved".to_string(),
                     "a per-use columnar override isn't built yet — only the whole-struct form ships".to_string(),
-                    "put `@Layout(columnar)` on the `struct` declaration instead".to_string(),
+                    "put `#Layout(columnar)` on the `struct` declaration instead".to_string(),
                     Some(kw_span),
                 ));
             }
@@ -437,15 +437,15 @@ impl<'a> Parser<'a> {
                 self.diags.push(Self::retired_effect_syntax(start));
                 self.fn_type(Some(bound))?
             }
-            TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE) =>
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE) =>
             {
                 let bound = self.parse_fn_type_effect_bound()?;
                 self.diags.push(Self::retired_effect_syntax(start));
                 self.fn_type(Some(bound))?
             }
-            // D-QUAL4=A: `@Marker Type` — a value-tag prefix on a type. The marker
+            // D-QUAL4=A: `#Marker Type` — a value-tag prefix on a type. The marker
             // must be a PascalCase ident (not `Pure`/`(` which are fn-effect bounds).
-            TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if !n.is_empty() && n.chars().next().map_or(false, |c| c.is_uppercase())) =>
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if !n.is_empty() && n.chars().next().map_or(false, |c| c.is_uppercase())) =>
             {
                 self.bump(); // `@`
                 let (marker, _) = self.expect_ident("after `@` in type-tag position")?;
@@ -797,7 +797,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-EFF2: parse the effect bound on the front of a function type, the cursor
-    /// at `#`. `@Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
+    /// at `#`. `#Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
     /// listed names (validated against the effect vocabulary in sema, not here).
     /// The caller has confirmed via lookahead that a `fn` follows.
     /// D-EFF2/D-MARKERMOVE2 (G1): parse a callback effect bound. `fn(…) --[]->`
@@ -806,7 +806,7 @@ impl<'a> Parser<'a> {
     /// parses here so it can teach E0062. The general effect-list form,
     /// `fn(…) --[Net]->`, is a directive and stays on `#` only.
     fn parse_fn_type_effect_bound(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
-        if matches!(self.peek().kind, TokKind::At) {
+        if matches!(self.peek().kind, TokKind::Hash) {
             self.bump();
         } else {
             self.expect(TokKind::Hash, "to start a callback effect bound")?;

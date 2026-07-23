@@ -511,7 +511,7 @@ fn load_entry_with_overlays_mode(
         // `--target=<triple>` before sema runs (LSP/tests keep the host bucket).
         active_os: Syntax::OsTarget::host(),
     };
-    // S59 (E2-M14): fold every `@Extern`/`@Bindgen module c.<lib>` into merged
+    // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.
     crate::Foreign::assemble_active_namespaces(&mut bundle)?;
     bundle.cffi = crate::CFFI::assemble(&mut bundle)?;

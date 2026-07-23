@@ -125,7 +125,7 @@ pub(crate) fn method_call_in_subset(
     if recv_type.as_deref() == Some("Html") && method == "text" {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
-    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `@Transact` handle.
+    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
     // Sema types the handle `Transaction` (`recv_type == Some("Transaction")`).
     // It lowers to a Drop-backed commit guard (a `scope.guard` cousin), so the
     // single arg must be an in-subset literal zero-param lambda.

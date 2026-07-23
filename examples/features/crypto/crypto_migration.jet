@@ -1,4 +1,4 @@
-// D-CRYPTO-API1=A: raw interoperability stays explicit and @Unsafe-gated.
+// D-CRYPTO-API1=A: raw interoperability stays explicit and #Unsafe-gated.
 use core.crypto as crypto
 use core.crypto.expert as expert
 use core.files as fs
@@ -24,7 +24,7 @@ fn run() {
     source :: Path.from(source_text)
     migrated :: Path.from(migrated_text)
     restored :: Path.from(restored_text)
-    @Unsafe("AES-256-GCM protocol interoperability") {
+    #Unsafe("AES-256-GCM protocol interoperability") {
         box = expert.aes256gcm_seal(key, nonce, msg, []) ?? panic("seal failed")
         plain = expert.aes256gcm_open(key, nonce, box, []) ?? panic("open failed")
         v1: [U8] := [0x4a, 0x45, 0x54, 0x43, 1, 2]

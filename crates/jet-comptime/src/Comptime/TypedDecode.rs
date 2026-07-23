@@ -3,7 +3,7 @@
 //! siblings, plus `core.data.csv<T>`'s row decode). Mirrors AOT's derived
 //! `user_Decode::jet_decode` / `jet_decode_traced` field-by-field walk
 //! (`Codegen/Items.rs::emit_struct_serde` / `emit_migration_chain_walker`)
-//! and `Sema::SchemaMigration`'s `@PublishedSchema` migration chain
+//! and `Sema::SchemaMigration`'s `#PublishedSchema` migration chain
 //! byte-for-byte (R12 parity) — including error message text (E2410/E2412)
 //! and the `DecodeError{path,reason}` / `MigrationStatus{migrated,from,steps}`
 //! shapes `jet_std` defines.
@@ -322,7 +322,7 @@ fn decode_char(tree: &CtValue) -> Result<CtValue, CtValue> {
     }
 }
 
-/// A reasonable zero value for a type with no `@[Default(expr)]` argument —
+/// A reasonable zero value for a type with no `#[Default(expr)]` argument —
 /// mirrors what `Default::default()` would build for AOT's Rust field type.
 fn zero_value(ty: &Type) -> CtValue {
     match ty {
@@ -341,7 +341,7 @@ impl<'a> Interp<'a> {
     /// The non-migrating decode: mirrors a type's plain `jet_decode` walk.
     /// Recurses through Option/List and nested user structs; the top-level
     /// `decode_traced<T>`/`decode<T>` entry point (`typed_decode_top`) is what
-    /// additionally tries the `@PublishedSchema` migration chain on failure.
+    /// additionally tries the `#PublishedSchema` migration chain on failure.
     pub(super) fn typed_decode_value(&mut self, ty: &Type, tree: &CtValue, span: Span) -> Result<CtValue, CtValue> {
         match ty {
             Type::Int => decode_int(tree),
@@ -569,7 +569,7 @@ impl<'a> Interp<'a> {
 
     /// `decode_traced<T>`'s full entry point — mirrors `jet_decode_traced`'s
     /// default (try `jet_decode`, report fresh) plus, for a
-    /// `@PublishedSchema` type with `migration { }` blocks, the runtime
+    /// `#PublishedSchema` type with `migration { }` blocks, the runtime
     /// chain-walker (`emit_migration_chain_walker`): on failure, detect which
     /// historical shape the data's key set matches (newest first) and walk
     /// the step functions forward.

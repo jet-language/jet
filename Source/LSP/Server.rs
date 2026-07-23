@@ -2923,7 +2923,7 @@ fn code_lenses_for(uri: &str, src: &str) -> Vec<String> {
                 "jet.runFile",
                 &[uri.to_string()],
             ));
-        } else if trimmed.starts_with("@Test") {
+        } else if trimmed.starts_with("#Test") {
             out.push(code_lens_json(
                 idx,
                 indent,

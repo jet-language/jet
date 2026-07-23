@@ -1301,10 +1301,10 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
     eprintln!("{}", rendered);
     jet_runtime_exit();
 }
-/// E3005 (D-PREPOST1): a `@Pre`/`@Post` contract clause failed at runtime.
+/// E3005 (D-PREPOST1): a `#Pre`/`#Post` contract clause failed at runtime.
 /// `clause_kw` is `"Pre"`/`"Post"`; `msg` is the clause's own message text
-/// (the second argument to `@Pre(cond, "msg")`/`@Post(cond, "msg")`).
-#[allow(dead_code)] // only called from generated code that has a @Pre/@Post
+/// (the second argument to `#Pre(cond, "msg")`/`#Post(cond, "msg")`).
+#[allow(dead_code)] // only called from generated code that has a #Pre/#Post
 fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Contract {
@@ -1316,11 +1316,11 @@ fn jet_contract_fail(file: &str, line: u32, clause_kw: &str, msg: &str) -> ! {
     }
     if jet_runtime_should_unwind() {
         panic!(
-            "@{} contract failed: {} (at {}:{})",
+            "#{} contract failed: {} (at {}:{})",
             clause_kw, msg, file, line
         );
     }
-    eprintln!("@{} contract failed: {}", clause_kw, msg);
+    eprintln!("#{} contract failed: {}", clause_kw, msg);
     eprintln!("  --> {}:{}", file, line);
     jet_runtime_exit();
 }
@@ -1347,7 +1347,7 @@ fn jet_proof_record(kind: u8, state: u8, name: &str, message: &str, file: &str, 
 // silent corruption becomes a caught bug. Each `+`/`-`/`*`/`/` on a fixed-width
 // integer lowers to one of these, which panic with the source location instead
 // of wrapping. `wrapping(…)`/`saturating(…)`/`checked(…)` opt out at the use
-// site. Floats and `@Numeric` distinct types keep the plain Rust operators.
+// site. Floats and `#Numeric` distinct types keep the plain Rust operators.
 trait JetArith: Copy {
     fn jet_add(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;

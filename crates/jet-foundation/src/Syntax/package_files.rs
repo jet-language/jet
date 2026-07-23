@@ -114,66 +114,66 @@ pub const BINPAT_ENDIAN_BIG: &str = "be";
 /// D-BINPAT1: multi-byte little-endian read suffix — `{len:U16le}`.
 pub const BINPAT_ENDIAN_LITTLE: &str = "le";
 
-/// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified): `@Numeric` marker
-/// enables same-type arithmetic on a distinct type. Written `@Numeric` on
+/// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified): `#Numeric` marker
+/// enables same-type arithmetic on a distinct type. Written `#Numeric` on
 /// the same line before the distinct-type name (contract-plane prefix,
 /// D-MARKER-FAMILY1). This is the single merged spelling for what used to
-/// be two markers doing the same job — the `@Numeric` distinct-type marker
+/// be two markers doing the same job — the `#Numeric` distinct-type marker
 /// (D-DIST3) and the `@numeric` capability bundle (D-CAPBUNDLE1) — folded
 /// per D-MARKERMOVE1=B (I8: one way to mean it). `CONTRACT_BUNDLE_NUMERIC`
 /// no longer exists as a separate constant; use this one.
 pub const ATTR_NUMERIC: &str = "Numeric";
 
-/// D-QUAL3 (ratified 2026-06-24): `@UnitFamily(Currency) { usd, eur, gbp }` —
-/// declares a family of units. Each member mints one distinct `@Numeric` type
+/// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(Currency) { usd, eur, gbp }` —
+/// declares a family of units. Each member mints one distinct `#Numeric` type
 /// (`usd` → `Usd`) that erases to `Float`, so signatures read plain English
 /// (`fn subtotal(price: Usd, qty: Int) -> Usd`). The family is the
 /// "upgrade to D-DIST2" framing of D-UNIT1: sugar over the distinct-type
 /// machinery (D-DIST1/D-DIST3). PascalCase tag per D-CASING1.
 pub const ATTR_UNIT_FAMILY: &str = "UnitFamily";
-/// D-QUANTITY-DECL1=A (card #603): contextual fields in `@UnitFamily`.
+/// D-QUANTITY-DECL1=A (card #603): contextual fields in `#UnitFamily`.
 pub const UNIT_FAMILY_BASE_FIELD: &str = "base";
 pub const UNIT_FAMILY_SCALE_FIELD: &str = "scale";
 pub const UNIT_FAMILY_OFFSET_FIELD: &str = "offset";
 
-/// D-MIGRATE1 (ratified 2026-06-22): `@PublishedSchema` — marks a struct whose
+/// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` — marks a struct whose
 /// field layout is snapshotted at release time. A breaking field change without
-/// a declared migration is E0910. Written `@PublishedSchema` before `struct`.
+/// a declared migration is E0910. Written `#PublishedSchema` before `struct`.
 pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 
-/// D-LIN1 (ratified 2026-06-21, option A; gated on D-QUAL2): `@SingleUse` — marks
+/// D-LIN1 (ratified 2026-06-21, option A; gated on D-QUAL2): `#SingleUse` — marks
 /// a type whose values must be consumed exactly once on every reachable path
 /// (moved to a `^` parameter or returned). Using one zero times is E0140
 /// (unconsumed at scope end) / E0141 (unconsumed on one branch); aliasing one
-/// with `&`/`view` is E0142. `@SingleUse` implies `#NoCopy`. The tag is
-/// compile-time only and erases in codegen (I3). Written `@SingleUse` before the
-/// `struct`/`enum`, same marker idiom as `@PublishedSchema`.
+/// with `&`/`view` is E0142. `#SingleUse` implies `#NoCopy`. The tag is
+/// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
+/// `struct`/`enum`, same marker idiom as `#PublishedSchema`.
 pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1
 
-/// D-REPLAY1: `@Replayable fn` marks a function whose reachable effects must be
+/// D-REPLAY1: `#Replayable fn` marks a function whose reachable effects must be
 /// deterministic by default. Ambient `Time`/`Rand`/`Net`/`Io` are rejected unless
 /// the work is routed through explicit deterministic/mockable capabilities.
 pub const ATTR_REPLAYABLE: &str = "Replayable";
 
 /// D-REFINE1: directive-plane invariant marker for distinct refinements.
-/// First shipped form is `@Invariant("value >= lo && value < hi")` before a
+/// First shipped form is `#Invariant("value >= lo && value < hi")` before a
 /// `distinct Int` declaration; sema normalizes it to proof-carrying bounds.
 pub const ATTR_INVARIANT: &str = "Invariant";
 
-/// D-MUSTUSE1 (c18iwxqx): `@MustUse` — marks a type, function, or method whose
+/// D-MUSTUSE1 (c18iwxqx): `#MustUse` — marks a type, function, or method whose
 /// result cannot be silently ignored as a bare expression statement (E0419).
 /// Explicit discard uses `.drop("reason")` only (D-IGNORERET2, amended by
 /// D-MARK-DISCARD1=A). Compile-time only; erases in codegen (I3).
 pub const ATTR_MUST_USE: &str = "MustUse"; // D-MUSTUSE1
 
 /// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces
-/// a migration block that declares how a `@PublishedSchema` struct changed between
+/// a migration block that declares how a `#PublishedSchema` struct changed between
 /// releases. Used as `migration TypeName { rename old -> new }`.
 /// D-VALIDATE1 (ratified 2026-07-12, card #506): contextual keyword `validate`
 /// — introduces the in-body `validate { … }` block inside a struct definition
 /// (S82 in-body grammar). Rules are `check(cond, at: field, "msg")`
 /// statements; sema resolves `field` as a bare sibling reference
-/// (D-FIELDPOL1) and purity-checks `cond`/`msg` (reuses the `@Pre`/`@Post`
+/// (D-FIELDPOL1) and purity-checks `cond`/`msg` (reuses the `#Pre`/`#Post`
 /// checker). Failing `check`s accumulate into `[FieldError]`; `decode<T>()`
 /// runs the block automatically on a successfully shape-decoded value, and
 /// `Type.validate(value)` runs it standalone. `Validate.over(s)` is the
@@ -224,7 +224,7 @@ pub const KW_REORDER_RETIRED: &str = "reorder"; // D-MIGRATE2F
 pub const KW_DROP_RETIRED: &str = "drop"; // D-MIGRATE2D
 
 /// D-MIGRATE2C (ratified): `jet inspect schema` subcommand and its verbs. `status`
-/// reports each `@PublishedSchema` type's pinned shape; `squash --before <ver>`
+/// reports each `#PublishedSchema` type's pinned shape; `squash --before <ver>`
 /// re-baselines snapshots to the current shape. There is NO `check` verb —
 /// `jet build`'s E0910 is already the CI gate.
 pub const CMD_SCHEMA: &str = "schema"; // D-MIGRATE2C
@@ -272,28 +272,28 @@ pub const API_CACHE_SUBDIR: &str = "cache/api";
 /// time (E1102) and flagged again at the detach site (E1103).
 pub const TASK_DETACH: &str = "detach"; // D-DETACH1
 
-/// D-REPRC1 (ratified; D-REPRC1 = B): `@Layout(…)` struct attribute — controls
-/// the memory layout of the generated Rust struct. `@Layout(c)` stamps
+/// D-REPRC1 (ratified; D-REPRC1 = B): `#Layout(…)` struct attribute — controls
+/// the memory layout of the generated Rust struct. `#Layout(c)` stamps
 /// `#[repr(C)]` for C interop. Field order is preserved as written.
 /// Growable fields (`[T]`, `Map`, `String`) are rejected (E1104).
 /// PascalCase per D-MARKERCASE1=A.
 pub const ATTR_LAYOUT: &str = "Layout"; // D-REPRC1 / D-MARKERCASE1
-/// D-REPRC1: the C-compatible layout variant — `@Layout(c)` → `#[repr(C)]`.
+/// D-REPRC1: the C-compatible layout variant — `#Layout(c)` → `#[repr(C)]`.
 pub const LAYOUT_C: &str = "c"; // D-REPRC1
 /// D-REPRC1: reserved layout variants — parse-and-error until their milestones ship.
 pub const LAYOUT_PACKED: &str = "packed"; // D-REPRC1 (reserved)
 pub const LAYOUT_ALIGN: &str = "align"; // D-REPRC1 (reserved)
 /// D-SOA1 / D-SOA2A=C (implemented): the struct-of-arrays layout variant —
-/// `@Layout(columnar) struct S` stores a `[S]` collection column-per-field.
-/// Whole-struct only in v1 (D-SOA2B); the partial form `@Layout(columnar: …)`
+/// `#Layout(columnar) struct S` stores a `[S]` collection column-per-field.
+/// Whole-struct only in v1 (D-SOA2B); the partial form `#Layout(columnar: …)`
 /// is rejected (E1109) and the per-container prefix `columnar [T]` is reserved
 /// (D-SOA2C, E1107).
 pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A
 
 // ── Serde derive markers + attributes (D-SERDE2–8, D-ENC1; bracket form D-ATTR2) ──
-// Derive markers (PascalCase per D-CASING1, written `@[…]` before a struct/enum,
-// D-MARKERMOVE1=B): `@[Codable]` derives BOTH directions (sugar for `@[Encode,
-// Decode]`); `@[Encode]` is write-only; `@[Decode]` is read-only. Owner (D-SERDE4 = B,
+// Derive markers (PascalCase per D-CASING1, written `#[…]` before a struct/enum,
+// D-MARKERMOVE1=B): `#[Codable]` derives BOTH directions (sugar for `#[Encode,
+// Decode]`); `#[Encode]` is write-only; `#[Decode]` is read-only. Owner (D-SERDE4 = B,
 // modified): the
 // collapsed umbrella is `Codable`, with `Encode`/`Decode` as the one-way markers.
 pub const ATTR_CODABLE: &str = "Codable"; // D-SERDE4
@@ -308,15 +308,15 @@ pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
 pub const ATTR_SUMMARIZE: &str = "Summarize"; // D-MARKERMOVE3
 pub const ATTR_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
                                                 // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
-pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  @[Rename("wire_key")]
-pub const ATTR_SKIP: &str = "Skip"; // D-SERDE5  @[Skip]
-pub const ATTR_DEFAULT: &str = "Default"; // D-SERDE5  @[Default] / @[Default(expr)]
-pub const ATTR_FLATTEN: &str = "Flatten"; // D-SERDE5  @[Flatten]
+pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
+pub const ATTR_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]
+pub const ATTR_DEFAULT: &str = "Default"; // D-SERDE5  #[Default] / #[Default(expr)]
+pub const ATTR_FLATTEN: &str = "Flatten"; // D-SERDE5  #[Flatten]
                                           // Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
-pub const ATTR_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  @[RenameAll(camel)]
+pub const ATTR_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  #[RenameAll(camel)]
 pub const ATTR_DENY_UNKNOWN_FIELDS: &str = "DenyUnknownFields"; // D-SERDE8
-pub const ATTR_TAG: &str = "Tag"; // D-SERDE7  @[Tag("type")] internal tagging
-pub const ATTR_UNTAGGED: &str = "Untagged"; // D-SERDE7  @[Untagged]
+pub const ATTR_TAG: &str = "Tag"; // D-SERDE7  #[Tag("type")] internal tagging
+pub const ATTR_UNTAGGED: &str = "Untagged"; // D-SERDE7  #[Untagged]
                                             // D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
 pub const RENAME_ALL_CAMEL: &str = "camel"; // D-SERDE3
 pub const RENAME_ALL_SNAKE: &str = "snake"; // D-SERDE3
@@ -325,7 +325,7 @@ pub const RENAME_ALL_KEBAB: &str = "kebab"; // D-SERDE3
 pub const RENAME_ALL_SCREAMING: &str = "screaming"; // D-SERDE3
 
 // ── Maturity metadata values (D-MARK-META1=B, ratified 2026-07-12) ──────────
-// Closed values for `@Meta(maturity: .Experimental | .Tested | .Hardened)`.
+// Closed values for `#Meta(maturity: .Experimental | .Tested | .Hardened)`.
 // They are not standalone markers and therefore are absent from marker-plane
 // registries. No sema/codegen effect.
 pub const ATTR_EXPERIMENTAL: &str = "Experimental"; // D-MARK-META1
@@ -335,7 +335,7 @@ pub const ATTR_HARDENED: &str = "Hardened"; // D-MARK-META1
 // ── Explicit discard (D-IGNORERET2=A, ratified 2026-06-28; amended by
 // D-MARK-DISCARD1=A, ratified 2026-07-11, card #498) ─────────────────────────
 // `.drop("reason")` — method-style terminal that silences E0402 for a
-// fallible or @MustUse result. It is now the SOLE discard spelling; the
+// fallible or #MustUse result. It is now the SOLE discard spelling; the
 // `#Suppress(MustUse) { … }` lexical-scope form is retired outright
 // (ordinary unknown-marker error — no ATTR_SUPPRESS registration).
 pub const METHOD_DROP: &str = "drop"; // D-IGNORERET2 method; distinct from consume builtin
@@ -408,9 +408,9 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_IMPURE,
     KW_TASKGROUP,
     CTX_BLOCK,
-    // Transactions (D-TXN1–D-TXN4): `@Transact(name) { … }`
+    // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
     KW_TRANSACT,
-    // Schedule-as-code (D-SCHEDULE1, card #505): `@Task fn` — `@Every(…)`
+    // Schedule-as-code (D-SCHEDULE1, card #505): `#Task fn` — `#Every(…)`
     // stays out of this list, matching ATTR_TARGET/ATTR_META (paren-arg
     // config markers aren't bare completion words).
     KW_TASK,
@@ -537,24 +537,24 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 //
 // D-MARKERMOVE1 (B): the fixed move list — `Pure`, `MustUse`, `Codable`,
 // `Encode`, `Decode`, `Experimental`, `Tested`, `Hardened`, `PublishedSchema`,
-// `Redact`, `Numeric` move from `#` to `@` (e.g. `@Pure` → `@Pure`), exact
-// PascalCase spelling kept. `@Numeric` (D-DIST3) and the `@numeric` capability
-// bundle (D-CAPBUNDLE1) are the same job (I8) and merge into one `@Numeric` —
+// `Redact`, `Numeric` move from `#` to `@` (e.g. `#Pure` → `#Pure`), exact
+// PascalCase spelling kept. `#Numeric` (D-DIST3) and the `@numeric` capability
+// bundle (D-CAPBUNDLE1) are the same job (I8) and merge into one `#Numeric` —
 // see `ATTR_NUMERIC` above; there is no separate bundle constant. Serde field +
-// container markers (`@Rename`, `@Skip`, `@Default`, `@Flatten`,
-// `@RenameAll`, `@DenyUnknownFields`, `@Tag`, `@Untagged`) are wire-format
+// container markers (`#Rename`, `#Skip`, `#Default`, `#Flatten`,
+// `#RenameAll`, `#DenyUnknownFields`, `#Tag`, `#Untagged`) are wire-format
 // machinery, not promises, and stay on `#`.
 //
 // D-MARKERMOVE2 (B, ratified 2026-07-02): whole-move, no carve-out by
-// position — `@Pure` is one spelling everywhere, including the type-position
+// position — `#Pure` is one spelling everywhere, including the type-position
 // callback bound (`f: fn(T) --[]-> U`). The plane law gains exactly one
 // exception: a contract marker may prefix a function TYPE to state a bound;
 // "declarations only" reads "declarations, plus contract bounds on function
 // types".
 //
 // D-MARKERMOVE3 (B, ratified 2026-07-02): all built-in derive markers move,
-// user derives stay `#`. `@Debug`, `@Summarize`, `@Comparable` join
-// `@Codable`/`@Encode`/`@Decode` as contract-plane capability promises;
+// user derives stay `#`. `#Debug`, `#Summarize`, `#Comparable` join
+// `#Codable`/`#Encode`/`#Decode` as contract-plane capability promises;
 // `derive T.Wire { … }` bodies applied as `#[Wire]` remain `#` generation
 // machinery — the built-in/user line IS the plane line.
 use super::{

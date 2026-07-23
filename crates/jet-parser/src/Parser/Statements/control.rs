@@ -3,7 +3,7 @@ use super::bindings::desugar_layout_anchors;
 
 impl<'a> Parser<'a> {
     pub(in super::super) fn at_meta_attr(&self) -> bool {
-        matches!(self.peek().kind, TokKind::At)
+        matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_META)
             && matches!(self.peek3().kind, TokKind::LParen)
     }
@@ -42,13 +42,13 @@ impl<'a> Parser<'a> {
 
     pub(in super::super) fn parse_meta_attr(&mut self) -> Result<MetaAttr, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::At, "expected `@`")?;
-        let (_, name_span) = self.expect_ident(&format!("`@{}`", Syntax::ATTR_META))?;
-        self.expect(TokKind::LParen, &format!("after `@{}`", Syntax::ATTR_META))?;
+        self.expect(TokKind::Hash, "expected `#`")?;
+        let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_META))?;
+        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::ATTR_META))?;
         let mut fields = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
-                let (name, field_span) = self.expect_ident("for a `@Meta` field")?;
+                let (name, field_span) = self.expect_ident("for a `#Meta` field")?;
                 if matches!(self.peek().kind, TokKind::Colon) {
                     self.bump();
                     let value = self.expr_no_struct_lit()?;
@@ -67,7 +67,7 @@ impl<'a> Parser<'a> {
                         if !valid {
                             self.diags.push(Diagnostic::error(
                                 "E0352",
-                                "`@Meta` maturity needs a known maturity value".to_string(),
+                                "`#Meta` maturity needs a known maturity value".to_string(),
                                 "maturity metadata is a closed documentation scale".to_string(),
                                 "write `maturity: .Experimental`, `.Tested`, or `.Hardened`".to_string(),
                                 Some(value.span()),
@@ -101,7 +101,7 @@ impl<'a> Parser<'a> {
             }
         }
         let end = self.peek().span.end;
-        self.expect(TokKind::RParen, &format!("to close `@{}`", Syntax::ATTR_META))?;
+        self.expect(TokKind::RParen, &format!("to close `#{}`", Syntax::ATTR_META))?;
         Ok(MetaAttr {
             fields,
             span: Span::new(start.start, end.max(name_span.end)),
@@ -111,21 +111,21 @@ impl<'a> Parser<'a> {
     pub(in super::super) fn meta_attr_wrong_place_diag(&self, span: Span, target: &str) -> Diagnostic {
         Diagnostic::error(
             "E0349",
-            "`@Meta` attaches to a binding, const, or function".to_string(),
-            "`@Meta` is a tooling fact about a named source item; expressions do not carry it"
+            "`#Meta` attaches to a binding, const, or function".to_string(),
+            "`#Meta` is a tooling fact about a named source item; expressions do not carry it"
                 .to_string(),
-            format!("move `@Meta(...)` before a {target}, or remove it"),
+            format!("move `#Meta(...)` before a {target}, or remove it"),
             Some(span),
         )
     }
 
     pub(super) fn at_statement_switch_stmt(&mut self, marker: &str) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::At, "expected `@`")?;
+        self.expect(TokKind::Hash, "expected `#`")?;
         let name_tok = self.bump();
         let attr_span = Span::new(start.start, name_tok.span.end);
 
-        if matches!(self.peek().kind, TokKind::At)
+        if matches!(self.peek().kind, TokKind::Hash)
             && matches!(
                 &self.peek2().kind,
                 TokKind::Ident(n) if n == Syntax::ATTR_OFF || n == Syntax::ATTR_DEBUG_ONLY
@@ -141,11 +141,11 @@ impl<'a> Parser<'a> {
                 "E0344",
                 "only one switch-off attribute can be written on a statement".to_string(),
                 format!(
-                    "`@{}` and `@{}` both control whether the same statement emits code",
+                    "`#{}` and `#{}` both control whether the same statement emits code",
                     marker, second_name
                 ),
                 format!(
-                    "keep one marker: `@{} <statement>` or `@{} <statement>`",
+                    "keep one marker: `#{} <statement>` or `#{} <statement>`",
                     Syntax::ATTR_OFF,
                     Syntax::ATTR_DEBUG_ONLY
                 ),
@@ -183,14 +183,14 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Policy { declarations, body, span })
     }
 
-    /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `@Unsafe("reason") { … }`
-    /// in statement position. The reason string is the argument of `@Unsafe`
-    /// itself; the separate `@Audit` marker is retired (E0055 teaching error).
+    /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") { … }`
+    /// in statement position. The reason string is the argument of `#Unsafe`
+    /// itself; the separate `#Audit` marker is retired (E0055 teaching error).
     /// A missing reason is allowed by the grammar and flagged in sema (L3101).
     pub(super) fn at_unsafe_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        // E0055: `@Audit("…")` is the retired spelling — teach the new form.
-        if matches!(self.peek().kind, TokKind::At)
+        // E0055: `#Audit("…")` is the retired spelling — teach the new form.
+        if matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_AUDIT)
         {
             let audit_start = self.peek().span;
@@ -202,12 +202,12 @@ impl<'a> Parser<'a> {
                              // skip the string argument
                 let _ = self.expect_plain_string(
                     "for the audit reason",
-                    "`@Audit` is retired; write `@Unsafe(\"reason\") { … }` instead",
-                    "write: @Unsafe(\"index checked against len\") { … }",
+                    "`#Audit` is retired; write `#Unsafe(\"reason\") { … }` instead",
+                    "write: #Unsafe(\"index checked against len\") { … }",
                 );
                 let _ = self.expect(TokKind::RParen, "after the audit reason");
             }
-            // Skip synthetic line terminator between `@Audit(…)` and `@Unsafe`.
+            // Skip synthetic line terminator between `#Audit(…)` and `#Unsafe`.
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
@@ -215,29 +215,29 @@ impl<'a> Parser<'a> {
             self.diags.push(Diagnostic::error(
                 "E0055",
                 format!(
-                    "`@{}` is retired — merge the reason into `@{}`",
+                    "`#{}` is retired — merge the reason into `#{}`",
                     Syntax::ATTR_AUDIT,
                     Syntax::KW_UNSAFE
                 ),
                 "D-UNSAFE2 merged the audit reason into the gate itself".to_string(),
                 format!(
-                    "write `@{}(\"why this is safe\") {{ … }}` (drop the separate `@{}` line)",
+                    "write `#{}(\"why this is safe\") {{ … }}` (drop the separate `#{}` line)",
                     Syntax::KW_UNSAFE,
                     Syntax::ATTR_AUDIT
                 ),
                 Some(audit_span),
             ));
         }
-        // Required `@Unsafe`.
-        if !(matches!(self.peek().kind, TokKind::At)
+        // Required `#Unsafe`.
+        if !(matches!(self.peek().kind, TokKind::Hash)
             && matches!(self.peek2().kind, TokKind::KwUnsafe))
         {
             return Err(Diagnostic::error(
                 "E0003",
-                format!("expected `@{}` here", Syntax::KW_UNSAFE),
-                "an audited region opens with `@Unsafe(\"reason\") { … }`".to_string(),
+                format!("expected `#{}` here", Syntax::KW_UNSAFE),
+                "an audited region opens with `#Unsafe(\"reason\") { … }`".to_string(),
                 format!(
-                    "write `@{}(\"why this is safe\") {{ … }}`",
+                    "write `#{}(\"why this is safe\") {{ … }}`",
                     Syntax::KW_UNSAFE
                 ),
                 Some(self.peek().span),
@@ -246,7 +246,7 @@ impl<'a> Parser<'a> {
         self.bump(); // `#`
         self.bump(); // `Unsafe`
         // Optional reason plus D-UNSAFE-OBLIG1 per-site selection:
-        // `@Unsafe("reason", obligations: .Track) { … }`.
+        // `#Unsafe("reason", obligations: .Track) { … }`.
         let mut audit = None;
         let mut obligation_mode = None;
         if matches!(self.peek().kind, TokKind::LParen) {
@@ -254,14 +254,14 @@ impl<'a> Parser<'a> {
             if matches!(self.peek().kind, TokKind::Str(_)) {
                 let (reason, _) = self.expect_plain_string(
                     "for the safety reason",
-                    "`@Unsafe` takes quoted text explaining why the block is safe",
-                    "write: @Unsafe(\"index checked against len\") { … }",
+                    "`#Unsafe` takes quoted text explaining why the block is safe",
+                    "write: #Unsafe(\"index checked against len\") { … }",
                 )?;
                 audit = Some(reason);
                 if matches!(self.peek().kind, TokKind::Comma) { self.bump(); }
             }
             if !matches!(self.peek().kind, TokKind::RParen) {
-                let (field, field_span) = self.expect_ident("for the `@Unsafe` option")?;
+                let (field, field_span) = self.expect_ident("for the `#Unsafe` option")?;
                 if field != "obligations" {
                     return Err(Diagnostic::error("E3108", format!("`{field}` is not an unsafe-gate option"), "per-site control has one typed field: `obligations`".to_string(), "write `obligations: .Track` or `obligations: .Skip`".to_string(), Some(field_span)));
                 }
@@ -276,7 +276,7 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::RParen, "after the safety reason")?;
         }
-        self.expect(TokKind::LBrace, "after `@Unsafe(…)`")?;
+        self.expect(TokKind::LBrace, "after `#Unsafe(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(start.start, end);
@@ -297,7 +297,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-CTEFFECT1 (ratified 2026-06-25): parse `@Impure("reason") { … }` in
+    /// D-CTEFFECT1 (ratified 2026-06-25): parse `#Impure("reason") { … }` in
     /// statement position. Mirrors `at_unsafe_stmt`. Missing reason → L3102 in sema.
     pub(super) fn at_impure_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
@@ -309,13 +309,13 @@ impl<'a> Parser<'a> {
             self.bump(); // `(`
             let (r, _) = self.expect_plain_string(
                 "for the impure reason",
-                "`@Impure` takes one piece of quoted text explaining why ambient I/O is needed here",
-                "write: @Impure(\"reading build config\") { … }",
+                "`#Impure` takes one piece of quoted text explaining why ambient I/O is needed here",
+                "write: #Impure(\"reading build config\") { … }",
             )?;
             self.expect(TokKind::RParen, "after the impure reason")?;
             reason = Some(r);
         }
-        self.expect(TokKind::LBrace, "after `@Impure(…)`")?;
+        self.expect(TokKind::LBrace, "after `#Impure(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Impure {
@@ -325,13 +325,13 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `@Reactive { … }` in
+    /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `#Reactive { … }` in
     /// statement position. Lowers to a reactive effect scope at codegen.
     pub(super) fn at_reactive_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::At, "expected `@`")?;
-        let _ = self.expect_ident(&format!("`@{}`", Syntax::KW_REACTIVE))?;
-        self.expect(TokKind::LBrace, "after `@Reactive`")?;
+        self.expect(TokKind::Hash, "expected `#`")?;
+        let _ = self.expect_ident(&format!("`#{}`", Syntax::KW_REACTIVE))?;
+        self.expect(TokKind::LBrace, "after `#Reactive`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Reactive {
@@ -340,25 +340,25 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-SHIELDNAME1=A (ratified 2026-07-11): parse `@Shield { … }` in statement
-    /// position. Bare block only — no argument list. `@Shield(...)` is E0430.
+    /// D-SHIELDNAME1=A (ratified 2026-07-11): parse `#Shield { … }` in statement
+    /// position. Bare block only — no argument list. `#Shield(...)` is E0430.
     /// Lowers to `jet_scheduler_shield_enter`/`_leave` around the body at codegen.
     pub(super) fn at_shield_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::At, "expected `@`")?;
+        self.expect(TokKind::Hash, "expected `#`")?;
         let name_tok = self.bump(); // `Shield`
         if matches!(self.peek().kind, TokKind::LParen) {
             let lparen = self.peek().span;
             return Err(Diagnostic::error(
                 "E0430",
-                "`@Shield` takes no arguments".to_string(),
+                "`#Shield` takes no arguments".to_string(),
                 "a shield region protects whatever runs inside it; there is nothing to configure"
                     .to_string(),
-                "write `@Shield { … }`".to_string(),
+                "write `#Shield { … }`".to_string(),
                 Some(Span::new(name_tok.span.start, lparen.end)),
             ));
         }
-        self.expect(TokKind::LBrace, "after `@Shield`")?;
+        self.expect(TokKind::LBrace, "after `#Shield`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Shield {
@@ -367,54 +367,54 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-BLOCKPLANE1=A: `@Region(name) { … }`.
+    /// D-BLOCKPLANE1=A: `#Region(name) { … }`.
     pub(super) fn at_region_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.bump().span; // `#`
         self.bump(); // `Region`
-        self.expect(TokKind::LParen, "after `@Region`")?;
+        self.expect(TokKind::LParen, "after `#Region`")?;
         let (name, name_span) = self.expect_ident("for the region name")?;
         self.expect(TokKind::RParen, "after the region name")?;
-        self.expect(TokKind::LBrace, "after `@Region(name)`")?;
+        self.expect(TokKind::LBrace, "after `#Region(name)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Region { name, name_span, body, span: Span::new(start.start, end) })
     }
 
-    /// D-BLOCKPLANE1=A: `@Live { … }`.
+    /// D-BLOCKPLANE1=A: `#Live { … }`.
     pub(super) fn at_live_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.bump().span; // `#`
         self.bump(); // `Live`
-        self.expect(TokKind::LBrace, "after `@Live`")?;
+        self.expect(TokKind::LBrace, "after `#Live`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Live { body, span: Span::new(start.start, end) })
     }
 
-    /// D-BLOCKPLANE1=A: audited `@Nondeterministic("reason") { … }`.
+    /// D-BLOCKPLANE1=A: audited `#Nondeterministic("reason") { … }`.
     pub(super) fn at_nondeterministic_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.bump().span; // `#`
         self.bump(); // `Nondeterministic`
-        self.expect(TokKind::LParen, "after `@Nondeterministic`")?;
+        self.expect(TokKind::LParen, "after `#Nondeterministic`")?;
         let (reason, _) = self.expect_plain_string(
             "for the nondeterminism reason",
-            "`@Nondeterministic` requires quoted audit text",
-            "write: @Nondeterministic(\"OS clock is an explicit input\") { … }",
+            "`#Nondeterministic` requires quoted audit text",
+            "write: #Nondeterministic(\"OS clock is an explicit input\") { … }",
         )?;
         self.expect(TokKind::RParen, "after the nondeterminism reason")?;
-        self.expect(TokKind::LBrace, "after `@Nondeterministic(…)`")?;
+        self.expect(TokKind::LBrace, "after `#Nondeterministic(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::AssumeDet { reason, body, span: Span::new(start.start, end) })
     }
 
-    /// D-CTX1 (ratified 2026-06-22, G2): parse `@Context(field: value, …) { … }`.
+    /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
     /// Cursor is on the `#` token. Emits E0760 for `=` spelling, E0761 for
     /// unknown fields.
     pub(super) fn at_context_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // `#`
         self.bump(); // `Context`
-        self.expect(TokKind::LParen, &format!("after `@{}`", Syntax::CTX_BLOCK))?;
+        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::CTX_BLOCK))?;
         let mut fields: Vec<(String, Expr, Span)> = Vec::new();
         // Parse comma-separated `ident : expr` pairs.
         while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
@@ -428,7 +428,7 @@ impl<'a> Parser<'a> {
                     "context fields are set with `:`, not `=`".to_string(),
                     "`=` is reassignment (S17); the `name: value` form sets a context field (D-CTX1)".to_string(),
                     format!(
-                        "write `@{}({}: …) {{ … }}`",
+                        "write `#{}({}: …) {{ … }}`",
                         Syntax::CTX_BLOCK,
                         field_name
                     ),
@@ -449,7 +449,7 @@ impl<'a> Parser<'a> {
                     format!("`{}` isn't a context field", field_name),
                     "the context bundle holds `allocator`, `logger`, and `deadline`".to_string(),
                     format!(
-                        "write `@{}(allocator: …)`, `@{}(logger: …)`, or `@{}(deadline: …)`",
+                        "write `#{}(allocator: …)`, `#{}(logger: …)`, or `#{}(deadline: …)`",
                         Syntax::CTX_BLOCK,
                         Syntax::CTX_BLOCK,
                         Syntax::CTX_BLOCK
@@ -466,11 +466,11 @@ impl<'a> Parser<'a> {
         }
         self.expect(
             TokKind::RParen,
-            &format!("after `@{}(…`", Syntax::CTX_BLOCK),
+            &format!("after `#{}(…`", Syntax::CTX_BLOCK),
         )?;
         self.expect(
             TokKind::LBrace,
-            &format!("after `@{}(…)`", Syntax::CTX_BLOCK),
+            &format!("after `#{}(…)`", Syntax::CTX_BLOCK),
         )?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -481,7 +481,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-EFF1 / D-QUAL1: parse a `@Caps(Net, Db) { … }` effect-restriction region
+    /// D-EFF1 / D-QUAL1: parse a `#Caps(Net, Db) { … }` effect-restriction region
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents; sema validates them against the known effect vocabulary (E0119).
     pub(super) fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -489,7 +489,7 @@ impl<'a> Parser<'a> {
         self.bump(); // `#`
         self.bump(); // `Caps`
         let lparen = self.peek().span;
-        self.expect(TokKind::LParen, &format!("after `@{}`", Syntax::KW_CAPS))?;
+        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_CAPS))?;
         let mut caps = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
@@ -504,9 +504,9 @@ impl<'a> Parser<'a> {
         let rparen = self.peek().span;
         self.expect(
             TokKind::RParen,
-            &format!("to close the `@{}(…)` list", Syntax::KW_CAPS),
+            &format!("to close the `#{}(…)` list", Syntax::KW_CAPS),
         )?;
-        self.expect(TokKind::LBrace, &format!("after `@{}(…)`", Syntax::KW_CAPS))?;
+        self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_CAPS))?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Caps {
@@ -517,17 +517,17 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-SCAP1: parse a `@Grant(Fs) { caps -> … }` scoped-capability grant region
+    /// D-SCAP1: parse a `#Grant(Fs) { caps -> … }` scoped-capability grant region
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents (sema validates them, E0119); `caps` binds the first-class
-    /// capability handle for the block. The dual of `@Caps`: `@Grant` authorizes
+    /// capability handle for the block. The dual of `#Caps`: `#Grant` authorizes
     /// the listed effects through the handle, RAII-revoked at scope end.
     pub(super) fn at_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // `#`
         self.bump(); // `Grant`
         let lparen = self.peek().span;
-        self.expect(TokKind::LParen, &format!("after `@{}`", Syntax::KW_GRANT))?;
+        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_GRANT))?;
         let mut caps = Vec::new();
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
@@ -542,18 +542,18 @@ impl<'a> Parser<'a> {
         let rparen = self.peek().span;
         self.expect(
             TokKind::RParen,
-            &format!("to close the `@{}(…)` list", Syntax::KW_GRANT),
+            &format!("to close the `#{}(…)` list", Syntax::KW_GRANT),
         )?;
         self.expect(
             TokKind::LBrace,
-            &format!("after `@{}(…)`", Syntax::KW_GRANT),
+            &format!("after `#{}(…)`", Syntax::KW_GRANT),
         )?;
         // The capability handle binding: `{ caps -> … }`.
         let (binding, binding_span) = self.expect_ident("for the capability handle name")?;
         self.expect(
             TokKind::Arrow,
             &format!(
-                "after the `@{}` handle name (`@{}(…) {{ caps {} … }}`)",
+                "after the `#{}` handle name (`#{}(…) {{ caps {} … }}`)",
                 Syntax::KW_GRANT,
                 Syntax::KW_GRANT,
                 Syntax::GRANT_ARROW
@@ -571,21 +571,21 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-TXN4: parse a `@Transact(name) { … }` transaction block in statement
+    /// D-TXN4: parse a `#Transact(name) { … }` transaction block in statement
     /// position. Cursor is on the `#` token. `name` binds a user-chosen
     /// transaction handle (any ident, mirroring `region r { … }`).
     pub(super) fn at_transact_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // `#`
         self.bump(); // `Transact`
-                     // D-TXN4: `@Transact(name) { … }` binds a handle; a bare `@Transact { … }`
+                     // D-TXN4: `#Transact(name) { … }` binds a handle; a bare `#Transact { … }`
                      // (no handle, hence no `on_commit` hooks) stays legal.
         let (name, name_span) = if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // `(`
             let (n, ns) = self.expect_ident("for the transaction handle name")?;
             self.expect(
                 TokKind::RParen,
-                &format!("to close `@{}(name`", Syntax::KW_TRANSACT),
+                &format!("to close `#{}(name`", Syntax::KW_TRANSACT),
             )?;
             (Some(n), Some(ns))
         } else {
@@ -593,7 +593,7 @@ impl<'a> Parser<'a> {
         };
         self.expect(
             TokKind::LBrace,
-            &format!("after `@{}`", Syntax::KW_TRANSACT),
+            &format!("after `#{}`", Syntax::KW_TRANSACT),
         )?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -605,8 +605,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// S19 + D-LABEL1: parse a `loop` statement (all three header forms), with an
-    /// optional `@name` label already parsed by the caller. The cursor is on the
+    /// S19 + D-LOOPLABEL3: parse a `loop` statement (all three header forms), with an
+    /// optional compile-time name already parsed by the caller. The cursor is on the
     /// `loop` keyword.
     pub(super) fn loop_stmt(&mut self, label: Option<(String, Span)>) -> Result<Stmt, Diagnostic> {
         let span = self.bump().span; // `loop`
@@ -747,7 +747,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                     break end;
                 }
-                // S6-R: a block statement (`if`/`loop`/`@Unsafe`/nested `{}`)
+                // S6-R: a block statement (`if`/`loop`/`#Unsafe`/nested `{}`)
                 // ends with `}`, after which the lexer inserts a synthetic
                 // terminator. Those statements don't consume their own
                 // terminator, so skip a stray one here.
@@ -780,9 +780,9 @@ impl<'a> Parser<'a> {
 
     pub(super) fn stmt(&mut self) -> Result<Stmt, Diagnostic> {
         match &self.peek().kind {
-            // S43 (D-CASING1 follow-on): a `@Test "name" { … }` block in statement
+            // S43 (D-CASING1 follow-on): a `#Test "name" { … }` block in statement
             // position is misplaced — E0601 points at the top level.
-            TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) =>
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST) =>
             {
                 let span = self.peek().span;
                 self.bump(); // `#`
@@ -807,11 +807,11 @@ impl<'a> Parser<'a> {
                 }
                 Err(Diagnostic::error(
                     "E0601",
-                    format!("`@{}` blocks only belong at the top of a file", Syntax::KW_TEST),
+                    format!("`#{}` blocks only belong at the top of a file", Syntax::KW_TEST),
                     "test blocks group checks that `jet test` runs separately from `run`"
                         .to_string(),
                     format!(
-                        "move this block to the top level, after your functions: @{} (\"name\") {{ ... }}",
+                        "move this block to the top level, after your functions: #{} (\"name\") {{ ... }}",
                         Syntax::KW_TEST
                     ),
                     Some(span),
@@ -1076,12 +1076,19 @@ impl<'a> Parser<'a> {
             }
             TokKind::KwBreak => {
                 let span = self.bump().span;
-                // D-LOOPLABEL2=A: `break name@` — label is ident with suffix `@`.
-                // Old prefix form `break @name` emits a teaching error.
+                // D-LOOPLABEL3=A: retired `break name@` / `break @name`.
                 if let TokKind::Ident(_) = &self.peek().kind {
                     if matches!(self.peek2().kind, TokKind::At) {
-                        let (name, _) = self.expect_ident("for the loop label")?;
-                        self.bump(); // `@`
+                        let (name, name_span) = self.expect_ident("for the loop label")?;
+                        let end = self.bump().span.end; // `@`
+                        self.diags.push(Diagnostic::error(
+                            "E0988",
+                            "named loop exits use dot calls".to_string(),
+                            "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                                .to_string(),
+                            format!("write `{name}.break()`"),
+                            Some(Span::new(name_span.start, end)),
+                        ));
                         self.finish_stmt()?;
                         return Ok(Stmt::BreakLabel(name, span));
                     }
@@ -1092,9 +1099,10 @@ impl<'a> Parser<'a> {
                     let (name, name_span) = self.expect_ident("after `@` for the loop label")?;
                     self.diags.push(Diagnostic::error(
                         "E0988",
-                        "loop label is a suffix, not a prefix".to_string(),
-                        "the label `@` moved to the suffix position (D-LOOPLABEL2)".to_string(),
-                        format!("write `break {}@`", name),
+                        "named loop exits use dot calls".to_string(),
+                        "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                            .to_string(),
+                        format!("write `{name}.break()`"),
                         Some(Span::new(at_span.start, name_span.end)),
                     ));
                     self.finish_stmt()?;
@@ -1106,15 +1114,24 @@ impl<'a> Parser<'a> {
             TokKind::Ident(name)
                 if name == Syntax::KW_NEXT
                     && (matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace)
+                        || matches!(self.peek2().kind, TokKind::At)
                         || matches!(self.peek2().kind, TokKind::Ident(_))
                             && matches!(self.peek3().kind, TokKind::At)) =>
             {
                 let span = self.bump().span;
-                // D-LOOP-CONTROLWORD1=B: contextual `next name@` suffix form.
+                // D-LOOPLABEL3=A: retired `next name@` / `next @name`.
                 if let TokKind::Ident(_) = &self.peek().kind {
                     if matches!(self.peek2().kind, TokKind::At) {
-                        let (name, _) = self.expect_ident("for the loop label")?;
-                        self.bump(); // `@`
+                        let (name, name_span) = self.expect_ident("for the loop label")?;
+                        let end = self.bump().span.end; // `@`
+                        self.diags.push(Diagnostic::error(
+                            "E0988",
+                            "named loop exits use dot calls".to_string(),
+                            "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                                .to_string(),
+                            format!("write `{name}.next()`"),
+                            Some(Span::new(name_span.start, end)),
+                        ));
                         self.finish_stmt()?;
                         return Ok(Stmt::ContinueLabel(name, span));
                     }
@@ -1125,9 +1142,10 @@ impl<'a> Parser<'a> {
                     let (name, name_span) = self.expect_ident("after `@` for the loop label")?;
                     self.diags.push(Diagnostic::error(
                         "E0988",
-                        "loop label is a suffix, not a prefix".to_string(),
-                        "the label `@` moved to the suffix position (D-LOOPLABEL2)".to_string(),
-                        format!("write `next {}@`", name),
+                        "named loop exits use dot calls".to_string(),
+                        "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                            .to_string(),
+                        format!("write `{name}.next()`"),
                         Some(Span::new(at_span.start, name_span.end)),
                     ));
                     self.finish_stmt()?;
@@ -1136,17 +1154,72 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Continue(span))
             }
+            // D-LOOPLABEL3=A: named loop exits are statement-shaped dot calls.
+            TokKind::Ident(_)
+                if matches!(self.peek2().kind, TokKind::Dot)
+                    && (matches!(self.peek3().kind, TokKind::KwBreak)
+                        || matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::KW_NEXT))
+                    && matches!(self.peek4().kind, TokKind::LParen)
+                    && matches!(self.peek5().kind, TokKind::RParen) =>
+            {
+                let (name, name_span) = self.expect_ident("for the loop name")?;
+                self.bump(); // `.`
+                let method = self.bump();
+                self.bump(); // `(`
+                let end = self.bump().span.end; // `)`
+                self.finish_stmt()?;
+                let span = Span::new(name_span.start, end);
+                if matches!(method.kind, TokKind::KwBreak) {
+                    Ok(Stmt::BreakLabel(name, span))
+                } else {
+                    Ok(Stmt::ContinueLabel(name, span))
+                }
+            }
             TokKind::KwLoop => self.loop_stmt(None),
-            // D-LOOPLABEL2=A: `name@ loop { }` — suffix loop-label declaration.
+            // D-LOOPLABEL3=A: `name :: loop { }` declares a compile-time loop name.
+            TokKind::Ident(_)
+                if matches!(self.peek2().kind, TokKind::ColonColon)
+                    && matches!(self.peek3().kind, TokKind::KwLoop) =>
+            {
+                let (label, lspan) = self.expect_ident("for the loop name")?;
+                self.bump(); // `::`
+                self.loop_stmt(Some((label, lspan)))
+            }
+            // `name := loop` cannot declare a loop name: labels are compile-time.
+            TokKind::Ident(_)
+                if matches!(self.peek2().kind, TokKind::ColonEq)
+                    && matches!(self.peek3().kind, TokKind::KwLoop) =>
+            {
+                let (label, lspan) = self.expect_ident("for the loop name")?;
+                self.bump(); // `:=`
+                let end = self.bump().span.end; // `loop`
+                Err(Diagnostic::error(
+                    "E0988",
+                    "a loop name is compile-time, not mutable state".to_string(),
+                    "`:=` creates a runtime binding; a loop name only targets control flow"
+                        .to_string(),
+                    format!("write `{label} :: loop {{ … }}`"),
+                    Some(Span::new(lspan.start, end)),
+                ))
+            }
+            // D-LOOPLABEL3: retired suffix declaration, recovered for one teaching error.
             TokKind::Ident(_)
                 if matches!(self.peek2().kind, TokKind::At)
                     && matches!(self.peek3().kind, TokKind::KwLoop | TokKind::KwFor) =>
             {
                 let (label, lspan) = self.expect_ident("for the loop label")?;
-                self.bump(); // `@`
+                let end = self.bump().span.end; // `@`
+                self.diags.push(Diagnostic::error(
+                    "E0988",
+                    "named loops use `::`, not `@`".to_string(),
+                    "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                        .to_string(),
+                    format!("write `{label} :: loop {{ … }}`"),
+                    Some(Span::new(lspan.start, end)),
+                ));
                 self.loop_stmt(Some((label, lspan)))
             }
-            TokKind::At if self.at_meta_attr() => {
+            TokKind::Hash if self.at_meta_attr() => {
                 let meta = self.parse_meta_attr()?;
                 if matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
@@ -1159,11 +1232,11 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TRACK) =>
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TRACK) =>
             {
                 let marker_span = self.peek().span;
                 self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`@{}`", Syntax::ATTR_TRACK))?;
+                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_TRACK))?;
                 let mut binding = self.sigil_binding()?;
                 binding.track = true;
                 binding.track_span = Some(Span::new(marker_span.start, name_span.end));
@@ -1178,20 +1251,20 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Val(binding))
             }
             // S58 (E2-M13): bare `unsafe { … }` is the rejected former
-            // spelling — point users at the `@Unsafe("…")` form.
+            // spelling — point users at the `#Unsafe("…")` form.
             TokKind::Ident(n) if n == Syntax::FOREIGN_UNSAFE => {
                 let span = self.bump().span;
                 Err(Diagnostic::error(
                     "E0003",
                     format!(
-                        "`{}` blocks are written with `@{}`",
+                        "`{}` blocks are written with `#{}`",
                         Syntax::FOREIGN_UNSAFE,
                         Syntax::KW_UNSAFE
                     ),
                     "the expert low-level gate is an attribute marker, never a bare keyword"
                         .to_string(),
                     format!(
-                        "write `@{}(\"why this is safe\") {{ … }}`",
+                        "write `#{}(\"why this is safe\") {{ … }}`",
                         Syntax::KW_UNSAFE
                     ),
                     Some(span),
@@ -1209,7 +1282,7 @@ impl<'a> Parser<'a> {
             {
                 return self.scope_member_stmt();
             }
-            TokKind::At
+            TokKind::Hash
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),
                     Syntax::ATTR_AUDIT
                     | Syntax::CTX_BLOCK
@@ -1229,10 +1302,10 @@ impl<'a> Parser<'a> {
             {
                 if let TokKind::Ident(name) = &self.peek2().kind {
                     if crate::Policy::applied_rule(name).is_some() && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Block) {
-                        return Err(Diagnostic::error("E0355", format!("`@{name}` cannot attach to a block"), "the compiler-owned rule registry gives every applied rule exact attachment sites".to_string(), "move the rule to one of its registered sites".to_string(), Some(self.peek2().span)));
+                        return Err(Diagnostic::error("E0355", format!("`#{name}` cannot attach to a block"), "the compiler-owned rule registry gives every applied rule exact attachment sites".to_string(), "move the rule to one of its registered sites".to_string(), Some(self.peek2().span)));
                     }
                 }
-                // D-CTX1 (ratified 2026-06-22): `@Context(field: value) { … }`.
+                // D-CTX1 (ratified 2026-06-22): `#Context(field: value) { … }`.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CTX_BLOCK) {
                     return self.at_context_stmt();
                 }
@@ -1248,7 +1321,7 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_NONDETERMINISTIC) {
                     return self.at_nondeterministic_stmt();
                 }
-                // D-EFF1 / D-QUAL1: `@Caps(Net, Db) { … }` effect-restriction region.
+                // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
                     return self.at_caps_stmt();
                 }
@@ -1256,21 +1329,21 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_GRANT) {
                     return self.at_grant_stmt();
                 }
-                // D-TXN1–D-TXN4: `@Transact(name) { … }` transaction block.
+                // D-TXN1–D-TXN4: `#Transact(name) { … }` transaction block.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSACT) {
                     return self.at_transact_stmt();
                 }
-                // D-CTEFFECT1: `@Impure("reason") { … }` comptime effect gate.
+                // D-CTEFFECT1: `#Impure("reason") { … }` comptime effect gate.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_IMPURE) {
                     return self.at_impure_stmt();
                 }
-                // D-SHIELDNAME1=A: `@Shield { … }` cancellation-shield region.
-                // Dispatch on the name alone so `@Shield(...)` still routes here
+                // D-SHIELDNAME1=A: `#Shield { … }` cancellation-shield region.
+                // Dispatch on the name alone so `#Shield(...)` still routes here
                 // to emit the E0430 teaching error.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_SHIELD) {
                     return self.at_shield_stmt();
                 }
-                // D-REACTCORE1: `@Reactive { … }` reactive effect scope.
+                // D-REACTCORE1: `#Reactive { … }` reactive effect scope.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_REACTIVE)
                     && matches!(self.peek3().kind, TokKind::LBrace)
                 {
@@ -1283,14 +1356,14 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_DEBUG_ONLY) {
                     return self.at_statement_switch_stmt(Syntax::ATTR_DEBUG_ONLY);
                 }
-                // D-UNSAFE2: `@Unsafe("reason") { … }` (or retired `@Audit("…") @Unsafe`).
+                // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()
             }
-            // D-PERSIST1 (E0145): `@Persist` on a local binding — persistence
+            // D-PERSIST1 (E0145): `#Persist` on a local binding — persistence
             // is keyed by module + name, and a local has no stable identity
             // across a reload. Takes priority over the loop-label-typo arm
             // below for the same reason as the directive-marker guard.
-            TokKind::At if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST) =>
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST) =>
             {
                 let t = self.bump(); // `@`
                 let name_tok = self.bump(); // `Persist`
@@ -1298,43 +1371,34 @@ impl<'a> Parser<'a> {
                     "E0145",
                     "only module-level state can persist across reloads".to_string(),
                     "persistence is keyed by module + name; a local has no stable identity across a reload".to_string(),
-                    "move it to module level, or drop `@Persist`".to_string(),
+                    "move it to module level, or drop `#Persist`".to_string(),
                     Some(Span::new(t.span.start, name_tok.span.end)),
                 ))
             }
             TokKind::At => {
-                // D-LOOPLABEL2=A: `@name loop { }` is the OLD prefix form — emit E0988
-                // teaching error pointing at the new `name@ loop { }` suffix form.
-                if let TokKind::Ident(_) = &self.peek2().kind {
+                // D-LOOPLABEL3: recover retired `@name loop`.
+                if matches!(self.peek2().kind, TokKind::Ident(_))
+                    && matches!(self.peek3().kind, TokKind::KwLoop)
+                {
                     let at_span = self.peek().span;
                     self.bump(); // `@`
                     let (label, lspan) = self.expect_ident("for the loop label after `@`")?;
-                    if matches!(self.peek().kind, TokKind::KwLoop) {
-                        self.diags.push(Diagnostic::error(
-                            "E0988",
-                            "loop label is a suffix, not a prefix".to_string(),
-                            "the label `@` moved to the suffix position (D-LOOPLABEL2)".to_string(),
-                            format!("write `{}@ loop {{ … }}`", label),
-                            Some(Span::new(at_span.start, lspan.end)),
-                        ));
-                        return self.loop_stmt(Some((label, lspan)));
-                    }
-                    // `@name` not followed by `loop` — mis-placed label.
-                    return Err(Diagnostic::error(
+                    self.diags.push(Diagnostic::error(
                         "E0988",
-                        "a loop label must be followed by `loop`".to_string(),
-                        "write `name@ loop { … }` (D-LOOPLABEL2)".to_string(),
-                        format!("write `{}@ loop {{ … }}`, or remove the label", label),
+                        "named loops use `::`, not `@`".to_string(),
+                        "`@` is reserved for locations, addresses, and sources (D-LOOPLABEL3)"
+                            .to_string(),
+                        format!("write `{label} :: loop {{ … }}`"),
                         Some(Span::new(at_span.start, lspan.end)),
                     ));
+                    return self.loop_stmt(Some((label, lspan)));
                 }
-                // A bare `@` has no rule name and cannot start a loop label.
                 let t = self.bump();
                 Err(Diagnostic::error(
-                    "E0990",
-                    "`@` needs an applied-rule name".to_string(),
-                    "D-SHAPE2 uses `@Rule` for declarations, expressions, and brace scopes; loop labels put `@` after the name".to_string(),
-                    "write `@Unsafe(\"…\")`, `@Test(\"…\")`, `@[Codable, MustUse]`, or `name@ loop { … }`".to_string(),
+                    "E0063",
+                    "applied rules use `#`, not `@`".to_string(),
+                    "`#` marks attributes, instructions, and properties; `@` marks locations, addresses, and sources (D-VERDICT-732-1)".to_string(),
+                    "replace the leading `@` with `#`".to_string(),
                     Some(t.span),
                 ))
             }

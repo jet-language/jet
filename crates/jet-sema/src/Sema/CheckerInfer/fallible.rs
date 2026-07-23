@@ -380,6 +380,32 @@ impl<'a> Checker<'a> {
                 }
                 Some(payload)
             }
+            OrFallback::BreakLabel(name, span) => {
+                if self.loop_depth == 0 {
+                    self.diags
+                        .push(loop_control_outside(Syntax::KW_BREAK, *span));
+                } else if !self.loop_labels.iter().any(|label| label == name) {
+                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
+                        name,
+                        &self.loop_labels,
+                        *span,
+                    ));
+                }
+                Some(payload)
+            }
+            OrFallback::ContinueLabel(name, span) => {
+                if self.loop_depth == 0 {
+                    self.diags
+                        .push(loop_control_outside(Syntax::KW_NEXT, *span));
+                } else if !self.loop_labels.iter().any(|label| label == name) {
+                    self.diags.push(crate::Sema::Diagnostics::undefined_loop_label(
+                        name,
+                        &self.loop_labels,
+                        *span,
+                    ));
+                }
+                Some(payload)
+            }
         }
     }
 

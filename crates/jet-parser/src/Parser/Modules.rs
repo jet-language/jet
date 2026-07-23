@@ -371,9 +371,9 @@ impl<'a> Parser<'a> {
                     | TokKind::KwTrait
                     | TokKind::KwTag
                     | TokKind::KwComptime
-                    // D-CASING1 follow-on: `@Test`/`@Pure`/`@Unsafe` markers start
+                    // D-CASING1 follow-on: `#Test`/`#Pure`/`#Unsafe` markers start
                     // with `#` inside a code-module body.
-                    | TokKind::At
+                    | TokKind::Hash
                     | TokKind::RBrace => true,
                     // JetOS body starters: `sources:`, `imports:`, `members:`, or `ident .`
                     TokKind::Ident(n)
@@ -415,10 +415,10 @@ impl<'a> Parser<'a> {
                     let span = self.peek().span;
                     return Err(Diagnostic::error(
                         "E0003",
-                        "`@Target(Web)` isn't valid on a module".to_string(),
+                        "`#Target(Web)` isn't valid on a module".to_string(),
                         "`Web` is a file-level default-backend marker, not a partition ceiling"
                             .to_string(),
-                        "move `@Target(Web)` to the top of the file, outside any module; use `@Target(Wasm)` or `@Target(Js)` on a module".to_string(),
+                        "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(Js)` on a module".to_string(),
                         Some(span),
                     ));
                 }
@@ -427,9 +427,9 @@ impl<'a> Parser<'a> {
                     let span = self.peek().span;
                     return Err(Diagnostic::error(
                         "E0003",
-                        format!("`@Target(Os.{})` isn't valid on a module", os.name()),
+                        format!("`#Target(Os.{})` isn't valid on a module", os.name()),
                         "`Os.Linux`/`Os.Macos`/`Os.Windows` gates a single `impl` block, not a module".to_string(),
-                        format!("move `@Target(Os.{})` to the `impl` block itself", os.name()),
+                        format!("move `#Target(Os.{})` to the `impl` block itself", os.name()),
                         Some(span),
                     ));
                 }
@@ -653,7 +653,7 @@ impl<'a> Parser<'a> {
     fn top_level_item_in_code_module(&mut self) -> Result<Item, Diagnostic> {
         match &self.peek().kind {
             TokKind::KwFn => self.func().map(Item::Func),
-            TokKind::At if self.at_meta_attr() => {
+            TokKind::Hash if self.at_meta_attr() => {
                 if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {
                     self.const_def().map(Item::Const)
                 } else if matches!(self.meta_attr_next_kind(), Some(TokKind::KwComptime)) {
@@ -662,29 +662,29 @@ impl<'a> Parser<'a> {
                     self.func().map(Item::Func)
                 }
             }
-            // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `@Pure fn` inside a module
-            // body (old `@Pure fn` spelling is E0062, taught inside `func()`).
-            TokKind::At if self.at_pure_fn() => self.func().map(Item::Func),
-            // D-TAINT1: `@Sanitizer fn` inside a module body.
-            TokKind::At if self.at_sanitizer_fn() => self.func().map(Item::Func),
-            // D-REPLAY1: `@Replayable fn` inside a module body.
-            TokKind::At if self.at_replayable_fn() => self.func().map(Item::Func),
-            // D-SCHEDULE1 (card #505): `@Task fn` / `@Every(…) fn` inside a module body.
-            TokKind::At if self.at_task_fn() || self.at_every_fn() => self.func().map(Item::Func),
-            // D-MUSTUSE1 / D-MARKERMOVE1: `@MustUse fn` inside a module body (old
-            // `@MustUse fn` spelling is E0062, taught inside `func()`).
-            TokKind::At if self.at_must_use_fn() => self.func().map(Item::Func),
-            // D-STATE1: `@State(S) fn` / `@Transition(From -> To) fn` in a module.
-            TokKind::At if self.at_state_fn() || self.at_transition_fn() => {
+            // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `#Pure fn` inside a module
+            // body (old `#Pure fn` spelling is E0062, taught inside `func()`).
+            TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
+            // D-TAINT1: `#Sanitizer fn` inside a module body.
+            TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
+            // D-REPLAY1: `#Replayable fn` inside a module body.
+            TokKind::Hash if self.at_replayable_fn() => self.func().map(Item::Func),
+            // D-SCHEDULE1 (card #505): `#Task fn` / `#Every(…) fn` inside a module body.
+            TokKind::Hash if self.at_task_fn() || self.at_every_fn() => self.func().map(Item::Func),
+            // D-MUSTUSE1 / D-MARKERMOVE1: `#MustUse fn` inside a module body (old
+            // `#MustUse fn` spelling is E0062, taught inside `func()`).
+            TokKind::Hash if self.at_must_use_fn() => self.func().map(Item::Func),
+            // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` in a module.
+            TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
                 self.func().map(Item::Func)
             }
-            // D-REACTCORE1: `@Reactive fn` inside a module body.
-            TokKind::At if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
-            // D-WASM1=A: `@Wasm` / `@Js` / `@WasmExport fn` inside a module body.
-            TokKind::At if self.at_web_partition_fn() => self.func().map(Item::Func),
-            // D-SHAPE2: `@[RenameAll(camel)]` / `@[Codable]` / `@Codable`
+            // D-REACTCORE1: `#Reactive fn` inside a module body.
+            TokKind::Hash if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
+            // D-WASM1=A: `#Wasm` / `#Js` / `#WasmExport fn` inside a module body.
+            TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
+            // D-SHAPE2: `#[RenameAll(camel)]` / `#[Codable]` / `#Codable`
             // type rules inside a module body.
-            TokKind::At if self.at_marker_list() || self.at_single_type_marker() =>
+            TokKind::Hash if self.at_marker_list() || self.at_single_type_marker() =>
             {
                 self.type_def_with_any_markers()
             }
@@ -719,17 +719,17 @@ impl<'a> Parser<'a> {
             TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
             TokKind::KwTag => self.tag_def(false).map(Item::Tag),
             TokKind::KwModule => self.code_module(false),
-            // D-OSTARGET1=A: `@Target(Os.X) impl …` inside a module body.
-            TokKind::At if self.at_web_target() => match self.parse_web_target_marker()? {
+            // D-OSTARGET1=A: `#Target(Os.X) impl …` inside a module body.
+            TokKind::Hash if self.at_web_target() => match self.parse_web_target_marker()? {
                 super::Items::TargetMarker::Os(os) => self.os_gated_impl(os),
                 super::Items::TargetMarker::DefaultWeb => {
                     let span = self.peek().span;
                     Err(Diagnostic::error(
                         "E0003",
-                        "`@Target(Web)` isn't valid on a module".to_string(),
+                        "`#Target(Web)` isn't valid on a module".to_string(),
                         "`Web` is a file-level default-backend marker, not a partition ceiling"
                             .to_string(),
-                        "move `@Target(Web)` to the top of the file, outside any module"
+                        "move `#Target(Web)` to the top of the file, outside any module"
                             .to_string(),
                         Some(span),
                     ))
@@ -738,8 +738,8 @@ impl<'a> Parser<'a> {
                     let span = self.peek().span;
                     Err(Diagnostic::error(
                         "E0003",
-                        "`@Target(Wasm)`/`@Target(Js)` isn't valid on an item inside a module body".to_string(),
-                        "the web bucket ceiling is file- or module-level (`@Target(Wasm) module name { … }`), not per-item".to_string(),
+                        "`#Target(Wasm)`/`#Target(Js)` isn't valid on an item inside a module body".to_string(),
+                        "the web bucket ceiling is file- or module-level (`#Target(Wasm) module name { … }`), not per-item".to_string(),
                         "move the marker to the `module` declaration itself".to_string(),
                         Some(span),
                     ))
@@ -748,10 +748,10 @@ impl<'a> Parser<'a> {
             TokKind::KwImpl => self.impl_or_error_conv(),
             TokKind::KwConst => self.const_def().map(Item::Const),
             TokKind::KwComptime => self.comptime_def().map(Item::Const),
-            TokKind::At if self.at_test_def() => self.test_def().map(Item::Test),
-            // D-BENCH1/D-BENCH-MARKER1=A: `@Bench("name") { … }`.
-            TokKind::At if self.at_bench_def() => self.bench_def().map(Item::Bench),
-            TokKind::At
+            TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
+            // D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }`.
+            TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
+            TokKind::Hash
                 if self.at_persist_const()
                     || matches!(&self.peek2().kind, TokKind::Ident(n) if n == "static" || n == "inline") =>
             {
@@ -765,6 +765,16 @@ impl<'a> Parser<'a> {
                     "`use` inside an inline code module is not yet supported".to_string(),
                     "unqualified imports inside modules need D-MOD4 ratification".to_string(),
                     "call items by their qualified path for now".to_string(),
+                    Some(span),
+                ))
+            }
+            TokKind::At => {
+                let span = self.bump().span;
+                Err(Diagnostic::error(
+                    "E0063",
+                    "applied rules use `#`, not `@`".to_string(),
+                    "`#` marks attributes, instructions, and properties; `@` marks locations, addresses, and sources (D-VERDICT-732-1)".to_string(),
+                    "replace the leading `@` with `#`".to_string(),
                     Some(span),
                 ))
             }

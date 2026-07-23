@@ -523,13 +523,13 @@ pub const TARGET_EXECUTABLE: &str = "executable";
 pub const TARGET_TEST: &str = "test";
 pub const TARGET_EXAMPLE: &str = "example";
 /// D-TGT2 / c80 (ratified 2026-06-21; backend shipped 2026-06-25): the manifest
-/// target that routes `jet bench` at the package entry — same engine as `@Bench`/
+/// target that routes `jet bench` at the package entry — same engine as `#Bench`/
 /// `jet bench file.jet`, now addressable from a `packages:` declaration.
 pub const TARGET_BENCHMARK: &str = "benchmark";
 /// D-PLUGIN1=B / D-DEP-WASM1=A (ratified 2026-06-25; backend shipped c81): a
 /// package built as `plugin` compiles to a sandboxed `wasm32` Component Model
 /// module (wasmtime host, typed `.wit` contract) instead of a native binary.
-/// Safe by default — no `@Unsafe` gate (I1 holds by construction: the sandbox
+/// Safe by default — no `#Unsafe` gate (I1 holds by construction: the sandbox
 /// is the safety boundary). Its exported surface is named by the `export:`
 /// target field (`TARGET_FIELD_EXPORT`, D-PLUGIN-EXPORT1).
 pub const TARGET_PLUGIN: &str = "plugin";

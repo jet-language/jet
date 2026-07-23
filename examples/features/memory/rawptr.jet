@@ -1,12 +1,12 @@
 // D-CAP9: the raw-pointer grammar. `*T` is the raw-pointer TYPE, prefix `*x`
 // takes a raw pointer to `x` (raw-pointer-of), and postfix `p.*` dereferences
-// one. All three are raw memory operations, so they live inside an `@Unsafe`
+// one. All three are raw memory operations, so they live inside an `#Unsafe`
 // region — ordinary Jet never needs any of this.
 use core.mem
 
 fn run() {
     cell: Int :: 1337
-    @Unsafe("`cell` is a live Int on this stack frame; the pointer never escapes") {
+    #Unsafe("`cell` is a live Int on this stack frame; the pointer never escapes") {
         // `*cell` takes a raw pointer to `cell`; `p` has the raw-pointer type `*Int`.
         p: *Int :: *cell
         // `p.*` dereferences it back to the stored value.

@@ -1,7 +1,7 @@
 //! D-CLIFLAG1 (c7cliflag): typed entry-signature CLI parsing.
 //!
-//! `@[Cli]` is a sibling derive of `@[Codable]` on the same marker/derive
-//! infrastructure (D-MARKERMOVE1/D-CLIFLAG1). A `@[Cli]`-derived struct's
+//! `#[Cli]` is a sibling derive of `#[Codable]` on the same marker/derive
+//! infrastructure (D-MARKERMOVE1/D-CLIFLAG1). A `#[Cli]`-derived struct's
 //! fields each map to one `core.args` registration; see docs/spec/spec.md
 //! ("Typed entry-signature CLI parsing (D-CLIFLAG1)") for the pinned
 //! field-mapping rule this validates. Sema does the shape-checking here so
@@ -33,25 +33,25 @@ fn is_cli_scalar(ty: &Type) -> bool {
         || matches!(ty, Type::Named(n) if n == "Path")
 }
 
-/// D-CLIFLAG1: does `f` carry a `@[Default(expr)]` marker (D-SERDE5's
+/// D-CLIFLAG1: does `f` carry a `#[Default(expr)]` marker (D-SERDE5's
 /// existing field-default mechanism, reused here rather than inventing a
 /// second one — Jet's only *inline* `= expr` default lives on function
 /// parameters, S61, a different grammar slot; struct fields, Cli or not, use
-/// `@[Default(...)]`)?
+/// `#[Default(...)]`)?
 fn has_default_marker(f: &Field) -> bool {
     f.serde_markers
         .iter()
         .any(|m| m.name == Syntax::ATTR_DEFAULT)
 }
 
-/// D-CLIFLAG1: classify one `@[Cli]` struct field for `core.args` codegen.
+/// D-CLIFLAG1: classify one `#[Cli]` struct field for `core.args` codegen.
 /// `None` means the field's type has no flag mapping (E1305).
 pub(crate) enum CliFieldKind {
     /// `Bool` field -> `.flag(name, help)`, default `false`.
     Flag,
     /// `T?` field (T a supported scalar) -> optional `.option(...)`, default `null`.
     OptionalOption,
-    /// A supported scalar field with `@[Default(expr)]` -> optional `.option(...)`,
+    /// A supported scalar field with `#[Default(expr)]` -> optional `.option(...)`,
     /// default = the marker's expression.
     DefaultedOption,
     /// A supported scalar field, no `Option`/`Default` -> required `.option(...)`;
@@ -74,7 +74,7 @@ pub(crate) fn classify_cli_field(f: &Field) -> Option<CliFieldKind> {
     }
 }
 
-/// E1305: a `@[Cli]` struct field's type has no flag mapping.
+/// E1305: a `#[Cli]` struct field's type has no flag mapping.
 fn e1305(field_name: &str, ty_show: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1305",
@@ -82,11 +82,11 @@ fn e1305(field_name: &str, ty_show: &str, span: Span) -> Diagnostic {
             "field `{}` has no CLI flag mapping ({})",
             field_name, ty_show
         ),
-        "a `@[Cli]` field becomes one `--flag`; only `Int`, `Float`, `Bool`, `String`, `Path`, \
-         and `T?` of those have a defined flag shape (nested `@[Cli]` structs and other \
+        "a `#[Cli]` field becomes one `--flag`; only `Int`, `Float`, `Bool`, `String`, `Path`, \
+         and `T?` of those have a defined flag shape (nested `#[Cli]` structs and other \
          collection/closure types don't)."
             .to_string(),
-        "change the field to a supported type, or drop it from the `@[Cli]` struct".to_string(),
+        "change the field to a supported type, or drop it from the `#[Cli]` struct".to_string(),
         Some(span),
     )
 }
@@ -96,7 +96,7 @@ fn e1305(field_name: &str, ty_show: &str, span: Span) -> Diagnostic {
 fn e1306(flag: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1306",
-        format!("two `@[Cli]` fields both derive the flag `--{}`", flag),
+        format!("two `#[Cli]` fields both derive the flag `--{}`", flag),
         "every field needs a distinct flag name; `--help` is also reserved (every generated \
          CLI gets one automatically)."
             .to_string(),
@@ -106,19 +106,19 @@ fn e1306(flag: &str, span: Span) -> Diagnostic {
 }
 
 /// E1307: an `enum` used as a `fn run` subcommand parameter has a variant
-/// whose payload isn't a `@[Cli]`-derived struct.
+/// whose payload isn't a `#[Cli]`-derived struct.
 pub(crate) fn e1307(variant_name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E1307",
         format!(
-            "subcommand variant `{}` doesn't carry a `@[Cli]` struct",
+            "subcommand variant `{}` doesn't carry a `#[Cli]` struct",
             variant_name
         ),
-        "each subcommand variant's payload is a single `@[Cli]`-derived struct — that struct \
+        "each subcommand variant's payload is a single `#[Cli]`-derived struct — that struct \
          is where the subcommand's own flags come from."
             .to_string(),
         format!(
-            "give `{}` a single `@[Cli]` struct payload, e.g. `{}(SomeArgs)`",
+            "give `{}` a single `#[Cli]` struct payload, e.g. `{}(SomeArgs)`",
             variant_name, variant_name
         ),
         Some(span),
@@ -130,16 +130,16 @@ pub(crate) fn e1308(span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E1308",
         "`run`'s parameter isn't a CLI-derived type".to_string(),
-        "a typed `fn run(args: T)` entry only works when `T` is a `@[Cli]`-derived struct, or \
-         an `enum` whose every variant carries a `@[Cli]` struct payload."
+        "a typed `fn run(args: T)` entry only works when `T` is a `#[Cli]`-derived struct, or \
+         an `enum` whose every variant carries a `#[Cli]` struct payload."
             .to_string(),
-        "mark the struct `@[Cli]`, or give the enum's variants `@[Cli]` struct payloads"
+        "mark the struct `#[Cli]`, or give the enum's variants `#[Cli]` struct payloads"
             .to_string(),
         span,
     )
 }
 
-/// D-CLIFLAG1: validate every `@[Cli]`-derived struct in `items` (E1305/E1306).
+/// D-CLIFLAG1: validate every `#[Cli]`-derived struct in `items` (E1305/E1306).
 /// Mirrors `validate_serde_items`'s shape (same call site in `Bundle.rs`, same
 /// "runs after the trait registry is built" timing) but for the CLI-derive
 /// plane instead of the wire-serde plane.

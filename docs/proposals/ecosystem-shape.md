@@ -604,7 +604,7 @@ policy: .{
 ```jet
 use core.mem
 
-@Unsafe("device register is defined by ACME-42") fn reset_device(register: *U32) {
+#Unsafe("device register is defined by ACME-42") fn reset_device(register: *U32) {
     register.* = 1
 }
 

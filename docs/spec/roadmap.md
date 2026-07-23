@@ -61,13 +61,13 @@ OSC 8 hyperlinks, `jet build -v`. Digit separators (S67) already shipped.
 watches and re-runs on save via the M9.5 comptime evaluator extended to whole
 programs; a 15-program differential battery proves interpreted stdout ==
 compiled stdout byte-for-byte (I2); honest boundaries E2201/E2202 name
-`jet build` for FFI/tasks/`@Unsafe`/native-std (`--try-anyway` to attempt
+`jet build` for FFI/tasks/`#Unsafe`/native-std (`--try-anyway` to attempt
 anyway, D-DEV1); <200ms latency budget tested (D-DEV3). No release path uses the
 interpreter (I2/I3); JIT deferred to Epoch 3 (D-DEV2). Std-only file watching
 (I6).
 
 **E2-M13 — Expert low-level tier (S58)** verified 2026-06-17. `use
-core.mem` discovery gate, `@Unsafe("reason") { … }` / `@Unsafe fn` audit
+core.mem` discovery gate, `#Unsafe("reason") { … }` / `#Unsafe fn` audit
 gate, `*T` (→ `*mut`), `p.*` dereference, and raw address interop;
 diagnostics E3101/E3102/E3103 + lint L3101; the I1 amendment (D-LL1) recorded in
 `architecture.md` (generated `unsafe` only inside user gates; safe Jet emits
@@ -142,8 +142,8 @@ M0–M14, v1.0 arc, verified 2026-06-14.
 - **E2-M10** — networking: blocking TCP/UDP, HTTP client/server (`core.http`; client HTTPS became default later under D-TLS1; server HTTPS uses D-TLSSERVE1's named `tls:` option). Advanced client TLS configuration remains `core.tls`.
 - **E2-M11** — testing/docs/bench: doctests, coverage, `jet bench`, property testing.
 - **E2-M12** — debug/observe: DAP prep, panic locals, structured logging/tracing/metrics.
-- **E2-M13** — expert low-level tier: `use core.mem`, `@Unsafe("reason")` gates, `*T`, volatile; I1 amendment (D-LL1).
-- **E2-M14** — C FFI: `@Bindgen`/`@Extern module`, `use c.<lib>`, link discovery.
+- **E2-M13** — expert low-level tier: `use core.mem`, `#Unsafe("reason")` gates, `*T`, volatile; I1 amendment (D-LL1).
+- **E2-M14** — C FFI: `#Bindgen`/`#Extern module`, `use c.<lib>`, link discovery.
 - **E2-M15** — cross-compilation + freestanding: `jet build --target`, `--freestanding`, QEMU smoke.
 - **E2-M16** — pure evaluation + layer 3: `fn … --[]->`, `jet eval --pure`, package recipes, sandboxed builds.
 - **E2-M17** — Epoch 2 GA: six showcase programs, diagnostics audit, size/perf budgets.

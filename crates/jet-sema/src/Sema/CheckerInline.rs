@@ -1,7 +1,7 @@
-//! D-METHODMACRO1=A: checked `@Inline` / `@InlineAlways` contracts.
+//! D-METHODMACRO1=A: checked `#Inline` / `#InlineAlways` contracts.
 //!
-//! `@Inline` is a soft hint — never rejected here, never even inspected by
-//! this module. `@InlineAlways` is a checked promise: if the compiler can
+//! `#Inline` is a soft hint — never rejected here, never even inspected by
+//! this module. `#InlineAlways` is a checked promise: if the compiler can
 //! prove it genuinely cannot inline the call, that's a compile error naming
 //! why (never a silent miss). Three ways a function fails the promise:
 //!
@@ -10,7 +10,7 @@
 //!     depth cutoff). Checked here: a direct call/method-call to the
 //!     function's own name anywhere in its straight-line/control-flow body.
 //!     Coverage note: only DIRECT self-recursion is checked (a function
-//!     calling itself by name). Mutual recursion between two `@InlineAlways`
+//!     calling itself by name). Mutual recursion between two `#InlineAlways`
 //!     functions is NOT checked — that needs a whole-program call graph,
 //!     which nothing in sema builds *before* per-function checking runs (the
 //!     effect-summary call graph in `Effects.rs` is only complete *after*
@@ -47,55 +47,55 @@ use crate::AST::{Binding, ElseBranch, Expr, Func, LValue, Stmt};
 /// revisit with real inlining-cost data if it ever cuts off a legitimate use.
 pub const INLINE_ALWAYS_MAX_STMTS: usize = 40;
 
-/// E0917: `@InlineAlways fn {name}` calls itself.
+/// E0917: `#InlineAlways fn {name}` calls itself.
 fn e0917_self_recursive(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0917",
-        format!("`{name}` calls itself, so `@InlineAlways` cannot expand it"),
+        format!("`{name}` calls itself, so `#InlineAlways` cannot expand it"),
         "inlining a recursive call would either loop forever at compile time or require an \
          artificial depth cutoff — neither is a real inline."
             .to_string(),
-        "drop `@InlineAlways` (use `@Inline` as a hint), or restructure the function to be \
+        "drop `#InlineAlways` (use `#Inline` as a hint), or restructure the function to be \
          non-recursive."
             .to_string(),
         Some(span),
     )
 }
 
-/// E0918: `@InlineAlways fn {name}` had its address taken (used as a value)
+/// E0918: `#InlineAlways fn {name}` had its address taken (used as a value)
 /// somewhere in the program instead of being called directly.
 pub(crate) fn e0918_address_taken(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0918",
         format!("`{name}` cannot be inlined: its address is taken"),
         format!(
-            "`@InlineAlways` promises every call to `{name}` expands in place — but `{name}` is \
+            "`#InlineAlways` promises every call to `{name}` expands in place — but `{name}` is \
              also used as a plain value somewhere (stored, returned, or passed as a callback), \
              and a value needs a real function to point at."
         ),
-        format!("drop `@InlineAlways`, or call `{name}` directly instead of through a value."),
+        format!("drop `#InlineAlways`, or call `{name}` directly instead of through a value."),
         Some(span),
     )
 }
 
-/// E0919: `@InlineAlways fn {name}` is too large to inline.
+/// E0919: `#InlineAlways fn {name}` is too large to inline.
 fn e0919_too_large(name: &str, stmt_count: usize, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0919",
-        format!("`{name}` is too large for `@InlineAlways`"),
+        format!("`{name}` is too large for `#InlineAlways`"),
         format!(
             "its body has {stmt_count} statements — over the {INLINE_ALWAYS_MAX_STMTS}-statement \
-             ceiling `@InlineAlways` enforces so a promised inline doesn't quietly bloat every \
+             ceiling `#InlineAlways` enforces so a promised inline doesn't quietly bloat every \
              call site."
         ),
-        "drop `@InlineAlways` (use `@Inline` as a hint the compiler is free to ignore), or split \
+        "drop `#InlineAlways` (use `#Inline` as a hint the compiler is free to ignore), or split \
          the function so the hot part is small enough to inline."
             .to_string(),
         Some(span),
     )
 }
 
-/// D-METHODMACRO1=A: the local part of the `@InlineAlways` check — direct
+/// D-METHODMACRO1=A: the local part of the `#InlineAlways` check — direct
 /// self-recursion (E0917) and the size ceiling (E0919). Both are provable
 /// from `f` alone; the whole-program address-taken check (E0918) lives in
 /// `check_with_mode`/`check_bundle_opts` after every function has run through
@@ -394,7 +394,10 @@ impl<'a> InlineAlwaysScan<'a> {
                             self.scan_expr(&a.expr);
                         }
                     }
-                    crate::AST::OrFallback::Break(_) | crate::AST::OrFallback::Continue(_) => {}
+                    crate::AST::OrFallback::Break(_)
+                    | crate::AST::OrFallback::Continue(_)
+                    | crate::AST::OrFallback::BreakLabel(..)
+                    | crate::AST::OrFallback::ContinueLabel(..) => {}
                 }
             }
             Expr::If {

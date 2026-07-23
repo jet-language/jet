@@ -3,7 +3,7 @@
 //!   * alloc-and-use compiles and runs;
 //!   * a view that escapes its region is E0631 (Jet rejects first, I2);
 //!   * a view used after the arena is reset is E0632;
-//!   * an explicit `@Region(r) { … }` may span two allocators.
+//!   * an explicit `#Region(r) { … }` may span two allocators.
 
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -230,7 +230,7 @@ fn explicit_region_spans_two_arenas() {
 use core.mem
 
 fn run() {
-    @Region(work) {
+    #Region(work) {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
         first :: a.alloc(1)
@@ -259,7 +259,7 @@ fn region_confines_view_escape() {
 use core.mem
 
 fn run() {
-    @Region(r) {
+    #Region(r) {
         a :: mem.Arena.new()
         v :: a.alloc(5)
         leak :: v

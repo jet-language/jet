@@ -121,7 +121,7 @@ automatic conversion between error types in v1.
 core pattern-test and `??` fallback forms. Composing two or more optionals
 gets library combinators instead of a general "hole"/absent-propagating value
 type (D-HOLE1 rejected that: it would duplicate `T?` and silently bypass
-distinct-type arithmetic gating like `@Numeric`).
+distinct-type arithmetic gating like `#Numeric`).
 
 | Method | Type | What it does |
 | --- | --- | --- |
@@ -376,7 +376,7 @@ Mailers for separate identities.
 STARTTLS; port 465 requires TLS from connect. Custom CA PEM extends system roots
 without disabling hostname verification. Password bytes leave `Secret` only in
 the private authentication boundary and are zeroized with every temporary and
-Mailer drop. Ambient task cancellation and `@Context` deadlines interrupt DNS,
+Mailer drop. Ambient task cancellation and `#Context` deadlines interrupt DNS,
 connect, TLS, and SMTP wait checkpoints. Cancellation after DATA becomes
 `DeliveryUnknown`; Jet never retries automatically. `SendReport` means relay
 acceptance, not inbox delivery.
@@ -491,7 +491,7 @@ Example: `examples/features/net/http_rest_service.jet`.
 
 `core.crypto` is the safe-by-default cryptography surface. Beginner APIs hide
 nonce handling and algorithm selection; raw algorithm choice lives under
-`core.crypto.expert` and requires an audited `@Unsafe` region. RustCrypto crates
+`core.crypto.expert` and requires an audited `#Unsafe` region. RustCrypto crates
 are linked only through the hidden bridge crate, not the compiler.
 
 ```jet
@@ -516,8 +516,8 @@ fn run() {
 | `random.bytes(n)` | `[U8]` (edition 2026) | One fail-closed OS CSPRNG request, capped at 1,048,576 bytes; edition 2026 reports E3001/exit 70 when the internal provider rejects the length or is unavailable. The ratified fallible `RandomError` surface waits for the next major edition. |
 | `seal(recipients, bytes, aad)` / `open(&identity, box, aad)` | `Sealed ? CryptoError` / `[U8] ? CryptoError` | Canonical recipient-based JETV value envelope with internal key and nonce handling |
 | `file_seal(recipients, source, destination)` / `file_open(&identity, source, destination)` | `() ? FileCryptoError` | Recipient-based JETC v2 files with bounded 1 MiB authenticated chunks and atomic no-overwrite publication |
-| `expert.open_v1(key, envelope)` | `[U8] ? CryptoError` | Audited `@Unsafe`-only reader for canonical historical JETC v1 ChaCha20-Poly1305 or AES-256-GCM bytes; every failure is `OpenFailed` |
-| `expert.migrate_v1(key, source, recipients, destination)` | `() ? FileCryptoError` | Audited `@Unsafe`-only migration from canonical historical JETC v1 to recipient JETC v2; preserves the source and reopen-verifies v2 before atomic publication |
+| `expert.open_v1(key, envelope)` | `[U8] ? CryptoError` | Audited `#Unsafe`-only reader for canonical historical JETC v1 ChaCha20-Poly1305 or AES-256-GCM bytes; every failure is `OpenFailed` |
+| `expert.migrate_v1(key, source, recipients, destination)` | `() ? FileCryptoError` | Audited `#Unsafe`-only migration from canonical historical JETC v1 to recipient JETC v2; preserves the source and reopen-verifies v2 before atomic publication |
 | `sign(signing_key, bytes)` / `verify(verify_key, bytes, signature)` | `Signature ? CryptoError` / `Bool ? CryptoError` | Ed25519 signing and verification with nominal key and signature types |
 | `x25519(secret_key, public_key)` | `SharedSecret ? CryptoError` | X25519 key agreement with nominal key and shared-secret types |
 | `hkdf_sha256(ikm, salt, info, len)` | `Secret ? CryptoError` | HKDF-SHA256 expand with a 0–8160-byte output bound, without exposing derived secret bytes |
@@ -604,7 +604,7 @@ revoked origins stay revoked. Cross-repository or renamed imports create the
 next local generation with a new identity and imported-origin audit metadata.
 Revocation is local bearer-copy state: already exported envelopes cannot be
 remotely erased. Expert raw imports are prepared and committed only through
-`core.vault.expert` inside `@Unsafe`; raw export remains the existing
+`core.vault.expert` inside `#Unsafe`; raw export remains the existing
 `core.crypto.expert` operation.
 
 `ExpiringSecret<T>` is the one secret-lifetime wrapper. `T` is closed to
@@ -1127,7 +1127,7 @@ s: F32x4 :: v + w
     print(s.to_array())             // [11.0, 22.0, 33.0, 44.0]
     print(v[2])                     // 3.0
     print(v.sum())                  // 10.0
-    print(v.reduce(@Max))           // 4.0
+    print(v.reduce(#Max))           // 4.0
     print(F32x4.splat(7.0).to_array())   // [7.0, 7.0, 7.0, 7.0]
 }
 ```
@@ -1139,7 +1139,7 @@ s: F32x4 :: v + w
 | `v[i]` | Read lane `i` (bounds-checked) |
 | `+` `-` `*` `/` | Element-wise across all lanes |
 | `v.sum()` `v.product()` `v.min()` `v.max()` | Named reductions → lane scalar |
-| `v.reduce(@Add)` `@Mul` `@Min` `@Max` | General reduce by op marker |
+| `v.reduce(#Add)` `#Mul` `#Min` `#Max` | General reduce by op marker |
 | `v.to_array()` | Round-trip out to `[F32#4]` / `[F64#2]` |
 
 ---
@@ -1402,7 +1402,7 @@ fn run() {
 | `zone(name)` / `utc()` | `Zone ? String` / `Zone` | IANA time zone from TZif zoneinfo, or UTC |
 | `zoned(dt, zone)` | `ZonedDateTime` | View a UTC `DateTime` in a zone |
 | `zoned_local(date, time, zone)` | `ZonedDateTime` | Resolve local civil time in a zone |
-| `sleep(millis)` | nothing | Block for about `millis` milliseconds (runtime E3003 if an ambient `@Context(deadline: …)` budget expires first) |
+| `sleep(millis)` | nothing | Block for about `millis` milliseconds (runtime E3003 if an ambient `#Context(deadline: …)` budget expires first) |
 | `time.start()` | `Stopwatch` | Start a stopwatch |
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
 | `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
@@ -1607,7 +1607,7 @@ abstraction, `T?` for absence, and `DataTree` for parsed dynamic input. Writing
 
 D-DATA-SURFACE1 makes `core.data` the beginner facade for typed tables,
 series, stats, CSV, and plots. The first slice is in-memory and deterministic:
-`data.csv<T>(text)` decodes CSV into `[T]` using the same `@[Codable]` model as
+`data.csv<T>(text)` decodes CSV into `[T]` using the same `#[Codable]` model as
 `core.encoding.csv.decode<T>`. Selectors are typed lambdas, so a misspelled row
 field is a Jet field error before codegen.
 
@@ -1644,7 +1644,7 @@ left-join form uses `R?`. `DataStatus` fields: `.step`, `.path`, `.replacement`.
 ```jet
 use core.data as data
 
-@[Codable]
+#[Codable]
 struct Ticket {
     team: String
     minutes: Float
@@ -1707,8 +1707,8 @@ Core helpers include `field`, `int`, `float`, `bool`, `redact`, `counter`,
 
 #### Typed (de)serialization — one derive, every format (D-SERDE1–8)
 
-Mark a type `@[Codable]` and it crosses the wire in any format. `@[Codable]` is
-both directions; the one-way markers are `@[Encode]` (write-only) and `@[Decode]`
+Mark a type `#[Codable]` and it crosses the wire in any format. `#[Codable]` is
+both directions; the one-way markers are `#[Encode]` (write-only) and `#[Decode]`
 (read-only). The derive is compiler-owned (like `derive Comparable`) — no macros,
 no runtime reflection.
 
@@ -1716,10 +1716,10 @@ no runtime reflection.
 use core.encoding.csv as csv
 use core.encoding.json as json
 
-@[Codable]
+#[Codable]
 struct Order {
     id: Int
-    @[Rename("customer")] who: String      // wire key overrides the field name
+    #[Rename("customer")] who: String      // wire key overrides the field name
     items: [String]
     note: String?                          // absent optional is omitted on the wire
 }
@@ -1734,7 +1734,7 @@ fn run() {
 }
 ```
 
-**Encode** — `to_string(v)` / `to_string_pretty(v)` accept any `@[Codable]`/`@[Encode]`
+**Encode** — `to_string(v)` / `to_string_pretty(v)` accept any `#[Codable]`/`#[Encode]`
 value (the dynamic `JSON` tree and the `[[String]]`/`[K: V]` forms still work too). Field
 order is preserved.
 
@@ -1789,7 +1789,7 @@ if r.migration.migrated {
 }
 ```
 
-Decoding a `@PublishedSchema` type with `migration { }` blocks (below) runs
+Decoding a `#PublishedSchema` type with `migration { }` blocks (below) runs
 the runtime chain: the current shape is tried first; on mismatch the data's
 field-name set picks the historical shape it matches (newest match wins) and
 the migration steps rewrite it forward — `rename` moves a key, `remove` drops
@@ -1834,35 +1834,35 @@ are follow-on work — see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
 
 | Attribute | Effect |
 |-----------|--------|
-| `@[Rename("k")]` | use `k` as the wire key for this field |
-| `@[Skip]` | never serialize; on decode use the field's default |
-| `@[Default]` / `@[Default(8080)]` | when the key is absent, use the type's default (or the given literal) |
-| `@[Flatten]` | inline a `@[Codable]` struct field's keys into the parent object |
+| `#[Rename("k")]` | use `k` as the wire key for this field |
+| `#[Skip]` | never serialize; on decode use the field's default |
+| `#[Default]` / `#[Default(8080)]` | when the key is absent, use the type's default (or the given literal) |
+| `#[Flatten]` | inline a `#[Codable]` struct field's keys into the parent object |
 
 **Container attributes:**
 
 | Attribute | Effect |
 |-----------|--------|
-| `@[RenameAll(camel)]` | map every field's wire key — `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3) |
-| `@[DenyUnknownFields]` | a wire key the struct doesn't declare is an error, not ignored (D-SERDE8) |
-| `@[Tag("type")]` / `@[Untagged]` | enum wire representation (D-SERDE7); default is externally tagged |
+| `#[RenameAll(camel)]` | map every field's wire key — `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3) |
+| `#[DenyUnknownFields]` | a wire key the struct doesn't declare is an error, not ignored (D-SERDE8) |
+| `#[Tag("type")]` / `#[Untagged]` | enum wire representation (D-SERDE7); default is externally tagged |
 
 **Enums** serialize externally tagged by default: a unit variant is its bare name
-(`"Closed"`), a payload variant is `{"Variant": payload}`. `@[Tag("type")]` switches
+(`"Closed"`), a payload variant is `{"Variant": payload}`. `#[Tag("type")]` switches
 to internal tagging (`{"type":"Click", …}`); a single unnamed payload uses the
-canonical `value` key (`{"type":"Count","value":7}`). `@[Untagged]` emits the
+canonical `value` key (`{"type":"Count","value":7}`). `#[Untagged]` emits the
 payload alone.
 
 Unknown wire keys are ignored by default (forward-compatible); opt into strict
-checking with `@[DenyUnknownFields]`. Diagnostics: E2407 (`@[Rename]` non-string),
-E2408 (`@[Flatten]` non-struct), E2409 (bad `@[RenameAll]` style), E2410 (missing
+checking with `#[DenyUnknownFields]`. Diagnostics: E2407 (`#[Rename]` non-string),
+E2408 (`#[Flatten]` non-struct), E2409 (bad `#[RenameAll]` style), E2410 (missing
 required field, runtime), E2411 (type isn't serializable — also fires at the use
 site for a non-codable generic argument), E2412 (unknown field, runtime). E2413 is
 retired (D-SERDE12).
 
-Generic `@[Codable]` is first-class (D-SERDE9-12): the derive auto-injects
+Generic `#[Codable]` is first-class (D-SERDE9-12): the derive auto-injects
 `T: Encode`/`T: Decode` bounds on exactly the type params that reach the wire —
-the user never spells them. A phantom or `@[Skip]`-only param carries no serde
+the user never spells them. A phantom or `#[Skip]`-only param carries no serde
 bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
 non-codable type argument fails at the use site (E2411), not the definition.
 
@@ -1941,7 +1941,7 @@ Values crossing `spawn` or `send` must be sendable: no `View<T>` or string-view
 windows, no trait values, and no closure values unless they are handed over
 with `take`. A `Task` that goes out of scope without
 `.join()` emits warning **L1101**.
-With `@Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
+With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
 `task.wait()` / `ch.receive()` / `sender.send()` / `time.sleep`, TCP read/write,
 and `ProcessChild.wait()`) observe the inherited budget and report runtime
 **E3003** on exceed. Task cancellation wakes the same scheduler wait points.
@@ -1952,9 +1952,9 @@ receivers and timers: `.recv(rx)` waits for a channel value, `.after(ms: N)` is 
 unit timer arm, and `.after(ms: N, value: fallback)` is a typed timeout arm that
 can be mixed with same-`T` receive arms.
 
-### `core.testing` — fixtures under `@Test`
+### `core.testing` — fixtures under `#Test`
 
-D-TESTKIT1 keeps `@Test` as the only test syntax. `core.testing` is a helper
+D-TESTKIT1 keeps `#Test` as the only test syntax. `core.testing` is a helper
 library for test data and deterministic fixtures.
 
 ```jet
@@ -1968,10 +1968,10 @@ fn run() {
 ```
 
 Helpers: `snap`, `golden`, `fixture`, `temp_dir`, `corpus`, `fake_clock`, and
-`fake_rng`. Use `expect(value).snapshot()` inside `@Test`
+`fake_rng`. Use `expect(value).snapshot()` inside `#Test`
 blocks for assertion snapshots; `testing.snap` is for explicit named files.
 
-Benchmark limits use a `@Bench` region plus a typed `Budget` declaration. The
+Benchmark limits use a `#Bench` region plus a typed `Budget` declaration. The
 shared budget evaluator owns samples, baselines, confidence, reports, and CI
 outcomes; `core.testing` has no separate benchmark evaluator.
 
@@ -1998,7 +1998,7 @@ jet test <file> --shuffle=42     # reproduce a specific shuffled order
 
 #### `jet fuzz` — fuzz a property test
 
-`jet fuzz <file> [<test-name>]` fuzzes a parameterized `@Test fn` (the same
+`jet fuzz <file> [<test-name>]` fuzzes a parameterized `#Test fn` (the same
 property-test form D-TEST1 gives `jet test` — see above) well past the
 200-case property-test budget, with corpus persistence and automatic
 minimization. The test name is optional when the file has exactly one
@@ -2178,9 +2178,9 @@ explicit reactive values:
 - **effect** — a side effect. `reactive.effect(() => { … })` runs the body now,
   and again whenever a signal it read changes, and returns an `Effect`. Call
   `.unsubscribe()` to detach it idempotently and `.is_active()` to inspect its
-  state. Dropping the final handle detaches it too. **`@Reactive { … }`** (D-REACTCORE1)
+  state. Dropping the final handle detaches it too. **`#Reactive { … }`** (D-REACTCORE1)
   creates the same effect with a runtime-owned lifetime.
-  **`@Reactive fn`** wraps the whole function body the same way (unit return only).
+  **`#Reactive fn`** wraps the whole function body the same way (unit return only).
 
 Dependency tracking is **explicit-by-read**: any `.get()` evaluated inside a
 derived or effect body subscribes that derived/effect to the signal. A `.set(v)`
@@ -2213,7 +2213,7 @@ fn run() {
 | `reactive.effect(() => { … })` | `Effect` | a retained side effect with explicit lifecycle |
 | `effect.unsubscribe()` | — | detach idempotently |
 | `effect.is_active()` | `Bool` | whether the effect remains subscribed |
-| `@Reactive { … }` | `Effect` (runtime-owned) | explicit reactive effect scope |
+| `#Reactive { … }` | `Effect` (runtime-owned) | explicit reactive effect scope |
 | `sig.get()` / `der.get()` | `T` | read the current value (and subscribe, inside a derived/effect) |
 | `sig.set(v)` | — | write a new value and re-run subscribers |
 
@@ -2291,7 +2291,7 @@ Canvas reports no runtime Event facts.
 ```jet
 use core.web as web
 
-@Target(Js)
+#Target(Js)
 fn init() {
     saved :: web.storage.local.get("tasks") ?? "[]"
     web.storage.local.set("tasks", saved)
@@ -2310,7 +2310,7 @@ reads an input value or text content. `web.storage.local` and
 
 ### `core.mem` — arenas and regions
 
-Expert-tier explicit allocators, unlocked by `use core.mem` (no `@Unsafe`
+Expert-tier explicit allocators, unlocked by `use core.mem` (no `#Unsafe`
 needed — arenas are the *safe* fast-allocation primitive). An arena bump-allocates
 many values into one buffer and frees them all at once.
 
@@ -2331,7 +2331,7 @@ fn run() {
 
 Raw pointer and MMIO helpers also live in `core.mem`. `mem.address_of(x)` returns
 an inert address as `Int`; `mem.Ptr<T>.from_addr(addr)`, `mem.volatile_read(p)`,
-and `mem.volatile_write(p, value)` require an audited `@Unsafe("reason")` region.
+and `mem.volatile_write(p, value)` require an audited `#Unsafe("reason")` region.
 
 `arena.alloc(value)` hands back a **view** into the arena's storage, not an owned
 copy. A view is fast and zero-copy, but it lives only inside its **region** — the
@@ -2351,7 +2351,7 @@ narrower than the function — write an explicit **`region r { … }`** block:
 use core.mem
 
 fn run() {
-    @Region(scratch) {
+    #Region(scratch) {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
         first :: a.alloc(1)
@@ -2601,7 +2601,7 @@ shift count past the type's width traps (no leaked Rust panic).
 `core.net` is the low-level socket layer. Calls look blocking at the Jet
 surface. On Unix, TCP, UDP, and Unix-socket operations park through the shared
 scheduler readiness backend and observe task cancellation and available
-`@Context` deadlines. Windows IOCP lifecycle and platform proof remains #527.
+`#Context` deadlines. Windows IOCP lifecycle and platform proof remains #527.
 Beginner calls accept strings; expert calls accept typed
 `IpAddr` / `SocketAddr` values.
 
@@ -2735,7 +2735,7 @@ those bytes with `core.compress.gzip`.
 D-STDLIBLEDGER1 keeps this reference to built modules only. It is not a
 have/have-not ledger of missing domains.
 
-D-OPTGC1 selects automatic scoped `@Policy(gc)` as the sole source path. The
+D-OPTGC1 selects automatic scoped `#Policy(gc)` as the sole source path. The
 collector is compiler-private: user code keeps ordinary bare values and opts in
 at package, module, function, or block scope. `jet gc report` identifies the
 exact automatic promotion sites to migrate back to ownership.
@@ -2780,12 +2780,12 @@ the package system fully stabilizes.
 | `examples/features/io/cli_args.jet` | `core.args` — flag/option/positional spec + parse |
 | `examples/features/io/db_checked_sql.jet` | `core.db` — checked SQL params, typed row reads, transactions, migrations |
 | `examples/features/io/dir_entry.jet` | `fs.list_dir` → `[DirEntry]` |
-| `examples/features/serde/serde_derive.jet` | `@[Codable]` encode + typed `decode<T>` with `@[Rename]` |
+| `examples/features/serde/serde_derive.jet` | `#[Codable]` encode + typed `decode<T>` with `#[Rename]` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
-| `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `@[RenameAll(camel)]` |
+| `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
 | `examples/features/serde/decode_traced.jet` | `decode_traced<T>` → `DecodeResult<T>`/`MigrationStatus`, incl. a real v1→v2 migration at decode time |
 | `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.display()`/`.fields()` |
-| `examples/features/syntax/maturity_tags.jet` | `@Meta(maturity: .Experimental / .Tested / .Hardened)` doc-only API metadata (D-MARK-META1=B) |
+| `examples/features/syntax/maturity_tags.jet` | `#Meta(maturity: .Experimental / .Tested / .Hardened)` doc-only API metadata (D-MARK-META1=B) |
 
 Run the full battery: `nix develop -c cargo test --test golden` and `nix develop -c cargo test --test corelib`.
 

@@ -73,7 +73,7 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// CLIF return type of the function being lowered (`None` = returns void).
     /// Drives the dummy value `emit_trap_check` returns on the trap-unwind path.
     pub(crate) ret_clif: Option<types::Type>,
-    /// Lexical `@Shield` depth in emitted native code. Used to emit exact
+    /// Lexical `#Shield` depth in emitted native code. Used to emit exact
     /// cleanup calls before every non-local control-flow edge.
     pub(crate) shield_depth: u32,
 }
@@ -224,6 +224,34 @@ impl LowerCtx<'_, '_> {
                 .cloned()
                 .ok_or_else(|| format!("jit {kind} outside loop")),
         }
+    }
+
+    fn emit_loop_fallback(
+        &mut self,
+        label: Option<&str>,
+        kind: &str,
+        is_continue: bool,
+    ) -> Result<(), String> {
+        let targets = self.loop_targets(label, kind)?;
+        let destination = if is_continue {
+            targets.continue_block
+        } else {
+            targets.break_block
+        };
+        if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
+            let zero = self.b.ins().iconst(types::I64, 0);
+            let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
+            let interrupted = self.b.create_block();
+            self.b
+                .ins()
+                .brif(pending, interrupted, &[], destination, &[]);
+            self.b.switch_to_block(interrupted);
+            self.b.seal_block(interrupted);
+            self.emit_dummy_return();
+        } else {
+            self.b.ins().jump(destination, &[]);
+        }
+        Ok(())
     }
 
     pub(crate) fn fresh_var(&mut self, ty: cranelift_codegen::ir::Type) -> Variable {
@@ -497,7 +525,6 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().jump(header, &[]);
 
                 self.b.switch_to_block(header);
-                self.b.seal_block(header);
                 self.b.ins().jump(body_block, &[]);
 
                 self.loop_stack.push(LoopTargets {
@@ -513,6 +540,7 @@ impl LowerCtx<'_, '_> {
                 if !self.dead {
                     self.b.ins().jump(header, &[]);
                 }
+                self.b.seal_block(header);
 
                 self.b.switch_to_block(exit);
                 self.b.seal_block(exit);
@@ -1594,16 +1622,27 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().jump(merge, &[val]);
                     self.b.switch_to_block(fail_block);
                     self.b.seal_block(fail_block);
-                    let fb = match fallback {
-                        TOrFallback::Value(e) => self.lower_expr(e)?,
-                        TOrFallback::Return(_)
-                        | TOrFallback::Panic(_)
-                        | TOrFallback::Break
-                        | TOrFallback::Continue => {
+                    match fallback {
+                        TOrFallback::Value(e) => {
+                            let fb = self.lower_expr(e)?;
+                            self.b.ins().jump(merge, &[fb]);
+                        }
+                        TOrFallback::Break => {
+                            self.emit_loop_fallback(None, "break", false)?;
+                        }
+                        TOrFallback::Continue => {
+                            self.emit_loop_fallback(None, "continue", true)?;
+                        }
+                        TOrFallback::BreakLabel(name) => {
+                            self.emit_loop_fallback(Some(name), "break", false)?;
+                        }
+                        TOrFallback::ContinueLabel(name) => {
+                            self.emit_loop_fallback(Some(name), "continue", true)?;
+                        }
+                        TOrFallback::Return(_) | TOrFallback::Panic(_) => {
                             return Err("jit option fallback unsupported".to_string());
                         }
-                    };
-                    self.b.ins().jump(merge, &[fb]);
+                    }
                     self.b.switch_to_block(merge);
                     self.b.seal_block(merge);
                     return Ok(self.b.block_params(merge)[0]);
@@ -1634,10 +1673,19 @@ impl LowerCtx<'_, '_> {
                         self.emit_trap_check()?;
                         self.b.ins().jump(merge, &[panic_val]);
                     }
-                    TOrFallback::Value(_)
-                    | TOrFallback::Return(_)
-                    | TOrFallback::Break
-                    | TOrFallback::Continue => {
+                    TOrFallback::Break => {
+                        self.emit_loop_fallback(None, "break", false)?;
+                    }
+                    TOrFallback::Continue => {
+                        self.emit_loop_fallback(None, "continue", true)?;
+                    }
+                    TOrFallback::BreakLabel(name) => {
+                        self.emit_loop_fallback(Some(name), "break", false)?;
+                    }
+                    TOrFallback::ContinueLabel(name) => {
+                        self.emit_loop_fallback(Some(name), "continue", true)?;
+                    }
+                    TOrFallback::Value(_) | TOrFallback::Return(_) => {
                         return Err("jit or-fallback unsupported".to_string());
                     }
                 }

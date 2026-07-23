@@ -594,11 +594,11 @@ mod s61_tests {
         assert_eq!(func.params.len(), 2);
     }
 
-    /// D-FFI-ASM1=A (card #501): the gated `@Unsafe("…") #FFI(asm) fn` form
+    /// D-FFI-ASM1=A (card #501): the gated `#Unsafe("…") #FFI(asm) fn` form
     /// parses with both the unsafe contract and the inline foreign payload.
     #[test]
     fn ffi_asm_inline_tier_with_unsafe_gate_parses() {
-        let src = "use core.mem\n@Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
+        let src = "use core.mem\n#Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -626,7 +626,7 @@ mod s61_tests {
         use crate::Formatter::format_source;
         for src in [
             "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
-            "use core.mem\n@Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
+            "use core.mem\n#Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
         ] {
             let once = format_source(src).expect("format once");
             assert!(once.contains("#FFI("), "formatted output keeps the #FFI marker: {once}");
@@ -635,10 +635,10 @@ mod s61_tests {
         }
     }
 
-    /// D-VISDEFAULT2=A: `@PubFile` flips default top-level visibility; `priv` opts out.
+    /// D-VISDEFAULT2=A: `#PubFile` flips default top-level visibility; `priv` opts out.
     #[test]
     fn pub_file_marker_sets_default_visibility() {
-        let src = r#"@PubFile
+        let src = r#"#PubFile
 
 fn greet() -> String {
     return "hi"
@@ -672,7 +672,7 @@ fn run() {
 
     #[test]
     fn pub_file_section_label_emits_e0415() {
-        let src = "@PubFile\n\npriv:\nfn run() { return }\n";
+        let src = "#PubFile\n\npriv:\nfn run() { return }\n";
         let (toks, errs) = lex(src);
         assert!(errs.is_empty(), "lex errors: {errs:?}");
         let toks = crate::Lexer::without_comments(&toks);

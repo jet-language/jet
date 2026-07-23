@@ -17,6 +17,8 @@ pub(crate) fn emit_tir_orfallback_rhs(fallback: &TOrFallback, cx: &Cx) -> String
         TOrFallback::Panic(rendered) => rendered.clone(),
         TOrFallback::Break => "break".to_string(),
         TOrFallback::Continue => "continue".to_string(),
+        TOrFallback::BreakLabel(name) => format!("break 'jet_{name}"),
+        TOrFallback::ContinueLabel(name) => format!("continue 'jet_{name}"),
     }
 }
 

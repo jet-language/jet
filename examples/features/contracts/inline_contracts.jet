@@ -1,22 +1,22 @@
-// D-METHODMACRO1=A — checked `@Inline`/`@InlineAlways` contracts.
-// `@Inline` is a soft hint (the compiler is free to ignore it; never an
-// error). `@InlineAlways` is a checked promise: the compiler proves it can
+// D-METHODMACRO1=A — checked `#Inline`/`#InlineAlways` contracts.
+// `#Inline` is a soft hint (the compiler is free to ignore it; never an
+// error). `#InlineAlways` is a checked promise: the compiler proves it can
 // actually inline every call, or the build fails naming why (self-recursive,
 // address-taken, or too large) — never a silent miss. Methods stay ordinary
 // functions; there is no macro-rewrite hook, just an attribute on the
 // generated Rust once sema has confirmed the promise holds.
-@Inline fn square(x: Int) -> Int {
+#Inline fn square(x: Int) -> Int {
     return x * x
 }
 
-@InlineAlways fn double(x: Int) -> Int {
+#InlineAlways fn double(x: Int) -> Int {
     return x * 2
 }
 
 struct Meters {
     value: Int
 
-    @InlineAlways fn plus(self, other: Int) -> Int {
+    #InlineAlways fn plus(self, other: Int) -> Int {
         return self.value + other
     }
 }

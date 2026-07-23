@@ -148,14 +148,14 @@ pub fn ptr_elem(t: &Type) -> Option<Type> {
     }
 }
 
-/// E3101: a low-level memory operation used outside an `@Unsafe` block.
+/// E3101: a low-level memory operation used outside an `#Unsafe` block.
 pub(crate) fn e3101(op: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E3101",
-        format!("`{}` can only run inside an `@Unsafe` block", op),
+        format!("`{}` can only run inside an `#Unsafe` block", op),
         "this operation can violate memory safety, so it must sit in an audited region".to_string(),
         format!(
-            "wrap it: @{}(\"why this is safe\") {{ … }}",
+            "wrap it: #{}(\"why this is safe\") {{ … }}",
             Syntax::KW_UNSAFE
         ),
         Some(span),

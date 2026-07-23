@@ -388,7 +388,7 @@ pub fn core_fixed_sig(
             Some((vec![(read, Type::Int)], Some(Type::List(Box::new(u8_ty())))))
         }
         // D-DET1: deterministic injected RNG capability. `random.rng(seed)` builds a
-        // reproducible `Rng` from a caller-supplied seed (a pure value); a `@Pure fn`
+        // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
         // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
         // ambient `random.int(…)` stays E3403.
         ("core.random", "rng") => Some((
@@ -461,7 +461,7 @@ pub fn core_fixed_sig(
         )),
         // D-DET1: deterministic injected Clock capability. `time.clock(seed)` builds a
         // reproducible `Clock` from a caller-supplied start instant (a pure Int, ms);
-        // a `@Pure fn` may read time through it (`clock.now()` / `clock.tick(ms)`)
+        // a `#Pure fn` may read time through it (`clock.now()` / `clock.tick(ms)`)
         // while the ambient `time.now()` stays E3403.
         ("core.time", "clock") => Some((
             vec![(read, Type::Int)],
@@ -978,7 +978,7 @@ pub fn core_fixed_sig(
         )),
         ("jet.crypto", "blake3") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
         ("jet.crypto", "sha512") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest512".into())))),
-        // D-CRYPTO-API1=A: exact @Unsafe expert API. Bounds remain runtime
+        // D-CRYPTO-API1=A: exact #Unsafe expert API. Bounds remain runtime
         // checked; lexical gating never waives memory safety or cleanup.
         ("core.crypto.expert", "xchacha20poly1305_seal" | "aes256gcm_seal") => Some((
             vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],

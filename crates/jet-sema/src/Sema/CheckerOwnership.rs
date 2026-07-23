@@ -1185,9 +1185,9 @@ impl<'a> Checker<'a> {
     // `return s.after(sep)` written directly (no intermediate binding) always
     // lowers as an ordinary owned `String` — safe, nothing to catch.
 
-    /// D-LIN1 (ratified 2026-06-21): true when `ty` is a `@SingleUse` struct/enum,
+    /// D-LIN1 (ratified 2026-06-21): true when `ty` is a `#SingleUse` struct/enum,
     /// checking the local registry first and then any imported module that exposes
-    /// the type publicly. A `@SingleUse` value must be consumed exactly once and
+    /// the type publicly. A `#SingleUse` value must be consumed exactly once and
     /// may not be aliased.
     pub(crate) fn type_is_single_use(&self, ty: &Type) -> bool {
         let Some(name) = ty.base_name() else {
@@ -1206,7 +1206,7 @@ impl<'a> Checker<'a> {
         false
     }
 
-    /// D-MUSTUSE1 (c18iwxqx): true when `ty` is a `@MustUse` struct/enum or a
+    /// D-MUSTUSE1 (c18iwxqx): true when `ty` is a `#MustUse` struct/enum or a
     /// built-in guard/handle type whose result must not be silently ignored.
     pub(crate) fn type_is_must_use(&self, ty: &Type) -> bool {
         let Some(name) = ty.base_name() else {
@@ -1228,7 +1228,7 @@ impl<'a> Checker<'a> {
         false
     }
 
-    /// D-MUSTUSE1 (c18iwxqx): name of a `@MustUse` fn/method call when `expr` is
+    /// D-MUSTUSE1 (c18iwxqx): name of a `#MustUse` fn/method call when `expr` is
     /// that call, else `None`.
     pub(crate) fn ignored_must_use_call_target(&self, expr: &Expr) -> Option<String> {
         if let Expr::Call(call) = expr {
@@ -1298,7 +1298,7 @@ impl<'a> Checker<'a> {
         self.diags.push(Diagnostic::error(
             "E0419",
             format!("`{target}` must be used — it was dropped as a bare statement"),
-            "a `@MustUse` result carries work or a resource that is lost when nothing checks it"
+            "a `#MustUse` result carries work or a resource that is lost when nothing checks it"
                 .to_string(),
             format!(
                 "bind it (`x := …`), use `{}`, `{} …`, or `.drop(\"reason\")` to discard intentionally",
@@ -1316,7 +1316,7 @@ impl<'a> Checker<'a> {
     }
 
     /// c26 / arena-inference lint: heap growth in a loop after `use core.mem`.
-    /// c26 / allocation-boundary lint: growable calls inside `@Context` without allocator.
+    /// c26 / allocation-boundary lint: growable calls inside `#Context` without allocator.
     pub(crate) fn lint_allocation_hints(&mut self, method: &str, span: Span) {
         let grows_heap = matches!(method, "push" | "append" | "insert" | "add" | "add_new");
         if !grows_heap {
@@ -1334,9 +1334,9 @@ impl<'a> Checker<'a> {
         if self.context_depth > 0 && !self.context_allocator_active {
             self.diags.push(Diagnostic::lint(
                 "L0506",
-                "hidden allocation inside `@Context` without an allocator".to_string(),
+                "hidden allocation inside `#Context` without an allocator".to_string(),
                 "this call may allocate on the global heap while a scoped context is active".to_string(),
-                "add `allocator: …` to the `@Context(…)` fields, or move the allocation outside the block".to_string(),
+                "add `allocator: …` to the `#Context(…)` fields, or move the allocation outside the block".to_string(),
                 Some(span),
             ));
         }
@@ -1421,7 +1421,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// D-LIN1 (ratified 2026-06-21): E0140 — a `@SingleUse` value that owns the
+    /// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value that owns the
     /// consume duty (`single_use_span` set) but is not in `moved` when its scope
     /// ends was dropped without being used. Mirrors the unjoined-task check: it
     /// looks only at the innermost (just-closing) scope. The branch-divergence
@@ -2149,13 +2149,13 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// D-LIN1 (ratified 2026-06-21): E0140 — a `@SingleUse` value reached the end of
+/// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value reached the end of
 /// its scope without being consumed. The fix names the three legal exits.
 pub(crate) fn e0140_unconsumed(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0140",
         format!("`{}` must be used exactly once, but it is never used", name),
-        "this value's type is `@SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)".to_string(),
+        "this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)".to_string(),
         format!(
             "give it away exactly once: move it to a `{}` parameter, or `return` it",
             Syntax::SIGIL_MOVE
@@ -2164,13 +2164,13 @@ pub(crate) fn e0140_unconsumed(name: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// D-LIN1 (ratified 2026-06-21): E0141 — a `@SingleUse` value is consumed on one
+/// D-LIN1 (ratified 2026-06-21): E0141 — a `#SingleUse` value is consumed on one
 /// branch of an `if` but not the other, so some paths leave it unused.
 pub(crate) fn e0141_unconsumed_branch(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0141",
         format!("`{}` must be used exactly once, but one path through this `if` leaves it unused", name),
-        "a `@SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job".to_string(),
+        "a `#SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job".to_string(),
         format!(
             "use `{}` exactly once on every branch: consume it in the missing arm, or move it out before the `if`",
             name
@@ -2180,17 +2180,17 @@ pub(crate) fn e0141_unconsumed_branch(name: &str, span: Span) -> Diagnostic {
 }
 
 /// D-DROP-WORD1: E0143 — `consume(x)` deliberately discards a
-/// `@SingleUse` value, but the discard wasn't audited. Throwing away a value
+/// `#SingleUse` value, but the discard wasn't audited. Throwing away a value
 /// whose whole point is "this job must be done" needs a written justification,
-/// so `consume` of a `@SingleUse` value is legal only inside an `@Unsafe("reason")`
+/// so `consume` of a `#SingleUse` value is legal only inside an `#Unsafe("reason")`
 /// region/fn — the reason IS the audit note (reuses D-UNSAFE2's audited gate).
 pub(crate) fn e0143_drop_unaudited(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0143",
-        format!("`{}` is `@SingleUse` — discarding it with `consume` needs an audited reason", name),
-        "this value's type is `@SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down".to_string(),
+        format!("`{}` is `#SingleUse` — discarding it with `consume` needs an audited reason", name),
+        "this value's type is `#SingleUse`, so it carries a job that has to be done; deliberately throwing it away skips that job, which is exactly the kind of decision that has to be written down".to_string(),
         format!(
-            "wrap it in an audited region: `@{}(\"why discarding this is fine\") {{ consume({}) }}`",
+            "wrap it in an audited region: `#{}(\"why discarding this is fine\") {{ consume({}) }}`",
             Syntax::KW_UNSAFE,
             name
         ),
@@ -2198,14 +2198,14 @@ pub(crate) fn e0143_drop_unaudited(name: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// D-LIN1 (ratified 2026-06-21): E0142 — a `@SingleUse` value was passed somewhere
+/// D-LIN1 (ratified 2026-06-21): E0142 — a `#SingleUse` value was passed somewhere
 /// that would borrow or copy it. Such values may only be moved/consumed.
 pub(crate) fn e0142_aliased(name: &str, call: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0142",
         format!("`{}` can't be shared — it must be used exactly once", name),
         format!(
-            "this value's type is `@SingleUse`, so it can only be moved (handed over for good); `{}` would borrow or copy it, and a `@SingleUse` value has no second use to give",
+            "this value's type is `#SingleUse`, so it can only be moved (handed over for good); `{}` would borrow or copy it, and a `#SingleUse` value has no second use to give",
             call
         ),
         format!(

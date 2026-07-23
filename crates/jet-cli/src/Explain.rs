@@ -122,8 +122,8 @@ pub fn lookup(code: &str) -> Option<Explanation> {
             Some(Explanation {
                 code: row.name.to_string(),
                 stage: "rule applicability".to_string(),
-                meaning: format!("`@{}` applicability", row.name),
-                what: Some(format!("`@{}` may attach at: {:?}.", row.name, row.sites)),
+                meaning: format!("`#{}` applicability", row.name),
+                what: Some(format!("`#{}` may attach at: {:?}.", row.name, row.sites)),
                 why: Some(format!("resolution is {:?}; site-bound authority never becomes ambient policy", row.resolution)),
                 fix: Some("move the rule to one of its registered sites".to_string()),
                 retired: false,

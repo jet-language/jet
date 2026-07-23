@@ -90,7 +90,7 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
 }
 
 /// Lower a web function through the same executable TIR as every other target,
-/// but retain the one target-boundary fact a flattened `@WasmExport` needs:
+/// but retain the one target-boundary fact a flattened `#WasmExport` needs:
 /// an all-integer Codable struct parameter is an owned typed local inside the
 /// function and scalar fields only at the external ABI. Sema already proved the
 /// export type legal; this pass only materializes resolved names/types.
@@ -192,9 +192,9 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     }
 }
 
-/// D-PREPOST1: lower a `@Pre`/`@Post` condition expression to a Rust bool
+/// D-PREPOST1: lower a `#Pre`/`#Post` condition expression to a Rust bool
 /// expression string, in a fresh env with `f`'s params bound exactly as
-/// `lower_func` binds them (same place/deref rules) — `@Post` additionally
+/// `lower_func` binds them (same place/deref rules) — `#Post` additionally
 /// binds `result` to `result_binding` (Rust name, type). Standalone: does not
 /// lower/emit the function body itself, so it can run before or independently
 /// of the normal body lowering.
@@ -224,7 +224,7 @@ pub(crate) fn render_contract_cond(
     emit_tir_expr(&lower_expr(cond, cx, &mut env), cx)
 }
 
-/// c109: lower + emit a `@Test` block body through the TIR, reproducing the legacy
+/// c109: lower + emit a `#Test` block body through the TIR, reproducing the legacy
 /// `emit_stmts(cx, body, &mut env, out, 1, false)` byte-for-byte. The body is a bare
 /// statement list with no params and an empty env, emitted at indent 1 inside the
 /// `fn jet_test_N() -> Result<(), String>` the caller already opened. The env's
@@ -594,8 +594,8 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         clone_types: Vec::new(),
         is_main: false,
         line: cov_line(cx, f.name_span.start),
-        // A delegation method has no body and never carries `@Unsafe fn` (sema rejects it).
-        // Same for `@Inline`/`@InlineAlways` — a delegation method is pure forwarding,
+        // A delegation method has no body and never carries `#Unsafe fn` (sema rejects it).
+        // Same for `#Inline`/`#InlineAlways` — a delegation method is pure forwarding,
         // never parsed with an inline marker.
         is_unsafe: false,
         is_pure: false,

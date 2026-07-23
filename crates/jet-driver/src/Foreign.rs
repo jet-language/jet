@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinderSurface {
-    /// `use <lang>.<lib>` / `@Extern module <lang>.<lib>` / generated cache.
+    /// `use <lang>.<lib>` / `#Extern module <lang>.<lib>` / generated cache.
     Namespace,
 }
 

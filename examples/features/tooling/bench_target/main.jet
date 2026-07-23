@@ -1,15 +1,15 @@
 // c80 / D-TGT2: a package with `benchmark` in its pkg.jet targets list.
 // pkg.jet declares `packages: { bench_perf: benchmark }`.
 // `jet run` / golden: executes `main` and prints the summary line.
-// `jet bench`: times each `@Bench` region and reports ns/iter + ops/sec.
+// `jet bench`: times each `#Bench` region and reports ns/iter + ops/sec.
 // The `benchmark` target is the manifest pointer at this entry; the engine is
-// the existing `@Bench` / `jet bench` machinery (I8: one way to mean it).
+// the existing `#Bench` / `jet bench` machinery (I8: one way to mean it).
 module bench_perf
 
 fn run() {
     print("sum_to(1000) = {bench_perf.sum_to(1000)}")
 }
 
-@Bench("sum_to(1000)") {
+#Bench("sum_to(1000)") {
     require_eq(bench_perf.sum_to(1000), 500500)
 }

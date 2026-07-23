@@ -1658,7 +1658,7 @@ fn lsp_document_links_and_code_lenses() {
     let uri = format!("file://{}", path.display());
     let root_uri = format!("file://{}", root.display());
     let target_uri = format!("file://{}", root.join("app/store.jet").display());
-    let source = "use app.store\n\nfn run() {\n    print(1)\n}\n\n@Test(\"smoke\") {\n    expect(1 == 1)\n}\n";
+    let source = "use app.store\n\nfn run() {\n    print(1)\n}\n\n#Test(\"smoke\") {\n    expect(1 == 1)\n}\n";
     std::fs::write(&path, source).expect("write link source");
 
     run_transcript(
@@ -2490,9 +2490,9 @@ fn lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words() {
     }
     let _guard = lock_lsp_process();
 
-    let source = r#"@Test("semantic") {
+    let source = r#"#Test("semantic") {
 }
-@Unsafe("audit") fn archive(name: ^String, slot: &Int) -> String {
+#Unsafe("audit") fn archive(name: ^String, slot: &Int) -> String {
     saved :: copy name
     return saved
 }
@@ -2517,7 +2517,7 @@ fn run() {
         escaped :: maybe() ?? (next)
         next
     }
-    outer@ loop { next outer@ }
+    outer :: loop { outer.next() }
 }
 fn next() -> Int { return 1 }
 "#;
@@ -2585,7 +2585,7 @@ fn next() -> Int { return 1 }
     assert_semantic_token(&tokens, "&", TOKEN_OWNERSHIP, MOD_WRITE_BORROW);
     assert_semantic_token(&tokens, "Test", TOKEN_DECORATOR, MOD_RULE);
     assert_semantic_token(&tokens, "Unsafe", TOKEN_DECORATOR, MOD_RULE);
-    assert_semantic_token(&tokens, "@", TOKEN_DECORATOR, MOD_RULE);
+    assert_semantic_token(&tokens, "#", TOKEN_DECORATOR, MOD_RULE);
     assert!(
         tokens
             .iter()
@@ -2607,16 +2607,16 @@ fn next() -> Int { return 1 }
             .iter()
             .filter(|token| token.text == "next" && token.token_type == TOKEN_KEYWORD)
             .count()
-            == 5,
-        "standalone, labeled, nested, comma-delimited, and bare `?? next` should be contextual keyword tokens: {tokens:?}"
+            == 4,
+        "standalone, nested, comma-delimited, and bare `?? next` should be contextual keyword tokens: {tokens:?}"
     );
     assert!(
         tokens
             .iter()
             .filter(|token| token.text == "next" && token.token_type == TOKEN_VARIABLE)
             .count()
-            == 4,
-        "`fn next`, `.next`, statement-start `next()`, and `?? (next)` must remain variables: {tokens:?}"
+            == 5,
+        "`fn next`, `.next` (including named loop exits), statement-start `next()`, and `?? (next)` must remain variables: {tokens:?}"
     );
 
     for retired in ["val", "mut", "take", "view"] {

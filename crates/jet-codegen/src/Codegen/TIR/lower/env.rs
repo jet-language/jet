@@ -235,10 +235,10 @@ pub(super) fn timeout_nanos(args: &[Expr]) -> u64 {
 }
 
 /// D-TXN-ROLLBACK layer 1: collect the root local names that are *assigned* anywhere
-/// in a `@Transact` body — `x = …`, `x += …`, `x.f = …`, `x[i] = …` — so each can be
+/// in a `#Transact` body — `x = …`, `x += …`, `x.f = …`, `x[i] = …` — so each can be
 /// auto-snapshotted at block entry and restored on a `?`-failure. Recurses through
 /// nested control flow (if/while/for/switch/loop/region/etc.) but stops at:
-///   • nested `@Transact` blocks — they establish their own rollback scope; and
+///   • nested `#Transact` blocks — they establish their own rollback scope; and
 ///   • lambda bodies — a deferred execution context (the same reason `on_commit`
 ///     lambdas escape the enclosing transaction's effect check).
 /// Each root is recorded once, in first-seen order. v1 covers assignment targets,
@@ -315,7 +315,7 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
                     collect_txn_mut_roots(eb, out);
                 }
             }
-            // A nested `@Transact` owns its own rollback scope — don't pull its
+            // A nested `#Transact` owns its own rollback scope — don't pull its
             // mutations up into the enclosing block.
             Stmt::Transact { .. } => {}
             // Other statements (Expr/Val/Return/Break/…) introduce no assignment

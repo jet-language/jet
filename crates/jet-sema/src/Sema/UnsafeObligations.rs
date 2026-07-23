@@ -135,12 +135,12 @@ fn visit_gate(target: Span, gate_span: Span, is_function: bool, reason: Option<&
         value = PolicyValue::UnsafeTrack;
     }
     if value == PolicyValue::UnsafeForbid {
-        result.diagnostics.push(Diagnostic::error("E3105", "organization or package policy forbids unsafe code".to_string(), "a lexical `@Unsafe` gate cannot widen the effective safety floor".to_string(), "remove the low-level operation or change the outer policy through its owner".to_string(), Some(gate_span)));
+        result.diagnostics.push(Diagnostic::error("E3105", "organization or package policy forbids unsafe code".to_string(), "a lexical `#Unsafe` gate cannot widen the effective safety floor".to_string(), "remove the low-level operation or change the outer policy through its owner".to_string(), Some(gate_span)));
     } else if reason.is_none() && value != PolicyValue::UnsafeRelaxed {
         let (what, why, fix) = if is_function {
-            ("this `@Unsafe` function has no reason", "every gated function records why callers can rely on its unsafe contract", "add the reason: `@Unsafe(\"why this is safe\") fn ...`")
+            ("this `#Unsafe` function has no reason", "every gated function records why callers can rely on its unsafe contract", "add the reason: `#Unsafe(\"why this is safe\") fn ...`")
         } else {
-            ("this `@Unsafe` block has no reason", "every gated region records why it can't break memory safety", "add the reason: `@Unsafe(\"why this is safe\") { … }`")
+            ("this `#Unsafe` block has no reason", "every gated region records why it can't break memory safety", "add the reason: `#Unsafe(\"why this is safe\") { … }`")
         };
         result.diagnostics.push(Diagnostic::lint("L3101", what.to_string(), why.to_string(), fix.to_string(), Some(gate_span)));
     }
@@ -286,7 +286,11 @@ fn collect_expr_operations(expression: &Expr, out: &mut Vec<(&'static str, Span,
             match fallback {
                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => collect_expr_operations(value, out),
                 OrFallback::Panic { args, .. } => for argument in args { collect_expr_operations(&argument.expr, out); },
-                OrFallback::Return(None, _) | OrFallback::Break(_) | OrFallback::Continue(_) => {}
+                OrFallback::Return(None, _)
+                | OrFallback::Break(_)
+                | OrFallback::Continue(_)
+                | OrFallback::BreakLabel(..)
+                | OrFallback::ContinueLabel(..) => {}
             }
         }
         Expr::If { cond, then_value, else_value, .. } => { collect_expr_operations(cond, out); collect_expr_operations(then_value, out); collect_expr_operations(else_value, out); }
@@ -324,7 +328,7 @@ fn nested_bodies(statement: &Stmt) -> Vec<&[Stmt]> {
 fn reject_assertions_outside_gate(body: &[Stmt], result: &mut UnsafeInspection) {
     for statement in body {
         if let Some((_, span)) = assertion(statement) {
-            result.diagnostics.push(Diagnostic::error("E3108", "unsafe obligations can only be asserted inside `@Unsafe`".to_string(), "the assertion discharges one tracked low-level operation and has no ambient meaning".to_string(), "move it immediately after an operation inside the audited gate".to_string(), Some(span)));
+            result.diagnostics.push(Diagnostic::error("E3108", "unsafe obligations can only be asserted inside `#Unsafe`".to_string(), "the assertion discharges one tracked low-level operation and has no ambient meaning".to_string(), "move it immediately after an operation inside the audited gate".to_string(), Some(span)));
         }
         if !matches!(statement, Stmt::Unsafe { .. }) { for nested in nested_bodies(statement) { reject_assertions_outside_gate(nested, result); } }
     }

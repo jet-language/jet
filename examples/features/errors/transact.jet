@@ -1,5 +1,5 @@
 // 110 — transaction blocks (D-TXN1–D-TXN4 + D-TXN-ROLLBACK).
-// `@Transact(name) { … }` opens a transaction. Three rollback layers (D-TXN-ROLLBACK):
+// `#Transact(name) { … }` opens a transaction. Three rollback layers (D-TXN-ROLLBACK):
 //   (1) auto-snapshot  — every value the block mutates is snapshotted on entry and
 //       restored on a `?`-failure. Magic out of the box, zero annotation.
 //   (3) `name.on_rollback(() => { … })` — an explicit hand-written undo, the mirror of
@@ -13,7 +13,7 @@ enum Fail {
 
 // A clean transaction: both commit hooks fire LIFO after the block commits.
 fn place_order(items: Int) -> Int ? Fail {
-    @Transact(order) {
+    #Transact(order) {
         print("reserving stock")
         order.on_commit(() => {
             print("commit hook 1: charge card")
@@ -35,7 +35,7 @@ fn place_order(items: Int) -> Int ? Fail {
 // to their pre-block values — so the caller observes the balances unchanged after a
 // failed transfer, with zero rollback annotation.
 fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
-    @Transact(tx) {
+    #Transact(tx) {
         from -= amount  // debit — `from` auto-snapshotted on entry
         to += amount  // credit — `to` auto-snapshotted on entry
         if amount > 100 {
@@ -48,7 +48,7 @@ fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
 
 // Layer 3 (explicit on_rollback): the author writes the undo by hand.
 fn reserve_seat(ok_path: Bool) -> Int ? Fail {
-    @Transact(booking) {
+    #Transact(booking) {
         print("seat held")
         booking.on_rollback(() => {
             print("rollback hook: release seat")

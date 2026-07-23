@@ -642,7 +642,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             recv_type,
             ..
         } => method_call_in_subset(receiver, method, args, recv_type, cx, locals),
-        // D-TAINT1: `@Tainted expr` — the tag is erased; in-subset iff the inner is.
+        // D-TAINT1: `#Tainted expr` — the tag is erased; in-subset iff the inner is.
         Expr::Tainted(inner, _, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 8: optional constructors `value(x)` / `null`. Covered when the
         // inner value (if any) is in-subset — they lower to `Some(x)` / `None`.
@@ -651,7 +651,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // D-SIMD2: a reduce-op marker `#Op`. Only appears inside `v.reduce(#Op)`; the
         // method lowering consumes it (it never emits on its own), so it is in-subset.
         Expr::ReduceMarker(_, _) => true,
-        // c109 Phase 23: a `@Todo` typed hole. Covered when sema filled the expected
+        // c109 Phase 23: a `#Todo` typed hole. Covered when sema filled the expected
         // type (`expected_type.is_some()`); a `None` (sema didn't run/resolve) stays on
         // the AST path so the TIR never guesses the `(unknown)` fallback.
         Expr::Todo { expected_type, .. } => expected_type.is_some(),
@@ -700,12 +700,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         }
         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr`, S58). The
         // address expr must be in-subset. The cast itself is safe Rust (no `unsafe`); it
-        // is only constructible inside `use core.mem` + an `@Unsafe` region (sema
+        // is only constructible inside `use core.mem` + an `#Unsafe` region (sema
         // E3101/E3102), so it never appears in a non-unsafe context. `elem` is a total
         // type on the node — emit needs no inference.
         Expr::PtrFromAddr { addr, .. } => expr_in_subset(addr, cx, locals),
         // D-CAP9: postfix `p.*` deref and prefix `*x` raw-of. Both only appear
-        // inside `use core.mem` + an `@Unsafe` region (sema-gated by E0208); the
+        // inside `use core.mem` + an `#Unsafe` region (sema-gated by E0208); the
         // deref/cast forms are byte-for-byte the AST path (no convention facts).
         Expr::Deref(inner, _) | Expr::RawOf(inner, _) => expr_in_subset(inner, cx, locals),
         // D-CAP2 (D-MEM1/S4): `copy x` — in-subset whenever `x` is.
@@ -746,7 +746,10 @@ pub(crate) fn orfallback_rhs_in_subset(
         OrFallback::Panic { args, .. } => {
             args.len() == 1 && args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals)
         }
-        OrFallback::Break(_) | OrFallback::Continue(_) => true,
+        OrFallback::Break(_)
+        | OrFallback::Continue(_)
+        | OrFallback::BreakLabel(..)
+        | OrFallback::ContinueLabel(..) => true,
     }
 }
 

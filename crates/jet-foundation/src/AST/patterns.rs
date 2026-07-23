@@ -257,6 +257,10 @@ pub enum OrFallback {
     Break(Span),
     /// D-ORRETURN-ERG1=B: `expr ?? next` — loop-only, sema-gated.
     Continue(Span),
+    /// D-LOOPLABEL3=A: `expr ?? label.break()` exits a named loop.
+    BreakLabel(String, Span),
+    /// D-LOOPLABEL3=A: `expr ?? label.next()` advances a named loop.
+    ContinueLabel(String, Span),
 }
 
 impl Pattern {
@@ -294,7 +298,7 @@ pub struct ConstDef {
     pub name: String,
     pub name_span: Span,
     pub value: Expr,
-    /// D-CANVASMETA1=B: `@Meta(...)` facts for Canvas/tooling. Checked by sema;
+    /// D-CANVASMETA1=B: `#Meta(...)` facts for Canvas/tooling. Checked by sema;
     /// ignored by codegen.
     pub meta: Option<MetaAttr>,
     pub attrs: Vec<ConstAttr>,
@@ -313,7 +317,7 @@ pub struct ConstDef {
     /// this to render a correctly-typed empty Rust collection (`Vec::<T>::new()`)
     /// instead of a bare `vec![]`, which rustc rejects as E0282 (I2).
     pub ty: Option<Type>,
-    /// D-PERSIST1: `@Persist` was present before this module-level binding —
+    /// D-PERSIST1: `#Persist` was present before this module-level binding —
     /// its value survives a `jet dev` hot reload instead of resetting
     /// (identity = module path + binding name). Inert in release builds.
     pub is_persist: bool,

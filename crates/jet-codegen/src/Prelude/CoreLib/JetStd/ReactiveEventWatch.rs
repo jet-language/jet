@@ -274,7 +274,7 @@
         JET_REACTIVE_ROOT_EFFECTS.with(|effects| effects.borrow_mut().push(effect));
     }
 
-    /// D-REACTCORE1: `@Reactive` scope marker with runtime-owned lifetime.
+    /// D-REACTCORE1: `#Reactive` scope marker with runtime-owned lifetime.
     pub fn jet_reactive_scope<F: Fn() + 'static>(body: F) {
         jet_reactive_effect_rooted(body);
     }

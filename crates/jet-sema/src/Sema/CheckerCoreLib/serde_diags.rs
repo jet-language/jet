@@ -83,12 +83,12 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
 
 /// E2411 (D-SERDE): a type used with an encoding verb can't be (de)serialized — it
 /// holds something with no wire form (a closure, handle, …), or a user type that
-/// hasn't opted in with `@[Codable]`/`@[Encode]`/`@[Decode]`.
+/// hasn't opted in with `#[Codable]`/`#[Encode]`/`#[Decode]`.
 pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
     let (verb, marker) = if encode {
-        ("serialized", "`@[Codable]` or `@[Encode]`")
+        ("serialized", "`#[Codable]` or `#[Encode]`")
     } else {
-        ("decoded", "`@[Codable]` or `@[Decode]`")
+        ("decoded", "`#[Codable]` or `#[Decode]`")
     };
     Diagnostic::error(
         "E2411",
@@ -99,47 +99,47 @@ pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
     )
 }
 
-/// E2407: `@[Rename(...)]` needs a single string-literal wire key.
+/// E2407: `#[Rename(...)]` needs a single string-literal wire key.
 pub(crate) fn e2407(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E2407",
-        "`@[Rename(...)]` needs a string literal".to_string(),
-        "the wire key is a constant string, e.g. `@[Rename(\"customer\")]`".to_string(),
-        "pass one quoted string — `@[Rename(\"wire_name\")]`".to_string(),
+        "`#[Rename(...)]` needs a string literal".to_string(),
+        "the wire key is a constant string, e.g. `#[Rename(\"customer\")]`".to_string(),
+        "pass one quoted string — `#[Rename(\"wire_name\")]`".to_string(),
         Some(span),
     )
 }
 
-/// E2408: `@[Flatten]` needs a field whose type is itself a Codable struct.
+/// E2408: `#[Flatten]` needs a field whose type is itself a Codable struct.
 pub(crate) fn e2408(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E2408",
-        format!("`@[Flatten]` on `{field}` needs a struct-typed field"),
-        "flatten splices another struct's keys into this object, so the field must be a `@[Codable]` struct — not a primitive, list, or map".to_string(),
-        format!("give `{field}` a `@[Codable]` struct type, or drop `@[Flatten]`"),
+        format!("`#[Flatten]` on `{field}` needs a struct-typed field"),
+        "flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map".to_string(),
+        format!("give `{field}` a `#[Codable]` struct type, or drop `#[Flatten]`"),
         Some(span),
     )
 }
 
-/// E2414 (Card #131 / D-SERDE5): a `@[Default(expr)]` argument didn't evaluate
+/// E2414 (Card #131 / D-SERDE5): a `#[Default(expr)]` argument didn't evaluate
 /// to a compile-time constant. The default is baked into the program to fill a
 /// missing field during decode, so it must be known at compile time — a literal
 /// or a `comptime`-evaluable expression — not a value read from runtime state.
 pub(crate) fn e2414(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E2414",
-        format!("`@[Default(...)]` on `{field}` must be a compile-time constant"),
+        format!("`#[Default(...)]` on `{field}` must be a compile-time constant"),
         "a decode default is baked into the program, so its value has to be known at compile time; this expression can only be computed at runtime".to_string(),
-        "use a literal or a `comptime`-evaluable expression — e.g. `@[Default(8080)]`, `@[Default(Color.Red)]`, or `@[Default([1, 2])]`".to_string(),
+        "use a literal or a `comptime`-evaluable expression — e.g. `#[Default(8080)]`, `#[Default(Color.Red)]`, or `#[Default([1, 2])]`".to_string(),
         Some(span),
     )
 }
 
-/// E2409: `@[RenameAll(...)]` names a casing style outside the closed menu.
+/// E2409: `#[RenameAll(...)]` names a casing style outside the closed menu.
 pub(crate) fn e2409(style: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E2409",
-        format!("`@[RenameAll({style})]` isn't a known casing style"),
+        format!("`#[RenameAll({style})]` isn't a known casing style"),
         "the wire-casing menu is `camel`, `snake`, `pascal`, `kebab`, `screaming`".to_string(),
         "pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`".to_string(),
         Some(span),
@@ -288,7 +288,7 @@ pub(crate) fn invalid_serde_derive_impls(
     invalid
 }
 
-/// True for a `@[Flatten]`-able field type: a named struct (not a primitive/list/map).
+/// True for a `#[Flatten]`-able field type: a named struct (not a primitive/list/map).
 fn is_struct_named(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if !is_json_type_name(n))
 }
@@ -300,7 +300,7 @@ fn marker_is_string_literal(m: &crate::AST::Marker) -> bool {
     )
 }
 
-/// D-SERDE: validate serde markers on every `@[Codable]`/`@[Encode]`/`@[Decode]` type
+/// D-SERDE: validate serde markers on every `#[Codable]`/`#[Encode]`/`#[Decode]` type
 /// (E2407–E2412). Runs after the trait registry is built so field types resolve. This
 /// keeps generated code rustc-clean (I2): a field with no wire form is caught here, not
 /// by rustc on the emitted `impl`.
@@ -321,11 +321,11 @@ pub(crate) fn validate_serde_items(
         if !enc && !dec {
             continue;
         }
-        // D-SERDE12: generic `@[Codable]` is first-class — no `type_params > 0`
+        // D-SERDE12: generic `#[Codable]` is first-class — no `type_params > 0`
         // gate. The per-field checks below run on generic types unchanged; a type
         // param `T` reads as a non-local `Type::Named`, so it's trusted here and
         // the codability obligation falls on the use site (E0905).
-        // Container `@[RenameAll(style)]` casing menu (E2409).
+        // Container `#[RenameAll(style)]` casing menu (E2409).
         for m in container {
             if m.name == Syntax::ATTR_RENAME_ALL {
                 match m.args.first() {
@@ -353,7 +353,7 @@ pub(crate) fn validate_serde_items(
                     .iter()
                     .any(|m| m.name == Syntax::ATTR_FLATTEN);
                 for m in &f.serde_markers {
-                    // E2407: `@[Rename]` needs a string literal.
+                    // E2407: `#[Rename]` needs a string literal.
                     if m.name == Syntax::ATTR_RENAME && !marker_is_string_literal(m) {
                         out.push(e2407(m.span));
                     }

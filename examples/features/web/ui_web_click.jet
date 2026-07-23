@@ -1,14 +1,14 @@
 // 196 — a real, clickable webpage rendered by Jet-compiled JS (Phase 7
 // extension: DOM backend now mounts real elements when a `document` exists,
-// and every top-level `@Target(Js) fn` is exported so a hand-written host page
+// and every top-level `#Target(Js) fn` is exported so a hand-written host page
 // (ui_web_click.html) can call `render` directly from a button's onclick.
 // The box's fill color is wired all the way through `ui.node_color` ->
 // `JetPaintCmd::FillRect` -> the real DOM background (Phase 3/7 wiring) —
 // no hardcoded "#000000" anywhere in this path. Every other click switches
 // color, proving the color is live per-render, not a static style.
 // D-WEBDEFAULT1/D-HTMLPAIR1 (ratified 2026-07-01, c134): explicit instead of implicit —
-// `jet dev`/`jet build`/`jet run` infer the web backend from @Target(Web)
-// (no --target=web needed), and @Html names the companion host page instead
+// `jet dev`/`jet build`/`jet run` infer the web backend from #Target(Web)
+// (no --target=web needed), and #Html names the companion host page instead
 // of relying on the <stem>.html filename convention.
 // c-devserver (owner-directed 2026-07-01): `fn dev()` below is this file's
 // OWN `jet dev` behavior — a real `core.web.devserver` value, configured and
@@ -26,9 +26,9 @@
 // accepts relative (resolved against the invocation cwd) or absolute paths.
 use core.ui as ui
 use core.web.devserver as devserver
-@Target(Web)
+#Target(Web)
 
-@Html("ui_web_click.html")
+#Html("ui_web_click.html")
 
 fn dev() {
     server :: devserver.app()

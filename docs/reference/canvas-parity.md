@@ -51,8 +51,8 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Stmt::ContinueLabel] status=graph control node with label in source detail.
 - [Stmt::Loop] status=graph loop rail.
 - [Stmt::CountedLoop] status=graph loop rail.
-- [Stmt::Val metadata] status=`@Meta` projects to binding-node `meta` JSON (D-CANVASMETA1), details-panel UI pending #377.
-- [Func metadata] status=`@Meta` projects to function `meta` JSON (D-CANVASMETA1), details-panel UI pending #377.
+- [Stmt::Val metadata] status=`#Meta` projects to binding-node `meta` JSON (D-CANVASMETA1), details-panel UI pending #377.
+- [Func metadata] status=`#Meta` projects to function `meta` JSON (D-CANVASMETA1), details-panel UI pending #377.
 - [Stmt::Off] status=readonly switched-off statement (D-CANVASSTATE1), node badge UI pending, source edits.
 - [Stmt::DebugOnly] status=readonly debug-build statement (D-CANVASSTATE1), node badge UI pending, source edits.
 - [Stmt::Unsafe] status=readonly expert gate, source edits.

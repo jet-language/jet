@@ -40,17 +40,17 @@ pub(super) enum Flow {
     Normal,
     Break,
     Continue,
-    /// D-LABEL1: `break @name` — bubbles up through enclosing loops until one
-    /// whose own `@name` label matches, where it becomes an ordinary `Break`.
+    /// D-LOOPLABEL3=A: `name.break()` bubbles through enclosing loops until the
+    /// matching named loop turns it into an ordinary `Break`.
     BreakLabel(String),
-    /// D-LABEL1: `continue @name` — same bubbling as `BreakLabel`, becomes an
-    /// ordinary `Continue` at the matching loop.
+    /// D-LOOPLABEL3=A: `name.next()` follows the same bubbling rule and becomes
+    /// an ordinary `Continue` at the matching loop.
     ContinueLabel(String),
     Return(CtValue),
 }
 
 /// What a loop body's [`Flow`] result means to the loop wrapping it, given
-/// that loop's own `@name` label (if any). D-LABEL1: an unlabeled `break`/
+/// that loop's declared name (if any). D-LOOPLABEL3: an unlabeled `break`/
 /// `continue` always applies to its innermost loop (`Break`/`Continue`); a
 /// labeled one only stops here if the name matches this loop's label —
 /// otherwise it keeps bubbling outward unchanged (`Bubble`).
@@ -193,18 +193,18 @@ pub(super) struct Interp<'a> {
     /// the breakpoint banner (`in main()`). Top level / `main` until a call
     /// swaps it.
     pub(super) cur_func: String,
-    /// D-CTEFFECT1: nesting depth of active `@Impure("reason") { … }` blocks.
+    /// D-CTEFFECT1: nesting depth of active `#Impure("reason") { … }` blocks.
     /// Tier-2 comptime effect calls (core.files/env/exec/io) are allowed only
     /// while this is `> 0` AND `allow_impure` is true.
     pub(super) impure_depth: usize,
     /// D-CTEFFECT1: true when the caller compiled with `--allow-impure`.
-    /// Without this, `@Impure` blocks are syntactically valid but Tier-2
+    /// Without this, `#Impure` blocks are syntactically valid but Tier-2
     /// effect calls inside them still fail with E3411.
     pub(super) allow_impure: bool,
     /// E2-M18 / c133: true only in `run_repl_step` — enables REPL-specific
     /// diagnostics for native-only Core modules (E1802-style wording).
     pub(super) repl_mode: bool,
-    /// Active lexical `@Grant` effect names in REPL mode. Sema proves the
+    /// Active lexical `#Grant` effect names in REPL mode. Sema proves the
     /// region statically; this copy gates host authorization dynamically.
     pub(super) repl_grants: Vec<String>,
     /// Host invocation policy callback. Called after concrete arguments are
@@ -238,7 +238,7 @@ pub(super) struct Interp<'a> {
     /// before falling back to the built-in `apply_method` dispatch.
     pub(super) methods: &'a HashMap<(String, String), &'a Func>,
     /// c139/D-DISPLAYDBG: struct definitions by Jet type name, used only to
-    /// mirror codegen's `JetDebug` field order and `@[Redact]` handling.
+    /// mirror codegen's `JetDebug` field order and `#[Redact]` handling.
     pub(super) structs: &'a HashMap<String, &'a crate::AST::StructDef>,
     /// c139: `(TypeName, field) -> expr` for D-FIELDPOL1 computed fields
     /// (`name: T => expr`). Sema has already rewritten sibling names to
@@ -247,7 +247,7 @@ pub(super) struct Interp<'a> {
     pub(super) computed_fields: &'a HashMap<(String, String), &'a Expr>,
     /// c139: `TypeName -> Some((lo, hi))` for a `distinct Base(lo..hi)` range
     /// constraint (D-RANGETYPE1), `TypeName -> None` for every other distinct
-    /// type / `@UnitFamily` member (D-DIST1/D-QUAL3). `Name(expr)` is the only
+    /// type / `#UnitFamily` member (D-DIST1/D-QUAL3). `Name(expr)` is the only
     /// call-syntax construct capitalized-name calls are used for in Jet (struct
     /// literals use `.{ }`, enum variants use `.Variant`), so an unresolved
     /// call to a name in this map is a distinct-type constructor: identity
@@ -257,7 +257,7 @@ pub(super) struct Interp<'a> {
     /// Numeric base type for each distinct/unit target.
     pub(super) distinct_bases: &'a HashMap<String, Type>,
     /// Card #392 pass 5: `TypeName -> migration { }` blocks declared for that
-    /// `@PublishedSchema` type, source order (the migration chain, oldest step
+    /// `#PublishedSchema` type, source order (the migration chain, oldest step
     /// first — mirrors `Codegen/Items.rs::migration_blocks`'s per-type list).
     /// Empty for a type with no migrations (the common case), which keeps
     /// `decode_traced<T>`'s fast path — try the current shape, done — the same
@@ -633,9 +633,9 @@ impl<'a> Interp<'a> {
                 restore_binding(scope, &init.name, previous);
                 result
             }
-            Stmt::Unsafe { span, .. } => Err(unsupported("an `@Unsafe` block", *span)),
-            Stmt::Reactive { span, .. } => Err(unsupported("a `@Reactive` block", *span)),
-            // D-CTEFFECT1: `@Impure("reason") { … }` — gate for Tier-2 ambient
+            Stmt::Unsafe { span, .. } => Err(unsupported("an `#Unsafe` block", *span)),
+            Stmt::Reactive { span, .. } => Err(unsupported("a `#Reactive` block", *span)),
+            // D-CTEFFECT1: `#Impure("reason") { … }` — gate for Tier-2 ambient
             // comptime effects. Increments impure_depth around the body so that
             // `apply_core_call` knows we're inside a gate. The E3411 (gate but no
             // flag) check is in `apply_impure_core_call`; the body always runs so
@@ -647,18 +647,18 @@ impl<'a> Interp<'a> {
                 // in `eval_method` (E3411 there names the specific call, e.g.
                 // `core.files.read()`), which also correctly leaves a gate whose
                 // body never attempts a Tier-2 effect (e.g. only `print`s, or
-                // a nested `@Impure` demo block) needing no flag at all —
+                // a nested `#Impure` demo block) needing no flag at all —
                 // matching the doc comment on D-CTEFFECT1's own example.
                 self.impure_depth += 1;
                 let result = self.exec_block(body, scope);
                 self.impure_depth -= 1;
                 result
             }
-            // D-SHIELDNAME1=A: `@Shield { … }` is a runtime scheduler region; at
+            // D-SHIELDNAME1=A: `#Shield { … }` is a runtime scheduler region; at
             // comptime there are no tasks or deadlines, so it is a transparent no-op
             // wrapper — execute the body directly.
             Stmt::Shield { body, .. } => self.exec_block(body, scope),
-            // D-CANVASSTATE1=D: `@Off` is real checked code but never executes.
+            // D-CANVASSTATE1=D: `#Off` is real checked code but never executes.
             Stmt::Off { .. } => Ok(Flow::Normal),
             // D-CANVASSTATE1=D: comptime execution is a dev/debug tier.
             Stmt::DebugOnly { body, .. } => self.exec_block(body, scope),
@@ -672,7 +672,7 @@ impl<'a> Interp<'a> {
             // no solver, so a `layout` block is declined, same as `region`/
             // `taskgroup`.
             Stmt::Layout { span, .. } => Err(unsupported("a `layout` block", *span)),
-            Stmt::Caps { span, .. } => Err(unsupported("a `@Caps` block", *span)),
+            Stmt::Caps { span, .. } => Err(unsupported("a `#Caps` block", *span)),
             Stmt::Grant { caps, body, .. } if self.repl_mode => {
                 let old_len = self.repl_grants.len();
                 self.repl_grants.extend(caps.iter().map(|(name, _)| name.clone()));
@@ -682,16 +682,16 @@ impl<'a> Interp<'a> {
                 self.repl_grants.truncate(old_len);
                 result
             }
-            Stmt::Grant { span, .. } => Err(unsupported("a `@Grant` block", *span)),
+            Stmt::Grant { span, .. } => Err(unsupported("a `#Grant` block", *span)),
             // D-TXN1–D-TXN4: a transaction block is a runtime/codegen construct; the
-            // comptime interpreter has no transactions, so `@Transact` is declined.
-            Stmt::Transact { span, .. } => Err(unsupported("a `@Transact` block", *span)),
+            // comptime interpreter has no transactions, so `#Transact` is declined.
+            Stmt::Transact { span, .. } => Err(unsupported("a `#Transact` block", *span)),
             // D-STREAMYIELD1: a generator suspends on a real thread/channel at
             // runtime; the comptime interpreter has no such thing.
             Stmt::Yield(_, span) => Err(unsupported("a `yield`", *span)),
             // D-CTX1: the smart-context block is a runtime/codegen construct; the
             // comptime interpreter declines it (no thread-local context at compile time).
-            Stmt::ContextBlock { span, .. } => Err(unsupported("a `@Context` block", *span)),
+            Stmt::ContextBlock { span, .. } => Err(unsupported("a `#Context` block", *span)),
             // D-TERM1 (ratified 2026-06-22): `live { … }` is a runtime/codegen
             // construct; the comptime interpreter has no terminal at compile time.
             Stmt::Live { span, .. } => Err(unsupported("a `live` block", *span)),
@@ -702,7 +702,7 @@ impl<'a> Interp<'a> {
             // only suspends the sema determinism check. The interpreter just runs
             // its body (the suspension is a no-op at comptime, which is already pure).
             Stmt::AssumeDet { body, .. } => self.exec_block(body, scope),
-            // D-LABEL1: labeled `break @name`/`continue @name` — bubble a
+            // D-LOOPLABEL3: `name.break()` / `name.next()` bubble a
             // named Flow signal outward; the matching labeled loop (found by
             // `loop_step`) turns it into an ordinary Break/Continue.
             Stmt::BreakLabel(name, _) => Ok(Flow::BreakLabel(name.clone())),
@@ -1069,7 +1069,7 @@ impl<'a> Interp<'a> {
                                 StrFormat::Display => {
                                     s.push_str(&self.show_value(&v, e.span())?);
                                 }
-                                // `{value@Debug}` always uses the built-in
+                                // `{value#Debug}` always uses the built-in
                                 // (auto-derived-Debug-shaped) rendering, never
                                 // a user `Display` impl.
                                 StrFormat::Debug => s.push_str(&self.debug_value(&v)),
@@ -1460,7 +1460,10 @@ impl<'a> Interp<'a> {
                         }
                         // `?? break` / `?? next` are runtime loop controls and
                         // are not evaluable at comptime.
-                        FallbackKind::Break(span) | FallbackKind::Continue(span) => {
+                        FallbackKind::Break(span)
+                        | FallbackKind::Continue(span)
+                        | FallbackKind::BreakLabel(_, span)
+                        | FallbackKind::ContinueLabel(_, span) => {
                             Err(unsupported("loop control; `??`", *span))
                         }
                     }

@@ -64,8 +64,8 @@ Start the local Tower board with the one canonical command:
 Violating an invariant means stop and fix it.
 
 - **I1 — Safety.** Jet is memory-safe and type-safe by default. Expert escape
-  uses user-written audited `@Unsafe("reason") { … }` or
-  `@Unsafe("reason") fn` regions. Generated Rust `unsafe` may appear only
+  uses user-written audited `#Unsafe("reason") { … }` or
+  `#Unsafe("reason") fn` regions. Generated Rust `unsafe` may appear only
   there or in vetted std/mem internals.
 - **I2 — rustc is hidden.** rustc rejection of generated code is an internal
   compiler error (exit 101), never a user diagnostic.

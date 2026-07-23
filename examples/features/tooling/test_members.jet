@@ -1,6 +1,6 @@
-// D-DOTSCOPE1 — contextual scope members inside a `@Test` block.
+// D-DOTSCOPE1 — contextual scope members inside a `#Test` block.
 // `.setup` / `.expect_fail` / `.timeout` / `.skip` are the vocabulary a
-// `@Test` block declares; each is a `.name { … }` region, run by `jet test`.
+// `#Test` block declares; each is a `.name { … }` region, run by `jet test`.
 fn double(n: Int) -> Int {
     return (n * 2)
 }
@@ -10,7 +10,7 @@ fn run() {
 }
 
 // `.setup` runs first and its bindings are visible to the rest of the test.
-@Test("setup runs first") {
+#Test("setup runs first") {
     .setup {
         base :: double(21)
     }
@@ -19,7 +19,7 @@ fn run() {
 
 // `.expect_fail` marks a region that MUST fail; the test still passes, and
 // execution continues after the region.
-@Test("expect_fail region must fail") {
+#Test("expect_fail region must fail") {
     .expect_fail {
         require((1 == 2), "one is not two")
     }
@@ -27,14 +27,14 @@ fn run() {
 }
 
 // `.timeout` bounds a region's running time (post-hoc in v1).
-@Test("timeout bounds a region") {
+#Test("timeout bounds a region") {
     .timeout(500ms) {
         require_eq(double(5), 10)
     }
 }
 
 // `.skip` as a later statement skips just that region; the rest still runs.
-@Test("skip one region") {
+#Test("skip one region") {
     require_eq(double(3), 6)
     .skip {
         require(false)
@@ -43,7 +43,7 @@ fn run() {
 }
 
 // `.skip` as the FIRST statement skips the whole test — it reports `skip`.
-@Test("skip the whole test") {
+#Test("skip the whole test") {
     .skip("waiting on fixtures") {
         require(false)
     }

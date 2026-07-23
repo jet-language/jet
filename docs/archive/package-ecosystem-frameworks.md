@@ -283,9 +283,9 @@ data — the same spelling in every framework.
 Headline features other package managers ship, answered from existing law —
 nothing silent:
 
-- **Scripts / task runner** (npm scripts, cargo xtask): ratified — `@Task fn`
+- **Scripts / task runner** (npm scripts, cargo xtask): ratified — `#Task fn`
   beside `fn run()` (D-JPK-TASKRUN1), invoked `jet run --task <name> <entry>`,
-  scheduled with `@Every(…)` (D-SCHEDULE1). No new surface needed.
+  scheduled with `#Every(…)` (D-SCHEDULE1). No new surface needed.
 - **Feature flags / conditional compilation** (cargo features): ratified —
   `Build.{ features }` in build profiles (D-BUILDPROFILE1) plus comptime
   `if target.*` for platform conditionals.
@@ -295,7 +295,7 @@ nothing silent:
 - **Install lifecycle hooks** (npm postinstall) — **scoped out, by design.**
   Arbitrary code on install is the supply-chain hole the trust law closes
   (D-WD1, D-JPK-GRANTSCHEMA1). Package build code is `fn build(b)` — Tier-1
-  pure by default, Tier-2 only via `@Impure` + explicit grant (D-BUILDENTRY1).
+  pure by default, Tier-2 only via `#Impure` + explicit grant (D-BUILDENTRY1).
   The env-activation `hook` (D-ECO7) is the only user hook, and it is
   trust-gated. A framework wanting npm-style install hooks must re-ballot the
   trust law; none of the three does.
@@ -697,7 +697,7 @@ A solo dev folds forever; a team shards fully; same semantics.
 | System (jetos) | block | `config.jet` (OSHOST1) | any file / split → `config.jet` |
 | Image (OCI) | block | discovered role file | any file / split |
 | Fleet | block | discovered role file | any file / split |
-| Tasks / scripts | `@Task fn` (ratified) | same | same |
+| Tasks / scripts | `#Task fn` (ratified) | same | same |
 | Single-file U7 | preserved | preserved | preserved |
 | Teach in one page | **easiest** | hardest | medium (+ `split`) |
 | Structural flexibility (philosophy) | **worst** | partial | **best** |

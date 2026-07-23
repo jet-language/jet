@@ -1,16 +1,16 @@
 //! Taint tracking (D-TAINT1, option A; D-TAINT2, option A).
 //!
-//! An *untrusted* value carries a `@Tainted` value-fact tag (D-QUAL1), attached
+//! An *untrusted* value carries a `#Tainted` value-fact tag (D-QUAL1), attached
 //! inline at its source. Taint **spreads** along intraprocedural dataflow:
 //! anything derived from a tainted value (binding, reassignment, interpolation,
-//! field/index read, arithmetic, return) is tainted. A `@Sanitizer fn` is the
+//! field/index read, arithmetic, return) is tainted. A `#Sanitizer fn` is the
 //! one blessed way to strip it — its return value is untainted by contract, even
 //! when its inputs were tainted (the audited cleaning step). A tainted value
 //! reaching a **sink effect** (`Db`/`Exec`/`Net` — a security-sensitive Core
 //! operation) without first passing through a sanitizer is **E0721**.
 //!
-//! **D-TAINT2 (option A)**: the kind is named in parens — `@Tainted(Credential)
-//! value`. Bare `@Tainted` defaults to `.Input`. The `Credential` kind extends
+//! **D-TAINT2 (option A)**: the kind is named in parens — `#Tainted(Credential)
+//! value`. Bare `#Tainted` defaults to `.Input`. The `Credential` kind extends
 //! D-TAINT1 with log/print/serialize **credential sinks** (E0722) alongside the
 //! existing injection sinks (E0721). Only `Credential` is gated on additional
 //! sinks; other kinds (`.Input`/`.PII`/`.Secret`) use the injection sink set.
@@ -19,8 +19,8 @@
 //! effect is in the sink set) and is **fully erased in codegen** (I3): the tag
 //! is a compile-time proof with no runtime value.
 //!
-//! The model is intraprocedural plus the explicit `@Sanitizer fn` contract:
-//! taint is introduced only by `@Tainted` and cleared only by a sanitizer call.
+//! The model is intraprocedural plus the explicit `#Sanitizer fn` contract:
+//! taint is introduced only by `#Tainted` and cleared only by a sanitizer call.
 //! Taint does not silently cross an ordinary call boundary — that would be the
 //! research-grade information-flow-control analysis explicitly deferred to D-IFC1
 //! (D-TAINT1 option B). What the card lists as propagation (assignment,
@@ -42,7 +42,7 @@ fn is_sink_effect(e: Effect) -> bool {
     matches!(e, Effect::Db | Effect::Exec | Effect::Net)
 }
 
-/// D-TAINT2: the credential log/print/serialize sinks. A `@Tainted(Credential)`
+/// D-TAINT2: the credential log/print/serialize sinks. A `#Tainted(Credential)`
 /// value reaching `core.io.print`, `core.io.eprint`, `jet.log.*`, or
 /// `core.encoding.*.to_string*` is E0722.
 fn is_credential_sink(module: &str, method: &str) -> bool {
@@ -58,10 +58,10 @@ fn is_credential_sink(module: &str, method: &str) -> bool {
 }
 
 /// Per-function taint analyzer. Carries the program-level facts (which functions
-/// are `@Sanitizer`, how Core aliases resolve to modules) and the running set of
+/// are `#Sanitizer`, how Core aliases resolve to modules) and the running set of
 /// tainted locals while it walks one function body.
 struct TaintCtx<'a> {
-    /// Names of `@Sanitizer fn` functions (bare names + `Type::method` keys). A
+    /// Names of `#Sanitizer fn` functions (bare names + `Type::method` keys). A
     /// call to one yields an untainted value regardless of argument taint.
     sanitizers: &'a HashSet<String>,
     /// Core import aliases in scope for the module owning this body
@@ -116,7 +116,7 @@ impl<'a> TaintCtx<'a> {
         is_credential_sink(module, method)
     }
 
-    /// D-TAINT2: true when `e` evaluates to a `@Tainted(Credential)` value.
+    /// D-TAINT2: true when `e` evaluates to a `#Tainted(Credential)` value.
     fn is_credential_tainted(&self, e: &Expr) -> bool {
         match e {
             Expr::Tainted(_, kind, _) => {
@@ -155,16 +155,16 @@ impl<'a> TaintCtx<'a> {
     }
 
     /// True when `e` evaluates to a tainted value (any kind), given the current
-    /// tainted-local set. Taint flows out of `@Tainted`, out of tainted locals,
+    /// tainted-local set. Taint flows out of `#Tainted`, out of tainted locals,
     /// and through any derivation (arithmetic, field/index read, interpolation,
-    /// optional/result wrappers, …). A `@Sanitizer fn` call is the cut point.
+    /// optional/result wrappers, …). A `#Sanitizer fn` call is the cut point.
     fn is_tainted(&self, e: &Expr) -> bool {
         match e {
             // The source of taint (any kind), and a tainted local reference.
             Expr::Tainted(_, _, _) => true,
             Expr::Ident(name, _) => self.tainted.contains(name),
 
-            // A free-function call's result is untainted: a `@Sanitizer fn`
+            // A free-function call's result is untainted: a `#Sanitizer fn`
             // clears taint by contract, and an ordinary call doesn't propagate
             // taint across the boundary in this intraprocedural model (that is
             // the deferred D-IFC1 analysis). Either way the result is clean.
@@ -176,7 +176,7 @@ impl<'a> TaintCtx<'a> {
                 args,
                 ..
             } => {
-                // `value.method(…)` where the method is a `@Sanitizer fn` clears
+                // `value.method(…)` where the method is a `#Sanitizer fn` clears
                 // taint. Otherwise taint flows from the receiver (a tainted
                 // string's `.trim()` is still tainted) and from any argument.
                 if let Some(ty) = recv_type {
@@ -263,7 +263,7 @@ impl<'a> TaintCtx<'a> {
 
     /// Walk an expression for sink violations:
     /// - E0721: a tainted (any kind) value reaches an injection sink (Db/Exec/Net).
-    /// - E0722: a `@Tainted(Credential)` value reaches a log/print/serialize sink.
+    /// - E0722: a `#Tainted(Credential)` value reaches a log/print/serialize sink.
     /// Recurses into every sub-expression so a nested sink is still checked.
     fn check_expr(&mut self, e: &Expr) {
         match e {
@@ -668,7 +668,7 @@ pub fn check_func_taint(
     ctx.diags
 }
 
-/// Collect the set of `@Sanitizer fn` keys across a program's items: bare names
+/// Collect the set of `#Sanitizer fn` keys across a program's items: bare names
 /// for top-level functions, `Type::method` for methods. A call to one of these
 /// strips taint from its result.
 pub fn collect_sanitizers(items: &[Item], out: &mut HashSet<String>) {
@@ -710,7 +710,7 @@ pub fn collect_sanitizers(items: &[Item], out: &mut HashSet<String>) {
     }
 }
 
-/// E0722 (D-TAINT2): a `@Tainted(Credential)` value reaches a log/print/serialize
+/// E0722 (D-TAINT2): a `#Tainted(Credential)` value reaches a log/print/serialize
 /// sink. Credentials must never appear in log files, stdout, or serialized output.
 pub fn e0722(alias: &str, method: &str, span: Span) -> Diagnostic {
     let api = if alias.is_empty() {
@@ -725,18 +725,18 @@ pub fn e0722(alias: &str, method: &str, span: Span) -> Diagnostic {
             api
         ),
         format!(
-            "`{}` writes to a log, terminal, or serialized output — a `@{}({})` value there leaks the secret",
+            "`{}` writes to a log, terminal, or serialized output — a `#{}({})` value there leaks the secret",
             api,
             crate::Syntax::KW_TAINTED,
             crate::Syntax::KW_CREDENTIAL,
         ),
-        "log a non-secret field, or strip the credential with a `@Sanitizer fn` first".to_string(),
+        "log a non-secret field, or strip the credential with a `#Sanitizer fn` first".to_string(),
         Some(span),
     )
 }
 
 /// E0721 (D-TAINT1): a tainted (untrusted) value reaches a sink effect without
-/// passing through a `@Sanitizer fn`. Names the sink and offers the sanitizer
+/// passing through a `#Sanitizer fn`. Names the sink and offers the sanitizer
 /// fix-it — the one blessed way to clear taint before a security-sensitive call.
 pub fn e0721(alias: &str, method: &str, effect: Effect, span: Span) -> Diagnostic {
     let api = if alias.is_empty() {
@@ -752,13 +752,13 @@ pub fn e0721(alias: &str, method: &str, effect: Effect, span: Span) -> Diagnosti
     };
     Diagnostic::error(
         "E0721",
-        format!("untrusted (`@{}`) data reaches `{}` without being sanitized", crate::Syntax::KW_TAINTED, api),
+        format!("untrusted (`#{}`) data reaches `{}` without being sanitized", crate::Syntax::KW_TAINTED, api),
         format!(
-            "`{}` runs {} — a `{}` sink; a `@{}` value used there unchecked is the classic injection bug",
+            "`{}` runs {} — a `{}` sink; a `#{}` value used there unchecked is the classic injection bug",
             api, kind, effect.name(), crate::Syntax::KW_TAINTED
         ),
         format!(
-            "pass the value through a `@{} fn` first — its result is trusted, so it may reach the sink",
+            "pass the value through a `#{} fn` first — its result is trusted, so it may reach the sink",
             crate::Syntax::KW_SANITIZER
         ),
         Some(span),

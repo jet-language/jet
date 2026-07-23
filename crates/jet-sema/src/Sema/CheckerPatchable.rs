@@ -1,4 +1,4 @@
-//! D-PATCH1 (card #181): `@[Patchable]` derive — synthetic `T.Patch` type + apply/diff/merge.
+//! D-PATCH1 (card #181): `#[Patchable]` derive — synthetic `T.Patch` type + apply/diff/merge.
 
 use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
@@ -81,12 +81,12 @@ fn validate_patchable_struct(s: &StructDef) -> Option<Diagnostic> {
         return Some(Diagnostic::error(
             "E0336",
             format!(
-                "`@[Patchable]` on generic struct `{}` isn't supported yet",
+                "`#[Patchable]` on generic struct `{}` isn't supported yet",
                 s.name
             ),
             "`T.Patch` codegen needs a concrete field list — generic patches are a follow-on"
                 .to_string(),
-            "remove the type parameters, or drop `@[Patchable]` for now".to_string(),
+            "remove the type parameters, or drop `#[Patchable]` for now".to_string(),
             Some(s.name_span),
         ));
     }
@@ -95,11 +95,11 @@ fn validate_patchable_struct(s: &StructDef) -> Option<Diagnostic> {
             return Some(Diagnostic::error(
                 "E0337",
                 format!(
-                    "`@[Patchable]` struct `{}` field `{}` has function type",
+                    "`#[Patchable]` struct `{}` field `{}` has function type",
                     s.name, f.name
                 ),
                 "patches are data values — function-typed fields can't be patched".to_string(),
-                "store a callable handle type instead, or drop `@[Patchable]`".to_string(),
+                "store a callable handle type instead, or drop `#[Patchable]`".to_string(),
                 Some(f.name_span),
             ));
         }

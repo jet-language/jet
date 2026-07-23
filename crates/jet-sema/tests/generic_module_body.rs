@@ -236,7 +236,7 @@ fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph()
     let src = r#"
 module laws<T> {
     tag Audited;
-    fn audited(value: @Audited T) -> @Audited T { return ~value }
+    fn audited(value: #Audited T) -> #Audited T { return ~value }
     trait Reveal { type Output; fn reveal(self) -> T }
     struct Wrapped { value: T }
     impl Wrapped.Reveal { type Output = T; fn reveal(self) -> T { return self.value } }
@@ -392,8 +392,8 @@ fn run() {}
 fn tests_and_benches_are_specialized_once_per_instance_with_unique_names() {
     let (bundle, diagnostics) = check(r#"
 module checks<T, count: Int> {
-    @Test fn identity(value: T) { expect(count == count) }
-    @Bench("work") { expect(count == count) }
+    #Test fn identity(value: T) { expect(count == count) }
+    #Bench("work") { expect(count == count) }
 }
 module int_checks = checks<Int, 2>
 module text_checks = checks<String, 4>

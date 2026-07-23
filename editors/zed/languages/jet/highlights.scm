@@ -30,7 +30,7 @@
 (generic_type base: (type_identifier) @type)
 (capability_sigil) @operator
 
-; Applied rules (@Test, @[Codable], @Caps(...), @Grant, ...)
+; Applied rules (#Test, #[Codable], #Caps(...), #Grant, ...)
 (attribute (marker_name) @attribute)
 (attribute_list (marker_name) @attribute)
 (lower_marker_name) @attribute
@@ -130,7 +130,7 @@
 
 ; builtin: check input print
 ; marker.rule: Abi Add Bench Bindgen Caps Cli Codable CodableAsBase Comparable Context DebugOnly Decode Default DenyUnknownFields Doc Encode Every Extern FFI Flatten Grant Html Impure Inline InlineAlways Invariant Layout Live Max Meta Min Mul MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Pure Reactive Redact Region Rename RenameAll Replayable Sanitizer Shield SingleUse Skip Sql State Summarize Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow inline static
-; sigil: # & ... :: := @ ^ ~
+; sigil: # & ... :: := ^ ~
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS
 

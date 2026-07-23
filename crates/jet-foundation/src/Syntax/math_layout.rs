@@ -1,7 +1,7 @@
 /// D-SIMD1/D-SIMD2 (ratified 2026-06-24): the built-in portable SIMD lane types.
 /// `F32x4` is four `F32` lanes, `F64x2` is two `F64` lanes. Constructor
 /// `F32x4(a,b,c,d)`, splat `F32x4.splat(x)`, lane index `v[i]`, element-wise
-/// `+`/`-`/`*`/`/`, reduce `v.sum()` / `v.reduce(@Max)`, and the `[F32#4]` bridge
+/// `+`/`-`/`*`/`/`, reduce `v.sum()` / `v.reduce(#Max)`, and the `[F32#4]` bridge
 /// `from_array`/`to_array`. A closed compiler-provided family (no user `+`); ops
 /// lower to a scalar-array fallback (the pinned stable rustc has no `std::simd`),
 /// memory-safe by construction (I1) — no `std::simd`-feature gate, no intrinsics.
@@ -77,14 +77,14 @@ pub const TYPE_KEY: &str = "Key";
 ///   reactive.effect(() => { … })             — a side effect re-run on change
 /// Methods: `Signal.get()/set(v)`, `Derived.get()`/`Computed.get()`. Dependency
 /// tracking is explicit-by-read (a `.get()` inside a derived/effect body subscribes).
-/// `@Reactive { … }` lowers to the effect job (D-REACTCORE1).
+/// `#Reactive { … }` lowers to the effect job (D-REACTCORE1).
 pub const REACTIVE_MODULE: &str = "jet.reactive";
 pub const TYPE_SIGNAL: &str = "Signal";
 pub const TYPE_DERIVED: &str = "Derived";
 /// D-SIGNAL1 (ratified 2026-06-28, opt A): canonical name for a derived reactive
 /// value. `Derived` remains accepted as a backward-compatible alias.
 pub const TYPE_COMPUTED: &str = "Computed";
-/// D-SIGNAL1: the runtime value created by `@Reactive` / `reactive.effect`.
+/// D-SIGNAL1: the runtime value created by `#Reactive` / `reactive.effect`.
 pub const TYPE_EFFECT: &str = "Effect";
 /// D-EVENT1 (ratified 2026-07-07): first-party typed Event/Hook family.
 /// Library values, compiler-known for typing/tooling; no new syntax.
@@ -337,9 +337,9 @@ pub const FOREIGN_NOT: &str = "not";
 pub const KW_USE: &str = "use";
 pub const KW_AS: &str = "as";
 
-/// D-MEM1/S7 / D-POLICY-WORD1: `@Policy(no_alloc)` — a
+/// D-MEM1/S7 / D-POLICY-WORD1: `#Policy(no_alloc)` — a
 /// module-level allocation floor, file-scoped like `web_target_ceiling`/
-/// `@PubFile`. Sema flags allocation-shaped expressions written directly in
+/// `#PubFile`. Sema flags allocation-shaped expressions written directly in
 /// this file's own function bodies (E0921) — local only, never follows calls
 /// into other modules. `no_alloc` is the only ratified policy name; the full
 /// policy list is a follow-on ballot (an unknown name after `policy` is E0003).
@@ -409,10 +409,10 @@ pub const COM_MODULE_ROOT: &str = "com"; // D-FFI-COM1 / D-FFI-UNIFY1
 pub const C_MODULE_ROOT: &str = "c"; // S59
 /// S59: reserved final segment for compiler-generated bindgen modules.
 pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
-/// S59 / D-CFFI-CANON1: marker on generated C binding modules — `@Bindgen module`.
+/// S59 / D-CFFI-CANON1: marker on generated C binding modules — `#Bindgen module`.
 pub const ATTR_BINDGEN: &str = "Bindgen"; // S59 / D-CFFI-CANON1
-/// S59 / D-CFFI-CANON1: marker on user C overlay modules — `@Extern module`.
-pub const ATTR_EXTERN_MODULE: &str = "Extern"; // S59 — `@Extern module`, not `extern rust`
+/// S59 / D-CFFI-CANON1: marker on user C overlay modules — `#Extern module`.
+pub const ATTR_EXTERN_MODULE: &str = "Extern"; // S59 — `#Extern module`, not `extern rust`
 /// D-CFFI-SYNTAX-REOPEN / D-CFFI-CANON1: retired C FFI marker spellings,
 /// recognized only for E0060 teaching diagnostics.
 pub const ATTR_BINDGEN_RETIRED: &str = "bindgen";
@@ -423,7 +423,7 @@ pub const ATTR_EXTERN_MODULE_RETIRED: &str = "extern";
 /// The Jet signature is the checked contract; the body is one string of
 /// foreign source the per-language binder compiles on cache miss. Unsafe
 /// languages (`c`, `cpp`, `asm`) additionally require the enclosing
-/// `@Unsafe("reason")` gate (I1/S58). Spelled fully capitalized (S66).
+/// `#Unsafe("reason")` gate (I1/S58). Spelled fully capitalized (S66).
 pub const ATTR_FFI: &str = "FFI"; // D-FFI-INLINE1
 /// D-FFI-CPP1=A (ratified 2026-07-11, card #501): C++ foreign root — the
 /// `cpp.<lib>` namespace binder and the `#FFI(cpp)` inline-tier language name.
@@ -432,15 +432,15 @@ pub const CPP_MODULE_ROOT: &str = "cpp"; // D-FFI-CPP1 / D-FFI-UNIFY1
 /// language name — `#FFI(asm) fn`. Assembly has no library namespace (it is
 /// inline-only); it never appears as a `<lang>.<lib>` mount.
 pub const ASM_LANG: &str = "asm"; // D-FFI-ASM1
-/// D-UNSAFE2 (retired marker): `@Audit("…")` is the old two-line form;
-/// now the reason is the argument of `@Unsafe("reason")` itself. Recognized
+/// D-UNSAFE2 (retired marker): `#Audit("…")` is the old two-line form;
+/// now the reason is the argument of `#Unsafe("reason")` itself. Recognized
 /// only to emit the E0055 teaching error.
 pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
-                                      // D-LOOPLABEL2=A (ratified 2026-06-26): loop label `@` is a SUFFIX on the name.
-                                      // `outer@ loop { … }` / `break outer@` / `next outer@`. Reverses D-LABEL1
-                                      // (which had `@outer loop`). Old prefix form emits E0988 teaching error.
+                                      // D-LOOPLABEL3=A: named loops use `outer :: loop { … }`;
+                                      // `outer.break()` / `outer.next()` target them. Retired `@`
+                                      // prefix and suffix forms emit E0988.
                                       // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
-                                      // D-QUAL4=A (ratified 2026-06-26): `@Marker T` is a value-tag qualifier in type
+                                      // D-QUAL4=A (ratified 2026-06-26): `#Marker T` is a value-tag qualifier in type
                                       // position. Transparent to type identity (the underlying type is still `T`).
                                       // Documented intent only; does not affect codegen or runtime behaviour.
                                       // Parser: `TokKind::Hash` followed by PascalCase ident → `Type::Tagged { marker, inner }`.
@@ -557,24 +557,24 @@ pub const BUILTIN_EMBED_BYTES: &str = "embed_bytes";
 pub const BUILTIN_FETCH: &str = "fetch";
 
 /// S43 (ratified M6; PascalCase marker D-CASING1 follow-on 2026-06-21):
-/// top-level test-declaration block, written as the marker `@Test("name") { … }`.
+/// top-level test-declaration block, written as the marker `#Test("name") { … }`.
 /// D-TESTPAREN1=A (ratified 2026-06-26): the name is now a parenthesized string
-/// argument, matching the `@Caps(…)` / `@Grant(…)` marker family.
+/// argument, matching the `#Caps(…)` / `#Grant(…)` marker family.
 /// The bare lowercase `test` keyword (FOREIGN_TEST) is the retired spelling,
-/// recognized only to emit the E0052 teaching error pointing at `@Test("name")`.
+/// recognized only to emit the E0052 teaching error pointing at `#Test("name")`.
 pub const KW_TEST: &str = "Test";
 
 /// D-BENCH1 + D-BENCH-MARKER1=A: top-level region-benchmark block, written as
-/// the marker `@Bench("name") { … }` — the exact sibling of `@Test("name") { … }`.
+/// the marker `#Bench("name") { … }` — the exact sibling of `#Test("name") { … }`.
 /// The existing `jet bench` verb (D-TOOL5) discovers and runs these, reporting
 /// per-region ops/sec + ns/iter (today it times a whole program). PascalCase
-/// marker per D-CASING1, joining the `@Test`/`@Pure`/`@Todo`/`@Caps` family.
+/// marker per D-CASING1, joining the `#Test`/`#Pure`/`#Todo`/`#Caps` family.
 /// The `benchmark` manifest target (TARGET_BENCHMARK, c80) points `jet bench`
 /// at a package entry; it is not a new engine — it reuses this exact machinery.
 pub const KW_BENCH: &str = "Bench";
 
-/// D-DOTSCOPE1 (ratified 2026-07-02): scope-member vocabulary for `@Test`.
-/// Inside a `@Test { … }` body a statement-position `.name { … }` /
+/// D-DOTSCOPE1 (ratified 2026-07-02): scope-member vocabulary for `#Test`.
+/// Inside a `#Test { … }` body a statement-position `.name { … }` /
 /// `.name(args) { … }` (I8: the ONE spelling for scope vocabulary) resolves
 /// against this list. `.setup` runs first (init region), `.expect_fail` marks
 /// a region that must fail, `.timeout(dur)` bounds a region's elapsed time,
@@ -586,7 +586,7 @@ pub const SCOPE_TEST_SKIP: &str = "skip";
 
 /// D-DOTSCOPE1: recognized duration suffixes for `.timeout(<dur>)` and their
 /// nanosecond multiplier. `.timeout` reads a bare unit literal directly, so its
-/// accepted units are fixed here rather than resolved through a `@UnitFamily`
+/// accepted units are fixed here rather than resolved through a `#UnitFamily`
 /// (D-UNITLIT1). Returns `None` for any other suffix. `u128` so the multiply
 /// can't overflow before codegen narrows to `u64` nanos.
 pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
@@ -599,23 +599,23 @@ pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
     }
 }
 
-/// D-SCHEDULE1 (ratified 2026-07-11, card #505): `@Task fn` — a top-level
+/// D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Task fn` — a top-level
 /// function Jet can invoke by name with `jet run --task` (D-JPK-TASKRUN1),
 /// living beside `fn run()`. Bare marker, no arguments.
 pub const KW_TASK: &str = "Task";
 
-/// D-JPK-TASKRUN1=A: lifecycle verbs a `@Task fn` must not reuse — they already
+/// D-JPK-TASKRUN1=A: lifecycle verbs a `#Task fn` must not reuse — they already
 /// name Jet's built-in entry points (`fn run`/`fn dev`/`fn build`/`fn test`).
 /// Sema rejects a collision as E0928.
 pub const TASK_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test"];
 
-/// D-SCHEDULE1: `@Every(…)` — a declarative schedule marker on a `@Task fn`.
-/// Legal only alongside `@Task` (E0925 otherwise).
+/// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Task fn`.
+/// Legal only alongside `#Task` (E0925 otherwise).
 pub const ATTR_EVERY: &str = "Every";
 
-/// D-SCHEDULE1: recognized duration suffixes for `@Every(<dur>)` — extends
+/// D-SCHEDULE1: recognized duration suffixes for `#Every(<dur>)` — extends
 /// `duration_suffix_nanos` (`ns`/`us`/`ms`/`s`) with `min`, the ratified
-/// example spelling (`@Every(5min)`); a schedule finer than a second is
+/// example spelling (`#Every(5min)`); a schedule finer than a second is
 /// never realistic, so `min` is added here rather than widening the shared
 /// `.timeout` table. `u128` nanoseconds, same overflow-safety reasoning as
 /// `duration_suffix_nanos`.
@@ -629,10 +629,10 @@ pub fn schedule_duration_suffix_nanos(suffix: &str) -> Option<u128> {
     }
 }
 
-/// D-DOTSCOPE1: the scope-member vocabulary a `@Marker { }` block declares, or
+/// D-DOTSCOPE1: the scope-member vocabulary a `#Marker { }` block declares, or
 /// `None` if the marker declares no members. Each marker that grows a member
 /// vocabulary is added here (an API decision, not a syntax one — the `.name { }`
-/// grammar is fixed). `@Test` is the only marker with members today; `@Bench`
+/// grammar is fixed). `#Test` is the only marker with members today; `#Bench`
 /// (and every other block marker) declares none, so a member statement inside
 /// it is rejected against this empty vocabulary.
 pub fn scope_members(marker: &str) -> Option<&'static [&'static str]> {

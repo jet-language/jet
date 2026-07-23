@@ -244,10 +244,10 @@ fn run() {
     }
     outer_hits := 0
     inner_hits := 0
-    outer@ loop i := 0; i < 3; i += 1 {
+    outer :: loop i := 0; i < 3; i += 1 {
         loop j := 0; j < 3; j += 1 {
             if j == 1 {
-                next outer@
+                outer.next()
             }
             inner_hits += 1
         }
@@ -279,10 +279,10 @@ fn run() {
         &["break 14", "c", "n", "p i", "n", "p i", "c"],
     );
     let next_stop = labeled
-        .find("14 |                 next outer@        <- here")
+        .find("14 |                 outer.next()        <- here")
         .expect("labeled next stop");
     let outer_step = labeled[next_stop..]
-        .find("11 |     outer@ loop i := 0; i < 3; i += 1 {        <- here")
+        .find("11 |     outer :: loop i := 0; i < 3; i += 1 {        <- here")
         .map(|offset| next_stop + offset)
         .expect("labeled next must target the outer afterthought");
     assert!(
@@ -362,7 +362,7 @@ fn needs_native_is_false_for_an_interpreter_safe_program() {
     assert_eq!(jet::Debug::needs_native(&file), Some(false));
 }
 
-/// D-DBG3 step 2: an FFI/task/@Unsafe/native-std program is exactly the case
+/// D-DBG3 step 2: an FFI/task/#Unsafe/native-std program is exactly the case
 /// the interpreter declines (E2203) — `needs_native` must say so, so the CLI
 /// dispatch (`Source/main.rs`'s `debug` arm) routes it to the native backend
 /// instead of erroring.

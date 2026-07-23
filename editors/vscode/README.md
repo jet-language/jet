@@ -67,7 +67,7 @@ nix develop -c cargo test --test grammar
 ```
 
 The LSP semantic overlay refines live editor coloring for ownership (`copy`,
-`^`, `&`), rules (`@Test`, `@Unsafe`), and effect rows (`--[]->`,
+`^`, `&`), rules (`#Test`, `#Unsafe`), and effect rows (`--[]->`,
 `--[Io]->`). Retired/foreign spellings are not colored as live syntax.
 
 Code lenses use **Jet: Run File** and **Jet: Test File**, which open a terminal

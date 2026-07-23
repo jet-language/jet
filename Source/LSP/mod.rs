@@ -143,7 +143,7 @@ mod tests {
     fn rename_preserves_case_for_all_declaration_families() {
         let src = r#"UserId :: distinct Int
 alias Count = Int
-@UnitFamily(Length) { meter }
+#UnitFamily(Length) { meter }
 state Door { Open }
 protocol Wire { client -> server: Send(value: Int) }
 module holder<T> { pub struct Box { value: T } }
@@ -287,8 +287,8 @@ fn run() {}
     #[test]
     fn completion_catalogs_source_distinct_and_unit_members() {
         let src = r#"
-@Numeric Token :: distinct Int(0..10)
-@UnitFamily(Reward) { credit }
+#Numeric Token :: distinct Int(0..10)
+#UnitFamily(Reward) { credit }
 
 fn run() {
     token :: Token.from_u8(1)

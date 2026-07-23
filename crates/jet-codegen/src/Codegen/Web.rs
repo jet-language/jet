@@ -25,7 +25,7 @@ pub struct WebArtifacts {
     /// (a button calling an exported function) ships its own companion HTML
     /// alongside the `.jet` source instead of relying on this default.
     pub index_html: String,
-    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): the entry file's `@Html("path.html")`
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): the entry file's `#Html("path.html")`
     /// marker, if any — relative to the `.jet` source's own directory.
     pub explicit_html_path: Option<String>,
     /// D-SHAPE-CLI-CARRIER1=A: canonical record embedded as a Wasm custom
@@ -955,7 +955,7 @@ fn emit_js_fn(f: &FuncWeb, out: &mut String, all: &[FuncWeb]) -> WebEmitResult<(
     // D-DOMGEN1=A (Phase 7 extension): every top-level #Js function is
     // exported, not just `main` — a hand-written host page (index.html) can
     // call any of them directly (e.g. a click handler invoking a Jet-compiled
-    // render function), the same way @WasmExport functions are callable via
+    // render function), the same way #WasmExport functions are callable via
     // their `bridge_*` wrapper.
     //
     // D-UISHOWCASE1 (c134 Phase 8): every exported function's body runs

@@ -69,7 +69,7 @@ block    = "{" { stmt } "}" ;            // S3: curly braces
 stmt     = binding | assign | if | loop
          | "break" NL | next | "return" [ expr ] NL
          | expr NL ;
-binding  = [ "@Track" ] ( ident "::" expr     // inferred immutable
+binding  = [ "#Track" ] ( ident "::" expr     // inferred immutable
          | ident ":=" expr                    // inferred mutable
          | ident ":" type "::" expr           // explicit immutable
          | ident ":" type ":=" expr ) NL      // explicit mutable
@@ -89,14 +89,14 @@ guard-stmt-body = block | non-if-stmt ; // direct nesting requires braces (E0329
 arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
 range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
 arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
-loop     = [ ident "@" ] loop-body ;            // D-LABEL1: optional `name@` label
+loop     = [ ident "::" ] loop-body ;            // D-LOOPLABEL3: optional ordinary-name label
 loop-body= "loop" block
          | "loop" cond block
          | "loop" ident [ "," ident ] ";" source [ ";" expr ] block
          | "loop" ident [ ":" type ] ":=" expr ";" cond [ ";" expr ] block ;
 source   = expr [ ".." expr ] ;
-break    = "break" [ ident "@" ] NL ;           // D-LABEL1: `break name@` targets a label
-next     = "next" [ ident "@" ] NL ;            // contextual: calls/declarations keep `next`
+break    = "break" NL | ident "." "break" "(" ")" NL ;
+next     = "next" NL | ident "." "next" "(" ")" NL ;
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
 if-expr  = "if" cond value-block "else" ( if-expr | value-block )
          | "if" "{" value-guard-arm { value-guard-arm } "else" "->" value-arm-body "}" ;
@@ -122,7 +122,7 @@ expr     = precedence climbing over:
   `name: Type := value` are mutable (D-BIND4).
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
-- `@Track name :: value` / `@Track name := value` opt a binding into
+- `#Track name :: value` / `#Track name := value` opt a binding into
   D-PROVENANCE1 provenance. Today this records Float binding origins for
   `value.origin() -> String`; untracked Floats return `"untracked"`.
 - Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
@@ -138,10 +138,11 @@ expr     = precedence climbing over:
   (`loop i := init; cond [; afterthought]`) headers. Range sources are inclusive.
   Source/bounds/stride evaluate once left-to-right; stride must be positive `Int`
   and is checked before the first pull. `break`/`next`
-  inside loops only (E0115, S23). A loop may
-  carry a suffix `name@` label (D-LABEL1) — `outer@ loop … { }` — and
-  `break outer@` / `next outer@` target it from a nested loop (E0987 names
-  an out-of-scope label; E0988 flags a retired prefix label).
+  inside loops only (E0115, S23). A loop may carry an ordinary-name label
+  (D-LOOPLABEL3) — `outer :: loop … { }` — and `outer.break()` /
+  `outer.next()` target it from a nested loop. E0987 names an out-of-scope
+  label; E0988 teaches the retired `@` forms, rejects `outer := loop`, and
+  explains that a loop name is not a runtime value.
   Normal explicit-state fallthrough and targeted `next` run the afterthought
   exactly once, then retest; normal source fallthrough and targeted `next` pull
   stride items and use the final pull. `break`, `return`, propagated failure,
@@ -168,7 +169,7 @@ expr     = precedence climbing over:
   ambient name in its scope; libraries cannot inject names; any addition or
   removal needs an owner ballot. `eprint`, `args`, and `read_all_input` stay
   qualified behind `use core.io`.
-  **`@NoPrelude` (D-PRELUDEX1=A)** opts a file out of those ambient names —
+  **`#NoPrelude` (D-PRELUDEX1=A)** opts a file out of those ambient names —
   call `io.print` / `io.input` after `use core.io as io`, or remove the marker.
   Its existing opt-out scope is the interactive I/O pair `print`/`input`.
 - **Tool artifact extensions (D-ARTIFACT-EXT1=A):** the closed family is
@@ -420,18 +421,18 @@ the lock scoped to the call only. Cloning `Shared<T>` is always a cheap
 handle clone, never a deep copy of `T` — so it crosses a `tasks.spawn`
 boundary with no `^`.
 
-Inside a `@Transact` block (D-STM1), a `Shared<T>.edit` joins the block's
+Inside a `#Transact` block (D-STM1), a `Shared<T>.edit` joins the block's
 atomic commit instead of locking on its own line: every touched handle changes
 together or not at all, and no other task ever sees a half-applied change. The
 runtime defers each edit and, at the block's end, takes all the touched
 handles' locks at once in a fixed order that cannot deadlock — the deadlock
 class hand-ordered locking is famous for simply disappears. One marker, one
-meaning (I8): the same `@Transact` that gives single-task rollback now spans
+meaning (I8): the same `#Transact` that gives single-task rollback now spans
 shared state.
 
 ```jet
 fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
-    @Transact(tx) {
+    #Transact(tx) {
         from.edit(a => { a.balance -= amount })  // both land, or neither
         to.edit(a => { a.balance += amount })    // no lock order to get wrong
     }
@@ -471,7 +472,7 @@ open-world dispatch must have a sealed target set or a signed dependency
 summary; otherwise the strict fact is unprovable and rejected.
 
 ```jet
-@Policy(no_alloc)
+#Policy(no_alloc)
 
 fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
 ```
@@ -501,7 +502,7 @@ ship in v1 (unmarked read is the default, not a sigil):
 
 `~` is the copy sigil (D-SHAPE-COPY1=A, below), not a parameter capability —
 it has no arm in this table. Raw-pointer access (`p.*` postfix deref, prefix
-`*x`) is a separate, `@Unsafe`-gated mechanism (D-CAP9) — also not a
+`*x`) is a separate, `#Unsafe`-gated mechanism (D-CAP9) — also not a
 parameter capability; the compiler's `AccessConvention` enum keeps dead
 `Share`/`Raw` variants internally, inert until a future tier reactivates
 them.
@@ -603,9 +604,9 @@ impl Circle {
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
   `Printable`/`Equatable`/`Debug` (D-MARK-DEBUG1=A: `Debug` auto-derives
-  whenever every field qualifies — no `@Debug` needed; a hand-written impl
-  overrides); explicit `@[Comparable]`, `@[Codable]`,
-  `@[Encode]`, `@[Decode]`.
+  whenever every field qualifies — no `#Debug` needed; a hand-written impl
+  overrides); explicit `#[Comparable]`, `#[Codable]`,
+  `#[Encode]`, `#[Decode]`.
 - **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) -> DataTree`
   and `Decode.decode(tree: DataTree) -> Self ? DecodeError` are ordinary Jet
   trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
@@ -636,21 +637,21 @@ impl Circle {
   method attachment is expected — `derive`d, or implemented/used as a trait —
   is **E0731** (fix-it: declare it as a `trait`). All tags are PascalCase
   (D-CASING1).
-- **Applied rules (D-SHAPE2/D-ATTR2):** `@Rule` or `@[A, B]` on the
+- **Applied rules (D-SHAPE2/D-ATTR2):** `#Rule` or `#[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
   arguments when arguments exist. An explicit empty effect row is `--[]->`; `comptime`
   stays a prefix keyword.
-- **Statement switch attributes (D-CANVASSTATE1):** `@Off <stmt>` parses and
+- **Statement switch attributes (D-CANVASSTATE1):** `#Off <stmt>` parses and
   type-checks one statement, including block-shaped statements, then emits no
-  code in every build. `@DebugOnly <stmt>` parses and type-checks the statement
+  code in every build. `#DebugOnly <stmt>` parses and type-checks the statement
   in every build, emits only in debug/dev builds, and strips from release output.
   Names introduced inside either marker are scoped to that marker body.
   `build.profile` is not a user-typeable comptime value.
-- **Canvas metadata (D-CANVASMETA1):** `@Meta(category: "Movement", tunable)`
+- **Canvas metadata (D-CANVASMETA1):** `#Meta(category: "Movement", tunable)`
   attaches checked tooling facts to bindings, top-level consts, and functions.
   `category` must be a non-empty plain string literal; `tunable` is a bare flag.
   The marker emits no code and changes no runtime behavior.
-- **OS-target gating & dispatch (D-OSTARGET1/D-OSTARGET2):** `@Target(Os.Linux
+- **OS-target gating & dispatch (D-OSTARGET1/D-OSTARGET2):** `#Target(Os.Linux
   |Macos|Windows)` gates one `impl` block to a native OS; `jet build
   --target=<triple>` emits only the matching build's impls (host OS by default).
   Ungated code reaches the surviving impl through the compile-time switch
@@ -674,7 +675,7 @@ impl Circle {
   **E0955**; for `embed_file`, a non-UTF-8 file is also **E0955**, with a fix
   pointing at `embed_bytes`. Every embedded file and every file matched by
   `find` records its sha256 in `.jet/lock`.
-- **Published schema migrations (D-MIGRATE1/D-MIGRATE2):** `@PublishedSchema struct
+- **Published schema migrations (D-MIGRATE1/D-MIGRATE2):** `#PublishedSchema struct
   Name { ... }` marks a public record whose field layout is snapshotted at release
   under `.jet/cache/schema/`. On later project builds, sema compares the current
   shape to the saved snapshot (keyed by field name, so order is ignored). A
@@ -710,7 +711,7 @@ impl Circle {
   snapshot exists.
 
   **`jet inspect schema` (D-MIGRATE2C):** `jet inspect schema status` lists every snapshotted
-  `@PublishedSchema` type with its pinned published version and fields, flagging any
+  `#PublishedSchema` type with its pinned published version and fields, flagging any
   type that has a pending breaking change vs its snapshot (reusing the E0910 diff).
   `jet inspect schema squash --before <ver>` re-baselines: it rewrites each snapshot to the
   *current* struct shape and records `squashed_before = <ver>`, so future builds
@@ -726,7 +727,7 @@ impl Circle {
   `.from` (the source shape's version label), and `.steps` (one entry per
   migration step applied, `"v1->v2"` style). `decode` itself is unchanged —
   same call, same cost, for anyone not asking (I8). `.migrated` is `false` and
-  `.from`/`.steps` are empty for a plain type and for a `@PublishedSchema`
+  `.from`/`.steps` are empty for a plain type and for a `#PublishedSchema`
   type decoding data already shaped like the current struct.
 
   ```jet
@@ -738,7 +739,7 @@ impl Circle {
   ```
 
   **Runtime migration chain (D-MIGRATE4=A):** decoding a concrete
-  `@PublishedSchema` type that derives `Decode` and has `migration { }` blocks
+  `#PublishedSchema` type that derives `Decode` and has `migration { }` blocks
   runs the chain. The blocks, in source order, are the steps: with `K` blocks
   the historical shapes are `v1` (oldest) … `vK`, and the current struct is
   `v(K+1)`; each historical shape's field set is derived at compile time by
@@ -751,7 +752,7 @@ impl Circle {
      *prefer the newest matching version*, so data that satisfies the current
      shape never migrates.
   2. **Shape detection** — on failure, the data's top-level field-name set
-     (wire keys, after any `@[Rename]`/`@[RenameAll]` treatment) is compared
+     (wire keys, after any `#[Rename]`/`#[RenameAll]` treatment) is compared
      against the historical shapes, newest (`vK`) to oldest (`v1`); the first
      match wins.
   3. **Walk forward** — the matched shape's data is rewritten step by step,
@@ -773,7 +774,7 @@ impl Circle {
   row (an old-header file migrates every row; the batch-level status reports
   the first migrated row).
 
-- **Struct layout control (D-REPRC1):** `@Layout(c)` before a struct stamps
+- **Struct layout control (D-REPRC1):** `#Layout(c)` before a struct stamps
   `#[repr(C)]` on the generated Rust struct, enabling direct C-FFI pointer
   sharing. Field order is preserved as written. Growable fields (`[T]`, `[K: V]`,
   `String`) are rejected with **E1104** because they lack a stable C layout;
@@ -812,7 +813,7 @@ Cross-type **`?`** conversion supports two forms:
   **`?`**; returned errors print and exit non-zero.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
-ignored **`@MustUse`** results (**E0419**), bad propagation (**E0403**),
+ignored **`#MustUse`** results (**E0419**), bad propagation (**E0403**),
 `ok`/`err` outside a result context (**E0404**), and fallback type mismatches
 (**E0405**) are compile errors with fixes that name **`?`**, **`??`**, pattern
 tests, binding, and **`.drop("reason")`** — the sole intentional-discard
@@ -840,10 +841,10 @@ Idempotence: **`fmt(fmt(x)) == fmt(x)`** on every `examples/*.jet` and
 
 ## M6 phase 2 — `jet test` + `jet new` (done)
 
-**`@Test("name") { … }`** (S43, D-CASING1 follow-on) — top-level blocks only.
+**`#Test("name") { … }`** (S43, D-CASING1 follow-on) — top-level blocks only.
 Bodies parse like a parameterless function; use **`require(cond)`** /
 **`require(cond, "msg")`** and **`require_eq(a, b)`** (S36) for checks. Duplicate
-test names → **E0105**; a nested `@Test` block → **E0601**; bare `test "name"` is
+test names → **E0105**; a nested `#Test` block → **E0601**; bare `test "name"` is
 paused under D-S14-PAUSE and gets an ordinary parse error. **`jet run`** / **`jet build`** ignore test
 blocks; only **`jet test`** compiles and runs them.
 
@@ -854,17 +855,17 @@ line per test (`name: pass` / `name: FAIL`), a summary (`N passed, M failed`),
 and exit **1** when any test fails. **`require_eq`** failures print
 `left: …, right: …` on stderr.
 
-**Scope members (D-DOTSCOPE1)** — inside a `@Test { … }` body, a
+**Scope members (D-DOTSCOPE1)** — inside a `#Test { … }` body, a
 statement-position `.name { … }` / `.name(args) { … }` resolves against the
 marker's declared vocabulary (`Syntax::scope_members`). This is the one spelling
 for scope vocabulary (I8); the parser/sema shape is generic (a marker→members
-table), so other markers can grow members later without new grammar. `@Test`
-declares four; `@Bench` (and every other block marker) declares none, so a member
+table), so other markers can grow members later without new grammar. `#Test`
+declares four; `#Bench` (and every other block marker) declares none, so a member
 there is **E0614**. A member outside any member-declaring marker is **E0615**;
 an unknown member **E0614** (lists the vocabulary); a wrong argument shape
 **E0617**; a member nested instead of a top-level statement of the block
 **E0618**. Members only *run* under **`jet test`** — `jet run`/`jet build` ignore
-`@Test` blocks entirely (unchanged); a malformed member is still reported in any
+`#Test` blocks entirely (unchanged); a malformed member is still reported in any
 mode (structural check).
 
 - **`.setup { … }`** — must be the first statement (**E0616** otherwise). Its
@@ -880,7 +881,7 @@ mode (structural check).
   the test fails with a `timeout: region took …` message. v1 ships **post-hoc**
   semantics: the region runs to completion, then its elapsed time is compared
   against the budget (it does not interrupt a hang — out of scope). `<dur>` is a
-  bare duration literal (`ns`/`us`/`ms`/`s`); it needs no `@UnitFamily` in scope.
+  bare duration literal (`ns`/`us`/`ms`/`s`); it needs no `#UnitFamily` in scope.
 - **`.skip { … }` / `.skip("reason") { … }`** — the region is **not executed**
   (emitted as a dead `if false` block, so it still type-checks). When `.skip` is
   the **first** statement the whole test is skipped: it reports `name: skip` and
@@ -896,14 +897,14 @@ Example: `examples/features/tooling/tests.jet`; scope members in
 `tests/jet_test.rs`, `tests/fixtures/test_fail.jet` + `.fixed.jet`, and the
 `scope_*` fixtures for the member fail paths.
 
-## `@Bench` region benchmarks + perf timing (c121, D-BENCH1) — done
+## `#Bench` region benchmarks + perf timing (c121, D-BENCH1) — done
 
-**`@Bench("name") { … }`** (D-BENCH1, D-BENCH-MARKER1) is the exact sibling of `@Test`: a
+**`#Bench("name") { … }`** (D-BENCH1, D-BENCH-MARKER1) is the exact sibling of `#Test`: a
 top-level block whose body parses like a parameterless function (and may use
 `require`/`require_eq`). **`jet run`** / **`jet build`** ignore bench blocks. A
-file with `@Bench` blocks runs per-region under **`jet bench`** — each region's
+file with `#Bench` blocks runs per-region under **`jet bench`** — each region's
 body is warmed, its iteration count auto-scaled to ≥1ms, sampled, and reported
-as `name  <ns> ns/iter (±sd)  <ops> ops/sec`. A file with no `@Bench` blocks
+as `name  <ns> ns/iter (±sd)  <ops> ops/sec`. A file with no `#Bench` blocks
 keeps whole-program `jet bench` timing (5 warmup + 20 trials). The body call is
 `black_box`'d so the optimizer can't elide it. Example:
 `examples/features/tooling/bench.jet`; golden `examples/features/expected/105_bench.out`
@@ -928,7 +929,7 @@ and a **`jet`** wrapper around `target/debug/jet`. **`cargo build`** once, then
 Every foreign ecosystem mounts through one model: a language root plus library
 name, `<lang>.<lib>`, with generated bindings under `.jet/bindings/<lang>/`.
 C, C++, and JS are active namespace binders. C uses the namespace surface
-(`use c.<lib>` / `@Extern module c.<lib>`). C++ uses `use cpp.<lib>` over a
+(`use c.<lib>` / `#Extern module c.<lib>`). C++ uses `use cpp.<lib>` over a
 clang-AST-derived, content-addressed C-ABI shim: namespaces are selected
 explicitly, public scalar classes become owned opaque handles, exceptions become
 `T ? CppError`, pure named callbacks keep their checked C ABI, and template
@@ -947,7 +948,7 @@ over generated C-ABI shims.
 
 The inline fourth tier is also implemented. `#FFI(c|cpp) fn` carries one exact
 triple-quoted raw body whose Jet signature remains the checked contract.
-`#FFI(asm) fn` is available only inside an audited `@Unsafe("reason")` region
+`#FFI(asm) fn` is available only inside an audited `#Unsafe("reason")` region
 with `use core.mem`; its named operands, return anchor, clobbers, and selected
 target are checked before lowering. These native boundaries are not resident-JIT
 code: the JIT reports the foreign boundary by name, while native build/run owns
@@ -986,8 +987,8 @@ overlay. (Full spec follows in this section.)
 
 | Layer | Shape |
 |---|---|
-| Autogen | `@Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
-| Overlay | `@Extern module c.<lib> { … }` — empty `{ }` = no overrides |
+| Autogen | `#Bindgen module c.<lib>.__bindgen__ { … }` in `.jet/bindings/c/<lib>.jet` |
+| Overlay | `#Extern module c.<lib> { … }` — empty `{ }` = no overrides |
 | Call site | `use "header.h" as alias` or `use c.<lib> as alias` (one per lib per file) |
 
 Function bodies mirror Rust FFI: `fn init_window(w: Int, h: Int, t: String) = 
@@ -1013,20 +1014,20 @@ threaded into the `rustc` link line. By-value scalars/`String`/C-layout
 structs+enums at the edge; aggregates (`[T]`, maps, `T?`, tuples, …) → **E3203**.
 D-CABI-RESULT1 keeps status-plus-out APIs raw: a parameter may be `*T` only
 when `T` is C-safe, and every call is an unsafe-function call requiring an
-audited `@Unsafe("reason")` region. The caller creates the non-null pointer
+audited `#Unsafe("reason")` region. The caller creates the non-null pointer
 through `core.mem`, initializes its slot, checks the raw status, and reads the
 slot only on a status the wrapper knows initialized it. Pointer returns remain
-**E3202**; direct `Result` declarations remain **E3203**. `@Bindgen` is legal only inside a
+**E3202**; direct `Result` declarations remain **E3203**. `#Bindgen` is legal only inside a
 generated cache file (**E3207**); users may not name the reserved `__bindgen__`
 segment (**E3206**); two `use` forms for one lib in one file → **E3204**.
 
 `jet inspect bind <header.h> --pkg <lib>` is the manual cache-refresh entry point and
 shares the compile-time auto-bind backend (owner 2026-06-18: native std-only
 implementation, D-CBIND3 superseded). It parses C function prototypes over the
-bindable type subset (scalars, `char*` strings, `void`) and emits a `@Bindgen`
+bindable type subset (scalars, `char*` strings, `void`) and emits a `#Bindgen`
 cache; declarations it cannot map are skipped and reported rather than faked
 (I3). **E3208** fires only when the header cannot be read or contains no
-bindable prototypes — the fix is a hand-written `@Extern module c.<lib>` overlay
+bindable prototypes — the fix is a hand-written `#Extern module c.<lib>` overlay
 for those declarations. Rust FFI (S50) is unchanged. Diagnostics:
 **E3201–E3208** in diagnostics.md with snapshots (front-end ones under
 `tests/ui/cffi_*`; link-time/gated ones pinned in `tests/cffi.rs`).
@@ -1072,7 +1073,7 @@ Example: `examples/features/lowlevel/polyglot_fortran/`.
 compiles one linkage program with provisioned GnuCOBOL and writes a
 `cobol.<lib>` cache. The copybook subset is closed: one level-01 record with
 level-05 fixed text, COMP-5 integers, and COMP-3 packed decimals. The binder
-records exact offsets and widths, emits an `@Codable` Jet record, and maps every
+records exact offsets and widths, emits an `#Codable` Jet record, and maps every
 COMP-3 field to `Decimal`, never `Float`. Its callable C bridge accepts packed
 decimal values as scaled minor-unit `Int` values, initializes `libcob` once,
 and invokes the exported `int PROGRAM(cob_u8_t*)` entry in-process. Generated
@@ -1394,7 +1395,7 @@ unrepresentable members, and emits committable typed stubs. Primitive VARIANT
 types become Jet scalars, BSTR becomes `String`, dispatch interfaces become a
 move-only `Object`, and VARIANT/SAFEARRAY values become `DataTree` through a
 bounded JSON boundary. Dynamic name-based IDispatch remains available only in
-an explicit `@Unsafe` region; the safe generated surface carries fixed DISPIDs.
+an explicit `#Unsafe` region; the safe generated surface carries fixed DISPIDs.
 
 The Windows bridge initializes a single-threaded COM apartment per live
 object, pins each generation-tagged handle to its creating thread, invokes
@@ -1413,22 +1414,22 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
 - **Discovery gate** — `use core.mem;` unlocks the low-level vocabulary (`*T`,
   `mem.volatile_read`, `mem.volatile_write`, `mem.address_of`, allocators).
   Naming one of these without the import → **E3102**.
-- **Audit gate** — `@Unsafe("reason") { … }` opens the operations that can
+- **Audit gate** — `#Unsafe("reason") { … }` opens the operations that can
   violate memory safety (pointer build/deref, volatile access). The reason
-  string is the argument to `@Unsafe` itself (D-UNSAFE2; the former separate
+  string is the argument to `#Unsafe` itself (D-UNSAFE2; the former separate
   `#Audit("…")` line is retired → **E0055**). Under **D-UNSAFE-REASON1=B**,
-  bare `@Unsafe { … }` and bare `@Unsafe fn` compile and emit lint **L3101**.
-  `@Unsafe("reason") fn` marks a whole-function contract; its body is itself
-  an audited region, and calling it requires an enclosing `@Unsafe` block →
+  bare `#Unsafe { … }` and bare `#Unsafe fn` compile and emit lint **L3101**.
+  `#Unsafe("reason") fn` marks a whole-function contract; its body is itself
+  an audited region, and calling it requires an enclosing `#Unsafe` block →
   **E3103**.
 - **Operations** — prefix `*x` takes a raw pointer to `x`; postfix `p.*`
   dereferences it. `mem.address_of(x)` is inert (a plain address as `Int`) and
   legal outside a gate. `mem.volatile_read(p)` and
   `mem.volatile_write(p, value)` perform explicit volatile/MMIO access through a
-  typed pointer. Using a low-level op outside `@Unsafe` → **E3101**.
+  typed pointer. Using a low-level op outside `#Unsafe` → **E3101**.
 
-Codegen stays dumb (I3): an `@Unsafe { … }` region lowers straight to a Rust
-`unsafe { … }`, an `@Unsafe fn` to a Rust `unsafe fn`. All gating is decided in
+Codegen stays dumb (I3): an `#Unsafe { … }` region lowers straight to a Rust
+`unsafe { … }`, an `#Unsafe fn` to a Rust `unsafe fn`. All gating is decided in
 sema. Diagnostics **E3101–E3104 + L3101** in diagnostics.md with snapshots
 (`tests/ui/lowlevel_e310*`, `tests/ui/mem_arena_gate`, `tests/ui/mem_use_after_free`,
 `tests/ui_lint/unsafe_missing_audit`); the audited end-to-end example is
@@ -1532,13 +1533,13 @@ in one chain, e.g. `slot.value_pointer.(*Bool).* = true`. Jet rejects that
 compact form outright — there is no cast-and-deref operator. The equivalent is
 two explicit, audited lines: reinterpret an address through
 `mem.Ptr<T>.from_addr(addr)` (the cast step), then read or write through it
-with postfix `p.*` (the deref step), both inside `@Unsafe`:
+with postfix `p.*` (the deref step), both inside `#Unsafe`:
 
 ```jet
 use core.mem
 
 flag: Bool :: true
-@Unsafe("flag is live on this stack frame and the pointer never escapes") {
+#Unsafe("flag is live on this stack frame and the pointer never escapes") {
     addr: Int :: mem.address_of(flag)
     p :: mem.Ptr<Bool>.from_addr(addr)
     print(p.*)
@@ -1553,7 +1554,7 @@ above) as the answer to "what does Jai's chain do in Jet." Example:
 ### Allocators (D-ALLOC1, D-ALLOC-C, D-ALLOC-D; ratified 2026-06-19)
 
 Four allocators ship under `core.mem` — `Arena`, `Bump`, `Pool`, `Fixed` — all namespaced
-under `core.mem.alloc` (D-ALLOC-C). No `@Unsafe` needed; `use core.mem` is the discovery
+under `core.mem.alloc` (D-ALLOC-C). No `#Unsafe` needed; `use core.mem` is the discovery
 gate (E3102). Constructors: `mem.Arena.new()` / `mem.Arena.new(capacity: N)` (D-ALLOC1);
 allocate with `arena.alloc(value)`. `reset()` keeps the backing storage (cheap, allocator is
 reusable). Terminal release uses the universal resource operation `close(^allocator)`; the
@@ -1597,7 +1598,7 @@ checker so Jet always rejects first (I2):
 
 Regions (D-REGION1): **implicit and scope-inferred by default** — the region is the lexical
 scope of the `arena` binding; the beginner never types a lifetime. **Plus an explicit
-`@Region(r) { … }` block** for expert cases
+`#Region(r) { … }` block** for expert cases
 inference can't give: a region spanning two allocators, narrower than the enclosing function,
 or named. The escape rule is enforced against the inferred scope or the named region
 identically. v1 restriction (I8): views are non-reassignable, non-escaping locals; anything
@@ -1617,7 +1618,7 @@ compiler-exported module per S51). Optional **`as alias`** in both forms.
 
 Cross-file access uses **`namespace.item`**; only **`pub`** items are visible from
 other files (S18), including **`pub`** struct fields. A file may opt into
-public-by-default with a single **`@PubFile`** marker (D-VISDEFAULT1=C /
+public-by-default with a single **`#PubFile`** marker (D-VISDEFAULT1=C /
 D-VISDEFAULT2=A); inside such a file, top-level items export unless marked
 **`priv`**. The driver loads the import
 graph, sema checks the whole program, codegen emits one Rust file with **`mod`**
@@ -1831,7 +1832,7 @@ Compiler-known `core.<name>` namespaces backed by Rust std helpers in the
 generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
 math, random, time, args, sized numeric types with checked-by-default
 overflow, and unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
-one `DataTree` value, plus `@[Codable]` derive). Every fallible call returns
+one `DataTree` value, plus `#[Codable]` derive). Every fallible call returns
 `T ? E`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
 module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
@@ -1852,7 +1853,7 @@ STARTTLS, authenticates only after verified TLS and post-upgrade EHLO, returns
 relay-acceptance `SendReport`, and never retries. `SystemPlusCa` extends system
 roots while retaining hostname verification. Passwords use the existing
 move-only `Secret`, cross one private extraction boundary, and are zeroized on
-failure and drop. Ambient task cancellation and `@Context` deadlines govern
+failure and drop. Ambient task cancellation and `#Context` deadlines govern
 every transport wait; interruption after DATA is `DeliveryUnknown`.
 Optional `SmtpConfig.dkim:DkimConfig?` binds one Ed25519 signing identity to
 every send through that Mailer. The signer uses relaxed/relaxed DKIM over final
@@ -1922,7 +1923,7 @@ releases resources via Drop rather than running to completion. A cancelled
 shielded region defers (never discards) the unwind until a critical section
 finishes — its wait points complete normally and the deferred cancel/deadline
 lands when the region exits. D-SHIELDNAME1=A spells that lexical region
-`@Shield { … }`. It takes no arguments, nests by depth, and always leaves through
+`#Shield { … }`. It takes no arguments, nests by depth, and always leaves through
 an RAII guard, so return, error propagation, and unwinding cannot strand a task
 in the shielded state. At the outermost normal exit, an expired deadline lands
 before a pending cancellation. Outside a task, the region is a transparent
@@ -1938,7 +1939,7 @@ are gone. Channel payloads
 must be sendable (**E1102**).
 
 D-DEADLINE1 (ratified 2026-06-28): an ambient deadline can be set with
-`@Context(deadline: <Int epoch_ms>) { … }`. Inside that scope, wait/IO points
+`#Context(deadline: <Int epoch_ms>) { … }`. Inside that scope, wait/IO points
 observe the inherited budget (task joins, channel receive, `time.sleep`, TCP
 read/write stubs). When the budget is exceeded, runtime report **E3003** is
 emitted in Jet terms and execution exits with the runtime error code.
@@ -2173,7 +2174,7 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
   encrypted repo store (`.jet/secrets.age`, managed by `jetpack secrets
   set/get/recipients/keygen`); reading one at runtime is `core.vault.get`,
   gated by the `Secret` effect (**E1264** if ungranted) and unconditionally
-  denied at build/comptime time (**E1265**, no `@Impure` escape hatch).
+  denied at build/comptime time (**E1265**, no `#Impure` escape hatch).
   `jetpack secrets get <name>` on a name absent from the store is **E1263**.
 - **Typed vault keys (D-CRYPTO-VAULT1=A):** `core.vault` persists only
   `SigningKey` and `X25519SecretKey` behind immutable `KeyRef<T>` handles.
@@ -2195,7 +2196,7 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
   authorization and consuming compare-and-swap commit; same-origin imports are
   idempotent and revoked origins never reactivate. All secret-dependent open
   failures collapse to `KeyWrapError.OpenFailed`. Raw 32-byte import is available only
-  through `core.vault.expert` inside an audited `@Unsafe` region. Headless
+  through `core.vault.expert` inside an audited `#Unsafe` region. Headless
   mutation requires `jet trust grant vault.write:<repository_uuid>`; source,
   workspace, environment, DAP, and stdin are never write authority.
 
@@ -2415,7 +2416,7 @@ result@ [Int#3]=  double.[1, 2, 3];
 - Destructuring a `[T#N]` with the wrong number of names is **E0963**.
 - Calling `push`, `pop`, `insert`, `remove`, or `clear` on a `[T#N]` is **E0964**.
 - A literal index outside `0..N-1` on a `[T#N]` is **E0965** (compile-time check).
-- A `distinct Int` with `@Invariant("value >= lo && value < hi")` may index a
+- A `distinct Int` with `#Invariant("value >= lo && value < hi")` may index a
   `[T#N]` without a runtime bounds check when `lo >= 0` and `hi < N`.
 - `[T#N]` is accepted wherever `[T]` is expected (widening coercion); the
   length information is erased at that point.
@@ -2464,7 +2465,7 @@ The complete expert surface is `xchacha20poly1305_seal/open` (32-byte key,
 24-byte nonce), `aes256gcm_seal/open` (32-byte key, 12-byte nonce),
 `ed25519_sign`, `ed25519_verify_strict`, `x25519`, `hkdf_sha256`, `argon2id`,
 `secret_bytes`, `signing_key_bytes`, `x25519_secret_bytes`, and
-`shared_secret_bytes`. Every call is lexical `@Unsafe`; importing the module
+`shared_secret_bytes`. Every call is lexical `#Unsafe`; importing the module
 does not weaken the gate. AEAD authentication failures collapse to
 `CryptoError.OpenFailed`. X25519 rejects all-zero shared secrets by default.
 HKDF-SHA256 output is at most 8160 bytes. Expert Argon2id accepts 8192–262144
@@ -2562,21 +2563,21 @@ purity violation (reported as **E3401**, the established purity diagnostic).
 Effects are erased: `--[Fs]->`, `--[]->`, and an unannotated function with the same
 body all generate byte-identical Rust.
 
-### Restricting a region — `@Caps(…) { … }`
+### Restricting a region — `#Caps(…) { … }`
 
-Where `--[…]->` bounds a whole function, `@Caps(…) { … }` restricts a **block**.
+Where `--[…]->` bounds a whole function, `#Caps(…) { … }` restricts a **block**.
 Inside the region, the only effects allowed — directly or through any call it
 reaches — are the ones listed; anything else is **E0741**. It is a hard local
 ceiling, not a grant: the effects still happen and still count toward the
 enclosing function's set.
 
 ```ebnf
-caps_region = "@Caps" "(" [ effect { "," effect } ] ")" block ;
+caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
 ```
 
 ```jet
 fn run() {
-    @Caps(Fs, Io) {
+    #Caps(Fs, Io) {
         text :: core.files.read("x") ?? "";   // Fs — allowed
         print(text);                            // Io — allowed
     }
@@ -2585,7 +2586,7 @@ fn run() {
 
 A call inside the region that transitively touches `Net` would be E0741 even
 though no `Net` call appears literally in the block. Like every effect
-construct, `@Caps` is a plain lexical block in codegen — it erases.
+construct, `#Caps` is a plain lexical block in codegen — it erases.
 
 ### Higher-order effects — transparent flow-through (D-EFF2)
 
@@ -2650,7 +2651,7 @@ unwind) via a RAII scope guard (D-DEFER1).
 ```jet
 use core.term as term
 
-@Live {
+#Live {
     k :: term.read_key()
     if k == Enter { return }
     print("got: {k}")
@@ -2701,7 +2702,7 @@ Lists, maps, options, results, structs, enums, and closures are not rebuilt
 from display text; explicit binding annotations remain available to `:type`.
 
 Pure Core calls run directly. Ambient Core calls use normal Jet authority:
-the call must be inside `@Grant(root)`, and the REPL must authorize the exact
+the call must be inside `#Grant(root)`, and the REPL must authorize the exact
 operation and resource before it touches host state. A TTY prompts for once,
 session, or deny. A session allowance is an exact tuple and offers continue
 or revoke on reuse. `--allow-fs`, `--allow-env`, `--allow-exec`,
@@ -2902,10 +2903,10 @@ no separate flag DSL to learn. `fn run()` (S12, zero-arg) is the simple program
 entry; a program opts into CLI parsing by defining `fn run` with one parameter:
 
 ```jet
-@[Cli]
+#[Cli]
 struct ServeArgs {
-    @[Doc("port to listen on")]
-    @[Default(3000)]
+    #[Doc("port to listen on")]
+    #[Default(3000)]
     port: Int
     verbose: Bool
     config: String?
@@ -2916,9 +2917,9 @@ fn run(args: ServeArgs) {
 }
 ```
 
-`@[Cli]` is a sibling derive of `@[Codable]` on the same marker/derive
-machinery (D-MARKERMOVE1). `@[Doc("...")]` is a field-level marker giving
-that flag's `--help` line; a field with no `@[Doc(...)]` gets a generic
+`#[Cli]` is a sibling derive of `#[Codable]` on the same marker/derive
+machinery (D-MARKERMOVE1). `#[Doc("...")]` is a field-level marker giving
+that flag's `--help` line; a field with no `#[Doc(...)]` gets a generic
 "value for --name" line instead.
 
 **Entry semantics.** `run` is the only reserved program entry name (S12). Plain
@@ -2951,7 +2952,7 @@ fn verify_release() -> Void ? {}
 `Output` is a closed sum with exactly `Library`, `Executable`, `Service`,
 `Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Every Output
 has fixed text `name:`. Executable, Service, and Check also require `entry:`.
-An Executable takes zero or one `@[Cli]`-derived parameter; Service and Check
+An Executable takes zero or one `#[Cli]`-derived parameter; Service and Check
 take none. All three return `Void` or `Void ?`. Sema resolves and validates the
 callable before TIR or Rust emission, and publishes its definition and solved
 effect row to semantic tooling.
@@ -2960,22 +2961,22 @@ For a singular run, explicit selection is handled by the command layer. With
 no explicit address, legacy `fn run` wins; otherwise a sole compatible
 Executable is selected. Multiple candidates produce E1321 with a sorted list.
 
-**Pinned field-mapping rule** — every `@[Cli]` struct field maps to exactly
+**Pinned field-mapping rule** — every `#[Cli]` struct field maps to exactly
 one flag, by this rule (checked top to bottom, first match wins):
 
 | Field shape | Flag | Absent at runtime |
 |---|---|---|
 | `Bool` | `--name` (boolean flag) | `false` |
 | `T?` (`T` a supported scalar) | `--name VALUE` (optional) | `None` |
-| scalar with `@[Default(expr)]` | `--name VALUE` (optional) | `expr` |
+| scalar with `#[Default(expr)]` | `--name VALUE` (optional) | `expr` |
 | any other supported scalar | `--name VALUE` (**required**) | runtime error, `core.args` voice — no new diagnostic code |
 
 Supported scalars: `Int`, `Float`, `Bool`, `String`, `Path`. Any other field
 type (a `[K: V]`, a closure, a `[T]`, a nested struct that isn't itself
-`@[Cli]`, …) is **E1305** — there is no flag shape for it. Field defaults
-use the *existing* `@[Default(expr)]` marker (D-SERDE5) — not a second,
+`#[Cli]`, …) is **E1305** — there is no flag shape for it. Field defaults
+use the *existing* `#[Default(expr)]` marker (D-SERDE5) — not a second,
 inline `= expr` mechanism (that syntax is reserved for function-parameter
-defaults, S61, a different grammar slot; reusing `@[Default(...)]` here is
+defaults, S61, a different grammar slot; reusing `#[Default(...)]` here is
 I8: one mechanism for "this field has a default", not two). Field name
 `snake_case` → flag `--snake-case` (underscores become dashes); no
 casing-style menu (that's a wire-format concern, D-SERDE3, not a CLI-flag
@@ -2984,11 +2985,11 @@ one). No positionals are derived from struct fields in v1 — `core.args`'s
 directly (not through the typed layer).
 
 Every generated CLI spec also registers `--help` automatically (rendering
-the struct's fields/types/`@[Doc]` text); a field named `help` collides
+the struct's fields/types/`#[Doc]` text); a field named `help` collides
 with it and is **E1306**.
 
-**Nested `@[Cli]` structs are not supported in v1** — a field whose type is
-itself a `@[Cli]`-derived struct is E1305, same as any other unmapped type.
+**Nested `#[Cli]` structs are not supported in v1** — a field whose type is
+itself a `#[Cli]`-derived struct is E1305, same as any other unmapped type.
 (Grouped `--outer-inner` flag prefixing was scoped out rather than bolted
 onto the decode machinery under time pressure that would otherwise force a
 second, prefix-threaded code path — a real feature, not a punt: it needs
@@ -3005,9 +3006,9 @@ fn run(cmd: Cmd) { ... }   // $ myapp import data.csv
 ```
 
 The first positional token picks the variant by its **lowercased** name;
-the rest of argv re-parses against that variant's own `@[Cli]` spec (its
+the rest of argv re-parses against that variant's own `#[Cli]` spec (its
 own `--help`, its own flags — no flag namespace is shared across
-variants). Every variant's payload must be a single `@[Cli]`-derived
+variants). Every variant's payload must be a single `#[Cli]`-derived
 struct — any other payload shape is **E1307**. Given **zero** arguments (no
 subcommand token at all), or given root `--help`, the generated entry prints
 the lowercased command list to stdout and exits 0 — an invocation asking "what
@@ -3056,10 +3057,10 @@ stderr.
 
 **Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
 including the reserved `--help`), E1307 (subcommand payload isn't
-`@[Cli]`), E1308 (`run`'s one parameter isn't a `@[Cli]` struct or an enum
-of `@[Cli]` payloads). See docs/spec/diagnostics.md.
+`#[Cli]`), E1308 (`run`'s one parameter isn't a `#[Cli]` struct or an enum
+of `#[Cli]` payloads). See docs/spec/diagnostics.md.
 
-The public `@[Cli]` struct or subcommand enum may be declared in the entry file
+The public `#[Cli]` struct or subcommand enum may be declared in the entry file
 or in one directly imported module. Its generated parser/decode helpers remain
 internal projections over the same `ArgsSpec` engine.
 
@@ -3083,8 +3084,8 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
 
 **Floor lenses (this card):**
 
-- `inline` (D-METHODMACRO1) — every fn/method carrying `@Inline` or
-  `@InlineAlways`: the contract and the Rust attribute codegen emits
+- `inline` (D-METHODMACRO1) — every fn/method carrying `#Inline` or
+  `#InlineAlways`: the contract and the Rust attribute codegen emits
   (`#[inline]` / `#[inline(always)]`). Functions with neither marker produce
   no line — the lens reports contracts, not every function in the program.
 
@@ -3325,7 +3326,7 @@ written `pkg.jet`'s `deps: {}` block, growing the script from rung 0 to rung 1
 
 A package built `target: plugin` compiles to a sandboxed `wasm32` Component
 Model module instead of a native binary. A host program loads and calls it —
-safe by default, **no `@Unsafe` gate anywhere in the story** (I1): the
+safe by default, **no `#Unsafe` gate anywhere in the story** (I1): the
 sandbox is the safety boundary, by construction. This is a general
 application-plugin substrate (WIT world `jetplugin`), distinct from PATH
 `jet-*` helpers (D-DX5) and from the compiler-extension API (Tower #549,
@@ -3412,7 +3413,7 @@ supports `find_program`, `pkg_config`, and `header` probe kinds.
 
 ```jet
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("run declared toolchain probe and action") {
+    #Impure("run declared toolchain probe and action") {
     shell :: b.probe("shell", "find_program", "sh")?
     native :: b.toolchain("native", "x86_64-linux")?
     stamp :: b.action(
@@ -3449,7 +3450,7 @@ flags (`--allow-exec`, `--allow-fs`, `--allow-net`, and the remaining D-EFF4
 names). Package/workspace policy can grant or cap the same capability set.
 The vocabulary is one closed typed ten-effect enum shared by sema, policy,
 CLI, graph, cache, and executor. Every effectful `b.action`/`b.probe` call must
-be inside its active `@Impure("reason")` region. Signature declaration and
+be inside its active `#Impure("reason")` region. Signature declaration and
 effective grant are checked before any probe or process runs.
 
 `b.generate(name, source)` materializes `.jet/generated/<package>/<name>.jet`.

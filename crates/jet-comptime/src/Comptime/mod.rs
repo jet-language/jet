@@ -298,7 +298,7 @@ pub fn evaluate_with_imports(
 }
 
 /// Like `evaluate_with_imports` but with `allow_impure` and `initial_impure_depth`
-/// for D-CTEFFECT1. When called from inside a sema `@Impure` block, pass
+/// for D-CTEFFECT1. When called from inside a sema `#Impure` block, pass
 /// `initial_impure_depth: 1` (and `allow_impure: true`) so the interpreter
 /// starts with the gate already open for Tier-2 calls.
 pub fn evaluate_with_imports_opts(
@@ -311,8 +311,8 @@ pub fn evaluate_with_imports_opts(
     allow_impure: bool,
     initial_impure_depth: usize,
 ) -> Result<CtValue, Diagnostic> {
-    // Only run the purity check when there is no active @Impure gate (i.e.
-    // the expression is not nested inside a `@Impure` block at sema time).
+    // Only run the purity check when there is no active #Impure gate (i.e.
+    // the expression is not nested inside a `#Impure` block at sema time).
     // When initial_impure_depth > 0, the gate is active — skip check_purity
     // so that Tier-2 calls fire E3411 ("gate present, flag absent") instead
     // of E0951 ("impure call at comptime"), giving a better fix message.
@@ -429,7 +429,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
 /// program (the differential battery in `tests/dev.rs` enforces this, I2).
 ///
 /// The caller (src/interp.rs) is responsible for the E2201 boundary scan
-/// (FFI/tasks/`@Unsafe`); this function simply runs and may itself return
+/// (FFI/tasks/`#Unsafe`); this function simply runs and may itself return
 /// E0956 (`unsupported`) when it reaches a construct the evaluator can't run,
 /// or E2202 when the fuel budget is exhausted.
 /// c139: everything the dev interpreter needs beyond the flat `funcs` map to
@@ -767,7 +767,7 @@ fn run_repl_step_inner(
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
-        // D-REPLCOREEFFECT1=A: only a lexical `@Grant` opens this depth.
+        // D-REPLCOREEFFECT1=A: only a lexical `#Grant` opens this depth.
         impure_depth: 0,
         allow_impure: true,
         repl_mode: true,
@@ -846,7 +846,7 @@ pub fn run_block_with_imports(
         depth: 0,
         cur_func: "comptime block".to_string(),
         // D-CTEFFECT1: a `comptime { }` block is build-time code — hermetic by
-        // default, so Tier-2 `@Impure` effects inside it require the normal gate
+        // default, so Tier-2 `#Impure` effects inside it require the normal gate
         // (E3411 until --allow-impure is plumbed through to block evaluation).
         allow_impure: false,
         impure_depth: 0,
@@ -913,7 +913,7 @@ pub fn evaluate_owned_with_imports(
 
 /// Like `evaluate_owned_with_imports` but with D-CTEFFECT1 `allow_impure` flag
 /// and `initial_impure_depth`. Pass `initial_impure_depth: 1` when evaluating a
-/// comptime binding inside a `@Impure` block so the interpreter starts with the
+/// comptime binding inside a `#Impure` block so the interpreter starts with the
 /// gate already open for Tier-2 calls.
 pub fn evaluate_owned_with_imports_opts(
     init: &crate::AST::Expr,

@@ -187,7 +187,9 @@ pub(super) fn substitute_expr(
                     .for_each(|arg| substitute_expr(&mut arg.expr, types, values)),
                 OrFallback::Return(None, _)
                 | OrFallback::Break(_)
-                | OrFallback::Continue(_) => {}
+                | OrFallback::Continue(_)
+                | OrFallback::BreakLabel(..)
+                | OrFallback::ContinueLabel(..) => {}
             }
         }
         Expr::PatternTest { subject, .. } => substitute_expr(subject, types, values),

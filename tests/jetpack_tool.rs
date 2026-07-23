@@ -3,7 +3,7 @@
 //! Ephemeral `tool run` realizes a ref through a built-in provider and execs
 //! its binary once (nothing stays on PATH). Persistent `tool install`
 //! projects bins onto `~/.jet/bin` with generation metadata. A bin name that
-//! collides with a project `@Task fn` is E1297 (JPK-TOOL-COLLIDE); an
+//! collides with a project `#Task fn` is E1297 (JPK-TOOL-COLLIDE); an
 //! external provider prefix with no hangar realization path is E1298
 //! (JPK-TOOL-PROVIDER). Split out per the `tests/jetpack.rs` -> per-card-file
 //! convention (see `tests/jetpack_tasks.rs`); shared fixtures/helpers come
@@ -757,7 +757,7 @@ fn tool_install_task_collision_is_e1297_snapshot() {
     );
     fs::write(
         proj.join("main.jet"),
-        "@Task fn serve() {\n    print(\"task\")\n}\n\nfn run() {\n    print(\"run\")\n}\n",
+        "#Task fn serve() {\n    print(\"task\")\n}\n\nfn run() {\n    print(\"run\")\n}\n",
     )
     .unwrap();
     let output = jetpack()

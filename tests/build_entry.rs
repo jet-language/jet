@@ -59,7 +59,7 @@ fn root_fn_build_executes_graph_materializes_and_frontend_checks_generated_sourc
         r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
     b.generate("generated_message", "fn generated_message() -> String {{ return \"built\" }}")?
-    @Impure("write declared build output") {
+    #Impure("write declared build output") {
     stamp :: b.action(
         "stamp",
         [],
@@ -155,7 +155,7 @@ fn failed_action_replaces_stale_rebuild_provenance() {
         &entry,
         r#"
 fn build(b: BuildContext) --[Exec]-> BuildPlan ? {
-    @Impure("run declared failing action") {
+    #Impure("run declared failing action") {
         fail :: b.action("fail", [], ["never"], ["sh", "-c", "exit 23"], ["Exec"])?
         app :: b.add_executable("app", ["main.jet"], [fail])?
         return b.plan(app)
@@ -204,7 +204,7 @@ fn cache_restore_provenance_distinguishes_missing_and_invalid_blobs() {
             &entry,
             r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("write declared cached output") {
+    #Impure("write declared cached output") {
         emit :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf fresh > artifact"], ["Exec", "Fs"])?
         app :: b.add_executable("app", ["main.jet"], [emit])?
         return b.plan(app)
@@ -300,7 +300,7 @@ fn ungranted_action_fails_before_process_spawn() {
         &entry,
         r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("exercise denied authority") {
+    #Impure("exercise denied authority") {
     action :: b.action("escape", [], ["out"], ["sh", "-c", "printf bad > out"], ["Exec"])?
     app :: b.add_executable("app", ["main.jet"], [action])?
     return b.plan(app)
@@ -324,7 +324,7 @@ fn action_generated_jet_reenters_frontend_before_runtime_codegen() {
         &entry,
         r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("generate declared source") {
+    #Impure("generate declared source") {
     action :: b.action(
         "bad-gen",
         [],
@@ -353,7 +353,7 @@ fn jet_build_command_runs_selected_build_entry() {
         &entry,
         r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("write CLI test output") {
+    #Impure("write CLI test output") {
     action :: b.action(
         "stamp",
         [],
@@ -429,7 +429,7 @@ fn graph_query_inspects_declared_effects_without_execution_grants() {
         &entry,
         r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("declare an inspectable action") {
+    #Impure("declare an inspectable action") {
         action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 91"], ["Exec", "Fs"])?
         app :: b.add_executable("app", ["main.jet"], [action])?
         return b.plan(app)
@@ -463,7 +463,7 @@ use core.env as env
 use core.process as process
 
 fn build(b: BuildContext) -> BuildPlan ? {{
-    @Impure("hostile inspection probe") {{
+    #Impure("hostile inspection probe") {{
         write_result :: files.write("{}", "owned")
         env.set("JET_QUERY_MUST_NOT_SET", "owned")
         process_result :: process.run(["sh", "-c", "exit 97"])
@@ -520,7 +520,7 @@ fn graph_query_denies_each_ambient_authority_class() {
         write(
             &entry,
             &format!(
-                "use {module} as api\nfn build(b: BuildContext) -> BuildPlan ? {{\n    @Impure(\"hostile {name} probe\") {{ {call} }}\n    return b.plan()\n}}\nfn run() {{}}\n"
+                "use {module} as api\nfn build(b: BuildContext) -> BuildPlan ? {{\n    #Impure(\"hostile {name} probe\") {{ {call} }}\n    return b.plan()\n}}\nfn run() {{}}\n"
             ),
         );
         let diagnostics = jet::Driver::evaluate_build_query(
@@ -570,7 +570,7 @@ fn unselected_action_output_never_runs_checks_or_leaks() {
     let entry = root.join("main.jet");
     write(&entry, r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("declare selected closure") {
+    #Impure("declare selected closure") {
     bad :: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "Fs"])?
     ignored :: b.add_executable("ignored", ["missing-generated.jet"], [bad])?
     app :: b.add_executable("app", ["main.jet"], [])?
@@ -607,7 +607,7 @@ fn runtime_reload_error_rolls_back_action_outputs_and_lock() {
     let entry = root.join("main.jet");
     write(&entry, r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("rollback after runtime reload") {
+    #Impure("rollback after runtime reload") {
     stamp :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "Fs"])?
     app :: b.add_executable("app", ["main.jet", "missing.jet"], [stamp])?
     return b.plan(app)
@@ -666,7 +666,7 @@ fn programmable_build_executes_destination_owned_distinct_conversion() {
     write(
         &entry,
         r#"
-@Numeric BuildCode :: distinct U8
+#Numeric BuildCode :: distinct U8
 
 fn build(b: BuildContext) -> BuildPlan ? {
     code :: BuildCode.from_int(7)?
@@ -694,7 +694,7 @@ fn typed_toolchain_and_probe_flow_into_executed_action() {
         &entry,
         r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("probe selected toolchain") {
+    #Impure("probe selected toolchain") {
     tc :: b.toolchain("native", "x86_64-linux")?
     shell :: b.probe("shell", "find_program", "sh")?
     action :: b.action(
@@ -736,7 +736,7 @@ fn sandbox_refuses_output_parent_symlink_escape() {
         &entry,
         r#"
 fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
-    @Impure("exercise hostile output path") {
+    #Impure("exercise hostile output path") {
     action :: b.action(
         "escape",
         [],
@@ -827,7 +827,7 @@ fn package_grant_and_workspace_ceiling_resolve_before_execution() {
         &entry,
         r#"
 fn build(b: BuildContext) --[Exec]-> BuildPlan ? {
-    @Impure("policy chain test") {
+    #Impure("policy chain test") {
     action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf ok > stamp"], ["Exec"])?
     app :: b.add_executable("app", ["main.jet"], [action])?
     return b.plan(app)
@@ -862,7 +862,7 @@ fn malformed_package_and_workspace_build_policy_fail_closed() {
     let entry = root.join("main.jet");
     write(&entry, r#"
 fn build(b: BuildContext) --[Exec]-> BuildPlan ? {
-    @Impure("must never run under malformed policy") {
+    #Impure("must never run under malformed policy") {
     action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
     app :: b.add_executable("app", ["main.jet"], [action])?
     return b.plan(app)
@@ -893,7 +893,7 @@ fn outer_package_grant_cannot_override_inner_workspace_deny() {
     let entry = child.join("main.jet");
     write(&entry, r#"
 fn build(b: BuildContext) --[Exec]-> BuildPlan ? {
-    @Impure("workspace ceiling wins last") {
+    #Impure("workspace ceiling wins last") {
     action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])?
     app :: b.add_executable("app", ["main.jet"], [action])?
     return b.plan(app)
@@ -955,7 +955,7 @@ fn locked_action_output_drift_rolls_back_filesystem() {
     let entry = root.join("main.jet");
     let source = |value: &str| format!(r#"
 fn build(b: BuildContext) --[Exec]-> BuildPlan ? {{
-    @Impure("locked action output") {{
+    #Impure("locked action output") {{
     action :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf {value} > artifact"], ["Exec"])?
     app :: b.add_executable("app", ["main.jet"], [action])?
     return b.plan(app)

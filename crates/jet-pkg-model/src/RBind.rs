@@ -477,7 +477,7 @@ repeat {{
 
 fn render_jet(lib: &str, functions: &[String]) -> String {
     let abi = format!("jet_r_{lib}");
-    let mut out=format!("@Extern module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
+    let mut out=format!("#Extern module c.{abi} {{\n    fn open() -> Int = \"{abi}_open\"\n    fn take_error() -> Int = \"{abi}_take_error\"\n    fn cancel(handle: Int) = \"{abi}_cancel\"\n    fn close(handle: Int) = \"{abi}_close\"\n");
     for name in functions {
         out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n"));
         out.push_str(&format!("    fn {name}_table(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}_table\"\n"));

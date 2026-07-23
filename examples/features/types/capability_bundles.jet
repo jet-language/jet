@@ -1,13 +1,13 @@
 // D-CAPBUNDLE1 — capability bundles on nominal `distinct` types.
 // A `distinct` type starts inert (no inherited operators). Tagging it with
-// one of the four fixed capability bundles — `@Numeric`, `@Comparable`,
-// `@Printable`, `@CodableAsBase` — re-exposes a curated slice of the base
+// one of the four fixed capability bundles — `#Numeric`, `#Comparable`,
+// `#Printable`, `#CodableAsBase` — re-exposes a curated slice of the base
 // type's operations while preserving nominal identity (`Usd + Usd` is a
 // `Usd`; `Usd + Eur` is still a type error even though both grant `+`).
-// Bundles stack: `@Numeric @Printable` on one type grants both.
-@Numeric @Printable Usd :: distinct Int;
+// Bundles stack: `#Numeric #Printable` on one type grants both.
+#Numeric #Printable Usd :: distinct Int;
 
-@Comparable CustomerId :: distinct Int;
+#Comparable CustomerId :: distinct Int;
 
 fn run() {
     price :: Usd.from_int(20)
@@ -18,7 +18,7 @@ fn run() {
     b :: CustomerId.from_int(1)
     print("{(a == b)}")
 }
-// `CustomerId` has no `@Numeric`, so arithmetic on it is still rejected
+// `CustomerId` has no `#Numeric`, so arithmetic on it is still rejected
 // at compile time (E0138/E0127) — see tests/ui/distinct_arith_on_id.jet
 // and tests/ui/capbundle_operation_not_granted.jet for the sibling
 // negative cases (a bare `CustomerId.from_int(1) * 2` here would not compile).

@@ -159,7 +159,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         // D-LIN1-DROP: `drop(x)` → Rust's safe `drop(x)`; the value moves in and
-        // its `Drop` runs. No `unsafe` — the audit is sema-side (the `@Unsafe`
+        // its `Drop` runs. No `unsafe` — the audit is sema-side (the `#Unsafe`
         // gate). The arg was lowered as a plain place/value (a move).
         TExprKind::Drop(arg) => {
             format!("drop({})", emit_tir_expr(arg, cx))
@@ -883,12 +883,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             )
         }
         // D-CAP9: postfix `p.*` deref → Rust `(*(p))`. The `unsafe` is supplied by
-        // the enclosing `@Unsafe` region (sema-gated); this node adds no `unsafe`.
+        // the enclosing `#Unsafe` region (sema-gated); this node adds no `unsafe`.
         TExprKind::Deref(operand) => format!("(*({}))", emit_tir_expr(operand, cx)),
         // D-CAP9: prefix `*x` raw-of → `(&({}) as *const _ as *mut _)`. The result
         // is `*mut T` to match the canonical raw-pointer type (`Ptr<T>` lowers to
         // `*mut`). Forming the pointer is safe Rust; only dereferencing it needs
-        // the surrounding `@Unsafe`. The const→mut cast is the standard idiom.
+        // the surrounding `#Unsafe`. The const→mut cast is the standard idiom.
         TExprKind::RawOf(operand) => {
             format!("(&({}) as *const _ as *mut _)", emit_tir_expr(operand, cx))
         }
@@ -1165,7 +1165,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `Expr::Present`/`Expr::Absent` exactly.
         TExprKind::Present(inner) => format!("Some({})", emit_tir_expr(inner, cx)),
         TExprKind::Absent => "None".to_string(),
-        // c109 Phase 23: a `@Todo` typed hole → diverging `todo!(…)`. Byte-for-byte the
+        // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. Byte-for-byte the
         // AST `Expr::Todo` arm (Expression.rs): file/line/expected-type baked into the
         // panic string. `cx.file` is program-level (read here, like every other use).
         TExprKind::Todo {

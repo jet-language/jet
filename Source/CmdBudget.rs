@@ -317,7 +317,7 @@ fn build_report(root:&Path, store:&BudgetStore, bundle:&jet::AST::ProgramBundle,
         if matches!(kind,"BenchMeasurement"|"AllocationProbe") {
             if let Some(evidence)=bench_evidence {
                 let name=provider_identity(&provider_name);
-                let bench=evidence.iter().find(|bench|bench.name==name).ok_or_else(||format!("@Bench `{name}` was not emitted by its selected benchmark target"))?;
+                let bench=evidence.iter().find(|bench|bench.name==name).ok_or_else(||format!("#Bench `{name}` was not emitted by its selected benchmark target"))?;
                 for index in indices {
                     if kind=="BenchMeasurement" {
                         if !ordered[index].spec.metric.starts_with("BenchTime("){return Err(format!("BenchMeasurement does not support metric `{}`",ordered[index].spec.metric))}
@@ -541,7 +541,7 @@ fn bench_measurement_provider(request:&ProviderRequest,_:&ProviderCancellation)-
     let source=std::fs::read_to_string(path).map_err(|error|ProviderFailure::malformed(format!("cannot read benchmark source: {error}")))?;
     let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never};
     let evidence=crate::CmdDevTools::collect_bench_evidence(path,&source,mode,false);
-    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("@Bench `{name}` was not emitted by its selected benchmark target")))?;
+    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("#Bench `{name}` was not emitted by its selected benchmark target")))?;
     let mut events=Vec::new();
     for(index,spec)in request.specs.iter().enumerate(){if !spec.metric.starts_with("BenchTime("){return Err(ProviderFailure::malformed(format!("BenchMeasurement does not support metric `{}`",spec.metric)))}for(elapsed,iters)in &bench.samples{let value=Rational::parse(&elapsed.to_string(),&iters.to_string()).map_err(ProviderFailure::malformed)?;events.push(ProviderEvent::Sample{spec:index as u32,metric:spec.metric.clone(),value});}}
     let samples=events.len()as u64;events.push(ProviderEvent::Complete{request_id:request.request_id.clone(),samples});Ok(events)
@@ -554,7 +554,7 @@ fn allocation_probe_provider(request:&ProviderRequest,_:&ProviderCancellation)->
     let source=std::fs::read_to_string(path).map_err(|error|ProviderFailure::malformed(format!("cannot read allocation workload source: {error}")))?;
     let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never};
     let evidence=crate::CmdDevTools::collect_bench_evidence(path,&source,mode,false);
-    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("@Bench `{name}` was not emitted by its selected allocation workload")))?;
+    let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("#Bench `{name}` was not emitted by its selected allocation workload")))?;
     if bench.allocation_samples.len()!=20{return Err(ProviderFailure::malformed(format!("AllocationProbe `{name}` emitted {} trials; policy requires 20",bench.allocation_samples.len())))}
     let mut events=Vec::new();
     for(index,spec)in request.specs.iter().enumerate(){

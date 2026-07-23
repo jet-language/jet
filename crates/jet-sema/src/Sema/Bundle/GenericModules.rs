@@ -2282,8 +2282,8 @@ module everything<T> {
     module nested { fn nested() {} }
     module inner<U> { fn inner(value: U) -> U { return ~value } }
     module int_inner = inner<Int>
-    @Test("smoke") { expect(answer == 42) }
-    @Bench("work") { expect(answer == 42) }
+    #Test("smoke") { expect(answer == 42) }
+    #Bench("work") { expect(answer == 42) }
 }
 fn run() {}
 "#;

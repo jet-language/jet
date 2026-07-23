@@ -5,7 +5,7 @@ trait JetShow {
 trait JetDisplay {
     fn jet_display(&self) -> String;
 }
-/// D-DISPLAYDBG1: developer interpolation (`{value@Debug}`).
+/// D-ATTR4=A: developer interpolation (`{value#Debug}`).
 trait JetDebug {
     fn jet_debug(&self) -> String;
 }
@@ -39,9 +39,9 @@ impl<F: FnOnce()> Drop for JetDeferredClose<F> {
     }
 }
 
-// D-PROVENANCE1=B: `@Track x :: <Float>` records local Float provenance by
+// D-PROVENANCE1=B: `#Track x :: <Float>` records local Float provenance by
 // address. Plain copies remain plain values; a copied Float is untracked unless
-// rebound under `@Track`.
+// rebound under `#Track`.
 static JET_FLOAT_ORIGINS: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<usize, String>>,
 > = std::sync::OnceLock::new();

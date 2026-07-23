@@ -235,7 +235,7 @@ pub(crate) fn annotate_scoped_gc_promotions(bundle: &mut ProgramBundle) -> Vec<D
                         "E2111",
                         format!("`{}` cannot leave its scoped GC policy here", binding.name),
                         "the called function returns a collector-owned graph, but this function is ownership-only".to_string(),
-                        "add `@Policy(gc)` to this function or convert the returned graph to ordinary ownership before the boundary".to_string(),
+                        "add `#Policy(gc)` to this function or convert the returned graph to ordinary ownership before the boundary".to_string(),
                         Some(binding.name_span),
                     ));
                 }

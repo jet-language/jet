@@ -237,7 +237,7 @@ fn parse_target(name: &str, value: &str) -> Result<Target, ManifestError> {
         k if k == Syntax::TARGET_TEST => Target::Test,
         k if k == Syntax::TARGET_EXAMPLE => Target::Example,
         // c80 / D-TGT2: `benchmark` now has a backend — routes `jet bench` at
-        // the entry via the existing `@Bench`/`compile_benches_with_path` engine.
+        // the entry via the existing `#Bench`/`compile_benches_with_path` engine.
         k if k == Syntax::TARGET_BENCHMARK => Target::Benchmark,
         k if Syntax::TARGET_RESERVED.contains(&k) => {
             return Err(ManifestError::ReservedTarget {

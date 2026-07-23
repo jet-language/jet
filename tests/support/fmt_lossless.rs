@@ -4,9 +4,6 @@ use std::path::PathBuf;
 use jet::Lexer::{StrTokPart, TokKind, Token};
 
 const UI_PARSE_INVALID: &[&str] = &[
-    "tests/ui/E0927_retired_marker.jet",
-    "tests/ui/E0927_unknown_marker_directive.jet",
-    "tests/ui/E0927_unknown_marker_typo.jet",
     "tests/ui/E2714_derive_old_for.jet",
     "tests/ui/assign_in_condition.jet",
     "tests/ui/bad_escape.jet",
@@ -75,6 +72,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/marker_hardened_hash.jet",
     "tests/ui/marker_tested_at.jet",
     "tests/ui/marker_tested_hash.jet",
+    "tests/ui/marker_wrong_at_plane.jet",
     "tests/ui/matcharm_mixing_needs_parens.jet",
     "tests/ui/meta_bad_maturity.jet",
     "tests/ui/meta_on_expression.jet",
@@ -106,6 +104,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/pub_file_redundant_pub.jet",
     "tests/ui/pub_file_section_label.jet",
     "tests/ui/pub_package_bad_qualifier.jet",
+    "tests/ui/quantity_unknown_dimension.jet",
+    "tests/ui/quantity_unknown_kind.jet",
     "tests/ui/range_arm_dot_dot_eq.jet",
     "tests/ui/range_arm_step.jet",
     "tests/ui/range_type_empty_range.jet",
@@ -130,9 +130,18 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/tuple_single_field.jet",
     "tests/ui/two_capability_markers.jet",
     "tests/ui/two_parse_errors.jet",
-    "tests/ui/undefined_loop_label.jet",
     "tests/ui/uninit_marker_retired.jet",
     "tests/ui/uninit_no_type.jet",
+    "tests/ui/unit_family_bad_denominator.jet",
+    "tests/ui/unit_family_base_metadata.jet",
+    "tests/ui/unit_family_duplicate_metadata.jet",
+    "tests/ui/unit_family_float_metadata.jet",
+    "tests/ui/unit_family_metadata_without_base.jet",
+    "tests/ui/unit_family_missing_base.jet",
+    "tests/ui/unit_family_unknown_header_field.jet",
+    "tests/ui/unit_family_unknown_metadata.jet",
+    "tests/ui/unit_family_zero_denominator.jet",
+    "tests/ui/unit_family_zero_scale.jet",
     "tests/ui/unknown_char.jet",
     "tests/ui/unsafe_forbidden/pkg.jet",
     "tests/ui/unsafe_per_site/pkg.jet",
@@ -313,7 +322,7 @@ fn is_spanless_file_marker_group(tokens: &[Token]) -> bool {
         .collect();
     matches!(
         kinds.as_slice(),
-        [TokKind::At, TokKind::Ident(name), ..]
+        [TokKind::Hash, TokKind::Ident(name), ..]
             if matches!(name.as_str(), jet::Syntax::ATTR_TARGET | jet::Syntax::ATTR_HTML)
     )
 }
@@ -354,7 +363,7 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
         [TokKind::KwPub, rest @ ..] if rest.iter().any(|kind| matches!(kind, TokKind::KwUse)) => {
             1
         }
-        [TokKind::At, TokKind::Ident(name), ..]
+        [TokKind::Hash, TokKind::Ident(name), ..]
             if matches!(
                 name.as_str(),
                 jet::Syntax::MARKER_PUB_FILE | jet::Syntax::MARKER_NO_PRELUDE
@@ -362,12 +371,12 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
         {
             0
         }
-        [TokKind::At, TokKind::Ident(name), ..]
+        [TokKind::Hash, TokKind::Ident(name), ..]
             if matches!(name.as_str(), jet::Syntax::ATTR_TARGET | jet::Syntax::ATTR_HTML) =>
         {
             2
         }
-        [TokKind::At, TokKind::Ident(policy), TokKind::LParen, TokKind::Ident(no_alloc), ..]
+        [TokKind::Hash, TokKind::Ident(policy), TokKind::LParen, TokKind::Ident(no_alloc), ..]
             if policy == jet::Syntax::ATTR_POLICY && no_alloc == jet::Syntax::POLICY_NO_ALLOC =>
         {
             2
@@ -380,7 +389,7 @@ fn expand_marker_groups(tokens: Vec<Token>) -> Vec<Token> {
     let mut out = Vec::with_capacity(tokens.len());
     let mut index = 0;
     while index < tokens.len() {
-        if matches!(tokens[index].kind, TokKind::At | TokKind::Hash)
+        if matches!(tokens[index].kind, TokKind::Hash)
             && matches!(tokens.get(index + 1).map(|t| &t.kind), Some(TokKind::LBracket))
         {
             if let Some(end) = matching_bracket(&tokens, index + 1) {
@@ -1172,8 +1181,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
     let allowed = [
         (
             "top-level ordering",
-            "@Target(Web)\nuse core.ui as ui\nfn run() {}\n",
-            "use core.ui as ui\n@Target(Web)\nfn run() {}\n",
+            "#Target(Web)\nuse core.ui as ui\nfn run() {}\n",
+            "use core.ui as ui\n#Target(Web)\nfn run() {}\n",
         ),
         (
             "import-hoisted top-level comments",
@@ -1182,13 +1191,13 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "spanless marker comment position",
-            "// web target\n@Target(Web)\nfn run() {}\n",
-            "@Target(Web)\n// web target\nfn run() {}\n",
+            "// web target\n#Target(Web)\nfn run() {}\n",
+            "#Target(Web)\n// web target\nfn run() {}\n",
         ),
         (
             "marker grouping",
-            "@Codable\n@RenameAll(camel)\nstruct S {}\n",
-            "@[Codable, RenameAll(camel)]\nstruct S {}\n",
+            "#Codable\n#RenameAll(camel)\nstruct S {}\n",
+            "#[Codable, RenameAll(camel)]\nstruct S {}\n",
         ),
         (
             "static generic call",
@@ -1281,13 +1290,13 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "spanless marker movement does not delete comments",
-            "// web target\n@Target(Web)\nfn run() {}\n",
-            "@Target(Web)\nfn run() {}\n",
+            "// web target\n#Target(Web)\nfn run() {}\n",
+            "#Target(Web)\nfn run() {}\n",
         ),
         (
             "marker grouping does not reorder markers",
-            "@[Codable, RenameAll(camel)]\nstruct S {}\n",
-            "@[RenameAll(camel), Codable]\nstruct S {}\n",
+            "#[Codable, RenameAll(camel)]\nstruct S {}\n",
+            "#[RenameAll(camel), Codable]\nstruct S {}\n",
         ),
         (
             "generic-call rewrite requires a call",
@@ -1375,8 +1384,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "marker payload deletion",
-            "@Pre(x > 0, \"positive\") fn f(x: Int) {}\n",
-            "@Pre(x > 0) fn f(x: Int) {}\n",
+            "#Pre(x > 0, \"positive\") fn f(x: Int) {}\n",
+            "#Pre(x > 0) fn f(x: Int) {}\n",
         ),
         (
             "comment reorder",

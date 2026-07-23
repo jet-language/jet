@@ -1,16 +1,16 @@
 # Maturity metadata
 
-`@Meta(maturity: …)` tells readers how stable a public API is without changing
+`#Meta(maturity: …)` tells readers how stable a public API is without changing
 compiler behavior.
 
 ```jet
-@Meta(maturity: .Experimental)
+#Meta(maturity: .Experimental)
 pub fn parse_streaming(src: Stream) -> Doc ? ParseError { ... }
 
-@Meta(maturity: .Tested)
+#Meta(maturity: .Tested)
 pub fn parse(src: String) -> Doc ? ParseError { ... }
 
-@Meta(maturity: .Hardened)
+#Meta(maturity: .Hardened)
 pub fn parse_strict(src: String) -> Doc ? ParseError { ... }
 ```
 
@@ -24,7 +24,7 @@ Current contract (D-MARK-META1=B):
 
 Use the field in API docs, examples, package READMEs, and generated
 documentation. Do not rely on it for access control, effect ceilings,
-dependency policy, or release gating. Standalone `@Experimental`/`@Tested`/`@Hardened` and `#Experimental`/`#Tested`/`#Hardened` are not grammar.
+dependency policy, or release gating. Standalone `#Experimental`/`#Tested`/`#Hardened` and `#Experimental`/`#Tested`/`#Hardened` are not grammar.
 
 See also: [Core library](core-library.md),
 `examples/features/syntax/maturity_tags.jet`.

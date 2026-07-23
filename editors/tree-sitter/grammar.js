@@ -20,7 +20,7 @@ const JET_HIGHLIGHT_LITERAL = ["None", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "Char", "Computed", "Csv", "DataTree", "DbValue", "Decimal", "Deque", "Derived", "Effect", "Error", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Int", "JSON", "JSONError", "Json", "Key", "Lru", "Measurement", "PriorityQueue", "Ptr", "SelectBuilder", "Set", "Shared", "Signal", "SortedSet", "Stream", "String", "Subscription", "TaskGroup", "Toml", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "WatchEvent", "WatchHandle", "WatchSet", "Yaml"];
 const JET_HIGHLIGHT_BUILTIN = ["check", "input", "print"];
 const JET_HIGHLIGHT_MARKER_RULE = ["Abi", "Add", "Bench", "Bindgen", "Caps", "Cli", "Codable", "CodableAsBase", "Comparable", "Context", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Doc", "Encode", "Every", "Extern", "FFI", "Flatten", "Grant", "Html", "Impure", "Inline", "InlineAlways", "Invariant", "Layout", "Live", "Max", "Meta", "Min", "Mul", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Pure", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Sanitizer", "Shield", "SingleUse", "Skip", "Sql", "State", "Summarize", "Tag", "Tainted", "Target", "Task", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "inline", "static"];
-const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "@", "^", "~"];
+const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", ".[", ".{", "/", "/=", "<", "<<", "<<=", "<=", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||"];
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
@@ -55,17 +55,17 @@ module.exports = grammar({
     source_file: ($) => repeat($._item),
 
     // ── Applied rules (D-SHAPE2, D-ATTR1/2/3, D-CASING1) ──────────────────
-    // `@Rule`, `@Rule(args)`, and `@[Rule, Rule(args)]` bracket lists.
+    // `#Rule`, `#Rule(args)`, and `#[Rule, Rule(args)]` bracket lists.
     _marker: ($) => choice($.attribute, $.attribute_list),
 
     attribute: ($) =>
       prec.right(
-        seq("@", field("name", $.marker_name), optional($.marker_args)),
+        seq("#", field("name", $.marker_name), optional($.marker_args)),
       ),
 
     attribute_list: ($) =>
       seq(
-        "@",
+        "#",
         "[",
         commaSep1(seq(field("name", $.marker_name), optional($.marker_args))),
         "]",
@@ -143,7 +143,7 @@ module.exports = grammar({
       ),
 
     // A marker that introduces a top-level brace-list declaration:
-    // `@UnitFamily(Currency) { usd, eur }` (D-QUAL3) mints one type per member.
+    // `#UnitFamily(Currency) { usd, eur }` (D-QUAL3) mints one type per member.
     marker_decl: ($) => seq($.attribute, "{", commaSep($.identifier), "}"),
 
     // ── Use (S16, D-MOD3) ────────────────────────────────────────────────────
@@ -399,7 +399,7 @@ module.exports = grammar({
         field("value", $._expr),
       ),
 
-    // ── Distinct type (D-DIST1): `UserId :: distinct Int`, `@Numeric M :: …` ──
+    // ── Distinct type (D-DIST1): `UserId :: distinct Int`, `#Numeric M :: …` ──
     distinct_def: ($) =>
       seq(
         repeat(choice($._marker, $._lower_marker)),
@@ -575,8 +575,8 @@ module.exports = grammar({
         $.expr_stmt,
       ),
 
-    // A rule-introduced block: `@Caps(Io) { … }` (D-EFF1), `@Grant(Fs) { caps
-    // -> … }` (D-SCAP1), `@Transact(order) { … }` (D-TXN4), `#context(…) { … }`.
+    // A rule-introduced block: `#Caps(Io) { … }` (D-EFF1), `#Grant(Fs) { caps
+    // -> … }` (D-SCAP1), `#Transact(order) { … }` (D-TXN4), `#context(…) { … }`.
     marker_block_stmt: ($) =>
       seq(choice($.attribute, $._lower_marker), $.scoped_block),
 
@@ -640,8 +640,16 @@ module.exports = grammar({
 
     dispatch_else: ($) => seq("else", "->", choice($.block, seq($._expr))),
 
-    break_stmt: ($) => prec.right(seq("break", optional($.loop_label))),
-    next_stmt: ($) => prec.right(seq("next", optional($.loop_label))),
+    break_stmt: ($) =>
+      prec(3, choice(
+        "break",
+        seq(field("label", $.identifier), ".", "break", "(", ")"),
+      )),
+    next_stmt: ($) =>
+      prec(3, choice(
+        "next",
+        seq(field("label", $.identifier), ".", "next", "(", ")"),
+      )),
 
     // `loop { }`, `loop cond { }`, or the canonical semicolon headers.
     loop_stmt: ($) =>
@@ -668,7 +676,7 @@ module.exports = grammar({
         field("cond", $._expr),
       ),
 
-    loop_label: ($) => prec(2, seq($.identifier, "@")),
+    loop_label: ($) => prec(2, seq(field("name", $.identifier), "::")),
 
     comptime_stmt: ($) =>
       seq(
@@ -748,8 +756,8 @@ module.exports = grammar({
 
     ref_target: (_) => token.immediate(/[A-Za-z0-9_./:-]+/),
 
-    // A value-fact rule riding an expression: `@Tainted input` (D-TAINT1), or
-    // a bare rule value such as the typed hole `@Todo` (D-TOOL2).
+    // A value-fact rule riding an expression: `#Tainted input` (D-TAINT1), or
+    // a bare rule value such as the typed hole `#Todo` (D-TOOL2).
     marked_expr: ($) => prec.right(seq($.attribute, optional($._expr))),
 
     copy_expr: ($) => prec.right(6, seq("~", $._expr)),

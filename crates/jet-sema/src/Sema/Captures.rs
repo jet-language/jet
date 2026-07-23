@@ -216,7 +216,9 @@ pub(crate) fn walk_expr_for_const_refs(
                 OrFallback::Return(None, _)
                 | OrFallback::Panic { .. }
                 | OrFallback::Break(_)
-                | OrFallback::Continue(_) => {}
+                | OrFallback::Continue(_)
+                | OrFallback::BreakLabel(..)
+                | OrFallback::ContinueLabel(..) => {}
             }
             let _ = is_option;
         }

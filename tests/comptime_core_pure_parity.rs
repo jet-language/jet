@@ -1236,7 +1236,7 @@ const LINALG_DECLS: &str = r#"fn linalg_view() -> String {
     w: F32x4 :: F32x4(10.0, 20.0, 30.0, 40.0)
     added: F32x4 :: v + w
     d: F64x2 :: F64x2.from_array([1.5, 2.5])
-    return "{sum.to_array()}|{a.dot(b)}|{crossed.to_array()}|{Vec3(0.0, 3.0, 4.0).length()}|{Vec3(0.0, 3.0, 4.0).normalize().to_array()}|{scaled.to_array()}|{scale.matmul(scale).to_array()}|{added.to_array()}|{(v * w).to_array()}|{F32x4.splat(7.0).to_array()}|{v[2]}|{v.sum()}|{v.product()}|{v.min()}|{v.max()}|{v.reduce(@Max)}|{v.reduce(@Mul)}|{(d + d).to_array()}|{d.sum()}|{d.product()}|{d.min()}|{d.max()}"
+    return "{sum.to_array()}|{a.dot(b)}|{crossed.to_array()}|{Vec3(0.0, 3.0, 4.0).length()}|{Vec3(0.0, 3.0, 4.0).normalize().to_array()}|{scaled.to_array()}|{scale.matmul(scale).to_array()}|{added.to_array()}|{(v * w).to_array()}|{F32x4.splat(7.0).to_array()}|{v[2]}|{v.sum()}|{v.product()}|{v.min()}|{v.max()}|{v.reduce(#Max)}|{v.reduce(#Mul)}|{(d + d).to_array()}|{d.sum()}|{d.product()}|{d.min()}|{d.max()}"
 }"#;
 const LINALG_EXPECTED: &str = "[5.0, 7.0, 9.0]|32.0|[-3.0, 6.0, -3.0]|5.0|[0.0, 0.6, 0.8]|[2.0, 4.0, 6.0]|[4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0]|[11.0, 22.0, 33.0, 44.0]|[10.0, 40.0, 90.0, 160.0]|[7.0, 7.0, 7.0, 7.0]|3.0|10.0|24.0|1.0|4.0|4.0|24.0|[3.0, 5.0]|4.0|3.75|1.5|2.5";
 

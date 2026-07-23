@@ -117,23 +117,23 @@ pub(crate) fn loop_control_outside(kw: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// D-LOOPLABEL2 (E0987): `break name@` / `next name@` names a loop label that is
-/// not in scope. The fix lists the labels that *are* reachable here.
+/// D-LOOPLABEL3 (E0987): `name.break()` / `name.next()` targets a loop name that
+/// is not in scope. The fix lists the names that *are* reachable here.
 pub(crate) fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) -> Diagnostic {
     let fix = if in_scope.is_empty() {
-        "label an enclosing loop with `name@ loop { … }` first".to_string()
+        "label an enclosing loop with `name :: loop { … }` first".to_string()
     } else {
         let labels = in_scope
             .iter()
-            .map(|l| format!("`{l}@`"))
+            .map(|l| format!("`{l}.break()` or `{l}.next()`"))
             .collect::<Vec<_>>()
             .join(", ");
         format!("use a label in scope: {labels}")
     };
     Diagnostic::error(
         "E0987",
-        format!("no loop labeled `{name}@` is in scope"),
-        "a labeled `break`/`next` must name an enclosing `name@ loop` (D-LOOPLABEL2)"
+        format!("no loop labeled `{name}` is in scope"),
+        "a named `break`/`next` must name an enclosing `name :: loop` (D-LOOPLABEL3)"
             .to_string(),
         fix,
         Some(span),
@@ -272,7 +272,7 @@ fn builtin_resource_type(name: &str) -> bool {
 /// D-MEM1/S7 (D-NOALLOC-SEM1=A): true when `ty` owns heap data — directly
 /// (`String`/`[T]`/`[K,V]`/`Shared<T>`/a boxed trait object/a `[T#N]`, which
 /// erases to `Vec<T>` at codegen) or transitively (a struct/enum/tuple/distinct/
-/// alias with a heap-owning part). Backs `@Policy(no_alloc)` struct/enum-
+/// alias with a heap-owning part). Backs `#Policy(no_alloc)` struct/enum-
 /// literal and `copy` checks (E0921) — deliberately narrower than
 /// `is_cloneable`, which asks a different question ("can Rust `.clone()` this",
 /// true for nearly everything including heap types).
@@ -814,7 +814,7 @@ pub(crate) fn is_displayable(
 
 /// D-CAPBUNDLE1: an operation used on a nominal `distinct` type whose
 /// capability bundles don't grant it. `operation` names the thing that was
-/// attempted ("string interpolation", …), `needed_bundle` is the `@Bundle`
+/// attempted ("string interpolation", …), `needed_bundle` is the `#Bundle`
 /// spelling that would grant it, and `granted` lists the bundles already
 /// present on the type (empty when the type is still fully inert).
 pub(crate) fn e0138(
@@ -842,21 +842,21 @@ pub(crate) fn e0138(
     )
 }
 
-/// D-PREPOST1: a `@Pre`/`@Post` contract condition used an effect — contract
+/// D-PREPOST1: a `#Pre`/`#Post` contract condition used an effect — contract
 /// clauses are checked at every call, so they must stay pure (same checker
-/// as `@Pure fn`, E3401). `clause_kw` is `"Pre"`/`"Post"`; `span` is the
+/// as `#Pure fn`, E3401). `clause_kw` is `"Pre"`/`"Post"`; `span` is the
 /// impure call site inside the condition (from `Purity::check_pure_expr`).
 pub(crate) fn e0139(clause_kw: &str, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E0139",
-        format!("a `@{clause_kw}` condition can't do I/O"),
+        format!("a `#{clause_kw}` condition can't do I/O"),
         "a contract is checked at every call and must be a pure claim about values".to_string(),
         "move the effect out; keep only a pure test".to_string(),
         span,
     )
 }
 
-/// D-DISPLAYDBG1: `{value@Debug}` uses auto-derived or explicit `Debug`.
+/// D-ATTR4=A: `{value#Debug}` uses auto-derived or explicit `Debug`.
 pub(crate) fn is_debuggable(
     ty: &Type,
     type_reg: &TypeRegistry,

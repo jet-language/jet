@@ -1055,9 +1055,9 @@ fn emit_tir_stmt(
             emit_tir_stmts_nested(stmts, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
-        // c109 Phase 18: an audited `@Unsafe { … }` region — `unsafe { … }`, byte-for-byte
+        // c109 Phase 18: an audited `#Unsafe { … }` region — `unsafe { … }`, byte-for-byte
         // `emit_stmts`'s `Stmt::Unsafe` arm (the `#Audit` annotation emits nothing). I1:
-        // emitted ONLY for a source `@Unsafe` gate.
+        // emitted ONLY for a source `#Unsafe` gate.
         TStmt::Unsafe(body) => {
             out.push_str(&format!("{}unsafe {{\n", pad));
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
@@ -1083,7 +1083,7 @@ fn emit_tir_stmt(
             emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
-        // D-SHIELDNAME1=A: `@Shield { … }` — enter a cancellation-shield region, install
+        // D-SHIELDNAME1=A: `#Shield { … }` — enter a cancellation-shield region, install
         // a scope guard that leaves it, then emit the body. The guard fires on every
         // exit path (normal, return, ?, panic unwind) via Rust's Drop ordering, so a
         // cancel/deadline deferred while shielded lands when the region exits.
@@ -1102,7 +1102,7 @@ fn emit_tir_stmt(
             emit_tir_stmts_nested(body, cx, out, inner, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));
         }
-        // D-DOTSCOPE1: a `@Test` scope member, emitted inside `fn jet_test_N() ->
+        // D-DOTSCOPE1: a `#Test` scope member, emitted inside `fn jet_test_N() ->
         // Result<(), String>`. Kind decides the framing; a `require` failure or
         // panic inside a region returns `Err`/unwinds, which each kind handles.
         TStmt::ScopeMember { kind, body } => {
@@ -1179,7 +1179,7 @@ fn emit_tir_stmt(
                 }
             }
         }
-        // D-REACTCORE1: `@Reactive { … }` — register a reactive effect at this point.
+        // D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
         TStmt::Reactive { closure } => {
             out.push_str(&format!(
                 "{}{}jet_std::jet_reactive_effect_rooted({});\n",
@@ -1206,7 +1206,7 @@ fn emit_tir_stmt(
             ));
             emit_tir_stmts_inline(body, cx, out, indent, active_deferred_closes);
         }
-        // D-TXN1–D-TXN4 (ratified 2026-06-24): `@Transact(name) { … }` block — open a
+        // D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` block — open a
         // transaction guard, emit the body, then `commit()` on the clean fall-through
         // path. An early `?`/`return` skips `commit()`, so registered `on_commit` hooks
         // drop un-run (D-TXN3). Codegen is dumb (I3): no effect/rollback machinery here.
@@ -1279,7 +1279,7 @@ fn emit_tir_stmt(
             }
             out.push_str(&format!("{}}}\n", pad));
         }
-        // c109 Phase 19: a `@Context(field: value) { … }` block — a plain block with one
+        // c109 Phase 19: a `#Context(field: value) { … }` block — a plain block with one
         // RAII/no-op guard per field (declaration order) BEFORE the body, byte-for-byte
         // `emit_stmts`'s `Stmt::ContextBlock` arm.
         TStmt::ContextBlock { guards, body } => {

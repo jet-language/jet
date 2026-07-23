@@ -95,12 +95,12 @@ pub fn collect_policy_facts(src: &str) -> Result<PolicyFactGraph, Vec<Diagnostic
     let program = Parser::parse(&toks)?;
     let mut graph = collect_policy_facts_from_program(&program);
     // Value-fact tags are type-transparent; surface them from source so the
-    // shared graph records introduction sites alongside `@Sanitizer` sinks.
-    if src.contains("@Tainted") {
+    // shared graph records introduction sites alongside `#Sanitizer` sinks.
+    if src.contains("#Tainted") {
         graph.record(
             PolicyDomain::Taint,
             "source",
-            "@Tainted value-fact enters the shared IFC/taint lattice",
+            "#Tainted value-fact enters the shared IFC/taint lattice",
         );
     }
     Ok(graph)
@@ -140,7 +140,7 @@ fn collect_items(graph: &mut PolicyFactGraph, items: &[Item]) {
                     graph.record(
                         PolicyDomain::Refinement,
                         def.name.clone(),
-                        format!("@Invariant / range proves value in {lo}..{hi}"),
+                        format!("#Invariant / range proves value in {lo}..{hi}"),
                     );
                     graph.record(
                         PolicyDomain::Bounds,
@@ -185,21 +185,21 @@ fn collect_func(graph: &mut PolicyFactGraph, func: &Func) {
         graph.record(
             PolicyDomain::Contract,
             func.name.clone(),
-            format!("@Pre×{} @Post×{}", func.pre.len(), func.post.len()),
+            format!("#Pre×{} #Post×{}", func.pre.len(), func.post.len()),
         );
     }
     if func.is_sanitizer {
         graph.record(
             PolicyDomain::Taint,
             func.name.clone(),
-            "@Sanitizer clears taint before sinks (D-TAINT1)",
+            "#Sanitizer clears taint before sinks (D-TAINT1)",
         );
     }
     if func.is_replayable {
         graph.record(
             PolicyDomain::Replay,
             func.name.clone(),
-            "@Replayable forbids ambient Time/Rand/Net/Io (D-REPLAY1)",
+            "#Replayable forbids ambient Time/Rand/Net/Io (D-REPLAY1)",
         );
     }
     if let Some(effects) = func.declared_effects.as_ref() {

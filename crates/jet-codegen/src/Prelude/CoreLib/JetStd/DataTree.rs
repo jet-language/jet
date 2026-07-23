@@ -1,5 +1,5 @@
     // ── core.encoding: format-agnostic value tree (D-SERDE2 = A) ───────────────
-    // The one tree every format adapter speaks. The built-in `@[Codable]` derive
+    // The one tree every format adapter speaks. The built-in `#[Codable]` derive
     // (D-ENC1) lowers `encode`/`decode` to walks over this; each adapter turns it
     // into / parses it from wire text. Distinct from the dynamic `Json` enum:
     // `DataTree` preserves field order (ordered `Object`) and keeps Int vs Float.
@@ -63,7 +63,7 @@
 
     // D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency plus the
     // runtime engine. `decode_traced<T>` sits beside `decode<T>` on every codec
-    // that shares this decode machinery. Decoding a `@PublishedSchema` type
+    // that shares this decode machinery. Decoding a `#PublishedSchema` type
     // with `migration { }` blocks tries the current shape first; on mismatch
     // the type's generated `jet_decode_traced` override detects which
     // historical shape the data's key set matches and walks the step functions
@@ -97,7 +97,7 @@
     }
 
     /// D-MIGRATE4: the sorted set of top-level object keys of a `DataTree`, used
-    /// by a `@PublishedSchema` type's migration chain-walker to detect which
+    /// by a `#PublishedSchema` type's migration chain-walker to detect which
     /// historical shape a decoded record matches. A non-object tree has no keys.
     pub fn jet_datatree_key_set(t: &DataTree) -> std::collections::BTreeSet<String> {
         match t {

@@ -330,10 +330,10 @@ pub(crate) fn collect_used_core(
     let mut spans = HashMap::new();
     // D-CABI-CALLBACK1: names of top-level functions sema proved are passed as
     // a stable C callback symbol (`arg.flags.c_callback_symbol`) at some
-    // `@Extern` call site anywhere in the bundle. Collected in this same
+    // `#Extern` call site anywhere in the bundle. Collected in this same
     // whole-program walk (not a second traversal) so codegen knows, before it
     // emits ANY function, which ones must be `extern "C" fn` — never every
-    // `@Pure fn` (that leaked the purity lever into codegen and broke I3
+    // `#Pure fn` (that leaked the purity lever into codegen and broke I3
     // erasure; see 14dd68a5), only the ones actually crossing the C boundary
     // as a raw function pointer.
     let mut ffi_cb = HashSet::new();
@@ -784,7 +784,7 @@ pub(crate) fn collect_core_expr(
             }
             collect_core_expr(receiver, imports, used, spans, ffi_cb);
             for arg in args {
-                // D-CABI-CALLBACK1: a qualified `@Extern`-module call
+                // D-CABI-CALLBACK1: a qualified `#Extern`-module call
                 // (`c.callback_twice(increment, x)`) resolves through
                 // `infer_import_call` (CheckerCoreLib/imports.rs), a separate
                 // path from the bare-name call below — same flag, same fix.
@@ -805,7 +805,7 @@ pub(crate) fn collect_core_expr(
             for arg in &c.args {
                 // D-CABI-CALLBACK1: `arg.flags.c_callback_symbol` means sema
                 // already proved this bare function name is passed as a stable
-                // C callback at a `@Extern` call site — record the referenced
+                // C callback at a `#Extern` call site — record the referenced
                 // function so codegen emits its definition as `extern "C" fn`.
                 if arg.flags.c_callback_symbol {
                     if let Expr::Ident(name, _) = &arg.expr {
@@ -912,7 +912,10 @@ pub(crate) fn collect_core_expr(
                         collect_core_expr(&arg.expr, imports, used, spans, ffi_cb);
                     }
                 }
-                OrFallback::Break(_) | OrFallback::Continue(_) => {}
+                OrFallback::Break(_)
+                | OrFallback::Continue(_)
+                | OrFallback::BreakLabel(..)
+                | OrFallback::ContinueLabel(..) => {}
             }
         }
         Expr::Lambda(lam) => match &lam.body {
@@ -1534,7 +1537,7 @@ pub(crate) fn check_module_bodies(
                 }
             }
             Item::Test(t) if mode == CompileMode::Test => {
-                // D-TEST1: a parameterized `@Test fn` is a property test — its
+                // D-TEST1: a parameterized `#Test fn` is a property test — its
                 // params must be generatable types so the runner can synthesize
                 // inputs. Validate before checking the body so the error points at
                 // the offending param type.
@@ -1607,7 +1610,7 @@ pub(crate) fn check_module_bodies(
                 ));
                 t.body = synthetic.body;
             }
-            // D-BENCH1: a `@Bench` body type-checks exactly like a `@Test` body
+            // D-BENCH1: a `#Bench` body type-checks exactly like a `#Test` body
             // (a bare statement list, no params, unit context) — only the mode
             // gate differs.
             Item::Bench(b) if mode == CompileMode::Bench => {
@@ -1907,7 +1910,7 @@ pub(crate) fn check_func_body_bundle(
     global_addr_taken: &mut HashSet<String>,
     // D-MEM1/S7 (D-NOALLOC-SEM1=A): this module's `policy no_alloc` state.
     _no_alloc: bool,
-    // D-PRELUDEX1=A: this file's `@NoPrelude` state.
+    // D-PRELUDEX1=A: this file's `#NoPrelude` state.
     no_prelude: bool,
     reference_anchors: &mut HashMap<(String, usize, usize), DefinitionAnchorFact>,
     pending_diagnostics_out: &mut Vec<PendingFunctionDiagnostic>,
@@ -1957,8 +1960,8 @@ pub(crate) fn check_func_body_bundle(
         det_suppress: 0,
         context_depth: 0,
         context_allocator_active: false,
-        // S58 (E2-M13): an `@Unsafe fn` body is itself an audited region — its
-        // statements may use low-level ops directly without a nested `@Unsafe`
+        // S58 (E2-M13): an `#Unsafe fn` body is itself an audited region — its
+        // statements may use low-level ops directly without a nested `#Unsafe`
         // block. Calling such a fn is gated separately (E3103).
         in_unsafe: f.is_unsafe,
         suppress_must_use: false,
@@ -2024,7 +2027,7 @@ pub(crate) fn check_func_body_bundle(
         (f.is_reactive, crate::Syntax::KW_REACTIVE, f.name_span),
     ] {
         if active && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function) {
-            ck.diags.push(Diagnostic::error("E0355", format!("`@{name}` cannot attach to a function"), "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain".to_string(), "move the rule to one of its registered sites".to_string(), Some(span)));
+            ck.diags.push(Diagnostic::error("E0355", format!("`#{name}` cannot attach to a function"), "the compiler-owned applicability registry is shared by parser, sema, formatter, semantic index, and explain".to_string(), "move the rule to one of its registered sites".to_string(), Some(span)));
         }
     }
     ck.check_params_and_body(f, owner_type);
@@ -2048,14 +2051,14 @@ pub(crate) fn check_func_body_bundle(
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));
     }
-    // D-METHODMACRO1=A: the local half of the `@InlineAlways` check (self-
+    // D-METHODMACRO1=A: the local half of the `#InlineAlways` check (self-
     // recursion E0917 + size ceiling E0919); roll this function's
     // address-taken names into the whole-program accumulator so the E0918
     // pass after the full bundle check can see them.
     if f.is_inline_always {
         ck.diags.extend(check_inline_always_fn(f));
     }
-    // D-SCHEDULE1 (card #505): a bad `@Every(…)` value is E0926.
+    // D-SCHEDULE1 (card #505): a bad `#Every(…)` value is E0926.
     ck.diags.extend(check_every_marker(f));
     global_addr_taken.extend(std::mem::take(&mut ck.inline_addr_taken));
     // D-EXPANDCLI1 (card #183): roll this function's resolved ref-owner facts
@@ -2189,11 +2192,11 @@ pub(super) fn property_param_unsupported(ty: &Type, span: Span) -> Option<Diagno
             ty.name()
         ),
         format!(
-            "a parameterized `@{} fn` is a property test (D-TEST1): {} generates inputs from each parameter's type, but this type has no built-in generator",
+            "a parameterized `#{} fn` is a property test (D-TEST1): {} generates inputs from each parameter's type, but this type has no built-in generator",
             Syntax::KW_TEST,
             Syntax::LANG_NAME
         ),
-        "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `@Test \"name\" { … }` block and construct the value yourself".to_string(),
+        "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" { … }` block and construct the value yourself".to_string(),
         Some(span),
     ))
 }

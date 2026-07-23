@@ -1,15 +1,15 @@
 Error [E0910]: the published record `UserRecord` dropped `name` since version `1.2.0`, with no migration to bridge it
   --> tests/ui/published_schema_breaking.jet:3:1
     |
-  3 | @PublishedSchema
+  3 | #PublishedSchema
     | ^^^^^^^^^^^^^^^^
- Why: `@PublishedSchema` pins a record's saved shape at release; old data written with `name` could no longer be read
+ Why: `#PublishedSchema` pins a record's saved shape at release; old data written with `name` could no longer be read
  Fix: add `migration UserRecord { remove name }` to delete it, `migration UserRecord { rename name -> <new> }` if you renamed it, or bump the major version
 
 Error [E0910]: the published record `UserRecord` added `display_name`, but old data has no value for it
   --> tests/ui/published_schema_breaking.jet:3:1
     |
-  3 | @PublishedSchema
+  3 | #PublishedSchema
     | ^^^^^^^^^^^^^^^^
- Why: `@PublishedSchema` records already written without this field can't be read unless there's a default to fill it in
+ Why: `#PublishedSchema` records already written without this field can't be read unless there's a default to fill it in
  Fix: add `migration UserRecord { add display_name: <Type> = <default> }` to supply the value, or bump the major version

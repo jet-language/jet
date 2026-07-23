@@ -138,9 +138,9 @@ fn parse_program_id(source: &str) -> Result<String, BindError> {
 fn render_jet(lib: &str, layout: &RecordLayout, packed: &FieldLayout, input: Option<&FieldLayout>) -> String {
     let abi = format!("jet_cobol_{lib}"); let mut out = format!("// cobol-layout {}: {} bytes\n", layout.name, layout.width);
     for f in &layout.fields { out.push_str(&format!("// cobol-field {}: offset={} width={} type={}{}\n", f.name, f.offset, f.width, f.kind.jet_type(), match f.kind { FieldKind::PackedDecimal { scale, .. } => format!(" scale={scale} encoding=COMP-3"), FieldKind::NativeInt { .. } => " encoding=COMP-5".into(), FieldKind::FixedText { .. } => " encoding=fixed-text".into() })); }
-    out.push_str(&format!("@Codable\npub struct {} {{\n", upper_camel(&layout.name)));
+    out.push_str(&format!("#Codable\npub struct {} {{\n", upper_camel(&layout.name)));
     for f in &layout.fields { out.push_str(&format!("    {}: {};\n", f.name, f.kind.jet_type())); } out.push_str("}\n\n");
-    out.push_str(&format!("@Extern module c.{abi} {{\n    fn apply_minor("));
+    out.push_str(&format!("#Extern module c.{abi} {{\n    fn apply_minor("));
     if input.is_some() { out.push_str("record_id: Int, "); } out.push_str(&format!("{}_minor: Int) -> Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\n", packed.name));
     out.push_str("pub fn apply_minor("); if input.is_some() { out.push_str("record_id: Int, "); } out.push_str(&format!("{}_minor: Int) -> Int {{\n", packed.name));
     if let Some(FieldKind::PackedDecimal { digits, signed, .. }) = Some(&packed.kind) { let max=10_i128.pow(*digits as u32)-1; let min=if *signed{-max}else{0}; out.push_str(&format!("    if {}_minor < {min} || {}_minor > {max} {{ panic(\"{}_minor exceeds the {}-digit COMP-3 field\") }}\n",packed.name,packed.name,packed.name,digits)); }

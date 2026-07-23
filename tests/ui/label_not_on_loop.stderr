@@ -1,7 +1,7 @@
-Error [E0988]: a loop label must be followed by `loop`
+Error [E0988]: a loop name is compile-time, not mutable state
   --> tests/ui/label_not_on_loop.jet:2:5
     |
-  2 |     @outer print("oops");
-    |     ^^^^^^
- Why: write `name@ loop { … }` (D-LOOPLABEL2)
- Fix: write `outer@ loop { … }`, or remove the label
+  2 |     outer := loop
+    |     ^^^^^^^^^^^^^
+ Why: `:=` creates a runtime binding; a loop name only targets control flow
+ Fix: write `outer :: loop { … }`

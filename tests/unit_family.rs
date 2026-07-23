@@ -1,6 +1,6 @@
-//! D-QUAL3 (ratified 2026-06-24): unit families, `@UnitFamily(Name) { m, … }`.
+//! D-QUAL3 (ratified 2026-06-24): unit families, `#UnitFamily(Name) { m, … }`.
 //!
-//! Each member mints one `@Numeric` distinct type erasing to `Float`
+//! Each member mints one `#Numeric` distinct type erasing to `Float`
 //! (`usd` → `Usd`), so signatures read in plain English and the compiler keeps
 //! the units from mixing. This is pure sugar over the D-DIST1/D-DIST3 distinct
 //! machinery: convert with `Usd.from_float(value)`, same-unit arithmetic stays in the
@@ -13,7 +13,7 @@ mod common;
 mod tir_support;
 
 const FAMILY: &str = r#"
-@UnitFamily(Currency) { usd, eur }
+#UnitFamily(Currency) { usd, eur }
 "#;
 
 fn codes_of(src: &str) -> Vec<String> {
@@ -48,7 +48,7 @@ fn parse_family(src: &str) -> jet::AST::UnitFamilyDef {
 #[test]
 fn scaled_and_affine_metadata_is_exact_and_normalized() {
     let family = parse_family(
-        r#"@UnitFamily(Temperature, base: kelvin) {
+        r#"#UnitFamily(Temperature, base: kelvin) {
     kelvin
     celsius(scale: 2/2, offset: 54630/200)
 }"#,
@@ -65,7 +65,7 @@ fn scaled_and_affine_metadata_is_exact_and_normalized() {
 
 #[test]
 fn unit_metadata_uses_arbitrary_precision_signed_ratios() {
-    let src = r#"@UnitFamily(Temperature, base: kelvin) {
+    let src = r#"#UnitFamily(Temperature, base: kelvin) {
     kelvin
     huge(scale: -123_456_789_012_345_678_901_234_567_890/-10, offset: -0xA/-0b100)
 }"#;
@@ -81,7 +81,7 @@ fn unit_metadata_uses_arbitrary_precision_signed_ratios() {
 
 #[test]
 fn zero_ratio_denominator_points_at_the_denominator() {
-    let src = "@UnitFamily(Length, base: meter) { meter broken(scale: 1/0) }";
+    let src = "#UnitFamily(Length, base: meter) { meter broken(scale: 1/0) }";
     let (tokens, lex) = jet::Lexer::lex(src);
     assert!(lex.is_empty(), "lex diagnostics: {lex:?}");
     let diagnostics = jet::Parser::parse(&tokens).unwrap_err();
@@ -96,7 +96,7 @@ fn zero_ratio_denominator_points_at_the_denominator() {
 #[test]
 fn affine_family_mints_point_and_delta_types_only() {
     let family = parse_family(
-        r#"@UnitFamily(Temperature, base: kelvin) {
+        r#"#UnitFamily(Temperature, base: kelvin) {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }"#,
@@ -110,7 +110,7 @@ fn affine_family_mints_point_and_delta_types_only() {
 
 #[test]
 fn scaled_family_metadata_is_public_api_identity() {
-    let src = r#"pub @UnitFamily(Length, base: meter) {
+    let src = r#"pub #UnitFamily(Length, base: meter) {
     meter
     millimeter(scale: 2/2000)
 }
@@ -128,7 +128,7 @@ pub fn length() -> Millimeter { return Millimeter.from_float(1.0)? }
 
 #[test]
 fn affine_point_and_delta_have_distinct_public_identities() {
-    let src = r#"pub @UnitFamily(Temperature, base: kelvin) {
+    let src = r#"pub #UnitFamily(Temperature, base: kelvin) {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
@@ -149,7 +149,7 @@ pub fn tolerance() -> CelsiusDelta { return CelsiusDelta.from_float(2.0) }
 #[test]
 fn affine_point_delta_algebra_and_conversion_compile() {
     let src = r#"
-@UnitFamily(Temperature, base: kelvin) {
+#UnitFamily(Temperature, base: kelvin) {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
@@ -171,7 +171,7 @@ fn run() {
 #[test]
 fn exact_same_dimension_conversion_covers_arithmetic_arguments_and_bindings() {
     let src = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     millimeter(scale: 1/1000)
 }
@@ -192,7 +192,7 @@ fn run() {
 #[test]
 fn exact_concrete_coercion_uses_the_value_not_only_the_scale_denominator() {
     let src = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     millimeter(scale: 1/1000)
 }
@@ -208,7 +208,7 @@ fn run() { takes_meter(3000millimeter) }
     );
 
     let family = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     double(scale: 2)
 }
@@ -251,7 +251,7 @@ fn takes_meter(value: Meter) { print(value.raw()) }
     );
 
     let identity = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     alias(scale: 1)
 }
@@ -268,7 +268,7 @@ fn run() { relay(Alias.from_float(0.25)) }
 #[test]
 fn exactness_uses_rational_math_beyond_f64_integer_precision() {
     let family = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     almost(scale: 9007199254740993/9007199254740992)
 }
@@ -292,14 +292,14 @@ fn exactness_uses_rational_math_beyond_f64_integer_precision() {
         assert_eq!(stdout, "-1.0\n");
 
         let rounding = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     almost(scale: 9007199254740993/9007199254740992)
     half(scale: 1/2)
     above_half(scale: 9007199254740993/18014398509481984)
     three_halves(scale: 3/2)
 }
-@UnitFamily(Temperature, base: kelvin) {
+#UnitFamily(Temperature, base: kelvin) {
     kelvin
     tie_offset(scale: 1, offset: 1/2)
     above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
@@ -322,7 +322,7 @@ fn run() {
         assert_eq!(stdout, "-1.0 0.0 1.0 -2.0 0.0 1.0 -1.0\n");
 
         let overflow = r#"
-@UnitFamily(Length, base: meter) { meter double(scale: 2) }
+#UnitFamily(Length, base: meter) { meter double(scale: 2) }
 fn run() {
     source :: Double.from_float(1.7976931348623157e308)
     value :: Meter.from_double_rounded(source, .NearestEven, digits: 0) ?? Meter.from_float(-1.0)
@@ -371,7 +371,7 @@ fn rounded_conversion_honors_mode_digits_affinity_and_fallibility() {
         return;
     }
     let src = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     half(scale: 1/2)
     eighth(scale: 1/8)
@@ -379,7 +379,7 @@ fn rounded_conversion_honors_mode_digits_affinity_and_fallibility() {
     near_three_quarters(scale: 751/1000)
     double(scale: 2)
 }
-@UnitFamily(Temperature, base: kelvin) {
+#UnitFamily(Temperature, base: kelvin) {
     kelvin
     shifted(scale: 1, offset: 249/1000)
 }
@@ -415,7 +415,7 @@ fn run() {
     );
 
     let negative_digits = r#"
-@UnitFamily(Length, base: meter) { meter half(scale: 1/2) }
+#UnitFamily(Length, base: meter) { meter half(scale: 1/2) }
 fn run() -> Void ? {
     digits: Int :: -1
     Meter.from_half_rounded(1half, .NearestEven, digits: digits)?
@@ -536,7 +536,7 @@ fn rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits() {
 #[test]
 fn quantity_generic_bound_preserves_concrete_unit_and_kind() {
     let src = r#"
-@UnitFamily(Length, base: meter) { meter }
+#UnitFamily(Length, base: meter) { meter }
 fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
 fn run() { source :: 3meter; value :: keep(^source); print("{(value.raw())}") }
 "#;
@@ -547,15 +547,15 @@ fn run() { source :: 3meter; value :: keep(^source); print("{(value.raw())}") }
 #[test]
 fn quantity_generic_bound_rejects_wrong_dimension_and_kind() {
     let wrong_dimension = r#"
-@UnitFamily(Length) { meter }
-@UnitFamily(Time) { second }
+#UnitFamily(Length) { meter }
+#UnitFamily(Time) { second }
 fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
 fn run() { source :: 3second; keep(^source) }
 "#;
     assert_eq!(codes_of(wrong_dimension), vec!["E0905"]);
 
     let wrong_kind = r#"
-@UnitFamily(Temperature, base: kelvin) { kelvin celsius(offset: 27315/100) }
+#UnitFamily(Temperature, base: kelvin) { kelvin celsius(offset: 27315/100) }
 fn keep<Q: Quantity<Temperature, .Delta>>(value: ^Q) -> Q { return value }
 fn run() { source :: CelsiusPoint.from_float(3.0); keep(^source) }
 "#;
@@ -574,7 +574,7 @@ fn imported_quantity_generic_preserves_concrete_type() {
         return;
     }
     let units = r#"
-pub @UnitFamily(Length) { meter }
+pub #UnitFamily(Length) { meter }
 pub fn sample() -> Meter { return 2meter }
 pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
 pub fn raw_meter(value: Meter) -> Float { return value.raw() }
@@ -614,7 +614,7 @@ fn imported_explicit_quantity_argument_checks_its_bound() {
         &entry,
         r#"
 use "units" as units
-@UnitFamily(Time) { second }
+#UnitFamily(Time) { second }
 fn run() {
     source :: 1second
     bad :: units.keep<Second>(^source)
@@ -680,11 +680,11 @@ fn quantity_generic_bounds_are_frozen_into_public_api_identity() {
 #[test]
 fn explicit_units_policy_requires_destination_owned_conversion() {
     let implicit = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     millimeter(scale: 1/1000)
 }
-@Policy(explicit_units)
+#Policy(explicit_units)
 fn run() {
     total :: 1meter + 1millimeter
     print("{(total.raw())}")
@@ -693,11 +693,11 @@ fn run() {
     assert_eq!(codes_of(implicit), vec!["E0127"]);
 
     let explicit = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     millimeter(scale: 1/1000)
 }
-@Policy(explicit_units)
+#Policy(explicit_units)
 fn run() {
     converted :: Meter.from_millimeter(1000millimeter) ?? panic("exact conversion")
     total :: 1meter + converted
@@ -707,16 +707,16 @@ fn run() {
     assert!(codes_of(explicit).is_empty());
 
     let module_scoped = r#"
-@Policy(explicit_units)
-@UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
+#Policy(explicit_units)
+#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
 fn run() { total :: 1meter + 1millimeter; print(total.raw()) }
 "#;
     assert_eq!(codes_of(module_scoped), vec!["E0127"]);
 
     let block_scoped = r#"
-@UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
+#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
 fn run() {
-    @Policy(explicit_units) {
+    #Policy(explicit_units) {
         total :: 1meter + 1millimeter
         print(total.raw())
     }
@@ -728,7 +728,7 @@ fn run() {
 #[test]
 fn implicit_unit_conversion_rejects_rounding_and_overflow_boundaries() {
     let rounding = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     thirdish(scale: 2/3)
 }
@@ -737,13 +737,13 @@ fn run() { value :: 1meter + 1thirdish; print("{(value.raw())}") }
     assert_eq!(codes_of(rounding), vec!["E0127"]);
 
     let overflow = format!(
-        "@UnitFamily(Length, base: meter) {{ meter giant(scale: {}) }}\nfn run() {{ value :: 1giant + 1meter; print(\"{{(value.raw())}}\") }}",
+        "#UnitFamily(Length, base: meter) {{ meter giant(scale: {}) }}\nfn run() {{ value :: 1giant + 1meter; print(\"{{(value.raw())}}\") }}",
         "9".repeat(400)
     );
     assert_eq!(codes_of(&overflow), vec!["E0127"]);
 
     let explicit_overflow = format!(
-        "@UnitFamily(Length, base: meter) {{ meter giant(scale: {}) }}\nfn run() {{ value :: Meter.from_giant(1giant); print(\"{{(value.raw())}}\") }}",
+        "#UnitFamily(Length, base: meter) {{ meter giant(scale: {}) }}\nfn run() {{ value :: Meter.from_giant(1giant); print(\"{{(value.raw())}}\") }}",
         "9".repeat(400)
     );
     assert_eq!(codes_of(&explicit_overflow), vec!["E0127"]);
@@ -755,7 +755,7 @@ fn explicit_unit_conversion_is_fallible_and_rounded_spelling_is_real() {
         return;
     }
     let src = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     millimeter(scale: 1/1000)
     thirdish(scale: 2/3)
@@ -777,7 +777,7 @@ fn run() {
     assert_eq!(stdout, "3.0 -1.0 1.0\n");
 
     let unchecked = r#"
-@UnitFamily(Length, base: meter) {
+#UnitFamily(Length, base: meter) {
     meter
     thirdish(scale: 2/3)
 }
@@ -799,7 +799,7 @@ fn physical_unit_codable_round_trips_as_its_concrete_type() {
     }
     let src = r#"
 use core.encoding.json as json
-@UnitFamily(Length) { meter }
+#UnitFamily(Length) { meter }
 fn run() {
     value :: 3meter
     wire :: json.to_string(value)
@@ -859,7 +859,7 @@ fn bare_float_does_not_coerce_into_unit() {
 #[test]
 fn multi_word_member_pascal_cases() {
     let src = r#"
-@UnitFamily(Speed) { m_per_s }
+#UnitFamily(Speed) { m_per_s }
 fn run() {
     v :: MPerS.from_float(3.0)
     print("{(v.raw())}")
@@ -905,8 +905,8 @@ fn family_erases_in_codegen() {
 #[test]
 fn physical_dimensions_derive_before_codegen_and_erase_at_runtime() {
     let src = r#"
-@UnitFamily(Length) { meter }
-@UnitFamily(Time) { second }
+#UnitFamily(Length) { meter }
+#UnitFamily(Time) { second }
 
 fn run() {
     distance :: 12meter
@@ -928,8 +928,8 @@ fn run() {
 #[test]
 fn physical_dimension_mismatch_is_rejected_in_sema() {
     let src = r#"
-@UnitFamily(Length) { meter }
-@UnitFamily(Time) { second }
+#UnitFamily(Length) { meter }
+#UnitFamily(Time) { second }
 fn run() { bad :: 1meter + 1second }
 "#;
     let codes = codes_of(src);
@@ -939,7 +939,7 @@ fn run() { bad :: 1meter + 1second }
 #[test]
 fn physical_value_cannot_compare_with_scalar() {
     let src = r#"
-@UnitFamily(Length) { meter }
+#UnitFamily(Length) { meter }
 fn run() { bad :: 1meter < 1.0 }
 "#;
     assert_eq!(codes_of(src), vec!["E0359"]);
@@ -947,7 +947,7 @@ fn run() { bad :: 1meter < 1.0 }
 
 #[test]
 fn dimension_exponent_limit_is_a_sema_error_not_a_panic() {
-    let mut src = String::from("@UnitFamily(Length) { meter }\nfn run() {\n    q0 :: 1meter\n");
+    let mut src = String::from("#UnitFamily(Length) { meter }\nfn run() {\n    q0 :: 1meter\n");
     for exponent in 1..=31 {
         src.push_str(&format!(
             "    q{exponent} :: q{} * q{}\n",
@@ -966,12 +966,12 @@ fn dimension_exponent_limit_is_a_sema_error_not_a_panic() {
 #[test]
 fn imported_same_leaf_units_keep_distinct_dimensions() {
     let length = r#"
-@UnitFamily(Length) { unit }
+#UnitFamily(Length) { unit }
 pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
 pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
 "#;
     let time = r#"
-@UnitFamily(Time) { unit }
+#UnitFamily(Time) { unit }
 pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
 pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
 "#;
@@ -1021,7 +1021,7 @@ fn same_named_unit_families_from_different_packages_do_not_convert() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let unit = r#"
-pub @UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
+pub #UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
 pub fn sample() -> Meter { return 1meter }
 "#;
     std::fs::write(dir.join("left.jet"), unit).unwrap();
@@ -1076,8 +1076,8 @@ fn physical_dimensions_cross_file_boundaries_canonically() {
     std::fs::write(
         dir.join("units.jet"),
         r#"
-@UnitFamily(Length) { meter }
-@UnitFamily(Time) { second }
+#UnitFamily(Length) { meter }
+#UnitFamily(Time) { second }
 pub fn distance() -> Meter { return 12meter }
 pub fn elapsed() -> Second { return 3second }
 "#,

@@ -15,12 +15,12 @@
 //! Effectful modules (`core.files`/`core.env`/`core.io`/`core.exec`/
 //! `core.net`/`core.tls`/`core.process`) are explicit effect boundaries:
 //! comptime handles them as a whole via the `is_tier2` wildcard (E3410
-//! `@Impure` gate), not per-method.
+//! `#Impure` gate), not per-method.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 
-/// Modules comptime gates wholesale behind `@Impure` (Methods.rs `is_tier2`)
+/// Modules comptime gates wholesale behind `#Impure` (Methods.rs `is_tier2`)
 /// rather than dispatching per-method — a per-name diff against these would
 /// only prove the gate exists, which other tests (e.g. `repl.rs`'s E3410
 /// cases) already cover.
@@ -35,7 +35,7 @@ const EFFECT_GATED_MODULES: &[&str] = &[
     // Not gated by the generic `is_tier2` list — denied unconditionally,
     // earlier in `eval_method`, with its own diagnostic (E1265): a build
     // artifact must never bake in a decrypted secret (I1), so there is no
-    // `@Impure` escape hatch at all here, unlike the effects above. Correctly
+    // `#Impure` escape hatch at all here, unlike the effects above. Correctly
     // handled, just not through the per-method `apply_core_call` table this
     // audit reads — excluded so it isn't flagged as a silent gap.
     "core.vault",
@@ -131,9 +131,9 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     //
     // `decode_traced<T>` is PORTED too (card #392 pass 5, `TypedDecode.rs`):
     // typed `Decode` dispatch at comptime — resolves the target user type via
-    // `self.structs`, walks its fields (honoring `@[Rename]`/`RenameAll`/
+    // `self.structs`, walks its fields (honoring `#[Rename]`/`RenameAll`/
     // `Default`/`Flatten`/`DenyUnknownFields`), and — for a
-    // `@PublishedSchema` type with `migration { }` blocks — walks the runtime
+    // `#PublishedSchema` type with `migration { }` blocks — walks the runtime
     // migration chain the same way `Codegen/Items.rs::emit_migration_chain_walker`
     // does (shape detection by wire-key set, newest match first, calling the
     // sema-lowered `__migrate_conv_*`/`__migrate_add_*` synthetic functions
@@ -147,7 +147,7 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // of the diff and aren't `newly_missing` — no entry needed.)
     //
     // core.os: host/process facts (hostname, arch, pid, cpu_count, …) — real
-    // ambient reads of the host, arguably belongs behind the same `@Impure`
+    // ambient reads of the host, arguably belongs behind the same `#Impure`
     // gate as `core.env`/`core.process` rather than E0956; needs the same
     // effect-boundary design work as `core.time`'s split above.
     ("core.os", "arch"),
@@ -228,7 +228,7 @@ const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
     // both non-deterministic, unlike `core.random`'s explicitly-seeded stream.
     // A "pure" comptime UUID would either fake randomness (silently diverging
     // from AOT, R12 risk) or read the real host (a build-time effect with no
-    // `@Impure` gate defined for it yet) — genuinely impossible to do purely,
+    // `#Impure` gate defined for it yet) — genuinely impossible to do purely,
     // not merely unported.
     ("core.uuid", "v4"),
     ("core.uuid", "v7"),

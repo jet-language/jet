@@ -17,6 +17,9 @@
 import { dataFile, historyFile, readJSON, writeJSON, backup, newId, today, now } from './paths.mjs';
 import { withLock } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
+import {
+  hasPendingRepair, recoverPendingRepair, recoverPendingRepairLocked,
+} from './repair-journal.mjs';
 
 export const VERSION = 4;
 export const CLAIM_TTL_MS = 24 * 60 * 60 * 1000;
@@ -61,25 +64,36 @@ export function openStore(dataDir) {
   if (!file) fail('E_NO_DATA', 'no Tower data found — run `tower init` in your project root (or set TOWER_DATA)');
   const config = loadConfig(dataDir);
 
-  const load = () => normalize(readJSON(file, empty(config.project)));
+  // A repair journal is the two-store commit marker. Check before and after
+  // unlocked reads so a concurrent repair cannot expose a persistent split.
+  recoverPendingRepair(dataDir, file);
+  const consistentRead = (read) => {
+    if (hasPendingRepair(dataDir)) recoverPendingRepair(dataDir, file);
+    let value = read();
+    if (hasPendingRepair(dataDir)) {
+      recoverPendingRepair(dataDir, file);
+      value = read();
+    }
+    return value;
+  };
+  const loadRaw = () => normalize(readJSON(file, empty(config.project)));
+  const load = () => consistentRead(loadRaw);
 
-  // #461: loadHistory() is lazy + cached per store handle — read once, reuse
-  // across calls in the same process, invalidated after any write that could
-  // have touched history.json (mutate/restoreArchived).
-  let historyCache = null;
-  const loadHistory = () => (historyCache ||= loadHistoryRaw(dataDir));
+  // history.json can change through another CLI process. Read it fresh so a
+  // long-lived server handle cannot retain a pre-repair archive indefinitely.
+  const loadHistory = () => consistentRead(() => loadHistoryRaw(dataDir));
 
   // Read-modify-write under the cross-process lock; rev bumps on every write.
   // `expectRev` (optional) enables optimistic concurrency for API callers.
   const mutate = (fn, { expectRev } = {}) => withLock(file, () => {
-    const s = load();
+    recoverPendingRepairLocked(dataDir);
+    const s = loadRaw();
     if (expectRev != null && Number(expectRev) !== s.meta.rev)
       fail('E_CONFLICT', `stale rev: expected ${expectRev}, store is at ${s.meta.rev} — re-read state and retry`);
     const result = fn(s, config);
     // #461: single chokepoint — every write gets a chance to retire aged-out
     // cards/decisions/events to history.json before tower.json is persisted.
     retire(s, config, dataDir);
-    historyCache = null;
     s.meta.rev += 1;
     backup(file, config.backups);
     writeJSON(file, s);
@@ -91,7 +105,8 @@ export function openStore(dataDir) {
   // ONLY tower.json — history.json is append-only and never rolled back
   // (see test/history.test.mjs for the duplicate-tolerance this buys).
   const restore = (prevState, { expectRev } = {}) => withLock(file, () => {
-    const cur = load();
+    recoverPendingRepairLocked(dataDir);
+    const cur = loadRaw();
     if (expectRev != null && Number(expectRev) !== cur.meta.rev)
       fail('E_CONFLICT', `undo refused: board changed since (rev ${cur.meta.rev} ≠ ${expectRev})`);
     const s = normalize(prevState);
@@ -105,14 +120,14 @@ export function openStore(dataDir) {
   // (D-TWR-ARCHIVE1=B). Resets its clock (updated/ratifiedAt = today) so it
   // doesn't immediately re-retire on the next write.
   const restoreArchived = (ref, by) => withLock(file, () => {
-    const s = load();
+    recoverPendingRepairLocked(dataDir);
+    const s = loadRaw();
     const h = loadHistoryRaw(dataDir);
     const result = restoreFromHistory(s, h, ref, by);
     s.meta.rev += 1;
     backup(file, config.backups);
     writeJSON(file, s);
     writeJSON(historyFile(dataDir), h);
-    historyCache = null;
     return { result, state: s };
   });
 

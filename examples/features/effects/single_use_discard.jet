@@ -1,22 +1,22 @@
 // D-LIN1-DROP (ratified 2026-06-25): the deliberate-discard hatch for a
-// `@SingleUse` value.
+// `#SingleUse` value.
 //
-// A `@SingleUse` value carries a job that has to be done exactly once — the
+// A `#SingleUse` value carries a job that has to be done exactly once — the
 // compiler proves it is consumed on every path (E0140/E0141/E0142). Almost
 // always you want to *do* the job: release the lock, join the task. But once in
 // a while you genuinely need to throw the value away without doing it — say the
 // resource it guards is already gone. That is a real decision with consequences,
 // so it has to be written down.
 //
-// The hatch is `consume(x)` inside an `@Unsafe("reason")` region or fn. The
-// `@Unsafe` reason IS the audit note — there is no second audit channel. Outside
-// an `@Unsafe` context, `drop` of a `@SingleUse` value is E0143, pointing you at
+// The hatch is `consume(x)` inside an `#Unsafe("reason")` region or fn. The
+// `#Unsafe` reason IS the audit note — there is no second audit channel. Outside
+// an `#Unsafe` context, `drop` of a `#SingleUse` value is E0143, pointing you at
 // the audited form.
 //
 // `drop` erases to a plain move-to-nowhere: the value's cleanup runs, no
-// `unsafe` machine code is emitted. The `@Unsafe` gate is a compile-time audit,
+// `unsafe` machine code is emitted. The `#Unsafe` gate is a compile-time audit,
 // not a runtime cost.
-@SingleUse struct Ticket {
+#SingleUse struct Ticket {
     id: String
 }
 
@@ -34,9 +34,9 @@ fn run() {
     redeem(^a)
     // The audited discard: this ticket is being voided on purpose — the event
     // it admitted to was cancelled, so there is nothing left to redeem. We say
-    // so in the `@Unsafe` reason, and `drop` discharges the consume duty.
+    // so in the `#Unsafe` reason, and `drop` discharges the consume duty.
     b :: issue("B")
-    @Unsafe("event cancelled; the ticket admits to nothing, so voiding it is correct") {
+    #Unsafe("event cancelled; the ticket admits to nothing, so voiding it is correct") {
         consume(b)
     }
     print("ticket B voided")

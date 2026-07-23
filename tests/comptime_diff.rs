@@ -646,7 +646,7 @@ fn cbor_canonical_typed_corpus_matches_comptime_and_aot() {
 use core.encoding.cbor as cbor
 use core.encoding.hex as hex
 
-@[Codable]
+#[Codable]
 struct Packet { id: Int, payload: [U8] }
 
 comptime expected_map = hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))

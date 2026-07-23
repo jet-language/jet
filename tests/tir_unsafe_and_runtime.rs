@@ -8,7 +8,7 @@ use std::fs;
 use tir_support::{build_and_run, have_rustc};
 
 /// c109 Phase 18 / D-UNSAFE2: the expert low-level tier (S58, E2-M13/D-LL1). A
-/// `@Unsafe("reason") fn` lowers to a Rust `unsafe fn`; a `@Unsafe("reason") { … }`
+/// `#Unsafe("reason") fn` lowers to a Rust `unsafe fn`; a `#Unsafe("reason") { … }`
 /// audited region lowers to `unsafe { … }` (the reason string emits nothing);
 /// `mem.Ptr<T>.from_addr(addr)`, `mem.address_of(x)`, and `mem.volatile_read(p)`
 /// lower to the raw-pointer ops. I1: every emitted `unsafe` is a gated form tied
@@ -20,7 +20,7 @@ fn unsafe_fn_block_and_ptr_ops() {
     }
     let src = "\
 use core.mem
-@Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
+#Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
 fn read_reg(addr: Int) -> Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
@@ -28,7 +28,7 @@ fn read_reg(addr: Int) -> Int {
 fn run() {
 cell: Int :: 1337
     addr :: mem.address_of(cell)
-    @Unsafe(\"addr is the address of `cell`, a live Int on this stack frame\") {
+    #Unsafe(\"addr is the address of `cell`, a live Int on this stack frame\") {
         p :: mem.Ptr<Int>.from_addr(addr)
         seen :: mem.volatile_read(p)
         print(seen)
@@ -49,7 +49,7 @@ cell: Int :: 1337
 fn unsafe_tier_emit_is_byte_exact() {
     let src = "\
 use core.mem
-@Unsafe(\"reads through a raw pointer; addr must be valid\")
+#Unsafe(\"reads through a raw pointer; addr must be valid\")
 fn read_reg(addr: Int) -> Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
@@ -57,7 +57,7 @@ fn read_reg(addr: Int) -> Int {
 fn run() {
 cell: Int :: 1337
     addr :: mem.address_of(cell)
-    @Unsafe(\"safe: cell is live\") {
+    #Unsafe(\"safe: cell is live\") {
         seen :: read_reg(addr)
         print(\"{seen}\")
     }
@@ -74,7 +74,7 @@ cell: Int :: 1337
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    // `@Unsafe fn` → `pub unsafe fn …`.
+    // `#Unsafe fn` → `pub unsafe fn …`.
     assert!(
         out.rust
             .contains("pub unsafe fn user_read_reg(user_addr: i64) -> i64 {"),
@@ -101,7 +101,7 @@ cell: Int :: 1337
         "address_of not byte-exact:\n{}",
         out.rust
     );
-    // `@Unsafe("…") { … }` → `unsafe {` (the reason string emits nothing).
+    // `#Unsafe("…") { … }` → `unsafe {` (the reason string emits nothing).
     assert!(
         out.rust.contains("    unsafe {\n"),
         "unsafe block not emitted:\n{}",
@@ -137,7 +137,7 @@ cell: Int :: 1337
 fn volatile_write_emit_is_byte_exact() {
     let src = "\
 use core.mem
-@Unsafe(\"UART TX register is mapped by the target profile\")
+#Unsafe(\"UART TX register is mapped by the target profile\")
 fn write_reg(value: Int) {
     p :: mem.Ptr<Int>.from_addr(0x40000100)
     mem.volatile_write(p, value)
@@ -316,7 +316,7 @@ fn run() {
     assert_eq!(stdout, "42\n99\n7\n3\n");
 }
 
-/// D-BLOCKPLANE1: explicit `@Region(r) { … }` — plain Rust block
+/// D-BLOCKPLANE1: explicit `#Region(r) { … }` — plain Rust block
 /// scope; views made inside live only until the block ends.
 #[test]
 fn arena_region_block() {
@@ -326,7 +326,7 @@ fn arena_region_block() {
     let src = "\
 use core.mem
 fn run() {
-    @Region(scratch) {
+    #Region(scratch) {
         a :: mem.Arena.new()
         b :: mem.Bump.new()
         x :: a.alloc(1)
@@ -342,7 +342,7 @@ fn run() {
     assert_eq!(stdout, "1\n2\n99\n");
 }
 
-/// c109 Phase 19: a `@Context(allocator: …) { … }` smart-context block (D-CTX1) — a
+/// c109 Phase 19: a `#Context(allocator: …) { … }` smart-context block (D-CTX1) — a
 /// plain lexical block with an `_ctx_guard_<i>` RAII guard.
 #[test]
 fn smart_context_block() {
@@ -353,7 +353,7 @@ fn smart_context_block() {
 use core.mem
 fn run() {
     arena :: mem.Arena.new()
-    @Context(allocator: arena) {
+    #Context(allocator: arena) {
         x :: arena.alloc(10)
         print(x)
     }

@@ -1,9 +1,9 @@
-Error [E3411]: `core.files.read()` inside `@Impure` gate, but `--allow-impure` was not passed
+Error [E3411]: `core.files.read()` inside `#Impure` gate, but `--allow-impure` was not passed
   --> tests/ui/impure_no_flag.jet:5:27
     |
   5 |         comptime cfg = fs.read("config.txt")
     |                           ^^^^
- Why: the `@Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host
+ Why: the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host
  Fix: add `--allow-impure` to your `jet build` / `jet run` invocation
 
 Error [E0915]: `String ? IOError` has no `Display` implementation
@@ -12,4 +12,4 @@ Error [E0915]: `String ? IOError` has no `Display` implementation
   6 |         print("{cfg}")
     |                 ^^^
  Why: bare `{value}` interpolation calls `Display` — there is no default for user types
- Fix: add `impl String ? IOError.Display { fn display(self) -> String { … } }`, or use `{value@Debug}` for debug output
+ Fix: add `impl String ? IOError.Display { fn display(self) -> String { … } }`, or use `{value#Debug}` for debug output

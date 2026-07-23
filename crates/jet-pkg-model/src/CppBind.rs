@@ -939,7 +939,7 @@ fn render_provenance(
 fn render_jet(lib: &str, surface: &Surface) -> String {
     let abi = format!("jet_cpp_{lib}");
     let mut out = format!(
-        "@Extern module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"
+        "#Extern module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"
     );
     for class in &surface.classes {
         let name = snake(&class.name);
@@ -974,7 +974,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
     for class in &surface.classes {
         let name = snake(&class.name);
         out.push_str(&format!(
-            "@SingleUse\npub struct {} {{ value: Int }}\n\npub fn new_{name}(",
+            "#SingleUse\npub struct {} {{ value: Int }}\n\npub fn new_{name}(",
             class.name
         ));
         jet_params(&mut out, &class.ctor);

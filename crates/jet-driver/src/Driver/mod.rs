@@ -619,12 +619,12 @@ pub fn query_build_plan(
 
 fn build_query_options() -> BuildRunOptions {
     BuildRunOptions {
-        // Inspection verifies source declarations and @Impure gates, but it
+        // Inspection verifies source declarations and #Impure gates, but it
         // must not require execution grants merely to display the graph.
         grants: crate::Comptime::Build::BuildCapability::ALL.into_iter().collect(),
         execute: false,
         // Graph inspection may describe effectful actions, but it has no
-        // authority to perform ambient comptime I/O. A user-written @Impure
+        // authority to perform ambient comptime I/O. A user-written #Impure
         // gate therefore still reaches E3411 instead of touching the host.
         allow_impure: false,
         inspect_only: true,
@@ -1381,9 +1381,9 @@ fn validate_build_authority(
         if !has_impure_gate {
             return Err(vec![Diagnostic::error(
                 "E3502",
-                format!("build authority `{}` must be used inside `@Impure(\"reason\")`", effect.name()),
+                format!("build authority `{}` must be used inside `#Impure(\"reason\")`", effect.name()),
                 "ambient build effects need an audited source gate as well as a policy grant".to_string(),
-                "wrap the action or probe declarations in `@Impure(\"why this build needs ambient authority\")`".to_string(),
+                "wrap the action or probe declarations in `#Impure(\"why this build needs ambient authority\")`".to_string(),
                 Some(span),
             )]);
         }
@@ -1391,7 +1391,7 @@ fn validate_build_authority(
             return Err(vec![Diagnostic::error(
                 "E3503",
                 format!("this build asks for `{}`, which effective policy has not granted", effect.name()),
-                "a source declaration and `@Impure` gate do not widen CLI, package, or workspace policy".to_string(),
+                "a source declaration and `#Impure` gate do not widen CLI, package, or workspace policy".to_string(),
                 format!("pass `--allow-{}` or grant it in package/workspace build policy", effect.flag()),
                 Some(span),
             )]);
@@ -1715,7 +1715,7 @@ fn compile_bundle_path_opts_full(
         timer.write_to(&bundle.project_root);
     }
     // c110: capabilities are derived from semantic facts (resolved Core calls,
-    // `@Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
+    // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
     let capabilities = crate::Capabilities::from_sema(
         &bundle.used_core,
         crate::bundle_uses_unsafe(&bundle),
@@ -1885,7 +1885,7 @@ fn compile_src_with_options_and_policy(
         None
     };
     // c110: capabilities are derived from semantic facts (resolved Core calls,
-    // `@Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
+    // `#Unsafe` gates, FFI declarations), not from scanning the lowered Rust.
     let capabilities = crate::Capabilities::from_sema(
         &bundle.used_core,
         crate::bundle_uses_unsafe(&bundle),
@@ -2269,12 +2269,12 @@ pub fn compile_bundle_path_with_entry(
 ///
 /// Sema/codegen still require a literal `fn run` (Registration/Bundle
 /// `funcs.get("run")`). D-JPK-TASKRUN1 also says a cross-task dependency is a
-/// plain call — so renaming `@Task fn greet` → `run` would break
+/// plain call — so renaming `#Task fn greet` → `run` would break
 /// `seed()`'s `greet()` with E0102. Fix: park any existing `fn run` as
 /// `__jet_unused_run`, then inject a synthetic `fn run(…) { entry_fn(…) }`
 /// that forwards params (and return) while leaving `entry_fn` callable.
 ///
-/// The wrapper is never `@Task` (avoids E0928 on reserved lifecycle name
+/// The wrapper is never `#Task` (avoids E0928 on reserved lifecycle name
 /// `run`). A no-op when `entry_fn` is already `"run"`, or when no function
 /// named `entry_fn` exists (caller surfaces E0101 / E1294 separately).
 fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {

@@ -331,7 +331,7 @@ fn tar_write_all(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
         if split_ustar_name(name).is_none() {
             let mut long = name.as_bytes().to_vec();
             long.push(0);
-            append_tar_entry(&mut out, "././@LongLink", &long, b'L');
+            append_tar_entry(&mut out, "././#LongLink", &long, b'L');
         }
         append_tar_entry(&mut out, name, data, b'0');
     }

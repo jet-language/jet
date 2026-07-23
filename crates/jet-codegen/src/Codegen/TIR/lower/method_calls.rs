@@ -595,14 +595,14 @@ pub(crate) fn lower_method_call(
             _ => {}
         }
     }
-    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `@Transact` handle.
+    // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
     // The gate proved `recv_type == Some("Transaction")` and a single literal
     // zero-param lambda arg. Lower to `<handle>.on_commit(Box::new(move || { … }))`;
     // the Drop-backed LIFO-on-commit semantics live in the `JetTransaction` prelude
     // type. The receiver is the bound handle ident → its mangled Rust place.
     if method == Syntax::TXN_ON_COMMIT && recv_type.as_deref() == Some(Syntax::TXN_HANDLE_TYPE) {
         // The handle is always a bound ident (sema typed it `Transaction` from a
-        // `@Transact(name)` binding); its mangled place is `user_<name>`.
+        // `#Transact(name)` binding); its mangled place is `user_<name>`.
         let handle = match receiver {
             Expr::Ident(name, _) => mangle(name),
             // Defensive: a non-ident receiver can't be a transaction handle, but
@@ -629,7 +629,7 @@ pub(crate) fn lower_method_call(
             };
         }
     }
-    // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` on a `@Transact`
+    // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` on a `#Transact`
     // handle — the exact mirror of `on_commit`. Lower to
     // `<handle>.on_rollback(Box::new(move || { … }))`; the Drop-backed run-on-rollback
     // semantics live in the `JetTransaction` prelude type.
@@ -1964,7 +1964,7 @@ pub(crate) fn lower_method_call(
                 expected,
                 method == "edit",
             );
-            // D-STM1=A (card #506): a `Shared<T>.edit(f)` inside a `@Transact` block
+            // D-STM1=A (card #506): a `Shared<T>.edit(f)` inside a `#Transact` block
             // routes to the deferred `edit_txn` — the write is buffered and applied
             // atomically at the block's commit, so the call yields nothing (Unit; E0750
             // rejects a value-producing edit here). The closure is stored past the call,

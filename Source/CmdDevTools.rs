@@ -50,7 +50,7 @@ pub(crate) fn run_dev(
     // diffed against it for type stability (D-HOTSWAP1).
     let mut prev_bundle = render_dev_iteration(file, try_anyway, mode, use_interpreter);
     let mut last_mtime = file_mtime(path);
-    // D-SCHEDULE1 (card #505): due `@Task @Every(…)` fns fire on their own
+    // D-SCHEDULE1 (card #505): due `#Task #Every(…)` fns fire on their own
     // schedule, independent of file-change ticks.
     let mut clock = TaskClock::new();
 
@@ -77,12 +77,12 @@ pub(crate) fn run_dev(
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): the `jet dev` consumer of
-/// schedule-as-code — check every `@Task @Every(…)` fn in `bundle` against
+/// schedule-as-code — check every `#Task #Every(…)` fn in `bundle` against
 /// `clock`, and run whichever are due through the same interpreter tier the
 /// rest of the dev loop uses (`jet::Interpreter::run_named_task`). This is
 /// the dev-loop tier only (D-DEV3); the service runtime (D-SERVICE1) and a
 /// jetos timer projection are the production/OS consumers of the identical
-/// `@Every(…)` declaration — see the D-SCHEDULE1 row in
+/// `#Every(…)` declaration — see the D-SCHEDULE1 row in
 /// docs/spec/syntax-decisions.md for the full three-consumer law.
 fn run_due_tasks(
     bundle: &jet::AST::ProgramBundle,
@@ -1424,12 +1424,12 @@ pub(crate) fn run_explain_marker(site: Option<&str>, key: Option<&str>, mode: Ou
 
 /// `jet inspect bind <header.h> [--pkg <lib>] [-o <out.jet>]` (S59 / E2-M14 Phase 4).
 ///
-/// Generates a `@Bindgen module c.<lib>.__bindgen__` cache from a C header,
+/// Generates a `#Bindgen module c.<lib>.__bindgen__` cache from a C header,
 /// using the same native std-only backend the compiler invokes on a cache miss
 /// (owner 2026-06-18, supersedes D-CBIND3=B). Parses C function prototypes
 /// over the bindable type subset; skips and reports what it cannot map (I3).
 /// **E3208** fires only when the header is unreadable or has no bindable
-/// prototypes — use `@Extern module c.<lib>` for those declarations.
+/// prototypes — use `#Extern module c.<lib>` for those declarations.
 pub(crate) fn run_bind(args: &[&String]) {
     if args.first().is_some_and(|arg| arg.as_str() == jet::Syntax::CPP_MODULE_ROOT) {
         run_cpp_bind(&args[1..]);
@@ -1476,7 +1476,7 @@ pub(crate) fn run_bind(args: &[&String]) {
         );
         eprintln!();
         eprintln!("Generate a C binding cache from a header (S59). The output is");
-        eprintln!("a `@Bindgen module c.<lib>.__bindgen__` file, by default written");
+        eprintln!("a `#Bindgen module c.<lib>.__bindgen__` file, by default written");
         eprintln!("to .jet/bindings/c/<lib>.jet. The compiler also runs this");
         eprintln!("automatically on a cache miss; `bind` is the manual refresh.");
         exit(if args.is_empty() { 2 } else { 0 });
@@ -1536,7 +1536,7 @@ pub(crate) fn run_bind(args: &[&String]) {
             );
             eprintln!(" Why: {}.", why);
             eprintln!(
-                " Fix: hand-write `@Extern module c.{} {{ … }}` for the symbols you need.",
+                " Fix: hand-write `#Extern module c.{} {{ … }}` for the symbols you need.",
                 lib
             );
             exit(ExitCodes::USER_ERROR);
@@ -1571,7 +1571,7 @@ pub(crate) fn run_bind(args: &[&String]) {
     );
     if !result.skipped.is_empty() {
         println!(
-            "skipped {} declaration{} outside the bindable subset (hand-write `@Extern` for these):",
+            "skipped {} declaration{} outside the bindable subset (hand-write `#Extern` for these):",
             result.skipped.len(),
             if result.skipped.len() == 1 { "" } else { "s" }
         );
@@ -2264,7 +2264,7 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
         }
     };
 
-    // D-BENCH1: when the file declares `@Bench` blocks, time each region via
+    // D-BENCH1: when the file declares `#Bench` blocks, time each region via
     // the bench harness (its generated `main` reports ns/iter + ops/sec).
     // Otherwise fall through to whole-program timing (the original behaviour).
     if jet::has_bench_blocks(file) {
@@ -2343,7 +2343,7 @@ pub(crate) fn run_bench(file: &str, mode: OutputMode) {
 }
 
 /// D-BENCH1: build and run the per-region bench harness. The harness binary's
-/// `main` warms up, auto-scales, times each `@Bench` region, and prints a line
+/// `main` warms up, auto-scales, times each `#Bench` region, and prints a line
 /// per region (ns/iter + ops/sec), so this just compiles, runs it once, and
 /// relays its output.
 fn run_bench_regions(file: &str, src: &str, mode: OutputMode) {
@@ -2377,7 +2377,7 @@ pub(crate) struct BenchEvidence {
     pub(crate) allocation_samples: Vec<(u128, u128, u64)>,
 }
 
-/// Shared `@Bench` executor for human bench output and BenchMeasurement.
+/// Shared `#Bench` executor for human bench output and BenchMeasurement.
 /// Wire rows are compiler-private; user-facing spelling stays `jet bench`.
 pub(crate) fn collect_bench_evidence(file: &str, src: &str, mode: OutputMode, relay_output: bool) -> Vec<BenchEvidence> {
     let (rust_code, ffi_link) = match jet::compile_benches_with_path(file) {

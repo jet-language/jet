@@ -117,7 +117,7 @@ impl<'a> Parser<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0911",
                             "`reorder` isn't a migration verb — field order isn't a breaking change".to_string(),
-                            "a `@PublishedSchema` record is keyed by field name, so reordering fields is safe and needs no migration".to_string(),
+                            "a `#PublishedSchema` record is keyed by field name, so reordering fields is safe and needs no migration".to_string(),
                             "delete the `reorder` line; just write the fields in the order you want".to_string(),
                             Some(op_tok.span),
                         ));

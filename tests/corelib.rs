@@ -2039,7 +2039,7 @@ fn csv_whole_value_handles_multiline_quotes_crlf_and_typed_decode() {
     let source = r#"
 use core.encoding.csv as csv
 
-@[Codable]
+#[Codable]
 struct Note { name: String, note: String }
 
 fn run() {
@@ -2773,7 +2773,7 @@ fn cbor_whole_codable_bytes_and_original_wire_canonical_validation() {
 use core.encoding as encoding
 use core.encoding.cbor as cbor
 
-@[Codable]
+#[Codable]
 struct Packet { id: Int, payload: [U8] }
 
 fn run() {
@@ -2873,7 +2873,7 @@ fn cbor_whole_indefinite_values_obey_normal_canonical_and_limit_laws() {
 use core.encoding as encoding
 use core.encoding.cbor as cbor
 
-@[Codable]
+#[Codable]
 struct Packet { name: String, data: [U8] }
 
 fn run() {
@@ -3196,7 +3196,7 @@ fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
 #[test]
 fn invariant_refinement_proves_fixed_array_index() {
     let src = r#"
-@Invariant("value >= 0 && value < 4")
+#Invariant("value >= 0 && value < 4")
 Index4 :: distinct Int
 
 fn pick(xs: [String#4], i: Index4) -> String {
@@ -3457,7 +3457,7 @@ use core.time as time
 
 fn run() {
     os.on_interrupt(() => {
-        @Context(deadline: time.now()) {
+        #Context(deadline: time.now()) {
             time.sleep(5)
         }
     })
@@ -5056,7 +5056,7 @@ fn run() {
     first.close() ?? panic("first close")
 
     second := net.tcp_connect(address) ?? panic("second connect")
-    @Context(deadline: time.now() - 1) {
+    #Context(deadline: time.now() - 1) {
         if second.read(1) == {
             Ok(_) -> print("unexpected second read")
             Err(error) -> print(net.error_message(error))
@@ -5561,7 +5561,7 @@ fn core_data_import_and_codegen_resolve() {
         r#"
 use core.data as data
 
-@Codable
+#Codable
 struct Ticket {
     team: String
     minutes: Float
@@ -6872,13 +6872,13 @@ fn core_data_typed_csv_group_stats_status_and_plot() {
         r#"
 use core.data as data
 
-@Codable
+#Codable
 struct Ticket {
     team: String
     minutes: Float
 }
 
-@Codable
+#Codable
 struct Budget {
     team: String
     owner: String
@@ -7687,7 +7687,7 @@ fn run() {
     print(rng.int(1, 4) >= 1)
 }
 
-@Bench("parse") {}
+#Bench("parse") {}
 "#,
         &[],
         None,
@@ -7721,7 +7721,7 @@ fn deadline_context_exceed_reports_e3003() {
 use core.time as time
 
 fn run() {
-    @Context(deadline: time.now()) {
+    #Context(deadline: time.now()) {
         time.sleep(5)
     }
 }
@@ -7765,7 +7765,7 @@ use core.time as time
 
 fn run() {{
     child :: process.cmd(["{sleeper}"]).spawn() ?? panic("spawn failed")
-    @Context(deadline: time.now() + 20) {{
+    #Context(deadline: time.now() + 20) {{
         child.wait() ?? panic("wait failed")
     }}
 }}
@@ -8364,7 +8364,7 @@ fn run() {
     );
 }
 
-/// c136 / D-SERDE9-12: generic `@[Codable]` is first-class. The derive injects
+/// c136 / D-SERDE9-12: generic `#[Codable]` is first-class. The derive injects
 /// `T: Encode`/`T: Decode` on exactly the wire-reaching params (D-SERDE9/10); a
 /// phantom/skip-only param gets no serde bound (it still gets structural Clone).
 /// E2413 is retired (D-SERDE12).
@@ -8375,15 +8375,15 @@ fn generic_codable_injects_wire_param_bounds() {
         r#"
 use core.encoding.json as json
 
-@[Codable]
+#[Codable]
 struct Wrap<T> {
     value: T
 }
 
-@[Codable]
+#[Codable]
 struct Tagged<K> {
     raw: Int
-    @[Skip] marker: K?
+    #[Skip] marker: K?
 }
 
 fn run() {
@@ -8418,7 +8418,7 @@ fn run() {
     );
 }
 
-/// c136: a generic `@[Codable]` value round-trips through json encode/decode, and
+/// c136: a generic `#[Codable]` value round-trips through json encode/decode, and
 /// a phantom-param type serializes regardless of its phantom argument (D-SERDE10).
 #[test]
 fn generic_codable_round_trips() {
@@ -8436,15 +8436,15 @@ fn generic_codable_round_trips() {
         r#"
 use core.encoding.json as json
 
-@[Codable]
+#[Codable]
 struct Wrap<T> {
     value: T
 }
 
-@[Codable]
+#[Codable]
 struct Tagged<K> {
     raw: Int
-    @[Skip] marker: K?
+    #[Skip] marker: K?
 }
 
 fn run() {
@@ -8468,7 +8468,7 @@ fn run() {
 
 // ── c152: full TOML adapter (D-ENC-DYN1=A+) ──────────────────────────────────
 // Nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars decode into
-// nested `@[Codable]` structs, and the rich tree round-trips through `to_string`.
+// nested `#[Codable]` structs, and the rich tree round-trips through `to_string`.
 #[test]
 fn toml_full_nested_decode_and_round_trip() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
@@ -8486,9 +8486,9 @@ fn toml_full_nested_decode_and_round_trip() {
         "toml_typed",
         r#"
 use core.encoding.toml as toml
-@[Codable]
+#[Codable]
 struct Server { host: String  port: Int }
-@[Codable]
+#[Codable]
 struct Config { title: String  server: Server  ports: [Int] }
 fn run() {
     raw :: "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
@@ -8596,7 +8596,7 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
-@[Codable]
+#[Codable]
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
@@ -8638,7 +8638,7 @@ fn generated_enum_codecs_reenter_jet_pipeline() {
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
 use core.encoding.json as json
-@[Codable]
+#[Codable]
 enum Event {
     Idle
     Count(Int)
@@ -8671,8 +8671,8 @@ fn generated_internal_tagged_enum_round_trips_every_variant_shape() {
     let src = r#"
 use core.encoding.json as json
 
-@[Codable]
-@[Tag("type")]
+#[Codable]
+#[Tag("type")]
 enum Event {
     Idle
     Count(Int)
@@ -8735,7 +8735,7 @@ fn generated_struct_codecs_preserve_option_and_computed_fields() {
     let src = r#"
 use core.encoding.json as json
 
-@[Codable]
+#[Codable]
 struct Record {
     base: Int
     note: String?
@@ -8826,10 +8826,10 @@ fn generated_struct_encode_preserves_order_with_rename_and_option() {
     let src = r#"
 use core.encoding.json as json
 
-@[Encode]
+#[Encode]
 struct Wire {
     first: String
-    @[Rename("wireSecond")] second: String
+    #[Rename("wireSecond")] second: String
     maybe: String?
     last: Int
 }
@@ -8862,14 +8862,14 @@ fn generated_struct_codecs_preserve_flatten_rename_and_default() {
     let src = r#"
 use core.encoding.json as json
 
-@Codable
+#Codable
 struct Inner { x: Int  y: Bool }
 
-@[Codable, RenameAll(camel)]
+#[Codable, RenameAll(camel)]
 struct Outer {
     display_name: String
-    @[Flatten] inner: Inner
-    @[Default(4 + 5)] count: Int
+    #[Flatten] inner: Inner
+    #[Default(4 + 5)] count: Int
 }
 
 fn run() {
@@ -8897,8 +8897,8 @@ fn generated_struct_decode_denies_unknown_fields() {
     let src = r#"
 use core.encoding.json as json
 
-@[Codable]
-@[DenyUnknownFields]
+#[Codable]
+#[DenyUnknownFields]
 struct Strict { name: String }
 
 fn run() {
@@ -8924,10 +8924,10 @@ fn generated_decode_dispatches_across_module_boundaries() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let lib = r#"
-@[Codable]
+#[Codable]
 pub struct Address { pub city: String }
 
-@[Codable]
+#[Codable]
 pub struct Order {
     pub shipping: Address
     pub quantities: [Int]
@@ -8970,7 +8970,7 @@ derive T.RemoteLabel {
     emit("impl $name {{ fn remote_label(self) -> String {{ return \"remote:$name\" }} }}")
 }
 
-@LocalLabel
+#LocalLabel
 pub struct RemoteType { pub value: Int }
 
 pub fn remote_type_label() -> String {
@@ -8987,7 +8987,7 @@ derive T.LocalLabel {
     emit("impl $name {{ pub fn local_label(self) -> String {{ return \"local:$name\" }} }}")
 }
 
-@RemoteLabel
+#RemoteLabel
 struct LocalType { value: Int }
 
 fn run() {
@@ -9008,8 +9008,8 @@ fn run() {
 }
 
 /// Card #129 / R11: generated declarations are ordinary Jet items. They must
-/// be registered before later generated code (here `@[Codable]`) is checked,
-/// and `@[Default(expr)]` must retain its exact compile-time value.
+/// be registered before later generated code (here `#[Codable]`) is checked,
+/// and `#[Default(expr)]` must retain its exact compile-time value.
 #[test]
 fn user_derive_generated_struct_reenters_registration_and_serde() {
     let dir = std::env::temp_dir().join(format!("jet_derive_reentry_{}", std::process::id()));
@@ -9020,14 +9020,14 @@ use core.encoding.json as json
 
 derive T.ConfigSchema {
     emit("""
-@[Codable]
+#[Codable]
 struct GeneratedConfig {{
-    @[Default([80, 443])] ports: [Int]
+    #[Default([80, 443])] ports: [Int]
 }}
 """)
 }
 
-@ConfigSchema
+#ConfigSchema
 struct Schema<T> { witness: T }
 
 fn run() {
@@ -9062,7 +9062,7 @@ derive T.TypeName {
     emit("impl $name {{ fn get_value(self) -> $param {{ return ~self.value }} fn type_name(self) -> String {{ return \"$name\" }} }}")
 }
 
-@TypeName
+#TypeName
 struct Box<T> { value: T }
 
 fn run() {
@@ -9103,7 +9103,7 @@ derive T.CopyCallback {
     emit("impl $name {{ fn duplicate(self) -> fn(Int) -> Int {{ return ~self.callback }} }}")
 }
 
-@CopyCallback
+#CopyCallback
 struct Handler { callback: fn(Int) -> Int }
 
 fn run() { print(0) }
@@ -9193,9 +9193,9 @@ fn yaml_full_nested_decode_and_features() {
         "yaml_typed",
         r#"
 use core.encoding.yaml as yaml
-@[Codable]
+#[Codable]
 struct Service { name: String  port: Int }
-@[Codable]
+#[Codable]
 struct Config { app: String  services: [Service] }
 fn run() {
     raw :: "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
@@ -9245,8 +9245,8 @@ fn run() {
 // ── D-MIGRATE3=A / D-MIGRATE4=A: decode-time migration transparency ──────────
 // `decode_traced<T>` sits beside `decode<T>` on every codec that shares the
 // decode machinery. `MigrationStatus.migrated` is false and `.from`/`.steps`
-// are empty both for a plain type (no `@PublishedSchema`) and for a
-// `@PublishedSchema` type decoding data already shaped like the current
+// are empty both for a plain type (no `#PublishedSchema`) and for a
+// `#PublishedSchema` type decoding data already shaped like the current
 // struct (the "fresh" case). This test covers those non-migrated cases; the
 // migrated paths (D-MIGRATE4 runtime chain) are `decode_traced_migration_*`
 // below.
@@ -9267,10 +9267,10 @@ fn decode_traced_json_plain_and_published_fresh() {
         r#"
 use core.encoding.json as json
 
-@[Codable]
+#[Codable]
 struct Point { x: Int  y: Int }
 
-@[PublishedSchema, Codable]
+#[PublishedSchema, Codable]
 struct UserRecord { id: Int  display_name: String }
 
 migration UserRecord {
@@ -9278,14 +9278,14 @@ migration UserRecord {
 }
 
 fn run() {
-    // Plain (non-@PublishedSchema) type: decode_traced still works.
+    // Plain (non-#PublishedSchema) type: decode_traced still works.
     p :: json.decode_traced<Point>("{{\"x\":1,\"y\":2}}") ?? panic("bad point")
     print(p.value.x)
     print(p.migration.migrated)
     print(p.migration.from)
     print(p.migration.steps.len())
 
-    // @PublishedSchema type, fresh data (matches the current shape exactly):
+    // #PublishedSchema type, fresh data (matches the current shape exactly):
     // still reports migrated: false — nothing runtime-converted it.
     r :: json.decode_traced<UserRecord>("{{\"id\":1,\"display_name\":\"Ada\"}}") ?? panic("bad user")
     print(r.value.display_name)
@@ -9325,7 +9325,7 @@ fn decode_traced_toml_and_csv() {
 use core.encoding.toml as toml
 use core.encoding.csv as csv
 
-@[Codable]
+#[Codable]
 struct Config { port: Int }
 
 fn run() {
@@ -9348,7 +9348,7 @@ fn run() {
 }
 
 // ── D-MIGRATE4=A: the runtime migration chain ────────────────────────────────
-// Decoding a `@PublishedSchema` type tries the current shape first; on
+// Decoding a `#PublishedSchema` type tries the current shape first; on
 // mismatch it detects which historical shape the data's field-name set
 // matches (newest matching version preferred) and walks the migration blocks
 // forward, oldest→current. `decode_traced` reports `from` + `steps`
@@ -9374,13 +9374,13 @@ fn decode_traced_migration_chain() {
         r#"
 use core.encoding.json as json
 
-@Codable
+#Codable
 struct Rank { value: Int }
 
 // v1: { legacy_id, name, score: Int }
 // v2: { name, score: Int }     (block 1: remove legacy_id)
 // v3: { title, score: Rank }   (block 2: rename + change via)
-@[PublishedSchema, Codable]
+#[PublishedSchema, Codable]
 struct Profile {
     title: String
     score: Rank
@@ -9456,7 +9456,7 @@ fn decode_traced_migration_toml_and_csv() {
 use core.encoding.toml as toml
 use core.encoding.csv as csv
 
-@[PublishedSchema, Codable]
+#[PublishedSchema, Codable]
 struct Config {
     port: Int
     host: String
@@ -9495,10 +9495,10 @@ fn migration_free_types_emit_no_runtime_chain() {
     let src = r#"
 use core.encoding.json as json
 
-@Codable
+#Codable
 struct Point { x: Int  y: Int }
 
-@[PublishedSchema, Codable]
+#[PublishedSchema, Codable]
 struct UserRecord { id: Int  display_name: String }
 
 fn run() {
@@ -9969,7 +9969,7 @@ fn run() {
     })
     queued_running :: queued_deadline.emit_async(10)
     queued_started :: queued_started_rx.receive() ?? panic("started")
-    @Context(deadline: time.now() + 20) {
+    #Context(deadline: time.now() + 20) {
         expires_queued :: queued_deadline.emit_async(11)
         queued_expired :: expires_queued.join()
         print("deadline queued={queued_expired.accepted() && queued_expired.state() == .DeadlineExceeded} trace={queued_expired.trace().summary()}")
@@ -9988,7 +9988,7 @@ fn run() {
     pending_running :: pending_deadline.emit_async(20)
     pending_started :: pending_started_rx.receive() ?? panic("started")
     pending_queued :: pending_deadline.emit_async(21)
-    @Context(deadline: time.now() + 20) {
+    #Context(deadline: time.now() + 20) {
         expires_pending :: pending_deadline.emit_async(22)
         pending_expired :: expires_pending.join()
         print("deadline pending={!pending_expired.accepted() && pending_expired.state() == .DeadlineExceeded} trace={pending_expired.trace().summary()}")
@@ -10063,7 +10063,7 @@ fn run() {
 
     cancel_scope :: event.scope()
     cancel_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    @Context(deadline: time.now() + 100000) {
+    #Context(deadline: time.now() + 100000) {
         cancel_queued :: cancel_event.emit_async(1)
         cancel_pending :: cancel_event.emit_async(2)
         cancel_event.on(cancel_scope, (n: Int) => {})
@@ -10087,7 +10087,7 @@ fn run() {
     close_scope :: event.scope()
     close_event :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     close_event.on(close_scope, (n: Int) => {})
-    @Context(deadline: time.now() + 100000) {
+    #Context(deadline: time.now() + 100000) {
         close_queued :: close_event.emit_async(3)
         close_pending :: close_event.emit_async(4)
         close_event.close()

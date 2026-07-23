@@ -1,4 +1,4 @@
-//! D-MUSTUSE1 (c18iwxqx): `@MustUse` ignored-result diagnostics (E0419).
+//! D-MUSTUSE1 (c18iwxqx): `#MustUse` ignored-result diagnostics (E0419).
 
 use jet_sema::Diagnostics::{Diagnostic, Severity};
 use jet_sema::Lexer;
@@ -78,7 +78,7 @@ fn run() {}
 #[test]
 fn must_use_fn_ignored_is_e0419() {
     let src = r#"
-@MustUse fn ticket() -> Int {
+#MustUse fn ticket() -> Int {
     return 1
 }
 fn run() {
@@ -96,7 +96,7 @@ fn run() {
 #[test]
 fn must_use_type_ignored_is_e0419() {
     let src = r#"
-@MustUse struct Receipt {
+#MustUse struct Receipt {
     id: Int
 }
 fn issue() -> Receipt {
@@ -117,7 +117,7 @@ fn run() {
 #[test]
 fn must_use_drop_suppresses_e0419() {
     let src = r#"
-@MustUse fn ping() -> Int {
+#MustUse fn ping() -> Int {
     return 1
 }
 fn run() {
@@ -135,7 +135,7 @@ fn run() {
 #[test]
 fn must_use_enum_ignored_is_e0419() {
     let src = r#"
-@MustUse enum Ticket {
+#MustUse enum Ticket {
     Open
     Closed
 }
@@ -157,8 +157,8 @@ fn run() {
 #[test]
 fn must_use_bound_value_ok() {
     let src = r#"
-@MustUse struct Token { id: Int }
-@MustUse fn mint(id: Int) -> Token {
+#MustUse struct Token { id: Int }
+#MustUse fn mint(id: Int) -> Token {
     return Token.{ id: id }
 }
 fn run() {

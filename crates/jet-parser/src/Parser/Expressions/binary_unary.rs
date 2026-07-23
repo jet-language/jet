@@ -68,7 +68,10 @@ impl<'a> Parser<'a> {
                     OrFallback::Value(e) => e.span().end,
                     OrFallback::Return(_, s) => s.end,
                     OrFallback::Panic { name_span, .. } => name_span.end,
-                    OrFallback::Break(s) | OrFallback::Continue(s) => s.end,
+                    OrFallback::Break(s)
+                    | OrFallback::Continue(s)
+                    | OrFallback::BreakLabel(_, s)
+                    | OrFallback::ContinueLabel(_, s) => s.end,
                 };
                 let span = Span::new(lhs.span().start, end.max(op_span.end));
                 lhs = Expr::OrFallback {
@@ -97,6 +100,26 @@ impl<'a> Parser<'a> {
             }
             if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_NEXT) {
                 return Ok(OrFallback::Continue(self.bump().span));
+            }
+            // D-LOOPLABEL3=A: a named dot exit composes with `??`.
+            if matches!(self.peek().kind, TokKind::Ident(_))
+                && matches!(self.peek2().kind, TokKind::Dot)
+                && (matches!(self.peek3().kind, TokKind::KwBreak)
+                    || matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::KW_NEXT))
+                && matches!(self.peek4().kind, TokKind::LParen)
+                && matches!(self.peek5().kind, TokKind::RParen)
+            {
+                let (name, name_span) = self.expect_ident("for the loop name")?;
+                self.bump(); // `.`
+                let method = self.bump();
+                self.bump(); // `(`
+                let end = self.bump().span.end; // `)`
+                let span = Span::new(name_span.start, end);
+                return Ok(if matches!(method.kind, TokKind::KwBreak) {
+                    OrFallback::BreakLabel(name, span)
+                } else {
+                    OrFallback::ContinueLabel(name, span)
+                });
             }
             let e = self.expr_or(allow_struct_lit)?;
             if let Expr::Call(call) = &e {
@@ -410,7 +433,7 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::Star => {
                     // D-CAP9: prefix `*x` is raw-pointer-of (take a raw pointer to
-                    // `x`), gated to `@Unsafe`. Dereference moved to postfix `p.*`.
+                    // `x`), gated to `#Unsafe`. Dereference moved to postfix `p.*`.
                     let span = self.bump().span;
                     let inner = self.expr_unary(allow_struct_lit)?;
                     let full = Span::new(span.start, inner.span().end);

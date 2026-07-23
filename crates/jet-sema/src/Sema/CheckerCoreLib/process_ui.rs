@@ -384,7 +384,7 @@ pub(crate) fn ui_backend_method_return(
 /// c-devserver (owner-directed 2026-07-01): type-check builder method calls
 /// on a `DevServer` value (`.html`/`.port`/`.serve`). `.html`/`.port` return
 /// `DevServer` for chaining, but are equally valid as bare statements (they
-/// are not `@MustUse`) — the reference example calls them as plain
+/// are not `#MustUse`) — the reference example calls them as plain
 /// statements without reassigning. `.serve()` blocks forever and returns
 /// nothing.
 pub(crate) fn devserver_method_return(

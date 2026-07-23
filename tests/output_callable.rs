@@ -205,7 +205,7 @@ fn runnable_contracts_and_selection_fail_in_sema() {
     )
     .contains(&"E1321".to_string()));
     assert!(codes(
-        "app: Output :: .Executable.{ name: \"demo\", entry: start }\n@Unsafe(\"raw boundary\") fn start() {}\n",
+        "app: Output :: .Executable.{ name: \"demo\", entry: start }\n#Unsafe(\"raw boundary\") fn start() {}\n",
         jet::Sema::CompileMode::Check,
     )
     .contains(&"E1321".to_string()));
@@ -411,7 +411,7 @@ fn typed_executable_output_reuses_the_checked_cli_schema() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "@[Cli]\nstruct Args { value: Int }\n\napp: Output :: .Executable.{ name: \"demo\", entry: launch };\n\nfn launch(args: Args) { print(args.value) }\n",
+        "#[Cli]\nstruct Args { value: Int }\n\napp: Output :: .Executable.{ name: \"demo\", entry: launch };\n\nfn launch(args: Args) { print(args.value) }\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
@@ -434,7 +434,7 @@ fn compiled_imported_typed_fallible_entry_uses_its_defining_module() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("helper.jet"),
-        "@[Cli]\npub struct Args { value: Int }\n\npub fn launch(args: Args) -> Void ? {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
+        "#[Cli]\npub struct Args { value: Int }\n\npub fn launch(args: Args) -> Void ? {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
     )
     .unwrap();
     let file = dir.join("main.jet");

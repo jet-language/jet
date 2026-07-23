@@ -532,7 +532,7 @@ pub fn e1802(feature: &str) -> Diagnostic {
         "E1802",
         format!("the REPL interpreter can't run {}", feature),
         "the REPL is an interpreter for learning Jet; some features — \
-         FFI, tasks/channels, `@Unsafe`, and OS-level APIs — require the real compiler"
+         FFI, tasks/channels, `#Unsafe`, and OS-level APIs — require the real compiler"
             .to_string(),
         "run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler".to_string(),
         None,
@@ -1006,7 +1006,7 @@ fn cmd_run_native(session: &Session, color: bool, out_sink: &mut impl Write) {
         let _ = writeln!(out_sink, "note: session is empty — nothing to run");
         return;
     }
-    if session.turns.iter().any(|turn| turn.input.contains("@Grant")) {
+    if session.turns.iter().any(|turn| turn.input.contains("#Grant")) {
         let _ = writeln!(out_sink, "Error [E1803]: `:run` will not replay effectful turns");
         let _ = writeln!(out_sink, " Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran");
         let _ = writeln!(out_sink, " Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`");
@@ -1071,7 +1071,7 @@ fn cmd_run_transcript(session: &Session) -> String {
     if session.stmt_srcs.is_empty() && session.item_srcs.is_empty() {
         return "note: session is empty — nothing to run\n".to_string();
     }
-    if session.turns.iter().any(|turn| turn.input.contains("@Grant")) {
+    if session.turns.iter().any(|turn| turn.input.contains("#Grant")) {
         return "Error [E1803]: `:run` will not replay effectful turns\n Why: replay would repeat already-authorized host operations without an operation-by-operation prompt; nothing ran\n Fix: run each effectful turn in the REPL, or put the program in a file and use `jet run`\n".to_string();
     }
 
@@ -1308,14 +1308,14 @@ fn reject_feature(text: &str) -> Option<&'static str> {
         .strip_prefix("use ")
         .and_then(|rest| rest.split_ascii_whitespace().next())
         .map(|path| path.trim_end_matches(';'));
-    if t.contains("@Unsafe") {
-        return Some("`@Unsafe`");
+    if t.contains("#Unsafe") {
+        return Some("`#Unsafe`");
     }
     if t.contains("extern rust") {
         return Some("`extern rust`");
     }
-    if t.contains("@Extern") || t.contains("@Bindgen") {
-        return Some("C-FFI (`@Extern`/`@Bindgen`)");
+    if t.contains("#Extern") || t.contains("#Bindgen") {
+        return Some("C-FFI (`#Extern`/`#Bindgen`)");
     }
     if t.contains("core.tasks") || t.contains("core.channels") {
         return Some("tasks/channels (`core.tasks`)");

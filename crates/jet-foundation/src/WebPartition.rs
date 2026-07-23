@@ -45,9 +45,9 @@ impl WebPartitionMarker {
 
     /// The marker's source spelling (without the leading `#`), for
     /// re-emission by `jet fmt`. D-MARK-TARGET1=A (ratified 2026-07-11, card
-    /// #498): the per-function override now shares the `@Target(Wasm|Js)`
+    /// #498): the per-function override now shares the `#Target(Wasm|Js)`
     /// spelling with the file/module ceiling — the old bare `#Wasm`/`#Js`
-    /// markers are retired. `@WasmExport` (a different job) is untouched.
+    /// markers are retired. `#WasmExport` (a different job) is untouched.
     pub fn name(self) -> &'static str {
         match self {
             WebPartitionMarker::Wasm => "Target(Wasm)",
@@ -130,9 +130,9 @@ pub fn web_abi_type(
     crate::Diagnostics::Diagnostic::error(
         "E-WEB-ABI-TYPE",
         format!("`{ty_show}` cannot cross the JS/WASM boundary {context}"),
-        "web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `@[Codable]` structs/enums per D-JSBIND1)"
+        "web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums per D-JSBIND1)"
             .to_string(),
-        "use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `@[Codable]` struct/enum whose fields are ABI-safe (D-JSBIND1)"
+        "use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe (D-JSBIND1)"
             .to_string(),
         span,
     )

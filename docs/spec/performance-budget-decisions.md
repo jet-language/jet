@@ -34,7 +34,7 @@ Every BudgetSpec retains spans for module, whole entry, name, scope, metric, pro
 
 Beginner: name+metric+limit covers a package/compiler deterministic gate when provider/comparison are unambiguous; defaults are Fail and Current. Expert: exact attachment, provider, percentile, absolute SLA or relative trend, baseline, enforcement, target class/triple, and profile are typed fields. Hybrid: omitted fields elaborate to the same BudgetSpec; no shorthand parser or second policy engine.
 
-I8 migration gate: current @Bench/bench_budget output and game budgets are separate prototypes. The ratified BENCHMIGRATE1 and GAMEMIGRATE1 laws below remove both before #241 closes. No alias, adapter, dormant parser, or second enforcement path may survive.
+I8 migration gate: current #Bench/bench_budget output and game budgets are separate prototypes. The ratified BENCHMIGRATE1 and GAMEMIGRATE1 laws below remove both before #241 closes. No alias, adapter, dormant parser, or second enforcement path may survive.
 
 Compatibility: no perf namespace or BudgetSpec/Report implementation exists. Ratification adds perf, Budget/BudgetApplies/enums, KiB/MiB/GiB/pct suffixes, parser/sema facts, and syntax reconciliation. Projects without perf modules are unchanged. OUTPUT1 below governs command spelling and copy.
 
@@ -184,7 +184,7 @@ jet budget check
 
 ## D-PERFBUDGET-BENCHMIGRATE1=B — Delete the legacy helper without source transformation
 
-`@Bench` and typed `BudgetSpec` remain. Every first-party `bench_budget` use is removed mechanically, with a retirement ledger that records how its name, body, and `max_ns` intent map to the replacement. Fixed warmups/trials, floating mean and standard deviation, stderr/environment rendering, and Bool return behavior are explicitly retired rather than copied into the new model. The old helper, parser, facts, output, and evaluator are deleted. External calls receive the ordinary unresolved-member diagnostic. There is no migration command, compatibility alias, teaching parser, adapter, or second evaluator.
+`#Bench` and typed `BudgetSpec` remain. Every first-party `bench_budget` use is removed mechanically, with a retirement ledger that records how its name, body, and `max_ns` intent map to the replacement. Fixed warmups/trials, floating mean and standard deviation, stderr/environment rendering, and Bool return behavior are explicitly retired rather than copied into the new model. The old helper, parser, facts, output, and evaluator are deleted. External calls receive the ordinary unresolved-member diagnostic. There is no migration command, compatibility alias, teaching parser, adapter, or second evaluator.
 
 ## D-PERFBUDGET-GAMEMIGRATE1=A — Exact game-budget migration
 
@@ -194,7 +194,7 @@ The closed metric set adds `SceneAssetBytes` and `DrawCalls(percentile)`. Game f
 
 | Former fact | Canonical replacement | Retired behavior |
 |---|---|---|
-| `bench_budget("parse", 5_000_000, body)` name and body | `@Bench("parse") { body }` plus a `.Bench("parse")` / `.BenchMeasurement("parse")` `Budget` | Helper Bool return, fixed 3/10 sampling, floating mean/deviation, environment-controlled stderr |
+| `bench_budget("parse", 5_000_000, body)` name and body | `#Bench("parse") { body }` plus a `.Bench("parse")` / `.BenchMeasurement("parse")` `Budget` | Helper Bool return, fixed 3/10 sampling, floating mean/deviation, environment-controlled stderr |
 | `bench_budget` `max_ns` | `.BenchTime(percentile)` with `.AtMost(5ms)` and explicit baseline policy | Implicit unpinned wall-clock hard gate |
 | `Game.Budgets.frame_ms` | `.Scene(scene)` / `.SceneProbe(scene)`, `.FrameTime(.P99)`, nanosecond-normalized `.AtMost` | Transcript display and runtime setter |
 | `Game.Budgets.memory_mb` | `.MemoryHighWater`, `.AtMost(value MiB)` | Transcript display and runtime setter |

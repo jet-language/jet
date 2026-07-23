@@ -13,7 +13,7 @@
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
 //
-// D-SHAPE-CLI1 reuses the existing `fn run` / `@Cli` surface: a resolved
+// D-SHAPE-CLI1 reuses the existing `fn run` / `#Cli` surface: a resolved
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
 // stays valid. D-SHAPE6 adds no Jet source token; grouped tool commands remain
 // owned by the single registry in crates/jet-cli/src/CLI.rs.
@@ -31,7 +31,7 @@
 // D-SHAPE-OPAQUE-INFER1=A adds no token: `Type.new(...)` may omit generic
 // receiver arguments only when ordinary input/expected-type inference is unique.
 // D-UNSAFE-OBLIG1=A adds contextual `assert valid_ptr, aligned, no_alias`,
-// the `obligations: .Track/.Skip` @Unsafe field, and ENV_ORG_UNSAFE_POLICY.
+// the `obligations: .Track/.Skip` #Unsafe field, and ENV_ORG_UNSAFE_POLICY.
 // D-SHAPE-INTERNAL1=A and D-SHAPE-DUNDER2=A add no token: the canonical
 // IdentifierClass prefix policy makes `_name` soft-public and reserves every
 // source-written `__name` for Jet and generated tooling.

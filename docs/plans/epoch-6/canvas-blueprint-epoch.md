@@ -44,8 +44,8 @@ machinery.
 | Blueprint namespaces (editor perf + visibility) | Jet modules + import surface | palette scoping (M4) |
 | Interfaces panel | Jet traits (projection shipped #316) | surface panel UI (M3) |
 | Event dispatchers | core.event (projection shipped #311) | surface panel UI (M3) |
-| Call In Editor | `jet run` / `@Test` + Canvas run HUD (#317) | verify interactively (M1) |
-| Variable metadata (instance-editable, tooltips, categories) | doc comments + ratified `@Meta` typed fields (D-CANVASMETA1=B) — implementation remains partial | metadata implementation (M3) |
+| Call In Editor | `jet run` / `#Test` + Canvas run HUD (#317) | verify interactively (M1) |
+| Variable metadata (instance-editable, tooltips, categories) | doc comments + ratified `#Meta` typed fields (D-CANVASMETA1=B) — implementation remains partial | metadata implementation (M3) |
 | Reparenting | traits/composition; no BP-style inheritance to repair | not applicable |
 | 3-way merge tool | plain text merge — free | document as advantage (M3) |
 | My Blueprint categories | My Canvas sidebar groups | maturity pass (M3) |
@@ -122,7 +122,7 @@ The known unfinished graph work, now interaction-verified:
   name/type/default/docs; function signature/pure/visibility; node values)
   with every field either live or absent — no dead controls.
 - Variable/function metadata surface (categories, tooltips from doc comments,
-  editor-exposure flags): D-CANVASMETA1=B ratifies one `@Meta` attribute with
+  editor-exposure flags): D-CANVASMETA1=B ratifies one `#Meta` attribute with
   sema-checked typed fields; the Canvas implementation remains M3 work.
 - Project-wide find/references/rename UI (semindex exists; make the UX real).
 - Review view: git diff panel with per-hunk graph highlight (our answer to
@@ -164,9 +164,9 @@ text-review-first collaboration flows. Card them, freeze them until M5 exits.
 
 | Ballot | Decides | Blocks |
 |---|---|---|
-| D-CANVASSTATE1=D (ratified, on #368) | `@Off` and `@DebugOnly` statement attributes | resolved; node-state UI implementation remains M2 |
+| D-CANVASSTATE1=D (ratified, on #368) | `#Off` and `#DebugOnly` statement attributes | resolved; node-state UI implementation remains M2 |
 | D-CANVASTEST1=A (ratified) | dev-shell Chromium with a repo-owned zero-npm-dependency CDP pipe driver | resolved; M0 is not ballot-blocked |
-| D-CANVASMETA1=B (ratified) | one `@Meta` attribute with sema-checked typed fields | resolved; metadata implementation remains M3 |
+| D-CANVASMETA1=B (ratified) | one `#Meta` attribute with sema-checked typed fields | resolved; metadata implementation remains M3 |
 | D-CANVAS-MULTIEXEC1=E (ratified, on #391) | second exec drop opens one no-write preview: extract by default, exact-body helper reuse or explicit warned duplication | resolved; multi-exec build (M2) is not ballot-blocked |
 | D-CANVAS-COPYPASTE1=E (ratified) | source-text paste with atomic rename, post-selection insertion, staged fallback, rename chips, and explicit paste-as-staged | resolved; #489 implementation remains M2 |
 | D-CANVAS-DEBUG-UX1=D (ratified) | one UX: native lldb/DAP for compiled runs, the executing tier's own session under `jet dev`; no session means no pulse | resolved; debugger implementation remains M3 |

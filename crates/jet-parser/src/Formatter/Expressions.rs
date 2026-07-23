@@ -218,7 +218,7 @@ impl<'a> Fmt<'a> {
                 self.write(&format!("#{}", len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)));
                 self.write("]");
             }
-            // D-QUAL4=A: `@Marker Type` — prefix value-tag.
+            // D-QUAL4=A: `#Marker Type` — prefix value-tag.
             Type::Tagged { marker, inner } => {
                 self.write(crate::Syntax::RULE_PREFIX);
                 self.write(marker);
@@ -640,12 +640,12 @@ impl<'a> Fmt<'a> {
                     self.write(if named { "}" } else { ")" });
                 }
             }
-            // D-TAINT1/TAINT2: `@Tainted expr` or `@Tainted(Kind) expr`.
+            // D-TAINT1/TAINT2: `#Tainted expr` or `#Tainted(Kind) expr`.
             Expr::Tainted(inner, kind, _) => {
                 if let Some(k) = kind {
-                    self.write(&format!("@{}({}) ", Syntax::KW_TAINTED, k));
+                    self.write(&format!("#{}({}) ", Syntax::KW_TAINTED, k));
                 } else {
-                    self.write(&format!("@{} ", Syntax::KW_TAINTED));
+                    self.write(&format!("#{} ", Syntax::KW_TAINTED));
                 }
                 self.fmt_expr(inner, Prec::Unary);
             }
@@ -656,9 +656,9 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             Expr::Absent(_) => self.write(Syntax::LIT_NULL),
-            // D-SIMD2: a reduce-op marker `@Add`/`@Mul`/`@Min`/`@Max` (inside `.reduce(…)`).
-            Expr::ReduceMarker(name, _) => self.write(&format!("@{}", name)),
-            Expr::Todo { .. } => self.write(&format!("@{}", Syntax::KW_TODO)),
+            // D-SIMD2: a reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max` (inside `.reduce(…)`).
+            Expr::ReduceMarker(name, _) => self.write(&format!("#{}", name)),
+            Expr::Todo { .. } => self.write(&format!("#{}", Syntax::KW_TODO)),
             Expr::PatternTest {
                 subject, pattern, ..
             } => {
@@ -799,6 +799,8 @@ impl<'a> Fmt<'a> {
             }
             OrFallback::Break(_) => self.write("break"),
             OrFallback::Continue(_) => self.write(Syntax::KW_NEXT),
+            OrFallback::BreakLabel(name, _) => self.write(&format!("{name}.break()")),
+            OrFallback::ContinueLabel(name, _) => self.write(&format!("{name}.next()")),
         }
     }
 
@@ -1082,7 +1084,7 @@ impl<'a> Fmt<'a> {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
                     if *fmt == crate::AST::StrFormat::Debug {
-                        self.write("@");
+                        self.write("#");
                         self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
                     }
                     self.write("}");
@@ -1114,7 +1116,7 @@ impl<'a> Fmt<'a> {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
                     if *fmt == crate::AST::StrFormat::Debug {
-                        self.write("@");
+                        self.write("#");
                         self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
                     }
                     self.write("}");

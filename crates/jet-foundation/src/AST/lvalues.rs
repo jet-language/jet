@@ -60,7 +60,7 @@ pub enum IndexKind {
     Pool,
 }
 
-/// D-CANVASMETA1=B: one raw field inside `@Meta(...)`.
+/// D-CANVASMETA1=B: one raw field inside `#Meta(...)`.
 #[derive(Debug, Clone)]
 pub enum MetaField {
     Category { value: Expr, span: Span },
@@ -150,11 +150,11 @@ pub enum ForKind {
 #[derive(Debug, Clone)]
 pub struct Binding {
     pub mutable: bool,
-    /// Binding-level `@Track` marker. Parser/formatter preserve it; sema assigns
+    /// Binding-level `#Track` marker. Parser/formatter preserve it; sema assigns
     /// meaning in the later tracking slice.
     pub track: bool,
     pub track_span: Option<Span>,
-    /// D-CANVASMETA1=B: `@Meta(category: "…", tunable)` for Canvas/tooling.
+    /// D-CANVASMETA1=B: `#Meta(category: "…", tunable)` for Canvas/tooling.
     pub meta: Option<MetaAttr>,
     pub name: String,
     pub name_span: Span,

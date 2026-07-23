@@ -35,7 +35,7 @@ pub(crate) struct MethodSig {
     /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
     /// `None` when no default; only trailing params may have defaults.
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
-    /// D-MUSTUSE1 (c18iwxqx): `@MustUse` method — return cannot be silently ignored (E0419).
+    /// D-MUSTUSE1 (c18iwxqx): `#MustUse` method — return cannot be silently ignored (E0419).
     pub(crate) must_use: bool,
     pub(crate) return_view_provenance:
         std::sync::Arc<std::sync::OnceLock<crate::AST::ViewProvenanceMap>>,
@@ -46,19 +46,19 @@ pub(crate) enum TypeDef {
     Struct {
         fields: Vec<(String, Span, Type, bool)>,
         methods: HashMap<String, MethodSig>,
-        /// D-LIN1 (ratified 2026-06-21): `@SingleUse` was present before `struct`.
+        /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `struct`.
         /// Values of this type must be consumed exactly once (E0140/E0141) and
         /// may not be aliased (E0142).
         single_use: bool,
-        /// D-MUSTUSE1 (c18iwxqx): `@MustUse` was present before `struct`.
+        /// D-MUSTUSE1 (c18iwxqx): `#MustUse` was present before `struct`.
         must_use: bool,
         /// D-SOA1 / D-SOA2A=C: `#layout(columnar)` was present. A `[S]` of this
         /// struct is stored struct-of-arrays; sema gates the list-op surface to
         /// the v1-supported subset (E1108) and codegen lowers it columnar.
         columnar: bool,
-        /// D-REPRC1: `@Layout(c)` was present — codegen stamps `#[repr(C)]`
+        /// D-REPRC1: `#Layout(c)` was present — codegen stamps `#[repr(C)]`
         /// on the generated Rust struct, so field order/size/padding match C.
-        /// A plain struct (no `@Layout(c)`) has an UNSPECIFIED Rust layout and
+        /// A plain struct (no `#Layout(c)`) has an UNSPECIFIED Rust layout and
         /// must never be accepted at the C FFI boundary (card #436 / E3203) —
         /// only this flag makes `c_named_type_ok` (Sema/FFI.rs) say yes.
         is_c_layout: bool,
@@ -70,11 +70,11 @@ pub(crate) enum TypeDef {
         /// its subtree). A group name matches its whole subtree in patterns.
         groups: HashMap<String, (Span, Vec<String>)>,
         methods: HashMap<String, MethodSig>,
-        /// D-LIN1 (ratified 2026-06-21): `@SingleUse` was present before `enum`.
+        /// D-LIN1 (ratified 2026-06-21): `#SingleUse` was present before `enum`.
         single_use: bool,
-        /// D-MUSTUSE1 (c18iwxqx): `@MustUse` was present before `enum`.
+        /// D-MUSTUSE1 (c18iwxqx): `#MustUse` was present before `enum`.
         must_use: bool,
-        /// D-REPRC2: present only for `@Layout(c[, tag: Width])`.
+        /// D-REPRC2: present only for `#Layout(c[, tag: Width])`.
         c_layout_tag: Option<crate::AST::CEnumTag>,
     },
     /// D-DIST1 (ratified 2026-06-19): a distinct type — a nominal wrapper over
@@ -83,7 +83,7 @@ pub(crate) enum TypeDef {
     Distinct {
         base: Type,
         is_numeric: bool,
-        /// D-CAPBUNDLE1: `@Comparable`/`@Printable`/`@CodableAsBase` grants.
+        /// D-CAPBUNDLE1: `#Comparable`/`#Printable`/`#CodableAsBase` grants.
         is_comparable: bool,
         is_printable: bool,
         is_codable_as_base: bool,
@@ -272,7 +272,7 @@ impl TypeRegistry {
         }
     }
 
-    /// D-LIN1 (ratified 2026-06-21): true when `name` is a `@SingleUse` struct/enum.
+    /// D-LIN1 (ratified 2026-06-21): true when `name` is a `#SingleUse` struct/enum.
     /// Values of such a type must be consumed exactly once and may not be aliased.
     pub(crate) fn is_single_use(&self, name: &str) -> bool {
         matches!(
@@ -287,7 +287,7 @@ impl TypeRegistry {
         )
     }
 
-    /// D-MUSTUSE1 (c18iwxqx): true when `name` is a `@MustUse` struct/enum.
+    /// D-MUSTUSE1 (c18iwxqx): true when `name` is a `#MustUse` struct/enum.
     pub(crate) fn is_must_use(&self, name: &str) -> bool {
         matches!(
             self.types.get(name),
@@ -304,7 +304,7 @@ impl TypeRegistry {
         }
     }
 
-    /// D-DIST3: true when the distinct type has `@Numeric`.
+    /// D-DIST3: true when the distinct type has `#Numeric`.
     pub(crate) fn distinct_is_numeric(&self, name: &str) -> bool {
         matches!(
             self.types.get(name),
@@ -325,7 +325,7 @@ impl TypeRegistry {
         }
     }
 
-    /// D-CAPBUNDLE1: true when the distinct type has `@Comparable`.
+    /// D-CAPBUNDLE1: true when the distinct type has `#Comparable`.
     pub(crate) fn distinct_is_comparable(&self, name: &str) -> bool {
         matches!(
             self.types.get(name),
@@ -336,7 +336,7 @@ impl TypeRegistry {
         )
     }
 
-    /// D-CAPBUNDLE1: true when the distinct type has `@Printable`.
+    /// D-CAPBUNDLE1: true when the distinct type has `#Printable`.
     pub(crate) fn distinct_is_printable(&self, name: &str) -> bool {
         matches!(
             self.types.get(name),
@@ -347,7 +347,7 @@ impl TypeRegistry {
         )
     }
 
-    /// D-CAPBUNDLE1: true when the distinct type has `@CodableAsBase`.
+    /// D-CAPBUNDLE1: true when the distinct type has `#CodableAsBase`.
     pub(crate) fn distinct_is_codable_as_base(&self, name: &str) -> bool {
         matches!(
             self.types.get(name),
@@ -363,16 +363,16 @@ impl TypeRegistry {
     pub(crate) fn distinct_granted_bundles(&self, name: &str) -> Vec<&'static str> {
         let mut out = Vec::new();
         if self.distinct_is_numeric(name) {
-            out.push("@Numeric");
+            out.push("#Numeric");
         }
         if self.distinct_is_comparable(name) {
-            out.push("@Comparable");
+            out.push("#Comparable");
         }
         if self.distinct_is_printable(name) {
-            out.push("@Printable");
+            out.push("#Printable");
         }
         if self.distinct_is_codable_as_base(name) {
-            out.push("@CodableAsBase");
+            out.push("#CodableAsBase");
         }
         out
     }
@@ -480,7 +480,7 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         c_abi_name: ef.abi.as_ref().map(|(name, _)| name.clone()),
         foreign_effect_root: ef.effect_root.clone(),
         // D-CABI-RESULT1=C: any raw out-pointer declaration is callable only
-        // from an audited `@Unsafe` region. The declaration remains the exact
+        // from an audited `#Unsafe` region. The declaration remains the exact
         // C status/out shape; no Result adapter is invented.
         is_unsafe: is_c_abi
             && ef.params.iter().any(|p| {
@@ -631,7 +631,7 @@ pub(crate) struct LocalInfo {
     /// Binding span for a Task value that must be consumed with `.join()`.
     task_lint_span: Option<Span>,
     /// D-LIN1 (ratified 2026-06-21): set (to the binding name's span) when this
-    /// local owns a `@SingleUse` value that must be consumed exactly once. `None`
+    /// local owns a `#SingleUse` value that must be consumed exactly once. `None`
     /// for ordinary values, for parameters (the caller owns the consume duty), and
     /// for `view`/`&` borrows (which never own). When still in scope and not in
     /// `moved` at scope end, E0140 fires.
@@ -990,7 +990,7 @@ pub enum CompileMode {
     Run,
     /// `jet test` — needs at least one test; `run` is optional.
     Test,
-    /// `jet bench` (D-BENCH1) — type-check `@Bench` block bodies and emit the
+    /// `jet bench` (D-BENCH1) — type-check `#Bench` block bodies and emit the
     /// timing harness; `run` is optional, like `Test`.
     Bench,
     /// `jet check` / LSP — type-check only; imported modules and library files
@@ -1075,7 +1075,7 @@ pub(crate) struct Checker<'a> {
     /// name -> span of the use that gave the value away.
     moved: HashMap<String, Span>,
     loop_depth: usize,
-    /// D-LABEL1: stack of `@name` loop labels; scope, innermost last.
+    /// D-LOOPLABEL3=A: stack of `name :: loop` names; scope, innermost last.
     loop_labels: Vec<String>,
     /// D-EFF1: effects this function body reaches directly (Core calls, impure
     /// builtins). Accumulated during the walk; rolled into the per-function
@@ -1092,15 +1092,15 @@ pub(crate) struct Checker<'a> {
     fx_maximal: bool,
     /// First source span that forced the row maximal.
     fx_maximal_span: Option<Span>,
-    /// D-EFF1: stack of active `@Caps(…)` regions, innermost last. Every effect
+    /// D-EFF1: stack of active `#Caps(…)` regions, innermost last. Every effect
     /// or edge recorded while one is open is also added to it (and all enclosing
     /// regions) so the region's own effect set can be checked against its caps.
     region_stack: Vec<RegionAccum>,
-    /// D-EFF1: completed `@Caps(…)` regions in this body, rolled into the
+    /// D-EFF1: completed `#Caps(…)` regions in this body, rolled into the
     /// `EffectSummary` for the post-pass E0741 check.
     fx_regions: Vec<RegionSummary>,
     /// D-EFF2: callback-bound obligations recorded at higher-order call sites
-    /// where the function-typed parameter carries a `@Pure`/`#(…)` bound. Rolled
+    /// where the function-typed parameter carries a `#Pure`/`#(…)` bound. Rolled
     /// into the `EffectSummary` for the post-pass E0747 check.
     fx_callback_obligations: Vec<CallbackObligation>,
     /// D-CRYPTO-DIAG1: compiler-known crypto facts wait for the function's
@@ -1115,7 +1115,7 @@ pub(crate) struct Checker<'a> {
     fx_memory_unbounded_control: Vec<Span>,
     fx_memory_calls: Vec<MemoryFacts::MemoryCall>,
     memory_control_multiplier: Option<u64>,
-    /// D-TXN2: nesting depth of `@Transact(name) { … }` blocks whose body is
+    /// D-TXN2: nesting depth of `#Transact(name) { … }` blocks whose body is
     /// being checked **directly** (not inside a deferred lambda). While `> 0`, an
     /// irreversible Core effect (Net/Fs/Exec) reached directly in the block is
     /// E0746 at the call site — the fix is to move it after the block or register
@@ -1123,27 +1123,27 @@ pub(crate) struct Checker<'a> {
     /// (effects inside an `on_commit`/other lambda are deferred, not rejected).
     txn_depth: usize,
     /// D-DET1: nesting depth of `assume_deterministic { … }` blocks currently
-    /// being checked. While `> 0`, the determinism rejections inside a `@Pure fn`
+    /// being checked. While `> 0`, the determinism rejections inside a `#Pure fn`
     /// (E3403 non-deterministic Core call, E3401 impure Core call) are suspended —
     /// the expert "I know this is deterministic" escape. A semantic footgun
     /// (v1-legal per the card); does not relax memory/type safety, only the
     /// determinism check. Zeroed/restored around lambda bodies like `txn_depth`.
     det_suppress: usize,
-    /// D-CTX1 / c26: nesting depth of `@Context { … }` blocks (for L0506).
+    /// D-CTX1 / c26: nesting depth of `#Context { … }` blocks (for L0506).
     context_depth: usize,
-    /// True while inside a `@Context` block that set an `allocator` field.
+    /// True while inside a `#Context` block that set an `allocator` field.
     context_allocator_active: bool,
     in_unsafe: bool,
     /// D-IGNORERET2=A: true while inside a `#Suppress(MustUse) { … }` block.
-    /// Suppresses E0402 / E0419 for fallible / `@MustUse` results dropped as statements.
+    /// Suppresses E0402 / E0419 for fallible / `#MustUse` results dropped as statements.
     suppress_must_use: bool,
     /// True while checking a `pure fn` body, so E3403 can fire on a
     /// non-deterministic std call (time/random) reached from pure code.
     in_pure: bool,
-    /// D-PRELUDEX1=A: true when the enclosing file declared `@NoPrelude`.
+    /// D-PRELUDEX1=A: true when the enclosing file declared `#NoPrelude`.
     /// Disables ambient `print`/`input` resolution for this body.
     no_prelude: bool,
-    /// D-PREPOST1: true while type-checking a `@Pre` clause's condition —
+    /// D-PREPOST1: true while type-checking a `#Pre` clause's condition —
     /// `result` isn't bound yet at function entry, so a reference to it here
     /// is E0144 instead of the normal "undefined name" error.
     in_pre_clause: bool,
@@ -1234,10 +1234,10 @@ pub(crate) struct Checker<'a> {
     type_param_scope: Vec<crate::AST::TypeParam>,
     /// E2-M15: reject OS-dependent std APIs in `--freestanding` builds (E3301).
     freestanding: bool,
-    /// D-CTEFFECT1: `--allow-impure` was passed — `@Impure` blocks may execute
+    /// D-CTEFFECT1: `--allow-impure` was passed — `#Impure` blocks may execute
     /// Tier-2 ambient comptime effects (Fs/Env/Exec/Io) at compile time.
     allow_impure: bool,
-    /// D-CTEFFECT1: nesting depth of `@Impure` blocks currently being checked.
+    /// D-CTEFFECT1: nesting depth of `#Impure` blocks currently being checked.
     /// Passed as `initial_impure_depth` to comptime evaluation of bindings
     /// inside, so the interpreter starts with the gate already open.
     ct_impure_depth: usize,
@@ -1271,7 +1271,7 @@ pub(crate) struct Checker<'a> {
     /// body — see `CheckerInfer/expr.rs`'s `Expr::Ident` arm, the single spot
     /// that resolves a bare name to a global function's signature. Rolled up
     /// into a whole-program accumulator (`check_func_body`'s
-    /// `global_addr_taken` parameter) so `@InlineAlways` (E0918) can be
+    /// `global_addr_taken` parameter) so `#InlineAlways` (E0918) can be
     /// checked once every function has run through here.
     inline_addr_taken: HashSet<String>,
 }

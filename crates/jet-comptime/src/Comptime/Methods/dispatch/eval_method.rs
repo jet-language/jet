@@ -307,8 +307,8 @@ impl<'a> Interp<'a> {
                             return Err(Diagnostic::error(
                                 "E1803",
                                 "Rand.Draw for `shuffle` has no REPL runtime authority".to_string(),
-                                "REPL ambient randomness requires lexical `@Grant(Rand)` authority; the RNG state did not advance".to_string(),
-                                "wrap this draw in `@Grant(Rand) { caps -> ... }` and approve it or pass `--allow-rand`".to_string(),
+                                "REPL ambient randomness requires lexical `#Grant(Rand)` authority; the RNG state did not advance".to_string(),
+                                "wrap this draw in `#Grant(Rand) { caps -> ... }` and approve it or pass `--allow-rand`".to_string(),
                                 Some(span),
                             ));
                         }
@@ -484,7 +484,7 @@ impl<'a> Interp<'a> {
                 }
                 // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` is denied at build time
                 // unconditionally — unlike the Tier-2 effects below, there is no
-                // `@Impure`/`--allow-impure` escape hatch, because a build artifact
+                // `#Impure`/`--allow-impure` escape hatch, because a build artifact
                 // must never bake in a decrypted secret (I1).
                 if module == "core.vault" {
                     return Err(Diagnostic::error(
@@ -492,14 +492,14 @@ impl<'a> Interp<'a> {
                         format!("`{}.{}()` can't be reached from a build-time context", module, method),
                         "module-field/comptime evaluation runs before secrets are ever decrypted; \
                          a repo's encrypted store is only ever opened at ordinary runtime, and — \
-                         unlike the Tier-2 comptime effect gate — there is no `@Impure` escape hatch \
+                         unlike the Tier-2 comptime effect gate — there is no `#Impure` escape hatch \
                          here.".to_string(),
                         "move the secret read out of comptime/module-field evaluation and into \
                          ordinary runtime code.".to_string(),
                         Some(span),
                     ));
                 }
-                // D-CTEFFECT1: Tier-2 effect calls require an @Impure gate (or REPL sandbox).
+                // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
                 let is_tier2 = matches!(
                     module.as_str(),
                     "core.files"
@@ -555,8 +555,8 @@ impl<'a> Interp<'a> {
                             return Err(Diagnostic::error(
                                 "E1803",
                                 format!("{}.{} for `{}` has no REPL runtime authority", request.root, request.operation, request.resource),
-                                "REPL host effects require both lexical `@Grant` authority and invocation policy; no host operation ran".to_string(),
-                                format!("wrap this operation in `@Grant({}) {{ caps -> ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`", request.root, request.root.to_ascii_lowercase()),
+                                "REPL host effects require both lexical `#Grant` authority and invocation policy; no host operation ran".to_string(),
+                                format!("wrap this operation in `#Grant({}) {{ caps -> ... }}`; interactive sessions then prompt, while non-TTY sessions also need `--allow-{}`", request.root, request.root.to_ascii_lowercase()),
                                 Some(span),
                             ));
                         }
@@ -579,10 +579,10 @@ impl<'a> Interp<'a> {
                         }
                         return Err(Diagnostic::error(
                             "E3410",
-                            format!("`{}.{}()` is a Tier-2 comptime effect — it requires a `@Impure` gate", module, method),
+                            format!("`{}.{}()` is a Tier-2 comptime effect — it requires a `#Impure` gate", module, method),
                             "ambient I/O (filesystem, environment, process) is not allowed in \
                              pure comptime evaluation".to_string(),
-                            "wrap the comptime binding in `@Impure(\"reason\") { … }` and \
+                            "wrap the comptime binding in `#Impure(\"reason\") { … }` and \
                              pass `--allow-impure` to the build".to_string(),
                             Some(span),
                         ));
@@ -591,8 +591,8 @@ impl<'a> Interp<'a> {
                     if !self.allow_impure {
                         return Err(Diagnostic::error(
                             "E3411",
-                            format!("`{}.{}()` inside `@Impure` gate, but `--allow-impure` was not passed", module, method),
-                            "the `@Impure` block opts in to ambient comptime I/O, but the build \
+                            format!("`{}.{}()` inside `#Impure` gate, but `--allow-impure` was not passed", module, method),
+                            "the `#Impure` block opts in to ambient comptime I/O, but the build \
                              flag is required so CI can audit builds that touch the host".to_string(),
                             "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
                             Some(span),

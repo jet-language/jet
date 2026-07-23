@@ -70,7 +70,7 @@ impl<'a> Checker<'a> {
         }
     
         /// S58 (E2-M13): `alias.Ptr<T>.from_addr(addr)`. Gated by `use core.mem`
-        /// (E3102) and an enclosing `@Unsafe` block (E3101). Returns `Ptr<T>`.
+        /// (E3102) and an enclosing `#Unsafe` block (E3101). Returns `Ptr<T>`.
         pub(crate) fn infer_ptr_from_addr(
             &mut self,
             alias: &str,

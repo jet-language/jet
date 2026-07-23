@@ -22,9 +22,9 @@ fn fmt_parallel_collection_adapters_are_stable() {
 
 #[test]
 fn repr_c_enum_surface_is_stable() {
-    let src = "@Layout(c, tag: U8)\nenum Packet { Ping(Int) = 3; Data(x: I32, y: I32) = 7 }\n";
+    let src = "#Layout(c, tag: U8)\nenum Packet { Ping(Int) = 3; Data(x: I32, y: I32) = 7 }\n";
     let once = jet::format_source(src).expect("C-layout enum should format");
-    assert!(once.contains("@Layout(c, tag: U8)"));
+    assert!(once.contains("#Layout(c, tag: U8)"));
     assert!(once.contains("Ping(Int) = 3"));
     assert!(once.contains("Data(x: I32, y: I32) = 7"));
     let twice = jet::format_source(&once).expect("formatted C-layout enum should parse");
@@ -145,18 +145,18 @@ fn fmt_preserves_s61_call_labels() {
 #[test]
 fn fmt_off_debug_only_statement_attributes_stability() {
     let src = r#"fn run() {
-    @Off print("off")
-    @DebugOnly print("debug")
-    @Off if true {
+    #Off print("off")
+    #DebugOnly print("debug")
+    #Off if true {
         print("off block")
     }
 }
 "#;
     let out = jet::format_source(src).expect("fmt should accept statement switch attributes");
     for needle in [
-        "@Off print(\"off\")",
-        "@DebugOnly print(\"debug\")",
-        "@Off if true {",
+        "#Off print(\"off\")",
+        "#DebugOnly print(\"debug\")",
+        "#Off if true {",
         "print(\"off block\")",
     ] {
         assert!(out.contains(needle), "fmt dropped `{needle}`, got:\n{out}");
@@ -170,23 +170,23 @@ fn fmt_off_debug_only_statement_attributes_stability() {
 
 #[test]
 fn fmt_meta_attribute_stability() {
-    let src = r#"@Meta(category: "Movement", tunable)
+    let src = r#"#Meta(category: "Movement", tunable)
 fn step_speed(speed: Int) -> Int {
-    @Meta(category: "Movement", tunable)
+    #Meta(category: "Movement", tunable)
     next :: speed + 1
     return next
 }
 "#;
-    let out = jet::format_source(src).expect("fmt should accept @Meta attributes");
+    let out = jet::format_source(src).expect("fmt should accept #Meta attributes");
     for needle in [
-        "@Meta(category: \"Movement\", tunable)",
+        "#Meta(category: \"Movement\", tunable)",
         "fn step_speed(speed: Int) -> Int {",
         "next :: speed + 1",
     ] {
         assert!(out.contains(needle), "fmt dropped `{needle}`, got:\n{out}");
     }
-    let twice = jet::format_source(&out).expect("@Meta output should re-fmt");
-    assert_eq!(out, twice, "@Meta formatting must be stable");
+    let twice = jet::format_source(&out).expect("#Meta output should re-fmt");
+    assert_eq!(out, twice, "#Meta formatting must be stable");
 }
 
 #[test]
@@ -215,7 +215,7 @@ fn run() {
 #[test]
 fn fmt_keeps_call_comment_outside_lambda_block() {
     let src = r#"fn transfer(from: Shared<Account>, amount: Int) {
-    @Transact(tx) {
+    #Transact(tx) {
         from.edit(a => { a.balance -= amount })  // both land, or neither
     }
 }
@@ -690,8 +690,8 @@ fn assert_fmt_stable(src: &str, label: &str) {
 
 #[test]
 fn fmt_shield_block_stability() {
-    let src = "fn run() {\n    @Shield {\n        print(\"committed\")\n    }\n}\n";
-    assert_fmt_stable(src, "@Shield block");
+    let src = "fn run() {\n    #Shield {\n        print(\"committed\")\n    }\n}\n";
+    assert_fmt_stable(src, "#Shield block");
 }
 
 #[test]
@@ -793,7 +793,7 @@ fn fmt_preserves_single_line_if_expr_branch() {
 //
 // `fmt_is_idempotent_on_examples` only checks that fmt(fmt(x)) == fmt(x); it does
 // NOT catch a formatter that silently drops a token on the FIRST pass (the lost
-// `@[Rename]`/`@Codable`/turbofish bug). These tests assert that the load-bearing
+// `#[Rename]`/`#Codable`/turbofish bug). These tests assert that the load-bearing
 // surface tokens SURVIVE one fmt pass, then that the result is stable.
 
 /// Assert every needle appears in `format_source(src)`, then that fmt is stable.
@@ -844,14 +844,14 @@ fn run() {
 
 #[test]
 fn fmt_keeps_codable_and_field_rename_and_turbofish() {
-    // The exact c-fmt regression: `@Codable` (contract plane) / `@[Rename("…")]`
+    // The exact c-fmt regression: `#Codable` (contract plane) / `#[Rename("…")]`
     // (directive/serde plane, D-MARKERMOVE1=B), and a method-call turbofish
     // `decode<Order>` must all survive.
     let src = "\
-@Codable
+#Codable
 struct Order {
     id: Int
-    @[Rename(\"customer\")] who: String
+    #[Rename(\"customer\")] who: String
 }
 
 fn run() {
@@ -862,19 +862,19 @@ fn run() {
 ";
     assert_fmt_keeps(
         src,
-        &["@Codable", "@[Rename(\"customer\")]", "decode<Order>"],
+        &["#Codable", "#[Rename(\"customer\")]", "decode<Order>"],
         "codable + rename + turbofish",
     );
 }
 
 #[test]
 fn fmt_keeps_cli_doc_and_default_field_markers() {
-    // D-SHAPE2: every field rule shares one `@[…]` group.
+    // D-SHAPE2: every field rule shares one `#[…]` group.
     let src = "\
-@Cli
+#Cli
 struct ServeArgs {
-    @[Doc(\"port to listen on\"), Default(3000)] port: Int
-    @[Doc(\"print extra detail\")] verbose: Bool
+    #[Doc(\"port to listen on\"), Default(3000)] port: Int
+    #[Doc(\"print extra detail\")] verbose: Bool
 }
 
 fn run(args: ServeArgs) {
@@ -884,8 +884,8 @@ fn run(args: ServeArgs) {
 ";
     assert_fmt_keeps(
         src,
-        &["@[Doc(\"port to listen on\"), Default(3000)]", "@Cli"],
-        "cli @[Doc] + @[Default] field markers",
+        &["#[Doc(\"port to listen on\"), Default(3000)]", "#Cli"],
+        "cli #[Doc] + #[Default] field markers",
     );
     assert_fmt_stable(src, "cli doc/default field markers");
 }
@@ -894,33 +894,33 @@ fn run(args: ServeArgs) {
 fn fmt_keeps_container_rename_all() {
     // Derive and container serde rules share one applied-rule group.
     let src = "\
-@Codable
-@RenameAll(camel)
+#Codable
+#RenameAll(camel)
 struct Person {
     full_name: String
 }
 ";
     assert_fmt_keeps(
         src,
-        &["@[Codable, RenameAll(camel)]"],
+        &["#[Codable, RenameAll(camel)]"],
         "container RenameAll",
     );
 }
 
 #[test]
 fn fmt_keeps_layout_columnar_and_codable() {
-    // `@[Codable]` then `@Layout(columnar)` on the same struct — both survive,
+    // `#[Codable]` then `#Layout(columnar)` on the same struct — both survive,
     // neither is rewritten into body `derive` lines.
     let src = "\
-@[Codable]
-@Layout(columnar)
+#[Codable]
+#Layout(columnar)
 struct Particle {
     x: Float
 }
 ";
     assert_fmt_keeps(
         src,
-        &["@[Codable]", "@Layout(columnar)"],
+        &["#[Codable]", "#Layout(columnar)"],
         "layout columnar + codable",
     );
     // And no `derive Encode`/`derive Decode` body lines leak in.
@@ -945,16 +945,16 @@ fn double(n: Int) --[]-> Int {
     return (n * 2)
 }
 ";
-    assert_fmt_stable(fn_src, "@Pure fn round-trip");
+    assert_fmt_stable(fn_src, "#Pure fn round-trip");
 
     let struct_src = "\
-@[Codable]
-@Layout(columnar)
+#[Codable]
+#Layout(columnar)
 struct Particle {
     x: Float
 }
 ";
-    assert_fmt_stable(struct_src, "@Codable + @Layout struct round-trip");
+    assert_fmt_stable(struct_src, "#Codable + #Layout struct round-trip");
 }
 
 #[test]
@@ -968,7 +968,7 @@ fn visit(callback: fn(Int) --[Io]->) --[via callback]-> {
     callback(1)
 }
 
-// `--[]->` replaces the retired `@Pure` marker without moving this comment.
+// `--[]->` replaces the retired `#Pure` marker without moving this comment.
 fn hash(n: Int) --[]-> Int {
     return n
 }
@@ -979,22 +979,22 @@ fn hash(n: Int) --[]-> Int {
 #[test]
 fn fmt_keeps_single_use_marker() {
     let src = "\
-@SingleUse struct Lock {
+#SingleUse struct Lock {
     resource: String
 }
 ";
-    assert_fmt_keeps(src, &["@SingleUse struct Lock"], "single-use struct");
+    assert_fmt_keeps(src, &["#SingleUse struct Lock"], "single-use struct");
 }
 
 #[test]
 fn fmt_keeps_layout_c_struct() {
     let src = "\
-@Layout(c)
+#Layout(c)
 struct Header {
     magic: Int
 }
 ";
-    assert_fmt_keeps(src, &["@Layout(c)"], "layout c struct");
+    assert_fmt_keeps(src, &["#Layout(c)"], "layout c struct");
 }
 
 #[test]
@@ -1009,10 +1009,10 @@ struct Score {
 }
 ";
     assert_fmt_keeps(src, &["derive Comparable"], "body derive line");
-    // And it must NOT be promoted to a bracket marker (contract plane: `@[Comparable]`).
+    // And it must NOT be promoted to a bracket marker (contract plane: `#[Comparable]`).
     let out = jet::format_source(src).unwrap();
     assert!(
-        !out.contains("@[Comparable]") && !out.contains("@Comparable"),
+        !out.contains("#[Comparable]") && !out.contains("#Comparable"),
         "body derive must not become bracket:\n{out}"
     );
 }
@@ -1021,16 +1021,16 @@ struct Score {
 fn fmt_keeps_enum_variant_rename_and_tag() {
     // Enum derive + container rule share one group; the variant keeps its group.
     let src = "\
-@Codable
-@Tag(\"type\")
+#Codable
+#Tag(\"type\")
 enum Shape {
-    @[Rename(\"circle\")] Circle(Float)
+    #[Rename(\"circle\")] Circle(Float)
     Square(Float)
 }
 ";
     assert_fmt_keeps(
         src,
-        &["@[Codable, Tag(\"type\")]", "@[Rename(\"circle\")]"],
+        &["#[Codable, Tag(\"type\")]", "#[Rename(\"circle\")]"],
         "enum tag + variant rename",
     );
 }
@@ -1038,31 +1038,31 @@ enum Shape {
 #[test]
 fn fmt_keeps_replayable_marker() {
     let src = "\
-@Replayable fn replay_turn(seed: Int) -> Int {
+#Replayable fn replay_turn(seed: Int) -> Int {
     return seed + 1
 }
 ";
-    assert_fmt_keeps(src, &["@Replayable fn replay_turn"], "replayable fn");
+    assert_fmt_keeps(src, &["#Replayable fn replay_turn"], "replayable fn");
 }
 
 #[test]
 fn fmt_keeps_typestate_markers() {
-    // D-STATE1: the `@State(S)` require-state guard and `@Transition(From -> To)`
+    // D-STATE1: the `#State(S)` require-state guard and `#Transition(From -> To)`
     // transition markers (including the entry form `_ -> To`) must survive fmt —
     // dropping a typestate contract would silently change what the checker enforces.
     let src = "\
 struct Reservation {
     guest: String
 
-    @Transition(_ -> Pending) fn book(guest: String) -> Reservation {
+    #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
         return Reservation.{guest: guest}
     }
 
-    @Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
+    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
         return self
     }
 
-    @State(Confirmed) fn check_in(self) {
+    #State(Confirmed) fn check_in(self) {
         print(self.guest)
     }
 }
@@ -1070,9 +1070,9 @@ struct Reservation {
     assert_fmt_keeps(
         src,
         &[
-            "@Transition(_ -> Pending)",
-            "@Transition(Pending -> Confirmed)",
-            "@State(Confirmed)",
+            "#Transition(_ -> Pending)",
+            "#Transition(Pending -> Confirmed)",
+            "#State(Confirmed)",
         ],
         "typestate markers",
     );
@@ -1099,41 +1099,41 @@ fn fmt_box_drawing_comment_does_not_panic() {
 
 #[test]
 fn fmt_impure_block_round_trips() {
-    // D-CTEFFECT1: `@Impure("reason") { … }` must survive a format round-trip
+    // D-CTEFFECT1: `#Impure("reason") { … }` must survive a format round-trip
     // with the reason string and body intact.
-    let src = "fn run() {\n    @Impure(\"reading build config\") {\n        print(\"inside\")\n    }\n}\n";
-    let out = jet::format_source(src).expect("fmt should succeed on @Impure block");
+    let src = "fn run() {\n    #Impure(\"reading build config\") {\n        print(\"inside\")\n    }\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed on #Impure block");
     assert!(
-        out.contains("@Impure(\"reading build config\")"),
-        "@Impure reason dropped by fmt:\n{out}"
+        out.contains("#Impure(\"reading build config\")"),
+        "#Impure reason dropped by fmt:\n{out}"
     );
-    let twice = jet::format_source(&out).expect("@Impure fmt must re-fmt");
-    assert_eq!(out, twice, "@Impure fmt must be idempotent");
+    let twice = jet::format_source(&out).expect("#Impure fmt must re-fmt");
+    assert_eq!(out, twice, "#Impure fmt must be idempotent");
 }
 
 #[test]
 fn fmt_impure_block_no_reason_round_trips() {
-    // D-CTEFFECT1: `@Impure { … }` without a reason also round-trips (triggers
+    // D-CTEFFECT1: `#Impure { … }` without a reason also round-trips (triggers
     // L3102 lint but is parseable).
-    let src = "fn run() {\n    @Impure {\n        print(\"inside\")\n    }\n}\n";
-    let out = jet::format_source(src).expect("fmt should succeed on @Impure block without reason");
+    let src = "fn run() {\n    #Impure {\n        print(\"inside\")\n    }\n}\n";
+    let out = jet::format_source(src).expect("fmt should succeed on #Impure block without reason");
     assert!(
-        out.contains("@Impure {") || out.contains("@Impure{"),
-        "@Impure block without reason dropped by fmt:\n{out}"
+        out.contains("#Impure {") || out.contains("#Impure{"),
+        "#Impure block without reason dropped by fmt:\n{out}"
     );
-    let twice = jet::format_source(&out).expect("@Impure (no reason) fmt must re-fmt");
-    assert_eq!(out, twice, "@Impure (no reason) fmt must be idempotent");
+    let twice = jet::format_source(&out).expect("#Impure (no reason) fmt must re-fmt");
+    assert_eq!(out, twice, "#Impure (no reason) fmt must be idempotent");
 }
 
 #[test]
 fn fmt_unsafe_reasons_escape_strings() {
     // D-UNSAFE-REASON1=B: unsafe block/function reasons are normal string
     // literals, so fmt must preserve quotes/backslashes as parseable Jet.
-    let src = "use core.mem\n\n@Unsafe(\"caller says \\\"ok\\\"\") fn raw() -> Int {\n    return 1\n}\n\nfn run() {\n    @Unsafe(\"path C:\\\\tmp\") {\n        print(\"{raw()}\")\n    }\n}\n";
+    let src = "use core.mem\n\n#Unsafe(\"caller says \\\"ok\\\"\") fn raw() -> Int {\n    return 1\n}\n\nfn run() {\n    #Unsafe(\"path C:\\\\tmp\") {\n        print(\"{raw()}\")\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on unsafe reasons");
     assert!(
-        out.contains("@Unsafe(\"caller says \\\"ok\\\"\")")
-            && out.contains("@Unsafe(\"path C:\\\\tmp\")"),
+        out.contains("#Unsafe(\"caller says \\\"ok\\\"\")")
+            && out.contains("#Unsafe(\"path C:\\\\tmp\")"),
         "unsafe reason escaping broke:\n{out}"
     );
     let twice = jet::format_source(&out).expect("unsafe reason fmt must re-fmt");
@@ -1354,18 +1354,18 @@ impl Foo.Greet {
 
 #[test]
 fn fmt_test_paren_name_stability() {
-    // D-TESTPAREN1=A: `@Test("name") { … }` must survive fmt unchanged.
+    // D-TESTPAREN1=A: `#Test("name") { … }` must survive fmt unchanged.
     let src = "\
 fn run() {}
-@Test(\"double returns twice\") {
+#Test(\"double returns twice\") {
     require_eq(2 * 2, 4)
 }
 ";
-    assert_fmt_keeps(src, &["@Test(\"double returns twice\")"], "test paren name");
+    assert_fmt_keeps(src, &["#Test(\"double returns twice\")"], "test paren name");
     // Idempotence: formatting twice produces the same output.
-    let once = jet::format_source(src).expect("fmt should accept @Test(\"name\")");
-    let twice = jet::format_source(&once).expect("second fmt of @Test(\"name\") must succeed");
-    assert_eq!(once, twice, "@Test(\"name\") must be fmt-idempotent");
+    let once = jet::format_source(src).expect("fmt should accept #Test(\"name\")");
+    let twice = jet::format_source(&once).expect("second fmt of #Test(\"name\") must succeed");
+    assert_eq!(once, twice, "#Test(\"name\") must be fmt-idempotent");
 }
 
 #[test]
@@ -1379,7 +1379,7 @@ fn run() {
 
 }
 
-@Test(\"members\") {
+#Test(\"members\") {
     .setup {
         base :: 1
     }
@@ -1422,13 +1422,13 @@ fn run() {
 fn fmt_preserves_track_binding_marker() {
     let src = "\
 fn run() {
-    @Track count :: 1
-    @Track total := 2
-    @Track label: String :: \"ok\"
+    #Track count :: 1
+    #Track total := 2
+    #Track label: String :: \"ok\"
     print(\"{count} {total} {label}\")
 }
 ";
-    assert_fmt_stable(src, "@Track binding marker");
+    assert_fmt_stable(src, "#Track binding marker");
 }
 
 #[test]
@@ -1477,17 +1477,17 @@ fn run() {
 
 #[test]
 fn fmt_no_alloc_policy_d_mem1_s7_stability() {
-    // D-POLICY-WORD1=A: `@Policy(no_alloc)` is a fixed post-import
-    // file marker, same treatment as `@PubFile`/`@Target(…)` — must survive
+    // D-POLICY-WORD1=A: `#Policy(no_alloc)` is a fixed post-import
+    // file marker, same treatment as `#PubFile`/`#Target(…)` — must survive
     // fmt unchanged.
     let src = "\
-@Policy(no_alloc)
+#Policy(no_alloc)
 
 fn run() {
     print(\"ok\")
 }
 ";
-    assert_fmt_keeps(src, &["@Policy(no_alloc)"], "D-POLICY-WORD1 policy marker");
+    assert_fmt_keeps(src, &["#Policy(no_alloc)"], "D-POLICY-WORD1 policy marker");
 }
 
 #[test]
@@ -1525,22 +1525,27 @@ fn run() {
 }
 
 #[test]
-fn fmt_loop_label_d_looplabel2_stability() {
-    // D-LOOPLABEL2=A: `outer@ loop { break outer@ }` must survive fmt unchanged.
+fn fmt_loop_label_d_looplabel3_stability() {
+    // D-LOOPLABEL3=A: named loops and dot exits must survive fmt unchanged.
     let src = "\
 fn run() {
-    outer@ loop i; [1, 2] {
+    outer :: loop i; [1, 2] {
         loop j; [1, 2] {
             if i == j {
-                break outer@
+                value() ?? outer.next()
+                outer.break()
             }
         }
     }
     print(\"done\")
 }
 ";
-    assert_fmt_keeps(src, &["outer@ loop", "break outer@"], "loop label suffix");
-    let once = jet::format_source(src).expect("fmt should accept suffix loop labels");
+    assert_fmt_keeps(
+        src,
+        &["outer :: loop", "outer.next()", "outer.break()"],
+        "named loop dot exits",
+    );
+    let once = jet::format_source(src).expect("fmt should accept named loop dot exits");
     let twice = jet::format_source(&once).expect("second fmt of loop labels must succeed");
     assert_eq!(once, twice, "loop label fmt must be idempotent");
 }
@@ -1669,7 +1674,7 @@ fn run() {
 fn fmt_value_tag_type_d_qual4_stability() {
     // D-QUAL4=A: `#Marker T` in type position must survive fmt unchanged.
     let src = "\
-fn process(input: @Tainted String) -> String {
+fn process(input: #Tainted String) -> String {
     return \"{input}-clean\"
 }
 
@@ -1678,7 +1683,7 @@ fn run() {
     print(result)
 }
 ";
-    assert_fmt_keeps(src, &["@Tainted String"], "value-tag type qualifier");
+    assert_fmt_keeps(src, &["#Tainted String"], "value-tag type qualifier");
     let once = jet::format_source(src).expect("fmt should accept value-tag types");
     let twice = jet::format_source(&once).expect("second fmt of value-tag types must succeed");
     assert_eq!(once, twice, "value-tag type fmt must be idempotent");
@@ -1798,7 +1803,7 @@ fn fmt_preserves_unit_literal() {
     // D-UNITLIT1: `500ms` must survive with no space inserted between the
     // number and the suffix, and the suffix itself must not be dropped.
     let src = "\
-@UnitFamily(Time) { ms, s }
+#UnitFamily(Time) { ms, s }
 
 fn run() {
     a :: 500ms
@@ -1813,17 +1818,17 @@ fn fmt_preserves_scaled_affine_unit_declaration() {
     // D-QUANTITY-DECL1=A: STABILITY must retain every base/scale/offset token;
     // idempotence alone could bless a first pass that discarded conversion law.
     let src = "\
-@UnitFamily(Temperature, base: kelvin) {
+#UnitFamily(Temperature, base: kelvin) {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
 ";
-    assert_fmt_stable(src, "scaled affine @UnitFamily declaration");
+    assert_fmt_stable(src, "scaled affine #UnitFamily declaration");
 }
 
 #[test]
 fn fmt_preserves_rounded_unit_conversion_contract() {
-    let src = r#"@UnitFamily(Length, base: meter) {
+    let src = r#"#UnitFamily(Length, base: meter) {
     meter
     half(scale: 1/2)
 }
@@ -1960,9 +1965,9 @@ fn fmt_preserves_capbundle_markers() {
     // verbatim from source span, but the span must actually start at the
     // first marker, not the type name).
     let src = "\
-@Numeric @Comparable Usd :: distinct Int;
+#Numeric #Comparable Usd :: distinct Int;
 
-@Printable @CodableAsBase CustomerId :: distinct Int;
+#Printable #CodableAsBase CustomerId :: distinct Int;
 
 fn run() {
     a :: Usd.from_int(100)
@@ -1974,13 +1979,13 @@ fn run() {
 
 #[test]
 fn fmt_preserves_contracts() {
-    // D-PREPOST1: `@Pre`/`@Post` clauses (condition + message) must survive
+    // D-PREPOST1: `#Pre`/`#Post` clauses (condition + message) must survive
     // byte-for-byte, in declared order. Emitted inline before `fn`, space-
     // separated — the same one-marker-placement convention every other `fn`
-    // marker uses (`@State(…)`, `@Transition(…)`, `@Pure`, `@MustUse`, …;
+    // marker uses (`#State(…)`, `#Transition(…)`, `#Pure`, `#MustUse`, …;
     // I8: one way to mean it), not one clause per line.
     let src = "\
-@Pre(cents > 0, \"cents must be positive\") @Post(result > cents, \"result must exceed cents\") fn add_fee(cents: Int) -> Int {
+#Pre(cents > 0, \"cents must be positive\") #Post(result > cents, \"result must exceed cents\") fn add_fee(cents: Int) -> Int {
     return cents + 5
 }
 
@@ -1993,10 +1998,10 @@ fn run() {
 
 #[test]
 fn fmt_preserves_persist() {
-    // D-PERSIST1: `@Persist` on a module-level `const` must survive
+    // D-PERSIST1: `#Persist` on a module-level `const` must survive
     // byte-for-byte.
     let src = "\
-@Persist const counter = 0
+#Persist const counter = 0
 
 fn run() {
     print(\"{counter}\")
@@ -2159,23 +2164,23 @@ fn run() {
 
 #[test]
 fn fmt_preserves_inline_contracts() {
-    // D-METHODMACRO1=A: `@Inline`/`@InlineAlways` precede `pub`/`fn` on a free
+    // D-METHODMACRO1=A: `#Inline`/`#InlineAlways` precede `pub`/`fn` on a free
     // function and on a method — both must round-trip byte-for-byte (own-
     // CLAUDE-memory rule: new syntax needs a formatter round-trip test, not
     // just a parser).
     let src = "\
-@Inline fn square(x: Int) -> Int {
+#Inline fn square(x: Int) -> Int {
     return x * x
 }
 
-@InlineAlways fn double(x: Int) -> Int {
+#InlineAlways fn double(x: Int) -> Int {
     return x * 2
 }
 
 struct Meters {
     value: Int
 
-    @InlineAlways fn plus(self, other: Int) -> Int {
+    #InlineAlways fn plus(self, other: Int) -> Int {
         return self.value + other
     }
 }
@@ -2193,7 +2198,7 @@ fn fmt_preserves_unsafe_site_modes_and_postfix_obligations() {
     let src = "\
 use core.mem
 
-@Unsafe(\"caller keeps address live\", obligations: .Track)
+#Unsafe(\"caller keeps address live\", obligations: .Track)
 fn read(address: Int) -> Int {
     pointer :: mem.Ptr<Int>.from_addr(address)
     assert valid_ptr, aligned
@@ -2203,7 +2208,7 @@ fn read(address: Int) -> Int {
 }
 
 fn run() {
-    @Unsafe(\"calling audited reader\", obligations: .Skip) {
+    #Unsafe(\"calling audited reader\", obligations: .Skip) {
         print(read(1))
     }
 }
@@ -2215,34 +2220,34 @@ fn run() {
 //
 // Formatter round-trip is required for new syntax, not optional (house
 // lesson: a past miss here silently corrupted syntax for months). Before
-// this fix, `@Target(Web)` / `@Html(...)` / `@Target(Os.*)` markers were
+// this fix, `#Target(Web)` / `#Html(...)` / `#Target(Os.*)` markers were
 // silently DROPPED by `jet fmt` — no error, just gone.
 
 #[test]
 fn fmt_target_web_marker_stability() {
-    // D-WEBDEFAULT1=A: `@Target(Web)` is a singleton file marker with no
-    // captured span (same treatment as `@PubFile`) — it renders at a fixed
+    // D-WEBDEFAULT1=A: `#Target(Web)` is a singleton file marker with no
+    // captured span (same treatment as `#PubFile`) — it renders at a fixed
     // canonical position right after imports, not wherever the author
     // originally wrote it.
-    let src = "use core.io as io\n@Target(Web)\n\nfn run() {\n    io.print(\"hi\")\n}\n";
-    assert_fmt_stable(src, "@Target(Web) marker");
+    let src = "use core.io as io\n#Target(Web)\n\nfn run() {\n    io.print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#Target(Web) marker");
 }
 
 #[test]
 fn fmt_html_marker_stability() {
-    // D-HTMLPAIR1=A: `@Html(\"path.html\")` — same marker family as
-    // `@Target(Web)`, same fixed-position treatment.
-    let src = "use core.ui as ui\n@Target(Web)\n\n@Html(\"dashboard.html\")\n\nfn run() {\n    ui.print(\"hi\")\n}\n";
-    assert_fmt_stable(src, "@Html(...) marker");
+    // D-HTMLPAIR1=A: `#Html(\"path.html\")` — same marker family as
+    // `#Target(Web)`, same fixed-position treatment.
+    let src = "use core.ui as ui\n#Target(Web)\n\n#Html(\"dashboard.html\")\n\nfn run() {\n    ui.print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#Html(...) marker");
 }
 
 #[test]
 fn fmt_os_target_marker_stability() {
-    // D-OSTARGET1=A: `@Target(Os.Linux)` precedes the `impl` block it gates,
+    // D-OSTARGET1=A: `#Target(Os.Linux)` precedes the `impl` block it gates,
     // on its own line — item-scoped, not file-scoped, so (unlike the two
     // markers above) it keeps the author's own position.
-    let src = "trait Backend {\n    fn label(self) -> String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n@Target(Os.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) -> String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn run() {\n    print(\"hi\")\n}\n";
-    assert_fmt_stable(src, "@Target(Os.Linux) marker");
+    let src = "trait Backend {\n    fn label(self) -> String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n#Target(Os.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) -> String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn run() {\n    print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#Target(Os.Linux) marker");
 }
 
 // ── #177 §5 syntax-lock sweep: 5 formatter bugs found reformatting the full
@@ -2251,15 +2256,15 @@ fn fmt_os_target_marker_stability() {
 
 #[test]
 fn fmt_pub_file_precedes_imports() {
-    // D-VISDEFAULT2: `@PubFile` carries no span (a fixed-position file
-    // marker, like `@Target(Web)`), so it used to render *after* the
+    // D-VISDEFAULT2: `#PubFile` carries no span (a fixed-position file
+    // marker, like `#Target(Web)`), so it used to render *after* the
     // imports loop. But an import's `priv`/`pub` qualifier is chosen
-    // relative to `@PubFile` being in effect — emitting the marker after the
-    // import it gates produced `priv use …` with no preceding `@PubFile`,
-    // which doesn't even reparse (E0413). `@PubFile` must render before
+    // relative to `#PubFile` being in effect — emitting the marker after the
+    // import it gates produced `priv use …` with no preceding `#PubFile`,
+    // which doesn't even reparse (E0413). `#PubFile` must render before
     // imports, not after.
-    let src = "@PubFile\n\nuse core.io\n\nfn run() {\n    print(\"hi\")\n}\n";
-    assert_fmt_stable(src, "@PubFile before imports");
+    let src = "#PubFile\n\nuse core.io\n\nfn run() {\n    print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#PubFile before imports");
 }
 
 #[test]
@@ -2268,9 +2273,9 @@ fn fmt_verbatim_derive_body_comment_not_duplicated() {
     // (copied straight from source) rather than walked comment-by-comment,
     // so `comment_i` never advanced past a comment living inside the derive
     // body. The next item's `emit_leading` then found that comment
-    // "unconsumed" and re-emitted it a second time before `@Label struct
+    // "unconsumed" and re-emitted it a second time before `#Label struct
     // Cube` — the comment kept duplicating on every subsequent fmt pass.
-    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    emit(\"impl $lbl {{ fn label(self) -> String {{ return \\\"$lbl\\\" }} }}\")\n}\n\n@Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
+    let src = "derive T.Label {\n    info :: T.reflect()\n    tname :: info.name\n    // resolves to the same value as `tname`\n    lbl :: $tname\n    emit(\"impl $lbl {{ fn label(self) -> String {{ return \\\"$lbl\\\" }} }}\")\n}\n\n#Label\nstruct Cube {\n    side: Int\n}\n\nfn run() {\n    c :: Cube.{side: 5}\n    print(c.label())\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on a derive block");
     assert_eq!(
         out.matches("resolves to the same value as `tname`").count(),
@@ -2318,12 +2323,12 @@ fn fmt_preserves_trait_associated_type() {
 #[test]
 fn fmt_preserves_pure_callback_bound_sigil() {
     // D-EFF2 / D-MARKER-FAMILY1: the empty callback effect bound renders as
-    // `@Pure ` (a contract marker, `@`-plane) but the code wrote the literal
+    // `#Pure ` (a contract marker, `@`-plane) but the code wrote the literal
     // `#` directive-plane prefix instead — every `f: fn(T) --[]-> U`
     // parameter type downgraded to the retired `fn(T) --[]-> U` spelling
     // on the first fmt pass, which then fails to parse (E0062).
     let src = "fn transform(items: [Int], f: fn(Int) --[]-> Int) -> [Int] {\n    return items.map((x) => f(x))\n}\n\nfn run() {\n    doubled :: transform([1, 2, 3], (n: Int) => n * 2)\n    print(\"{doubled}\")\n}\n";
-    assert_fmt_stable(src, "@Pure callback bound");
+    assert_fmt_stable(src, "#Pure callback bound");
 }
 
 #[test]
@@ -2332,8 +2337,8 @@ fn fmt_preserves_dotted_effect_paths() {
     // `Net.Http.Get`) — a leaf under one of the ten D-EFF4/5 roots. The name
     // is stored as one opaque string end to end, so fmt needs no new emission
     // logic; this pins that the dot survives every printer that touches an
-    // effect list (`#(…)` bounds, prohibitions, `@Caps`/`@Grant` regions).
-    let src = "fn load(path: String) --[Fs.Read]-> String {\n    return path\n}\n\nfn archive(path: String) --[Fs.Write]-> {\n    print(path)\n}\n\nfn read_only(path: String) --[Fs.Read, !Fs.Write]-> {\n    load(path)\n}\n\nfn boot() --[Fs]-> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    @Caps(Net.Http.Get) {\n        print(\"net\")\n    }\n    @Grant(Fs.Read) { caps ->\n        load(\"app.conf\")\n    }\n}\n";
+    // effect list (`#(…)` bounds, prohibitions, `#Caps`/`#Grant` regions).
+    let src = "fn load(path: String) --[Fs.Read]-> String {\n    return path\n}\n\nfn archive(path: String) --[Fs.Write]-> {\n    print(path)\n}\n\nfn read_only(path: String) --[Fs.Read, !Fs.Write]-> {\n    load(path)\n}\n\nfn boot() --[Fs]-> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #Caps(Net.Http.Get) {\n        print(\"net\")\n    }\n    #Grant(Fs.Read) { caps ->\n        load(\"app.conf\")\n    }\n}\n";
     assert_fmt_stable(src, "dotted effect paths (D-EFFTREE1)");
 }
 
@@ -2352,16 +2357,16 @@ fn fmt_preserves_int_literal_radix() {
 #[test]
 fn fmt_preserves_web_partition_markers() {
     // D-WASM1, respelled by D-MARK-TARGET1=A (ratified 2026-07-11, card
-    // #498): `@Target(Js)` / `@Target(Wasm)` / `@WasmExport` per-function
+    // #498): `#Target(Js)` / `#Target(Wasm)` / `#WasmExport` per-function
     // partition overrides, each on its own line before `fn`. fmt dropped the
     // marker entirely (Func.web_marker was never re-emitted) — every
     // browser-side function silently fell back to the Wasm bucket, breaking
     // the cross-partition checks: web_showcase_dashboard_roundtrip and
     // web_compute_wasm_bridge_roundtrip in tests/web_build.rs went red after
     // the #177 §5 tree reformat.
-    let src = "@Target(Js)\nfn render_stat(label: String) -> String {\n    return \"<div>{label}</div>\"\n}\n\n@Target(Wasm)\nfn crunch(n: Int) -> Int {\n    return n * n\n}\n\n@WasmExport\nfn bridge_total(n: Int) -> Int {\n    return crunch(n)\n}\n\nfn run() {\n    print(\"{bridge_total(4)}\")\n}\n";
+    let src = "#Target(Js)\nfn render_stat(label: String) -> String {\n    return \"<div>{label}</div>\"\n}\n\n#Target(Wasm)\nfn crunch(n: Int) -> Int {\n    return n * n\n}\n\n#WasmExport\nfn bridge_total(n: Int) -> Int {\n    return crunch(n)\n}\n\nfn run() {\n    print(\"{bridge_total(4)}\")\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on web partition markers");
-    for tag in ["@Target(Js)\n", "@Target(Wasm)\n", "@WasmExport\n"] {
+    for tag in ["#Target(Js)\n", "#Target(Wasm)\n", "#WasmExport\n"] {
         assert!(
             out.contains(tag),
             "fmt must keep the `{}` partition marker, got:\n{out}",
@@ -2403,17 +2408,17 @@ fn fmt_preserves_maturity_tags() {
     // D-MARK-META1=B: maturity fields are doc-only but
     // must round-trip (fmt STABILITY — not just accept-without-crash).
     let src = "\
-@Meta(maturity: .Experimental)
+#Meta(maturity: .Experimental)
 fn experimental_label() -> String {
     return \"exp\"
 }
 
-@Meta(maturity: .Tested)
+#Meta(maturity: .Tested)
 fn tested_label() -> String {
     return \"tested\"
 }
 
-@Meta(maturity: .Hardened)
+#Meta(maturity: .Hardened)
 fn hardened_label() -> String {
     return \"hard\"
 }
@@ -2431,7 +2436,7 @@ fn run() {
 fn fmt_preserves_maturity_tags_next_line() {
     // Metadata on the preceding line parses and round-trips canonically.
     let src = "\
-@Meta(maturity: .Experimental)
+#Meta(maturity: .Experimental)
 fn experimental_label() -> String {
     return \"exp\"
 }
@@ -2442,7 +2447,7 @@ fn run() {
 ";
     let out = jet::format_source(src).expect("next-line maturity metadata should parse");
     assert!(
-        out.contains("@Meta(maturity: .Experimental)"),
+        out.contains("#Meta(maturity: .Experimental)"),
         "fmt must not drop maturity metadata; got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("re-fmt");
@@ -2451,20 +2456,20 @@ fn run() {
 
 #[test]
 fn fmt_preserves_schedule_markers() {
-    // D-SCHEDULE1 (ratified 2026-07-11, card #505): `@Task`/`@Every(…)` must
+    // D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Task`/`#Every(…)` must
     // round-trip byte-for-byte (fmt STABILITY, not just accept-without-crash)
-    // — same inline-marker convention as `@Reactive`/`@Sanitizer`/
-    // `@Replayable`/`@State(…)` (one space-separated line before `fn`).
+    // — same inline-marker convention as `#Reactive`/`#Sanitizer`/
+    // `#Replayable`/`#State(…)` (one space-separated line before `fn`).
     let src = "\
-@Task @Every(5min) fn prune_sessions() {
+#Task #Every(5min) fn prune_sessions() {
     print(\"pruning\")
 }
 
-@Task @Every(\"03:00\") fn nightly_backup() {
+#Task #Every(\"03:00\") fn nightly_backup() {
     print(\"backing up\")
 }
 
-@Task fn manual_only() {
+#Task fn manual_only() {
     print(\"manual\")
 }
 
@@ -2474,14 +2479,14 @@ fn run() {
     manual_only()
 }
 ";
-    assert_fmt_stable(src, "@Task/@Every schedule markers (D-SCHEDULE1)");
+    assert_fmt_stable(src, "#Task/#Every schedule markers (D-SCHEDULE1)");
 }
 
 #[test]
 fn fmt_preserves_per_function_c_abi() {
-    let src = "use c.demo as c\n@Extern module c.demo {\n    @Abi(system) fn portable(x: I32) -> I32 = \"portable\"\n    @Abi(sysv64) fn native(x: I32) -> I32 = \"native\"\n}\nfn run() {}\n";
-    let once = jet::format_source(src).expect("@Abi C module should format");
-    assert!(once.contains("@Abi(system)") && once.contains("@Abi(sysv64)"), "fmt dropped @Abi: {once}");
+    let src = "use c.demo as c\n#Extern module c.demo {\n    #Abi(system) fn portable(x: I32) -> I32 = \"portable\"\n    #Abi(sysv64) fn native(x: I32) -> I32 = \"native\"\n}\nfn run() {}\n";
+    let once = jet::format_source(src).expect("#Abi C module should format");
+    assert!(once.contains("#Abi(system)") && once.contains("#Abi(sysv64)"), "fmt dropped #Abi: {once}");
     assert_eq!(once, jet::format_source(&once).expect("re-fmt"));
 }
 
@@ -2495,12 +2500,12 @@ fn fmt_preserves_casing_errors_for_sema() {
 #[test]
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module ring<T, capacity: Int, label: String> {
-@Meta(category: label)
+#Meta(category: label)
 const size = capacity
 pub struct Buffer { slots: [T#capacity] }
 module nested<U> { pub fn keep(value: U) -> U { return ~value } }
 module inner = nested<T>
-@Meta(category: label)
+#Meta(category: label)
 pub fn adjusted() -> Int { return capacity + 1 }
 }
 module a = ring<Int, 2 + 2, "ring">
@@ -2512,7 +2517,7 @@ fn run() {}
     assert_eq!(once, twice);
     for preserved in [
         "module ring<T, capacity: Int, label: String>",
-        "@Meta(category: label)",
+        "#Meta(category: label)",
         "[T#capacity]",
         "module nested<U>",
         "capacity + 1",

@@ -1,11 +1,11 @@
 // D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating for
-// `@Extern` backends (Tower c134 Phase 9.3) — the mechanism, not a real
+// `#Extern` backends (Tower c134 Phase 9.3) — the mechanism, not a real
 // GTK/AppKit/Win32 backend (this sandbox has no toolkit dev headers; a real
 // native backend needs its own devShell/flake change first, tracked
 // separately as Phase 8).
 //
 // Three dummy structs implement the same `Backend` trait, each `impl` gated to
-// one OS with `@Target(Os.*)`. `jet build --target=<triple>` only emits/links
+// one OS with `#Target(Os.*)`. `jet build --target=<triple>` only emits/links
 // the `impl` matching that triple's OS (host OS when `--target` is omitted) —
 // `tests/cross.rs` proves this by inspecting the generated Rust per triple.
 //
@@ -15,7 +15,7 @@
 // build's target OS *before* any OS-gating check runs, discarding the others —
 // so constructing an OS-gated type inside the taken arm is legal, and the dead
 // arms never trip `E-OSTARGET-UNMATCHED-CALL`. This is the one dispatch
-// primitive: no fn-level `@Target` gating (option A was rejected).
+// primitive: no fn-level `#Target` gating (option A was rejected).
 trait Backend {
     fn label(self) -> String
 }
@@ -32,21 +32,21 @@ struct WindowsBackend {
     name: String
 }
 
-@Target(Os.Linux)
+#Target(Os.Linux)
 impl LinuxBackend.Backend {
     fn label(self) -> String {
         return "linux: {self.name}"
     }
 }
 
-@Target(Os.Macos)
+#Target(Os.Macos)
 impl MacosBackend.Backend {
     fn label(self) -> String {
         return "macos: {self.name}"
     }
 }
 
-@Target(Os.Windows)
+#Target(Os.Windows)
 impl WindowsBackend.Backend {
     fn label(self) -> String {
         return "windows: {self.name}"

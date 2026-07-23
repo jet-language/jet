@@ -59,12 +59,12 @@ fn statement_attributes_codegen_shape() {
         });
     assert!(
         !out.rust.contains("\"off\"") && !out.rust.contains("\"off block\""),
-        "`@Off` body must not appear in generated Rust:\n{}",
+        "`#Off` body must not appear in generated Rust:\n{}",
         out.rust
     );
     assert!(
         out.rust.contains("#[cfg(not(jet_release))]") && out.rust.contains("debug"),
-        "`@DebugOnly` body must be cfg-gated for release:\n{}",
+        "`#DebugOnly` body must be cfg-gated for release:\n{}",
         out.rust
     );
 }
@@ -201,7 +201,7 @@ fn examples_compile_and_run() {
 }
 
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
-    // D-JPK-TASKRUN1 / I5 (card #476): task_runner proves both `@Task` entry
+    // D-JPK-TASKRUN1 / I5 (card #476): task_runner proves both `#Task` entry
     // paths — leaf `greet` stays callable while sibling `seed` calls it.
     if entry.stem == "devloop/task_runner" {
         check_task_runner_tasks(entry, env);
@@ -541,7 +541,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
 }
 
 /// I5 for `examples/features/devloop/task_runner.jet`: compile+run both
-/// `@Task` entries via `compile_with_entry` (same path as `jet run --task`).
+/// `#Task` entries via `compile_with_entry` (same path as `jet run --task`).
 fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
     let src = fs::read_to_string(&entry.path).unwrap();
     let path = entry.path.to_str().expect("example path is utf8");

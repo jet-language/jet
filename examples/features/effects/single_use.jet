@@ -1,9 +1,9 @@
 // D-LIN1 (ratified 2026-06-21): single-use (must-consume) values.
 //
-// A type marked `@SingleUse` carries a job that has to be done exactly once:
+// A type marked `#SingleUse` carries a job that has to be done exactly once:
 // the canonical case is a lock that must be released, or a task handle that
 // must be joined. The compiler proves — at compile time, with the value erased
-// from the generated code (I3) — that every `@SingleUse` value is consumed on
+// from the generated code (I3) — that every `#SingleUse` value is consumed on
 // every path through its scope:
 //
 //   - dropping it without using it      → E0140
@@ -12,9 +12,9 @@
 //     moving it
 //   - using it twice                    → E0121 (reuses the move tracker)
 //
-// `@SingleUse` implies `#NoCopy`: the value can only be moved (`^`), never
+// `#SingleUse` implies `#NoCopy`: the value can only be moved (`^`), never
 // copied. The only legal exits are moving it to a `^` parameter or returning it.
-@SingleUse struct Lock {
+#SingleUse struct Lock {
     resource: String
 }
 

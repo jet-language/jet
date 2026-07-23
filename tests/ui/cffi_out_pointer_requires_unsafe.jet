@@ -1,14 +1,14 @@
 use core.mem
 use c.store as store
 
-@Layout(c)
+#Layout(c)
 struct Record { id: U64 }
 
-@Extern module c.store {
+#Extern module c.store {
     fn store_load(id: U64, out: *Record) -> I32 = "store_load"
 }
 
-@Unsafe("the local slot remains live for the complete C call")
+#Unsafe("the local slot remains live for the complete C call")
 fn invoke() {
     slot: Record := Record.{id: 0}
     p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))

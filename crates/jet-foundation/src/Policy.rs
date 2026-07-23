@@ -185,7 +185,7 @@ const FIELD_SITE: &[RuleSite] = &[RuleSite::Field];
 const CONST_SITE: &[RuleSite] = &[RuleSite::Constant];
 const EXPR_SITE: &[RuleSite] = &[RuleSite::Expression];
 
-/// Exact applicability row for every compiler-registered `@Rule`, plus the two
+/// Exact applicability row for every compiler-registered `#Rule`, plus the two
 /// conceptual authority/wire groups whose concrete spellings have their own rows.
 pub fn applied_rule_registry() -> Vec<AppliedRule> {
     let mut rows = crate::Syntax::APPLIED_RULES.iter().map(|&name| {

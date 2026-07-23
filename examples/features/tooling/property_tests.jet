@@ -1,9 +1,9 @@
 // 114 — property tests (D-TEST1, ratified option B).
 //
-// A parameterized `@Test fn` is a *property* test: `jet test` generates inputs
+// A parameterized `#Test fn` is a *property* test: `jet test` generates inputs
 // from each parameter's type, runs the body across many cases, and — on the
 // first failing case — automatically shrinks the input to a minimal
-// counterexample. A `@Test("name") { … }` block (no params) stays a unit test.
+// counterexample. A `#Test("name") { … }` block (no params) stays a unit test.
 fn reverse(xs: [Int]) -> [Int] {
     out: [Int] := []
     loop x; xs {
@@ -18,16 +18,16 @@ fn run() {
 
 // Reversing a list twice gives the original back — for every list the runner
 // generates.
-@Test fn reverse_twice_is_identity(xs: [Int]) {
+#Test fn reverse_twice_is_identity(xs: [Int]) {
     require_eq(reverse(reverse(xs)), xs)
 }
 
 // Reversing never changes the length — for every list.
-@Test fn reverse_keeps_length(xs: [Int]) {
+#Test fn reverse_keeps_length(xs: [Int]) {
     require_eq(reverse(xs).len(), xs.len())
 }
 
 // A plain unit test still works alongside property tests.
-@Test("reverse of a known list") {
+#Test("reverse of a known list") {
     require_eq(reverse([1, 2, 3]), [3, 2, 1])
 }

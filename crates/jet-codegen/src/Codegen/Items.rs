@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 /// D-FIELDPOL1: the Rust expression that reads field `f` off `self` — a
 /// getter call `(self).user_field()` for a computed field (it's not a struct
 /// member), a plain member read `(self).user_field` otherwise. Used anywhere
-/// codegen renders a field's *value* (JetShow/JetDebug, `@[Codable]` encode)
+/// codegen renders a field's *value* (JetShow/JetDebug, `#[Codable]` encode)
 /// outside the struct's own member-list emission.
 fn field_self_read(f: &Field) -> String {
     let m = mangle(&f.name);
@@ -420,8 +420,8 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// D-CLIFLAG1 (c7cliflag): `@[Cli]` derive codegen — sibling of the
-// `@[Codable]` serde codegen just above, generating onto `core.args`'s
+// D-CLIFLAG1 (c7cliflag): `#[Cli]` derive codegen — sibling of the
+// `#[Codable]` serde codegen just above, generating onto `core.args`'s
 // `ArgsSpec`/`ParsedArgs` builder (the same `jet_args_*`/`jet_parsed_*`
 // prelude functions a hand-written `.flag()/.option()` chain compiles to,
 // I8: no second parser). Field-shape validation already ran in sema
@@ -450,7 +450,7 @@ fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str, root_prefix: &str) -
 }
 
 /// D-CLIFLAG1: emit `__jet_cli_spec_<Name>`/`__jet_cli_decode_<Name>` for a
-/// `@[Cli]`-derived struct. See the pinned field-mapping rule in
+/// `#[Cli]`-derived struct. See the pinned field-mapping rule in
 /// docs/spec/spec.md ("Typed entry-signature CLI parsing (D-CLIFLAG1)").
 fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
     let Some(schema) = jet_foundation::CliSchema::command_schema(s) else {
@@ -553,7 +553,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// D-PATCH1 (card #181): `@[Patchable]` — nested `T.Patch` + apply/diff/merge.
+// D-PATCH1 (card #181): `#[Patchable]` — nested `T.Patch` + apply/diff/merge.
 // ──────────────────────────────────────────────────────────────────────────────
 
 fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
@@ -784,7 +784,7 @@ fn fallible_void_entry_error(ty: &Type, cx: &Cx) -> Option<EntryError> {
 
 /// D-CLIFLAG1: the `enum Cmd { Serve(ServeArgs) Import(ImportArgs) }` case.
 /// The first positional token picks the variant by its lowercased name; the
-/// rest of argv is re-parsed against that variant's own `@[Cli]` spec. Given
+/// rest of argv is re-parsed against that variant's own `#[Cli]` spec. Given
 /// zero arguments (no subcommand token at all — the shape the zero-arg
 /// golden-example convention exercises), the generated `main` prints the
 /// command list and exits 0 rather than erroring: a bare invocation asking
@@ -1042,14 +1042,14 @@ fn field_wire_key(style: Option<&str>, f: &Field) -> String {
     }
 }
 /// D-MIGRATE4: the migration blocks for a struct, when the runtime chain
-/// applies: `@PublishedSchema`, concrete (no type params), with at least one
+/// applies: `#PublishedSchema`, concrete (no type params), with at least one
 /// `migration { }` block in the module. Mirrors the gate in
 /// `Sema::desugar_migrations` — the two must agree on which types get runtime
 /// machinery, since sema pre-lowers the converter/default functions the step
 /// functions call.
 fn migration_blocks<'a>(cx: &'a Cx, s: &StructDef) -> Option<&'a [crate::AST::MigrationDecl]> {
-    // `@PublishedSchema struct` sets the flag; the grouped
-    // `@[PublishedSchema, Codable]` spelling leaves the marker in `derives`.
+    // `#PublishedSchema struct` sets the flag; the grouped
+    // `#[PublishedSchema, Codable]` spelling leaves the marker in `derives`.
     let published = s.is_published_schema
         || s.derives
             .iter()
@@ -1066,7 +1066,7 @@ fn migration_blocks<'a>(cx: &'a Cx, s: &StructDef) -> Option<&'a [crate::AST::Mi
 }
 
 /// The wire key a field name carries for migration shape detection: the
-/// current struct's `@[Rename]`/`RenameAll` treatment when the name is a
+/// current struct's `#[Rename]`/`RenameAll` treatment when the name is a
 /// current field, else the container casing style applied to the bare name
 /// (fields that only exist in historical shapes can't carry markers).
 fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String {
@@ -1130,7 +1130,7 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
     let shapes = migration_shapes(style, s, blocks);
     let k = shapes.len();
     out.push_str(&format!(
-        "    // D-MIGRATE4: @PublishedSchema migration chain — v1..v{} are historical shapes.\n",
+        "    // D-MIGRATE4: #PublishedSchema migration chain — v1..v{} are historical shapes.\n",
         k
     ));
     out.push_str("    fn jet_decode_traced(__t: &jet_std::DataTree) -> Result<(Self, jet_std::MigrationStatus), jet_std::DecodeError> {\n");
@@ -1190,7 +1190,7 @@ fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mu
     let blocks = migration_blocks(cx, s).expect("caller checked");
     for (idx, block) in blocks.iter().enumerate() {
         out.push_str(&format!(
-            "// D-MIGRATE4: migration step v{} -> v{} for @PublishedSchema `{}`.\n",
+            "// D-MIGRATE4: migration step v{} -> v{} for #PublishedSchema `{}`.\n",
             idx + 1,
             idx + 2,
             s.name
@@ -1564,7 +1564,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         derives.push("Copy");
     }
     if d.is_numeric || d.is_comparable {
-        // PartialOrd needed for ordered comparisons; also useful for @Numeric types.
+        // PartialOrd needed for ordered comparisons; also useful for #Numeric types.
         derives.push("PartialOrd");
     }
     out.push_str(&format!(
@@ -1618,7 +1618,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
             hi = hi
         ));
     }
-    // @Numeric: implement Add, Sub, Mul, Div (same-type arithmetic).
+    // #Numeric: implement Add, Sub, Mul, Div (same-type arithmetic).
     if d.is_numeric {
         for (trait_name, op) in &[("Add", "+"), ("Sub", "-"), ("Mul", "*"), ("Div", "/")] {
             if d.range.is_none() {
@@ -1650,7 +1650,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
             }
         }
     }
-    // D-CAPBUNDLE1 `@Printable`: forward `{value}` interpolation (JetDisplay)
+    // D-CAPBUNDLE1 `#Printable`: forward `{value}` interpolation (JetDisplay)
     // to the base value's own rendering — a distinct type starts inert, so
     // without this marker sema never lets a value reach here (E0138).
     if d.is_printable {
@@ -1659,9 +1659,9 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
             n = d.name
         ));
     }
-    // D-CAPBUNDLE1 `@CodableAsBase`: encode/decode via the base type's own
+    // D-CAPBUNDLE1 `#CodableAsBase`: encode/decode via the base type's own
     // wire representation (`user_Encode`/`user_Decode`, the same traits
-    // struct/enum `@[Codable]` derives target — I8: one wire mechanism).
+    // struct/enum `#[Codable]` derives target — I8: one wire mechanism).
     if d.is_codable_as_base && !cx.used_core.is_empty() {
         out.push_str(&format!(
             "impl crate::user_Encode for user_{n} {{\n    fn jet_encode(&self) -> crate::jet_std::DataTree {{ crate::user_Encode::jet_encode(&self.0) }}\n}}\n\n",
@@ -1750,9 +1750,9 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
     );
 }
 
-/// D-PREPOST1: wrap a function's normally-emitted body with `@Pre`/`@Post`
-/// runtime guards (E3005). `@Pre` clauses are checked entry guards, emitted
-/// right after the opening brace. When `@Post` clauses are present, the
+/// D-PREPOST1: wrap a function's normally-emitted body with `#Pre`/`#Post`
+/// runtime guards (E3005). `#Pre` clauses are checked entry guards, emitted
+/// right after the opening brace. When `#Post` clauses are present, the
 /// original body is wrapped in an immediately-invoked closure so `result`
 /// binds the return value at every exit point — Rust's own closure `return`
 /// semantics do the "checked before each return" work, instead of a bespoke
@@ -1760,10 +1760,10 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
 /// reused byte-for-byte, only re-indented around it). A violated clause
 /// panics via `jet_contract_fail` naming the clause's own message text.
 ///
-/// Known v1 limitation: a `@Post` condition that reads a parameter the
+/// Known v1 limitation: a `#Post` condition that reads a parameter the
 /// original body *moves* can hit a Rust "used after move" error, since the
 /// body now runs inside a closure that may capture that parameter by value.
-/// `@Post` conditions should read `result` (and any parameter the body only
+/// `#Post` conditions should read `result` (and any parameter the body only
 /// borrows), matching every shipped example.
 fn emit_func_with_contracts(cx: &Cx, f: &Func, tir: &TIR::TFunc, out: &mut String) {
     let mut body_buf = String::new();

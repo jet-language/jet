@@ -12,8 +12,8 @@ pub const DEBUG: &str = "Debug";
 pub const EQUATABLE: &str = "Equatable";
 pub const COMPARABLE: &str = "Comparable";
 pub const SERIALIZE: &str = "Serialize";
-/// D-SERDE4 (= B, owner-modified): the serde derive traits. `@[Codable]` derives
-/// both; `@[Encode]`/`@[Decode]` derive one. They lower to `user_Encode`/`user_Decode`.
+/// D-SERDE4 (= B, owner-modified): the serde derive traits. `#[Codable]` derives
+/// both; `#[Encode]`/`#[Decode]` derive one. They lower to `user_Encode`/`user_Decode`.
 pub const ENCODE: &str = "Encode";
 pub const DECODE: &str = "Decode";
 /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): `Renderable` — the trait-bounded
@@ -409,17 +409,17 @@ pub fn e0913(trait_name: &str, missing: &[String], span: Span) -> Diagnostic {
     )
 }
 
-/// D-DISPLAYDBG2: unknown interpolation selector after `@`.
+/// D-ATTR4=A: unknown interpolation selector after `#`.
 pub fn e0914(selector: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0914",
-        format!("unknown interpolation selector `@{}`", selector),
+        format!("unknown interpolation selector `#{}`", selector),
         format!(
-            "string interpolation supports a closed selector set — use `@{}` for debug output",
+            "string interpolation supports a closed selector set — use `#{}` for debug output",
             crate::Syntax::INTERP_SELECTOR_DEBUG
         ),
         format!(
-            "write `{{value@{}}}` for debug formatting, or `{{value}}` for display",
+            "write `{{value#{}}}` for debug formatting, or `{{value}}` for display",
             crate::Syntax::INTERP_SELECTOR_DEBUG
         ),
         Some(span),
@@ -434,7 +434,7 @@ pub fn e0915(type_show: &str, span: Span) -> Diagnostic {
         "bare `{value}` interpolation calls `Display` — there is no default for user types"
             .to_string(),
         format!(
-            "add `impl {type_show}.Display {{ fn display(self) -> String {{ … }} }}`, or use `{{value@{}}}` for debug output",
+            "add `impl {type_show}.Display {{ fn display(self) -> String {{ … }} }}`, or use `{{value#{}}}` for debug output",
             crate::Syntax::INTERP_SELECTOR_DEBUG
         ),
         Some(span),
@@ -442,7 +442,7 @@ pub fn e0915(type_show: &str, span: Span) -> Diagnostic {
 }
 
 /// D-MARK-DEBUG1=A (ratified 2026-07-11, card #498): `Debug` no longer has an
-/// explicit derive spelling — `@Debug`, `@[.., Debug]`, and a body
+/// explicit derive spelling — `#Debug`, `#[.., Debug]`, and a body
 /// `derive Debug;` line all land here (a struct/enum's `derives` list can
 /// only contain the literal name "Debug" via one of those three explicit
 /// forms; auto-derive never writes into `derives`, see
@@ -455,7 +455,7 @@ pub fn e0922(span: Span) -> Diagnostic {
          D-MARK-DEBUG1 retired the explicit opt-in spelling so there's exactly one way to \
          get it (I8)."
             .to_string(),
-        "remove `Debug` here — printing already works via `{value@Debug}` interpolation; \
+        "remove `Debug` here — printing already works via `{value#Debug}` interpolation; \
          implement `Debug` by hand (`impl T.Debug { fn debug(self) -> String { … } }`) only \
          if you need custom output."
             .to_string(),
@@ -468,10 +468,10 @@ pub fn e0916(type_show: &str, field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0916",
         format!("`{type_show}` can't auto-derive `Debug` because field `{field}` isn't debuggable"),
-        "auto-derived `Debug` requires every non-`@[Redact]` field to be debuggable"
+        "auto-derived `Debug` requires every non-`#[Redact]` field to be debuggable"
             .to_string(),
         format!(
-            "mark `{field}` with `@[Redact]`, change its type, or implement `Debug` manually for `{type_show}`"
+            "mark `{field}` with `#[Redact]`, change its type, or implement `Debug` manually for `{type_show}`"
         ),
         Some(span),
     )
@@ -723,8 +723,8 @@ pub fn collect_type_param_mentions(
     }
 }
 
-/// D-SERDE9/D-SERDE10: extra Rust serde bounds for a generic `@[Codable]`/
-/// `@[Encode]`/`@[Decode]` impl. The compiler injects `T: user_Encode` /
+/// D-SERDE9/D-SERDE10: extra Rust serde bounds for a generic `#[Codable]`/
+/// `#[Encode]`/`#[Decode]` impl. The compiler injects `T: user_Encode` /
 /// `T: user_Decode` — never spelled by the user — for *exactly* the type params
 /// that reach the wire (D-SERDE10: those mentioned by some non-skipped field
 /// type in `wire_types`). A phantom/skip-only param gets no serde bound, so e.g.

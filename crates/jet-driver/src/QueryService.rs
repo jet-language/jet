@@ -423,7 +423,7 @@ mod tests {
                 r#"use core.crypto.expert as expert
 
 fn protect() --[]-> {{
-    @Unsafe("fixed interop vector") {{
+    #Unsafe("fixed interop vector") {{
         _ :: expert.xchacha20poly1305_seal(
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [next_byte()],

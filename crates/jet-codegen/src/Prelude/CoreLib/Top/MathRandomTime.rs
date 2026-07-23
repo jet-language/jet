@@ -42,7 +42,7 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
     let rendered = format!(
         "Error [E3003]: deadline exceeded while waiting in {wait_kind}\n\
-Why: this wait point observed the task context deadline from `@Context(deadline: …)`\n\
+Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
 Fix: raise the deadline budget or shorten the work before this wait point"
     );
     if jet_interrupt_handler_should_unwind()
@@ -81,7 +81,7 @@ fn jet_std_time_start() -> jet_std::Stopwatch {
 }
 
 // ── D-DET1: deterministic injected Clock / Rng capabilities ───────────────────
-// Built from a caller-supplied seed (a pure value), so a `@Pure fn` may read
+// Built from a caller-supplied seed (a pure value), so a `#Pure fn` may read
 // time/randomness THROUGH the handle and stay reproducible. No wall-clock or
 // OS-RNG read; std-only (no external crate, I6).
 fn jet_std_clock_new(seed: i64) -> jet_std::Clock {

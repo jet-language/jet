@@ -813,7 +813,9 @@ pub(crate) fn rewrite_inline_calls_expr(
                 OrFallback::Return(None, _)
                 | OrFallback::Panic { .. }
                 | OrFallback::Break(_)
-                | OrFallback::Continue(_) => {}
+                | OrFallback::Continue(_)
+                | OrFallback::BreakLabel(..)
+                | OrFallback::ContinueLabel(..) => {}
             }
         }
         Expr::PatternTest { subject, .. } => {
@@ -955,7 +957,7 @@ fn check_bundle_opts_for_output(
     // meet the taken arm. Rewrites into a `comptime if` chain (reuses D-WHEN1).
     diags.extend(super::desugar_os_switches(bundle));
     // D-MIGRATE4: desugar each `change … via { (old) => … }` converter on a
-    // decodable `@PublishedSchema` type into a synthetic top-level converter
+    // decodable `#PublishedSchema` type into a synthetic top-level converter
     // function, so the runtime migration step (codegen) can call it. Runs before
     // registration/checking so those synthetic functions are type-checked and
     // lowered through the normal pipeline. Sets `conv_fn` on the `change` op.
@@ -1074,7 +1076,7 @@ fn check_bundle_opts_for_output(
         })
         .collect();
 
-    // D-MARK-VOCAB1 (card #518): the dynamic half of the `@Rule` vocabulary
+    // D-MARK-VOCAB1 (card #518): the dynamic half of the `#Rule` vocabulary
     // vocabulary — every `derive T.Name { … }` provider in the bundle, not
     // just this module's own, per the same bundle-wide orphan-rule view as
     // `derive_providers` above.
@@ -1095,7 +1097,7 @@ fn check_bundle_opts_for_output(
         // D-PATCH1: synthetic `T.Patch` before struct registration.
         inject_patchable_types(&mut module.items, &mut diags);
         // Card #436: `CFFI::assemble` (jetpack crate) drains every
-        // `@Extern`/`@Bindgen module` out of its declaring file and re-homes
+        // `#Extern`/`#Bindgen module` out of its declaring file and re-homes
         // it in a synthetic per-lib module (`<c.lib>`) with an empty
         // registry of its own — so a struct/enum/distinct declared in an
         // ordinary file was NEVER visible to `is_c_abi_type`'s `Type::Named`
@@ -1223,7 +1225,7 @@ fn check_bundle_opts_for_output(
                         .insert(a.name.clone(), a.is_pub && !a.is_package_pub);
                     st.type_pkg_pub.insert(a.name.clone(), a.is_package_pub);
                 }
-                // D-QUAL3: a unit family lowers to one `@Numeric` distinct type
+                // D-QUAL3: a unit family lowers to one `#Numeric` distinct type
                 // per member, each erasing to `Float`.
                 Item::UnitFamily(uf) => {
                     let dimension = crate::AST::Dimension::for_family(&uf.family);
@@ -1257,7 +1259,7 @@ fn check_bundle_opts_for_output(
                         st.tests.insert(t.name.clone(), t.name_span);
                     }
                 }
-                // D-BENCH1: `@Bench` blocks define no referenceable name; codegen
+                // D-BENCH1: `#Bench` blocks define no referenceable name; codegen
                 // discovers them straight from the AST, so registration is a no-op.
                 Item::Bench(_) => {}
                 Item::ExternRust(block) => {
@@ -1585,7 +1587,7 @@ fn check_bundle_opts_for_output(
                 }
             }
         }
-        // D-SERDE: validate `@[Codable]`/`@[Encode]`/`@[Decode]` markers (E2407–E2412)
+        // D-SERDE: validate `#[Codable]`/`#[Encode]`/`#[Decode]` markers (E2407–E2412)
         // now that the trait registry resolves field/variant types — keeps the emitted
         // `impl`s rustc-clean (I2).
         diags.extend(validate_serde_items(&module.items, &st.trait_reg));
@@ -1593,7 +1595,7 @@ fn check_bundle_opts_for_output(
         // `@`/`#` plane vocabulary is E0927, instead of silently doing
         // nothing (the parser accepts any PascalCase name structurally).
         diags.extend(check_marker_vocabulary(&module.items, &known_derive_names));
-        // D-CLIFLAG1: validate `@[Cli]`-derived structs (E1305/E1306), same
+        // D-CLIFLAG1: validate `#[Cli]`-derived structs (E1305/E1306), same
         // timing as the serde pass above (trait registry must be built so
         // `Cli` is visible on `s.derives`).
         diags.extend(validate_cli_items(&module.items, &st.trait_reg));
@@ -2095,7 +2097,7 @@ fn check_bundle_opts_for_output(
         }) {
             // S12/D-S80-RUN1/D-CLIFLAG1: `run` is the only program entry name.
             // It is zero-arg (optionally `-> Void ?`), or one typed CLI-spec
-            // parameter (`@[Cli]` struct / enum).
+            // parameter (`#[Cli]` struct / enum).
             if run_fn.params.is_empty() {
                 if mode == CompileMode::Run
                     && run_fn
@@ -2140,9 +2142,9 @@ fn check_bundle_opts_for_output(
             }) => {
             diags.push(Diagnostic::error(
                 "E0601",
-                format!("no `@{}` blocks found to run", Syntax::KW_TEST),
+                format!("no `#{}` blocks found to run", Syntax::KW_TEST),
                 format!(
-                    "add at least one top-level block: @{} \"describes what this checks\" {{ ... }}",
+                    "add at least one top-level block: #{} \"describes what this checks\" {{ ... }}",
                     Syntax::KW_TEST
                 ),
                 format!(
@@ -2153,7 +2155,7 @@ fn check_bundle_opts_for_output(
                 None,
             ));
         }
-        // `jet bench` checks the AST for `@Bench` blocks before entering Bench
+        // `jet bench` checks the AST for `#Bench` blocks before entering Bench
         // mode and falls back to whole-program timing otherwise, so an empty
         // bench set is never an error here.
         CompileMode::Bench
@@ -2181,7 +2183,7 @@ fn check_bundle_opts_for_output(
     let mut module_pending_diagnostics = Vec::new();
     // D-METHODMACRO1=A: top-level function names whose address was taken
     // anywhere in the bundle, accumulated across every module below; the
-    // `@InlineAlways` address-taken pass (E0918) runs after the loop, once
+    // `#InlineAlways` address-taken pass (E0918) runs after the loop, once
     // this set is complete across the whole bundle.
     let mut global_addr_taken: HashSet<String> = HashSet::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
@@ -2352,7 +2354,7 @@ fn check_bundle_opts_for_output(
     }
 
     // D-WASM1=A (c123 M1): JS/WASM partition inference and boundary checks.
-    // D-MEM-FACTS1: module `@Policy(no_alloc)` declarations are checked only
+    // D-MEM-FACTS1: module `#Policy(no_alloc)` declarations are checked only
     // after the same qualified, dependency-complete graph reaches its fixpoint.
     // #657 feeds the other scope levels and the two remaining fact values into
     // this declaration surface; reachability itself stays single-mechanism.
@@ -2387,7 +2389,7 @@ fn check_bundle_opts_for_output(
     // mixed-axis conflicts and unmatched cross-gate calls.
     diags.extend(check_os_target(bundle));
 
-    // D-TAINT1: taint tracking across every module. `@Sanitizer fn`s are
+    // D-TAINT1: taint tracking across every module. `#Sanitizer fn`s are
     // collected program-wide (a sanitizer in one module clears taint at a call in
     // another); each module's bodies are checked against its own Core aliases so
     // a sink call (Db/Exec/Net effect) resolves correctly. Erased in codegen (I3).
@@ -2417,7 +2419,7 @@ fn check_bundle_opts_for_output(
     }
 
     let (mut used_core, usage_spans, ffi_callback_fns) = collect_used_core(bundle, &states);
-    // D-CLIFLAG1: a `@[Cli]`-derived struct's generated `__jet_cli_spec_*`/
+    // D-CLIFLAG1: a `#[Cli]`-derived struct's generated `__jet_cli_spec_*`/
     // `__jet_cli_decode_*` functions (and the synthesized `fn main` for a
     // typed `fn run`) call straight into `core.args`'s `JetArgsSpec`/
     // `JetParsedArgs` prelude — but they're pure codegen text, not a Jet

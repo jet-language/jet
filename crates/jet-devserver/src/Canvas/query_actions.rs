@@ -472,7 +472,7 @@ fn core_member_direct_exclusion(
     if module_path == "core.crypto.expert" {
         return Some((
             "needs_unsafe_region",
-            "Needs an @Unsafe region before Canvas can insert it.".to_string(),
+            "Needs an #Unsafe region before Canvas can insert it.".to_string(),
         ));
     }
     if !core_module_has_canvas_defaults(module_path) {

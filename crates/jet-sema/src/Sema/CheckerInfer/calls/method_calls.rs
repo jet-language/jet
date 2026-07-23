@@ -754,7 +754,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 // D-SHAPE-CONVERT1=A: every numeric-backed distinct type,
-                // including @UnitFamily members, gets the same destination-owned
+                // including #UnitFamily members, gets the same destination-owned
                 // conversion as its base (`UserId.from_int`, `Meter.from_float`).
                 if self.registry.is_distinct(type_name) {
                     if let Some(base) = self.registry.distinct_base(type_name).cloned() {
@@ -1347,7 +1347,7 @@ impl<'a> Checker<'a> {
                     "E0311",
                     format!("`{method}` is forbidden on secret-bearing `{shown}`"),
                     "secret-bearing cryptographic values are move-only and expose no clone, hash, serialization, Debug, or Display capability".to_string(),
-                    "move the value to its next owner; use only a named `core.crypto.expert` exposure inside an audited `@Unsafe` region when raw bytes are required".to_string(),
+                    "move the value to its next owner; use only a named `core.crypto.expert` exposure inside an audited `#Unsafe` region when raw bytes are required".to_string(),
                     Some(span),
                 ));
                 for arg in args.iter_mut() {
@@ -1491,7 +1491,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
-            // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `@Transact`
+            // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact`
             // transaction handle. Same shape as `scope.guard`: a zero-parameter
             // lambda, Drop-backed, run LIFO on a clean commit and dropped on a
             // `?`-failure/rollback. Returns a guard handle (`TransactionGuard`),
@@ -1564,7 +1564,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(() => { … })` on a
-            // `@Transact` handle — the exact mirror of `on_commit`. A zero-parameter
+            // `#Transact` handle — the exact mirror of `on_commit`. A zero-parameter
             // lambda, Drop-backed, run LIFO on a `?`-failure/rollback and dropped on a
             // clean commit. Returns the same `TransactionGuard` handle.
             if let Type::Named(handle_ty) = &recv_ty {
@@ -1635,7 +1635,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-DBDRIVER1: method calls on a `DbConnection` handle. A bespoke block
-            // (like the `@Transact` handle above) rather than the generic
+            // (like the `#Transact` handle above) rather than the generic
             // `file_handle_method_return` table, because `.query`/`.query_one`/
             // `.execute` need real expected-type-directed arg elaboration
             // (`sql: String, params: [DbValue]`) — an empty `[]` params literal must
@@ -2764,7 +2764,7 @@ impl<'a> Checker<'a> {
                         self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                     *recv_type_out = Some("Shared".to_string());
                     // D-STM1=A (card #506): a `Shared.edit` on the direct path of a
-                    // `@Transact` block joins the block's atomic commit — the write is
+                    // `#Transact` block joins the block's atomic commit — the write is
                     // DEFERRED, so the call yields nothing (Unit), matching codegen's
                     // `edit_txn(…) -> ()`. Consuming it (`x :: h.edit(…)`) then fails as an
                     // ordinary type error against Unit. `txn_depth` is 0 inside a nested
@@ -2779,7 +2779,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-SIMD2 / D-LINALG1: methods on the built-in math value types
-            // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(@Max)`, `m.matmul(n)`).
+            // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(#Max)`, `m.matmul(n)`).
             // Operator overloading on this closed family is blessed; named methods are
             // the rest of the surface. Set `recv_type_out` so codegen routes to the
             // math-method op (TIR handle-method path).
@@ -2793,16 +2793,16 @@ impl<'a> Checker<'a> {
                                 "E2510",
                                 format!("`reduce` takes one reduce-op marker, got {}", args.len()),
                                 "a lane reduction names its operation with a marker".to_string(),
-                                "write `v.reduce(@Add)`, `@Mul`, `@Min`, or `@Max`".to_string(),
+                                "write `v.reduce(#Add)`, `#Mul`, `#Min`, or `#Max`".to_string(),
                                 Some(span),
                             ));
                         } else if let Expr::ReduceMarker(op, mspan) = &args[0].expr {
                             if !simd_reduce_markers().contains(&op.as_str()) {
                                 self.diags.push(Diagnostic::error(
                                     "E2510",
-                                    format!("`@{}` isn't a reduce operation", op),
+                                    format!("`#{}` isn't a reduce operation", op),
                                     "a lane reduction folds the lanes with one of a fixed set of operations".to_string(),
-                                    "use `@Add`, `@Mul`, `@Min`, or `@Max`".to_string(),
+                                    "use `#Add`, `#Mul`, `#Min`, or `#Max`".to_string(),
                                     Some(*mspan),
                                 ));
                             }
@@ -2812,7 +2812,7 @@ impl<'a> Checker<'a> {
                                 "`reduce` takes a reduce-op marker, not a value".to_string(),
                                 "the operation is named with a marker so the fold is explicit"
                                     .to_string(),
-                                "write `v.reduce(@Add)`, `@Mul`, `@Min`, or `@Max`".to_string(),
+                                "write `v.reduce(#Add)`, `#Mul`, `#Min`, or `#Max`".to_string(),
                                 Some(args[0].expr.span()),
                             ));
                             self.infer(&mut args[0].expr);
@@ -2910,9 +2910,9 @@ impl<'a> Checker<'a> {
                                 method,
                                 recv_ty.show()
                             ),
-                            "`@Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
+                            "`#Layout(columnar)` lists support the core surface in v1: indexing, field access, `len`, `is_empty`, `push`, and iteration".to_string(),
                             format!(
-                                "drop `@Layout(columnar)` from `{}` to use `.{}()`, or rewrite the loop with indexing",
+                                "drop `#Layout(columnar)` from `{}` to use `.{}()`, or rewrite the loop with indexing",
                                 elem, method
                             ),
                             Some(span),

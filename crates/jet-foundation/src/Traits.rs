@@ -28,7 +28,7 @@ pub struct TraitRegistry {
     pub derives: HashMap<String, HashSet<String>>,
     pub local_types: HashSet<String>,
     /// D-SERDE9/10: for each Codable type, the indices of its type params that
-    /// reach the wire (a non-`@[Skip]` field type mentions them). Used at the use
+    /// reach the wire (a non-`#[Skip]` field type mentions them). Used at the use
     /// site so a non-codable type argument fails there (E2411), not on the
     /// emitted impl (I2). A param absent here is phantom/skip-only and is never
     /// required to be codable — `Id<Kind>` serializes regardless of `Kind`.
@@ -125,7 +125,7 @@ impl TraitRegistry {
                 // D-CAPBUNDLE1: a distinct type's capability bundles re-expose
                 // base operations while keeping nominal identity (I8: reuse the
                 // existing Display/derive machinery rather than a second
-                // mechanism). `@Numeric` arithmetic is a separate, older gate
+                // mechanism). `#Numeric` arithmetic is a separate, older gate
                 // (D-DIST3/E0127) left untouched — see CheckerInfer/binary.rs.
                 Item::Distinct(d) => {
                     self.auto_equatable.insert(d.name.clone());
@@ -177,7 +177,7 @@ impl TraitRegistry {
                     diags.push(Generics::e0731(name, "`derive`", *span));
                 } else if name == DEBUG {
                     // D-MARK-DEBUG1=A: `Debug` auto-derives; an explicit
-                    // `@Debug`/`@[.., Debug]`/`derive Debug;` is retired.
+                    // `#Debug`/`#[.., Debug]`/`derive Debug;` is retired.
                     diags.push(Generics::e0922(*span));
                 }
             }
@@ -496,7 +496,7 @@ impl TraitRegistry {
                 s.name.clone(),
                 wire_param_indices(&s.type_params, &stored_types),
             );
-            // D-SERDE9/10: record which params reach the wire (a non-`@[Skip]`
+            // D-SERDE9/10: record which params reach the wire (a non-`#[Skip]`
             // field type mentions them) for use-site codability checks.
             let wire_types: Vec<&Type> = s
                 .fields
@@ -815,7 +815,7 @@ impl TraitRegistry {
                 .derives
                 .get(type_name)
                 .is_some_and(|d| d.contains(trait_name)),
-            // D-CLIFLAG1: `@[Cli]` is a derive-trait name like the others above,
+            // D-CLIFLAG1: `#[Cli]` is a derive-trait name like the others above,
             // just not one of Generics's built-in constants (it's CLI-parsing
             // specific, not a wire/comparison trait) — same `derives` lookup.
             _ if trait_name == Syntax::CONTRACT_CLI => self

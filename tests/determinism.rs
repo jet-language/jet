@@ -1,19 +1,19 @@
-//! D-DET1 (ratified 2026-06-22): `@Pure` ⇒ reproducible.
+//! D-DET1 (ratified 2026-06-22): `#Pure` ⇒ reproducible.
 //!
 //! Two ratified pieces beyond the base purity checks (which already ship as
 //! E3401/E3403):
-//!   1. Injected deterministic `Clock` / `Rng` capabilities — a `@Pure fn` may
+//!   1. Injected deterministic `Clock` / `Rng` capabilities — a `#Pure fn` may
 //!      read time/randomness THROUGH a `Clock`/`Rng` parameter (seeded by the
 //!      caller, hence reproducible), while ambient `time.now()`/`random.int()`
 //!      stay E3403.
-//!   2. `@Nondeterministic("reason") { … }` — expert escape suspending
+//!   2. `#Nondeterministic("reason") { … }` — expert escape suspending
 //!      determinism rejections (E3401/E3403) for its body.
 
 mod common;
 
 // ── Piece 1: injected deterministic Clock / Rng ───────────────────────────────
 
-/// A `@Pure fn` reading time through an injected `Clock` param compiles.
+/// A `#Pure fn` reading time through an injected `Clock` param compiles.
 #[test]
 fn pure_fn_injected_clock_ok() {
     let src = r#"
@@ -34,7 +34,7 @@ use core.time as time;
     );
 }
 
-/// A `@Pure fn` drawing randomness through an injected `&Rng` param compiles.
+/// A `#Pure fn` drawing randomness through an injected `&Rng` param compiles.
 #[test]
 fn pure_fn_injected_rng_ok() {
     let src = r#"
@@ -52,7 +52,7 @@ fn run() {
 }
 
 /// The deterministic capability constructors (`time.clock`, `random.rng`) are
-/// themselves usable inside a `@Pure fn` — they carry no ambient effect.
+/// themselves usable inside a `#Pure fn` — they carry no ambient effect.
 #[test]
 fn pure_fn_constructs_caps_ok() {
     let src = r#"
@@ -245,7 +245,7 @@ fn copy_box(value: BoxedClock) --[]-> BoxedClock {
     return ~value
 }
 fn show_box(value: BoxedClock) --[]-> String {
-    return "{value@Debug}"
+    return "{value#Debug}"
 }
 fn run() {}
 "#;
@@ -261,7 +261,7 @@ struct Holder {
     clock: Clock
 }
 fn show(holder: Holder) --[]-> String {
-    return "{holder.clock} {holder.clock@Debug}"
+    return "{holder.clock} {holder.clock#Debug}"
 }
 fn run() {
     holder := Holder.{ clock: Clock.system() }
@@ -280,7 +280,7 @@ struct Holder {
     clock: Clock
 }
 fn show(holder: Holder) --[]-> String {
-    return "{holder@Debug}"
+    return "{holder#Debug}"
 }
 fn run() {
     holder := Holder.{ clock: Clock.system() }
@@ -307,7 +307,7 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
     let main = dir.join("main.jet");
     std::fs::write(
         &main,
-        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) --[]-> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) --[]-> String {\n    return \"{value@Debug}\"\n}\nfn run() {}\n",
+        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) --[]-> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) --[]-> String {\n    return \"{value#Debug}\"\n}\nfn run() {}\n",
     )
     .unwrap();
 
@@ -318,7 +318,7 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
     );
 }
 
-/// Ambient `time.now()` inside a `@Pure fn` is STILL E3403 — the injection is
+/// Ambient `time.now()` inside a `#Pure fn` is STILL E3403 — the injection is
 /// not a backdoor around the determinism rule.
 #[test]
 fn pure_fn_ambient_time_still_e3403() {
@@ -330,7 +330,7 @@ fn bad() --[]-> Int {
 fn run() { print("{bad()}") }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "ambient time.now() in @Pure fn must fail");
+    assert!(res.is_err(), "ambient time.now() in #Pure fn must fail");
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E3403"),
@@ -339,7 +339,7 @@ fn run() { print("{bad()}") }
     );
 }
 
-/// Ambient `random.int(…)` inside a `@Pure fn` is STILL E3403.
+/// Ambient `random.int(…)` inside a `#Pure fn` is STILL E3403.
 #[test]
 fn pure_fn_ambient_random_still_e3403() {
     let src = r#"
@@ -350,7 +350,7 @@ fn bad() --[]-> Int {
 fn run() { print("{bad()}") }
 "#;
     let res = jet::compile(src);
-    assert!(res.is_err(), "ambient random.int() in @Pure fn must fail");
+    assert!(res.is_err(), "ambient random.int() in #Pure fn must fail");
     let diags = res.unwrap_err();
     assert!(
         diags.iter().any(|d| d.code == "E3403"),
@@ -361,14 +361,14 @@ fn run() { print("{bad()}") }
 
 // ── Piece 2: audited nondeterminism escape ────────────────────────────────────
 
-/// `@Nondeterministic("reason") { … }` suspends E3403 inside `@Pure fn`.
+/// `#Nondeterministic("reason") { … }` suspends E3403 inside `#Pure fn`.
 #[test]
 fn assume_deterministic_suppresses_e3403() {
     let src = r#"
 use core.time as time;
 fn risky() --[]-> Int {
     t := 0
-    @Nondeterministic("ambient clock is explicit test input") {
+    #Nondeterministic("ambient clock is explicit test input") {
         t = time.now()
     }
     return t
@@ -378,17 +378,17 @@ fn run() { print("{risky()}") }
     let res = jet::compile(src);
     assert!(
         res.is_ok(),
-        "@Nondeterministic should suppress E3403: {:?}",
+        "#Nondeterministic should suppress E3403: {:?}",
         res.err()
     );
 }
 
-/// `@Nondeterministic("reason") { … }` suspends E3401 too.
+/// `#Nondeterministic("reason") { … }` suspends E3401 too.
 #[test]
 fn assume_deterministic_suppresses_e3401() {
     let src = r#"
 fn risky() --[]-> Int {
-    @Nondeterministic("ambient print is deliberate") {
+    #Nondeterministic("ambient print is deliberate") {
         print("side effect")
     }
     return 42
@@ -398,7 +398,7 @@ fn run() { print("{risky()}") }
     let res = jet::compile(src);
     assert!(
         res.is_ok(),
-        "@Nondeterministic should suppress E3401: {:?}",
+        "#Nondeterministic should suppress E3401: {:?}",
         res.err()
     );
 }
@@ -409,7 +409,7 @@ fn assume_deterministic_is_scoped() {
     let src = r#"
 use core.time as time;
 fn risky() --[]-> Int {
-    @Nondeterministic("ambient clock is deliberate") {
+    #Nondeterministic("ambient clock is deliberate") {
         a := time.now()
     }
     return time.now()
@@ -453,7 +453,7 @@ fn run() {
 // checked `Duration` construction and whole-unit reading. All stay
 // pure-callable through the injected, seeded handles.
 
-/// The widened `Rng` draws (`bool`/`pick`/`shuffle`) compile inside a `@Pure fn`.
+/// The widened `Rng` draws (`bool`/`pick`/`shuffle`) compile inside a `#Pure fn`.
 #[test]
 fn pure_fn_widened_rng_ok() {
     let src = r#"
@@ -547,7 +547,7 @@ fn run() {
     );
 }
 
-/// The widened `Clock` surface (`advance` / `wait`) compiles inside a `@Pure fn`.
+/// The widened `Clock` surface (`advance` / `wait`) compiles inside a `#Pure fn`.
 #[test]
 fn pure_fn_widened_clock_ok() {
     let src = r#"

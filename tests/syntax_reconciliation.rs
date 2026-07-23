@@ -90,7 +90,7 @@ const FORBIDDEN: &[&str] = &[
     "List<",
     "List[",
     "Map<",
-    "@Bench \"",
+    "#Bench \"",
     "#[Serialize",
     "Serialize]",
     "#[Deserialize",
@@ -108,8 +108,6 @@ const OLD_BINDING_CODES: &[&str] = &["E0009", "E0010", "E0985"];
 const OLD_BINDING_WORDS: &[&str] = &["let", "val", "var", "set"];
 const SYNTAX_STATUS_MATRIX: &str =
     "docs/plans/epoch-3/syntax-law-source-status-matrix-2026-07-07.md";
-const MARKER_PLANE_MATRIX: &str =
-    "docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md";
 const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
     "docs/spec/syntax-decisions.md",
     "docs/spec/encoding-decisions.md",
@@ -118,8 +116,7 @@ const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
     "examples/features/serde/encoding_breadth.jet",
 ];
 const ACTIVE_MATURITY_DOCS: &[&str] = &["docs/reference/maturity-tags.md"];
-const MARKER_CENSUS_DOCS: &[&str] =
-    &["docs/plans/epoch-3/marker-plane-source-of-truth-matrix-2026-07-07.md"];
+const MARKER_CENSUS_DOC: &str = "docs/spec/syntax-decisions.md";
 const MATRIX_UNBUILT_MARKERS: &[&str] = &[
     "S74-D-DESTRUCT1-ARM",
     "D-IGNORERET1",
@@ -137,106 +134,6 @@ const MATRIX_UNBUILT_MARKERS: &[&str] = &[
     "D-WEBAPP1",
 ];
 const ENVIRONMENT_REFERENCE: &str = "docs/reference/environment.md";
-const MARKER_PLANE_ROWS: &[(&str, &[&str])] = &[
-    (
-        "file-target-directives",
-        &[
-            "@PubFile",
-            "@NoPrelude",
-            "@Target(Web)",
-            "@Target(Wasm)",
-            "@Target(Js)",
-            "@Html",
-            "@WasmExport",
-        ],
-    ),
-    (
-        "type-layout-directives",
-        &[
-            "@Layout(c)",
-            "@Layout(columnar)",
-            "@SingleUse",
-            "@UnitFamily",
-        ],
-    ),
-    (
-        "serde-directive-attributes",
-        &[
-            "@[Rename",
-            "@[Skip]",
-            "@[Default]",
-            "@RenameAll",
-            "@Tag",
-            "@Untagged",
-        ],
-    ),
-    (
-        "derive-contract-markers",
-        &[
-            "@Codable",
-            "@[Encode, Decode]",
-            "@Summarize",
-            "@Comparable",
-        ],
-    ),
-    (
-        "general-contract-markers",
-        &[
-            "@Pure", "@MustUse", "@Pre", "@Post", "@Inline", "@Persist", "@Cli",
-        ],
-    ),
-    (
-        "distinct-capability-bundles",
-        &["@Numeric", "@Printable", "@CodableAsBase"],
-    ),
-    (
-        "effect-capability-directives",
-        &["--[Fs]->", "--[via f]->", "@Caps", "@Grant"],
-    ),
-    (
-        "unsafe-impure-gates",
-        &["@Unsafe", "@Impure", "D-UNSAFE-REASON1"],
-    ),
-    (
-        "test-bench-directives",
-        &["@Test(\"name\")", "@Test fn", "@Bench(\"name\")"],
-    ),
-    (
-        "typing-fact-directives",
-        &[
-            "@Tainted",
-            "@Sanitizer",
-            "@Replayable",
-            "@State",
-            "@Transition",
-            "@Track",
-        ],
-    ),
-    (
-        "comptime-metaprogramming",
-        &["comptime", "$name", "derive T.Trait"],
-    ),
-    (
-        "capability-sigils",
-        &["^T", "&T", "~x", "p.*", "edit", "share"],
-    ),
-    (
-        "maturity-markers",
-        &["@Meta(maturity: .Experimental", ".Tested", ".Hardened"],
-    ),
-    (
-        "retired-paused-marker-spellings",
-        &["@unsafe", "#extern", "#layout", "@Bench \"", "#[Serialize"],
-    ),
-];
-
-fn marker_plane_row<'a>(matrix: &'a str, row: &str) -> &'a str {
-    let row_token = format!("| `{row}` |");
-    matrix
-        .lines()
-        .find(|line| line.starts_with(&row_token))
-        .unwrap_or_else(|| panic!("marker-plane matrix missing row `{row}`"))
-}
 
 #[test]
 fn live_surface_has_no_retired_spellings() {
@@ -336,9 +233,9 @@ fn dynamic_encoding_surface_uses_datatree_name() {
 #[test]
 fn active_maturity_docs_use_meta_field_only() {
     let retired = [
-        "@Experimental",
-        "@Tested",
-        "@Hardened",
+        "#Experimental",
+        "#Tested",
+        "#Hardened",
         "#Experimental",
         "#Tested",
         "#Hardened",
@@ -348,7 +245,7 @@ fn active_maturity_docs_use_meta_field_only() {
         let text = fs::read_to_string(relative)
             .unwrap_or_else(|error| panic!("cannot read maturity surface {relative}: {error}"));
         for required in [
-            "@Meta(maturity:",
+            "#Meta(maturity:",
             ".Experimental",
             ".Tested",
             ".Hardened",
@@ -367,7 +264,7 @@ fn active_maturity_docs_use_meta_field_only() {
     }
     assert!(
         failures.is_empty(),
-        "active maturity docs drifted from the sole `@Meta(maturity: ...)` surface:\n{}",
+        "active maturity docs drifted from the sole `#Meta(maturity: ...)` surface:\n{}",
         failures.join("\n")
     );
 }
@@ -376,15 +273,21 @@ fn active_maturity_docs_use_meta_field_only() {
 fn proposal_marker_census_matches_syntax_registry() {
     let rules = jet::Syntax::APPLIED_RULES.len();
     assert!(rules > 0, "applied-rule registry must be non-empty");
-    let expected = format!("{} registered applied rules (all `@`)", rules);
-    for relative in MARKER_CENSUS_DOCS {
-        let text = fs::read_to_string(relative)
-            .unwrap_or_else(|error| panic!("cannot read marker census doc {relative}: {error}"));
-        assert!(
-            text.contains(&expected),
-            "{relative} marker census must match Syntax registries: expected `{expected}`"
-        );
-    }
+    assert_eq!(
+        jet::Syntax::RULE_PREFIX,
+        "#",
+        "registered applied rules must use the canonical `#` plane"
+    );
+
+    let text = fs::read_to_string(MARKER_CENSUS_DOC).unwrap_or_else(|error| {
+        panic!("cannot read marker census doc {MARKER_CENSUS_DOC}: {error}")
+    });
+    assert!(
+        text.contains("`#` is the sole prefix for attributes, instructions, and\nproperties.")
+            && text.contains("`@` is reserved for locations, addresses, and sources.")
+            && text.contains("A leading `@Rule` produces E0063\nwith the canonical `#Rule` fix."),
+        "{MARKER_CENSUS_DOC} must teach the Syntax registry's canonical `#` applied-rule plane"
+    );
 }
 
 #[test]
@@ -504,12 +407,15 @@ fn documentation_consistency_sweep_stays_current() {
 
 #[test]
 fn marker_plane_matrix_covers_current_marker_families() {
-    let matrix = fs::read_to_string(MARKER_PLANE_MATRIX).expect("read marker-plane matrix");
     let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax.rs").expect("read Syntax.rs");
     let decisions =
         fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
 
-    // Deleting or hiding either export fails to compile; respelling one fails here.
+    assert_eq!(
+        jet::Syntax::RULE_PREFIX,
+        "#",
+        "the applied-rule registry must stay on the canonical `#` plane"
+    );
     assert_eq!(jet::Syntax::EFFECT_ARROW_OPEN, "--[");
     assert_eq!(jet::Syntax::EFFECT_ARROW_CLOSE, "]->");
     assert!(
@@ -520,21 +426,61 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "syntax decisions must keep D-SHAPE8=A ratified and implemented"
     );
 
-    for (row, spellings) in MARKER_PLANE_ROWS {
-        let row_text = marker_plane_row(&matrix, row);
-        for spelling in *spellings {
-            assert!(
-                row_text.contains(spelling),
-                "marker-plane matrix row `{row}` missing spelling `{spelling}`"
-            );
-        }
-    }
-
-    let effect_row = marker_plane_row(&matrix, "effect-capability-directives");
-    for anchor in ["EFFECT_ARROW_OPEN", "EFFECT_ARROW_CLOSE", "D-SHAPE8"] {
+    let mut unique = std::collections::BTreeSet::new();
+    for rule in jet::Syntax::APPLIED_RULES {
         assert!(
-            effect_row.contains(anchor),
-            "effect-capability row must cite `{anchor}`"
+            !rule.starts_with(['#', '@']),
+            "registered applied-rule names are bare; RULE_PREFIX owns the `#` plane: {rule}"
+        );
+        assert!(unique.insert(*rule), "duplicate applied rule `{rule}`");
+    }
+    for rule in [
+        "PubFile",
+        "NoPrelude",
+        "Target",
+        "Html",
+        "WasmExport",
+        "Layout",
+        "SingleUse",
+        "UnitFamily",
+        "Rename",
+        "Skip",
+        "Default",
+        "RenameAll",
+        "Tag",
+        "Untagged",
+        "Codable",
+        "Encode",
+        "Decode",
+        "Summarize",
+        "Comparable",
+        "Pure",
+        "MustUse",
+        "Pre",
+        "Post",
+        "Inline",
+        "Persist",
+        "Cli",
+        "Numeric",
+        "Printable",
+        "CodableAsBase",
+        "Caps",
+        "Grant",
+        "Unsafe",
+        "Impure",
+        "Test",
+        "Bench",
+        "Tainted",
+        "Sanitizer",
+        "Replayable",
+        "State",
+        "Transition",
+        "Track",
+        "Meta",
+    ] {
+        assert!(
+            unique.contains(rule),
+            "Syntax registry missing applied-rule family member `{rule}`"
         );
     }
 
@@ -551,8 +497,8 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "ATTR_TRACK",
     ] {
         assert!(
-            matrix.contains(syntax_anchor) && syntax.contains(syntax_anchor),
-            "marker-plane matrix must cite live Syntax.rs anchor `{syntax_anchor}`"
+            syntax.contains(syntax_anchor),
+            "Syntax.rs must retain live marker anchor `{syntax_anchor}`"
         );
     }
 
@@ -566,8 +512,8 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "D-CTMARKER1",
     ] {
         assert!(
-            matrix.contains(decision_anchor) && decisions.contains(decision_anchor),
-            "marker-plane matrix must cite syntax decision `{decision_anchor}`"
+            decisions.contains(decision_anchor),
+            "live syntax decisions must retain `{decision_anchor}`"
         );
     }
 }
@@ -600,7 +546,7 @@ fn card_511_census_matches_current_law() {
     for value in ["ATTR_EXPERIMENTAL", "ATTR_TESTED", "ATTR_HARDENED"] {
         assert!(
             package.contains(value) && !markers.contains(value),
-            "maturity value `{value}` must remain a @Meta value, not a standalone marker"
+            "maturity value `{value}` must remain a #Meta value, not a standalone marker"
         );
     }
     for law in ["D-MARKER-FAMILY1", "D-DET1", "D-REPLAY1", "D-MARK-META1"] {

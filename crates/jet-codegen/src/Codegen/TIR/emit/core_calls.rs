@@ -102,7 +102,7 @@ pub(crate) fn emit_tir_core_call(
         // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
         // `emit_core_call`. `address_of` is an inert address cast (no `unsafe`);
         // `volatile_read`/`volatile_write` access through a `Ptr<T>` — the volatile ops are
-        // valid because the call only reaches codegen inside an `@Unsafe` region/fn (sema
+        // valid because the call only reaches codegen inside an `#Unsafe` region/fn (sema
         // E3101), already lowered to a Rust `unsafe` context.
         ("core.mem", "address_of") => format!("(&({}) as *const _ as usize as i64)", arg(0)),
         ("core.mem", "volatile_read") => format!("std::ptr::read_volatile({})", arg(0)),
