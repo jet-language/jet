@@ -50,6 +50,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Values.rs"),
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core.rs"),
+    include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
     include_str!("../Prelude/Observe.rs"),
     include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),
@@ -1321,6 +1322,8 @@ mod tests {
         let expiring_secret =
             std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
+        let collections =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Collections.rs")).unwrap();
         let runtime_control =
             std::fs::read_to_string(root.join("src/Prelude/Core/RuntimeControl.rs")).unwrap();
         let observe = std::fs::read_to_string(root.join("src/Prelude/Observe.rs")).unwrap();
@@ -1335,6 +1338,7 @@ mod tests {
                 expiring_secret.as_str(),
             ),
             ("src/Prelude/Core.rs", core.as_str()),
+            ("src/Prelude/Core/Collections.rs", collections.as_str()),
             (
                 "src/Prelude/Core/RuntimeControl.rs",
                 runtime_control.as_str(),
@@ -1369,6 +1373,9 @@ mod tests {
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
             .unwrap();
+        let collections_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Collections.rs\")")
+            .unwrap();
         let control_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/RuntimeControl.rs\")")
             .unwrap();
@@ -1382,7 +1389,8 @@ mod tests {
             unicode_pos < values_pos
                 && values_pos < expiring_secret_pos
                 && expiring_secret_pos < core_pos
-                && core_pos < control_pos
+                && core_pos < collections_pos
+                && collections_pos < control_pos
                 && control_pos < observe_pos
                 && observe_pos < exact_units_pos,
             "prelude ownership order is generated-byte order"
@@ -1396,6 +1404,7 @@ mod tests {
                 values.as_str(),
                 expiring_secret.as_str(),
                 core.as_str(),
+                collections.as_str(),
                 runtime_control.as_str(),
                 observe.as_str(),
                 exact_units.as_str(),
@@ -1410,6 +1419,7 @@ mod tests {
             values.as_str(),
             expiring_secret.as_str(),
             core.as_str(),
+            collections.as_str(),
             runtime_control.as_str(),
             observe.as_str(),
             exact_units.as_str(),
@@ -1419,10 +1429,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 213_355, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 213_351, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "2389f2214de601a0f136f21ab790d2130332760ad76516a4e8db213d0f9ceee1",
+            "8372b9ec3b7b16433127995a019da916ade4e24cda94ec2fdcbc1efbea358a8e",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }
