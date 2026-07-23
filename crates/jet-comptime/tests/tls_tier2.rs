@@ -142,6 +142,8 @@ fn core_tls_repl_requests_use_the_net_effect() {
         100,
         true,
         &core_imports,
+        &HashMap::new(),
+        &HashMap::new(),
         &mut authorizer,
     )
     .expect_err("recording preflight stops execution");

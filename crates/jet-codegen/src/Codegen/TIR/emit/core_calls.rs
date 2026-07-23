@@ -1,4 +1,5 @@
 use crate::AST::{Type};
+use crate::Codegen::escape_rust_str;
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::TIR::emit_tir_expr;
@@ -9,7 +10,61 @@ use crate::Codegen::TIR::enc_row_target_rust;
 use crate::Codegen::TIR::enc_row_target_rust_traced;
 use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::enc_target_rust_traced;
+use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::TExpr;
+
+fn emit_data_schema_columns(elem_ty: &Type, expand_struct: bool, cx: &Cx) -> String {
+    let column = |name: &str, type_name: &str| {
+        format!(
+            "{root}jet_std::DataColumn {{ name: {name}.to_string(), type_name: {ty}.to_string() }}",
+            root = cx.root_prefix,
+            name = escape_rust_str(name),
+            ty = escape_rust_str(type_name),
+        )
+    };
+    // Series schema is always one `value` column (docs / D-DATAFRAME1). Table /
+    // LazyFrame / `[T]` expand a Named row struct into its fields.
+    if !expand_struct {
+        return format!("vec![{}]", column("value", &elem_ty.name()));
+    }
+    let Some(struct_name) = elem_ty.base_name() else {
+        return format!("vec![{}]", column("value", &elem_ty.name()));
+    };
+    match cx.struct_fields.get(struct_name) {
+        Some(fields) => {
+            let items: Vec<String> = fields
+                .iter()
+                .map(|(fname, _)| {
+                    let field_ty = struct_field_type(cx, elem_ty, fname)
+                        .expect("registered struct field must have a concrete type");
+                    column(fname, &field_ty.name())
+                })
+                .collect();
+            if items.is_empty() {
+                format!("Vec::<{}jet_std::DataColumn>::new()", cx.root_prefix)
+            } else {
+                format!("vec![{}]", items.join(", "))
+            }
+        }
+        None => format!("vec![{}]", column("value", &elem_ty.name())),
+    }
+}
+
+fn data_schema_elem_ty(arg_ty: &Type) -> Option<&Type> {
+    match arg_ty {
+        Type::List(inner) => Some(inner.as_ref()),
+        Type::Apply { name, args }
+            if matches!(name.as_str(), "Table" | "Series" | "LazyFrame") && args.len() == 1 =>
+        {
+            Some(&args[0])
+        }
+        _ => None,
+    }
+}
+
+fn data_schema_expand_struct(arg_ty: &Type) -> bool {
+    !matches!(arg_ty, Type::Apply { name, .. } if name == "Series")
+}
 
 pub(crate) fn emit_http_bridge_error(ffi: &str, error: &str) -> String {
     format!(
@@ -791,11 +846,34 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
+        // Array-of-objects JSON → `[T]`, reusing encoding.json's Decode path (I8).
+        ("core.data", "json") => {
+            format!(
+                "{}::<{}>(&({}))",
+                helper("jet_enc_json_decode"),
+                enc_target_rust(ret_ty, cx),
+                arg(0)
+            )
+        }
         ("core.data", "count") => format!("{}(&({}))", helper("jet_data_count"), arg(0)),
         ("core.data", "table") => format!("{}(&({}))", helper("jet_data_table"), arg(0)),
         ("core.data", "rows") => format!("{}(&({}))", helper("jet_data_rows"), arg(0)),
         ("core.data", "series") => format!("{}(&({}))", helper("jet_data_series"), arg(0)),
         ("core.data", "values") => format!("{}(&({}))", helper("jet_data_series_values"), arg(0)),
+        ("core.data", "schema") => {
+            let arg_ty = args.first().map(|a| &a.ty);
+            let elem = arg_ty
+                .and_then(|ty| data_schema_elem_ty(ty))
+                .cloned()
+                .unwrap_or(Type::Int);
+            let expand = arg_ty.map(|ty| data_schema_expand_struct(ty)).unwrap_or(true);
+            // Argument is evaluated for effects, then discarded — schema is type-driven.
+            format!(
+                "{{ let _ = &({}); {} }}",
+                arg(0),
+                emit_data_schema_columns(&elem, expand, cx)
+            )
+        }
         ("core.data", "missing_count") => {
             format!("{}(&({}))", helper("jet_data_missing_count"), arg(0))
         }

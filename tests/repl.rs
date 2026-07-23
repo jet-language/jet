@@ -2635,3 +2635,118 @@ fn repl_core_data_lazy_plans_and_typed_joins() {
         "left join unmatched row missing: {out}"
     );
 }
+
+#[test]
+fn repl_core_data_schema_empty_table_and_series_law() {
+    let inputs = &[
+        "use core.data as data",
+        "struct Ticket { team: String minutes: Float }",
+        "empty_rows: [Ticket] := []",
+        "empty_table :: data.table(empty_rows)",
+        "data.schema(empty_table)",
+        "data.schema(data.series([1.0, 2.0]))",
+        "t :: Ticket.{team: \"Core\", minutes: 4.0}",
+        "data.schema(data.series([t]))",
+        "empty_tickets: [Ticket] := []",
+        "data.schema(data.series(empty_tickets))",
+        "struct Empty {}",
+        "empty_units: [Empty] := []",
+        "data.schema(data.table(empty_units))",
+        "struct Box<T> { value: T }",
+        "boxed: [Box<Int>] := []",
+        "data.schema(data.table(boxed))",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        !out.contains("E0956"),
+        "core.data schema should dispatch at comptime, got: {out}"
+    );
+    assert!(
+        out.contains("DataColumn(name: team, type_name: String)")
+            && out.contains("DataColumn(name: minutes, type_name: Float)"),
+        "empty Table<Ticket> must keep static columns: {out}"
+    );
+    assert!(
+        out.contains("DataColumn(name: value, type_name: Float)"),
+        "Series<Float> must be one value column: {out}"
+    );
+    let ticket_value_hits = out.matches("DataColumn(name: value, type_name: Ticket)").count();
+    assert!(
+        ticket_value_hits >= 2,
+        "non-empty and empty Series<Ticket> both need value:Ticket (not expanded fields): {out}"
+    );
+    assert!(out.contains("[] : List"), "zero-field row must have zero columns: {out}");
+    assert!(
+        out.contains("DataColumn(name: value, type_name: Int)"),
+        "generic row fields must substitute concrete type arguments: {out}"
+    );
+}
+
+#[test]
+fn repl_core_data_table_echo_hides_elem_type() {
+    let inputs = &[
+        "use core.data as data",
+        "struct Ticket { team: String minutes: Float }",
+        "empty_rows: [Ticket] := []",
+        "data.table(empty_rows)",
+        "data.series(empty_rows)",
+        "data.lazy(data.table(empty_rows))",
+    ];
+    let out = run_transcript(inputs, None);
+    assert!(
+        !out.contains("E0956"),
+        "core.data containers should dispatch at comptime, got: {out}"
+    );
+    assert!(
+        out.contains("Table(rows:") && out.contains("Series(values:") && out.contains("LazyFrame(rows:"),
+        "expected Table/Series/LazyFrame echoes: {out}"
+    );
+    assert!(
+        !out.contains("elem_type:"),
+        "elem_type is comptime-only metadata; must not leak into REPL echo: {out}"
+    );
+}
+
+#[test]
+fn repl_core_data_json_ingest_and_select() {
+    let fixture = std::env::temp_dir().join(format!(
+        "jet_repl_data_json_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&fixture).unwrap();
+    std::fs::write(
+        fixture.join("model.jet"),
+        "#Codable\nstruct Ticket { team: String minutes: Float }\n",
+    )
+    .unwrap();
+    let project_dir = fixture.to_string_lossy().to_string();
+    let inputs = &[
+        "use core.data as data",
+        r#"raw :: "[{{\"team\":\"Core\",\"minutes\":4.0}},{{\"team\":\"Tools\",\"minutes\":5.0}},{{\"team\":\"Core\",\"minutes\":8.0}}]""#,
+        r#"rows :: data.json<Ticket>(raw) ?? panic("bad json")"#,
+        "table :: data.table(rows)",
+        "data.schema(table)",
+        "selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)",
+        "data.count(selected)",
+        "data.status()[6]",
+    ];
+    let out = run_transcript(inputs, Some(&project_dir));
+    std::fs::remove_dir_all(fixture).ok();
+    assert!(
+        !out.contains("E0956"),
+        "core.data json should dispatch at comptime, got: {out}"
+    );
+    assert!(
+        out.contains("DataColumn(name: team, type_name: String)")
+            && out.contains("DataColumn(name: minutes, type_name: Float)"),
+        "json table schema missing: {out}"
+    );
+    assert!(
+        out.contains("2 : Int"),
+        "selected count missing: {out}"
+    );
+    assert!(
+        out.contains("DataStatus(step: core.data.json") && out.contains("path: native"),
+        "json status row missing: {out}"
+    );
+}

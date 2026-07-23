@@ -50,7 +50,7 @@ use std::path::Path;
 
 use crate::Comptime::{CtValue, DevSink, REPL_FUEL_BUDGET};
 use crate::Diagnostics::Diagnostic;
-use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt};
+use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt, StructDef};
 
 pub mod Docs;
 mod History;
@@ -561,6 +561,9 @@ pub struct Session {
     /// The interpreter's function table: all `fn` items by name.
     /// Rebuilt when a new function is added.
     pub func_defs: HashMap<String, Func>,
+    /// Session struct defs (rebuilt with `func_defs`). Needed so comptime
+    /// `data.schema` can expand empty `Table<T>` columns from `T`'s fields.
+    pub struct_defs: HashMap<String, StructDef>,
     /// Live interpreter scope: accumulated bindings (D-REPL7).
     pub scope: HashMap<String, CtValue>,
     /// Declared Jet type annotations, retained independently from CtValue so
@@ -589,6 +592,7 @@ pub struct Session {
     baseline_item_srcs: Vec<String>,
     baseline_import_srcs: Vec<String>,
     baseline_func_defs: HashMap<String, Func>,
+    baseline_struct_defs: HashMap<String, StructDef>,
     baseline_core_imports: HashMap<String, String>,
     /// Notebook controls state: every accepted input gets an addressable turn.
     pub turns: Vec<ReplTurn>,
@@ -642,6 +646,7 @@ impl Session {
             import_srcs: Vec::new(),
             sema_stmts: Vec::new(),
             func_defs: HashMap::new(),
+            struct_defs: HashMap::new(),
             scope: HashMap::new(),
             binding_types: HashMap::new(),
             mutable_names: HashSet::new(),
@@ -653,6 +658,7 @@ impl Session {
             baseline_item_srcs: Vec::new(),
             baseline_import_srcs: Vec::new(),
             baseline_func_defs: HashMap::new(),
+            baseline_struct_defs: HashMap::new(),
             baseline_core_imports: HashMap::new(),
             turns: Vec::new(),
             history: History::History::session_only(),
@@ -672,6 +678,7 @@ impl Session {
         self.import_srcs = self.baseline_import_srcs.clone();
         self.sema_stmts.clear();
         self.func_defs = self.baseline_func_defs.clone();
+        self.struct_defs = self.baseline_struct_defs.clone();
         self.scope.clear();
         self.binding_types.clear();
         self.step = 0;
@@ -686,6 +693,7 @@ impl Session {
         self.baseline_item_srcs = self.item_srcs.clone();
         self.baseline_import_srcs = self.import_srcs.clone();
         self.baseline_func_defs = self.func_defs.clone();
+        self.baseline_struct_defs = self.struct_defs.clone();
         self.baseline_core_imports = self.core_imports.clone();
     }
 
@@ -1758,6 +1766,17 @@ fn checked_top_level_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String
         .collect()
 }
 
+fn checked_top_level_structs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, StructDef> {
+    bundle.modules[bundle.entry]
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(s) => Some((s.name.clone(), s.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Parse + sema-check `src`, returning the checked AST. Uses `Check` mode so
 /// E0101 (no `run`) is not fired — a REPL session is a library.
 fn checked_program(src: &str) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
@@ -1843,14 +1862,22 @@ fn rebuild_funcs(session: &mut Session) {
     );
     if let Ok(bundle) = checked_program(&src) {
         session.func_defs = checked_top_level_funcs(&bundle);
+        session.struct_defs = checked_top_level_structs(&bundle);
         return;
     }
     session.func_defs.clear();
+    session.struct_defs.clear();
     let (toks, _) = crate::Lexer::lex(&src);
     if let Ok(prog) = crate::Parser::parse(&toks) {
         for item in prog.items {
-            if let Item::Func(f) = item {
-                session.func_defs.insert(f.name.clone(), f);
+            match item {
+                Item::Func(f) => {
+                    session.func_defs.insert(f.name.clone(), f);
+                }
+                Item::Struct(s) => {
+                    session.struct_defs.insert(s.name.clone(), s);
+                }
+                _ => {}
             }
         }
     }
@@ -2305,6 +2332,11 @@ pub(crate) fn execute_line(
                 .iter()
                 .map(|(k, v)| (k.clone(), v))
                 .collect();
+            let structs: HashMap<String, &StructDef> = session
+                .struct_defs
+                .iter()
+                .map(|(k, v)| (k.clone(), v))
+                .collect();
             let mut sink = DevSink::new();
             let mut tracking_authorizer = TrackingAuthorizer { inner: authorizer, observed: false };
             // A turn commits as one transaction. Interpreter writes land in
@@ -2320,6 +2352,8 @@ pub(crate) fn execute_line(
                     REPL_FUEL_BUDGET,
                     suppress,
                     &session.core_imports,
+                    &structs,
+                    &session.binding_types,
                     &mut tracking_authorizer,
                 )
             } else {
@@ -2332,6 +2366,8 @@ pub(crate) fn execute_line(
                     REPL_FUEL_BUDGET,
                     suppress,
                     &session.core_imports,
+                    &structs,
+                    &session.binding_types,
                     &mut tracking_authorizer,
                 )
                 .map_err(crate::Comptime::ReplStepError::Diagnostic)
@@ -3030,6 +3066,11 @@ pub fn run_transcript_with_flags(
                     .iter()
                     .map(|(k, v)| (k.clone(), v))
                     .collect();
+                let structs: HashMap<String, &StructDef> = session
+                    .struct_defs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v))
+                    .collect();
                 let mut sink = DevSink::new();
                 let mut authorizer = policy.authorizer(None);
                 let mut trial_scope = session.scope.clone();
@@ -3042,6 +3083,8 @@ pub fn run_transcript_with_flags(
                     REPL_FUEL_BUDGET,
                     suppress,
                     &session.core_imports,
+                    &structs,
+                    &session.binding_types,
                     &mut authorizer,
                 ) {
                     Ok(echo_val) => {

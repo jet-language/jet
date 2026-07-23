@@ -339,7 +339,7 @@ impl<'a> Interp<'a> {
                 // Card #392 pass 5: `core.data`'s typed table/lazy pipeline — a
                 // generic call-site-typed surface built from ordinary Jet
                 // lambdas over dynamically-typed `CtValue` rows, so (unlike
-                // `decode<T>` below) only `csv<T>` actually reads `type_args`.
+                // `decode<T>` below) only `csv<T>`/`json<T>` actually read `type_args`.
                 // The pre-existing fixed-signature stats/plot surface (`sum`/
                 // `mean`/…/`bar_svg`, `DataLite.rs`) stays on the
                 // `apply_core_call` path below — only the table/lazy pipeline
@@ -348,13 +348,28 @@ impl<'a> Interp<'a> {
                     (module.as_str(), method),
                     (
                         "core.data",
-                        "csv" | "count" | "table" | "rows" | "series" | "values" | "missing_count"
-                            | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect" | "plan" | "filter"
-                            | "sort_by" | "group_count" | "group_sum" | "group_mean" | "inner_join"
-                            | "left_join",
+                        "csv" | "json" | "count" | "table" | "rows" | "series" | "values" | "schema"
+                            | "missing_count" | "lazy" | "lazy_filter" | "lazy_sort_by" | "collect"
+                            | "plan" | "filter" | "sort_by" | "group_count" | "group_sum"
+                            | "group_mean" | "inner_join" | "left_join",
                     )
                 ) {
-                    return self.eval_data_call(method, argv, type_args, span);
+                    let arg0_ty = args.first().and_then(|a| match &a.expr {
+                        Expr::Ident(name, _) => self.binding_types.get(name).cloned(),
+                        Expr::MethodCall {
+                            resolved_ret: Some(ty),
+                            ..
+                        } => Some(ty.clone()),
+                        _ => None,
+                    });
+                    return self.eval_data_call(
+                        method,
+                        argv,
+                        type_args,
+                        arg0_ty.as_ref(),
+                        resolved_ret,
+                        span,
+                    );
                 }
                 // D-ENC-CBOR-SURFACE1: encoding a Codable value needs its
                 // declared field types. CtValue intentionally erases `[U8]`

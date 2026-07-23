@@ -712,10 +712,23 @@ pub fn run_repl_step(
     fuel: u64,
     suppress: bool,
     core_imports: &HashMap<String, String>,
+    structs: &HashMap<String, &StructDef>,
+    binding_types: &HashMap<String, Type>,
     authorizer: &mut dyn ReplAuthorizer,
 ) -> Result<Option<CtValue>, Diagnostic> {
     match run_repl_step_inner(
-        stmts, funcs, base_dir, sink, scope, fuel, suppress, core_imports, authorizer, false,
+        stmts,
+        funcs,
+        base_dir,
+        sink,
+        scope,
+        fuel,
+        suppress,
+        core_imports,
+        structs,
+        binding_types,
+        authorizer,
+        false,
     ) {
         Ok(value) => Ok(value),
         Err(ReplStepError::Diagnostic(d)) => Err(d),
@@ -734,11 +747,24 @@ pub fn run_repl_step_interruptible(
     fuel: u64,
     suppress: bool,
     core_imports: &HashMap<String, String>,
+    structs: &HashMap<String, &StructDef>,
+    binding_types: &HashMap<String, Type>,
     authorizer: &mut dyn ReplAuthorizer,
 ) -> Result<Option<CtValue>, ReplStepError> {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_repl_step_inner(
-            stmts, funcs, base_dir, sink, scope, fuel, suppress, core_imports, authorizer, true,
+            stmts,
+            funcs,
+            base_dir,
+            sink,
+            scope,
+            fuel,
+            suppress,
+            core_imports,
+            structs,
+            binding_types,
+            authorizer,
+            true,
         )
     }));
     match result {
@@ -757,6 +783,8 @@ fn run_repl_step_inner(
     fuel: u64,
     suppress: bool,
     core_imports: &HashMap<String, String>,
+    structs: &HashMap<String, &StructDef>,
+    binding_types: &HashMap<String, Type>,
     authorizer: &mut dyn ReplAuthorizer,
     interruptible: bool,
 ) -> Result<Option<CtValue>, ReplStepError> {
@@ -778,10 +806,12 @@ fn run_repl_step_inner(
         repl_interruptible: interruptible,
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
-        binding_types: HashMap::new(),
+        // Fresh Interp per turn — seed prior binding types so empty
+        // `data.table`/`data.schema` can still read `Table<T>` / `[T]`.
+        binding_types: binding_types.clone(),
         globals: empty_globals(),
         methods: empty_methods(),
-        structs: empty_structs(),
+        structs,
         computed_fields: empty_computed(),
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),

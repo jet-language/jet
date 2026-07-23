@@ -946,6 +946,18 @@ fn previously_manifested_execution_skips_use_transparent_fallback() {
 }
 
 #[test]
+fn data_schema_empty_and_generic_rows_match_aot_in_default_dev() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_dev_data_schema_parity_{}",
+        std::process::id()
+    ));
+    let stats = check_dev_default_stem(0, "tooling/data_json", &dir, &[]);
+    assert_eq!(stats.ran, 1);
+    assert_eq!(stats.boundary, 0);
+    assert_eq!(stats.manifested, 0);
+}
+
+#[test]
 fn sh_typed_text_default_matches_compiled_binary() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_sh_typed_text_{}",

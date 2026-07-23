@@ -322,6 +322,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "FileLock" => Some("FileLock"),
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data summary/status values.
         "DataGroup" => Some("DataGroup"),
+        "DataColumn" => Some("DataColumn"),
         "DataStatus" => Some("DataStatus"),
         "DataSummary" => Some("DataSummary"),
         // D-LOGTRACE1=A: structured logging values.

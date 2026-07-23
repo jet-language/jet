@@ -223,11 +223,13 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.game" => &["Scene", "Replay", "Backend", "run"],
         "core.data" => &[
             "csv",
+            "json",
             "count",
             "table",
             "rows",
             "series",
             "values",
+            "schema",
             "missing_count",
             "lazy",
             "lazy_filter",
