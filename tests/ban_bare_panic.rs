@@ -37,8 +37,8 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-foundation/src/XmlPull.rs",
-        3,
-        "#[cfg(test)] XML event/tree shape assertion fixtures",
+        10,
+        "#[cfg(test)] XML parser/event/tree assertion fixtures",
     ),
     (
         "crates/jet-foundation/src/Terminal.rs",
@@ -79,6 +79,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "crates/jet-codegen/src/Codegen/TIR/tests.rs",
         8,
         "test file — every panic! here is inside a #[test] fn",
+    ),
+    (
+        "crates/jet-comptime/src/Comptime/EncodingLite.rs",
+        7,
+        "#[cfg(test)] XML conversion shape assertion fixtures",
     ),
     (
         "crates/jet-comptime/src/Comptime/Reflect.rs",
