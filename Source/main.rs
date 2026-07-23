@@ -352,19 +352,19 @@ impl BuildProfile {
 
 fn command_group_usage(name: &str) -> String {
     let group = jet::CLI::command_group(name).expect("command group must exist");
-    group
-        .actions
-        .iter()
-        .map(|action| {
-            format!(
-                "  {} {} {:<18} {}\n",
+    let mut output = String::new();
+    for action in group.actions {
+        for usage in action.usage.lines() {
+            output.push_str(&format!(
+                "  {} {} {:<48} {}\n",
                 jet::Syntax::BINARY_NAME,
                 group.name,
-                action.name,
+                usage,
                 action.summary
-            )
-        })
-        .collect()
+            ));
+        }
+    }
+    output
 }
 
 pub(crate) fn usage() -> String {
@@ -645,9 +645,7 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     if let Some(spec) = jet::CLI::command_group(&group) {
         if exhaustive && (raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help")) {
             println!("jet {group} — {}", spec.summary);
-            for action in spec.actions {
-                println!("  {:<15} {}", action.name, action.summary);
-            }
+            print!("{}", command_group_usage(&group));
             exit(ExitCodes::OK);
         }
     }

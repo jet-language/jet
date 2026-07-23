@@ -1031,9 +1031,37 @@ fn shape6_inspect_routes_and_retired_bare_snapshots() {
     let help = String::from_utf8(help.stdout).unwrap();
     for group_name in ["inspect", "registry"] {
         let group = jet::CLI::command_group(group_name).unwrap();
+        let expected_usage = group
+            .actions
+            .iter()
+            .flat_map(|action| {
+                action.usage.lines().map(|usage| {
+                    format!(
+                        "  jet {} {:<48} {}\n",
+                        group.name, usage, action.summary
+                    )
+                })
+            })
+            .collect::<String>();
+        assert!(
+            help.contains(&format!("{group_name} commands:\n{expected_usage}")),
+            "jet help did not render exact {group_name} usage"
+        );
+
+        let group_help = std::process::Command::new(&bin)
+            .args([group_name, "help"])
+            .output()
+            .unwrap();
+        assert!(group_help.status.success());
+        assert_eq!(
+            String::from_utf8(group_help.stdout).unwrap(),
+            format!("jet {group_name} — {}\n{expected_usage}", group.summary)
+        );
         for action in group.actions {
-            let command = format!("jet {} {}", group.name, action.name);
-            assert!(help.contains(&command), "jet help omitted {command}");
+            for usage in action.usage.lines() {
+                let command = format!("jet {} {usage}", group.name);
+                assert!(help.contains(&command), "jet help omitted {command}");
+            }
         }
     }
 
