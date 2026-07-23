@@ -1236,6 +1236,10 @@ stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
 keywords (E0056/E0057 retired by D-S14-PAUSE; E0058 retired earlier by
 D-MEM1/S3).
 
+*Supersession (D-SHAPE-COPY1=A, ratified 2026-07-15):* `copy x` is
+historical text in this frozen entry, not current syntax. The current copy
+form is `~x`; the retired `copy` word produces E0991.
+
 *History:* D-CAP7's original text (pre-2026-07-03) had a third visible
 parameter sigil `~T` (edit/mutate), a fourth `*T` in parameter position, and
 an `Infer` tier where a bare `T` param elevated by body usage. D-MEM1
