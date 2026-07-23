@@ -936,13 +936,28 @@ fn budget_unreadable_compiler_identity_rejects_before_artifact() {
 #[cfg(target_os = "linux")]
 fn budget_parallel_child_builds_survive_running_compiler_unlink() {
     use jet_foundation::PerformanceBudget::CanonicalJson;
+    use std::os::unix::fs::MetadataExt;
     let dirs = [
         artifact_budget_project("budget_unlinked_compiler_identity_a", 100_000_000),
         artifact_budget_project("budget_unlinked_compiler_identity_b", 100_000_000),
     ];
     let bin_dir = isolated_cwd("budget_unlinked_compiler_binary");
     let copied = bin_dir.join("jet-running-unlinked");
+    let cache = bin_dir.join("cache");
     fs::copy(jet(), &copied).unwrap();
+    // Pin the artifact before unlink: independent rustc links have different
+    // build IDs, and this test owns compiler replacement rather than linking.
+    let primed = output_with_retry(Command::new(&copied)
+        .arg("build")
+        .arg(dirs[0].join("src/main.jet"))
+        .current_dir(&dirs[0])
+        .env("JET_CACHE_DIR", &cache));
+    assert_eq!(primed.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&primed.stdout), String::from_utf8_lossy(&primed.stderr));
+    let seed_artifact = dirs[0].join("build/main");
+    let expected_artifact = (
+        CanonicalJson::String(jet::SHA256::sha256_file_hex(&seed_artifact).unwrap()),
+        CanonicalJson::Integer(fs::metadata(seed_artifact).unwrap().len().to_string()),
+    );
     let expected_compiler = env!("JET_COMPILER_BUILD_ID").to_string();
     let expected_stdlib = env!("JET_STDLIB_BUILD_ID").to_string();
     let expected_runner = env!("JET_RUNNER_BUILD_ID").to_string();
@@ -950,10 +965,14 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
         spawn_with_retry(Command::new(&copied)
             .args(["budget", "check", "--json"])
             .current_dir(dir)
+            .env("JET_CACHE_DIR", &cache)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped()))
     }).collect::<Vec<_>>();
+    let running_inode = fs::metadata(&copied).unwrap().ino();
     fs::remove_file(&copied).unwrap();
+    fs::write(&copied, "replacement compiler inode\n").unwrap();
+    assert_ne!(running_inode, fs::metadata(&copied).unwrap().ino());
     for (child, dir) in children.into_iter().zip(&dirs) {
         let out = child.wait_with_output().unwrap();
         assert_eq!(out.status.code(), Some(0), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -971,6 +990,7 @@ fn budget_parallel_child_builds_survive_running_compiler_unlink() {
         let artifact_path = dir.join("build/main");
         assert_eq!(artifact["sha256"], CanonicalJson::String(jet::SHA256::sha256_file_hex(&artifact_path).unwrap()));
         assert_eq!(artifact["bytes"], CanonicalJson::Integer(fs::metadata(artifact_path).unwrap().len().to_string()));
+        assert_eq!((&artifact["sha256"], &artifact["bytes"]), (&expected_artifact.0, &expected_artifact.1), "parallel builds produced different artifact identities");
     }
 }
 

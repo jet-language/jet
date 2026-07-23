@@ -1886,8 +1886,11 @@ fn rustc_identity() -> (String, String) {
 fn native_toolchain_identity() -> &'static str {
     static IDENTITY: OnceLock<String> = OnceLock::new();
     IDENTITY.get_or_init(|| {
-        let compiler_build = std::env::current_exe().ok()
-            .and_then(|path| fs::read(path).ok())
+        #[cfg(target_os = "linux")]
+        let compiler_bytes = fs::read("/proc/self/exe");
+        #[cfg(not(target_os = "linux"))]
+        let compiler_bytes = std::env::current_exe().and_then(fs::read);
+        let compiler_build = compiler_bytes.ok()
             .map(|bytes| jet::SHA256::sha256_hex(&bytes))
             .unwrap_or_else(|| "unavailable".into());
         let (rustc, backend) = rustc_identity();
