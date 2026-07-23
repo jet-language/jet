@@ -1048,8 +1048,8 @@ pub fn e3210(lib: &str, attr: &str, reason: &str) -> Diagnostic {
         "E3210",
         format!("Couldn't fetch C library `{}` from nixpkgs.", lib),
         format!(
-            "`{lib}: {}#{}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}",
-            Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
+            "`{lib}: {}{}{}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}",
+            Syntax::DEP_PROVIDER_C, Syntax::REF_PROVIDER_AT, Syntax::SYSTEM_LIB_TARGET,
         ),
         format!(
             "Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: {}@\"<path>\"`, or install it and use `{}`.",
@@ -1082,8 +1082,8 @@ fn e3201(lib: &str) -> Diagnostic {
             Syntax::DEP_PROVIDER_C, Syntax::PAYLOAD_FILE,
         ),
         format!(
-            "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {}#{}` in `deps:`.",
-            Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
+            "Install the system package (e.g. `pacman -S {lib}`), or declare it as `{lib}: {}{}{}` in `deps:`.",
+            Syntax::DEP_PROVIDER_C, Syntax::REF_PROVIDER_AT, Syntax::SYSTEM_LIB_TARGET,
         ),
         None,
     )
@@ -1102,8 +1102,8 @@ pub fn e3209(lib: &str) -> Diagnostic {
             "Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path.",
         ),
         format!(
-            "Declare it in `deps:` so Jet provisions it: `{lib}: {}#{}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.",
-            Syntax::DEP_PROVIDER_C, Syntax::SYSTEM_LIB_TARGET,
+            "Declare it in `deps:` so Jet provisions it: `{lib}: {}{}{}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.",
+            Syntax::DEP_PROVIDER_C, Syntax::REF_PROVIDER_AT, Syntax::SYSTEM_LIB_TARGET,
             Syntax::DEP_PROVIDER_C,
         ),
         None,
