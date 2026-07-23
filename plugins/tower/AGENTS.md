@@ -3,8 +3,9 @@
 This file is the model-agnostic version of the Tower workflow. Any coding
 agent (Claude, GPT, Gemini, local models, scripts) that can run shell
 commands can drive the board with it. Plugin users get the same board
-mechanics from the `tower` skill. The `tower-burndown` skill ranks work.
-Everyone else uses the CLI below.
+mechanics from the `tower` skill. Sibling skills: `tower-rank` (order the
+queue), `tower-prep` (plans + ballots), `tower-burndown` (orchestrated
+closeout). Everyone else uses the CLI below.
 
 ## What Tower is
 

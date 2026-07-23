@@ -1,23 +1,25 @@
 ---
 name: simple
 description: >-
-  Controlled clear prose for Jet: ASD-STE100-inspired rules plus Orwell’s six
-  writing rules for all agent and documentation text. Use only when the user
-  invokes simple / ste / STE / STE100. Do not apply unless invoked.
-disable-model-invocation: true
+  Clear controlled prose for Jet (ASD-STE100-inspired + Orwell). Auto-apply
+  when writing user-visible text: docs, specs, ballots, Tower card plans/logs,
+  commit/PR bodies, and owner-facing reports. Also when the user invokes
+  simple / ste / STE / STE100. Do not use for agent-to-agent caveman chatter.
 ---
 
-# Simple writing (opt-in)
+# Simple writing (user-visible prose)
 
-**Opt-in only.** Apply only when the user invokes this skill (`simple`, `ste`,
-`STE`, `STE100`, `ASD-STE100`).
+**Auto-apply** whenever you newly write text a human owner or user will read:
 
-While active, all **natural-language** output follows this skill:
-
-- user replies
+- docs, specs, comments meant for humans
+- Tower ballots, card plans/bodies, owner-facing logs and reports
 - commit messages and PR bodies you draft
-- docs, specs, comments, ballots, and example prose you **newly write**
+- product/UI copy you newly author
 
+Also apply when the user invokes `simple` / `ste` / `STE` / `STE100` /
+`ASD-STE100`.
+
+**Do not** restyle agent-to-agent status chatter that **caveman** owns.
 **Never rewrite these into “simple English” synonyms:** code, identifiers, paths,
 commands, Jet syntax, error strings, decision IDs, diagnostic codes.
 

@@ -1,78 +1,154 @@
 ---
 name: tower-burndown
-description: Rank and prioritize Tower cards for a burndown while preserving scope, dependencies, gates, and active ownership. Use when asked to rank, reorder, triage, thin, or choose the next Tower work. Produces an ordered queue; it does not implement, review, or verify cards.
+description: >-
+  Orchestrate closing Tower cards with one-layer subagents: claim, implement,
+  verify, update board, merge worktrees. Use when asked to burn down, close out,
+  work the backlog, or when invoked as /tower-burndown. Executes work; ranking
+  is tower-rank and prep is tower-prep.
 ---
 
-# Tower — rank a burndown
+# Tower — burn down cards
 
-This skill has one job: turn live Tower state into a dependency-safe ordered
-queue. Stop after reporting the queue or applying requested `workOrder`
-values. Execution belongs to the implementer (or the owner’s chosen agent),
-not to this skill.
+Orchestrate real closeout. Rank is **tower-rank**. Plans/ballots are
+**tower-prep**. This skill does the work.
+
+## Triggers and args
+
+```
+/tower-burndown
+/tower-burndown epoch 3
+/tower-burndown e3
+/tower-burndown sidequests
+/tower-burndown epoch 3+sidequests
+/tower-burndown epoch 3 model gpt-5.6-sol
+/tower-burndown sidequests model grok max 5
+```
+
+| Arg | Meaning |
+|---|---|
+| *(none)* | **Sidequests first**, then `meta.currentEpoch` epoch-track |
+| `epoch N` / `eN` | That epoch's epoch-track only |
+| `sidequests` | Sidequest track only |
+| `epoch N+sidequests` | Named epoch plus sidequests |
+| `model <id>` | Pin every worker (and reviewer) to that model |
+| `max N` | Concurrent workers; default **3**, hard max **10** |
+
+Also honor plain language: “burn down epoch 3”, “continue burndown”, “close
+the backlog”. Assume `workOrder` is already set unless the user also asks to
+rank/prep or invokes those skills.
+
+## Role split
+
+**You are the orchestrator.** Keep context light.
+
+- Dispatch one-layer workers. **Workers must not spawn subagents.**
+- Do not implement large or multi-file cards yourself.
+- Exception: tiny mechanical work when spinning a worker would waste more
+  tokens than doing it inline (single-file typo, snapshot bless, log-only
+  board reconciliation). Still no stubs/facades.
+- Always keep at least one worker on the critical path (lowest ready
+  `workOrder` / hardest blocker in scope).
+- Never hand-edit `plugins/tower/.tower/*.json`. Tower CLI only.
+- Never clobber other agents' claims, dirty paths, or worktrees. Inspect
+  `git status`, `git worktree list`, and claims before dispatch.
+
+## Forced skills (every participant)
+
+| Surface | Skill |
+|---|---|
+| Agent chatter / status | **caveman** (full unless user sets another level) |
+| Implementation | **ponytail** (lazy ladder; smallest complete solution) |
+| User-visible prose | **simple** — card plans/logs, ballots, docs, commit/PR bodies, owner reports |
+| Board mechanics | **tower** |
+| Closeout proof | host **verify** skill (targeted vs full-suite rules) |
+| Owner gates mid-flight | **tower-ballot**; stop that slice, burn ungated work |
+
+Pass these by name in every worker brief. If `model` was set, pass that model
+into every Task/subagent spawn. Effort: medium default; low for mechanical;
+high for hard semantics/architecture/debug.
 
 ## Reference index
 
-Load only the section needed for the current ranking question:
-
 | Need | Source |
 |---|---|
-| Lanes, claims, blockers, criteria, archive, CLI writes | `../tower/SKILL.md` |
-| Ballot readiness or an owner-gated choice | `../tower-ballot/SKILL.md` |
-| Missing board, import, config, or server startup | `../tower-setup/SKILL.md` |
-| Project-specific scope, authority, model, review, or command rules | nearest `AGENTS.md` |
-| Domain semantics for one card | that card's `refs` and triggered project index |
+| Claims, brief, criteria, phases | `../tower/SKILL.md` |
+| Rank / reorder | `../tower-rank/SKILL.md` |
+| Plans + ballots before build | `../tower-prep/SKILL.md` |
+| Ballot authoring | `../tower-ballot/SKILL.md` |
+| Project invariants, jet-env, review policy | nearest `AGENTS.md` |
+| Scoped vs full-suite proof | `.agents/skills/verify/SKILL.md` or `.claude/skills/verify/SKILL.md` |
 
-Do not preload every sibling skill, repository manual, plan, or spec. Start
-from live board state; follow a pointer only when a card or requested action
-needs it.
+## Pick work
 
-## Select scope
+1. `tower status` + open questions.
+2. Build the actionable queue from live board (not stale chat):
+   - Default: sidequest agent-lane cards by `workOrder`, then current-epoch
+     epoch-track agent-lane cards by `workOrder`.
+   - Explicit scope overrides the default.
+3. Skip `decide`, `frozen`, `done`, foreign active claims, and unfinished
+   `blockedBy` predecessors.
+4. **Group** when it cuts duplication: same files, same mechanism, or a thin
+   umbrella whose criteria are the same vertical slice. One worker may own a
+   named group with disjoint paths from other live workers. Do not smear
+   unrelated cards into one blob.
+5. Prefer law/syntax/structure cards that later work builds on when redo risk
+   is real; otherwise follow `workOrder` and critical path.
 
-Default burndown scope comes from `tower next --burndown --json`: current
-epoch-track cards plus all sidequests, agent lanes only. Use another epoch,
-track, or the whole non-frozen board only when the user requests it.
+## Dispatch brief (every worker)
 
-Exclude `decide`, `frozen`, `done`, and externally blocked cards from the
-actionable queue. Keep them in a separate gates list when they explain why
-downstream work cannot start. Preserve active claims; a claimed card remains
-owned and must not be reassigned by ranking.
+Workers get zero ambiguity. Each brief states:
 
-## Rank
+- Goal + definition of done (criteria text verbatim when present)
+- Card `#N` (or grouped `#A+#B`), `--by` identity, claim rules
+- Exact writable paths; everything else read-only
+- Model + effort; **ponytail** + **caveman** + **simple** (for user-facing text)
+- **No nested subagents. No stubs, facades, placeholders, or fake-green.**
+- Exact targeted test commands (`scripts/agent/jet-env cargo test --test …`)
+- Tower update commands to run on progress (`criteria --meet`, `--log`, phase)
+- Worktree path/branch if used; merge + remove before reporting done
+- Return shape: commits, tests run, criteria met, handoff, blockers
 
-Dependencies outrank ease: no card may appear before an unfinished
-`blockedBy` predecessor. Within each ready dependency layer, use these bands:
+Checkpoint the orchestrator's own dirty work before a write-capable worker
+touches a shared tree. Prefer disjoint worktrees for parallel writers; merge
+to the integration branch promptly; delete the worktree and temp branch after
+verify. No orphaned trees.
 
-1. Proven complete work whose board state only needs reconciliation.
-2. Tiny ungated repair with direct mechanical proof.
-3. Narrow test, documentation, tooling, or durability work.
-4. Existing implementation with a small concrete gap.
-5. Bounded implementation governed by ratified behavior.
-6. Broad cross-layer or architectural work.
-7. Owner-gated or externally blocked work; report separately, do not schedule.
+## Concurrency
 
-Tie-break in this order: already in progress, smaller verified remainder,
-unblocks more ready work, lower current `workOrder`, then card number. Never
-rank by implementation cost when project policy forbids effort as a design
-criterion; here, size only optimizes safe delivery order after behavior is
-settled.
+- Default **3** live workers. User `max N` may raise up to **10**.
+- Serialize on path / generated-artifact / test-resource collisions.
+- Do not start a new stream while a finished patch is waiting to integrate.
+- Cap retries: reject once or twice with a tighter brief; then escalate or
+  re-scope.
 
-Likely file, generated-artifact, test-resource, or service collisions are
-queue metadata. Record them so the implementer can serialize or isolate work.
+## Proof and review (burndown policy)
 
-## Output and optional write
+Owner override for this skill (outranks generic “review everything” habits):
 
-Return an ordered table with rank, card, band, dependency reason, active
-claim, likely collision domain, and evidence/confidence. Also return owner
-gates, external blockers, and cards excluded from scope. Do not claim cards.
+| Kind | Proof |
+|---|---|
+| Covered by targeted tests / golden / criteria evidence | Independent **reviewer subagent not required**. Meet criteria with evidence; when the card has criteria, `--verify` still needs a **different** agent identity than `--meet` (board `E_CRITERIA_SELF`). Orchestrator may be the verifier when they did not build. |
+| High-impact / hard / architectural / safety-sensitive | Spawn a fresh reviewer (same pinned `model` if set). Reviewer does not implement. Fix findings; recheck. |
+| Batch / major milestone | After **3–5** integrated closures, or at a major-push boundary, orchestrator runs `scripts/agent/jet-env full scripts/agent/verify-full.sh` once. Workers never run the full suite “to be safe.” |
 
-Ranking is read-only by default. When the user asks to reorder Tower, assign
-unique ascending `workOrder` values with no dependency inversion. Apply each
-change through:
+Never trust a worker's green alone for closeout: re-read diff scope, confirm
+named tests, spot-check evidence. Rebuild before `jet` smoke when binaries
+matter. Known out-of-scope reds stay out of scope — fix or card them, do not
+bless around them.
 
-```
-tower card update '#N' --work-order N --expect-rev REV --by <agent>
-```
+## Board honesty
 
-Re-read after revision conflicts. Never edit `plugins/tower/.tower/*.json` directly.
-Verify final coverage, unique ranks, dependency order, and unchanged claims.
-Then hand the ordered queue and collision metadata to the implementer.
+- `tower brief '#N' --agent <worker>` (or claim) before build.
+- Phase: ready → building → verify → done only with real proof.
+- Criteria: `--meet` with evidence; `--verify` by a different `--by`.
+- `needsAcceptance` only for real owner taste/hardware/visual checks — never
+  for machine-verifiable technical correctness.
+- Release with `--handoff` if stopping mid-`building`.
+- Log progress on the card; owner learns from the board, not a side channel.
+
+## Stop / report
+
+Keep burning until scope is empty, capacity ends, or only owner gates remain.
+Final report (simple prose): cards closed/advanced, groups shipped, tests and
+any full-suite run, open gates, live claims/worktrees left, suggested next
+`/tower-burndown …` line.

@@ -31,7 +31,9 @@ Read this file, then relevant code, tests, and the current diff. Load only task-
 - FFI bridges: `docs/spec/architecture.md` ("Adding an FFI bridge");
 - Tower board mechanics or owner decisions: `plugins/tower/skills/tower/SKILL.md`, plus
   `plugins/tower/skills/tower-ballot/SKILL.md` when a choice is owner-gated;
-- Tower backlog ranking: `plugins/tower/skills/tower-burndown/SKILL.md`;
+- Tower backlog ranking: `plugins/tower/skills/tower-rank/SKILL.md`;
+- Tower board prep (plans/ballots): `plugins/tower/skills/tower-prep/SKILL.md`;
+- Tower backlog burndown (orchestrated closeout): `plugins/tower/skills/tower-burndown/SKILL.md`;
 - Jet audits / research / cleanup routing: `.agents/skills/JetSkillsRouter.md`;
 - completion claims: `.agents/skills/verify/SKILL.md` (code closeout only);
 - a specialized task: the matching skill named in the request or skill catalog.
@@ -85,15 +87,6 @@ Violating an invariant means stop and fix it.
   spelling and organization. Keep the beginner surface small and safe; expose
   expert control through explicit opt-in. New mechanisms require a roadmap slot
   or owner approval.
-
-## GPT-5.6 model policy
-
-Use GPT-5.6 Sol exclusively; the `gpt-5.6` alias is Sol. Use only low, medium, or high effort: low for bounded
-mechanics, medium for normal implementation, and high for semantics, architecture, hard debugging, and review. Do not
-route implementation, orchestration, or review to another model family.
-
-Give agents a clear goal, relevant context, hard constraints, owned paths, and observable done conditions. Prefer
-tests and acceptance criteria over step-by-step micromanagement.
 
 ## Workflow ownership
 
@@ -165,11 +158,11 @@ finished work unmerged. Paused work keeps a named coherent handoff branch and re
 
 ## Review and verification constraints
 
-Every completed change has one implementer and one fresh-context Sol reviewer:
+Every completed change has one implementer and one fresh-context reviewer:
 
-1. **Sol reviewer:** inspect the diff, acceptance criteria, invariants, and test
+1. **Reviewer:** inspect the diff, acceptance criteria, invariants, and test
    evidence; assume the patch is wrong; report only concrete findings.
-2. The implementer fixes findings; the Sol reviewer rechecks material fixes.
+2. The implementer fixes findings; the reviewer rechecks material fixes.
 
 The reviewer does not implement. They check missing paths, semantic and safety bugs,
 false-green tests, stale decisions, accidental scope, duplicate mechanisms, and

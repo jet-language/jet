@@ -1,6 +1,6 @@
 ---
 name: tower
-description: Use Tower's board mechanics — inspect and claim agent-lane cards, act on ratified decisions, answer owner questions, update criteria and phases, and keep board state honest. Use when a task reads from or writes to Tower. For backlog ranking use tower-burndown.
+description: Use Tower's board mechanics — inspect and claim agent-lane cards, act on ratified decisions, answer owner questions, update criteria and phases, and keep board state honest. Use when a task reads from or writes to Tower. For ranking use tower-rank; for plans/ballots use tower-prep; for closing cards use tower-burndown.
 ---
 
 # Tower — work the board
@@ -87,14 +87,19 @@ everything as JSON; `tower status` is the human summary.
    and a question/ballot for anything newly blocked on the owner — those are
    what the owner sees (live SSE UI — web push removed).
 
-## Burndown scope + durability sweep (#457)
+## Multi-card campaigns + durability sweep (#457)
 
-For multi-card work, use **tower-burndown** to produce or apply the ordered
-queue, then hand that queue to an implementer. This skill owns board semantics,
-not campaign orchestration. `tower next --burndown` narrows
-the pool to `track:"epoch"` cards in `meta.currentEpoch` plus every
-`track:"sidequest"` card, agent lanes only, in the same `workOrder` order as
-plain `tower next`.
+Board semantics live here. Campaign roles split across sibling skills:
+
+- **tower-rank** — ordered `workOrder` queue
+- **tower-prep** — plans + ballots until ready or decide
+- **tower-burndown** — orchestrated closeout with one-layer workers
+
+`tower next --burndown` narrows the pool to `track:"epoch"` cards in
+`meta.currentEpoch` plus every `track:"sidequest"` card, agent lanes only, in
+the same `workOrder` order as plain `tower next`. Default **tower-burndown**
+execution order is sidequests first, then the current epoch, unless the owner
+names a different grouping.
 
 Run `tower lint` before or after a sweep to catch durability rot the guards
 don't: cards marked `done` with no verification evidence in the log, cards

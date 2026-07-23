@@ -184,8 +184,9 @@ Durable collapse state, no localStorage, no framework, mobile bottom tabs.
 
 ## Plugin skills
 
-Four focused skills ship with the plugin: **tower** (board mechanics),
+Focused skills ship with the plugin: **tower** (board mechanics),
 **tower-ballot** (authoring decisions the owner can decide from the ballot
-alone), **tower-burndown** (ranking and prioritization only), and
-**tower-setup** (init, import, config, server). Non-Claude agents use
-`AGENTS.md` — same protocol, plain shell.
+alone), **tower-rank** (ordered queue / `workOrder`), **tower-prep** (plans
++ ballots until ready or decide), **tower-burndown** (orchestrated card
+closeout), and **tower-setup** (init, import, config, server). Non-Claude
+agents use `AGENTS.md` — same protocol, plain shell.
