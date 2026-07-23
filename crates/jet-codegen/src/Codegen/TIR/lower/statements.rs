@@ -17,6 +17,7 @@ use crate::Codegen::TIR::lower_if;
 use crate::Codegen::TIR::lower::lower_string_view_init;
 use crate::Codegen::TIR::lower::render_reactive_block_closure;
 use crate::Codegen::TIR::lower_switch;
+use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::lower::timeout_nanos;
 use crate::Codegen::TIR::lower::tracked_float_origin;
 use crate::Codegen::TIR::ScopeMemberKind;
@@ -24,6 +25,7 @@ use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
+use crate::Codegen::TIR::TIndexFieldAssign;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::unit_type;
 use crate::Syntax;
@@ -814,6 +816,56 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // read path uses — byte-for-byte the AST `LValue::Field` form. Carried as a
             // plain `TStmt::Assign` so the `op` compound form rides the shared emit.
             LValue::Field { base, field, span } => {
+                if let Expr::Index {
+                    base: collection,
+                    index,
+                    kind,
+                    span: index_span,
+                } = base.as_ref()
+                {
+                    let is_map = matches!(kind, IndexKind::Map);
+                    let index_proven = matches!(kind, IndexKind::FixedListProof);
+                    if is_map
+                        || index_proven
+                        || matches!(kind, IndexKind::List)
+                    {
+                        let collection_t = lower_expr(collection, cx, env);
+                        let elem_ty = match &collection_t.ty {
+                            Type::List(elem) | Type::FixedList { elem, .. } => {
+                                Some((**elem).clone())
+                            }
+                            Type::Map { value, .. } => Some((**value).clone()),
+                            _ => None,
+                        };
+                        if let Some(elem_ty) = elem_ty {
+                            let field_ty =
+                                struct_field_type(cx, &elem_ty, field).unwrap_or(Type::Int);
+                            let clone_value = if let Expr::Ident(vname, _) = value {
+                                env.is_borrowed(vname)
+                                    && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
+                            } else {
+                                false
+                            };
+                            let line = crate::Diagnostics::span_line_col(
+                                &cx.src,
+                                index_span.start,
+                            )
+                            .0;
+                            return TStmt::IndexFieldAssign(Box::new(TIndexFieldAssign {
+                                base: collection_t,
+                                index: lower_expr(index, cx, env),
+                                is_map,
+                                index_proven,
+                                field_rust: mangle(field),
+                                field_ty,
+                                op: *op,
+                                value: lower_expr(value, cx, env),
+                                clone_value,
+                                line,
+                            }));
+                        }
+                    }
+                }
                 let base_t = lower_expr(base, cx, env);
                 let swizzle_write = match &base_t.ty {
                     Type::Named(type_name)

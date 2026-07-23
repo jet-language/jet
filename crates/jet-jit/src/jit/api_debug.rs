@@ -228,6 +228,11 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
                 collect_expr_ops(index, out);
                 collect_expr_ops(value, out);
             }
+            TStmt::IndexFieldAssign(assign) => {
+                collect_expr_ops(&assign.base, out);
+                collect_expr_ops(&assign.index, out);
+                collect_expr_ops(&assign.value, out);
+            }
             TStmt::MathSwizzleAssign { base, value, .. } => {
                 collect_expr_ops(base, out);
                 collect_expr_ops(value, out);
@@ -487,6 +492,7 @@ pub fn jit_stmt_tag(stmt: &TStmt) -> &'static str {
         TStmt::Let { .. } => "Let",
         TStmt::SplitViews { .. } => "SplitViews",
         TStmt::Assign { .. } => "Assign",
+        TStmt::IndexFieldAssign(_) => "IndexFieldAssign",
         TStmt::Return(_) => "Return",
         TStmt::ExprStmt(_) => "ExprStmt",
         TStmt::DeferClose { .. } => "DeferClose",

@@ -85,6 +85,14 @@ pub(crate) fn jit_struct_type(ty: &Type) -> bool {
     user_type_name(ty).is_some()
 }
 
+pub(crate) fn jit_list_record_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::List(elem) | Type::FixedList { elem, .. }
+            if record_type_key(elem).is_some()
+    )
+}
+
 pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
     matches!(ty, Type::Tuple(fields) if fields.iter().all(|(_, t)| matches!(t.as_ref(), Type::Int | Type::Float)))
 }
@@ -96,6 +104,7 @@ pub(crate) fn jit_enum_type(ty: &Type) -> bool {
 fn jit_compound_type(ty: &Type) -> bool {
     jit_list_native_type(ty)
         || jit_list_task_int_type(ty)
+        || jit_list_record_type(ty)
         || jit_struct_type(ty)
         || jit_tuple_type(ty)
         || jit_enum_type(ty)
@@ -225,6 +234,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 }))
                 || (jit_list_task_int_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
+                || (jit_list_record_type(&expr.ty)
+                    && elems.iter().all(|e| resident_safe_expr(e, callees)))
         }
         TExprKind::Index {
             base,
@@ -293,7 +304,21 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::TupleLit { fields, .. } => {
             jit_tuple_type(&expr.ty) && resident_safe_tuple_fields(fields, callees)
         }
-        TExprKind::Field { recv, .. } => resident_safe_expr(recv, callees),
+        TExprKind::Field { recv, .. } => match &recv.kind {
+            TExprKind::Index {
+                base,
+                index,
+                is_map,
+                ..
+            } => {
+                !is_map
+                    && jit_list_record_type(&base.ty)
+                    && matches!(&index.ty, Type::Int)
+                    && resident_safe_expr(base, callees)
+                    && resident_safe_expr(index, callees)
+            }
+            _ => resident_safe_expr(recv, callees),
+        },
         TExprKind::MethodCall { recv, args, .. } => {
             resident_safe_expr(recv, callees)
                 && args.iter().all(|a| resident_safe_call_arg(a, callees))
@@ -597,6 +622,18 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && resident_safe_expr(index, callees)
                 && resident_safe_expr(value, callees)
         }
+        TStmt::IndexFieldAssign(assign) => {
+            !assign.is_map
+                && !assign.clone_value
+                && jit_list_record_type(&assign.base.ty)
+                && matches!(&assign.index.ty, Type::Int)
+                && assign
+                    .op
+                    .is_none_or(|_| matches!(&assign.field_ty, Type::Int | Type::Float))
+                && resident_safe_expr(&assign.base, callees)
+                && resident_safe_expr(&assign.index, callees)
+                && resident_safe_expr(&assign.value, callees)
+        }
         TStmt::ForIn {
             var2,
             method_kind,
@@ -725,6 +762,11 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
             | TStmt::Assign { value: init, .. }
             | TStmt::Return(Some(init))
             | TStmt::ExprStmt(init) => count_spawn_sites_expr(init, n),
+            TStmt::IndexFieldAssign(assign) => {
+                count_spawn_sites_expr(&assign.base, n);
+                count_spawn_sites_expr(&assign.index, n);
+                count_spawn_sites_expr(&assign.value, n);
+            }
             TStmt::If {
                 then_body,
                 else_body,

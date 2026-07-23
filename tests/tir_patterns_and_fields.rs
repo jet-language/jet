@@ -703,3 +703,44 @@ fn run() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "43\n-1\n3\na\nb\nc\n60\n");
 }
+
+#[test]
+fn array_of_structs_field_mutation() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Point {
+    x: Int
+}
+fn run() {
+    points := [Point.{x: 1}, Point.{x: 2}]
+    points[0].x = 11
+    points[0].x += 1
+    print(points[0].x)
+}
+";
+    let out = jet::compile(src).expect("should compile");
+    assert!(
+        out.rust.contains(
+            "{ let __jet_v = 11i64; (user_points)[0i64 as usize].user_x = __jet_v; }"
+        ),
+        "plain indexed field assignment did not mutate the list element:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains(
+            "{ let __jet_v = 1i64; (user_points)[0i64 as usize].user_x += __jet_v; }"
+        ),
+        "compound indexed field assignment did not mutate the list element:\n{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains("jet_index_vec(&user_points, 0i64"),
+        "indexed field assignment rebuilt the clone-producing read path:\n{}",
+        out.rust
+    );
+    let (code, stdout) = build_and_run("tir_struct_list_mutation", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "12\n");
+}

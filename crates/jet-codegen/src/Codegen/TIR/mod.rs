@@ -812,6 +812,24 @@ pub enum ScopeMemberKind {
     Skip,
 }
 
+/// D-SHAPE-PLACE1: a field write through an indexed collection element.
+///
+/// This remains structured through lowering so every backend mutates the
+/// collection element itself instead of reconstructing the field-read
+/// expression, whose list-index path returns a clone.
+pub struct TIndexFieldAssign {
+    pub base: TExpr,
+    pub index: TExpr,
+    pub is_map: bool,
+    pub index_proven: bool,
+    pub field_rust: String,
+    pub field_ty: Type,
+    pub op: Option<BinOp>,
+    pub value: TExpr,
+    pub clone_value: bool,
+    pub line: usize,
+}
+
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
 pub enum TStmt {
     /// `let [mut] name[: ty] = init;`. All presentation facts are resolved at
@@ -1038,6 +1056,8 @@ pub enum TStmt {
         is_map: bool,
         value: TExpr,
     },
+    /// D-SHAPE-PLACE1: `coll[i].field [op]= value`.
+    IndexFieldAssign(Box<TIndexFieldAssign>),
     /// D-INDEX-HOOK: `mytype[k] = v` via `IndexMut::set`.
     IndexHookAssign {
         type_name: String,

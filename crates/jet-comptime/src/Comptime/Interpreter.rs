@@ -1043,11 +1043,63 @@ impl<'a> Interp<'a> {
                 scope.insert(bname.clone(), container);
                 Ok(())
             }
-            // D-MUTSELF1: a field-assignment `place.field = v`. The comptime
-            // interpreter has no struct-field mutation model — report it unsupported
-            // rather than silently dropping the write.
-            crate::AST::LValue::Field { span, .. } => {
-                Err(unsupported("this field assignment", *span))
+            crate::AST::LValue::Field { base, field, span } => {
+                let Expr::Index {
+                    base: collection,
+                    index,
+                    ..
+                } = base.as_ref()
+                else {
+                    return Err(unsupported("this field assignment", *span));
+                };
+                let Expr::Ident(bname, _) = collection.as_ref() else {
+                    return Err(unsupported("this indexed field assignment", *span));
+                };
+                let key = self.eval(index, scope)?;
+                let mut container = scope
+                    .get(bname)
+                    .cloned()
+                    .ok_or_else(|| unsupported("this indexed field assignment", *span))?;
+                let item = match &mut container {
+                    CtValue::List(values) => {
+                        let index = as_int(&key, index.span())?;
+                        if index < 0 || index as usize >= values.len() {
+                            return Err(index_oob(values.len(), index, *span));
+                        }
+                        &mut values[index as usize]
+                    }
+                    CtValue::Map(values) => {
+                        let key = CtKey::from_value(key)
+                            .ok_or_else(|| unsupported("this map key type", index.span()))?;
+                        values
+                            .get_mut(&key)
+                            .ok_or_else(|| unsupported("a missing map key", *span))?
+                    }
+                    _ => return Err(unsupported("this indexed field assignment", *span)),
+                };
+                let CtValue::Struct { type_name, fields } = item else {
+                    return Err(unsupported("field assignment on this value", *span));
+                };
+                let Some(position) = fields.iter().position(|(name, _)| name == field) else {
+                    return Err(unsupported(&format!("the field `.{field}`"), *span));
+                };
+                let mut new = match op {
+                    None => rhs,
+                    Some(op) => {
+                        eval_binop(op, fields[position].1.clone(), rhs, op_span)?
+                    }
+                };
+                if let Some(ty) = self.structs.get(type_name).and_then(|def| {
+                    def.fields
+                        .iter()
+                        .find(|candidate| candidate.name == *field)
+                        .map(|candidate| &candidate.ty)
+                }) {
+                    new = coerce_value_to_type(new, ty);
+                }
+                fields[position].1 = new;
+                scope.insert(bname.clone(), container);
+                Ok(())
             }
         }
     }
