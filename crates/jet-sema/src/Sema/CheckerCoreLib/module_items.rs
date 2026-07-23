@@ -186,7 +186,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.encoding.xml" => &[
             "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding",
             "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy",
-            "parse", "parse_with", "to_string", "canonical", "reader", "writer", "XMLReader", "XMLWriter",
+            "parse", "parse_with", "parse_bytes", "to_string", "to_bytes", "canonical", "reader", "writer", "XMLReader", "XMLWriter",
         ],
         "core.encoding.cbor" => &[
             "CBOROptions", "CBORError", "CBORErrorKind", "CBORReader", "CBORWriter",

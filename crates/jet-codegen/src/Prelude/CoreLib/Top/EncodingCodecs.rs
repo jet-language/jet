@@ -158,6 +158,24 @@ fn jet_xml_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
     }
 }
 
+fn jet_xml_source_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
+    let offset = error.offset as i64;
+    let mut converted = jet_xml_error(error);
+    converted.byte_offset = Some(offset);
+    converted
+}
+
+fn jet_xml_shape_error(reason: String) -> jet_std::XMLError {
+    jet_std::XMLError {
+        kind: jet_std::XMLReason::Shape,
+        byte_offset: None,
+        line: None,
+        column: None,
+        path: String::new(),
+        reason,
+    }
+}
+
 fn jet_xml_options(options: &jet_std::XMLParseOptions) -> crate::jet_xml_pull::ParseOptions {
     let number = |value: i64| usize::try_from(value).unwrap_or(usize::MAX);
     let entities = match &options.entities {
@@ -190,10 +208,26 @@ fn jet_std_xml_parse_with(text: &String, options: &jet_std::XMLParseOptions) -> 
         .map_err(jet_xml_error)
 }
 
+fn jet_std_xml_parse_bytes(bytes: &Vec<u8>, options: jet_std::XMLParseOptions) -> Result<jet_std::DataTree, jet_std::XMLError> {
+    crate::jet_xml_pull::parse_document_bytes_with(bytes, &jet_xml_options(&options))
+        .map(jet_xml_to_data_tree)
+        .map_err(jet_xml_source_error)
+}
+
 fn jet_std_xml_render(d: &jet_std::DataTree) -> String {
     jet_xml_from_data_tree(d)
         .and_then(|value| crate::jet_xml_pull::render_document(&value))
         .unwrap_or_default()
+}
+
+fn jet_std_xml_to_bytes(d: &jet_std::DataTree, options: jet_std::XMLRenderOptions) -> Result<Vec<u8>, jet_std::XMLError> {
+    let value = jet_xml_from_data_tree(d).map_err(jet_xml_shape_error)?;
+    crate::jet_xml_pull::render_document_bytes(
+        &value,
+        jet_xml_render_encoding(&options.encoding),
+        jet_xml_lexical_policy(&options.lexical),
+    )
+    .map_err(jet_xml_error)
 }
 
 fn jet_std_xml_canonical(d: &jet_std::DataTree, options: &jet_std::XMLCanonical) -> Result<String, jet_std::XMLError> {

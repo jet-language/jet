@@ -1501,6 +1501,9 @@ impl<'a> Interp<'a> {
                         if type_name == "XMLParseOptions" {
                             return Ok(super::super::EncodingLite::xml_safe_options_value());
                         }
+                        if type_name == "XMLRenderOptions" {
+                            return Ok(super::super::EncodingLite::xml_safe_render_options_value());
+                        }
                     }
                 }
             }

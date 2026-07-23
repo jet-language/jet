@@ -957,8 +957,24 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.xml", "parse_with") => {
             format!("{}(&({}), &({}))", helper("jet_std_xml_parse_with"), arg(0), arg(1))
         }
+        ("core.encoding.xml", "parse_bytes") => {
+            let options = if args.len() > 1 {
+                arg(1)
+            } else {
+                format!("{}jet_std::XMLParseOptions::safe()", cx.root_prefix)
+            };
+            format!("{}(&({}), {})", helper("jet_std_xml_parse_bytes"), arg(0), options)
+        }
         ("core.encoding.xml", "to_string") => {
             format!("{}(&({}))", helper("jet_std_xml_render"), arg(0))
+        }
+        ("core.encoding.xml", "to_bytes") => {
+            let options = if args.len() > 1 {
+                arg(1)
+            } else {
+                format!("{}jet_std::XMLRenderOptions::safe()", cx.root_prefix)
+            };
+            format!("{}(&({}), {})", helper("jet_std_xml_to_bytes"), arg(0), options)
         }
         ("core.encoding.xml", "canonical") => {
             format!("{}(&({}), &({}))", helper("jet_std_xml_canonical"), arg(0), arg(1))

@@ -7138,6 +7138,81 @@ fn run() {
 }
 
 #[test]
+fn xml_whole_byte_verbs_match_comptime_aot_and_dev() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML whole-byte parity test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_xml_whole_bytes_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.xml as xml
+
+fn same_bytes(left: [U8], right: [U8]) -> Bool {
+    if left.len() != right.len() { return false }
+    for index in 0..left.len() {
+        if left[index] != right[index] { return false }
+    }
+    return true
+}
+
+fn summarize() -> String {
+    plain: [U8] :: [60, 114, 62, 111, 107, 60, 47, 114, 62]
+    utf8_bom: [U8] :: [239, 187, 191, 60, 63, 120, 109, 108, 32, 118, 101, 114, 115, 105, 111, 110, 61, 39, 49, 46, 48, 39, 32, 101, 110, 99, 111, 100, 105, 110, 103, 61, 39, 85, 84, 70, 45, 56, 39, 63, 62, 60, 114, 62, 195, 169, 240, 159, 153, 130, 60, 47, 114, 62]
+    utf16: [U8] :: [255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0]
+    conflict: [U8] :: [255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 56, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 47, 0, 62, 0]
+
+    plain_doc := xml.parse_bytes(plain) ?? panic("plain parse")
+    plain_out := xml.to_bytes(plain_doc) ?? panic("plain render")
+    utf8_doc := xml.parse_bytes(utf8_bom) ?? panic("UTF-8 BOM parse")
+    utf8_out := xml.to_bytes(utf8_doc, xml.XMLRenderOptions.{ encoding: .UTF8BOM, lexical: .PreserveValid }) ?? panic("UTF-8 BOM render")
+    utf16_doc := xml.parse_bytes(utf16) ?? panic("UTF-16 parse")
+    utf16_out := xml.to_bytes(utf16_doc, xml.XMLRenderOptions.{ encoding: .UTF16LE, lexical: .PreserveValid }) ?? panic("UTF-16 render")
+
+    conflict_result: DataTree ? XMLError :: xml.parse_bytes(conflict)
+    if conflict_result == {
+        Ok(_) -> return "encoding-conflict-missed"
+        Err(error) -> {
+            reason_ok :: error.reason == "XML declaration conflicts with detected input encoding"
+            return "{same_bytes(plain_out, plain)}|{same_bytes(utf8_out, utf8_bom)}|{same_bytes(utf16_out, utf16)}|{reason_ok}|{error.byte_offset}|{error.line}|{error.column}|{error.path}|{error.reason}"
+        }
+    }
+    return "unreachable"
+}
+
+comptime expected = summarize()
+
+fn run() {
+    print(expected)
+    print(summarize())
+}
+"#;
+    let expected = concat!(
+        "true|true|true|true|2|1|1|$|XML declaration conflicts with detected input encoding\n",
+        "true|true|true|true|2|1|1|$|XML declaration conflicts with detected input encoding\n",
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_whole_bytes", source, &[], None);
+    assert_eq!(code, 0, "XML whole-byte AOT fixture failed: {stderr}");
+    assert_eq!(stdout, expected);
+    assert_eq!(stderr, "");
+
+    let dev_path = dir.join("xml_whole_bytes.jet");
+    fs::write(&dev_path, source).unwrap();
+    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
+        }
+        other => panic!("XML whole-byte default-dev fixture failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

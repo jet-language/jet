@@ -751,6 +751,15 @@ struct ElementFrame {
     open_raw: String,
 }
 
+struct ByteElementFrame {
+    name: Value,
+    namespaces: Value,
+    attributes: Value,
+    children: Vec<Value>,
+    empty_style: Value,
+    open_lexical: Value,
+}
+
 fn finish_element(frame: ElementFrame, close_raw: Option<String>) -> Value {
     let empty = close_raw.is_none();
     let name = name_value(frame.name.clone());
@@ -772,6 +781,19 @@ fn finish_element(frame: ElementFrame, close_raw: Option<String>) -> Value {
         ("empty_style", empty_style),
         ("open_lexical", lexical(frame.open_raw, open_semantic)),
         ("close_lexical", close_lexical.unwrap_or(Value::Null)),
+    ])
+}
+
+fn finish_byte_element(frame: ByteElementFrame, close_lexical: Value) -> Value {
+    object(vec![
+        ("$xml", text("element")),
+        ("name", frame.name),
+        ("namespaces", frame.namespaces),
+        ("attributes", frame.attributes),
+        ("children", Value::Array(frame.children)),
+        ("empty_style", frame.empty_style),
+        ("open_lexical", frame.open_lexical),
+        ("close_lexical", close_lexical),
     ])
 }
 
@@ -889,6 +911,97 @@ pub fn parse_document_with(source: &str, options: &ParseOptions) -> Result<Value
         ("$xml", text("document")),
         ("encoding", Value::Null),
         ("bom", Value::Array(Vec::new())),
+        ("children", Value::Array(document_children)),
+    ]))
+}
+
+/// Parse bytes through the same pull scanner used by XMLReader, then fold its
+/// exact event algebra into the ratified whole-value tree.
+pub fn parse_document_bytes(bytes: &[u8]) -> Result<Value, Error> {
+    parse_document_bytes_with(bytes, &ParseOptions::safe())
+}
+
+pub fn parse_document_bytes_with(bytes: &[u8], options: &ParseOptions) -> Result<Value, Error> {
+    options.limits.validate()?;
+    let mut scanner = StreamScanner::new(bytes.len().max(4), options.clone())?;
+    scanner.push(bytes)?;
+    scanner.finish_input()?;
+    let mut document_start = None;
+    let mut document_children = Vec::new();
+    let mut stack: Vec<ByteElementFrame> = Vec::new();
+    let mut ended = false;
+    while let Some(item) = scanner.next()? {
+        let event = stream_event_value(item);
+        let tag = required_text(&event, "$xml_event").map_err(Error::shape)?;
+        let node = match tag {
+            "document_start" => {
+                exact_keys(&event, &["$xml_event", "encoding", "bom"])?;
+                document_start = Some((
+                    field(&event, "encoding").cloned().ok_or_else(|| Error::shape("document_start lacks encoding"))?,
+                    field(&event, "bom").cloned().ok_or_else(|| Error::shape("document_start lacks bom"))?,
+                ));
+                None
+            }
+            "document_end" => {
+                exact_keys(&event, &["$xml_event"])?;
+                ended = true;
+                None
+            }
+            "element_start" => {
+                exact_keys(&event, &["$xml_event", "name", "namespaces", "attributes", "empty_style", "open_lexical"])?;
+                let empty = match required_text(&event, "empty_style").map_err(Error::shape)? {
+                    "empty" => true,
+                    "explicit" => false,
+                    _ => return Err(Error::shape("empty_style must be empty or explicit")),
+                };
+                let frame = ByteElementFrame {
+                    name: field(&event, "name").cloned().ok_or_else(|| Error::shape("element_start lacks name"))?,
+                    namespaces: field(&event, "namespaces").cloned().ok_or_else(|| Error::shape("element_start lacks namespaces"))?,
+                    attributes: field(&event, "attributes").cloned().ok_or_else(|| Error::shape("element_start lacks attributes"))?,
+                    children: Vec::new(),
+                    empty_style: field(&event, "empty_style").cloned().ok_or_else(|| Error::shape("element_start lacks empty_style"))?,
+                    open_lexical: field(&event, "open_lexical").cloned().ok_or_else(|| Error::shape("element_start lacks open_lexical"))?,
+                };
+                if empty {
+                    Some(finish_byte_element(frame, Value::Null))
+                } else {
+                    stack.push(frame);
+                    None
+                }
+            }
+            "element_end" => {
+                exact_keys(&event, &["$xml_event", "name", "close_lexical"])?;
+                let frame = stack.pop().ok_or_else(|| Error::shape("element stack underflow"))?;
+                Some(finish_byte_element(
+                    frame,
+                    field(&event, "close_lexical").cloned().ok_or_else(|| Error::shape("element_end lacks close_lexical"))?,
+                ))
+            }
+            _ => {
+                let Value::Object(mut entries) = event else { return Err(Error::shape("XML event must be an Object")); };
+                let Some((key, _)) = entries.iter_mut().find(|(key, _)| key == "$xml_event") else {
+                    return Err(Error::shape("XML event lacks $xml_event"));
+                };
+                *key = "$xml".to_string();
+                Some(Value::Object(entries))
+            }
+        };
+        if let Some(node) = node {
+            if let Some(parent) = stack.last_mut() {
+                parent.children.push(node);
+            } else {
+                document_children.push(node);
+            }
+        }
+    }
+    if !ended || !stack.is_empty() {
+        return Err(Error::shape("XML byte stream did not form a complete document"));
+    }
+    let (encoding, bom) = document_start.ok_or_else(|| Error::shape("XML byte stream lacks document_start"))?;
+    Ok(object(vec![
+        ("$xml", text("document")),
+        ("encoding", encoding),
+        ("bom", bom),
         ("children", Value::Array(document_children)),
     ]))
 }
@@ -1266,6 +1379,92 @@ impl StreamWriter {
     }
 }
 
+/// Render a whole tree by unfolding it into the same validated events consumed
+/// by XMLWriter. This keeps encoding selection and token-local byte reuse in one
+/// writer engine.
+pub fn render_document_bytes(
+    value: &Value,
+    encoding: RenderEncoding,
+    lexical: LexicalPolicy,
+) -> Result<Vec<u8>, Error> {
+    fn event_from_node(value: &Value) -> Result<Value, Error> {
+        let Value::Object(mut entries) = value.clone() else {
+            return Err(Error::shape("XML node must be an Object"));
+        };
+        let Some((key, _)) = entries.iter_mut().find(|(key, _)| key == "$xml") else {
+            return Err(Error::shape("XML node lacks $xml"));
+        };
+        *key = "$xml_event".to_string();
+        Ok(Value::Object(entries))
+    }
+
+    fn write_node(value: &Value, writer: &mut StreamWriter, output: &mut Vec<u8>) -> Result<(), Error> {
+        let tag = required_text(value, "$xml").map_err(Error::shape)?;
+        if tag == "element" {
+            exact_keys(value, &["$xml", "name", "namespaces", "attributes", "children", "empty_style", "open_lexical", "close_lexical"])?;
+            let children = match field(value, "children") {
+                Some(Value::Array(children)) => children,
+                _ => return Err(Error::shape("XML element children must be an Array")),
+            };
+            let style = required_text(value, "empty_style").map_err(Error::shape)?;
+            match (style, field(value, "close_lexical")) {
+                ("empty", Some(Value::Null)) if children.is_empty() => {}
+                ("explicit", Some(Value::Object(_))) => {}
+                ("empty", _) => return Err(Error::shape("empty element requires no children and null close_lexical")),
+                ("explicit", _) => return Err(Error::shape("explicit element requires close_lexical")),
+                _ => return Err(Error::shape("empty_style must be empty or explicit")),
+            }
+            let start = object(vec![
+                ("$xml_event", text("element_start")),
+                ("name", field(value, "name").cloned().ok_or_else(|| Error::shape("element lacks name"))?),
+                ("namespaces", field(value, "namespaces").cloned().ok_or_else(|| Error::shape("element lacks namespaces"))?),
+                ("attributes", field(value, "attributes").cloned().ok_or_else(|| Error::shape("element lacks attributes"))?),
+                ("empty_style", text(style)),
+                ("open_lexical", field(value, "open_lexical").cloned().ok_or_else(|| Error::shape("element lacks open_lexical"))?),
+            ]);
+            output.extend(writer.write(&start)?);
+            for child in children {
+                write_node(child, writer, output)?;
+            }
+            if style == "explicit" {
+                let end = object(vec![
+                    ("$xml_event", text("element_end")),
+                    ("name", field(value, "name").cloned().ok_or_else(|| Error::shape("element lacks name"))?),
+                    ("close_lexical", field(value, "close_lexical").cloned().ok_or_else(|| Error::shape("element lacks close_lexical"))?),
+                ]);
+                output.extend(writer.write(&end)?);
+            }
+            return Ok(());
+        }
+        if !matches!(tag, "declaration" | "document_whitespace" | "doctype" | "text" | "cdata" | "entity_ref" | "comment" | "processing_instruction") {
+            return Err(Error::shape(format!("{tag} is not legal as an XML document or element child")));
+        }
+        output.extend(writer.write(&event_from_node(value)?)?);
+        Ok(())
+    }
+
+    exact_keys(value, &["$xml", "encoding", "bom", "children"])?;
+    if required_text(value, "$xml").map_err(Error::shape)? != "document" {
+        return Err(Error::shape("XML whole value must be a document"));
+    }
+    let children = match field(value, "children") {
+        Some(Value::Array(children)) => children,
+        _ => return Err(Error::shape("XML document children must be an Array")),
+    };
+    let mut writer = StreamWriter::new(encoding, lexical);
+    let start = object(vec![
+        ("$xml_event", text("document_start")),
+        ("encoding", field(value, "encoding").cloned().ok_or_else(|| Error::shape("document lacks encoding"))?),
+        ("bom", field(value, "bom").cloned().ok_or_else(|| Error::shape("document lacks bom"))?),
+    ]);
+    let mut output = writer.write(&start)?;
+    for child in children {
+        write_node(child, &mut writer, &mut output)?;
+    }
+    output.extend(writer.write(&object(vec![("$xml_event", text("document_end"))]))?);
+    Ok(output)
+}
+
 impl Error {
     fn shape(reason: impl Into<String>) -> Self { Self::at_kind(0, Reason::Shape, reason) }
     fn state(reason: impl Into<String>) -> Self { Self::at_kind(0, Reason::Shape, format!("[state] {}", reason.into())) }
@@ -1505,7 +1704,7 @@ fn canonical_attr_escape(value: &str) -> String { value.replace('&', "&amp;").re
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use super::{canonical_document, field, parse_document, parse_document_with, render_document, stream_event_value, wire_bytes, ByteLexer, CanonicalMode, CanonicalOptions, EntityPolicy, Error, Event, LexicalPolicy, Limits, ParseOptions, Part, Reason, RenderEncoding, Scanner, StreamEvent, StreamScanner, StreamWriter, TokenKind, Value, WireEncoding};
+    use super::{canonical_document, field, parse_document, parse_document_bytes, parse_document_with, render_document, render_document_bytes, stream_event_value, wire_bytes, ByteLexer, CanonicalMode, CanonicalOptions, EntityPolicy, Error, Event, LexicalPolicy, Limits, ParseOptions, Part, Reason, RenderEncoding, Scanner, StreamEvent, StreamScanner, StreamWriter, TokenKind, Value, WireEncoding};
 
     fn scan(source: &str) -> Result<Vec<Event>, String> {
         let mut scanner = Scanner::new(source);
@@ -2000,6 +2199,32 @@ mod tests {
             }
             assert_eq!(output, bytes, "{wire:?} byte identity");
         }
+    }
+
+    #[test]
+    fn whole_bytes_share_stream_encoding_and_identity() {
+        for (wire, render, bom, declared) in [
+            (WireEncoding::Utf8, RenderEncoding::Utf8Bom, vec![0xef, 0xbb, 0xbf], "UTF-8"),
+            (WireEncoding::Utf16Le, RenderEncoding::Utf16Le, vec![0xff, 0xfe], "UTF-16"),
+            (WireEncoding::Utf16Be, RenderEncoding::Utf16Be, vec![0xfe, 0xff], "UTF-16BE"),
+        ] {
+            let source = format!("<?xml version='1.0' encoding='{declared}'?><r>\u{e9}\u{1f642}</r>");
+            let mut bytes = bom;
+            bytes.extend(wire_bytes(&source, wire));
+            let value = parse_document_bytes(&bytes).expect("whole byte parse");
+            assert_eq!(
+                render_document_bytes(&value, render, LexicalPolicy::PreserveValid).expect("whole byte render"),
+                bytes,
+                "{wire:?} byte identity",
+            );
+        }
+
+        let source = "<?xml version='1.0' encoding='UTF-8'?><r/>";
+        let mut conflict = vec![0xff, 0xfe];
+        conflict.extend(wire_bytes(source, WireEncoding::Utf16Le));
+        let error = parse_document_bytes(&conflict).expect_err("conflicting declaration");
+        assert_eq!(error.kind, Reason::InvalidEncoding);
+        assert_eq!(error.offset, 2);
     }
 
     #[test]

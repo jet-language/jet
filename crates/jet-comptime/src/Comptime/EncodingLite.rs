@@ -1715,12 +1715,37 @@ pub(super) fn xml_safe_options_value() -> CtValue {
     }
 }
 
+pub(super) fn xml_safe_render_options_value() -> CtValue {
+    CtValue::Struct {
+        type_name: "XMLRenderOptions".to_string(),
+        fields: vec![
+            ("encoding".to_string(), CtValue::Enum {
+                type_name: "XMLEncoding".to_string(), variant: "UTF8".to_string(), args: Vec::new(),
+            }),
+            ("lexical".to_string(), CtValue::Enum {
+                type_name: "XMLLexicalPolicy".to_string(), variant: "PreserveValid".to_string(), args: Vec::new(),
+            }),
+        ],
+    }
+}
+
 pub(super) fn xml_parse_with(
     text: &str,
     options: &CtValue,
 ) -> Result<CtValue, jet_foundation::XmlPull::Error> {
     let options = xml_options(options)?;
     jet_foundation::XmlPull::parse_document_with(text, &options).map(xml_to_ct)
+}
+
+pub(super) fn xml_parse_bytes(
+    bytes: &[u8],
+    options: Option<&CtValue>,
+) -> Result<CtValue, jet_foundation::XmlPull::Error> {
+    let options = match options {
+        Some(options) => xml_options(options)?,
+        None => jet_foundation::XmlPull::ParseOptions::safe(),
+    };
+    jet_foundation::XmlPull::parse_document_bytes_with(bytes, &options).map(xml_to_ct)
 }
 
 fn xml_int(fields: &[(String, CtValue)], name: &str) -> i64 {
@@ -1774,13 +1799,18 @@ fn xml_options(value: &CtValue) -> Result<jet_foundation::XmlPull::ParseOptions,
     Ok(options)
 }
 
-pub(super) fn xml_error_value(error: jet_foundation::XmlPull::Error) -> CtValue {
+fn xml_error_value_with_source(error: jet_foundation::XmlPull::Error, source_bytes: bool) -> CtValue {
     let kind = format!("{:?}", error.kind);
+    let byte_offset = if source_bytes || error.line.is_some() {
+        CtValue::Some(Box::new(CtValue::Int(error.offset as i64)))
+    } else {
+        CtValue::None(Type::Int)
+    };
     CtValue::Struct {
         type_name: "XMLError".to_string(),
         fields: vec![
             ("kind".to_string(), CtValue::Enum { type_name: "XMLReason".to_string(), variant: kind, args: Vec::new() }),
-            ("byte_offset".to_string(), error.line.map(|_| CtValue::Some(Box::new(CtValue::Int(error.offset as i64)))).unwrap_or(CtValue::None(Type::Int))),
+            ("byte_offset".to_string(), byte_offset),
             ("line".to_string(), error.line.map(|value| CtValue::Some(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::None(Type::Int))),
             ("column".to_string(), error.column.map(|value| CtValue::Some(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::None(Type::Int))),
             ("path".to_string(), CtValue::Str(error.path)),
@@ -1789,10 +1819,59 @@ pub(super) fn xml_error_value(error: jet_foundation::XmlPull::Error) -> CtValue 
     }
 }
 
+pub(super) fn xml_error_value(error: jet_foundation::XmlPull::Error) -> CtValue {
+    xml_error_value_with_source(error, false)
+}
+
+pub(super) fn xml_source_error_value(error: jet_foundation::XmlPull::Error) -> CtValue {
+    xml_error_value_with_source(error, true)
+}
+
+fn xml_shape_error_value(reason: String) -> CtValue {
+    CtValue::Struct {
+        type_name: "XMLError".to_string(),
+        fields: vec![
+            ("kind".to_string(), CtValue::Enum { type_name: "XMLReason".to_string(), variant: "Shape".to_string(), args: Vec::new() }),
+            ("byte_offset".to_string(), CtValue::None(Type::Int)),
+            ("line".to_string(), CtValue::None(Type::Int)),
+            ("column".to_string(), CtValue::None(Type::Int)),
+            ("path".to_string(), CtValue::Str(String::new())),
+            ("reason".to_string(), CtValue::Str(reason)),
+        ],
+    }
+}
+
 pub(super) fn xml_render(value: &CtValue) -> String {
     xml_from_ct(value)
         .and_then(|value| jet_foundation::XmlPull::render_document(&value))
         .unwrap_or_default()
+}
+
+pub(super) fn xml_to_bytes(
+    value: &CtValue,
+    options: Option<&CtValue>,
+) -> Result<Vec<u8>, CtValue> {
+    let value = xml_from_ct(value).map_err(xml_shape_error_value)?;
+    let (encoding, lexical) = match options {
+        Some(CtValue::Struct { fields, .. }) => {
+            let encoding = match fields.iter().find_map(|(name, value)| (name == "encoding").then_some(value)) {
+                Some(CtValue::Enum { variant, .. }) if variant == "UTF8BOM" => jet_foundation::XmlPull::RenderEncoding::Utf8Bom,
+                Some(CtValue::Enum { variant, .. }) if variant == "UTF16LE" => jet_foundation::XmlPull::RenderEncoding::Utf16Le,
+                Some(CtValue::Enum { variant, .. }) if variant == "UTF16BE" => jet_foundation::XmlPull::RenderEncoding::Utf16Be,
+                _ => jet_foundation::XmlPull::RenderEncoding::Utf8,
+            };
+            let lexical = match fields.iter().find_map(|(name, value)| (name == "lexical").then_some(value)) {
+                Some(CtValue::Enum { variant, .. }) if variant == "Deterministic" => jet_foundation::XmlPull::LexicalPolicy::Deterministic,
+                _ => jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
+            };
+            (encoding, lexical)
+        }
+        _ => (
+            jet_foundation::XmlPull::RenderEncoding::Utf8,
+            jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
+        ),
+    };
+    jet_foundation::XmlPull::render_document_bytes(&value, encoding, lexical).map_err(xml_error_value)
 }
 
 #[cfg(test)]
