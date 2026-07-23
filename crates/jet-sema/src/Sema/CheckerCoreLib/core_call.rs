@@ -2694,13 +2694,44 @@ impl<'a> Checker<'a> {
                     return Some(Type::Named("HttpMux".to_string()));
                 }
                 ("core.http.server", "bind") => {
-                    if args.len() != 2 {
-                        self.diags.push(wrong_core_arity("bind", 2, args.len(), span));
+                    if args.len() != 2 && args.len() != 3 {
+                        self.diags.push(Diagnostic::error(
+                            "E0104",
+                            format!("`bind` expects 2 arguments, or 3 with `tls:`, got {}", args.len()),
+                            "HTTPS binding uses the named `tls:` option so plaintext and TLS share one entry point".to_string(),
+                            "write `Server.bind(addr, mux)` or `Server.bind(addr, mux, tls: Server.tls(cert, key))`".to_string(),
+                            Some(span),
+                        ));
                         for arg in args.iter_mut() { self.infer(&mut arg.expr); }
                         return None;
                     }
                     self.expect_core_arg("bind", 0, &Type::String, &mut args[0]);
                     self.expect_core_arg("bind", 1, &Type::Named("HttpMux".to_string()), &mut args[1]);
+                    if args.len() == 3 {
+                        match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
+                            Some(("tls", _)) => {}
+                            Some((label, label_span)) => self.diags.push(Diagnostic::error(
+                                "E0125",
+                                format!("`bind` has no option named `{label}` here"),
+                                "the third HTTP server argument is a named TLS option, not a positional value".to_string(),
+                                "write `tls: Server.tls(cert, key)`".to_string(),
+                                Some(label_span),
+                            )),
+                            None => self.diags.push(Diagnostic::error(
+                                "E0125",
+                                "`bind` needs `tls:` before the third argument".to_string(),
+                                "the label makes the transport switch explicit at the call site".to_string(),
+                                "write `Server.bind(addr, mux, tls: Server.tls(cert, key))`".to_string(),
+                                Some(args[2].span),
+                            )),
+                        }
+                        self.expect_core_arg(
+                            "bind",
+                            2,
+                            &Type::Named("HttpServerTls".to_string()),
+                            &mut args[2],
+                        );
+                    }
                     return Some(Type::Result {
                         ok: Box::new(Type::Named("HttpServer".to_string())),
                         err: Box::new(Type::Named("HttpError".to_string())),
@@ -2883,6 +2914,23 @@ impl<'a> Checker<'a> {
                     );
                     self.expect_core_arg("access_log", 1, &Type::Int, &mut args[1]);
                     return Some(Type::String);
+                }
+                ("core.http.server", "request_id") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("request_id", 1, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg(
+                        "request_id",
+                        0,
+                        &Type::Named("HttpMux".to_string()),
+                        &mut args[0],
+                    );
+                    return Some(Type::Named("Unit".to_string()));
                 }
                 // D-TIMEDEPTH1=A: civil-time constructors.
                 ("core.time.date", "new") => {

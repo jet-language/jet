@@ -22,8 +22,16 @@ pub fn net_method_return(
         ("HttpResponse", "header") if n_args == 1 => Some(Some(Type::Option(Box::new(str_ty.clone())))),
         ("HttpResponse", "cookies") => Some(Some(Type::List(Box::new(Type::String)))),
         ("HttpResponse", "header") if n_args == 2 => Some(Some(Type::Named("HttpResponse".to_string()))),
+        ("HttpResponse", "trailers") if n_args == 1 => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("HttpResponse".to_string())),
+            err: Box::new(Type::Named("HttpError".to_string())),
+        })),
         ("HttpRequest", "method" | "path") => Some(Some(str_ty.clone())),
         ("HttpRequest", "body") if n_args == 0 => Some(Some(Type::Named("HttpBody".to_string()))),
+        ("HttpRequest", "trailers") if n_args == 0 => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("HttpHeaders".to_string())),
+            err: Box::new(Type::Named("HttpError".to_string())),
+        })),
         ("HttpRequest", "header") if n_args == 1 => Some(Some(Type::Option(Box::new(str_ty.clone())))),
         ("HttpRequest", "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
             | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text") => {
@@ -325,6 +333,10 @@ pub fn http_type_method_return(
         Type::Named(n) if n == "HttpRequest" => match method {
             "method" | "path" => mk_str(),
             "body" if _args.is_empty() => mk("HttpBody"),
+            "trailers" if _args.is_empty() => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("HttpHeaders".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            })),
             "param" | "header" if _args.len() == 1 => mk_opt_str(),
             "body" | "header" | "timeout" | "connect_timeout" | "read_timeout"
             | "total_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" => {
@@ -343,6 +355,10 @@ pub fn http_type_method_return(
             "body" => mk("HttpBody"),
             "header" if _args.len() == 1 => mk_opt_str(),
             "header" => mk("HttpResponse"),
+            "trailers" if _args.len() == 1 => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                err: Box::new(Type::Named("HttpError".to_string())),
+            })),
             "cookies" => Some(Some(Type::List(Box::new(Type::String)))),
             _ => None,
         },

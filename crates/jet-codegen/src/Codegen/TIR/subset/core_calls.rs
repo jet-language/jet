@@ -148,6 +148,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
                 | "static_file"
                 | "static_file_range"
                 | "access_log"
+                | "request_id"
         )
     {
         return true;
@@ -202,7 +203,10 @@ pub(super) fn core_call_args_in_subset(
             label_ok && expr_in_subset(&arg.expr, cx, locals)
         });
     }
-    if module == "core.http.server" && method == "serve" && args.len() == 3 {
+    if module == "core.http.server"
+        && matches!(method, "serve" | "bind")
+        && args.len() == 3
+    {
         return args.iter().enumerate().all(|(idx, a)| {
             let label_ok = if idx == 2 {
                 matches!(

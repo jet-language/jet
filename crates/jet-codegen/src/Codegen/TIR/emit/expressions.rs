@@ -1804,6 +1804,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::HttpReqParam => {
                     format!("{}jet_http_request_param(&({}), &({}))", root, recv, a(0))
                 }
+                THandleOp::HttpReqTrailers => {
+                    format!("{}jet_http_srv_req_trailers(&({}))", root, recv)
+                }
+                THandleOp::HttpRespTrailers => {
+                    format!("{}jet_http_srv_response_trailers({}, {})", root, recv, a(0))
+                }
                 // c109 Phase 21: Task/Channel/Sender methods, byte-for-byte the
                 // `emit_builtin_method` arms (Source/Codegen/Expression.rs). The handle
                 // value's prelude methods take `&self`, so the receiver is emitted plainly
@@ -2155,6 +2161,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                     } else if kind == "HttpRequest" {
                         match method.as_str() {
+                            "trailers" => format!("{}jet_http_srv_req_trailers(&({}))", root, recv),
                             "header" => format!(
                                 "{}jet_http_client_request_header({}, &({}), &({}))",
                                 root,
@@ -2241,6 +2248,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                     } else {
                         match method.as_str() {
+                            "trailers" => format!("{}jet_http_srv_response_trailers({}, {})", root, recv, a(0)),
                             "status" => {
                                 format!("{}jet_http_client_response_status(&({}))", root, recv)
                             }
@@ -2284,6 +2292,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ("HttpRequest", "body") => {
                             format!("{}jet_http_srv_req_body(&({}))", root, recv)
                         }
+                        ("HttpRequest", "trailers") => {
+                            format!("{}jet_http_srv_req_trailers(&({}))", root, recv)
+                        }
                         ("HttpRequest", "param") => {
                             format!("{}jet_http_srv_req_param(&({}), &({}))", root, recv, a(0))
                         }
@@ -2308,6 +2319,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ),
                         ("HttpResponse", "status") => format!("{}jet_http_srv_response_status(&({}))", root, recv),
                         ("HttpResponse", "body") => format!("{}jet_http_srv_response_body(&({}))", root, recv),
+                        ("HttpResponse", "trailers") => format!(
+                            "{}jet_http_srv_response_trailers({}, {})",
+                            root,
+                            recv,
+                            a(0)
+                        ),
                         ("HttpResponse", "cookies") => format!("{}jet_http_response_cookies(&({}))", root, recv),
                         ("HttpServer", "local_addr") => format!("{}jet_http_server_local_addr(&({})).map_err(|_| JetHttpError::Io {{ operation: \"local address\".to_string() }})", root, recv),
                         ("HttpServer", "serve") => format!("{}jet_http_server_serve(&({})).map_err(|_| JetHttpError::Io {{ operation: \"serve\".to_string() }})", root, recv),

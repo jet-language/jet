@@ -337,9 +337,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("HttpRequest", "body", 0) => THandleOp::HttpReqField("body"),
         ("HttpRequest", "header", 1) => THandleOp::HttpReqHeader,
         ("HttpRequest", "param", 1) => THandleOp::HttpReqParam,
+        ("HttpRequest", "trailers", 0) => THandleOp::HttpReqTrailers,
         ("HttpResponse", "status", 0) => THandleOp::HttpRespField("status"),
         ("HttpResponse", "body", 0) => THandleOp::HttpRespField("body"),
         ("HttpResponse", "header", 1) => THandleOp::HttpRespHeader,
+        ("HttpResponse", "trailers", 1) => THandleOp::HttpRespTrailers,
         // D-SERDE-ACCESS=B: DataTree accessor methods.
         ("DataTree", "field", 1) => THandleOp::DataTreeField,
         ("DataTree", "at", 1) => THandleOp::DataTreeAt,
@@ -769,6 +771,7 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.http.server", "response") => return Type::Named("HttpResponse".to_string()),
         ("core.http.server", "sse") => return Type::Named("HttpResponse".to_string()),
         ("core.http.server", "access_log") => return Type::String,
+        ("core.http.server", "request_id") => return unit_type(),
         _ => {}
     }
     crate::Sema::core_fixed_sig(module, method)

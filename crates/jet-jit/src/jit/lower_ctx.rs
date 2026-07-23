@@ -2728,6 +2728,8 @@ impl LowerCtx<'_, '_> {
             THandleOp::RegexMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpClientMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpServerMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpReqTrailers => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpRespTrailers => Err("jit handle method unsupported".to_string()),
             THandleOp::DataTreeField => Err("jit handle method unsupported".to_string()),
             THandleOp::DataTreeAt => Err("jit handle method unsupported".to_string()),
             THandleOp::DataTreeInt => Err("jit handle method unsupported".to_string()),

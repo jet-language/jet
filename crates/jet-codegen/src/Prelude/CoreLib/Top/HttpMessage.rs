@@ -150,13 +150,54 @@ impl JetShow for JetHttpError {
     }
 }
 
+struct JetHttpBodyCloser {
+    closed: std::sync::atomic::AtomicBool,
+    close: Box<dyn Fn() + Send + Sync>,
+}
+
+impl JetHttpBodyCloser {
+    fn new(close: impl Fn() + Send + Sync + 'static) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            closed: std::sync::atomic::AtomicBool::new(false),
+            close: Box::new(close),
+        })
+    }
+
+    fn close(&self) {
+        if !self.closed.swap(true, std::sync::atomic::Ordering::AcqRel) { (self.close)(); }
+    }
+}
+
 enum JetHttpBodySource {
-    Reader(Box<dyn std::io::Read + Send>),
+    Bytes(std::io::Cursor<Vec<u8>>),
+    File(std::io::Take<std::fs::File>),
+    Reader {
+        reader: Box<dyn std::io::Read + Send>,
+        closer: Option<std::sync::Arc<JetHttpBodyCloser>>,
+    },
     Bridge {
         handle: i64,
         read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHttpError>,
-        close: fn(i64),
+        closer: std::sync::Arc<JetHttpBodyCloser>,
     },
+}
+
+impl JetHttpBodySource {
+    fn closer(&self) -> Option<std::sync::Arc<JetHttpBodyCloser>> {
+        match self {
+            Self::Reader { closer, .. } => closer.clone(),
+            Self::Bridge { closer, .. } => Some(closer.clone()),
+            Self::Bytes(_) | Self::File(_) => None,
+        }
+    }
+
+    fn h2_cancellable(&self) -> bool {
+        matches!(self, Self::Bytes(_) | Self::File(_) | Self::Reader { closer: Some(_), .. })
+    }
+
+    fn close(&self) {
+        if let Some(closer) = self.closer() { closer.close(); }
+    }
 }
 
 struct JetHttpBodyState {
@@ -168,9 +209,7 @@ struct JetHttpBodyState {
 
 impl Drop for JetHttpBodyState {
     fn drop(&mut self) {
-        if let Some(JetHttpBodySource::Bridge { handle, close, .. }) = self.source.take() {
-            close(handle);
-        }
+        if let Some(source) = self.source.take() { source.close(); }
     }
 }
 
@@ -190,7 +229,13 @@ impl JetHttpBody {
 
     fn from_bytes_with_content_type(bytes: Vec<u8>, content_type: Option<String>) -> Self {
         let length = bytes.len();
-        Self::reader_with_content_type(std::io::Cursor::new(bytes), Some(length), content_type)
+        let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == 0));
+        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
+            source: Some(JetHttpBodySource::Bytes(std::io::Cursor::new(bytes))),
+            length: Some(length),
+            content_type,
+            drained,
+        })) }
     }
 
     fn from_text(text: String) -> Self {
@@ -286,12 +331,39 @@ impl JetHttpBody {
         let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == Some(0)));
         Self {
             state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
-                source: Some(JetHttpBodySource::Reader(Box::new(reader))),
+                source: Some(JetHttpBodySource::Reader { reader: Box::new(reader), closer: None }),
                 length,
                 content_type,
                 drained,
             })),
         }
+    }
+
+    fn reader_cancellable(
+        reader: impl std::io::Read + Send + 'static,
+        length: Option<usize>,
+        close: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
+        let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == Some(0)));
+        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
+            source: Some(JetHttpBodySource::Reader {
+                reader: Box::new(reader),
+                closer: Some(JetHttpBodyCloser::new(close)),
+            }),
+            length,
+            content_type: None,
+            drained,
+        })) }
+    }
+
+    fn file(file: std::fs::File, length: usize) -> Self {
+        let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == 0));
+        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
+            source: Some(JetHttpBodySource::File(std::io::Read::take(file, length as u64))),
+            length: Some(length),
+            content_type: None,
+            drained,
+        })) }
     }
 
     fn from_reader(reader: JetFileReader) -> Result<Self, JetHttpError> {
@@ -311,12 +383,13 @@ impl JetHttpBody {
         close: fn(i64),
     ) -> Self {
         let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == Some(0)));
+        let closer = JetHttpBodyCloser::new(move || close(handle));
         Self {
             state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
                 source: Some(JetHttpBodySource::Bridge {
                     handle,
                     read,
-                    close,
+                    closer,
                 }),
                 length,
                 content_type: None,
@@ -404,13 +477,17 @@ struct JetHttpBodyChunks {
 impl JetHttpBodyChunks {
     fn failed(error: JetHttpError) -> Self {
         Self {
-            source: JetHttpBodySource::Reader(Box::new(std::io::Cursor::new(Vec::new()))),
+            source: JetHttpBodySource::Bytes(std::io::Cursor::new(Vec::new())),
             max_chunk: 1,
             done: false,
             initial_error: Some(error),
             drained: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
+
+    fn h2_cancellable(&self) -> bool { self.source.h2_cancellable() }
+
+    fn closer(&self) -> Option<std::sync::Arc<JetHttpBodyCloser>> { self.source.closer() }
 }
 
 impl Iterator for JetHttpBodyChunks {
@@ -426,7 +503,9 @@ impl Iterator for JetHttpBodyChunks {
         }
         let mut chunk = vec![0; self.max_chunk];
         let read = match &mut self.source {
-            JetHttpBodySource::Reader(reader) => reader.read(&mut chunk),
+            JetHttpBodySource::Bytes(reader) => std::io::Read::read(reader, &mut chunk),
+            JetHttpBodySource::File(file) => std::io::Read::read(file, &mut chunk),
+            JetHttpBodySource::Reader { reader, .. } => reader.read(&mut chunk),
             JetHttpBodySource::Bridge { handle, read, .. } => match read(*handle, self.max_chunk) {
                 Ok(Some(bytes)) => return Some(Ok(bytes)),
                 Ok(None) => Ok(0),
@@ -459,11 +538,7 @@ impl Iterator for JetHttpBodyChunks {
 }
 
 impl Drop for JetHttpBodyChunks {
-    fn drop(&mut self) {
-        if let JetHttpBodySource::Bridge { handle, close, .. } = &self.source {
-            close(*handle);
-        }
-    }
+    fn drop(&mut self) { self.source.close(); }
 }
 
 impl std::fmt::Debug for JetHttpBody {
@@ -549,6 +624,7 @@ struct JetHttpRequest {
     path: String,
     version: String,
     headers: JetHttpHeaders,
+    trailers: std::sync::Arc<std::sync::Mutex<JetHttpHeaders>>,
     body: JetHttpBody,
     body_set: bool,
     params: std::collections::BTreeMap<String, String>,
@@ -573,6 +649,7 @@ struct JetHttpResponse {
     body: JetHttpBody,
     trailers: JetHttpHeaders,
     head_content_length: Option<usize>,
+    suppress_body: bool,
 }
 
 type JetHttpHandler = std::sync::Arc<
@@ -590,12 +667,29 @@ impl JetHttpRequest {
         body: JetHttpBody,
         headers: JetHttpHeaders,
     ) -> Self {
+        Self::server_body_with_trailers(
+            method,
+            path,
+            body,
+            headers,
+            std::sync::Arc::new(std::sync::Mutex::new(JetHttpHeaders::new())),
+        )
+    }
+
+    fn server_body_with_trailers(
+        method: &str,
+        path: String,
+        body: JetHttpBody,
+        headers: JetHttpHeaders,
+        trailers: std::sync::Arc<std::sync::Mutex<JetHttpHeaders>>,
+    ) -> Self {
         Self {
             method: method.to_string(),
             url: String::new(),
             path,
             version: "HTTP/1.1".to_string(),
             headers,
+            trailers,
             body,
             body_set: true,
             params: std::collections::BTreeMap::new(),

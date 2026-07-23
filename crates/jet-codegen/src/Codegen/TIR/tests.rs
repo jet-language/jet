@@ -1077,8 +1077,10 @@ fn mk() {
         assert!(handle_method_op("HttpRequest", "path", 0).is_some());
         assert!(handle_method_op("HttpRequest", "header", 1).is_some());
         assert!(handle_method_op("HttpRequest", "param", 1).is_some());
+        assert!(handle_method_op("HttpRequest", "trailers", 0).is_some());
         assert!(handle_method_op("HttpResponse", "status", 0).is_some());
         assert!(handle_method_op("HttpResponse", "body", 0).is_some());
+        assert!(handle_method_op("HttpResponse", "trailers", 1).is_some());
         // D-ARGS1: ArgsSpec builder and ParsedArgs query methods.
         assert!(handle_method_op("ArgsSpec", "flag", 2).is_some());
         assert!(handle_method_op("ArgsSpec", "option", 3).is_some());

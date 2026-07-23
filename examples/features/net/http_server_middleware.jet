@@ -29,6 +29,7 @@ fn inner(next: HttpHandler) -> HttpHandler {
 
 fn run() {
     mux :: http_server.mux()
+    http_server.request_id(mux)
     mux.middleware(outer)
     mux.middleware(inner)
     mux.get("/ok", (req: HttpRequest) => Ok(http_server.response(200, "handler")))
