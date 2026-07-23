@@ -242,8 +242,8 @@ impl ModuleDecl {
     }
 }
 
-/// U8 (unified-ecosystem §2.2): one `name: provider@target` entry in a module's
-/// `sources:` block, e.g. `default: github@NixOS/nixpkgs/nixos-24.05`. The ref
+/// U8 (unified-ecosystem §2.2): one `name: target@provider` or bare-path entry
+/// in a module's `sources:` block, e.g. `default: NixOS/nixpkgs/nixos-24.05@github`. The ref
 /// is not a single token (it contains `@`, `/`, `-`, `.`), so the parser records
 /// its source span; modeval slices the source and validates it via
 /// `classify_provider_ref`.
@@ -251,7 +251,7 @@ impl ModuleDecl {
 pub struct SourceDecl {
     pub name: String,
     pub name_span: Span,
-    /// Span of the raw `provider@target` ref text in the source.
+    /// Span of the raw `target@provider` or bare-path ref text in the source.
     pub ref_span: Span,
     pub span: Span,
 }

@@ -68,7 +68,7 @@ fn realize_into_hangar(
     fs::create_dir_all(&store_dir).unwrap();
     let upstream = format!("path:{}", repo.to_string_lossy());
     let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
-    let spec = classify_in(&format!("mine:{pkg}"), &table).unwrap();
+    let spec = classify_in(&format!("{pkg}@mine"), &table).unwrap();
     let ctx = Ctx {
         fixtures: None,
         store_dir: &store_dir,
@@ -124,7 +124,7 @@ fn realized_library_is_consumed_with_use() {
     let consumer = s.join("app");
     write(
         &consumer.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { jsonutil: github@acme/jsonutil/abc123 }\n",
+        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { jsonutil: acme/jsonutil/abc123@github }\n",
     );
     write(
         &consumer.join("main.jet"),
@@ -177,7 +177,7 @@ fn executable_is_not_importable() {
     let consumer = s.join("app");
     write(
         &consumer.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { deploy: github@acme/deploy/abc123 }\n",
+        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { deploy: acme/deploy/abc123@github }\n",
     );
     write(
         &consumer.join("main.jet"),
@@ -223,7 +223,7 @@ fn unrealized_library_points_at_build() {
     let consumer = s.join("app");
     write(
         &consumer.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { jsonutil: github@acme/jsonutil/abc123 }\n",
+        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { jsonutil: acme/jsonutil/abc123@github }\n",
     );
     write(
         &consumer.join("main.jet"),

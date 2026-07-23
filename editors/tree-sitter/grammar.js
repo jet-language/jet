@@ -745,13 +745,13 @@ module.exports = grammar({
         $.source_ref,
       ),
 
-    // A `provider@target` source/dependency ref (U6, S59): `c@system`,
-    // `path@./jet-pkgs`, `github@NixOS/nixpkgs/nixos-24.05`, `c@"vendor"`.
+    // A `name@source` dependency ref (D-JPK-REF1, S59): `tool@github`,
+    // `c@system`, or `c@"vendor"`.
     source_ref: ($) =>
       seq(
-        field("provider", $.identifier),
+        field("name", $.identifier),
         token.immediate("@"),
-        field("target", choice($.string_literal, $.ref_target)),
+        field("source", choice($.string_literal, $.ref_target)),
       ),
 
     ref_target: (_) => token.immediate(/[A-Za-z0-9_./:-]+/),

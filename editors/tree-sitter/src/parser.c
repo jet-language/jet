@@ -14,14 +14,14 @@
 #pragma GCC optimize ("O0")
 #endif
 
-#define LANGUAGE_VERSION 14
+#define LANGUAGE_VERSION 15
 #define STATE_COUNT 2685
 #define LARGE_STATE_COUNT 622
 #define SYMBOL_COUNT 290
 #define ALIAS_COUNT 0
 #define TOKEN_COUNT 140
 #define EXTERNAL_TOKEN_COUNT 0
-#define FIELD_COUNT 41
+#define FIELD_COUNT 40
 #define MAX_ALIAS_SEQUENCE_LENGTH 10
 #define MAX_RESERVED_WORD_SET_SIZE 0
 #define PRODUCTION_ID_COUNT 82
@@ -2092,24 +2092,23 @@ enum ts_field_identifiers {
   field_op = 21,
   field_path = 22,
   field_pattern = 23,
-  field_provider = 24,
-  field_receiver = 25,
-  field_resource = 26,
-  field_return_type = 27,
-  field_right = 28,
-  field_rust_path = 29,
-  field_source = 30,
-  field_state = 31,
-  field_state_type = 32,
-  field_stride = 33,
-  field_subject = 34,
-  field_target = 35,
-  field_then = 36,
-  field_trait = 37,
-  field_type = 38,
-  field_value = 39,
-  field_var = 40,
-  field_var2 = 41,
+  field_receiver = 24,
+  field_resource = 25,
+  field_return_type = 26,
+  field_right = 27,
+  field_rust_path = 28,
+  field_source = 29,
+  field_state = 30,
+  field_state_type = 31,
+  field_stride = 32,
+  field_subject = 33,
+  field_target = 34,
+  field_then = 35,
+  field_trait = 36,
+  field_type = 37,
+  field_value = 38,
+  field_var = 39,
+  field_var2 = 40,
 };
 
 static const char * const ts_field_names[] = {
@@ -2137,7 +2136,6 @@ static const char * const ts_field_names[] = {
   [field_op] = "op",
   [field_path] = "path",
   [field_pattern] = "pattern",
-  [field_provider] = "provider",
   [field_receiver] = "receiver",
   [field_resource] = "resource",
   [field_return_type] = "return_type",
@@ -2294,8 +2292,8 @@ static const TSFieldMapEntry ts_field_map_entries[] = {
     {field_cond, 1},
     {field_then, 2},
   [31] =
-    {field_provider, 0},
-    {field_target, 2},
+    {field_name, 0},
+    {field_source, 2},
   [33] =
     {field_field, 2},
     {field_object, 0},
@@ -11290,7 +11288,7 @@ static bool ts_lex_keywords(TSLexer *lexer, TSStateId state) {
   }
 }
 
-static const TSLexMode ts_lex_modes[STATE_COUNT] = {
+static const TSLexerMode ts_lex_modes[STATE_COUNT] = {
   [0] = {.lex_state = 0},
   [1] = {.lex_state = 147},
   [2] = {.lex_state = 5},
@@ -123618,6 +123616,7 @@ TS_PUBLIC const TSLanguage *tree_sitter_jet(void) {
     .state_count = STATE_COUNT,
     .large_state_count = LARGE_STATE_COUNT,
     .production_id_count = PRODUCTION_ID_COUNT,
+    .supertype_count = SUPERTYPE_COUNT,
     .field_count = FIELD_COUNT,
     .max_alias_sequence_length = MAX_ALIAS_SEQUENCE_LENGTH,
     .parse_table = &ts_parse_table[0][0],
@@ -123637,6 +123636,13 @@ TS_PUBLIC const TSLanguage *tree_sitter_jet(void) {
     .keyword_lex_fn = ts_lex_keywords,
     .keyword_capture_token = sym_identifier,
     .primary_state_ids = ts_primary_state_ids,
+    .name = "jet",
+    .max_reserved_word_set_size = 0,
+    .metadata = {
+      .major_version = 0,
+      .minor_version = 1,
+      .patch_version = 0,
+    },
   };
   return &language;
 }

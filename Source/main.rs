@@ -493,12 +493,12 @@ fn looks_like_jet_source(arg: &str) -> bool {
 
 /// U16 (D-JPK-BRIDGE1=A): `nix run nixpkgs#fastfetch` parity.
 ///
-/// Top-level `jet run nixpkgs:tool` is not a Jet source compile; it is the
-/// package-engine path, with the ratified `<source>:<package>` CLI spelling. Lower it
-/// to `jetpack run nixpkgs:tool -- tool`, preserving the offline fixture flags
+/// Top-level `jet run tool@nixpkgs` is not a Jet source compile; it is the
+/// package-engine path, with the ratified `<package>@<source>` CLI spelling. Lower it
+/// to `jetpack run tool@nixpkgs -- tool`, preserving the offline fixture flags
 /// used by the same provider path and forwarding user args after `--`.
 fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Option<i32> {
-    let (source, package) = target.split_once(jet::Syntax::REF_SEPARATOR)?;
+    let (package, source) = target.rsplit_once(jet::Syntax::REF_PROVIDER_AT)?;
     if source != jet::Syntax::REF_SOURCE_NIXPKGS || package.is_empty() {
         return None;
     }
@@ -506,12 +506,7 @@ fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Opt
     let before_sep = sep.map_or(raw, |i| &raw[..i]);
     let mut fwd = vec![
         "run".to_string(),
-        format!(
-            "{}{}{}",
-            jet::Syntax::REF_SOURCE_NIXPKGS,
-            jet::Syntax::REF_SEPARATOR,
-            package
-        ),
+        target.to_string(),
     ];
     let mut command_args = Vec::new();
     let mut saw_run = false;
@@ -541,14 +536,14 @@ fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Opt
             "--color=never" => fwd.push("--no-color".to_string()),
             s if s.starts_with("--") => {
                 eprintln!(
-                    "Error [E2102]: `{}` isn't a flag `jet run nixpkgs:…` understands",
+                    "Error [E2102]: `{}` isn't a flag `jet run …@nixpkgs` understands",
                     s
                 );
                 eprintln!(
                     " Why: this form forwards only package-run flags before `--`; tool arguments go after `--`"
                 );
                 eprintln!(
-                    " Fix: write `jet run nixpkgs:{} -- {}` to pass it to the tool.",
+                    " Fix: write `jet run {}@nixpkgs -- {}` to pass it to the tool.",
                     package, s
                 );
                 return Some(ExitCodes::USAGE);

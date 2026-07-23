@@ -2,7 +2,7 @@
 //! slice 6 split).
 //!
 //! These cover the CLI delegation surface — `jet clean`/`jet env`/
-//! `jet outdated`/`jet run nixpkgs:tool` routing through to the `jetpack`
+//! `jet outdated`/`jet run tool@nixpkgs` routing through to the `jetpack`
 //! engine — as distinct from the engine mechanics themselves (see
 //! `tests/jetpack_engine.rs`). Split out of the former `tests/jetpack.rs`.
 
@@ -47,7 +47,7 @@ fn bare_jet_outdated_is_a_teaching_error_naming_jet_inspect_outdated() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: github@acme/tools#latest }
+    sources: { default: acme/tools#latest@github }
     env.dev: Env.{ packages: [default.greet] }
 }
 "#,
@@ -90,7 +90,7 @@ fn jet_inspect_outdated_dispatches_to_jetpack() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: github@acme/tools#latest }
+    sources: { default: acme/tools#latest@github }
     env.dev: Env.{ packages: [default.greet] }
 }
 "#,
@@ -159,10 +159,10 @@ fn jet_env_delegates_to_jetpack_enter() {
 
 
 #[test]
-fn top_level_jet_run_nixpkgs_colon_tool_execs_tool() {
+fn top_level_jet_run_nixpkgs_suffix_tool_execs_tool() {
     // U16: `nix run nixpkgs#tool` parity at the public `jet` front door. The
-    // top-level spelling uses CLI refs (`nixpkgs:tool`) and lowers to the
-    // same jetpack realization path as `jetpack run nixpkgs:tool -- tool`.
+    // top-level spelling uses CLI refs (`tool@nixpkgs`) and lowers to the
+    // same jetpack realization path as `jetpack run tool@nixpkgs -- tool`.
     let root = Scratch::new("jet-run-nixpkgs-root");
     let proj = Scratch::new("jet-run-nixpkgs-proj");
     let fixtures = Scratch::new("jet-run-nixpkgs-fx");
@@ -171,7 +171,7 @@ fn top_level_jet_run_nixpkgs_colon_tool_execs_tool() {
     let output = jet()
         .args([
             "run",
-            "nixpkgs:greet",
+            "greet@nixpkgs",
             "--no-color",
             "--offline",
             "--fixtures",
@@ -192,11 +192,10 @@ fn top_level_jet_run_nixpkgs_colon_tool_execs_tool() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(
-        stderr.matches("running nixpkgs:greet -> greet").count(),
+        stderr.matches("running greet@nixpkgs -> greet").count(),
         1,
         "stderr: {stderr}"
     );
 }
 
 // ── U16: `jetpack bridge flake` ──
-

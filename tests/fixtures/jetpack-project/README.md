@@ -12,7 +12,7 @@ fixtures so the commands run without Nix or a network.
   live in `workspace.jet` in monorepos, not here.
 - `jet-pkgs/` — a first-party Jet package repo (no Nix) whose `pkg.jet`
   `packages:` block declares the `hello` package (an `executable`) that
-  `mine:hello` resolves to; the package is the `module hello` discovered by name
+  `hello@mine` resolves to; the package is the `module hello` discovered by name
   in its source tree (U10).
 - `functional-env.jet` — an alternative, fully functional sketch of the same
   environment (a runnable Jet program that prints the directive list).
@@ -25,22 +25,22 @@ fixtures so the commands run without Nix or a network.
 $ cd tests/fixtures/jetpack-project
 $ JETPACK_FIXTURES=fixtures jetpack build --offline
 
-  jetpack  resolving stable:ripgrep …
+  jetpack  resolving ripgrep@stable …
   jetpack  ripgrep ready ✓
            ▸ /nix/store/…-ripgrep-14.1.0
-  jetpack  resolving unstable:neovim …
+  jetpack  resolving neovim@unstable …
   jetpack  neovim ready ✓
            ▸ /nix/store/…-neovim-0.10.2
-  jetpack  resolving mine:hello …
+  jetpack  resolving hello@mine …
   jetpack  hello ready ✓
            ▸ …/store/hello-…           (core � no Nix)
   jetpack  built 3 package(s).
 ```
 
 `jetpack build`/`jetpack run` (no ref) read `env.jet` and resolve everything it
-declares — `stable:ripgrep` against the `nixos-24.05` pin, `unstable:neovim`
-against the unstable channel, and `mine:hello` through the first-party `core`
-provider (no Nix). `jetpack add unstable:fd` / `jetpack remove unstable:fd`
+declares — `ripgrep@stable` against the `nixos-24.05` pin, `neovim@unstable`
+against the unstable channel, and `hello@mine` through the first-party `core`
+provider (no Nix). `jetpack add fd@unstable` / `jetpack remove fd@unstable`
 edit `env.jet` in place, preserving the source declarations.
 
 ## Online
@@ -49,7 +49,7 @@ With Nix installed, drop `--offline`/`JETPACK_FIXTURES` and Jetpack resolves
 through the real Nix provider:
 
 ```
-$ jetpack run nixpkgs:fastfetch
+$ jetpack run fastfetch@nixpkgs
 ```
 
 See `docs/guide/07-jetpack.md` for the full command surface.

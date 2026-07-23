@@ -331,7 +331,7 @@ fn parses_nested_sources_and_imports() {
     // the `env.dev: Env.{ … }` contribution (owner, 2026-06-16; amends U4).
     let src = r#"
 module dev {
-    sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
+    sources: { default: NixOS/nixpkgs/nixos-24.05@github }
     imports: find("./modules")
     env.dev: Env.{
         prompt: "wordstats",
@@ -343,14 +343,14 @@ module dev {
         panic!("expected a module item, got {:?}", items[0]);
     };
 
-    // One named source; its `provider@target` ref is recovered by slicing the
+    // One named source; its `target@provider` ref is recovered by slicing the
     // source at the recorded span (the parser is token-based, the ref is not a
     // single token — modeval validates it via classify_provider_ref).
     assert_eq!(m.sources.len(), 1);
     assert_eq!(m.sources[0].name, "default");
     assert_eq!(
         &src[m.sources[0].ref_span.start..m.sources[0].ref_span.end],
-        "github@NixOS/nixpkgs/nixos-24.05"
+        "NixOS/nixpkgs/nixos-24.05@github"
     );
 
     // One import: `find("./modules")`, parsed as an ordinary call expression.

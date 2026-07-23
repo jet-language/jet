@@ -303,7 +303,7 @@ mod tests {
     fn attempt_json_round_trips() {
         let mut a = Attempt::new(
             "weirdctl",
-            "adapt:weirdctl:path@vendor/weirdctl",
+            "adapt:weirdctl:./vendor/weirdctl",
             "adapter",
             "rh",
             "sh",

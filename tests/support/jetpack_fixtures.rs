@@ -424,7 +424,7 @@ pub fn assert_no_hangar_entry(root: &Path, name: &str) {
 }
 
 
-/// Write a `nixpkgs:fastfetch` fixture whose `out` points at a real directory
+/// Write a `fastfetch@nixpkgs` fixture whose `out` points at a real directory
 /// we control (see `write_runnable_fixture`).
 pub fn write_fastfetch_fixture(fixtures: &Path, root: &Path, staging_dir: &Path) -> PathBuf {
     fs::create_dir_all(fixtures).unwrap();
@@ -648,7 +648,7 @@ pub fn core_hello_project(tag: &str) -> (Scratch, PathBuf, PathBuf) {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"path:{}\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
+            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{}\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}}\n",
             repo.to_string_lossy()
         ),
     )

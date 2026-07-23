@@ -1547,7 +1547,7 @@ fn lsp_completion_uses_local_discovery_index_for_packages_and_options() {
     index.add_package(jetpack::Discovery::PackageRecord {
         source: "default".to_string(),
         name: "postgres_16".to_string(),
-        reference: "default:postgres_16".to_string(),
+        reference: "postgres_16@default".to_string(),
         version: "16.4".to_string(),
         platforms: vec!["linux".to_string()],
         docs: "Postgres fixture from local discovery index".to_string(),

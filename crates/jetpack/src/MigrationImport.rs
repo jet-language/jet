@@ -134,7 +134,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
             if let Ok(name) = pkg.as_str() {
                 plan.deps.push(ImportedDep {
                     name: name.to_string(),
-                    provider_ref: format!("nixpkgs@{name}"),
+                    provider_ref: format!("{name}@nixpkgs"),
                     locked_version: String::new(),
                     dev: false,
                 });

@@ -462,6 +462,7 @@ fn parse_adapter(item: &str) -> Result<AdapterPlan, Diagnostic> {
     let args = call_args(item, "Pkg.adapt").ok_or_else(|| adapter_shape(item))?;
     let name = named_string(args, "name").ok_or_else(|| adapter_shape(item))?;
     let source = named_raw(args, "source").ok_or_else(|| adapter_shape(item))?;
+    let source = unquote(source.trim()).unwrap_or(source);
     super::super::RefSpec::classify_provider_ref(&source).map_err(|_| adapter_shape(item))?;
     let deps = named_raw(args, "deps")
         .map(|raw| {
@@ -536,7 +537,7 @@ fn adapter_shape(_raw: &str) -> Diagnostic {
         "E1270",
         "adapter package declaration is not complete".to_string(),
         "`Pkg.adapt` needs `name:`, `source:`, and a supported `recipe:`; this U20 slice supports `Recipe.copy()` and `Recipe.prebuilt(bin:, as:)`.".to_string(),
-        "write `Pkg.adapt(name: \"tool\", source: path@vendor/tool, recipe: Recipe.copy())`.".to_string(),
+        "write `Pkg.adapt(name: \"tool\", source: \"./vendor/tool\", recipe: Recipe.copy())`.".to_string(),
         None,
     )
 }
@@ -559,7 +560,7 @@ pub fn merge_all(
     Ok(out)
 }
 
-/// Render one merged `Pkg` as a `<source>:<package>` ref. A bare package (the
+/// Render one merged `Pkg` as a `<package>@<source>` ref. A bare package (the
 /// sugar's empty source) resolves against the conventional `default` source.
 pub fn pkg_ref(pkg: &Merge::Pkg) -> String {
     let source = if pkg.source.is_empty() {
@@ -567,5 +568,5 @@ pub fn pkg_ref(pkg: &Merge::Pkg) -> String {
     } else {
         pkg.source.as_str()
     };
-    format!("{}{}{}", source, Syntax::REF_SEPARATOR, pkg.name)
+    format!("{}{}{}", pkg.name, Syntax::REF_PROVIDER_AT, source)
 }

@@ -21,7 +21,7 @@ pub(super) struct NixosImportPlan {
     pub(super) host: String,
     pub(super) target: String,
     pub(super) nixpkgs_ref: String,
-    /// Additional named sources beyond nixpkgs (label, `github@…` ref) —
+    /// Additional named sources beyond nixpkgs (label, `…@github` ref) —
     /// e.g. the `nix-cachyos-kernel` pin a `.CachyOS` kernel needs, or a
     /// flake input recovered by package-provenance import.
     pub(super) extra_sources: Vec<(String, String)>,
@@ -242,7 +242,7 @@ fn import_plan_from_json(
         .ok_or_else(|| "import facts need `host`, or pass `--host <name>`.".to_string())?;
     let target = import_json_string(root, "target").unwrap_or_else(|| "linux.x64".to_string());
     let nixpkgs_ref =
-        import_json_string(root, "nixpkgs").unwrap_or_else(|| "nixpkgs@nixpkgs-unstable".to_string());
+        import_json_string(root, "nixpkgs").unwrap_or_else(|| "nixpkgs-unstable@nixpkgs".to_string());
     let (packages, omitted_packages) = import_package_list(root, "packages");
     let services = import_json_string_array(root, "services");
     let mut options = import_json_option_object(root, "options");
@@ -338,7 +338,7 @@ fn import_plan_from_scan(args: &NixosImportArgs) -> Result<NixosImportPlan, Stri
         mode: "facts-only-scan",
         host,
         target: "linux.x64".to_string(),
-        nixpkgs_ref: "nixpkgs@nixpkgs-unstable".to_string(),
+        nixpkgs_ref: "nixpkgs-unstable@nixpkgs".to_string(),
         extra_sources: Vec::new(),
         packages: Vec::new(),
         sourced_packages: Vec::new(),

@@ -102,7 +102,7 @@ fn os_import_writes_semantic_nixos_facts_with_audit() {
         r#"{
   "host": "halcyon",
   "target": "linux.x64",
-  "nixpkgs": "github@NixOS/nixpkgs/nixos-24.05",
+  "nixpkgs": "NixOS/nixpkgs/nixos-24.05@github",
   "packages": ["git", "ripgrep", "jetbrains.idea-ultimate"],
   "services": ["openssh", "pipewire"],
   "options": {
@@ -149,7 +149,7 @@ fn os_import_writes_semantic_nixos_facts_with_audit() {
     );
     let config = fs::read_to_string(out_dir.join("config.jet")).unwrap();
     assert!(config.contains("system.halcyon"), "{config}");
-    assert!(config.contains("nixpkgs: github@NixOS/nixpkgs/nixos-24.05"), "{config}");
+    assert!(config.contains("nixpkgs: NixOS/nixpkgs/nixos-24.05@github"), "{config}");
     assert!(config.contains("packages: [nixpkgs.[git, ripgrep]]"), "{config}");
     assert!(config.contains("openssh: { enable: true"), "{config}");
     assert!(config.contains("user.nate.packages: [nixpkgs.[neovim, ghostty]]"), "{config}");
@@ -224,7 +224,7 @@ exit 0
     );
     let config = String::from_utf8_lossy(&out.stdout);
     assert!(
-        config.contains("zen_beta: github@0xc000022070/zen-browser-flake/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+        config.contains("zen_beta: 0xc000022070/zen-browser-flake/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@github"),
         "extra source must be pinned from flake.lock:\n{config}"
     );
     assert!(
@@ -262,7 +262,7 @@ fn os_import_live_semantic_eval_maps_real_options() {
         String::from_utf8_lossy(&out.stderr)
     );
     let config = String::from_utf8_lossy(&out.stdout);
-    assert!(config.contains("nixpkgs: github@NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51"), "{config}");
+    assert!(config.contains("nixpkgs: NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51@github"), "{config}");
     assert!(config.contains("network.hostName: \"halcyon\""), "{config}");
     assert!(config.contains("network.networkmanager.enable: true"), "{config}");
     assert!(config.contains("network.firewall.allowedTcpPorts: [22, 443]"), "{config}");
@@ -2375,7 +2375,7 @@ fn os_build_bare_host_uses_current_repo_config() {
     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+        "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -2422,7 +2422,7 @@ fn os_cachyos_kernel_source_recipe_builds_boot_artifacts() {
     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+        "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -2487,7 +2487,7 @@ fn os_cachyos_kernel_source_builder_failure_is_diagnostic() {
     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+        "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -2549,7 +2549,7 @@ fn os_systemd_init_requires_first_party_source() {
     write_cachyos_source_recipe(&pkg);
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+        "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -2593,7 +2593,7 @@ fn os_default_gnome_desktop_requires_first_party_packages() {
     write_executable(&systemd.join("bin/systemd"), "#!/bin/sh\nexit 0\n");
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64, options: [ services.desktop.profile: .Default ] }\n}\n",
+        "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64, options: [ services.desktop.profile: .Default ] }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -2635,7 +2635,7 @@ fn os_cachyos_kernel_requires_boot_artifacts() {
     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+        "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -2680,7 +2680,7 @@ fn os_cachyos_kernel_rejects_text_boot_artifacts() {
     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+        "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -2723,7 +2723,7 @@ fn os_cachyos_kernel_requires_source_recipe() {
     fs::write(systemd.join("bin/systemd"), "test systemd\n").unwrap();
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+        "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -2766,7 +2766,7 @@ fn os_systemd_init_requires_init_artifact() {
     fs::write(systemd.join("systemd.jet"), "module systemd { }\n").unwrap();
     fs::write(
         proj.join("config.jet"),
-        "module box {\n    sources: { mine: path@./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
+        "module box {\n    sources: { mine: ./jet-pkgs }\n    system.box: { target: linux.x64 }\n}\n",
     )
     .unwrap();
     let out = jet()
@@ -2819,7 +2819,7 @@ fn os_unknown_host_lists_available_systems() {
 fn os_missing_config_file_is_friendly() {
     let root = Scratch::new("os-no-config");
     let out = jet()
-        .args(["os", "build", "/definitely/not/here@box", "--no-color"])
+        .args(["os", "build", "box@/definitely/not/here", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();

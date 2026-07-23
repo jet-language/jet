@@ -17,16 +17,16 @@
 //!     cli: executable,
 //! }
 //! deps: {
-//!     textkit:  "1.2.0",
-//!     helpers:  path@../helpers,
+//!     textkit: textkit#1.2.0,
+//!     helpers:  ../helpers,
 //!     parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" },
 //! }
 //! ```
 //!
 //! This module is the structural parser for that shape (U1). It is std-only
-//! (I6). Dependency values are a registry version string (`"1.2.0"`), a
-//! `provider@target` source ref (`path@../local`, `github@owner/repo/rev`,
-//! classified through `RefSpec::classify_provider_ref`, U6), or an inline
+//! (I6). Dependency values are a `name#version` pin, a bare local path, a
+//! `target@provider` source ref (`owner/repo/rev@github`, classified through
+//! `RefSpec::classify_provider_ref`, D-JPK-REF1), or an inline
 //! git struct (`{ git: "<url>", tag/branch/rev: "<value>" }`, D-JPK23 —
 //! generalizes to any git remote, not just GitHub). `to_manifest` converts a
 //! parsed `PackManifest` into the compiler's `Manifest::Manifest`, the type
@@ -196,9 +196,9 @@ pub struct PackageEntry {
 /// Where a dependency resolves from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DepSource {
-    /// A registry version string, e.g. `"1.2.0"`.
+    /// The selector from a `name#version` registry ref.
     Version(String),
-    /// A `provider@target` source ref, e.g. `path@../helpers`.
+    /// A bare path or `target@provider` source ref.
     Provider { provider: Source, target: String },
     /// An inline git dependency (D-JPK23): any remote, with an explicit
     /// selector — `{ git: "<url>", tag/branch/rev: "<value>" }`.
@@ -272,9 +272,9 @@ pub enum ManifestError {
     MissingPayload,
     /// `payload` is missing a required `name` or `version`.
     MissingField(&'static str),
-    /// A `deps` value is neither a quoted version nor a `provider@target` ref.
+    /// A `deps` value is not a `name#version`, bare path, or source ref.
     BadDepValue { name: String, value: String },
-    /// A `provider@target` dep ref failed to classify (U6).
+    /// A dependency source ref failed to classify (D-JPK-REF1).
     BadDepRef { name: String, err: RefError },
     /// An inline git dep (D-JPK23) is missing `git`, or doesn't have exactly
     /// one of `tag`/`branch`/`rev`.
@@ -482,8 +482,8 @@ packages: {
     cli: executable,
 }
 deps: {
-    textkit: "1.2.0",
-    helpers: path@../helpers,
+    textkit: textkit#1.2.0,
+    helpers: ../helpers,
 }
 "#;
 
@@ -695,7 +695,7 @@ packages: {
     fn github_provider_dep() {
         let src = r#"
 payload: { name: "p", version: "0.1.0" }
-deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
+deps: { up: NixOS/nixpkgs/nixos-24.05@github }
 "#;
         let m = parse(src).unwrap();
         assert_eq!(
@@ -705,6 +705,26 @@ deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
                 target: "NixOS/nixpkgs/nixos-24.05".into(),
             }
         );
+    }
+
+    #[test]
+    fn provider_first_dep_is_a_teaching_error() {
+        let err = parse(
+            r#"payload: { name: "p", version: "0.1.0" }
+deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
+"#,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ManifestError::BadDepRef {
+                err: RefError::ProviderFirst {
+                    ref replacement,
+                    ..
+                },
+                ..
+            } if replacement == "NixOS/nixpkgs/nixos-24.05@github"
+        ));
     }
 
     #[test]
@@ -749,7 +769,7 @@ deps: {
         // converted Manifest's dependency map (never realized / locked).
         let src = r#"
 payload: { name: "p", version: "0.1.0" }
-deps: { textkit: "1.2.0", raylib: c@system }
+deps: { textkit: textkit#1.2.0, raylib: c@system }
 "#;
         let m = parse(src).unwrap();
         let mf = to_manifest(&m, src).unwrap();
@@ -895,8 +915,8 @@ deps: { bad: { git: "https://example.com/x", tag: "v1", branch: "main" } }
         let src = r#"
 payload: { name: "p", version: "0.1.0" }
 deps: {
-    textkit:  "1.2.0",
-    helpers:  path@../helpers,
+    textkit: textkit#1.2.0,
+    helpers:  ../helpers,
     parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" },
 }
 "#;
@@ -966,7 +986,7 @@ deps: { parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" } }
     fn to_manifest_converts_github_provider_ref_as_pinned_rev() {
         let src = r#"
 payload: { name: "p", version: "0.1.0" }
-deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
+deps: { up: NixOS/nixpkgs/nixos-24.05@github }
 "#;
         let m = parse(src).unwrap();
         let mf = to_manifest(&m, src).unwrap();
@@ -983,7 +1003,7 @@ deps: { up: github@NixOS/nixpkgs/nixos-24.05 }
     fn to_manifest_rejects_nixpkgs_provider_dep() {
         let src = r#"
 payload: { name: "p", version: "0.1.0" }
-deps: { x: nixpkgs@fastfetch }
+deps: { x: fastfetch@nixpkgs }
 "#;
         let m = parse(src).unwrap();
         let err = to_manifest(&m, src).unwrap_err();
@@ -1044,7 +1064,7 @@ payload: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
 
     #[test]
     fn add_dep_inserts_into_existing_block_and_replaces() {
-        let raw = "payload: { name: \"x\", version: \"1\" }\n\ndeps: {\n    a: \"1.0.0\",\n}\n";
+        let raw = "payload: { name: \"x\", version: \"1\" }\n\ndeps: {\n    a: a#1.0.0,\n}\n";
         let updated = add_dep(
             raw,
             "b",
@@ -1071,7 +1091,7 @@ payload: { name: "p", version: "0.1.0", jet: ">=1.0.0" }
 
     #[test]
     fn remove_dep_drops_only_named_entry() {
-        let raw = "payload: { name: \"x\", version: \"1\" }\n\ndeps: {\n    a: \"1.0.0\",\n    b: \"2.0.0\",\n}\n";
+        let raw = "payload: { name: \"x\", version: \"1\" }\n\ndeps: {\n    a: a#1.0.0,\n    b: b#2.0.0,\n}\n";
         let updated = remove_dep(raw, "a");
         let m = parse(&updated).unwrap();
         assert_eq!(m.deps.len(), 1);

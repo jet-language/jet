@@ -123,7 +123,7 @@ fn doctor_checks_real_state_and_is_read_only() {
         &jetpack::Store::IngestRequest {
             name: "demo".into(),
             version: "1".into(),
-            reference: "path:demo".into(),
+            reference: "./demo".into(),
             cache_identity: jetpack::Store::CacheIdentity {
                 source_fingerprint: "sha256-test-source".into(),
                 recipe_fingerprint: "sha256-test-recipe".into(),
@@ -133,7 +133,7 @@ fn doctor_checks_real_state_and_is_read_only() {
             references: Vec::new(),
             outputs: std::collections::BTreeMap::from([("out".into(), output.clone())]),
             signature: String::new(),
-            provenance: "path:demo via test".into(),
+            provenance: "./demo via test".into(),
             platform_artifact_kind: String::new(),
         },
     )
@@ -190,7 +190,7 @@ fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
         .args([
             "override",
             "draft",
-            "nixpkgs:foo",
+            "foo@nixpkgs",
             "--overlay",
             "plasma_beta",
             "--provider",
@@ -249,7 +249,7 @@ fn override_draft_writes_reviewed_workspace_policy_and_explains_it() {
 fn build_resolves_fixture_ref() {
     let root = Scratch::new("root");
     let out = jetpack()
-        .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
+        .args(["build", "fastfetch@nixpkgs", "--no-color", "--offline"])
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .output()
@@ -268,7 +268,7 @@ fn list_shows_realized_package() {
     let staging = Scratch::new("greet-out");
     write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
     let built = jetpack()
-        .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
+        .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_FIXTURES", &fixtures.path)
         .output()
@@ -307,7 +307,7 @@ fn disappeared_output_build_fails_without_store_state_and_retries() {
     fs::remove_dir_all(&missing).unwrap();
     let build = || {
         jetpack()
-            .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
+            .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
             .env("JETPACK_ROOT", &root.path)
             .env("JETPACK_FIXTURES", &fixtures.path)
             .output()
@@ -355,7 +355,7 @@ fn unreadable_and_wrong_kind_outputs_leave_no_store_entry() {
     };
     let build = || {
         jetpack()
-            .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
+            .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
             .env("JETPACK_ROOT", &root.path)
             .env("JETPACK_FIXTURES", &fixtures.path)
             .output()
@@ -556,7 +556,7 @@ fn build_runs_opportunistic_clean_after_success() {
     let stale = write_hangar_meta(&root.path, "old-auto", "oldauto", "1.0", Some(1)).0;
 
     let out = jetpack()
-        .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
+        .args(["build", "fastfetch@nixpkgs", "--no-color", "--offline"])
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
         .env("JETPACK_AUTO_CLEAN_ALWAYS", "1")
@@ -586,7 +586,7 @@ fn run_dash_dash_executes_in_env_and_returns_status() {
     let output = jetpack()
         .args([
             "run",
-            "nixpkgs:greet",
+            "greet@nixpkgs",
             "--no-color",
             "--offline",
             "--",
@@ -614,7 +614,7 @@ fn run_explicit_package_without_command_runs_package_visibly() {
     write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path);
 
     let output = jetpack()
-        .args(["run", "nixpkgs:greet", "--no-color", "--offline"])
+        .args(["run", "greet@nixpkgs", "--no-color", "--offline"])
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_FIXTURES", &fixtures.path)
         .output()
@@ -630,7 +630,7 @@ fn run_explicit_package_without_command_runs_package_visibly() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("running nixpkgs:greet -> greet"),
+        stderr.contains("running greet@nixpkgs -> greet"),
         "stderr: {stderr}"
     );
     assert!(stderr.contains("(no args)"), "stderr: {stderr}");
@@ -647,7 +647,7 @@ fn run_dash_dash_propagates_failure_status() {
     let output = jetpack()
         .args([
             "run",
-            "nixpkgs:greet",
+            "greet@nixpkgs",
             "--no-color",
             "--offline",
             "--",
@@ -682,7 +682,7 @@ fn parent_env_unchanged_after_run() {
     let output = jetpack()
         .args([
             "run",
-            "nixpkgs:greet",
+            "greet@nixpkgs",
             "--no-color",
             "--offline",
             "--",
@@ -719,14 +719,14 @@ fn bad_ref_is_friendly_and_exits_2() {
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("missing a source"), "stderr: {stderr}");
-    assert!(stderr.contains("<source>:<package>"), "stderr: {stderr}");
+    assert!(stderr.contains("name#version@source"), "stderr: {stderr}");
 }
 
 
 #[test]
 fn unknown_source_is_friendly() {
     let out = jetpack()
-        .args(["build", "brew:wget", "--no-color"])
+        .args(["build", "wget@brew", "--no-color"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
@@ -741,11 +741,11 @@ fn add_then_remove_edits_env_file() {
     let env_path = proj.join("env.jet");
     fs::write(
         &env_path,
-        fs::read_to_string(&env_path).unwrap().replace("\"mine:hello\"", ""),
+        fs::read_to_string(&env_path).unwrap().replace("\"hello@mine\"", ""),
     )
     .unwrap();
     let add = jetpack()
-        .args(["add", "mine:hello", "--no-color"])
+        .args(["add", "hello@mine", "--no-color"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .output()
@@ -765,7 +765,7 @@ fn add_then_remove_edits_env_file() {
     assert!(env.contains("pkg.packages"), "env.jet: {env}");
 
     let remove = jetpack()
-        .args(["remove", "mine:hello", "--no-color", "--yes"])
+        .args(["remove", "hello@mine", "--no-color", "--yes"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .output()
@@ -773,7 +773,7 @@ fn add_then_remove_edits_env_file() {
     assert!(remove.status.success());
     let env = fs::read_to_string(proj.join("env.jet")).unwrap();
     assert!(
-        !env.contains("\"mine:hello\""),
+        !env.contains("\"hello@mine\""),
         "env.jet still has hello: {env}"
     );
 }
@@ -785,11 +785,11 @@ fn remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty() {
     let env_path = proj.join("env.jet");
     fs::write(
         &env_path,
-        fs::read_to_string(&env_path).unwrap().replace("\"mine:hello\"", ""),
+        fs::read_to_string(&env_path).unwrap().replace("\"hello@mine\"", ""),
     )
     .unwrap();
     let add = jetpack()
-        .args(["add", "mine:hello", "--no-color"])
+        .args(["add", "hello@mine", "--no-color"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .output()
@@ -797,14 +797,14 @@ fn remove_without_yes_prints_plan_and_keeps_env_file_in_non_tty() {
     assert!(add.status.success());
 
     let remove = jetpack()
-        .args(["remove", "mine:hello", "--no-color"])
+        .args(["remove", "hello@mine", "--no-color"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .output()
         .unwrap();
     assert!(remove.status.success());
     let env = fs::read_to_string(proj.join("env.jet")).unwrap();
-    assert!(env.contains("\"mine:hello\""), "env.jet was changed: {env}");
+    assert!(env.contains("\"hello@mine\""), "env.jet was changed: {env}");
     let stderr = String::from_utf8_lossy(&remove.stderr);
     assert!(stderr.contains("Plan env edit"), "stderr: {stderr}");
     assert!(stderr.contains("- hello"), "stderr: {stderr}");
@@ -820,11 +820,11 @@ fn remove_with_short_yes_applies_identically_to_long_yes() {
     let env_path = proj.join("env.jet");
     fs::write(
         &env_path,
-        fs::read_to_string(&env_path).unwrap().replace("\"mine:hello\"", ""),
+        fs::read_to_string(&env_path).unwrap().replace("\"hello@mine\"", ""),
     )
     .unwrap();
     let add = jetpack()
-        .args(["add", "mine:hello", "--no-color"])
+        .args(["add", "hello@mine", "--no-color"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .output()
@@ -836,7 +836,7 @@ fn remove_with_short_yes_applies_identically_to_long_yes() {
     );
 
     let remove = jetpack()
-        .args(["remove", "mine:hello", "--no-color", "-y"])
+        .args(["remove", "hello@mine", "--no-color", "-y"])
         .current_dir(&proj)
         .env("JETPACK_ROOT", &root)
         .output()
@@ -848,7 +848,7 @@ fn remove_with_short_yes_applies_identically_to_long_yes() {
     );
     let env = fs::read_to_string(proj.join("env.jet")).unwrap();
     assert!(
-        !env.contains("\"mine:hello\""),
+        !env.contains("\"hello@mine\""),
         "short -y must apply the remove plan: {env}"
     );
     let stderr = String::from_utf8_lossy(&remove.stderr);
@@ -906,7 +906,7 @@ module dev {
         packages: [
             Pkg.adapt(
                 name: "tool",
-                source: path@vendor/tool,
+                source: "./vendor/tool",
                 recipe: Recipe.copy()
             )
         ],
@@ -978,7 +978,7 @@ module dev {
         packages: [
             Pkg.adapt(
                 name: "weirdctl",
-                source: path@vendor/weirdctl,
+                source: "./vendor/weirdctl",
                 recipe: Recipe.prebuilt(bin: "weirdctl", as: "weirdctl")
             )
         ],
@@ -1007,7 +1007,7 @@ module dev {
 fn no_nix_nixpkgs_package_reports_e1272() {
     let root = Scratch::new("root");
     let output = jetpack()
-        .args(["build", "nixpkgs:postgres", "--no-color"])
+        .args(["build", "postgres@nixpkgs", "--no-color"])
         .env("JETPACK_ROOT", &root.path)
         .env("PATH", "/usr/bin:/bin")
         .output()
@@ -1015,7 +1015,7 @@ fn no_nix_nixpkgs_package_reports_e1272() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1272"), "stderr: {stderr}");
-    assert!(stderr.contains("nixpkgs:postgres"), "stderr: {stderr}");
+    assert!(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}");
     assert!(stderr.contains("install Nix"), "stderr: {stderr}");
     assert!(stderr.contains("--adapt"), "stderr: {stderr}");
     assert!(!stderr.contains("E1256"), "stderr: {stderr}");
@@ -1045,7 +1045,7 @@ fn no_nix_ad_hoc_package_reports_e1272() {
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("E1272"), "stderr: {stderr}");
-    assert!(stderr.contains("nixpkgs:postgres"), "stderr: {stderr}");
+    assert!(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}");
 }
 
 
@@ -1055,8 +1055,8 @@ fn no_nix_mixed_env_realizes_core_then_reports_nix_hole() {
     fs::write(
         proj.join("env.jet"),
         fs::read_to_string(proj.join("env.jet")).unwrap().replace(
-            "pkg.packages([\"mine:hello\"])",
-            "pkg.packages([\"mine:hello\", \"nixpkgs:postgres\"])",
+            "pkg.packages([\"hello@mine\"])",
+            "pkg.packages([\"hello@mine\", \"postgres@nixpkgs\"])",
         ),
     )
     .unwrap();
@@ -1078,7 +1078,7 @@ fn no_nix_mixed_env_realizes_core_then_reports_nix_hole() {
         "stderr: {stderr}"
     );
     assert!(stderr.contains("E1272"), "stderr: {stderr}");
-    assert!(stderr.contains("nixpkgs:postgres"), "stderr: {stderr}");
+    assert!(stderr.contains("postgres@nixpkgs"), "stderr: {stderr}");
     let metas = fs::read_dir(root.join("hangar"))
         .unwrap()
         .flatten()
@@ -1095,8 +1095,8 @@ fn no_nix_json_lists_realized_refs_and_holes() {
     fs::write(
         proj.join("env.jet"),
         fs::read_to_string(proj.join("env.jet")).unwrap().replace(
-            "pkg.packages([\"mine:hello\"])",
-            "pkg.packages([\"mine:hello\", \"nixpkgs:postgres\"])",
+            "pkg.packages([\"hello@mine\"])",
+            "pkg.packages([\"hello@mine\", \"postgres@nixpkgs\"])",
         ),
     )
     .unwrap();
@@ -1112,11 +1112,11 @@ fn no_nix_json_lists_realized_refs_and_holes() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("\"code\":\"E1272\""), "stdout: {stdout}");
     assert!(
-        stdout.contains("\"realized\":[\"mine:hello\"]"),
+        stdout.contains("\"realized\":[\"hello@mine\"]"),
         "stdout: {stdout}"
     );
     assert!(
-        stdout.contains("\"holes\":[\"nixpkgs:postgres\"]"),
+        stdout.contains("\"holes\":[\"postgres@nixpkgs\"]"),
         "stdout: {stdout}"
     );
 }
@@ -1134,7 +1134,7 @@ module dev {
         packages: [
             Pkg.adapt(
                 name: "broken",
-                source: path@vendor/broken,
+                source: "./vendor/broken",
                 recipe: Recipe.build()
             )
         ],
@@ -1164,7 +1164,7 @@ fn channel_update_writes_exact_lock_and_build_uses_it_offline() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: github@acme/tools#latest }
+    sources: { default: acme/tools#latest@github }
     env.dev: Env.{ packages: [default.greet] }
 }
 "#,
@@ -1233,7 +1233,7 @@ fn channel_build_without_lock_is_e1271() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: github@acme/tools#latest }
+    sources: { default: acme/tools#latest@github }
     env.dev: Env.{ packages: [default.greet] }
 }
 "#,
@@ -1265,8 +1265,8 @@ fn channel_update_accepts_main_and_semver_mask() {
         r#"
 module dev {
     sources: {
-        trunk: github@acme/tools#main,
-        stable: github@acme/tools#v0.x,
+        trunk: acme/tools#main@github,
+        stable: acme/tools#v0.x@github,
     }
     env.dev: Env.{ packages: [trunk.greet, stable.greet] }
 }
@@ -1318,7 +1318,7 @@ fn outdated_reports_newer_channel_without_mutating_lock() {
         proj.join("env.jet"),
         r#"
 module dev {
-    sources: { default: github@acme/tools#latest }
+    sources: { default: acme/tools#latest@github }
     env.dev: Env.{ packages: [default.greet] }
 }
 "#,
@@ -1364,7 +1364,7 @@ module dev {
 fn add_adapt_prints_snippet_without_editing_env() {
     let proj = Scratch::new("proj");
     let output = jetpack()
-        .args(["add", "path:vendor/weirdctl", "--adapt", "--no-color"])
+        .args(["add", "./vendor/weirdctl", "--adapt", "--no-color"])
         .current_dir(&proj.path)
         .output()
         .unwrap();
@@ -1372,7 +1372,7 @@ fn add_adapt_prints_snippet_without_editing_env() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Pkg.adapt("), "stdout: {stdout}");
     assert!(
-        stdout.contains("source: path@vendor/weirdctl"),
+        stdout.contains("source: \"./vendor/weirdctl\""),
         "stdout: {stdout}"
     );
     assert!(!proj.join("env.jet").exists());
@@ -1382,13 +1382,13 @@ fn add_adapt_prints_snippet_without_editing_env() {
 #[test]
 fn named_source_env_resolves_with_pin() {
     // An env that declares a named source `stable` and references it inline as
-    // `stable:ripgrep` resolves via the nix provider against the pin. The
+    // `ripgrep@stable` resolves via the nix provider against the pin. The
     // fixture is keyed by the source name (`stable-ripgrep.json`).
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
     fs::write(
         proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"github:NixOS/nixpkgs/nixos-24.05\");\n        pkg.packages([\"stable:ripgrep\"]);\n    ];\n}\n",
+        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\");\n        pkg.packages([\"ripgrep@stable\"]);\n    ];\n}\n",
     )
     .unwrap();
     let output = jetpack()
@@ -1412,10 +1412,10 @@ fn named_source_env_resolves_with_pin() {
 fn unknown_named_source_in_env_is_friendly() {
     let proj = Scratch::new("proj");
     let root = Scratch::new("root");
-    // References `beta:neovim` but only declares `stable`.
+    // References `neovim@beta` but only declares `stable`.
     fs::write(
         proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"github:NixOS/nixpkgs/nixos-24.05\");\n        pkg.packages([\"beta:neovim\"]);\n    ];\n}\n",
+        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\");\n        pkg.packages([\"neovim@beta\"]);\n    ];\n}\n",
     )
     .unwrap();
     let output = jetpack()
@@ -1729,7 +1729,7 @@ fn core_provider_runs_first_party_package_without_nix() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"path:{}\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
+            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{}\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -1756,7 +1756,7 @@ fn core_provider_runs_first_party_package_without_nix() {
 
 #[test]
 fn typed_core_source_inferred_from_pack_jet() {
-    // U9/U10: a typed `module { … }` env declares `sources: { mine: path@<dir> }`
+    // U9/D-JPK-REF1: a typed module declares a local source as a bare path.
     // with no provider marker. The kind is *inferred* from `pkg.jet` in the
     // target → realizes through the first-party `core` provider. U10 Chunk 3:
     // the package is discovered by module name — `module hello` in the source tree
@@ -1786,11 +1786,11 @@ fn typed_core_source_inferred_from_pack_jet() {
         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
     }
     // The typed env declares the source with no `via`/`core` marker — just
-    // `provider@target`. `mine.hello` is the Pkg sugar → `mine:hello`.
+    // `target@provider`. `mine.hello` is the Pkg sugar → `hello@mine`.
     fs::write(
         proj.join("env.jet"),
         format!(
-            "module dev {{\n    sources: {{ mine: path@{} }}\n    env.dev: Env.{{\n        packages: [mine.hello],\n    }}\n}}\n",
+            "module dev {{\n    sources: {{ mine: {} }}\n    env.dev: Env.{{\n        packages: [mine.hello],\n    }}\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -1846,7 +1846,7 @@ fn core_provider_builds_library_package_without_nix() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "module dev {{\n    sources: {{ mine: path@{} }}\n    env.dev: Env.{{\n        packages: [mine.mathlib],\n    }}\n}}\n",
+            "module dev {{\n    sources: {{ mine: {} }}\n    env.dev: Env.{{\n        packages: [mine.mathlib],\n    }}\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -1876,9 +1876,9 @@ fn core_provider_builds_library_package_without_nix() {
 fn committed_example_builds_offline_end_to_end() {
     // I5: the committed jetpack project fixture is the executable spec for
     // a real env.jet. `jetpack build` with no ref reads env.jet and realizes
-    // everything it declares — nix-backed named sources (`stable:ripgrep`,
-    // `unstable:neovim`) resolved from the committed fixtures, plus a
-    // first-party `mine:hello` realized through the `core` provider with no
+    // everything it declares — nix-backed named sources (`ripgrep@stable`,
+    // `neovim@unstable`) resolved from the committed fixtures, plus a
+    // first-party `hello@mine` realized through the `core` provider with no
     // nix. The whole thing runs fully offline. The store lives under a scratch
     // JETPACK_ROOT, so nothing is written back into the example dir.
     let project = Scratch::new("example-e2e-project");
@@ -1919,7 +1919,7 @@ fn failed_first_dependency_reports_zero_completed_nodes() {
     let env_path = proj.join("env.jet");
     let env = fs::read_to_string(&env_path)
         .unwrap()
-        .replace("[\"mine:hello\"]", "[\"mine:missing\", \"mine:hello\"]");
+        .replace("[\"hello@mine\"]", "[\"missing@mine\", \"hello@mine\"]");
     fs::write(&env_path, env).unwrap();
     let out = jetpack()
         .args(["build", "--no-color"])
@@ -2030,7 +2030,7 @@ fn core_provider_fetches_remote_git_package_from_env() {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"file://{}#HEAD\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}}\n",
+            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"file://{}#HEAD\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}}\n",
             repo.to_string_lossy()
         ),
     )
@@ -2070,14 +2070,14 @@ fn core_provider_fetches_remote_git_package_from_env() {
     );
 }
 
-// ── E7 jetos runtime: `jet os <verb> <host>` / `path@host` ─────────
+// ── E7 jetos runtime: `jet os <verb> <host>` / `host@root` ─────────
 
 
 #[test]
 fn offline_without_fixtures_errors() {
     let root = Scratch::new("root");
     let out = jetpack()
-        .args(["build", "nixpkgs:fastfetch", "--no-color", "--offline"])
+        .args(["build", "fastfetch@nixpkgs", "--no-color", "--offline"])
         .env("JETPACK_ROOT", &root.path)
         .env_remove("JETPACK_FIXTURES")
         .output()
@@ -2085,7 +2085,7 @@ fn offline_without_fixtures_errors() {
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E1276"), "stderr: {stderr}");
-    assert!(stderr.contains("nixpkgs:fastfetch"), "stderr: {stderr}");
+    assert!(stderr.contains("fastfetch@nixpkgs"), "stderr: {stderr}");
 }
 
 // ── D-JPK-FILES Phase 2b: jetpack.toml wiring ─────────────────────────────
@@ -2236,15 +2236,15 @@ fn jetpack_toml_sources_merge_into_cwd_table() {
     // jetpack.toml declares `mine` as a path source (no via — inferred as core).
     fs::write(
         proj.join("jetpack.toml"),
-        format!("[sources]\nmine = \"path@{}\"\n", repo.to_string_lossy()),
+        format!("[sources]\nmine = \"{}\"\n", repo.to_string_lossy()),
     )
     .unwrap();
-    // env.jet references `mine:hello` — the source name is resolved from jetpack.toml.
+    // env.jet references `hello@mine` — the source name is resolved from jetpack.toml.
     fs::write(
         proj.join("env.jet"),
-        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"mine\", \"path:PLACEHOLDER\", \"core\");\n        pkg.packages([\"mine:hello\"]);\n    ];\n}\n".replace(
-            "path:PLACEHOLDER",
-            &format!("path:{}", repo.to_string_lossy()),
+        "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"mine\", \"PLACEHOLDER\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}\n".replace(
+            "PLACEHOLDER",
+            &repo.to_string_lossy(),
         ),
     )
     .unwrap();
@@ -2400,11 +2400,11 @@ fn two_process_reverse_package_order_does_not_deadlock() {
         fs::write(
             project.join("env.jet"),
             format!(
-                "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n return [pkg.source(\"mine\", \"path:{}\", \"core\"); pkg.packages([{}]);];\n}}\n",
+                "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n return [pkg.source(\"mine\", \"{}\", \"core\"); pkg.packages([{}]);];\n}}\n",
                 repo.display(),
                 packages
                     .iter()
-                    .map(|package| format!("\"mine:{package}\""))
+                    .map(|package| format!("\"{package}@mine\""))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -2455,7 +2455,7 @@ fn jet_build_never_reports_deleted_output_as_cached() {
         root: root.clone(),
         dev_mode: false,
     };
-    let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    let entry = jetpack::Store::find_by_reference(&roots, "hello@mine").unwrap();
     make_tree_writable(Path::new(&entry.out));
     fs::remove_dir_all(&entry.out).unwrap();
 
@@ -2491,7 +2491,7 @@ fn jet_build_never_reports_tampered_output_as_cached() {
         root: root.clone(),
         dev_mode: false,
     };
-    let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    let entry = jetpack::Store::find_by_reference(&roots, "hello@mine").unwrap();
     make_tree_writable(Path::new(&entry.out));
     fs::write(Path::new(&entry.out).join("bin/hello"), "tampered").unwrap();
 

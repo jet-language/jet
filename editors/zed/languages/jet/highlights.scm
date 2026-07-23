@@ -21,7 +21,7 @@
 (null_literal) @constant.builtin
 (ok_err_literal) @constant.builtin
 
-; Source / dependency refs (`c@system`, `github@owner/repo`)
+; Source / dependency refs (`c@system`, `tool@github`)
 (source_ref (ref_target) @string.special)
 
 ; Types

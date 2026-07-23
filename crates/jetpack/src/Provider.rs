@@ -920,11 +920,11 @@ pub(crate) fn provider_for(kind: ProviderKind) -> Box<dyn Provider> {
 
 /// Resolve a ref's concrete provider kind (`Nix`/`Core`), running the U9
 /// realize-time probe when the source table left the kind to **inference**
-/// (a typed `github@…` source). `offline`/`cache_dir` come from the realize
+/// (a typed `…@github` source). `offline`/`cache_dir` come from the realize
 /// context: offline never hits the network — it reuses a cached checkout if
 /// present, else falls back to `nix`.
 ///
-/// Built-in sources and `path@…`/`nixpkgs@…` named sources are already concrete
+/// Built-in sources, bare paths, and `…@nixpkgs` named sources are already concrete
 /// in the table, so no probe runs for them.
 pub fn resolve_kind(
     spec: &RefSpec,
@@ -974,7 +974,7 @@ fn script_registry_kind(kind: ProviderKind) -> Option<ScriptRegistryKind> {
 }
 
 /// True when realizing this ref goes through the Nix compatibility provider.
-/// Resolves the kind first (so an inferred `github@…` source is probed).
+/// Resolves the kind first (so an inferred `…@github` source is probed).
 pub fn uses_nix_provider(
     spec: &RefSpec,
     table: &SourceTable,
@@ -1170,7 +1170,7 @@ fn stage_adapter_source(
             fetch_remote_repo(&remote, ctx)
         }
         Source::Nixpkgs => Err(ProviderError::Adapter(
-            "`nixpkgs@...` is an index source, not source bytes; use `jetpack add <ref> --adapt` to draft a concrete adapter.".to_string(),
+            "`...@nixpkgs` is an index source, not source bytes; use `jetpack add <ref> --adapt` to draft a concrete adapter.".to_string(),
         )),
         Source::Cran => Err(ProviderError::Adapter(
             "CRAN packages must be realized before they can be adapter source bytes.".to_string(),
@@ -1184,12 +1184,12 @@ fn stage_adapter_source(
                 .to_string(),
         )),
         Source::Named(_) => Err(ProviderError::Adapter(
-            "adapter source must be a built-in provider ref like `path@vendor/tool`.".to_string(),
+            "adapter source must be a source ref such as `owner/repo@github` or a bare path such as `./vendor/tool`.".to_string(),
         )),
     }
 }
 
-/// U9 remote probe: classify a `github@…`/git upstream as `Core` (it carries a
+/// U9 remote probe: classify an `…@github`/git upstream as `Core` (it carries a
 /// `pkg.jet`) or `Nix` (it does not), peeking **only** `pkg.jet` — never
 /// cloning a nixpkgs-sized repo just to classify it.
 ///
@@ -1525,11 +1525,11 @@ mod tests {
     #[test]
     fn translates_ref_to_flake() {
         assert_eq!(
-            flake_ref(&classify("nixpkgs:fastfetch").unwrap(), &empty()),
+            flake_ref(&classify("fastfetch@nixpkgs").unwrap(), &empty()),
             "nixpkgs#fastfetch"
         );
         assert_eq!(
-            flake_ref(&classify("github:o/r").unwrap(), &empty()),
+            flake_ref(&classify("o/r@github").unwrap(), &empty()),
             "github:o/r"
         );
     }
@@ -1541,7 +1541,7 @@ mod tests {
             "github:NixOS/nixpkgs/nixos-24.05".to_string(),
             super::super::RefSpec::ProviderKind::Nix,
         )]);
-        let spec = classify_in("stable:ripgrep", &table).unwrap();
+        let spec = classify_in("ripgrep@stable", &table).unwrap();
         assert_eq!(
             flake_ref(&spec, &table),
             "github:NixOS/nixpkgs/nixos-24.05#ripgrep"
@@ -1552,13 +1552,13 @@ mod tests {
 
     #[test]
     fn fixture_name_sanitizes_slashes() {
-        let s = classify("github:halcyonomega/cfg").unwrap();
+        let s = classify("halcyonomega/cfg@github").unwrap();
         assert_eq!(fixture_name(&s), "github-halcyonomega_cfg.json");
     }
 
     #[test]
     fn parses_good_output() {
-        let spec = classify("nixpkgs:fastfetch").unwrap();
+        let spec = classify("fastfetch@nixpkgs").unwrap();
         let stdout = r#"[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]"#;
         let r = parse_realization(&spec, stdout).unwrap();
         assert_eq!(r.out, "/nix/store/abc-fastfetch-2.0");
@@ -1582,7 +1582,7 @@ mod tests {
     /// bug", for any user on a large optimised store.
     #[test]
     fn tolerates_nix_store_noise_around_output() {
-        let spec = classify("nixpkgs:fastfetch").unwrap();
+        let spec = classify("fastfetch@nixpkgs").unwrap();
         let stdout = "\"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n\
              [{\"drvPath\":\"/nix/store/abc-fastfetch.drv\",\"outputs\":{\"out\":\"/nix/store/abc-fastfetch-2.0\"}}]\n\
              \"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n";
@@ -1592,7 +1592,7 @@ mod tests {
 
     #[test]
     fn tolerates_nix_hard_link_noise_between_multiline_realization_lines() {
-        let spec = classify("nixpkgs:fastfetch").unwrap();
+        let spec = classify("fastfetch@nixpkgs").unwrap();
         let stdout = "[\n\
              {\"drvPath\":\"/nix/store/abc-fastfetch.drv\",\n\
              \"/nix/store/.links/1gs2lc42h68lmq8fkcwp96lhnrqcyr3zwmi75k0896nbvc3p4fpc\" has maximum number of links\n\
@@ -1604,7 +1604,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_realization_payloads() {
-        let spec = classify("nixpkgs:fastfetch").unwrap();
+        let spec = classify("fastfetch@nixpkgs").unwrap();
         let payload = r#"[{"drvPath":"/nix/store/abc-fastfetch.drv","outputs":{"out":"/nix/store/abc-fastfetch-2.0"}}]"#;
         assert!(matches!(
             parse_realization(&spec, &format!("{payload}\n{payload}\n")),
@@ -1614,7 +1614,7 @@ mod tests {
 
     #[test]
     fn realization_schema_error_retains_filtered_provider_noise() {
-        let spec = classify("nixpkgs:fastfetch").unwrap();
+        let spec = classify("fastfetch@nixpkgs").unwrap();
         let noise = "warning: ignoring untrusted substituter";
         let error = parse_realization(&spec, &format!("{noise}\n[{{}}]\n")).unwrap_err();
         let ProviderError::BadOutput(reason) = error else {
@@ -1626,7 +1626,7 @@ mod tests {
 
     #[test]
     fn prefers_bin_output() {
-        let spec = classify("nixpkgs:git").unwrap();
+        let spec = classify("git@nixpkgs").unwrap();
         let stdout = r#"[{"drvPath":"/nix/store/x.drv","outputs":{"out":"/nix/store/x","bin":"/nix/store/x-bin"}}]"#;
         let r = parse_realization(&spec, stdout).unwrap();
         assert_eq!(r.out, "/nix/store/x");
@@ -1636,7 +1636,7 @@ mod tests {
 
     #[test]
     fn empty_output_is_bad() {
-        let spec = classify("nixpkgs:x").unwrap();
+        let spec = classify("x@nixpkgs").unwrap();
         assert!(matches!(
             parse_realization(&spec, "[]"),
             Err(ProviderError::BadOutput(_))
@@ -1645,7 +1645,7 @@ mod tests {
 
     #[test]
     fn garbage_output_is_bad() {
-        let spec = classify("nixpkgs:x").unwrap();
+        let spec = classify("x@nixpkgs").unwrap();
         assert!(matches!(
             parse_realization(&spec, "not json"),
             Err(ProviderError::BadOutput(_))
@@ -1654,7 +1654,7 @@ mod tests {
 
     #[test]
     fn missing_outputs_key_is_bad() {
-        let spec = classify("nixpkgs:x").unwrap();
+        let spec = classify("x@nixpkgs").unwrap();
         assert!(matches!(
             parse_realization(&spec, r#"[{"drvPath":"/x.drv"}]"#),
             Err(ProviderError::BadOutput(_))
@@ -1663,7 +1663,7 @@ mod tests {
 
     #[test]
     fn missing_exact_derivation_is_bad() {
-        let spec = classify("nixpkgs:x").unwrap();
+        let spec = classify("x@nixpkgs").unwrap();
         assert!(matches!(
             parse_realization(
                 &spec,
@@ -1675,7 +1675,7 @@ mod tests {
 
     #[test]
     fn fixture_missing_errors() {
-        let spec = classify("nixpkgs:nope").unwrap();
+        let spec = classify("nope@nixpkgs").unwrap();
         let dir = std::env::temp_dir();
         let ctx = Ctx {
             fixtures: Some(&dir.join("definitely-not-here-xyz")),
@@ -1706,7 +1706,7 @@ mod tests {
 
         let upstream = format!("path:{}", repo.to_string_lossy());
         let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
-        let spec = classify_in("mine:hello", &table).unwrap();
+        let spec = classify_in("hello@mine", &table).unwrap();
         let ctx = Ctx {
             fixtures: None,
             store_dir: &store,
@@ -1760,13 +1760,13 @@ mod tests {
             project_dir: None,
         };
 
-        let exe = realize(&classify_in("mine:hello", &table).unwrap(), &table, &ctx).unwrap();
+        let exe = realize(&classify_in("hello@mine", &table).unwrap(), &table, &ctx).unwrap();
         assert!(
             !exe.bin.is_empty() && std::path::Path::new(&exe.bin).join("hello").is_file(),
             "executable must stage a bin/ on PATH: {exe:?}"
         );
 
-        let lib = realize(&classify_in("mine:mathlib", &table).unwrap(), &table, &ctx).unwrap();
+        let lib = realize(&classify_in("mathlib@mine", &table).unwrap(), &table, &ctx).unwrap();
         assert!(
             lib.bin.is_empty(),
             "library must contribute no PATH entry: {lib:?}"
@@ -1833,7 +1833,7 @@ mod tests {
 
         let upstream = format!("file://{}#HEAD", repo.to_string_lossy());
         let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
-        let spec = classify_in("mine:hello", &table).unwrap();
+        let spec = classify_in("hello@mine", &table).unwrap();
         let ctx = Ctx {
             fixtures: None,
             store_dir: &store,
@@ -1899,7 +1899,7 @@ mod tests {
             format!("file://{}", with.to_string_lossy()),
             ProviderKind::Infer,
         )]);
-        let with_spec = classify_in("mine:hello", &with_table).unwrap();
+        let with_spec = classify_in("hello@mine", &with_table).unwrap();
         assert_eq!(
             resolve_kind(&with_spec, &with_table, false, &store),
             ProviderKind::Core,
@@ -1914,7 +1914,7 @@ mod tests {
             format!("file://{}", without.to_string_lossy()),
             ProviderKind::Infer,
         )]);
-        let without_spec = classify_in("plain:fd", &without_table).unwrap();
+        let without_spec = classify_in("fd@plain", &without_table).unwrap();
         assert_eq!(
             resolve_kind(&without_spec, &without_table, false, &store),
             ProviderKind::Nix,
@@ -1965,7 +1965,7 @@ mod tests {
         .to_string();
         let upstream = format!("file://{}#{}", repo.to_string_lossy(), sha);
         let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Infer)]);
-        let spec = classify_in("mine:hello", &table).unwrap();
+        let spec = classify_in("hello@mine", &table).unwrap();
         assert_eq!(
             resolve_kind(&spec, &table, false, &store),
             ProviderKind::Core,
@@ -1977,7 +1977,7 @@ mod tests {
     #[test]
     fn realize_resolves_inferred_remote_to_core() {
         // U9 end-to-end at the realize boundary: an `Infer` source — the kind a
-        // typed `github@…` source carries — whose remote has a `pkg.jet`
+        // typed `…@github` source carries — whose remote has a `pkg.jet`
         // resolves to the `core` provider and builds the first-party package,
         // with no nix and no declared marker.
         use super::super::RefSpec::{classify_in, ProviderKind, SourceTable};
@@ -1998,7 +1998,7 @@ mod tests {
         }
         let upstream = format!("file://{}", repo.to_string_lossy());
         let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Infer)]);
-        let spec = classify_in("mine:hello", &table).unwrap();
+        let spec = classify_in("hello@mine", &table).unwrap();
         let ctx = Ctx {
             fixtures: None,
             store_dir: &store,
@@ -2046,7 +2046,7 @@ mod tests {
         let upstream = format!("file://{}", repo.to_string_lossy());
         let table =
             SourceTable::from_decls([("mine".to_string(), upstream.clone(), ProviderKind::Core)]);
-        let spec = classify_in("mine:hello", &table).unwrap();
+        let spec = classify_in("hello@mine", &table).unwrap();
         let ctx = Ctx {
             fixtures: None,
             store_dir: &store,
@@ -2093,7 +2093,7 @@ mod tests {
                 // path-target resolution, not just name matching.
                 (
                     "packages/app/pkg.jet",
-                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { log: path@../logging }\n",
+                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { log: ../logging }\n",
                 ),
                 ("packages/app/app.jet", "module app { }\n"),
                 (
@@ -2114,7 +2114,7 @@ mod tests {
         let upstream = format!("file://{}", repo.to_string_lossy());
         let table =
             SourceTable::from_decls([("mine".to_string(), upstream.clone(), ProviderKind::Core)]);
-        let spec = classify_in("mine:app", &table).unwrap();
+        let spec = classify_in("app@mine", &table).unwrap();
         let ctx = Ctx {
             fixtures: None,
             store_dir: &store,
@@ -2157,7 +2157,7 @@ mod tests {
                 // is NOT a workspace member (no pkg.jet of its own).
                 (
                     "packages/app/pkg.jet",
-                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { ghost: path@../ghost }\n",
+                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { ghost: ../ghost }\n",
                 ),
                 ("packages/app/app.jet", "module app { }\n"),
                 ("packages/ghost/notes.txt", "not a package\n"),
@@ -2168,7 +2168,7 @@ mod tests {
         }
         let upstream = format!("file://{}", repo.to_string_lossy());
         let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
-        let spec = classify_in("mine:app", &table).unwrap();
+        let spec = classify_in("app@mine", &table).unwrap();
         let ctx = Ctx {
             fixtures: None,
             store_dir: &store,
@@ -2206,7 +2206,7 @@ mod tests {
 
         let upstream = format!("path:{}", repo.to_string_lossy());
         let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
-        let spec = classify_in("mine:mathlib", &table).unwrap();
+        let spec = classify_in("mathlib@mine", &table).unwrap();
         let ctx = Ctx {
             fixtures: None,
             store_dir: &store,
@@ -2223,7 +2223,7 @@ mod tests {
         );
         assert!(!r.envelope.platform.is_empty(), "platform must be set");
         assert!(
-            r.envelope.provenance.contains("mine:mathlib"),
+            r.envelope.provenance.contains("mathlib@mine"),
             "provenance names the source ref: {:?}",
             r.envelope
         );

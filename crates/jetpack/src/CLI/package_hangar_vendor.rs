@@ -151,7 +151,7 @@ fn cmd_hangar_ingest(theme: &Theme, parsed: &Parsed) -> i32 {
         }
     };
     let reference =
-        flag_value(parsed, "--ref").unwrap_or_else(|| format!("path:{}", dir.display()));
+        flag_value(parsed, "--ref").unwrap_or_else(|| dir.display().to_string());
     let mut outputs = std::collections::BTreeMap::new();
     outputs.insert("out".to_string(), dir.clone());
     if let Some(dev) = flag_value(parsed, "--output-dev") {

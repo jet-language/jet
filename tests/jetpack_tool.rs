@@ -61,7 +61,7 @@ fn tool_install_command(
         .args([
             "tool",
             "install",
-            &format!("nixpkgs:{package}"),
+            &format!("{package}@nixpkgs"),
             "--no-color",
             "--offline",
             "--fixtures",
@@ -174,7 +174,7 @@ fn tool_run_ephemeral_execs_builtin_provider_fixture() {
         .args([
             "tool",
             "run",
-            "nixpkgs:greet",
+            "greet@nixpkgs",
             "--no-color",
             "--offline",
             "--fixtures",
@@ -208,11 +208,12 @@ fn tool_run_ephemeral_execs_builtin_provider_fixture() {
 
 #[test]
 fn tool_run_unavailable_provider_is_e1298_not_silent() {
+    // D-JPK-REF1 keeps the package first even for a provider that is gated.
     let root = Scratch::new("tool-prov-root");
     let proj = Scratch::new("tool-prov-proj");
     let home = Scratch::new("tool-prov-home");
     let output = jetpack()
-        .args(["tool", "run", "npm:prettier", "--no-color"])
+        .args(["tool", "run", "prettier@npm", "--no-color"])
         .current_dir(&proj.path)
         .env("JETPACK_ROOT", &root.path)
         .env("HOME", &home.path)
@@ -244,7 +245,7 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
         .args([
             "tool",
             "install",
-            "nixpkgs:greet",
+            "greet@nixpkgs",
             "--no-color",
             "--offline",
             "--fixtures",
@@ -297,7 +298,7 @@ fn tool_install_publishes_stable_dispatcher_and_generation() {
     assert!(meta.is_file(), "missing generation metadata {}", meta.display());
     let meta_text = fs::read_to_string(&meta).unwrap();
     assert!(meta_text.contains("\"generation\": 1"), "{meta_text}");
-    assert!(meta_text.contains("nixpkgs:greet"), "{meta_text}");
+    assert!(meta_text.contains("greet@nixpkgs"), "{meta_text}");
     let output_hash = metadata_output_hash(&meta_text);
     assert!(output_hash.starts_with("sha256-"), "{meta_text}");
     assert!(home.join(".jet/tools/generations/1/complete").is_file());
@@ -628,13 +629,13 @@ fn legacy_generation_is_verified_and_migrated_to_owned_projection() {
         .map(|entry| entry.path().join("meta.json"))
         .filter(|path| path.is_file())
         .map(|path| fs::read_to_string(path).unwrap())
-        .find(|metadata| metadata.contains("nixpkgs:greet"))
+        .find(|metadata| metadata.contains("greet@nixpkgs"))
         .expect("greet Store metadata");
     let bin = json_meta_field(&store_meta, "bin");
     store_meta.clear();
     let target = Path::new(&bin).join("greet").to_string_lossy().into_owned();
     let legacy = format!(
-        "{{\n  \"generation\": 1,\n  \"profile\": \"tools\",\n  \"created_at\": 1,\n  \"tools\": [\n    {{\n      \"name\": \"greet\",\n      \"version\": \"\",\n      \"source\": \"nixpkgs\",\n      \"reference\": \"nixpkgs:greet\",\n      \"output_hash\": {output_hash:?},\n      \"bins\": [\"greet\"],\n      \"targets\": [{target:?}]\n    }}\n  ]\n}}\n"
+        "{{\n  \"generation\": 1,\n  \"profile\": \"tools\",\n  \"created_at\": 1,\n  \"tools\": [\n    {{\n      \"name\": \"greet\",\n      \"version\": \"\",\n      \"source\": \"nixpkgs\",\n      \"reference\": \"greet@nixpkgs\",\n      \"output_hash\": {output_hash:?},\n      \"bins\": [\"greet\"],\n      \"targets\": [{target:?}]\n    }}\n  ]\n}}\n"
     );
     fs::write(home.join(".jet/tools/generations/1/meta.json"), legacy).unwrap();
     fs::write(home.join(".jet/tools/generations/1/complete"), "complete\n").unwrap();
@@ -744,6 +745,7 @@ fn profile_failpoints_recover_conservatively_around_root_and_pointer_publish() {
 
 #[test]
 fn tool_install_task_collision_is_e1297_snapshot() {
+    // The collision guidance must teach the canonical email-order ref.
     let root = Scratch::new("tool-collide-root");
     let proj = Scratch::new("tool-collide-proj");
     let fixtures = Scratch::new("tool-collide-fx");
@@ -764,7 +766,7 @@ fn tool_install_task_collision_is_e1297_snapshot() {
         .args([
             "tool",
             "install",
-            "nixpkgs:serve",
+            "serve@nixpkgs",
             "--no-color",
             "--offline",
             "--fixtures",

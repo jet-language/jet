@@ -96,7 +96,7 @@ pub(super) fn first_party_package_ref(table: &RefSpec::SourceTable, package: &st
         .declarations()
         .into_iter()
         .find(|(_, _, via)| *via == RefSpec::ProviderKind::Core)
-        .map(|(name, _, _)| format!("{name}:{package}"))
+        .map(|(name, _, _)| format!("{package}@{name}"))
 }
 
 pub(super) fn jetos_runtime_package_ref(
@@ -107,7 +107,7 @@ pub(super) fn jetos_runtime_package_ref(
     if offline {
         first_party_package_ref(table, package)
     } else {
-        Some(format!("nixpkgs:{package}"))
+        Some(format!("{package}@nixpkgs"))
     }
 }
 

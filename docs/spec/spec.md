@@ -2077,7 +2077,7 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   by `jet os image`, not by `jet image`.
 - **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
   `Pkg.adapt(name:, source:, recipe:)`. `source:` is a provider ref such as
-  `path@vendor/tool`; this U20 slice realizes `Recipe.copy()` and
+  `"./vendor/tool"`; this U20 slice realizes `Recipe.copy()` and
   `Recipe.prebuilt(bin:, as:)` into ordinary hangar packages, with the same
   store/lock path as any other package. `jetpack add <ref> --adapt` prints a
   draft adapter and does not run upstream code.
@@ -2204,7 +2204,7 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
 
 `jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm`
 is active. A bare host (`jet os switch laptop`) selects `system.laptop` in
-`./config.jet`; `path@host` selects an exact external root. Builds create named
+`./config.jet`; `laptop@../machines` selects an exact external root. Builds create named
 generations; `generations` lists newest first; `switch --name <name>` overrides
 the automatic name; `rollback` activates a prior generation. `plan` prints the
 checked system plan without building. `proof` reads the latest generation's
@@ -2890,11 +2890,10 @@ reader ignores; the three identity fields keep this exact `key: value` shape.
 
 ## Command grouping and typed inputs (D-SHAPE6, D-SHAPE-CLI1)
 
-Tool families use one noun-then-verb grammar. The shipped inspection routes are
-`jet inspect dossier`, `jet inspect schema`, `jet inspect expand`,
-`jet inspect live`, and `jet inspect semindex`. The shipped registry routes are
-`jet registry publish`, `jet registry keygen`, `jet registry key`, and
-`jet registry yank`.
+Tool families use one noun-then-verb grammar. D-SHAPE6 moved
+`dossier`, `schema`, `expand`, `live`, and `semindex` under `jet inspect`.
+It moved `publish`, `keygen`, `key`, and `yank` under `jet registry`.
+Other commands in these groups keep their existing grouped routes.
 The daily commands `jet run`, `jet build`, `jet test`, and `jet fmt` stay flat.
 A bare moved action is E2101 and names its canonical grouped route. It is never
 a compatibility alias. Help, completion, manual, typo suggestion, and dispatch

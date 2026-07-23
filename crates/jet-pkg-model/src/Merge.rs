@@ -340,20 +340,20 @@ mod tests {
 
     #[test]
     fn sources_merge_by_key_and_dedup() {
-        let a = map(&[("default", "github@NixOS/nixpkgs/nixos-24.05")]);
+        let a = map(&[("default", "NixOS/nixpkgs/nixos-24.05@github")]);
         let b = map(&[
-            ("default", "github@NixOS/nixpkgs/nixos-24.05"), // identical → dedup
-            ("unstable", "github@NixOS/nixpkgs/nixpkgs-unstable"),
+            ("default", "NixOS/nixpkgs/nixos-24.05@github"), // identical → dedup
+            ("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"),
         ]);
         let merged = merge_sources(&[a, b]).unwrap();
         assert_eq!(merged.len(), 2);
-        assert_eq!(merged["unstable"], "github@NixOS/nixpkgs/nixpkgs-unstable");
+        assert_eq!(merged["unstable"], "NixOS/nixpkgs/nixpkgs-unstable@github");
     }
 
     #[test]
     fn sources_conflict_on_different_refs() {
-        let a = map(&[("default", "github@NixOS/nixpkgs/nixos-24.05")]);
-        let b = map(&[("default", "github@NixOS/nixpkgs/nixos-23.11")]);
+        let a = map(&[("default", "NixOS/nixpkgs/nixos-24.05@github")]);
+        let b = map(&[("default", "NixOS/nixpkgs/nixos-23.11@github")]);
         assert!(matches!(
             merge_sources(&[a, b]),
             Err(MergeError::SourceConflict { .. })

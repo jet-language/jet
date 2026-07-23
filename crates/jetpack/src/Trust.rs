@@ -754,19 +754,19 @@ mod tests {
 
     #[test]
     fn nonempty_refs_are_trust_sensitive() {
-        assert!(is_trust_sensitive(&[ref_spec("nixpkgs:fastfetch")]));
+        assert!(is_trust_sensitive(&[ref_spec("fastfetch@nixpkgs")]));
     }
 
     #[test]
     fn hash_is_stable_and_order_independent() {
         let table = SourceTable::empty();
         let a = env_definition_hash(
-            &[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")],
+            &[ref_spec("a@nixpkgs"), ref_spec("b@nixpkgs")],
             &table,
             &["stripe".to_string(), "db".to_string()],
         );
         let b = env_definition_hash(
-            &[ref_spec("nixpkgs:b"), ref_spec("nixpkgs:a")],
+            &[ref_spec("b@nixpkgs"), ref_spec("a@nixpkgs")],
             &table,
             &["db".to_string(), "stripe".to_string()],
         );
@@ -776,15 +776,15 @@ mod tests {
     #[test]
     fn hash_changes_when_refs_change() {
         let table = SourceTable::empty();
-        let a = env_definition_hash(&[ref_spec("nixpkgs:a")], &table, &[]);
-        let b = env_definition_hash(&[ref_spec("nixpkgs:a"), ref_spec("nixpkgs:b")], &table, &[]);
+        let a = env_definition_hash(&[ref_spec("a@nixpkgs")], &table, &[]);
+        let b = env_definition_hash(&[ref_spec("a@nixpkgs"), ref_spec("b@nixpkgs")], &table, &[]);
         assert_ne!(a, b);
     }
 
     #[test]
     fn hash_changes_when_secrets_change() {
         let table = SourceTable::empty();
-        let refs = [ref_spec("nixpkgs:a")];
+        let refs = [ref_spec("a@nixpkgs")];
         let a = env_definition_hash(&refs, &table, &["stripe".to_string()]);
         let b = env_definition_hash(&refs, &table, &["db".to_string()]);
         assert_ne!(a, b);
@@ -795,7 +795,7 @@ mod tests {
         let dir = scratch("hashgrant");
         let store = dir.join("trust");
         let table = SourceTable::empty();
-        let refs = [ref_spec("nixpkgs:fastfetch")];
+        let refs = [ref_spec("fastfetch@nixpkgs")];
         let hash = env_definition_hash(&refs, &table, &[]);
         assert!(!is_trusted(&store, &dir, &hash));
         grant_hash(&store, &hash);
@@ -808,7 +808,7 @@ mod tests {
         let dir = scratch("typed_grants");
         let store = dir.join("trust");
         let table = SourceTable::empty();
-        let refs = [ref_spec("nixpkgs:fastfetch")];
+        let refs = [ref_spec("fastfetch@nixpkgs")];
         let hash = env_definition_hash(&refs, &table, &[]);
 
         add_grant(
@@ -891,7 +891,7 @@ mod tests {
             "payload: { name: \"app\", version: \"0.1.0\" }\npolicy: { trust: { default: deny } }\n",
         )
         .unwrap();
-        let refs = [ref_spec("nixpkgs:fastfetch")];
+        let refs = [ref_spec("fastfetch@nixpkgs")];
         let table = SourceTable::empty();
         let theme = Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never);
 

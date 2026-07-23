@@ -174,7 +174,7 @@ mod tests {
         Activation {
             base_path: "/usr/bin:/bin".to_string(),
             composed_path: "/nix/store/pkg/bin:/usr/bin:/bin".to_string(),
-            refs: "nixpkgs:ripgrep nixpkgs:jq".to_string(),
+            refs: "ripgrep@nixpkgs jq@nixpkgs".to_string(),
             root: "/home/dev/router".to_string(),
         }
     }
@@ -239,7 +239,7 @@ mod tests {
         assert!(bash.contains("export PATH='/nix/store/pkg/bin:/usr/bin:/bin'"));
         assert!(bash.contains("export JETPACK_ENV=1"));
         assert!(bash.contains("export JETPACK_ENV_DIR='/home/dev/router'"));
-        assert!(bash.contains("export JETPACK_REF='nixpkgs:ripgrep nixpkgs:jq'"));
+        assert!(bash.contains("export JETPACK_REF='ripgrep@nixpkgs jq@nixpkgs'"));
 
         let fish = render_activate(ShellKind::Fish, &act());
         assert!(fish.contains("set -gx PATH (string split : '/nix/store/pkg/bin:/usr/bin:/bin')"));

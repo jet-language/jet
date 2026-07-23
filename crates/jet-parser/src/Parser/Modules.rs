@@ -791,9 +791,9 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// U8: a module's `sources: { name: provider@target, … }` block. Each ref is
-    /// not a single token (it carries `@`, `/`, `-`, `.`), so we record its
-    /// source span and leave validation to modeval (`classify_provider_ref`).
+    /// U8/D-JPK-REF1: a module's `sources: { name: target@provider, … }` block.
+    /// Each ref is not a single token, so we record its source span and leave
+    /// validation to modeval (`classify_provider_ref`).
     fn module_sources(&mut self) -> Result<Vec<crate::AST::SourceDecl>, Diagnostic> {
         self.bump(); // `sources`
         self.expect(TokKind::Colon, "after `sources`")?;
@@ -806,7 +806,7 @@ impl<'a> Parser<'a> {
             }
             let (name, name_span) = self.expect_ident("for a source name")?;
             self.expect(TokKind::Colon, "after a source name")?;
-            // Consume the `provider@target` ref tokens up to the next `,`/`}`;
+            // Consume the `target@provider` ref tokens up to the next `,`/`}`;
             // the recovered span slices back to the exact written text.
             let ref_start = self.peek().span;
             let mut ref_end = ref_start.end;
@@ -816,8 +816,8 @@ impl<'a> Parser<'a> {
             ) {
                 return Err(Diagnostic::error(
                     "E0003",
-                    "a source needs a `provider@target` ref".to_string(),
-                    "every named source resolves to an upstream, e.g. `default: github@owner/repo/rev`"
+                    "a source needs a `target@provider` ref or bare path".to_string(),
+                    "every named source resolves to an upstream, e.g. `default: owner/repo/rev@github`"
                         .to_string(),
                     "write the ref after the `:`".to_string(),
                     Some(ref_start),

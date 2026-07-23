@@ -410,5 +410,5 @@ pub(super) fn now_secs() -> u64 {
 }
 
 pub(super) fn print_help() {
-    println!("jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm <host>|path@host");
+    println!("jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm <host>|host@root");
 }

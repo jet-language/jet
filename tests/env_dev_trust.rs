@@ -51,7 +51,7 @@ fn jet() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jet"))
 }
 
-/// Write a `nixpkgs:fastfetch` fixture backed by a sealed Hangar object.
+/// Write a `fastfetch@nixpkgs` fixture backed by a sealed Hangar object.
 /// Store's closure proof accepts a zero-reference Nix realization only when
 /// Hangar can re-hash its canonical object (or Nix protects a real
 /// `/nix/store` output with a GC root). A generic temp directory is real
@@ -432,7 +432,7 @@ fn top_level_jet_trust_grant_list_explain_revoke() {
         .args([
             "trust",
             "grant",
-            "github@acme/web:postgres.service",
+            "acme/web@github:postgres.service",
             "--scope",
             "repo",
             "--color=never",
@@ -458,7 +458,7 @@ fn top_level_jet_trust_grant_list_explain_revoke() {
         "stdout: {stdout}"
     );
     assert!(
-        stdout.contains("\"subject\":\"github@acme/web:postgres.service\""),
+        stdout.contains("\"subject\":\"acme/web@github:postgres.service\""),
         "stdout: {stdout}"
     );
     assert!(stdout.contains("\"scope\":\"repo\""), "stdout: {stdout}");
@@ -467,7 +467,7 @@ fn top_level_jet_trust_grant_list_explain_revoke() {
         .args([
             "trust",
             "explain",
-            "service:github@acme/web:postgres.service",
+            "service:acme/web@github:postgres.service",
             "--color=never",
         ])
         .env("HOME", &home.path)
@@ -484,7 +484,7 @@ fn top_level_jet_trust_grant_list_explain_revoke() {
         .args([
             "trust",
             "revoke",
-            "service:github@acme/web:postgres.service",
+            "service:acme/web@github:postgres.service",
             "--color=never",
         ])
         .env("HOME", &home.path)
