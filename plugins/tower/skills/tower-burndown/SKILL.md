@@ -1,15 +1,14 @@
 ---
 name: tower-burndown
-description: Rank and prioritize Tower cards for a burndown while preserving scope, dependencies, gates, and active ownership. Use when asked to rank, reorder, triage, thin, or choose the next Tower work. Produces an ordered queue for Codeflow; it does not orchestrate, delegate, implement, review, integrate, or verify cards.
+description: Rank and prioritize Tower cards for a burndown while preserving scope, dependencies, gates, and active ownership. Use when asked to rank, reorder, triage, thin, or choose the next Tower work. Produces an ordered queue; it does not implement, review, or verify cards.
 ---
 
 # Tower — rank a burndown
 
 This skill has one job: turn live Tower state into a dependency-safe ordered
-queue. **Codeflow owns execution**: planning, delegation, write isolation,
-implementation, checkpoints, review, verification, integration, and resume.
-Stop this skill after reporting the queue or applying requested `workOrder`
-values.
+queue. Stop after reporting the queue or applying requested `workOrder`
+values. Execution belongs to the implementer (or the owner’s chosen agent),
+not to this skill.
 
 ## Reference index
 
@@ -21,7 +20,6 @@ Load only the section needed for the current ranking question:
 | Ballot readiness or an owner-gated choice | `../tower-ballot/SKILL.md` |
 | Missing board, import, config, or server startup | `../tower-setup/SKILL.md` |
 | Project-specific scope, authority, model, review, or command rules | nearest `AGENTS.md` |
-| Campaign execution after ranking | `codeflow` skill |
 | Domain semantics for one card | that card's `refs` and triggered project index |
 
 Do not preload every sibling skill, repository manual, plan, or spec. Start
@@ -59,8 +57,7 @@ criterion; here, size only optimizes safe delivery order after behavior is
 settled.
 
 Likely file, generated-artifact, test-resource, or service collisions are
-queue metadata, not orchestration instructions. Record them so Codeflow can
-choose serialization or isolation.
+queue metadata. Record them so the implementer can serialize or isolate work.
 
 ## Output and optional write
 
@@ -76,6 +73,6 @@ change through:
 tower card update '#N' --work-order N --expect-rev REV --by <agent>
 ```
 
-Re-read after revision conflicts. Never edit `.tower/*.json` directly.
+Re-read after revision conflicts. Never edit `plugins/tower/.tower/*.json` directly.
 Verify final coverage, unique ranks, dependency order, and unchanged claims.
-Then hand the ordered queue and collision metadata to Codeflow.
+Then hand the ordered queue and collision metadata to the implementer.

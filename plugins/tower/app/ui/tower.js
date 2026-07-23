@@ -255,6 +255,7 @@ function jumpTo(it) {
 const VIEWS = [
   { id: 'now', name: 'Now', count: () => duties().length, alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
+  { id: 'scratch', name: 'Scratch', count: () => scratchCache?.notes?.length || 0 },
 ];
 function renderChrome() {
   document.title = `Tower · ${S.meta.project || 'project'}`;
@@ -519,7 +520,6 @@ function cardTile(c) {
         ${c.openQ ? `<span class="card__q">✎ ${c.openQ}</span>` : ''}
       </div>
       <h3 class="card__title">${esc(c.title)}</h3>
-      ${c.assignee ? `<span class="card__claim">⛭ ${esc(c.assignee)}</span>` : ''}
       <span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span>
     </button>`);
   node.addEventListener('click', () => {
@@ -561,7 +561,7 @@ const radarSort = {}; // table key -> { col, dir }
 
 function radarMatches(c, needle) {
   if (!needle) return true;
-  return ('#' + c.num).includes(needle) || c.title.toLowerCase().includes(needle) || (c.assignee || '').toLowerCase().includes(needle);
+  return ('#' + c.num).includes(needle) || c.title.toLowerCase().includes(needle);
 }
 
 function viewBoard() {
@@ -575,11 +575,11 @@ function viewBoard() {
       </div></div>
     <div class="capture"><input id="idea-input" placeholder="Capture an idea — it waits in Ideas until you make it a card…">
       <button class="btn" id="idea-btn">Capture</button></div>
-    <div class="capture"><input id="radar-filter" placeholder="Filter by #, title, assignee…" value="${esc(radarFilterText)}"></div>
+    <div class="capture"><input id="radar-filter" placeholder="Filter by # or title…" value="${esc(radarFilterText)}"></div>
     <div id="radar-body"></div>`;
 
   $('#new-card').addEventListener('click', async () => {
-    const c = await api('card/add', { title: 'New card', epoch: S.meta.currentEpoch, by: 'owner' });
+    const c = await api('card/add', { title: 'New card', by: 'owner' });  // server defaults epoch to the active one
     if (c) showDetail(c.id);
   });
   const fire = async () => {
@@ -714,7 +714,6 @@ const OPS_COLS = [
   { k: 'lane', label: 'Lane' },
   { k: 'priority', label: 'Priority' },
   { k: 'workOrder', label: 'Order' },
-  { k: 'assignee', label: 'Assignee' },
   { k: 'updated', label: 'Updated' },
 ];
 const opsSortVal = (c, col) => {
@@ -768,7 +767,6 @@ function opsRow(c) {
       <td><span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span></td>
       <td class="ops__prio"></td>
       <td class="ops__wo"></td>
-      <td class="ops__as"></td>
       <td class="num">${ageAgo(c.updated)}</td>
     </tr>`);
 
@@ -781,11 +779,6 @@ function opsRow(c) {
   woIn.addEventListener('click', (ev) => ev.stopPropagation());
   woIn.addEventListener('change', () => api('card/update', { id: c.id, workOrder: woIn.value === '' ? null : Number(woIn.value), by: 'owner' }));
   $('.ops__wo', tr).appendChild(woIn);
-
-  const asIn = el(`<input data-fld="assignee" value="${esc(c.assignee || '')}" placeholder="—">`);
-  asIn.addEventListener('click', (ev) => ev.stopPropagation());
-  asIn.addEventListener('change', () => api('card/update', { id: c.id, assignee: asIn.value.trim() === '' ? null : asIn.value.trim(), by: 'owner' }));
-  $('.ops__as', tr).appendChild(asIn);
 
   tr.addEventListener('click', (ev) => { if (!/INPUT|SELECT/.test(ev.target.tagName)) showDetail(c.id); });
   return tr;
@@ -821,7 +814,6 @@ function showDetail(id) {
         <div class="fld"><div class="fld__k">${esc(TERM('milestone', 'Milestone'))}</div><select data-fld="milestoneId"><option value="">—</option>${S.milestones.filter(x => !c.epoch || x.epochId === c.epoch).map(x => `<option value="${x.id}" ${x.id === c.milestoneId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Priority</div>${sel('priority', CFG().priorities || ['P0', 'P1', 'P2', 'P3'], c.priority)}</div>
         <div class="fld"><div class="fld__k">Kind</div>${sel('kind', CFG().kinds || ['task', 'feature', 'idea', 'bug'], c.kind)}</div>
-        <div class="fld"><div class="fld__k">Assignee</div><input data-fld="assignee" value="${esc(c.assignee || '')}" placeholder="—"></div>
         <div class="fld"><div class="fld__k">Work order</div><input data-fld="workOrder" type="number" min="1" value="${c.workOrder ?? ''}" placeholder="—"></div>
       </div>
       <div class="fld" style="margin-bottom:16px"><div class="fld__k">Plan</div><input data-fld="plan" value="${esc(c.plan || '')}" placeholder="— (agents fill this in the plan lane)"></div>
@@ -903,7 +895,7 @@ function showDetail(id) {
 }
 const commit = (id, k, v) => {
   let val = v;
-  if (['plan', 'milestoneId', 'assignee', 'epoch'].includes(k) && v === '') val = null;
+  if (['plan', 'milestoneId', 'epoch'].includes(k) && v === '') val = null;
   else if (k === 'workOrder') val = v === '' ? null : Number(v);
   return api('card/update', { id, [k]: val, by: 'owner' });
 };
@@ -1072,8 +1064,185 @@ async function recordBatch() {
   renderFocus();
 }
 
+// ---- Scratch pad (file notes + docs preview; not board state) --------------------
+let scratchCache = null;   // { notes, docs }
+let scratchSel = null;     // { kind:'note'|'doc', id|path }
+let scratchDirty = false;
+
+const scratchGet = async (qs = '') => {
+  const r = await fetch('/api/scratch' + qs);
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.message || 'scratch fetch failed'); }
+  return r.json();
+};
+const scratchPost = async (route, payload) => {
+  const r = await fetch('/api/scratch/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) { toast(j.message || `scratch ${route} failed`, true); throw new Error(j.message || route); }
+  return j.result;
+};
+
+function mdRich(s) {
+  const parts = String(s ?? '').replace(/\r\n/g, '\n').split(/```/);
+  let out = '';
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      const nl = parts[i].indexOf('\n');
+      const code = nl < 0 ? parts[i] : parts[i].slice(nl + 1);
+      out += codeBlock(code.replace(/\n$/, ''));
+      continue;
+    }
+    out += parts[i].split(/\n{2,}/).map(block => {
+      const lines = block.split('\n');
+      if (/^#{1,3}\s/.test(lines[0])) {
+        return lines.map(l => {
+          const m = /^(#{1,3})\s+(.*)$/.exec(l);
+          if (!m) return `<p>${esc(l)}</p>`;
+          const tag = `h${m[1].length + 2}`;
+          return `<${tag} class="scratch__h">${esc(m[2])}</${tag}>`;
+        }).join('');
+      }
+      if (lines.every(l => /^[-*]\s/.test(l) || !l.trim())) {
+        return `<ul class="scratch__ul">${lines.filter(l => l.trim()).map(l => `<li>${esc(l.replace(/^[-*]\s+/, ''))}</li>`).join('')}</ul>`;
+      }
+      return `<p>${esc(block).replace(/\n/g, '<br>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')}</p>`;
+    }).join('');
+  }
+  return out;
+}
+
+async function loadScratchIndex() {
+  scratchCache = await scratchGet();
+  if (VIEW === 'scratch') renderChrome();
+}
+
+async function viewScratch() {
+  const v = $('#view');
+  if (!scratchCache) {
+    v.innerHTML = `<div class="viewhead"><h1 class="h1">Scratch</h1><span class="viewhead__sub">loading…</span></div>`;
+    try { await loadScratchIndex(); } catch (e) { v.innerHTML = `<div class="empty"><div>Scratch load failed: ${esc(e.message)}</div></div>`; return; }
+  }
+  const notes = scratchCache.notes || [];
+  const docs = scratchCache.docs || [];
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">Scratch</h1>
+      <span class="viewhead__sub">notes + docs preview — not tracked tasks</span>
+      <div class="viewhead__actions">
+        <button class="btn btn--red" id="scratch-new">New note</button>
+      </div></div>
+    <div class="scratch">
+      <aside class="scratch__side">
+        <div class="scratch__label">Notes</div>
+        <div id="scratch-notes"></div>
+        <div class="scratch__label">Docs preview</div>
+        <div id="scratch-docs" class="scratch__docs"></div>
+      </aside>
+      <section class="scratch__main" id="scratch-main"><div class="empty"><div class="empty__glyph">✎</div><div>Pick a note or preview a doc.</div></div></section>
+    </div>`;
+
+  const notesEl = $('#scratch-notes');
+  for (const n of notes) {
+    const b = el(`<button class="scratch__item${scratchSel?.kind === 'note' && scratchSel.id === n.id ? ' on' : ''}" type="button">
+      <b>${esc(n.title)}</b><span>${esc(n.id)}</span></button>`);
+    b.addEventListener('click', () => openScratchNote(n.id));
+    notesEl.appendChild(b);
+  }
+  if (!notes.length) notesEl.appendChild(el(`<div class="scratch__empty">No notes yet.</div>`));
+
+  const docsEl = $('#scratch-docs');
+  let lastRoot = '';
+  for (const d of docs) {
+    const root = d.path.split('/').slice(0, 2).join('/');
+    if (root !== lastRoot) {
+      docsEl.appendChild(el(`<div class="scratch__root">${esc(root)}</div>`));
+      lastRoot = root;
+    }
+    const b = el(`<button class="scratch__item scratch__item--doc${scratchSel?.kind === 'doc' && scratchSel.path === d.path ? ' on' : ''}" type="button">
+      <b>${esc(d.title)}</b><span>${esc(d.path)}</span></button>`);
+    b.addEventListener('click', () => openScratchDoc(d.path));
+    docsEl.appendChild(b);
+  }
+  if (!docs.length) docsEl.appendChild(el(`<div class="scratch__empty">No previewable docs.</div>`));
+
+  $('#scratch-new').addEventListener('click', async () => {
+    const title = prompt('Note title');
+    if (!title) return;
+    const n = await scratchPost('add', { title, body: '' });
+    await loadScratchIndex();
+    scratchSel = { kind: 'note', id: n.id };
+    await viewScratch();
+    await openScratchNote(n.id);
+  });
+
+  if (scratchSel?.kind === 'note') await openScratchNote(scratchSel.id);
+  else if (scratchSel?.kind === 'doc') await openScratchDoc(scratchSel.path);
+}
+
+async function openScratchNote(id) {
+  scratchSel = { kind: 'note', id };
+  scratchDirty = false;
+  let n;
+  try { n = await scratchGet('?id=' + encodeURIComponent(id)); }
+  catch (e) { toast(e.message, true); return; }
+  const main = $('#scratch-main');
+  if (!main) return;
+  for (const b of document.querySelectorAll('.scratch__item')) {
+    b.classList.toggle('on', b.querySelector('span')?.textContent === id);
+  }
+  main.innerHTML = `<div class="scratch__toolbar">
+      <input class="scratch__title" id="scratch-title" value="${esc(n.title)}">
+      <span class="scratch__meta">${esc(n.id)} · ${esc((n.updated || '').slice(0, 19).replace('T', ' '))}</span>
+      <button class="btn btn--sm" id="scratch-preview-toggle">Preview</button>
+      <button class="btn btn--sm btn--red" id="scratch-save" disabled>Save</button>
+      <button class="btn btn--sm btn--danger" id="scratch-del">Delete</button>
+    </div>
+    <textarea class="scratch__edit" id="scratch-body" spellcheck="true"></textarea>
+    <div class="scratch__preview prose" id="scratch-prev" hidden></div>`;
+  const body = $('#scratch-body');
+  body.value = n.body;
+  const title = $('#scratch-title');
+  const save = $('#scratch-save');
+  const mark = () => { scratchDirty = true; save.disabled = false; };
+  body.addEventListener('input', mark);
+  title.addEventListener('input', mark);
+  $('#scratch-preview-toggle').addEventListener('click', () => {
+    const prev = $('#scratch-prev');
+    if (prev.hidden) { prev.innerHTML = mdRich(body.value); prev.hidden = false; body.hidden = true; }
+    else { prev.hidden = true; body.hidden = false; }
+  });
+  save.addEventListener('click', async () => {
+    await scratchPost('update', { id, title: title.value.trim() || id, body: body.value });
+    scratchDirty = false; save.disabled = true; toast('saved');
+    await loadScratchIndex();
+  });
+  $('#scratch-del').addEventListener('click', async () => {
+    if (!confirm(`Delete note "${n.title}"?`)) return;
+    await scratchPost('delete', { id });
+    scratchSel = null;
+    await loadScratchIndex();
+    viewScratch();
+    toast('deleted');
+  });
+}
+
+async function openScratchDoc(path) {
+  scratchSel = { kind: 'doc', path };
+  scratchDirty = false;
+  let n;
+  try { n = await scratchGet('?path=' + encodeURIComponent(path)); }
+  catch (e) { toast(e.message, true); return; }
+  const main = $('#scratch-main');
+  if (!main) return;
+  for (const b of document.querySelectorAll('.scratch__item')) {
+    b.classList.toggle('on', b.querySelector('span')?.textContent === path);
+  }
+  main.innerHTML = `<div class="scratch__toolbar">
+      <div class="scratch__title scratch__title--ro">${esc(n.title)}</div>
+      <span class="scratch__meta">${esc(n.path)} · read-only</span>
+    </div>
+    <div class="scratch__preview prose scratch__preview--doc">${mdRich(n.body)}</div>`;
+}
+
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, board: viewBoard };
+const RENDER = { now: viewNow, board: viewBoard, scratch: viewScratch };
 function render() {
   if (!S) return;
   renderBeacon();

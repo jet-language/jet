@@ -1,12 +1,12 @@
 ---
 name: tower-setup
-description: Set up or configure Tower in a project — init the .tower/ data dir, import an older tower.json, tune config.json (terminology, priorities, decision groups), and start the board server. Use for "set up tower", "add tower to this project", "import my old board", "configure tower", or first-run problems (no Tower data found).
+description: Set up or configure Tower — init plugins/tower/.tower, import an older tower.json, tune config.json, and start the board server. Use for "set up tower", "configure tower", or first-run problems (no Tower data found).
 ---
 
 # Tower — set up in a project
 
 Tower's code lives where it's installed (plugin dir or vendored `Tower/`);
-its DATA lives in the host project at `.tower/`. Setup = create that dir,
+its DATA lives at `plugins/tower/.tower/` beside this app. Setup = create that dir,
 shape the config, start the server.
 
 ```
@@ -14,11 +14,11 @@ node ${CLAUDE_PLUGIN_ROOT}/tower.mjs init --name "<Project>"
 node ${CLAUDE_PLUGIN_ROOT}/tower.mjs serve --open      # board at :7878
 ```
 
-`init` creates `.tower/tower.json` (all state), public `.tower/config.json`,
+`init` creates `plugins/tower/.tower/tower.json` (all state), public `plugins/tower/.tower/config.json`,
 and a `.gitignore` for `backups/`, `secrets.json`, and crash-residue
-`.secrets.json.tmp-*` files. Commit `.tower/` so the
+`.secrets.json.tmp-*` files. Commit `plugins/tower/.tower/` so the
 team shares the board —
-including `.tower/history.json` once it appears (retired cards/decisions,
+including `plugins/tower/.tower/history.json` once it appears (retired cards/decisions,
 see below); it's board history, not a cache, and is NOT gitignored.
 Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
 (v3-era files: `binder` → ideas, epochs/cards carried losslessly).
@@ -43,14 +43,14 @@ Migrating an older board: `tower import <old-tower.json> --name "<Project>"`
   7878, set another port here. The server binds on the configured port —
   treat it as trusted-network-only (LAN/tailnet).
 - **`retireAfterDays`** — the walk-back buffer: how long a done card, or a
-  ratified decision, sits live before it retires into `.tower/history.json`
+  ratified decision, sits live before it retires into `plugins/tower/.tower/history.json`
   (`tower archive status|show|restore` reads it back). Nothing retires the
   instant it's ratified — the owner sees it on Now's "Recently decided"
   strip and can reopen it in one tap while it's fresh.
 
 ## Remote access, git linking
 
-- Auth is OPT-IN: set `"auth": {"token": "…"}` in ignored `.tower/secrets.json`
+- Auth is OPT-IN: set `"auth": {"token": "…"}` in ignored `plugins/tower/.tower/secrets.json`
   to require a key from non-localhost devices (unlock screen asks once per
   device; localhost always exempt). Web push/VAPID is removed — live updates
   use SSE only. Tower never invents secrets.

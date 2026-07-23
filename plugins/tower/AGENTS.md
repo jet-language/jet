@@ -3,13 +3,13 @@
 This file is the model-agnostic version of the Tower workflow. Any coding
 agent (Claude, GPT, Gemini, local models, scripts) that can run shell
 commands can drive the board with it. Plugin users get the same board
-mechanics from the `tower` skill. The `tower-burndown` skill ranks work;
-Codeflow owns multi-card execution. Everyone else uses the CLI below.
+mechanics from the `tower` skill. The `tower-burndown` skill ranks work.
+Everyone else uses the CLI below.
 
 ## What Tower is
 
 A file-backed project board shared between one human **owner** and any number
-of **agents**. State lives in `.tower/tower.json` at the host project root.
+of **agents**. State lives in `plugins/tower/.tower/tower.json` (beside the Tower app).
 **Never edit that file directly** — use the CLI (or the HTTP API when
 `tower serve` is running). The CLI validates input, takes a cross-process
 lock, writes atomically, keeps rolling backups, bumps a revision counter, and
@@ -19,8 +19,8 @@ records an event log; hand edits do none of that.
 node <tower-dir>/tower.mjs help        # full command surface
 ```
 
-`<tower-dir>` is wherever Tower lives: an installed Claude Code plugin, or a
-`Tower/` directory vendored in the repo.
+`<tower-dir>` is `plugins/tower` in this repo (or wherever the Tower plugin is
+installed).
 
 ## The contract
 
@@ -43,9 +43,12 @@ tower brief --agent me       # ONE call: card, blockers, criteria, decisions
                               # machine output; a #ref picks a specific card)
 tower state                  # full projected state as JSON
 tower next [--agent me]      # what to pick up, in canonical order
-tower next --burndown        # burndown loop scope: meta.currentEpoch's
-                              # epoch-track cards + every sidequest, agent
-                              # lanes only (#457)
+tower next --burndown        # burndown: active epoch's epoch-track cards
+                              # + every sidequest, agent lanes only (#457,
+                              # D-TWR-OPS1)
+tower next --ready-across-epochs  # every unblocked card board-wide —
+                              # the parallel-safe set (D-TWR-OPS2)
+tower scratch list|show|…    # owner markdown notes + docs preview
 tower lint [--json] [--docs] # durability sweeper over the live board (+
                               # docs/ballots/*.md scan with --docs); exit 1
                               # on any finding, 0 clean
@@ -57,10 +60,12 @@ tower events --limit 20      # who did what, when
 `tower brief` is the one-shot work packet (#462): it replaces reading
 `status`/`next`/`card show`/`decision show`/`question list` separately to
 start a card. No `[ref]` → picks the top card via the same picker as
-`next`. `--agent me` claims it (E_CLAIMED if someone else holds it; a no-op
-if you already do); omit `--agent`, or pass `--no-claim`, to read without
-claiming. Decisions in the packet are copied verbatim off the live store —
-never paraphrased.
+`next`. `--agent me` takes a renewable 24-hour work lease (E_CLAIMED if
+someone else holds an active lease; a no-op if you already do); omit
+`--agent`, or pass `--no-claim`, to read without leasing. Normal card writes
+by the holder renew it. Expired leases never block selection or takeover.
+Done and frozen cards clear them. Decisions in the packet are copied verbatim
+off the live store — never paraphrased.
 
 Report completions and blockers on the card itself: a `--log` entry when you
 advance it, a `tower question answer` when the owner asked something. The
@@ -68,7 +73,7 @@ board (and the live SSE UI) is how the owner finds out — there is no
 side channel.
 
 Auth note: localhost is exempt. Remote access reads `auth.token` from the
-untracked `.tower/secrets.json`; never put credentials in `config.json`.
+untracked `plugins/tower/.tower/secrets.json`; never put credentials in `config.json`.
 
 Each card has a computed `lane`: `decide` (owner), `plan`/`implement`/
 `building`/`verify` (agent), `blocked`/`frozen`/`done` (inert).
@@ -81,7 +86,7 @@ an epoch — link cards with `--milestone <id>` and progress computes itself.
 Always pass `--by <your-agent-name>`.
 
 ```
-tower card claim '#12' --by me                # soft lock vs other agents
+  tower card claim '#12' --by me                # renewable lease vs double work
 tower card update '#12' --phase building --log "started X" --by me
 tower card update '#12' --plan "1. ... 2. ..." --by me
 tower card update '#12' --refs "docs/spec/foo.md,examples/features/bar.jet"  # explicit doc pointers (also auto-harvested from body/plan into `tower brief`)
@@ -156,7 +161,7 @@ alone — if they'd need to ask you something to decide, it isn't ready.
 
 A done card, or a ratified decision, sits live for `config.retireAfterDays`
 (default 3) — a walk-back buffer — before it retires into
-`.tower/history.json`. A card's own decisions and questions stay live with
+`plugins/tower/.tower/history.json`. A card's own decisions and questions stay live with
 it until the card itself retires, so no card view is ever half-archived; a
 still-active (non-`done`) card keeps its ratified decisions live no matter
 how old. Nothing about this needs an explicit command — it happens inside
@@ -182,11 +187,12 @@ its own function, returning `{rule, ref, msg}` findings):
 | Rule | Flags |
 |---|---|
 | `done-without-evidence` | a `done` card whose log never mentions verif/green/tests/evidence AND whose criteria are empty or not all `verified` |
-| `claimed-idle` | assignee set, phase `building`/`ready`, `updated` more than 3 days old |
+| `claimed-idle` | internal lease metadata remains on `building`/`ready` work untouched for more than 3 days |
 | `missing-attribution` | an event (newest 500, live) with an empty/missing `by` |
 | `ballot-gaps` | an OPEN, non-draft, non-`acceptance` decision that would fail `addDecision`'s own ballot-ready gate today |
 | `stale-draft` | a draft decision more than 7 days old |
 | `orphan-blockers` | a `blockedBy` ref that resolves to no live card, history card, or live decision |
+| `blocker-unpopulated` | epoch-track `planning` card with a plan but empty `blockedBy` (and no `blockedBy: none` marker) — D-TWR-OPS2 |
 
 `--docs` adds `ratified-in-open-ballot-doc`: a decision id ratified in the
 live store (or history) but still listed in a `docs/ballots/*.md` file
@@ -233,8 +239,8 @@ blocks the same as an unfinished card.
   are safe.
 - For read-modify-write races: pass `--expect-rev N` (from `tower state`'s
   `meta.rev`). Exit code 2 = conflict → re-read, retry.
-- `tower card claim` prevents two agents double-working a card; a claim held
-  by someone else is a hard stop, pick another card.
+- `tower card claim` prevents two agents double-working a card while its
+  24-hour renewable lease is active. An expired lease is never a blocker.
 
 ## HTTP API (when `tower serve` is up, default :7878)
 

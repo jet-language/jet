@@ -13,6 +13,7 @@ import { findDataDir, readJSON, writeJSON, historyFile } from './paths.mjs';
 import { ConfigError, DEFAULTS } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
+import * as scratch from './scratch.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
@@ -64,7 +65,8 @@ function Theme(flags) {
   };
 }
 
-const cardLine = (c) => `#${String(c.num).padEnd(4)} ${(c.priority || '').padEnd(3)} ${c.lane.lane.padEnd(9)} ${c.title.slice(0, 60)}${c.assignee ? `  [${c.assignee}]` : ''}`;
+const cardLine = (c, { epoch } = {}) =>
+  `#${String(c.num).padEnd(4)}${epoch ? ` ${(c.epoch || '—').padEnd(3)} ` : ' '}${(c.priority || '').padEnd(3)} ${c.lane.lane.padEnd(9)} ${c.title.slice(0, epoch ? 52 : 60)}`;
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 const zeroWidth = /[\p{Mark}\p{Default_Ignorable_Code_Point}\p{Control}]/u;
 const glyphWidth = (glyph) => {
@@ -130,7 +132,7 @@ function cmdStatus(store, { flags }) {
   const t = Theme(flags);
   const bar = (n) => t.success('█'.repeat(Math.min(12, n))) + t.border('░'.repeat(Math.max(0, 12 - n)));
   const phase = (id, text) => ({ done: t.success, verify: t.warn, deciding: t.error }[id] || t.accent)(text);
-  console.log(`\n  ${t.invert('TOWER')} ${t.border('·')} ${t.accent(s.meta.project)} ${t.border('·')} ${t.dim(`${store.config.terms.epoch.toLowerCase()} ${s.meta.currentEpoch || '—'} · rev ${s.meta.rev}`)}\n`);
+  console.log(`\n  ${t.invert('TOWER')} ${t.border('·')} ${t.accent(s.meta.project)} ${t.border('·')} ${t.dim(`${store.config.terms.epoch.toLowerCase()} ${db.activeEpoch(s) || '—'} · rev ${s.meta.rev}`)}\n`);
   for (const ph of db.PHASES) {
     const n = s.counts.byPhase[ph.id];
     if (n) console.log(`  ${phase(ph.id, ph.label.padEnd(9))} ${bar(n)} ${t.dim(String(n))}`);
@@ -148,11 +150,9 @@ function cmdStatus(store, { flags }) {
       const priority = (c.priority || '').padEnd(3);
       const lanePadded = lane.padEnd(9);
       const prefix = `   · #${number} ${priority} ${lanePadded} `;
-      let claim = c.assignee ? `  [${c.assignee}]` : '';
-      if (displayWidth(prefix) + 12 + displayWidth(claim) > columns) claim = '';
-      const title = clip(c.title, columns - displayWidth(prefix) - displayWidth(claim));
+      const title = clip(c.title, columns - displayWidth(prefix));
       const laneText = (lane === 'decide' ? t.error : lane === 'verify' ? t.warn : t.success)(lane.padEnd(9));
-      console.log(`   ${t.border('·')} #${number} ${c.priority ? t.warn(priority) : priority} ${laneText} ${title}${claim ? t.dim(claim) : ''}`);
+      console.log(`   ${t.border('·')} #${number} ${c.priority ? t.warn(priority) : priority} ${laneText} ${title}`);
     }
   };
   show('OWNER — decide', 'decide');
@@ -204,7 +204,7 @@ function cmdCard(store, { pos, flags }) {
       const patch = { ...p, by };
       for (const [f, k] of [['title', 'title'], ['body', 'body'], ['kind', 'kind'], ['track', 'track'], ['epoch', 'epoch'],
         ['milestone', 'milestoneId'], ['phase', 'phase'], ['priority', 'priority'], ['plan', 'plan'],
-        ['workOrder', 'workOrder'], ['assignee', 'assignee'], ['log', 'logEntry'], ['needsAcceptance', 'needsAcceptance']])
+        ['workOrder', 'workOrder'], ['log', 'logEntry'], ['needsAcceptance', 'needsAcceptance']])
         if (flags[f] !== undefined) patch[k] = flags[f];
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');
       if (flags.refs !== undefined) patch.refs = flags.refs === '' ? [] : String(flags.refs).split(',').map(x => x.trim()).filter(Boolean);
@@ -380,7 +380,7 @@ function cmdEpoch(store, { pos, flags }) {
     case 'list': {
       const s = store.load();
       if (flags.json) return out(flags, null, s.epochs);
-      for (const e of s.epochs) console.log(`${e.id.padEnd(6)} ${(e.status || 'open').padEnd(9)} ${e.name}${e.id === s.meta.currentEpoch ? '  ← current' : ''}`);
+      for (const e of s.epochs) console.log(`${e.id.padEnd(6)} ${(e.status || 'open').padEnd(9)} ${e.name}${e.status === 'active' ? '  ← current' : ''}`);
       if (!s.epochs.length) console.log('(no epochs — tower epoch add e1 --name "...")');
       return;
     }
@@ -396,7 +396,7 @@ function cmdEpoch(store, { pos, flags }) {
     }
     case 'current': {
       const { result } = store.mutate((s) => db.setCurrentEpoch(s, id === 'none' ? null : id));
-      return out(flags, `current ${store.config.terms.epoch.toLowerCase()}: ${result.currentEpoch || '—'}`, result);
+      return out(flags, `current ${store.config.terms.epoch.toLowerCase()}: ${result.active || '—'}`, result);
     }
     default: throw new TowerError('E_USAGE', `unknown epoch verb "${verb}" — list/add/update/current`);
   }
@@ -435,14 +435,19 @@ function cmdMilestone(store, { pos, flags }) {
 
 function cmdNext(store, { flags }) {
   const s = store.load();
-  const scope = flags.burndown ? 'burndown' : undefined;
-  const picks = db.nextCards(s, { epoch: flags.epoch, track: flags.track, agent: flags.agent, limit: Number(flags.limit || 5), scope });
+  const readyAcross = flags.readyAcrossEpochs || flags.parallel;
+  const scope = readyAcross ? 'ready-across' : flags.burndown ? 'burndown' : undefined;
+  const defaultLimit = readyAcross ? 50 : 5;   // the parallel view is a survey, not a single pick
+  const picks = db.nextCards(s, { epoch: flags.epoch, track: flags.track, agent: flags.agent, limit: Number(flags.limit || defaultLimit), scope });
   const proj = db.project(s);
   const rich = picks.map(p => proj.cards.find(c => c.id === p.id));
   if (flags.json) return out(flags, null, rich);
   if (!rich.length) return console.log('(nothing agent-workable — board is either empty, blocked on the owner, or done)');
-  console.log(scope === 'burndown' ? 'next up — burndown scope (current epoch + sidequests):' : 'next up (workOrder → building > verify > implement > plan):');
-  for (const c of rich) console.log(` · ${cardLine(c)}`);
+  const header = scope === 'ready-across' ? 'ready across all epochs — every card with no unfinished blocker (the parallel-safe set):'
+    : scope === 'burndown' ? 'next up — burndown scope (current epoch + sidequests):'
+    : 'next up (workOrder → building > verify > implement > plan):';
+  console.log(header);
+  for (const c of rich) console.log(` · ${cardLine(c, { epoch: scope === 'ready-across' })}`);
 }
 
 // #457 — durability sweeper: rule-based lint over the live board, optionally
@@ -461,6 +466,58 @@ function cmdLint(store, { flags }) {
   for (const f of findings) console.log(`${f.rule}  ${f.ref}  ${f.msg}`);
   if (!findings.length) console.log('(clean)');
   process.exitCode = findings.length ? 1 : 0;
+}
+
+function cmdScratch(store, { pos, flags }) {
+  const dir = store.dataDir;
+  scratch.migrateOwnerScratch(dir);
+  const [verb, id] = pos;
+  switch (verb) {
+    case 'list': {
+      const notes = scratch.listScratch(dir);
+      if (flags.json) return out(flags, null, notes);
+      if (!notes.length) return console.log('(no scratch notes — tower scratch add --title "...")');
+      for (const n of notes) console.log(`${n.id.padEnd(24)} ${n.updated.slice(0, 10)}  ${n.title}`);
+      return;
+    }
+    case 'show': {
+      if (!id) throw new TowerError('E_USAGE', 'scratch show needs an id');
+      const n = scratch.showScratch(dir, id);
+      return out(flags, n.body, n);
+    }
+    case 'add': {
+      const body = flags.file ? readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8') : (flags.body || '');
+      const n = scratch.addScratch(dir, { title: flags.title, body, id: flags.id });
+      return out(flags, `added scratch ${n.id}`, n);
+    }
+    case 'update': {
+      if (!id) throw new TowerError('E_USAGE', 'scratch update needs an id');
+      const patch = {};
+      if (flags.title !== undefined) patch.title = flags.title;
+      if (flags.file) patch.body = readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8');
+      else if (flags.body !== undefined) patch.body = flags.body;
+      const n = scratch.updateScratch(dir, id, patch);
+      return out(flags, `updated scratch ${n.id}`, n);
+    }
+    case 'delete': {
+      if (!id) throw new TowerError('E_USAGE', 'scratch delete needs an id');
+      const r = scratch.deleteScratch(dir, id);
+      return out(flags, `deleted scratch ${id}`, r);
+    }
+    case 'preview': {
+      const path = id || flags.path;
+      if (!path) throw new TowerError('E_USAGE', 'scratch preview needs a docs path');
+      const n = scratch.previewDoc(dir, path);
+      return out(flags, n.body, n);
+    }
+    case 'docs': {
+      const docs = scratch.listPreviewTree(dir);
+      if (flags.json) return out(flags, null, docs);
+      for (const d of docs) console.log(`${d.path}`);
+      return;
+    }
+    default: throw new TowerError('E_USAGE', `unknown scratch verb "${verb}" — list/show/add/update/delete/preview/docs`);
+  }
 }
 
 // #462 — tower brief: one-shot agent work packet. No ref → pick the top
@@ -495,7 +552,7 @@ function renderBrief(p, t) {
   const L = [];
   const heading = (text) => t.accent(text);
   L.push(`${t.invert(`#${c.num}`)} ${t.accent(c.title)}`);
-  L.push(`  ${t.warn(c.phase)}${c.priority ? ` ${t.border('·')} ${t.warn(c.priority)}` : ''}${c.track ? ` ${t.border('·')} ${t.dim(c.track)}` : ''}${c.workOrder != null ? ` ${t.border('·')} ${t.dim(`workOrder ${c.workOrder}`)}` : ''}${c.assignee ? ` ${t.border('·')} ${t.dim(`claimed by ${c.assignee}`)}` : ''}`);
+  L.push(`  ${t.warn(c.phase)}${c.priority ? ` ${t.border('·')} ${t.warn(c.priority)}` : ''}${c.track ? ` ${t.border('·')} ${t.dim(c.track)}` : ''}${c.workOrder != null ? ` ${t.border('·')} ${t.dim(`workOrder ${c.workOrder}`)}` : ''}`);
   if (c.epoch) L.push(`  ${t.dim(`epoch ${c.epoch.id}${c.epoch.name ? ` — ${c.epoch.name}` : ''}${c.epoch.goal ? `: ${c.epoch.goal}` : ''}`)}`);
   if (c.milestone) L.push(`  ${t.dim(`milestone ${c.milestone.title}${c.milestone.goal ? ` — ${c.milestone.goal}` : ''}${c.milestone.criteria ? `  criteria: ${c.milestone.criteria}` : ''}`)}`);
   if (c.body) { L.push('', heading('BODY'), c.body); }
@@ -671,7 +728,7 @@ async function githookPostCommit(store) {
 
 const HELP = `tower — file-backed project board for an owner + AI agents
 
-  tower init [--name X] [--dir .]           set up .tower/ in a project
+  tower init [--name X] [--dir PATH]        set up plugins/tower/.tower (or PATH/.tower)
   tower serve [--port ${DEFAULTS.port}] [--open] [--no-watch]
                                             board UI + HTTP API; self-restarts
                                             when Tower's own source changes
@@ -679,20 +736,28 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower status [--json] [--color=auto|always|never]
                                             terminal snapshot
   tower state                               full projected state (JSON)
-  tower next [--epoch E] [--track T] [--agent A] [--limit N] [--burndown]
+  tower next [--epoch E] [--track T] [--agent A] [--limit N]
+             [--burndown | --ready-across-epochs | --parallel]
                                             what an agent should pick up next;
-                                            --burndown narrows to current
-                                            epoch (meta.currentEpoch) + all
-                                            sidequests, agent lanes only
+                                            --burndown narrows to the active
+                                            epoch + all sidequests; --ready-
+                                            across-epochs (alias --parallel)
+                                            lists every unblocked card board-
+                                            wide — the parallel-safe set
+                                            (D-TWR-OPS2)
   tower lint [--json] [--docs] [--docs-root DIR]
                                             durability sweeper over the live
                                             board (done-without-evidence,
                                             claimed-idle, missing-attribution,
                                             ballot-gaps, stale-draft, orphan-
-                                            blockers); --docs also flags a
-                                            ratified decision id still listed
-                                            in docs/ballots/*.md; exit 1 on
-                                            any finding, 0 clean
+                                            blockers, blocker-unpopulated);
+                                            --docs also flags a ratified
+                                            decision id still listed in
+                                            docs/ballots/*.md; exit 1 on any
+                                            finding, 0 clean
+  tower scratch  list|show|add|update|delete|preview
+                                            owner scratch notes (…/.tower/scratch/)
+                                            + read-only preview of docs/*.md
   tower brief [ref] [--agent me] [--json] [--no-claim]
               [--color=auto|always|never]
                                             one-shot work packet: card, blockers,
@@ -788,6 +853,7 @@ export async function run(argv) {
       case 'next':      return cmdNext(store, sub);
       case 'brief':     return cmdBrief(store, sub);
       case 'lint':      return cmdLint(store, sub);
+      case 'scratch':   return cmdScratch(store, sub);
       case 'verdict':   return cmdVerdict(store, sub);
       case 'archive':   return cmdArchive(store, sub);
       case 'events':    return cmdEvents(store, sub);

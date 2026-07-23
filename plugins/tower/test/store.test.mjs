@@ -96,6 +96,31 @@ test('claims: second agent bounces, release frees', () => {
   assert.equal(st.load().cards[0].assignee, 'agent-2');
 });
 
+test('expired claims do not block selection or takeover', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A', phase: 'building' }, cfg));
+  st.mutate((s) => db.claimCard(s, '#1', 'agent-1'));
+  st.mutate((s) => { s.cards[0].claimedAt = '2000-01-01T00:00:00.000Z'; });
+
+  const s = st.load();
+  assert.equal(nextCards(s, { agent: 'agent-2' })[0].num, 1);
+  st.mutate((s2) => db.claimCard(s2, '#1', 'agent-2'));
+  assert.equal(st.load().cards[0].assignee, 'agent-2');
+});
+
+test('card writes renew active claims and terminal phases clear them', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A', phase: 'building' }, cfg));
+  st.mutate((s) => db.claimCard(s, '#1', 'agent-1'));
+  st.mutate((s) => { s.cards[0].claimedAt = '2000-01-01T00:00:00.000Z'; });
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { title: 'B', by: 'agent-1' }, cfg));
+  assert.notEqual(st.load().cards[0].claimedAt, '2000-01-01T00:00:00.000Z');
+
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'agent-1' }, cfg));
+  assert.equal(st.load().cards[0].assignee, null);
+  assert.equal(st.load().cards[0].claimedAt, undefined);
+});
+
 test('milestones: progress computes from linked cards; delete unlinks', () => {
   const st = fresh();
   st.mutate((s) => db.addEpoch(s, { id: 'e1', name: 'One' }));

@@ -17,6 +17,7 @@ import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
 import { lint } from './lint.mjs';
 import { computeVersion } from './version.mjs';
+import * as scratch from './scratch.mjs';
 
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
@@ -238,7 +239,31 @@ export function serve(store, port = 7878, open = false) {
       }
       if (req.method === 'GET' && url.pathname === '/api/next') {
         const q = url.searchParams;
-        return send(res, 200, db.nextCards(store.load(), { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit: Number(q.get('limit') || 5) }));
+        const scope = q.get('scope') === 'ready-across' || q.get('parallel') === '1' ? 'ready-across'
+          : q.get('burndown') === '1' || q.get('scope') === 'burndown' ? 'burndown'
+          : undefined;
+        const limit = Number(q.get('limit') || (scope === 'ready-across' ? 50 : 5));
+        return send(res, 200, db.nextCards(store.load(), { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit, scope }));
+      }
+      // Scratch pad — file-backed notes + read-only docs preview (not board state).
+      if (req.method === 'GET' && url.pathname === '/api/scratch') {
+        scratch.migrateOwnerScratch(store.dataDir);
+        const q = url.searchParams;
+        if (q.get('id')) return send(res, 200, scratch.showScratch(store.dataDir, q.get('id')));
+        if (q.get('path')) return send(res, 200, scratch.previewDoc(store.dataDir, q.get('path')));
+        return send(res, 200, { notes: scratch.listScratch(store.dataDir), docs: scratch.listPreviewTree(store.dataDir) });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/scratch/add') {
+        const p = await jsonBody(req);
+        return send(res, 200, { ok: true, result: scratch.addScratch(store.dataDir, p) });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/scratch/update') {
+        const p = await jsonBody(req);
+        return send(res, 200, { ok: true, result: scratch.updateScratch(store.dataDir, p.id, p) });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/scratch/delete') {
+        const p = await jsonBody(req);
+        return send(res, 200, { ok: true, result: scratch.deleteScratch(store.dataDir, p.id) });
       }
       // #457 — durability sweeper, same rules as `tower lint`.
       if (req.method === 'GET' && url.pathname === '/api/lint') {

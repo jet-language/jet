@@ -242,7 +242,7 @@ test('cli: tower brief --agent respects an existing claim by someone else (E_CLA
   run(cwd, ['card', 'claim', '#1', '--by', 'agent-x']);
   const r = run(cwd, ['brief', '#1', '--agent', 'agent-y'], false);
   assert.equal(r.code, 1);
-  assert.match(r.out, /already claimed by agent-x/);
+  assert.match(r.out, /active work lease held by agent-x/);
 });
 
 test('cli: tower brief --agent is a no-op when the same agent already holds the claim', () => {

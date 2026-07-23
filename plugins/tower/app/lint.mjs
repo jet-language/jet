@@ -109,7 +109,27 @@ export function ruleOrphanBlockers(s, history) {
   return findings;
 }
 
-const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft];
+// ---- rule: blocker-unpopulated (D-TWR-OPS2=A) --------------------------------
+// Plan-phase exit: an epoch-track card that already has a plan must also
+// record its real prerequisites (or explicitly claim none). Sidequests and
+// cards past planning are grandfathered — this catches the blank-graph drift
+// at the moment a planner would otherwise leave blockedBy empty forever.
+export function ruleBlockerUnpopulated(s) {
+  const findings = [];
+  for (const c of s.cards) {
+    if (c.track !== 'epoch') continue;
+    if (c.phase !== 'planning') continue;
+    if (!c.plan || !String(c.plan).trim()) continue;
+    if ((c.blockedBy || []).length) continue;
+    // Explicit none-marker in the plan body: "blockedBy: none" / "no blockers"
+    if (/\b(?:blockedBy\s*:\s*none|no blockers?)\b/i.test(c.plan)) continue;
+    findings.push({ rule: 'blocker-unpopulated', ref: `#${c.num}`,
+      msg: `#${c.num} "${c.title}" has a plan but empty blockedBy — record prerequisites (or write "blockedBy: none" in the plan)` });
+  }
+  return findings;
+}
+
+const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated];
 
 // ---- --docs mode: ratified decision id still listed in an open-ballot doc --
 // Precise on purpose: only docs/ballots/*.md (not docs/plans/**), since plans

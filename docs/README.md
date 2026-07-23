@@ -13,6 +13,8 @@ One home per kind of document. Start here.
 | See durable plans | [plans/](plans/) |
 | See live work, decisions, and blockers | [AGENTS.md](../AGENTS.md) → Tower |
 | Review unexplored proposals | [proposals/](proposals/) |
+| Find superseded research / old audits | [archive/](archive/) |
+| Re-run improvement / competitive checks | [`.agents/skills/`](../.agents/skills/) |
 
 ## spec/ — the authoritative surface
 

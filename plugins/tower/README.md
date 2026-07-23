@@ -29,10 +29,10 @@ node <tower-dir>/tower.mjs init --name "My Project"
 node <tower-dir>/tower.mjs serve --open        # board at http://localhost:7878
 ```
 
-`init` creates `.tower/` in the host project: `tower.json` (all state),
+`init` creates `plugins/tower/.tower/` beside this app: `tower.json` (all state),
 `config.json` (public terminology + taxonomies), `backups/` (rolling,
 automatic), and ignore rules for `secrets.json` plus crash-residue
-`.secrets.json.tmp-*` files. Commit `.tower/` to share the board with the
+`.secrets.json.tmp-*` files. Commit `plugins/tower/.tower/` to share the board with the
 team; backups and both secret-file forms are gitignored.
 
 Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json --name "My Project"`.
@@ -45,7 +45,7 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
 - **Cards** — the work. Stages: deciding → planning → ready → building →
   verify → done (+ frozen). A fresh card lands in `planning` — no owner
   greenlight step. Fields include `workOrder` (canonical
-  pick order), `blockedBy`, `assignee` (claims), `plan`, `log`, `refs`
+  pick order), `blockedBy`, an internal renewable work lease, `plan`, `log`, `refs`
   (explicit doc-path pointers, merged with auto-harvested ones in `tower brief`).
 - **Exit criteria** — a card's `criteria[]` checklist (open → met → verified)
   gates `--phase done` for anyone but the owner, and the verifier must differ
@@ -62,7 +62,7 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
 - **Events** — append-only audit trail of every mutation, with `--by` attribution.
 - **History** — a done card, or a ratified decision, sits live for
   `config.retireAfterDays` (default 3) before it retires into
-  `.tower/history.json` — the walk-back buffer. A card's own decisions and
+  `plugins/tower/.tower/history.json` — the walk-back buffer. A card's own decisions and
   questions stay live with it until the card itself retires, so no card view
   is ever half-archived. `tower archive status|show <id>|restore <id>` reads
   the archive back and, if needed, brings something back to the live board.
@@ -88,8 +88,10 @@ tower init | serve | import
 state, exit criteria, every linked decision copied verbatim, open questions,
 `refs` (explicit + harvested from body/plan), recent log, and the standing
 rules footer — everything needed to start a card with no other reads. No
-`ref` → picks the top card the same way `next` would. `--agent` claims the
-card (unless `--no-claim`); without `--agent` it's read-only.
+`ref` → picks the top card the same way `next` would. `--agent` takes a
+renewable 24-hour work lease (unless `--no-claim`); without `--agent` it is
+read-only. Expired leases never block work, and owner-facing card views do
+not show durable ownership markings.
 
 `--json` everywhere for machine output; `--file x.json` / `--file -` (stdin)
 for rich payloads; cards accept `#num` or id; `--by <name>` attributes every
@@ -100,7 +102,7 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 - **SSE** — the UI updates over `/api/stream` the instant anything changes;
   passive updates never disturb reading, typing, or an open ballot.
 - **Auth (opt-in)** — set `"auth": {"token": "…"}` in the untracked
-  `.tower/secrets.json` to
+  `plugins/tower/.tower/secrets.json` to
   require a key from non-localhost devices (`/?key=<token>` once per device;
   localhost always exempt). Without it the board is open to your LAN/tailnet.
 - **PWA** — installable app (offline shell). Live updates use SSE; web push
@@ -125,7 +127,7 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 - The HTTP API returns structured errors (`{error, message}`, 400/404/409).
 - `node --test test/*.test.mjs` runs the suite from the plugin root.
 
-## Configuration (`.tower/config.json`)
+## Configuration (`plugins/tower/.tower/config.json`)
 
 ```json
 {
@@ -143,9 +145,9 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 
 Everything is optional; the UI and validation follow whatever you set.
 `retireAfterDays` is the walk-back buffer before a done card / ratified
-decision moves to `.tower/history.json`.
+decision moves to `plugins/tower/.tower/history.json`.
 
-Runtime credentials belong only in ignored `.tower/secrets.json`:
+Runtime credentials belong only in ignored `plugins/tower/.tower/secrets.json`:
 
 ```json
 {
@@ -153,7 +155,7 @@ Runtime credentials belong only in ignored `.tower/secrets.json`:
 }
 ```
 
-Auth token (optional) belongs only in ignored `.tower/secrets.json`. Tower
+Auth token (optional) belongs only in ignored `plugins/tower/.tower/secrets.json`. Tower
 never provisions push credentials — web push was removed.
 If an older tracked `config.json` contains `auth` or `push`, Tower refuses to
 start: remove those fields, rotate any exposed auth token, then put only auth
@@ -185,6 +187,5 @@ Durable collapse state, no localStorage, no framework, mobile bottom tabs.
 Four focused skills ship with the plugin: **tower** (board mechanics),
 **tower-ballot** (authoring decisions the owner can decide from the ballot
 alone), **tower-burndown** (ranking and prioritization only), and
-**tower-setup** (init, import, config, server). Codeflow owns multi-card
-execution and orchestration. Non-Claude agents use `AGENTS.md` — same
-protocol, plain shell.
+**tower-setup** (init, import, config, server). Non-Claude agents use
+`AGENTS.md` — same protocol, plain shell.

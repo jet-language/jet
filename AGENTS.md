@@ -2,8 +2,6 @@
 
 Canonical policy for every coding agent. `CLAUDE.md` is a symlink here; do not fork per-tool copies.
 Put procedures in skills, design in specs, work state in Tower, and deterministic enforcement in tests or hooks.
-Codeflow is the preferred owner of systematic and larger-scope orchestration when available; this file does not
-duplicate its workflow.
 
 ## Mission and authority
 
@@ -16,7 +14,7 @@ Resolve guidance in this order:
 2. ratified Tower verdicts and their acceptance terms;
 3. the relevant domain spec;
 4. this file and the nearest nested `AGENTS.md`;
-5. task-specific skills and prompts.
+5. task-specific skills.
 
 Code shows implementation state, not design authority. A newer ratified ruling beats stale code or prose. On conflict,
 follow the higher authority, record it, and stop only the affected slice. Never average contradictory rules.
@@ -27,19 +25,18 @@ Read this file, then relevant code, tests, and the current diff. Load only task-
 
 - language semantics or syntax: relevant sections of `docs/spec/philosophy.md`,
   `docs/spec/syntax-decisions.md`, and `docs/spec/architecture.md`; adding syntax
-  uses `.claude/skills/verify/SKILL.md`;
+  uses `.agents/skills/verify/SKILL.md`;
 - diagnostics: `docs/spec/diagnostics.md` (including "Adding a diagnostic") and
   the matching UI snapshots;
 - FFI bridges: `docs/spec/architecture.md` ("Adding an FFI bridge");
 - Tower board mechanics or owner decisions: `plugins/tower/skills/tower/SKILL.md`, plus
   `plugins/tower/skills/tower-ballot/SKILL.md` when a choice is owner-gated;
-- Tower backlog ranking: `plugins/tower/skills/tower-burndown/SKILL.md`; Codeflow owns
-  campaign execution, delegation, checkpoints, and review;
-- completion claims: `.claude/skills/verify/SKILL.md`;
-- systematic, multi-part, ambiguous, or larger-scope work: `codeflow` when available;
+- Tower backlog ranking: `plugins/tower/skills/tower-burndown/SKILL.md`;
+- Jet audits / research / cleanup routing: `.agents/skills/JetSkillsRouter.md`;
+- completion claims: `.agents/skills/verify/SKILL.md` (code closeout only);
 - a specialized task: the matching skill named in the request or skill catalog.
 
-Do not front-load every spec, plan, prompt, or board record. Search first; read the smallest authoritative slice.
+Do not front-load every spec, plan, skill, or board record. Search first; read the smallest authoritative slice.
 
 ## Command environment
 
@@ -59,8 +56,8 @@ Rebuild before compiler smoke tests: the `jet` wrapper runs `target/debug/jet`. 
 The verification skill owns snapshot, golden, formatter, grammar, and full-suite traps.
 
 Start the local Tower board with the one canonical command:
-`node plugins/tower/tower.mjs serve --open`. Read and write board state through
-that CLI.
+`node plugins/tower/tower.mjs serve --open`. Board data lives in
+`plugins/tower/.tower/`. Read and write board state through that CLI.
 
 ## Invariants
 
@@ -100,14 +97,11 @@ tests and acceptance criteria over step-by-step micromanagement.
 
 ## Workflow ownership
 
-When Codeflow is installed and available, use it for systematic, multi-part, ambiguous, long-running, or larger-scope
-work. Codeflow owns planning, delegation, checkpoints, resumability, and phase mechanics. This manual supplies Jet's
-authority, invariants, environment, ownership guards, review requirement, and done conditions. Do not restate or
-extend Codeflow's orchestration algorithm in this file or repo prompts. Domain skills still own their mechanics;
-Codeflow coordinates them rather than replacing them. If Codeflow is unavailable, do not create a durable competing
-workflow while completing the task with the active harness.
+Keep bounded work inline. For larger work, use the active harness plus Tower.
+Do not invent a durable competing planner, phase model, or orchestration product
+in this repo.
 
-Keep bounded work inline. Before writing, inspect relevant Git/Tower ownership and the authoritative decision. Search
+Before writing, inspect relevant Git/Tower ownership and the authoritative decision. Search
 before broad reading; choose targeted proof before implementation.
 
 Use `ponytail:ponytail` for coding, refactoring, fixes, review, and technical design. Choose the smallest complete
@@ -132,7 +126,7 @@ ANSI/`NO_COLOR` where relevant—not prose or a selected screenshot.
 Before coding, enumerate new syntax, a new stdlib external dependency, an
 invariant carve-out, and any other owner-only call. For Jet project work, make
 each choice ballot-ready in Tower, then pause only the gated slice. Work on
-independent ungated slices meanwhile. Never hand-edit `.tower/` data.
+independent ungated slices meanwhile. Never hand-edit `plugins/tower/.tower/` data.
 
 Kill a design slice before ballot or code when it breaks an invariant,
 duplicates a mechanism, burdens the beginner default without necessity, or
@@ -147,9 +141,16 @@ choices directly in chat rather than creating Tower ballots.
 
 ## Ownership and worktrees
 
-One implementer owns each coherent patch. Concurrent writers need disjoint paths. Codeflow or the active specialized
-skill decides delegation mechanics. Start agent chatter with `caveman:caveman` where available; product copy, specs,
+One implementer owns each coherent patch. Concurrent writers need disjoint paths. The active specialized
+skill decides delegation mechanics when needed. Start agent chatter with `caveman:caveman` where available; product copy, specs,
 diagnostics, ballots, and commits use normal prose.
+
+Default to one active delivery stream. Expand concurrency only when each stream
+has disjoint write paths and tests, a clean integration target, and one named
+close owner. Contract when streams share compiler seams, contend for build
+resources, or produce an integration backlog. Never start new work while a
+reviewed or completed patch is waiting to integrate. This is an adaptive rule,
+not a fixed worker cap.
 
 Shared-tree safety is absolute:
 
@@ -183,9 +184,13 @@ or genuine UI, UX, or DX taste and design judgment. Tell the owner only what to
 observe and why human inspection is needed, as a brief checklist; omit the machine
 verification details agents already own.
 
-Use targeted tests during implementation and review. The verification skill owns when to run
-`scripts/agent/jet-env full scripts/agent/verify-full.sh`; CI runs it again. Keep normal parallelism unless reproducing
-a race.
+Use targeted tests during implementation and review. Close each bounded card
+from scoped proof and independent review. Run
+`scripts/agent/jet-env full scripts/agent/verify-full.sh` once after a batch of
+3–5 integrated card closures, at a major-push boundary, or when targeted
+evidence identifies a repository-wide interaction. CI runs it again. An
+unrelated full-suite failure becomes its own card and does not reopen a scoped,
+proved closure. Keep normal parallelism unless reproducing a race.
 
 Done means: integrated code matches current authority; targeted tests pass;
 docs/examples/snapshots match behavior; the Sol review closes; Tower/task state is

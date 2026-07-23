@@ -3,18 +3,18 @@
 Tower owns live cards, order, claims, blockers, and decisions:
 
 ```sh
-nix develop -c node plugins/tower/tower.mjs status
-nix develop -c node plugins/tower/tower.mjs next --burndown
+node plugins/tower/tower.mjs status
+node plugins/tower/tower.mjs next --burndown
 ```
 
 This directory keeps only durable cross-card law:
 
 - [universal-language-core.md](universal-language-core.md) — binding
   truth-repair and product-parity acceptance.
-- [syntax-law-source-status-matrix-2026-07-07.md](syntax-law-source-status-matrix-2026-07-07.md)
-  — machine-checked syntax implementation matrix.
-- [marker-plane-source-of-truth-matrix-2026-07-07.md](marker-plane-source-of-truth-matrix-2026-07-07.md)
-  — machine-checked marker-plane inventory.
+
+Dated syntax/marker matrices and capability dumps live in
+[`docs/archive/`](../../archive/). Regenerate with
+`.agents/skills/spec-compliance-audit/`.
 
 Application `target: plugin` shipped (D-PLUGIN1). Compiler-extension hooks are
 Tower #549 / D-DX5-HOOK1=A (typed post-sema WASM host in jet-pkg-model).

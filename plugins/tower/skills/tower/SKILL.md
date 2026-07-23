@@ -1,12 +1,12 @@
 ---
 name: tower
-description: Use Tower's board mechanics — inspect and claim agent-lane cards, act on ratified decisions, answer owner questions, update criteria and phases, and keep board state honest. Use when a task reads from or writes to Tower. For backlog ranking use tower-burndown; for multi-card execution use Codeflow.
+description: Use Tower's board mechanics — inspect and claim agent-lane cards, act on ratified decisions, answer owner questions, update criteria and phases, and keep board state honest. Use when a task reads from or writes to Tower. For backlog ranking use tower-burndown.
 ---
 
 # Tower — work the board
 
 Tower is the project's board. All state lives
-in `.tower/tower.json` in the project root, but you **never edit that file by
+in `plugins/tower/.tower/tower.json`, but you **never edit that file by
 hand** — every operation goes through the Tower CLI (or the HTTP API of a
 running `tower serve`).
 
@@ -17,7 +17,7 @@ node ${CLAUDE_PLUGIN_ROOT}/tower.mjs help
 If Tower is vendored in the repo instead of installed as a plugin, find the
   directory containing `tower.mjs` with `app/` beside it (commonly `Tower/` at
 the repo root). Alias once per session: `alias tower='node <path>/tower.mjs'`.
-No `.tower/` in the project yet → use the **tower-setup** skill.
+No `plugins/tower/.tower/` yet → use the **tower-setup** skill.
 
 ## The one rule that governs everything
 
@@ -51,8 +51,11 @@ everything as JSON; `tower status` is the human summary.
    `status`/`next`/`card show`/`decision show`/`question list` separately:
    picks the top card by the canonical order (lowest `workOrder`, then
    building > verify > implement > plan; respects `blockedBy` — never route
-   around a gate) and claims it in the same step (already claimed by someone
-   else → `E_CLAIMED`, pick another with `tower brief '#N' --agent <me>`).
+   around a gate) and takes a renewable 24-hour work lease in the same step
+   (someone else holds an active lease → `E_CLAIMED`, pick another with
+   `tower brief '#N' --agent <me>`). Normal card writes by the holder renew
+   it. Expired leases never block selection or takeover; done and frozen
+   cards clear them.
    The packet returned is everything needed to start: card, live blockers,
    full criteria checklist, every linked decision copied verbatim, open
    questions, refs, recent log, and the rules footer — no other reads
@@ -87,8 +90,8 @@ everything as JSON; `tower status` is the human summary.
 ## Burndown scope + durability sweep (#457)
 
 For multi-card work, use **tower-burndown** to produce or apply the ordered
-queue, then give that queue to **Codeflow** for execution. This skill owns
-board semantics, not campaign orchestration. `tower next --burndown` narrows
+queue, then hand that queue to an implementer. This skill owns board semantics,
+not campaign orchestration. `tower next --burndown` narrows
 the pool to `track:"epoch"` cards in `meta.currentEpoch` plus every
 `track:"sidequest"` card, agent lanes only, in the same `workOrder` order as
 plain `tower next`.
@@ -125,7 +128,7 @@ everything (bypass event-logged). Full table in the plugin's `AGENTS.md`; headli
 
 A done card, or a ratified decision, sits live for a walk-back buffer
 (`config.retireAfterDays`, default 3 days) before it retires into
-`.tower/history.json` — the owner sees it on Now's collapsed **Recently
+`plugins/tower/.tower/history.json` — the owner sees it on Now's collapsed **Recently
 decided** strip in the meantime and can reopen it in one tap. A card's own
 decisions/questions stay live with it until the card retires, so no card
 view is ever half-archived. `tower archive status|show <id>|restore <id>`
@@ -134,7 +137,7 @@ automatically once something isn't live any more.
 
 ## Non-negotiables
 
-- **Never edit `.tower/tower.json` directly** — the CLI/HTTP validate, lock,
+- **Never edit `plugins/tower/.tower/tower.json` directly** — the CLI/HTTP validate, lock,
   version, back up, and log; hand edits do none of that.
 - Always pass `--by <me>` on writes.
 - "Implemented" = fully functional end-to-end slice, never a stub.

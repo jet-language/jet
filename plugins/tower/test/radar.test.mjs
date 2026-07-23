@@ -12,9 +12,9 @@ const dayKey = (d) => d.slice(0, 10);
 
 function fixture() {
   return {
-    meta: { currentEpoch: 'e2' },
+    meta: {},
     epochs: [
-      { id: 'e1', name: 'Epoch One', goal: 'g1', status: 'active', order: 1 },
+      { id: 'e1', name: 'Epoch One', goal: 'g1', status: 'planned', order: 1 },
       { id: 'e2', name: 'Epoch Two', goal: 'g2', status: 'active', order: 2 },
       { id: 'e3', name: 'Arrived Epoch', status: 'arrived', order: 3 },
     ],
@@ -45,9 +45,9 @@ function fixture() {
   };
 }
 
-test('radar: excludes arrived/done epochs, current epoch sorts first', () => {
+test('radar: excludes arrived/done epochs, active epoch sorts first', () => {
   const r = radarData(fixture());
-  assert.deepEqual(r.map(x => x.id), ['e2', 'e1']); // e2 is currentEpoch, bumped ahead of e1 despite order 1 < 2; e3 (arrived) dropped
+  assert.deepEqual(r.map(x => x.id), ['e2', 'e1']); // e2 is the active epoch, bumped ahead of e1 despite order 1 < 2; e3 (arrived) dropped
 });
 
 test('radar: epoch grouping excludes sidequests from active/done/pct', () => {
@@ -95,6 +95,6 @@ test('radar: milestone stall days — touched, untouched, no linked cards', () =
 });
 
 test('radar: empty store yields empty list, no throw', () => {
-  const r = radarData({ meta: { currentEpoch: null }, epochs: [], milestones: [], cards: [], events: [] });
+  const r = radarData({ meta: {}, epochs: [], milestones: [], cards: [], events: [] });
   assert.deepEqual(r, []);
 });

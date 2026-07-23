@@ -95,7 +95,7 @@ test('human brief prints each open question exactly once', () => {
   assert.equal(output.split(text).length - 1, 1);
 });
 
-test('status card rows fit real 40 and 120 column PTYs without losing readable titles', () => {
+test('status card rows fit real 40 and 120 column PTYs without ownership markings', () => {
   const cwd = fresh();
   run(cwd, ['card', 'update', '#1', '--title', 'Render me with a deliberately long title that remains readable while terminal widths change', '--by', 'owner']);
   run(cwd, ['card', 'claim', '#1', '--by', 'width-reviewer']);
@@ -113,7 +113,7 @@ test('status card rows fit real 40 and 120 column PTYs without losing readable t
   assert.ok([...wide].length <= 120, `120-column row is ${[...wide].length} columns: ${wide}`);
   assert.match(narrow, /Render me with.*…/, 'narrow output keeps a useful title prefix');
   assert.match(wide, /deliberately long title that remains readable/, 'wide output uses available columns');
-  assert.match(wide, /\[width-reviewer\]/, 'wide output retains claim context');
+  assert.doesNotMatch(wide, /width-reviewer/, 'active lease stays internal');
 });
 
 test('status card row measures wide CJK glyphs in a real 40 column PTY', () => {

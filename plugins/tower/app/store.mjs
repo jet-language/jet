@@ -19,6 +19,7 @@ import { withLock } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
 
 export const VERSION = 4;
+export const CLAIM_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const PHASES = [
   { id: 'deciding', label: 'Deciding', seq: 0, who: 'owner', blurb: 'Blocked on a decision' },
@@ -252,15 +253,26 @@ export function restoreFromHistory(s, h, ref, by) {
 
 export function normalize(s) {
   s = s && typeof s === 'object' ? s : empty();
-  s.meta = { version: VERSION, project: 'Project', currentEpoch: null, nextNum: 1, rev: 0, ...(s.meta || {}) };
+  s.meta = { version: VERSION, project: 'Project', nextNum: 1, rev: 0, ...(s.meta || {}) };
   s.meta.version = VERSION;
   s.meta.ui = { toggled: [], ...(s.meta.ui || {}) };
   for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events']) s[k] ||= [];
   delete s.messages;   // messaging was removed; drop the legacy key on next write
+  // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
+  // One-time reconcile of the retired meta.currentEpoch pointer, then drop it so
+  // the two-source-of-truth drift (null pointer vs an active epoch) cannot recur.
+  if (s.meta.currentEpoch != null && !s.epochs.some(e => e.status === 'active')) {
+    const e = s.epochs.find(x => x.id === s.meta.currentEpoch);
+    if (e) e.status = 'active';
+  }
+  delete s.meta.currentEpoch;
   for (const c of s.cards) { c.blockedBy ||= []; c.log ||= []; c.criteria ||= []; c.refs ||= []; c.needsAcceptance = !!c.needsAcceptance; }
   for (const d of s.decisions) d.draft = !!d.draft;
   return s;
 }
+
+// D-TWR-OPS1=A: the single source of truth for "which epoch is live".
+export const activeEpoch = (s) => s.epochs.find(e => e.status === 'active')?.id ?? null;
 
 // ---- derivation: clearance + lane (the ONE place this is decided) ---------
 
@@ -286,7 +298,9 @@ export function laneOf(card, decisions, cards) {
   const open = decisions.filter(d => d.cardId === card.id && isBlocking(d) && d.group !== 'acceptance');
   if (open.length) return { lane: 'decide', who: 'owner', label: `${open.length} decision${open.length > 1 ? 's' : ''} to make`, decisions: open.map(d => d.id) };
   const blockers = (card.blockedBy || []).filter(id => {
-    const b = cards.find(c => c.id === id);
+    // Resolve by id OR #num — same contract as findCard / blockedBy validation.
+    const str = String(id);
+    const b = cards.find(c => c.id === str) || cards.find(c => c.num === Number(str.replace(/^#/, '')));
     if (b) return b.phase !== 'done';
     const d = decisions.find(x => x.id === id);
     if (d) return d.status !== 'ratified';
@@ -363,8 +377,9 @@ function milestoneStallDays(m, cards, events) {
 
 export function radarData(s) {
   const activeEpochs = s.epochs.filter(e => !['arrived', 'done'].includes(e.status));
+  const cur = activeEpoch(s);
   const sorted = [...activeEpochs].sort((a, b) => {
-    const aCur = a.id === s.meta.currentEpoch, bCur = b.id === s.meta.currentEpoch;
+    const aCur = a.id === cur, bCur = b.id === cur;
     if (aCur !== bCur) return aCur ? -1 : 1;
     return (a.order ?? a.num ?? 999) - (b.order ?? b.num ?? 999);
   });
@@ -485,7 +500,7 @@ export function addCard(s, p, config) {
     body: p.body || '',
     kind: p.kind || config.kinds[0],
     track: p.track || config.tracks[0],
-    epoch: p.epoch ?? s.meta.currentEpoch ?? null,
+    epoch: p.epoch ?? activeEpoch(s),
     milestoneId: p.milestoneId || null,
     phase: p.phase || 'planning',
     priority: p.priority || config.priorities[2] || config.priorities.at(-1),
@@ -504,7 +519,7 @@ export function addCard(s, p, config) {
   return card;
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'assignee', 'criteria', 'needsAcceptance', 'refs'];
+const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Criteria remain
 // owner-soft, but needsAcceptance is transport-hard: caller attribution can
@@ -628,6 +643,11 @@ export function updateCard(s, ref, patch, config) {
       else c[k] = patch[k];
     }
   }
+  if (c.assignee && c.assignee === patch.by) c.claimedAt = now();
+  if (c.phase === 'done' || c.phase === 'frozen') {
+    c.assignee = null;
+    delete c.claimedAt;
+  }
   if (patch.logEntry) c.log.unshift({ at: today(), by: patch.by || 'agent', text: patch.logEntry });
   c.updated = today();
   logEvent(s, { by: patch.by, action: 'card.update', ref: c.id, note: Object.keys(patch).filter(k => k !== 'id' && k !== 'by').join(',') });
@@ -710,13 +730,22 @@ function assertOwnerOr(by, quote, code, what) {
   return `by ${by}, quoting owner: "${quote}"`;
 }
 
-// Claim/release: soft assignment so parallel agents don't double-work a card.
+// Claims are renewable coordination leases, not durable ownership. An expired
+// lease never blocks selection or takeover; normal writes by its holder renew
+// it, and terminal/paused phases clear it.
+export function hasActiveClaim(c, at = Date.now()) {
+  if (!c?.assignee || !c.claimedAt) return false;
+  const claimed = Date.parse(c.claimedAt);
+  return Number.isFinite(claimed) && at - claimed < CLAIM_TTL_MS;
+}
+
 export function claimCard(s, ref, by) {
   const c = mustCard(s, ref);
   if (!by) fail('E_INVALID', 'claim needs --by <agent>');
   if (by !== 'owner' && c.phase === 'frozen')
     fail('E_OWNER_LANE', `card #${c.num} is frozen — owner-only until the owner moves it out (\`tower card update --phase ... --by owner\`)`);
-  if (c.assignee && c.assignee !== by) fail('E_CLAIMED', `card #${c.num} already claimed by ${c.assignee} — pick another or release it first`);
+  if (hasActiveClaim(c) && c.assignee !== by)
+    fail('E_CLAIMED', `card #${c.num} has an active work lease held by ${c.assignee} — pick another or release it first`);
   c.assignee = by; c.claimedAt = now(); c.updated = today();
   logEvent(s, { by, action: 'card.claim', ref: c.id });
   return c;
@@ -1042,13 +1071,26 @@ export function addEpoch(s, p) {
 }
 export function updateEpoch(s, id, patch) {
   const e = s.epochs.find(x => x.id === id) || fail('E_NOT_FOUND', `no epoch ${id}`);
+  // D-TWR-OPS1=A: at most one active epoch. Reject a second one honestly rather
+  // than silently demoting the old epoch (which might not actually be finished).
+  if (patch.status === 'active') {
+    const other = s.epochs.find(x => x.id !== id && x.status === 'active');
+    if (other) fail('E_INVALID', `${other.id} is already active — set it to arrived/planned before activating ${id}`);
+  }
   for (const k of ['name', 'goal', 'status']) if (k in patch) e[k] = patch[k];
   return e;
 }
+// D-TWR-OPS1=A: `epoch current <id>` is now sugar for activating that epoch;
+// `epoch current none` demotes the live epoch back to planned. The retired
+// meta.currentEpoch field is gone — status is the only source of truth.
 export function setCurrentEpoch(s, id) {
-  if (id != null) checkEpoch(s, id);
-  s.meta.currentEpoch = id;
-  return s.meta;
+  if (id == null) {
+    const cur = s.epochs.find(e => e.status === 'active');
+    if (cur) cur.status = 'planned';
+    return { active: null };
+  }
+  updateEpoch(s, id, { status: 'active' });
+  return { active: id };
 }
 
 export function addMilestone(s, p) {
@@ -1084,25 +1126,40 @@ const LANE_PREF = { building: 0, verify: 1, implement: 2, plan: 3 };
 // #457 — `scope: 'burndown'` narrows the pool to exactly the current
 // epoch's epoch-track cards plus all sidequests (agent lanes only) — the
 // tower skill's "burndown loop" scope, made a real filter instead of
-// something an agent has to hand-derive from meta.currentEpoch each time.
+// something an agent has to hand-derive from the active epoch each time.
+//
+// D-TWR-OPS2=A — `scope: 'ready-across'` spans every epoch and returns every
+// card an agent could pick up right now. laneOf already drops a card while any
+// blockedBy prerequisite is unfinished, so this list IS the parallel-safe set:
+// once dependencies are recorded, work that must wait simply isn't in it.
 export function nextCards(s, { epoch, track, agent, limit = 5, scope } = {}) {
   const proj = project(s);
   const pool = proj.cards.filter(c => {
     if (!(c.lane.lane in LANE_PREF)) return false;
     if (epoch && c.epoch !== epoch) return false;
     if (track && c.track !== track) return false;
-    if (c.assignee && agent && c.assignee !== agent) return false;
+    if (hasActiveClaim(c) && agent && c.assignee !== agent) return false;
     if (scope === 'burndown') {
-      const inEpoch = c.track === 'epoch' && c.epoch === s.meta.currentEpoch;
+      const inEpoch = c.track === 'epoch' && c.epoch === activeEpoch(s);
       if (!inEpoch && c.track !== 'sidequest') return false;
     }
     return true;
   });
-  pool.sort((a, b) =>
-    (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
-    || LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
-    || (a.priority || '').localeCompare(b.priority || '')
-    || a.num - b.num);
+  // ready-across groups by epoch so cross-epoch parallel candidates read as a
+  // plan; every other scope keeps the single global workOrder march.
+  if (scope === 'ready-across') {
+    pool.sort((a, b) =>
+      (a.epoch || '').localeCompare(b.epoch || '')
+      || (a.priority || '').localeCompare(b.priority || '')
+      || (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
+      || a.num - b.num);
+  } else {
+    pool.sort((a, b) =>
+      (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
+      || LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
+      || (a.priority || '').localeCompare(b.priority || '')
+      || a.num - b.num);
+  }
   return pool.slice(0, limit);
 }
 
