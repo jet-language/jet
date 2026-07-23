@@ -2662,6 +2662,15 @@ aliases or whole-buffer facades.
 
 **D-API-CTOR1=A — constructor-idiom law** *(ratified by owner 2026-07-12, card #513)*: the four shipped idioms become written rubric law — bare `Type(…)` when the arguments ARE the value's components (fallible where narrowing); `.new(…)` for fresh stateful containers; `.over(…)` for non-owning views over existing data; `.from_*(…)` for conversions. `Type.{ }` stays the literal for plain data records. Nothing shipped changes; new construction shapes need a ballot.
 
+**D-SHAPE-CTORVERB1=C — one fresh-value completion stem** *(ratified by
+owner 2026-07-23, card #736)*: deterministic fresh values use type-owned
+`Type.new(…)`; constructors that draw entropy use `Type.new_random(…)`.
+`Clock.new`, `ExpiringValue.new`, `SigningKey.new_random`, and
+`X25519SecretKey.new_random` are the canonical spellings. The former
+`time.clock`, `expiring.new`, and key-type `generate` spellings retire with
+teaching errors. The plain `random` suffix does not extend the closed
+abbreviation list.
+
 **D-SHAPE3a=A — inferred fresh construction** *(ratified by owner 2026-07-14,
 card #536)*: `.new(…)` may omit the receiver only when the surrounding expected
 type plus its arguments determine one receiver type. `Type.new(…)` always remains

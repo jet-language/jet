@@ -213,7 +213,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-PENDING1=B: async UI state machine.
         | "Loadable"
         // D-CORE-SECRETS1=A / D-TTLVAL1=A: generic TTL plus one secret wrapper.
-        | "Expired" | "Expiring" | "ExpiringSecret"
+        | "Expired" | "ExpiringValue" | "ExpiringSecret"
         // D-RENDERTGT2=A (c133 M1): UI backend seam types.
         | "Point" | "Size" | "Rect" | "SizeConstraint" | "UiNode" | "InputEvent"
         | "EventResult" | "NullBackend" | "TuiBackend"

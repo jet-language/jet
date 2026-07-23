@@ -212,6 +212,17 @@ impl<'a> Interp<'a> {
         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
         if let Expr::Ident(type_name, _) = receiver {
+            // D-SHAPE-CTORVERB1=C: deterministic fresh state is type-owned.
+            if type_name == crate::Syntax::CLOCK_TYPE && method == "new" {
+                let seed = self.eval(&args[0].expr, scope)?;
+                let CtValue::Int(seed) = seed else {
+                    return Err(unsupported("Clock.new expects an Int seed", span));
+                };
+                return Ok(CtValue::Struct {
+                    type_name: crate::Syntax::CLOCK_TYPE.to_string(),
+                    fields: vec![("now".to_string(), CtValue::Int(seed))],
+                });
+            }
             if type_name == crate::Syntax::DURATION_TYPE {
                 let Some(unit) = crate::Syntax::duration_unit_for_constructor(method) else {
                     return Err(super::super::super::Diagnostics::unsupported(

@@ -459,14 +459,6 @@ pub fn core_fixed_sig(
             ],
             Some(Type::Named("ZonedDateTime".to_string())),
         )),
-        // D-DET1: deterministic injected Clock capability. `time.clock(seed)` builds a
-        // reproducible `Clock` from a caller-supplied start instant (a pure Int, ms);
-        // a `#Pure fn` may read time through it (`clock.now()` / `clock.tick(ms)`)
-        // while the ambient `time.now()` stays E3403.
-        ("core.time", "clock") => Some((
-            vec![(read, Type::Int)],
-            Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())),
-        )),
         ("core.game", "run") => Some((
             vec![(read, Type::Named("GameScene".to_string()))],
             Some(Type::String),

@@ -30,6 +30,10 @@
 // and ordinary call punctuation, with the receiver resolved by sema.
 // D-SHAPE-OPAQUE-INFER1=A adds no token: `Type.new(...)` may omit generic
 // receiver arguments only when ordinary input/expected-type inference is unique.
+// D-SHAPE-CTORVERB1=C closes fresh-value construction under the `new` prefix:
+// MEM_ALLOC_NEW owns deterministic construction; METHOD_FRESH_NEW_RANDOM owns
+// entropy-drawing construction; CLOCK_TYPE and EXPIRING_VALUE_TYPE own the
+// migrated type names. Lowercase module factories and `generate` are retired.
 // D-UNSAFE-OBLIG1=A adds contextual `assert valid_ptr, aligned, no_alias`,
 // the `obligations: .Track/.Skip` #Unsafe field, and ENV_ORG_UNSAFE_POLICY.
 // D-SHAPE-INTERNAL1=A and D-SHAPE-DUNDER2=A add no token: the canonical

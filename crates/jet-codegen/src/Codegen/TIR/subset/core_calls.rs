@@ -126,10 +126,6 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     {
         return true;
     }
-    // D-CORE-SECRETS1=A: generic TTL constructor.
-    if module == "core.time.expiring" && method == "new" {
-        return true;
-    }
     // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors. NOT in `core_fixed_sig`.
     if matches!(module, "core.http.client" | "core.http.server")
         && matches!(

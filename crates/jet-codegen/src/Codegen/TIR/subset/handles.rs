@@ -713,12 +713,6 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             return Type::Named("DateTime".to_string())
         }
         // D-CORE-SECRETS1=A: generic TTL constructor; T comes from argument 0.
-        ("core.time.expiring", "new") => {
-            return Type::Apply {
-                name: "Expiring".to_string(),
-                args: vec![Type::Named("Unknown".to_string())],
-            }
-        }
         // D-EVENT1=D: generic constructors; sema normally writes the precise
         // resolved return type and lowering reads that. Placeholders keep node
         // totality for defensive/fallback paths.

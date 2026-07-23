@@ -2,7 +2,7 @@
 use core.crypto as crypto
 
 fn run() {
-    recipient :: crypto.X25519SecretKey.generate() ?? panic("recipient key")
+    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient key")
     plaintext: [U8] :: [0x73, 0x61, 0x66, 0x65]
     aad: [U8] :: [0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74]
     sealed :: crypto.seal([recipient.public_key()], plaintext, aad) ?? panic("seal")
@@ -12,7 +12,7 @@ fn run() {
     parsed_recipient :: crypto.X25519PublicKey.from_text(recipient_text) ?? panic("public key text")
     print(parsed_recipient.bytes() == recipient.public_key().bytes())
 
-    signing :: crypto.SigningKey.generate() ?? panic("signing key")
+    signing :: crypto.SigningKey.new_random() ?? panic("signing key")
     signature :: crypto.sign(signing, plaintext) ?? panic("sign")
     print(crypto.verify(signing.public_key(), plaintext, signature) ?? panic("verify"))
 

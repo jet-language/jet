@@ -523,7 +523,7 @@ fn jet_ring_crypto_sha256_bytes(bs: &Vec<u8>) -> String {
     hash.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-// D-CORE-SECRETS1=A: generic TTL stays in core.time.expiring.
+// D-SHAPE-CTORVERB1=C: generic TTL uses ExpiringValue.new.
 fn jet_expiring_new<T: Clone>(value: T, ttl_ms: i64, clock_now: i64) -> JetExpiring<T> {
     JetExpiring::new(value, clock_now.saturating_add(ttl_ms))
 }
