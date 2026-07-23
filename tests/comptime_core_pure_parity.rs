@@ -246,7 +246,7 @@ const TESTING_FAKE_RNG_FN: &str = r#"fn testing_fake_rng_view() -> String {
 const TESTING_FAKE_RNG_EXPECTED: &str = "4|4|0.0316577610861849|0.0316577610861849";
 const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() -> String {
     clock := testing.fake_clock(42)
-    canonical := time.clock(42)
+    canonical := Clock.new(42)
     initial :: clock.now()
     ticked :: clock.tick(8)
     after_tick :: clock.now()

@@ -2733,7 +2733,7 @@ pub enum THandleOp {
     LoadableMethod {
         method: String,
     },
-    /// D-CORE-SECRETS1=A: generic `Expiring<T>` fallible accessors.
+    /// D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` fallible accessors.
     ExpiringMethod {
         method: String,
     },

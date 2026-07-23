@@ -7,7 +7,7 @@ fn recipient_surface() --[Secret]-> {
     create :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
     create_write :: vault.authorize_write(&create, "create release signer") ?? return
     key_ref :: vault.commit_generate(^create_write, ^create) ?? return
-    identity :: crypto.X25519SecretKey.generate() ?? return
+    identity :: crypto.X25519SecretKey.new_random() ?? return
     recipient :: identity.public_key()
     wrapped :: vault.export_to_recipients(&key_ref, [recipient]) ?? return
     bytes :: wrapped.bytes()

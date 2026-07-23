@@ -2560,8 +2560,10 @@ impl<'a> Checker<'a> {
                         args: vec![unit_ty(), err_ty],
                     });
                 }
-                // D-CORE-SECRETS1=A: generic TTL stays in core.time.expiring.
+                // D-SHAPE-CTORVERB1=C: recover after the retired module factory
+                // as if `ExpiringValue.new` had been written.
                 ("core.time.expiring", "new") => {
+                    self.diags.push(unknown_core_item(module, name, span));
                     if args.len() != 3 {
                         self.diags
                             .push(wrong_core_arity("new", 3, args.len(), span));
@@ -2586,7 +2588,7 @@ impl<'a> Checker<'a> {
                         &mut args[2],
                     );
                     return Some(Type::Apply {
-                        name: "Expiring".to_string(),
+                        name: crate::Syntax::EXPIRING_VALUE_TYPE.to_string(),
                         args: vec![value_ty],
                     });
                 }

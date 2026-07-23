@@ -299,14 +299,18 @@ pub fn loadable_method_return(
     }
 }
 
-/// D-CORE-SECRETS1=A: instance methods on generic `Expiring<T>`.
+/// D-SHAPE-CTORVERB1=C: instance methods on generic `ExpiringValue<T>`.
 pub fn expiring_method_return(
     type_apply: &Type,
     method: &str,
     _n_args: usize,
 ) -> Option<Option<Type>> {
     let val_ty = match type_apply {
-        Type::Apply { name, args } if name == "Expiring" && args.len() == 1 => args[0].clone(),
+        Type::Apply { name, args }
+            if name == crate::Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 =>
+        {
+            args[0].clone()
+        }
         _ => return None,
     };
     match method {

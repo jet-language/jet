@@ -293,8 +293,8 @@ pub(crate) fn lower_method_call(
         let helper = match (ty.as_str(), method) {
             ("Secret", "from_text") => "__secret_from_text",
             ("Secret", "from_bytes") => "__secret_from_bytes",
-            ("SigningKey", "generate") => "__signing_generate",
-            ("X25519SecretKey", "generate") => "__x25519_generate",
+            ("SigningKey", "new_random") => "__signing_generate",
+            ("X25519SecretKey", "new_random") => "__x25519_generate",
             ("VerifyKey", "from_bytes") => "__verify_key_from_bytes",
             ("X25519PublicKey", "from_bytes") => "__x25519_public_from_bytes",
             ("X25519PublicKey", "from_text") => "__x25519_public_from_text",
@@ -744,14 +744,28 @@ pub(crate) fn lower_method_call(
         }
     }
     if matches!(receiver, Expr::Ident(name, _) if name == Syntax::CLOCK_TYPE)
-        && method == "system"
-        && args.is_empty()
         && !env.locals.contains_key(Syntax::CLOCK_TYPE)
     {
-        return TExpr {
-            ty: Type::Named(Syntax::CLOCK_TYPE.to_string()),
-            kind: TExprKind::ConstInline(format!("{}jet_std_clock_system()", cx.root_prefix)),
-        };
+        if method == "new" && args.len() == 1 {
+            let seed = lower_expr(&args[0].expr, cx, env);
+            return TExpr {
+                ty: Type::Named(Syntax::CLOCK_TYPE.to_string()),
+                kind: TExprKind::ConstInline(format!(
+                    "{}jet_std_clock_new({})",
+                    cx.root_prefix,
+                    emit_tir_expr(&seed, cx)
+                )),
+            };
+        }
+        if method == "system" && args.is_empty() {
+            return TExpr {
+                ty: Type::Named(Syntax::CLOCK_TYPE.to_string()),
+                kind: TExprKind::ConstInline(format!(
+                    "{}jet_std_clock_system()",
+                    cx.root_prefix
+                )),
+            };
+        }
     }
     // D-SHAPE-DURATION1=A: a bare `Duration.unit(value)` is a type-owned
     // checked constructor, not an instance/static user method.
@@ -1561,8 +1575,8 @@ pub(crate) fn lower_method_call(
             },
         };
     }
-    // D-CORE-SECRETS1=A: generic `Expiring<T>` stays in core.time.expiring.
-    if recv_type.as_deref() == Some("Expiring")
+    // D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` uses type-owned construction.
+    if recv_type.as_deref() == Some(Syntax::EXPIRING_VALUE_TYPE)
         && matches!(method, "get" | "is_valid" | "force")
     {
         let recv_t = lower_expr(receiver, cx, env);
@@ -2977,6 +2991,34 @@ pub(crate) fn lower_method_call(
                          __jet_expiring_value, __jet_expiring_ttl.ms, \
                          move || __jet_expiring_observer.now()) }}",
                     cx.root_prefix, elem_rust
+                )),
+            };
+        }
+        if type_name == Syntax::EXPIRING_VALUE_TYPE && method == "new" && args.len() == 3 {
+            let value = lower_expr(&args[0].expr, cx, env);
+            let duration = lower_expr(&args[1].expr, cx, env);
+            let clock = lower_expr(&args[2].expr, cx, env);
+            let elem_ty = match resolved_ret {
+                Some(Type::Apply { name, args })
+                    if name == Syntax::EXPIRING_VALUE_TYPE && !args.is_empty() =>
+                {
+                    args[0].clone()
+                }
+                _ => value.ty.clone(),
+            };
+            return TExpr {
+                ty: Type::Apply {
+                    name: Syntax::EXPIRING_VALUE_TYPE.to_string(),
+                    args: vec![elem_ty],
+                },
+                kind: TExprKind::ConstInline(format!(
+                    "{}jet_expiring_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",
+                    cx.root_prefix,
+                    emit_tir_expr(&value, cx),
+                    cx.root_prefix,
+                    emit_tir_expr(&duration, cx),
+                    cx.root_prefix,
+                    emit_tir_expr(&clock, cx)
                 )),
             };
         }

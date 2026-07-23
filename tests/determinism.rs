@@ -21,7 +21,7 @@ fn at(clock: Clock) --[]-> Int {
     return clock.now()
 }
 fn run() {
-    c :: time.clock(500)
+    c :: Clock.new(500)
     print("{at(c)}")
 }
 use core.time as time;
@@ -51,7 +51,7 @@ fn run() {
     assert!(res.is_ok(), "injected Rng should compile: {:?}", res.err());
 }
 
-/// The deterministic capability constructors (`time.clock`, `random.rng`) are
+/// The deterministic capability constructors (`Clock.new`, `random.rng`) are
 /// themselves usable inside a `#Pure fn` — they carry no ambient effect.
 #[test]
 fn pure_fn_constructs_caps_ok() {
@@ -59,7 +59,7 @@ fn pure_fn_constructs_caps_ok() {
 use core.time as time;
 use core.random as random;
 fn seeded() --[]-> Int {
-    c :: time.clock(10)
+    c :: Clock.new(10)
     r := random.rng(1)
     return c.now() + r.int(0, 0)
 }
@@ -558,7 +558,7 @@ fn drive_clock(clock: &Clock) --[]-> Int {
     return base + clock.wait(span)
 }
 fn run() {
-    c := time.clock(0)
+    c := Clock.new(0)
     print("{drive_clock(&c)}")
 }
 "#;
@@ -576,7 +576,7 @@ fn clock_advance_needs_mut_receiver() {
     let src = r#"
 use core.time as time;
 fn run() {
-    c :: time.clock(0)
+    c :: Clock.new(0)
     n := c.advance(100)
     print("{n}")
 }

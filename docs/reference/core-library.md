@@ -519,7 +519,7 @@ are linked only through the hidden bridge crate, not the compiler.
 use core.crypto as crypto
 
 fn run() {
-    recipient :: crypto.X25519SecretKey.generate() ?? return
+    recipient :: crypto.X25519SecretKey.new_random() ?? return
     box :: crypto.seal([recipient.public_key()], "hello".bytes(), []) ?? return
     plain :: crypto.open(&recipient, box, []) ?? return
 
@@ -634,10 +634,14 @@ moves the credential into the wrapper. The wrapper retains a private observer
 of the injected clock, so ordinary `~clock` copies cannot change its expiry.
 Access is closure-only:
 
+Generic cache expiry uses
+`ExpiringValue.new(value, ttl, clock)`. Fresh deterministic values use
+type-owned `.new`; entropy-drawing key constructors use `.new_random`.
+
 ```jet
-clock := time.clock(0)
+clock := Clock.new(0)
 ttl := Duration.minutes(5) ?? return
-key := crypto.SigningKey.generate() ?? return
+key := crypto.SigningKey.new_random() ?? return
 secret := vault.ExpiringSecret.new(^key, ttl, clock)
 result := secret.with((borrowed) => borrowed.public_key())
 ```
@@ -1473,7 +1477,7 @@ fn at(clock: Clock) --[]-> Int {
     return clock.now()             // current value in ms; pure read
 }
 fn run() {
-    c :: time.clock(1000)          // a Clock starting at 1000 ms
+    c :: Clock.new(1000)          // a Clock starting at 1000 ms
     print(at(c))                   // 1000, on every machine
 }
 ```

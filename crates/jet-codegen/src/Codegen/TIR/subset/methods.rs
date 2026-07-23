@@ -428,6 +428,11 @@ pub(crate) fn method_call_in_subset(
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                     }
+                    ("ExpiringValue", "new", 3) => {
+                        return args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    }
                     // D-PATHFS1: `Path.from(str)` — static constructor for typed paths.
                     // Like `Set.from`, admitted before `static_method_call_in_subset`
                     // blocks `from` (an intercepted name). Path is not a user type.
@@ -619,8 +624,8 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
-    // D-CORE-SECRETS1=A: generic Expiring<T> access.
-    if recv_type.as_deref() == Some("Expiring")
+    // D-SHAPE-CTORVERB1=C: generic ExpiringValue<T> access.
+    if recv_type.as_deref() == Some(Syntax::EXPIRING_VALUE_TYPE)
         && matches!(
             (method, args.len()),
             ("get", 1) | ("is_valid", 1) | ("force", 1)
@@ -1087,8 +1092,16 @@ pub(crate) fn static_method_call_in_subset(
     if locals.contains(type_name) {
         return false;
     }
-    if matches!((type_name, method, args.len()), ("Clock", "system", 0)) {
+    if matches!(
+        (type_name, method, args.len()),
+        ("Clock", "new", 1) | ("Clock", "system", 0)
+    ) {
         return true;
+    }
+    if matches!((type_name, method, args.len()), ("ExpiringValue", "new", 3)) {
+        return args
+            .iter()
+            .all(|arg| arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!((type_name, method, args.len()), ("ExpiringSecret", "new", 3)) {
         return args
@@ -1145,7 +1158,7 @@ pub(crate) fn static_method_call_in_subset(
     if matches!(
         (type_name, method, args.len()),
         ("Secret", "from_text" | "from_bytes", 1)
-            | ("SigningKey" | "X25519SecretKey", "generate", 0)
+            | ("SigningKey" | "X25519SecretKey", "new_random", 0)
             | ("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey", "from_bytes", 1)
             | ("KeyUnlock", "Recipient" | "Passphrase", 1)
             | ("X25519PublicKey", "from_text", 1)
