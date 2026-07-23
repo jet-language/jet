@@ -1,8 +1,7 @@
 use jet_codegen::Codegen::TIR::{
-    self, JitProgram, JitSpawnCapture, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr,
-    TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TModuleCallForm, TOrFallback,
-    TStmt, TStrPart,
-    TNumericOp,
+    self, JitProgram, JitSpawnCapture, ListSpreadPart, TBuiltinOp, TCallArg, TCoreClosureKind,
+    TEnumPayload, TExpr, TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody,
+    TJitSpawnLambda, TModuleCallForm, TNumericOp, TOrFallback, TStmt, TStrPart,
 };
 use jet_foundation::AST::{BinOp, Type, UnOp};
 use std::collections::HashSet;
@@ -206,16 +205,26 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                             | TOrFallback::ContinueLabel(_)
                     )
             } else {
-                !is_option
-                    && resident_safe_expr(value, callees)
-                    && matches!(
-                        fallback,
-                        TOrFallback::Panic(_)
-                            | TOrFallback::Break
-                            | TOrFallback::Continue
-                            | TOrFallback::BreakLabel(_)
-                            | TOrFallback::ContinueLabel(_)
-                    )
+                let channel_receive = matches!(
+                    &value.kind,
+                    TExprKind::HandleMethod {
+                        op: THandleOp::ChannelReceive,
+                        ..
+                    }
+                );
+                resident_safe_expr(value, callees)
+                    && (matches!(fallback, TOrFallback::Value(expr)
+                        if matches!(&expr.ty, Type::Int)
+                            && resident_safe_expr(expr, callees))
+                        || (channel_receive
+                            && matches!(
+                                fallback,
+                                TOrFallback::Panic(_)
+                                    | TOrFallback::Break
+                                    | TOrFallback::Continue
+                                    | TOrFallback::BreakLabel(_)
+                                    | TOrFallback::ContinueLabel(_)
+                            )))
             }
         }
         TExprKind::ListLit(elems) => {
@@ -225,6 +234,18 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 }))
                 || (jit_list_task_int_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
+        }
+        TExprKind::ListSpread { parts } => {
+            jit_list_native_type(&expr.ty)
+                && parts.iter().all(|part| match part {
+                    ListSpreadPart::Elem(expr) => {
+                        matches!(&expr.ty, Type::Int | Type::Float)
+                            && resident_safe_expr(expr, callees)
+                    }
+                    ListSpreadPart::Spread(list) => {
+                        jit_list_native_type(&list.ty) && resident_safe_expr(list, callees)
+                    }
+                })
         }
         TExprKind::Index {
             base,
@@ -405,14 +426,19 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
 }
 
 fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
-    // TIR marks non-scalar params as `borrow`; JIT passes them by handle/discriminant.
-    (!arg.borrow || jit_value_type(&arg.value.ty))
-        && !arg.mut_borrow
+    // TIR marks non-scalar params as `borrow`; write capability uses `mut_borrow`.
+    // JIT passes structs by handle, so both borrow forms keep the same value.
+    let borrow_ok = if arg.mut_borrow {
+        jit_struct_type(&arg.value.ty) || jit_value_type(&arg.value.ty)
+    } else {
+        !arg.borrow || jit_value_type(&arg.value.ty)
+    };
+    borrow_ok
         && !arg.clone
         && !arg.arc_clone
         && arg.fn_coerce.is_none()
         && !arg.widen_to_vec
-        && (!jit_struct_type(&arg.value.ty) || arg.borrow)
+        && (!jit_struct_type(&arg.value.ty) || arg.borrow || arg.mut_borrow)
         && resident_safe_expr(&arg.value, callees)
 }
 
