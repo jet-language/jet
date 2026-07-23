@@ -352,7 +352,7 @@ renumbered, and no new `W` code may be allocated.
 | E0506 | sema  | `Set<T>` element type is not hashable (D-COLLBREADTH1) |
 | E0507 | sema  | collection changed while `for` reads it   |
 | E0510 | sema  | raw crypto expert API used without `use core.crypto.expert` and/or outside `@Unsafe` — use `crypto.seal`/`open` instead (D-CRYPTOENV1) |
-| E0511 | sema  | `Expiring.force` / `Rotting.force` bypasses fallible expiry access — use `get(clock)` (D-TTLVAL1) |
+| E0511 | sema  | `Expiring.force` bypasses fallible cache-expiry access — use `get(clock)` (D-TTLVAL1) |
 | L0501 | sema  | slice copy inside a loop (lint)           |
 | L0502 | sema  | float `==`/`!=` comparison is unreliable (D-SMELLLINT1) |
 | L0503 | sema  | visually confusable single-character names in one scope (`l`/`I`/`1`, `O`/`0`) (D-CONFUSE1) |

@@ -6,6 +6,7 @@ mod types;
 pub use types::{
     AccessConvention, Dimension, Type, int_spelling, numeric_type_from_name, int_range,
     canonicalize_tuple_fields, CORE_CRYPTO_NOMINAL_MARKER, CPP_CALLBACK_ABI_MARKER,
+    DETERMINISTIC_CLOCK_MARKER, EXPIRING_SECRET_LOAN_MARKER, SYSTEM_CLOCK_MARKER,
 };
 
 #[path = "AST/program_imports.rs"]

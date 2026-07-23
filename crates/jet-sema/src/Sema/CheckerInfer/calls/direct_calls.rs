@@ -1072,6 +1072,19 @@ impl<'a> Checker<'a> {
                 } else {
                     self.infer(&mut arg.expr)
                 };
+                if sig.is_pure
+                    && effective_params
+                        .get(i)
+                        .is_some_and(|(_, ty)| crate::Sema::Diagnostics::is_clock_type(ty))
+                    && arg_ty
+                        .as_ref()
+                        .is_some_and(|ty| !crate::Sema::Diagnostics::is_deterministic_clock_type(ty))
+                {
+                    self.diags.push(crate::Sema::e3403(
+                        &format!("an unproven Clock passed to pure `{}`", call.name),
+                        Some(arg.expr.span()),
+                    ));
+                }
                 self.memory_control_multiplier = memory_multiplier;
                 if effective_params.get(i).is_some_and(|(_, ty)| {
                     crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, ty)
@@ -1133,13 +1146,19 @@ impl<'a> Checker<'a> {
                     {
                         arg_ty = param_ty.clone();
                     }
-                    let reported = self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
+                    let reads_expiring_secret_loan = arg.convention == AccessConvention::Read
+                        && crate::Sema::Diagnostics::expiring_secret_loan_matches(
+                            &param_ty, &arg_ty,
+                        );
+                    let reported = reads_expiring_secret_loan
+                        || self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
                     // D-FIXARR1: [T#N] widens to [T] at a call site — compatible but codegen
                     // will emit .to_vec() on the argument.
                     let fixed_widens = matches!((&param_ty, &arg_ty),
                         (Type::List(pe), Type::FixedList { elem: ae, .. }) if pe == ae);
                     let compatible = arg_ty == param_ty
                         || fixed_widens
+                        || reads_expiring_secret_loan
                         || (matches!(&param_ty, Type::Fn { .. })
                             && matches!(&arg_ty, Type::Fn { .. })
                             && fn_types_compatible(&param_ty, &arg_ty));

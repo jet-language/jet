@@ -473,7 +473,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "x25519_secret_bytes",
             "shared_secret_bytes",
         ],
-        // D-TTLVAL1=A: TTL-wrapped values and rotting secrets.
+        // D-CORE-SECRETS1=A: generic TTL remains separate from secret lifecycle.
         "core.time.expiring" => &["new"],
         // E2-M10: networking modules.
         "core.net" => &[
@@ -709,9 +709,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         // crypto FFI bridge.
         // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
         "core.vault" => &[
-            "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "WrappedImportPlan",
+            "ExpiringSecret", "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "WrappedImportPlan",
             "KeyStatus", "VaultError", "WrappedVaultKey", "KeyUnlock", "KeyWrapError",
-            "get", "rotting_new", "current", "versions", "load", "status",
+            "get", "current", "versions", "load", "status",
             "prepare_generate", "prepare_store", "prepare_rotate", "prepare_retire", "prepare_revoke",
             "authorize_write", "commit_generate", "commit_store", "commit_rotate", "commit_retire", "commit_revoke",
             "export_to_recipients", "export_to_passphrase", "prepare_import_wrapped",
@@ -737,7 +737,7 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
             | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
         // D-AUTH-TOKENPOLICY1=A: typed verifier result and error records.
         | ("core.auth", "Claims" | "AuthError")
-        | ("core.vault", "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
+        | ("core.vault", "ExpiringSecret" | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
             | "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError")
         | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TlsVersion")
         | ("jet.http" | "core.http.client" | "core.http.server",

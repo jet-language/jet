@@ -2066,22 +2066,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).{}({})", recv, method, a(0))
                     }
                 }
-                // D-TTLVAL1=A: Expiring<T> methods.
+                // D-CORE-SECRETS1=A: generic Expiring<T> methods.
                 THandleOp::ExpiringMethod { method } => match method.as_str() {
                     "get" => format!(
                         "{}jet_expiring_get(&({}), {}jet_clock_now(&({})))",
-                        root, recv, root, a(0)
-                    ),
-                    "is_valid" => format!(
-                        "({}).is_valid({}jet_clock_now(&({})))",
-                        recv, root, a(0)
-                    ),
-                    _ => format!("({}).{}()", recv, method),
-                },
-                // D-TTLVAL1=A: Rotting<T> methods (mutating get zeroizes).
-                THandleOp::RottingMethod { method } => match method.as_str() {
-                    "get" => format!(
-                        "{}jet_rotting_get(&mut ({}), {}jet_clock_now(&({})))",
                         root, recv, root, a(0)
                     ),
                     "is_valid" => format!(

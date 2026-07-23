@@ -249,6 +249,16 @@ impl<'a> Checker<'a> {
         self.borrow_ctx = self.operator_operand_needs_borrow(rhs, op);
         let rt = self.infer(rhs);
         let (lt, rt) = (lt?, rt?);
+        if matches!(op, BinOp::Eq | BinOp::Ne)
+            && (self.type_contains_observable_clock(&lt)
+                || self.type_contains_observable_clock(&rt))
+        {
+            self.record_effect(crate::Sema::Effects::Effect::Time.name(), span);
+            if self.in_pure && self.det_suppress == 0 {
+                self.diags
+                    .push(crate::Sema::e3403("Clock comparison", Some(span)));
+            }
+        }
 
         // D-OPDEF1=A: user operators are ordinary trait-method calls after sema
         // proves one exact impl and the fixed same-type law.

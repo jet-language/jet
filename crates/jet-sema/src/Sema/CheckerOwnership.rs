@@ -548,6 +548,11 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_expr_change(&mut self, expr: &Expr, action: &str, span: Span) {
+        if let Some(name) = expr_root_ident(expr) {
+            if self.reject_expiring_secret_loan_change(name, action, span) {
+                return;
+            }
+        }
         if let Some(place) = self.place_from_expr(expr) {
             self.check_place_change(&place, action, span);
         }
@@ -1338,6 +1343,9 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
+        if self.reject_expiring_secret_loan_change(&name, "be moved", span) {
+            return;
+        }
         self.check_owner_change(&name, "be moved", span);
         if let Some(info) = self.lookup(&name) {
             if info.decl_loop_depth < self.loop_depth {
@@ -1352,6 +1360,27 @@ impl<'a> Checker<'a> {
             }
         }
         self.moved.insert(name, span);
+    }
+
+    fn reject_expiring_secret_loan_change(
+        &mut self,
+        name: &str,
+        action: &str,
+        span: Span,
+    ) -> bool {
+        if !self.lookup(name).is_some_and(|info| {
+            crate::Sema::Diagnostics::contains_expiring_secret_loan(&info.ty)
+        }) {
+            return false;
+        }
+        self.diags.push(Diagnostic::error(
+            "E0201",
+            format!("ExpiringSecret loan `{name}` cannot {action}"),
+            "the callback receives temporary read access; moving, changing, or dropping it could let the credential escape its expiry boundary".to_string(),
+            "use the loan only for read-only operations inside this callback".to_string(),
+            Some(span),
+        ));
+        true
     }
 
     /// `x = y` / `a :: y` / `return y` where `y` is a plain name of a
@@ -1779,7 +1808,10 @@ impl<'a> Checker<'a> {
         match arg.convention {
             AccessConvention::Read => {
                 if let Expr::Ident(name, span) = &arg.expr {
-                    if !self.is_resource_type(param_ty) && is_cloneable(param_ty, self.registry) {
+                    if !crate::Sema::Diagnostics::is_secret_bearing_crypto_type(param_ty)
+                        && !self.is_resource_type(param_ty)
+                        && is_cloneable(param_ty, self.registry)
+                    {
                         arg.flags.implicit_clone = true;
                         // D-MEM1/S2 (was D-L0201 lint): passing a named binding to
                         // a Move param without `^` is always a hard error now.
@@ -1899,7 +1931,7 @@ impl<'a> Checker<'a> {
         args: &mut [crate::AST::CallArg],
         span: Span,
     ) -> Option<Type> {
-        self.finish_shared_closure("read", inner, args, span, false)
+        self.finish_shared_closure("read", inner, args, span, false, false)
     }
 
     /// D-MEM1 S6 (D-SHARED-API1=A): `shared.edit(f)` — write-locked closure
@@ -1912,7 +1944,32 @@ impl<'a> Checker<'a> {
         args: &mut [crate::AST::CallArg],
         span: Span,
     ) -> Option<Type> {
-        self.finish_shared_closure("edit", inner, args, span, true)
+        self.finish_shared_closure("edit", inner, args, span, true, false)
+    }
+
+    pub(crate) fn finish_expiring_secret_with(
+        &mut self,
+        inner: &Type,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) -> Option<Type> {
+        let loan = crate::Sema::Diagnostics::expiring_secret_loan_type(inner.clone());
+        let result = self.finish_shared_closure("with", &loan, args, span, false, true);
+        let escaped = result
+            .as_ref()
+            .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
+            || matches!(&result, Some(Type::Fn { .. }));
+        if escaped {
+            self.diags.push(Diagnostic::error(
+                "E0201",
+                "an ExpiringSecret loan cannot escape its callback".to_string(),
+                "the callback receives a temporary read-only loan; returning a secret would create another owned credential outside the expiry boundary".to_string(),
+                "return a non-secret result such as a signature, public key, status, or response".to_string(),
+                Some(span),
+            ));
+            return Some(Type::Named("Unit".to_string()));
+        }
+        result
     }
 
     fn finish_shared_closure(
@@ -1922,6 +1979,7 @@ impl<'a> Checker<'a> {
         args: &mut [crate::AST::CallArg],
         span: Span,
         param_mutable: bool,
+        param_is_secret_loan: bool,
     ) -> Option<Type> {
         if args.len() != 1 {
             self.diags.push(Diagnostic::error(
@@ -1959,10 +2017,13 @@ impl<'a> Checker<'a> {
         self.expected_type = Some(expected);
         let saved_mut = self.lambda_param_mutable;
         self.lambda_param_mutable = param_mutable;
+        let saved_loan = self.lambda_param_is_secret_loan;
+        self.lambda_param_is_secret_loan = param_is_secret_loan;
         let saved_esc = self.lambda_escapes;
         self.lambda_escapes = false;
         let fn_ty = self.infer(&mut args[0].expr);
         self.lambda_escapes = saved_esc;
+        self.lambda_param_is_secret_loan = saved_loan;
         self.lambda_param_mutable = saved_mut;
         self.expected_type = saved_exp;
         match fn_ty {

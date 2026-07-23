@@ -679,6 +679,112 @@ impl<'a> Checker<'a> {
         }
     }
 
+    pub(crate) fn type_contains_observable_clock(&self, ty: &Type) -> bool {
+        fn contains(
+            checker: &Checker<'_>,
+            ty: &Type,
+            context_mod: usize,
+            seen: &mut HashSet<(usize, String)>,
+        ) -> bool {
+            match ty {
+                Type::Tagged { marker, inner }
+                    if marker == crate::AST::DETERMINISTIC_CLOCK_MARKER
+                        && crate::Sema::Diagnostics::is_clock_type(inner) =>
+                {
+                    false
+                }
+                Type::Named(name) if name == crate::Syntax::CLOCK_TYPE => true,
+                Type::Named(name) | Type::Apply { name, .. } => {
+                    if let Type::Apply { args, .. } = ty {
+                        if args
+                            .iter()
+                            .any(|arg| contains(checker, arg, context_mod, seen))
+                        {
+                            return true;
+                        }
+                    }
+                    let context_registry = if context_mod == checker.module_idx {
+                        Some(checker.registry)
+                    } else {
+                        checker
+                            .modules
+                            .and_then(|modules| modules.get(context_mod))
+                            .map(|state| &state.registry)
+                    };
+                    let owner_mod = if context_registry
+                        .is_some_and(|registry| registry.contains(name))
+                    {
+                        context_mod
+                    } else if let Some(owner) = checker.struct_owner_module(name, None) {
+                        owner
+                    } else {
+                        return false;
+                    };
+                    if !seen.insert((owner_mod, name.clone())) {
+                        return false;
+                    }
+                    let registry = if owner_mod == checker.module_idx {
+                        checker.registry
+                    } else if let Some(registry) = checker
+                        .modules
+                        .and_then(|modules| modules.get(owner_mod))
+                        .map(|state| &state.registry)
+                    {
+                        registry
+                    } else {
+                        return false;
+                    };
+                    let result = match registry.types.get(name) {
+                        Some(TypeDef::Struct { fields, .. }) => fields.iter().any(
+                            |(_, _, field_ty, _)| {
+                                contains(checker, field_ty, owner_mod, seen)
+                            },
+                        ),
+                        Some(TypeDef::Enum { variants, .. }) => {
+                            variants.values().any(|(_, payload)| match payload {
+                                VariantPayload::Unit => false,
+                                VariantPayload::Single(payload_ty, _) => {
+                                    contains(checker, payload_ty, owner_mod, seen)
+                                }
+                                VariantPayload::Named(fields) => fields.iter().any(|field| {
+                                    contains(checker, &field.ty, owner_mod, seen)
+                                }),
+                            })
+                        }
+                        Some(TypeDef::Distinct { base, .. }) => {
+                            contains(checker, base, owner_mod, seen)
+                        }
+                        Some(TypeDef::Alias { target, .. }) => {
+                            contains(checker, target, owner_mod, seen)
+                        }
+                        None => false,
+                    };
+                    seen.remove(&(owner_mod, name.clone()));
+                    result
+                }
+                Type::Option(inner)
+                | Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Tagged { inner, .. } => contains(checker, inner, context_mod, seen),
+                Type::Result { ok, err } => {
+                    contains(checker, ok, context_mod, seen)
+                        || contains(checker, err, context_mod, seen)
+                }
+                Type::Map { key, value, .. } => {
+                    contains(checker, key, context_mod, seen)
+                        || contains(checker, value, context_mod, seen)
+                }
+                Type::Tuple(fields) => fields
+                    .iter()
+                    .any(|(_, field_ty)| contains(checker, field_ty, context_mod, seen)),
+                Type::FixedList { elem, .. } => contains(checker, elem, context_mod, seen),
+                _ => false,
+            }
+        }
+
+        contains(self, ty, self.module_idx, &mut HashSet::new())
+    }
+
     /// D-FIELDPOL1: `type_name`'s computed fields (name → span + declared
     /// type) in `owner_mod`, or `None` when it has none / isn't a struct.
     pub(crate) fn computed_field_types_of(

@@ -548,6 +548,18 @@ impl<'a> Checker<'a> {
                         let t = self.infer(inner);
                         self.allow_string_view_read = was_view_read;
                         if let Some(t) = t {
+                            if self.type_contains_observable_clock(&t) {
+                                self.record_effect(
+                                    crate::Sema::Effects::Effect::Time.name(),
+                                    inner.span(),
+                                );
+                                if self.in_pure && self.det_suppress == 0 {
+                                    self.diags.push(crate::Sema::e3403(
+                                        "Clock formatting",
+                                        Some(inner.span()),
+                                    ));
+                                }
+                            }
                             match fmt {
                                 crate::AST::StrFormat::Display => {
                                     if !is_displayable(&t, self.registry, self.trait_reg) {
@@ -1007,6 +1019,16 @@ impl<'a> Checker<'a> {
                 let inner_t = self.infer(inner);
                 self.allow_string_view_read = was_view_read;
                 let inner_t = inner_t?;
+                if self.type_contains_observable_clock(&inner_t) {
+                    self.record_effect(
+                        crate::Sema::Effects::Effect::Time.name(),
+                        *span,
+                    );
+                    if self.in_pure && self.det_suppress == 0 {
+                        self.diags
+                            .push(crate::Sema::e3403("Clock copy", Some(*span)));
+                    }
+                }
                 let resource = self.is_resource_type(&inner_t);
                 if resource
                     || (!type_is_copy(&inner_t) && !is_cloneable(&inner_t, self.registry))

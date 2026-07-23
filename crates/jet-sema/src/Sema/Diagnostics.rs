@@ -621,6 +621,105 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
     }
 }
 
+pub(crate) fn deterministic_clock_type(ty: Type) -> Type {
+    Type::Tagged {
+        marker: crate::AST::DETERMINISTIC_CLOCK_MARKER.to_string(),
+        inner: Box::new(ty),
+    }
+}
+
+pub(crate) fn system_clock_type(ty: Type) -> Type {
+    Type::Tagged {
+        marker: crate::AST::SYSTEM_CLOCK_MARKER.to_string(),
+        inner: Box::new(ty),
+    }
+}
+
+pub(crate) fn expiring_secret_loan_type(ty: Type) -> Type {
+    Type::Tagged {
+        marker: crate::AST::EXPIRING_SECRET_LOAN_MARKER.to_string(),
+        inner: Box::new(ty),
+    }
+}
+
+pub(crate) fn is_expiring_secret_member_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Tagged { marker, inner }
+            if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER
+                && matches!(
+                    inner.as_ref(),
+                    Type::Named(name)
+                        if matches!(
+                            name.as_str(),
+                            "Secret" | "SigningKey" | "X25519SecretKey"
+                        )
+                )
+    )
+}
+
+pub(crate) fn expiring_secret_loan_matches(want: &Type, got: &Type) -> bool {
+    matches!(
+        got,
+        Type::Tagged { marker, inner }
+            if marker == crate::AST::EXPIRING_SECRET_LOAN_MARKER
+                && inner.as_ref() == want
+    )
+}
+
+pub(crate) fn contains_expiring_secret_loan(ty: &Type) -> bool {
+    match ty {
+        Type::Tagged { marker, .. }
+            if marker == crate::AST::EXPIRING_SECRET_LOAN_MARKER =>
+        {
+            true
+        }
+        Type::Tagged { inner, .. }
+        | Type::Option(inner)
+        | Type::List(inner)
+        | Type::Shared(inner)
+        | Type::FixedList { elem: inner, .. } => contains_expiring_secret_loan(inner),
+        Type::Result { ok, err } | Type::Map { key: ok, value: err, .. } => {
+            contains_expiring_secret_loan(ok) || contains_expiring_secret_loan(err)
+        }
+        Type::Fn { params, ret, .. } => {
+            params.iter().any(contains_expiring_secret_loan)
+                || ret.as_deref().is_some_and(contains_expiring_secret_loan)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| contains_expiring_secret_loan(field)),
+        Type::Apply { args, .. } => args.iter().any(contains_expiring_secret_loan),
+        _ => false,
+    }
+}
+
+pub(crate) fn is_deterministic_clock_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Tagged { marker, inner }
+            if marker == crate::AST::DETERMINISTIC_CLOCK_MARKER
+                && matches!(inner.as_ref(), Type::Named(name) if name == crate::Syntax::CLOCK_TYPE)
+    )
+}
+
+pub(crate) fn is_system_clock_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Tagged { marker, inner }
+            if marker == crate::AST::SYSTEM_CLOCK_MARKER
+                && matches!(inner.as_ref(), Type::Named(name) if name == crate::Syntax::CLOCK_TYPE)
+    )
+}
+
+pub(crate) fn is_clock_type(ty: &Type) -> bool {
+    match ty {
+        Type::Named(name) => name == crate::Syntax::CLOCK_TYPE,
+        Type::Tagged { inner, .. } => is_clock_type(inner),
+        _ => false,
+    }
+}
+
 pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
     match ty {
         Type::Tagged { marker, inner }
@@ -984,6 +1083,7 @@ pub(crate) fn builtin_type_from_ident(name: &str) -> Option<Type> {
         Syntax::TYPE_STRING => Some(Type::String),
         Syntax::TYPE_CHAR => Some(Type::Char),
         Syntax::DURATION_TYPE => Some(Type::Named(Syntax::DURATION_TYPE.to_string())),
+        Syntax::CLOCK_TYPE => Some(Type::Named(Syntax::CLOCK_TYPE.to_string())),
         _ => None,
     }
 }

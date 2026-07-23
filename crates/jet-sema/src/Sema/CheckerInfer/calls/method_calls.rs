@@ -15,7 +15,7 @@ use crate::Sema::CheckerCoreLib::{
     net_method_return, parsed_args_method_return, path_method_return, require_net_method_labels,
     process_child_method_return, process_spec_method_return, process_stdin_method_return,
     process_stream_method_return, reflect_method_return, regex_method_return, result_ty,
-    rotting_method_return, simd_reduce_markers, sketch_method_return, sketch_type_name,
+    simd_reduce_markers, sketch_method_return, sketch_type_name,
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
     wrong_core_arity,
 };
@@ -346,6 +346,90 @@ impl<'a> Checker<'a> {
                                 leaf.clone()
                             };
                             **receiver = Expr::Ident(type_name.clone(), span);
+                            if ns == "core.vault"
+                                && type_name == "ExpiringSecret"
+                                && method == "new"
+                            {
+                                if args.len() != 3 {
+                                    self.diags.push(wrong_core_arity(
+                                        "ExpiringSecret.new",
+                                        3,
+                                        args.len(),
+                                        span,
+                                    ));
+                                    for arg in args.iter_mut() {
+                                        self.infer(&mut arg.expr);
+                                    }
+                                    return None;
+                                }
+                                let value_ty =
+                                    self.infer(&mut args[0].expr).unwrap_or(Type::Int);
+                                let allowed =
+                                    crate::Sema::Diagnostics::is_expiring_secret_member_type(
+                                        &value_ty,
+                                    );
+                                if !allowed {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0112",
+                                        format!(
+                                            "`ExpiringSecret.new` cannot own {}",
+                                            value_ty.show()
+                                        ),
+                                        "expiring secrets accept only the closed, move-only secret family with audited zeroizing Drop behavior".to_string(),
+                                        "convert text or bytes to `crypto.Secret`, or use `crypto.SigningKey` / `crypto.X25519SecretKey`".to_string(),
+                                        Some(args[0].expr.span()),
+                                    ));
+                                }
+                                self.check_take_arg_ownership(
+                                    "ExpiringSecret.new",
+                                    0,
+                                    &value_ty,
+                                    &mut args[0],
+                                );
+                                self.expect_core_arg(
+                                    "ExpiringSecret.new",
+                                    1,
+                                    &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
+                                    &mut args[1],
+                                );
+                                self.borrow_ctx = true;
+                                let clock_ty = self
+                                    .infer(&mut args[2].expr)
+                                    .unwrap_or_else(|| {
+                                        Type::Named(crate::Syntax::CLOCK_TYPE.to_string())
+                                    });
+                                if !crate::Sema::Diagnostics::is_clock_type(&clock_ty) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0112",
+                                        format!(
+                                            "`ExpiringSecret.new` wants `Clock` for argument 3, but this is {}",
+                                            clock_ty.show()
+                                        ),
+                                        "secret expiry must observe the explicitly injected clock"
+                                            .to_string(),
+                                        "use `time.clock(...)` for deterministic code or `Clock.system()` for production"
+                                            .to_string(),
+                                        Some(args[2].expr.span()),
+                                    ));
+                                }
+                                let ret = Type::Apply {
+                                    name: "ExpiringSecret".to_string(),
+                                    args: vec![value_ty],
+                                };
+                                let ret = if crate::Sema::Diagnostics::is_deterministic_clock_type(
+                                    &clock_ty,
+                                ) {
+                                    crate::Sema::Diagnostics::deterministic_clock_type(ret)
+                                } else if crate::Sema::Diagnostics::is_system_clock_type(&clock_ty)
+                                {
+                                    crate::Sema::Diagnostics::system_clock_type(ret)
+                                } else {
+                                    ret
+                                };
+                                *recv_type_out = Some("ExpiringSecret".to_string());
+                                *resolved_ret_out = Some(ret.clone());
+                                return Some(ret);
+                            }
                             let ty = Type::Named(type_name.clone());
                             let http_error = || Type::Named("HttpError".to_string());
                             let http_result = |ok: Type| Type::Result {
@@ -408,8 +492,21 @@ impl<'a> Checker<'a> {
                                 return Some(ret);
                             }
                             if let Some(ret) = Collections::builtin_method_return(&ty, method, args.len(), true) {
+                                if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
+                                    self.record_effect(Effect::Time.name(), span);
+                                    if self.in_pure && self.det_suppress == 0 {
+                                        self.diags.push(crate::Sema::e3403(
+                                            "Clock.system",
+                                            Some(span),
+                                        ));
+                                    }
+                                }
                                 let ret = self.finish_builtin_method(receiver, method, &ty, args, span, ret);
-                                let ret = if matches!(ns.as_str(), "jet.crypto" | "core.crypto") {
+                                let ret = if type_name == crate::Syntax::CLOCK_TYPE
+                                    && method == "system"
+                                {
+                                    ret.map(crate::Sema::Diagnostics::system_clock_type)
+                                } else if matches!(ns.as_str(), "jet.crypto" | "core.crypto") {
                                     ret.map(crate::Sema::Diagnostics::core_crypto_nominal)
                                 } else {
                                     ret
@@ -635,8 +732,24 @@ impl<'a> Checker<'a> {
                         if let Some(ret) =
                             Collections::builtin_method_return(&ty, method, args.len(), true)
                         {
-                            return self
-                                .finish_builtin_method(receiver, method, &ty, args, span, ret);
+                            if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
+                                self.record_effect(Effect::Time.name(), span);
+                                if self.in_pure && self.det_suppress == 0 {
+                                    self.diags.push(crate::Sema::e3403(
+                                        "Clock.system",
+                                        Some(span),
+                                    ));
+                                }
+                            }
+                            let ret =
+                                self.finish_builtin_method(receiver, method, &ty, args, span, ret);
+                            return if type_name == crate::Syntax::CLOCK_TYPE
+                                && method == "system"
+                            {
+                                ret.map(crate::Sema::Diagnostics::system_clock_type)
+                            } else {
+                                ret
+                            };
                         }
                     }
                 }
@@ -1133,6 +1246,43 @@ impl<'a> Checker<'a> {
                 self.allow_string_view_read = false;
             }
             let recv_ty = recv_ty?;
+            let receiver_is_clock = crate::Sema::Diagnostics::is_clock_type(&recv_ty);
+            let clock_is_deterministic =
+                crate::Sema::Diagnostics::is_deterministic_clock_type(&recv_ty);
+            let expiring_clock_is_deterministic = matches!(
+                &recv_ty,
+                Type::Tagged { marker, inner }
+                    if marker == crate::AST::DETERMINISTIC_CLOCK_MARKER
+                        && matches!(
+                            inner.as_ref(),
+                            Type::Apply { name, .. } if name == "ExpiringSecret"
+                        )
+            );
+            let recv_ty = match recv_ty {
+                Type::Tagged { marker, inner }
+                    if matches!(
+                        marker.as_str(),
+                        crate::AST::DETERMINISTIC_CLOCK_MARKER
+                            | crate::AST::SYSTEM_CLOCK_MARKER
+                            | crate::AST::EXPIRING_SECRET_LOAN_MARKER
+                    ) =>
+                {
+                    *inner
+                }
+                other => other,
+            };
+            if receiver_is_clock
+                && !clock_is_deterministic
+                && matches!(method, "now" | "tick" | "advance" | "wait")
+            {
+                self.record_effect(Effect::Time.name(), span);
+                if self.in_pure && self.det_suppress == 0 {
+                    self.diags.push(crate::Sema::e3403(
+                        &format!("Clock.{method}"),
+                        Some(span),
+                    ));
+                }
+            }
             if matches!(&recv_ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_EVENT)
                 && matches!(method, "emit_async" | "queued_count")
             {
@@ -1876,55 +2026,6 @@ impl<'a> Checker<'a> {
                 *recv_type_out = Some("Loadable".to_string());
                 return ret;
             }
-            // D-TTLVAL1=A: Expiring<T> / Rotting<T> — fallible get, reject force().
-            if let Type::Apply { name, .. } = &recv_ty {
-                if name == "Expiring" {
-                    if method == "force" {
-                        self.diags.push(Diagnostic::error(
-                            "E0511",
-                            "`Expiring.force` bypasses expiry checking".to_string(),
-                            "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly (D-TTLVAL1)".to_string(),
-                            "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
-                            Some(span),
-                        ));
-                    }
-                    if let Some(ret) = expiring_method_return(&recv_ty, method, args.len()) {
-                        if method == "get" && args.len() == 1 {
-                            self.expect_core_arg(
-                                "get",
-                                0,
-                                &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-                                &mut args[0],
-                            );
-                        }
-                        *recv_type_out = Some("Expiring".to_string());
-                        return ret;
-                    }
-                }
-                if name == "Rotting" {
-                    if method == "force" {
-                        self.diags.push(Diagnostic::error(
-                            "E0511",
-                            "`Rotting.force` bypasses expiry checking".to_string(),
-                            "rotting secrets must use fallible `get(clock)` so expired access zeroizes storage (D-TTLVAL1, I1)".to_string(),
-                            "use `match secret.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
-                            Some(span),
-                        ));
-                    }
-                    if let Some(ret) = rotting_method_return(&recv_ty, method, args.len()) {
-                        if method == "get" && args.len() == 1 {
-                            self.expect_core_arg(
-                                "get",
-                                0,
-                                &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-                                &mut args[0],
-                            );
-                        }
-                        *recv_type_out = Some("Rotting".to_string());
-                        return ret;
-                    }
-                }
-            }
             // D-APPROX1=A: method calls on sketch data structures.
             if let Some(ret) = sketch_method_return(&recv_ty, method, args) {
                 for a in args.iter_mut() {
@@ -2601,6 +2702,49 @@ impl<'a> Checker<'a> {
             // The actual dispatch (`finish_pool_add` etc.) already lives in
             // `finish_builtin_method`, reached the same way Signal/Derived reach it.
             if let Type::Apply { name, .. } = &recv_ty {
+                if name == "Expiring" {
+                    if method == "force" {
+                        self.diags.push(Diagnostic::error(
+                            "E0511",
+                            "`Expiring.force` bypasses expiry checking".to_string(),
+                            "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly (D-TTLVAL1)".to_string(),
+                            "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    if let Some(ret) = expiring_method_return(&recv_ty, method, args.len()) {
+                        if method == "get" && args.len() == 1 {
+                            self.expect_core_arg(
+                                "get",
+                                0,
+                                &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
+                                &mut args[0],
+                            );
+                        }
+                        *recv_type_out = Some("Expiring".to_string());
+                        return ret;
+                    }
+                }
+                if name == "ExpiringSecret" && method == "with" {
+                    if !expiring_clock_is_deterministic {
+                        self.record_effect(Effect::Time.name(), span);
+                        if self.in_pure && self.det_suppress == 0 {
+                            self.diags
+                                .push(crate::Sema::e3403("ExpiringSecret.with", Some(span)));
+                        }
+                    }
+                    let inner = match &recv_ty {
+                        Type::Apply { args, .. } => args.first().cloned().unwrap_or(Type::Int),
+                        _ => unreachable!(),
+                    };
+                    let result =
+                        self.finish_expiring_secret_with(&inner, args, span);
+                    *recv_type_out = Some("ExpiringSecret".to_string());
+                    return result.map(|ok| Type::Result {
+                        ok: Box::new(ok),
+                        err: Box::new(Type::Named("Expired".to_string())),
+                    });
+                }
                 if name == "Pool" {
                     if let Some(ret) =
                         Collections::builtin_method_return(&recv_ty, method, args.len(), false)

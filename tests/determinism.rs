@@ -9,6 +9,8 @@
 //!   2. `@Nondeterministic("reason") { … }` — expert escape suspending
 //!      determinism rejections (E3401/E3403) for its body.
 
+mod common;
+
 // ── Piece 1: injected deterministic Clock / Rng ───────────────────────────────
 
 /// A `@Pure fn` reading time through an injected `Clock` param compiles.
@@ -68,6 +70,251 @@ fn run() { print("{seeded()}") }
         res.is_ok(),
         "cap constructors should be pure: {:?}",
         res.err()
+    );
+}
+
+#[test]
+fn system_clock_is_monotonic_and_effectful() {
+    let pure = r#"
+fn bad() --[]-> Int {
+    clock := Clock.system()
+    return clock.now()
+}
+fn run() { print(bad()) }
+"#;
+    let diags = jet::compile(pure).expect_err("Clock.system must carry Time");
+    assert!(diags.iter().any(|diag| diag.code == "E3403"));
+
+    let launder = r#"
+fn read(clock: Clock) --[]-> Int {
+    return clock.now()
+}
+fn make_system_clock() -> Clock {
+    return Clock.system()
+}
+fn run() {
+    direct := Clock.system()
+    print(read(direct))
+    hidden := make_system_clock()
+    print(read(hidden))
+}
+"#;
+    let diags = jet::compile(launder).expect_err("a system Clock must not enter pure code");
+    assert!(
+        diags.iter().filter(|diag| diag.code == "E3403").count() >= 2,
+        "both direct and return-type laundering must fail: {diags:?}"
+    );
+
+    if !common::have_rustc() {
+        return;
+    }
+    let runtime = r#"
+use core.time as time
+
+fn run() {
+    clock := Clock.system()
+    before := clock.now()
+    fork := ~clock
+    fork_before := fork.now()
+    time.sleep(2)
+    after := clock.now()
+    print(after >= before)
+    print(fork.now() >= fork_before)
+    reported := clock.tick(-1000000)
+    print(clock.now() >= after)
+    print(reported == clock.now())
+}
+"#;
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_system_clock", "system_clock", runtime);
+    assert_eq!(code, 0, "system clock failed: {stderr}");
+    assert_eq!(stdout, "true\ntrue\ntrue\ntrue\n");
+}
+
+#[test]
+fn system_clock_has_total_tir_and_an_honest_resident_jit_boundary() {
+    let dir = common::unique_tmp("jet_system_clock_jit_boundary");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    let src = r#"
+fn run() {
+    clock := Clock.system()
+    print(clock.now())
+}
+"#;
+    std::fs::write(&path, src).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    assert!(
+        jet_jit::tir_lowers_bundle(&bundle),
+        "{}",
+        jet_jit::tir_lower_fail_reason(&bundle)
+    );
+    assert!(!jet_jit::resident_jit_safe_bundle(&bundle));
+    assert!(
+        jet_jit::resident_jit_safe_bundle_detail(&bundle).contains("entry not resident-safe")
+    );
+}
+
+#[test]
+fn pure_code_rejects_clock_provenance_laundered_through_a_struct() {
+    let read = r#"
+struct Holder {
+    clock: Clock
+}
+fn read(holder: Holder) --[]-> Int {
+    return holder.clock.now()
+}
+fn run() {
+    holder := Holder.{ clock: Clock.system() }
+    print(read(holder))
+}
+"#;
+    let diagnostics =
+        jet::compile(read).expect_err("aggregate clock observation must retain Time");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "{diagnostics:#?}"
+    );
+
+    let compare = r#"
+struct Holder {
+    clock: Clock
+}
+fn same(holder: Holder) --[]-> Bool {
+    return holder.clock == holder.clock
+}
+fn run() {
+    holder := Holder.{ clock: Clock.system() }
+    print(same(holder))
+}
+"#;
+    let diagnostics =
+        jet::compile(compare).expect_err("aggregate clock comparison must retain Time");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "{diagnostics:#?}"
+    );
+
+    let copy = r#"
+struct Holder {
+    clock: Clock
+}
+fn copy_clock(holder: Holder) --[]-> Clock {
+    return ~holder.clock
+}
+fn run() {
+    holder := Holder.{ clock: Clock.system() }
+    copied := copy_clock(holder)
+    print(copied.now())
+}
+"#;
+    let diagnostics =
+        jet::compile(copy).expect_err("aggregate clock copy must retain Time");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "{diagnostics:#?}"
+    );
+
+    let copy_aggregate = r#"
+struct Holder {
+    clock: Clock
+}
+fn copy_holder(holder: Holder) --[]-> Holder {
+    return ~holder
+}
+fn run() {
+    holder := Holder.{ clock: Clock.system() }
+    copied := copy_holder(holder)
+    print(copied.clock.now())
+}
+"#;
+    let diagnostics =
+        jet::compile(copy_aggregate).expect_err("whole aggregate clock copy must retain Time");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "{diagnostics:#?}"
+    );
+
+    let enum_aggregate = r#"
+enum BoxedClock {
+    Held(Clock)
+}
+fn copy_box(value: BoxedClock) --[]-> BoxedClock {
+    return ~value
+}
+fn show_box(value: BoxedClock) --[]-> String {
+    return "{value@Debug}"
+}
+fn run() {}
+"#;
+    let diagnostics = jet::compile(enum_aggregate)
+        .expect_err("enum-contained clock observation must retain Time");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "{diagnostics:#?}"
+    );
+
+    let format = r#"
+struct Holder {
+    clock: Clock
+}
+fn show(holder: Holder) --[]-> String {
+    return "{holder.clock} {holder.clock@Debug}"
+}
+fn run() {
+    holder := Holder.{ clock: Clock.system() }
+    print(show(holder))
+}
+"#;
+    let diagnostics =
+        jet::compile(format).expect_err("aggregate clock formatting must retain Time");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "{diagnostics:#?}"
+    );
+
+    let format_aggregate = r#"
+struct Holder {
+    clock: Clock
+}
+fn show(holder: Holder) --[]-> String {
+    return "{holder@Debug}"
+}
+fn run() {
+    holder := Holder.{ clock: Clock.system() }
+    print(show(holder))
+}
+"#;
+    let diagnostics = jet::compile(format_aggregate)
+        .expect_err("whole aggregate clock formatting must retain Time");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
+    let dir = common::unique_tmp("jet_imported_clock_aggregate");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("clock_box.jet"),
+        "pub enum BoxedClock {\n    Held(Clock)\n}\n",
+    )
+    .unwrap();
+    let main = dir.join("main.jet");
+    std::fs::write(
+        &main,
+        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) --[]-> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) --[]-> String {\n    return \"{value@Debug}\"\n}\nfn run() {}\n",
+    )
+    .unwrap();
+
+    let diagnostics = jet::check_with_path(main.to_str().unwrap());
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E3403"),
+        "{diagnostics:#?}"
     );
 }
 

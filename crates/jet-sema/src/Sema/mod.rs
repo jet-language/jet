@@ -1205,6 +1205,10 @@ pub(crate) struct Checker<'a> {
     /// contract IS the exclusive lock; `check_lambda` reads this once, at bind
     /// time, then it's irrelevant for the rest of the closure body).
     lambda_param_mutable: bool,
+    /// `ExpiringSecret.with` lends its callback parameter without transferring
+    /// ownership. The ordinary parameter convention machinery then rejects
+    /// moves and captures before codegen.
+    lambda_param_is_secret_loan: bool,
     /// D-DETACH1: task names whose spawn lambda had a non-view sendability error (E1102 fired).
     /// At `.detach()`, if the task is in this set and NOT in view_borrow_escape_tasks, E1103 fires.
     view_capture_tasks: HashSet<String>,

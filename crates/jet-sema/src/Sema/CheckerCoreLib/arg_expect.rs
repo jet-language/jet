@@ -197,12 +197,20 @@ impl<'a> Checker<'a> {
             let got = self.infer(&mut arg.expr);
             self.expected_type = saved_expected;
             if let Some(got) = got {
-                let reported = self.check_type_assignable(param_ty, &got, arg.expr.span());
+                let reads_expiring_secret_loan = !consumes
+                    && arg.convention == AccessConvention::Read
+                    && crate::Sema::Diagnostics::expiring_secret_loan_matches(param_ty, &got);
+                let reported = reads_expiring_secret_loan
+                    || self.check_type_assignable(param_ty, &got, arg.expr.span());
                 let fixed_widens = matches!(
                     (param_ty, &got),
                     (Type::List(want), Type::FixedList { elem: actual, .. }) if want == actual
                 );
-                if !reported && got != *param_ty && !fixed_widens {
+                if !reported
+                    && got != *param_ty
+                    && !fixed_widens
+                    && !reads_expiring_secret_loan
+                {
                     self.diags.push(Diagnostic::error(
                         "E0112",
                         format!(

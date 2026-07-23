@@ -2673,7 +2673,6 @@ impl LowerCtx<'_, '_> {
             THandleOp::LayoutMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::LoadableMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::ExpiringMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::RottingMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::SketchMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::CivilTimeMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::UrlMimeMethod { .. } => Err("jit handle method unsupported".to_string()),

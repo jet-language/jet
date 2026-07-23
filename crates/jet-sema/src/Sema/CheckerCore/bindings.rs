@@ -340,6 +340,18 @@ impl<'a> Checker<'a> {
                 it.as_ref(),
                 "be stored in a binding",
             );
+            if it
+                .as_ref()
+                .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0201",
+                    "an ExpiringSecret loan cannot be stored".to_string(),
+                    "the callback parameter is a temporary read-only loan that ends when `.with` returns".to_string(),
+                    "use the loan inside the callback and store only a non-secret result".to_string(),
+                    Some(b.init.span()),
+                ));
+            }
     
             // E2502 (E2-M7): a line stream — `FileReader.lines()` / `StdinHandle
             // .lines()` — is a loop-source-only value. It may only be consumed
@@ -390,6 +402,9 @@ impl<'a> Checker<'a> {
                 (Some(annot), Some(actual)) => {
                     let annot = self.resolve_type(annot.clone());
                     let mut actual = self.resolve_type(actual.clone());
+                    let preserve_clock_provenance = crate::Sema::Diagnostics::is_clock_type(&annot)
+                        && (crate::Sema::Diagnostics::is_deterministic_clock_type(&actual)
+                            || crate::Sema::Diagnostics::is_system_clock_type(&actual));
                     if annot != actual
                         && self.implicitly_convert_unit(&mut b.init, &annot, &actual)
                     {
@@ -439,7 +454,11 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
-                    annot
+                    if preserve_clock_provenance {
+                        actual
+                    } else {
+                        annot
+                    }
                 }
                 (Some(annot), None) => self.resolve_type(annot.clone()),
                 (None, Some(actual)) => actual,

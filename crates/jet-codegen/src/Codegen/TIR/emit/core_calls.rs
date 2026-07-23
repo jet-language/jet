@@ -1485,18 +1485,9 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", regex_fn("jet_vault_unlock_recipient_impl"), arg(0)),
         ("jet.crypto", "__vault_unlock_passphrase") =>
             format!("{}(&({}))", regex_fn("jet_vault_unlock_passphrase_impl"), arg(0)),
-        // D-TTLVAL1=A: Expiring<T> / Rotting<T> constructors.
+        // D-CORE-SECRETS1=A: generic TTL remains core.time.expiring.
         ("core.time.expiring", "new") => format!(
             "{}jet_expiring_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",
-            helper(""),
-            arg(0),
-            helper(""),
-            arg(1),
-            helper(""),
-            arg(2)
-        ),
-        ("core.vault", "rotting_new") => format!(
-            "{}jet_rotting_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",
             helper(""),
             arg(0),
             helper(""),

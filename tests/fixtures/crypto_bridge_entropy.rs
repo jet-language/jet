@@ -2,6 +2,72 @@ include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 include!("../../crates/jet-pkg-model/src/Prelude/Crypto.rs");
 
 #[cfg(test)]
+mod expiring_secret_runtime {
+    use super::{jet_crypto_clear_zeroize_test_observer, jet_crypto_set_zeroize_test_observer};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    #[derive(Debug, PartialEq)]
+    struct JetExpired;
+
+    struct ManualClock {
+        now: Arc<AtomicI64>,
+    }
+
+    impl ManualClock {
+        fn new(now: i64) -> Self {
+            Self {
+                now: Arc::new(AtomicI64::new(now)),
+            }
+        }
+
+        fn set(&self, now: i64) {
+            self.now.store(now, Ordering::Relaxed);
+        }
+
+        fn observer(&self) -> impl Fn() -> i64 + Send + Sync + 'static {
+            let now = Arc::clone(&self.now);
+            move || now.load(Ordering::Relaxed)
+        }
+    }
+
+    include!("../../crates/jet-codegen/src/Prelude/Core/ExpiringSecret.rs");
+
+    #[test]
+    fn expiry_and_wrapper_drop_zeroize_owned_values() {
+        struct ObservedSecret(Vec<u8>);
+        impl Drop for ObservedSecret {
+            fn drop(&mut self) {
+                super::zeroize(&mut self.0);
+            }
+        }
+
+        let observed = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+        let snapshots = Rc::clone(&observed);
+        jet_crypto_set_zeroize_test_observer(move |bytes| {
+            snapshots.borrow_mut().push(bytes.to_vec());
+        });
+
+        let clock = ManualClock::new(0);
+        let mut expired =
+            JetExpiringSecret::new(ObservedSecret(vec![1; 17]), 0, clock.observer());
+        clock.set(1);
+        assert_eq!(expired.with(|_| ()), Err(JetExpired));
+        drop(expired);
+        drop(JetExpiringSecret::new(
+            ObservedSecret(vec![2; 18]),
+            0,
+            clock.observer(),
+        ));
+
+        jet_crypto_clear_zeroize_test_observer();
+        assert_eq!(*observed.borrow(), vec![vec![0; 17], vec![0; 18]]);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::RefCell;

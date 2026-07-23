@@ -218,6 +218,8 @@ pub fn prepare_for_target(
     let needs_crypto = bundle.used_core.iter().any(|u| {
         u == "jet.crypto"
             || u.starts_with("jet.crypto::")
+            || u == "core.crypto"
+            || u.starts_with("core.crypto::")
             || u == "core.crypto.expert"
             || u.starts_with("core.crypto.expert::")
             || u == "core.auth"

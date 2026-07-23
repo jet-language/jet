@@ -2560,17 +2560,17 @@ impl<'a> Checker<'a> {
                         args: vec![unit_ty(), err_ty],
                     });
                 }
-                // D-TTLVAL1=A: Expiring<T> — value + TTL + injectable Clock.
+                // D-CORE-SECRETS1=A: generic TTL stays in core.time.expiring.
                 ("core.time.expiring", "new") => {
                     if args.len() != 3 {
                         self.diags
                             .push(wrong_core_arity("new", 3, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
                         }
                         return None;
                     }
-                    let val_ty = self
+                    let value_ty = self
                         .infer(&mut args[0].expr)
                         .unwrap_or(Type::Named("Unknown".to_string()));
                     self.expect_core_arg(
@@ -2587,37 +2587,7 @@ impl<'a> Checker<'a> {
                     );
                     return Some(Type::Apply {
                         name: "Expiring".to_string(),
-                        args: vec![val_ty],
-                    });
-                }
-                // D-TTLVAL1=A: Rotting<T> — secret with TTL + zeroize on expiry.
-                ("core.vault", "rotting_new") => {
-                    if args.len() != 3 {
-                        self.diags
-                            .push(wrong_core_arity("rotting_new", 3, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    let val_ty = self
-                        .infer(&mut args[0].expr)
-                        .unwrap_or(Type::Named("Unknown".to_string()));
-                    self.expect_core_arg(
-                        "rotting_new",
-                        1,
-                        &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
-                        &mut args[1],
-                    );
-                    self.expect_core_arg(
-                        "rotting_new",
-                        2,
-                        &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-                        &mut args[2],
-                    );
-                    return Some(Type::Apply {
-                        name: "Rotting".to_string(),
-                        args: vec![val_ty],
+                        args: vec![value_ty],
                     });
                 }
                 // D-CRYPTOENV1=A: expert-only raw crypto — requires import + @Unsafe gate.
@@ -3211,7 +3181,11 @@ impl<'a> Checker<'a> {
                     self.fx_pending_diagnostics.push(diagnostic);
                 }
             }
-            ret
+            if module == "core.time" && name == "clock" {
+                ret.map(crate::Sema::Diagnostics::deterministic_clock_type)
+            } else {
+                ret
+            }
         }
     
 }

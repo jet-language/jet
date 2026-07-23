@@ -313,7 +313,9 @@ impl<'a> Checker<'a> {
                         // builtin-closure shape that binds its param mutable with no
                         // `&` sigil — the exclusive write lock IS the API contract.
                         mutable: self.lambda_param_mutable,
-                        param_conv: None,
+                        param_conv: self
+                            .lambda_param_is_secret_loan
+                            .then_some(AccessConvention::Read),
                         decl_loop_depth: self.loop_depth,
                         sendable: true,
                         task_lint_span: None,

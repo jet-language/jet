@@ -692,6 +692,30 @@ pub(crate) fn collect_core_expr(
                     Some(*method_span),
                 );
             }
+            if matches!(
+                recv_type.as_deref(),
+                Some(
+                    "Secret"
+                        | "SigningKey"
+                        | "VerifyKey"
+                        | "X25519SecretKey"
+                        | "X25519PublicKey"
+                        | "SharedSecret"
+                        | "Signature"
+                        | "Sealed"
+                        | "WrappedKey"
+                        | "Digest256"
+                        | "Digest512"
+                        | "PasswordHash"
+                )
+            ) {
+                note_core_usage(
+                    used,
+                    spans,
+                    format!("core.crypto::__nominal__.{method}"),
+                    Some(*method_span),
+                );
+            }
             if recv_type.as_deref() == Some(crate::Syntax::DURATION_TYPE)
                 || matches!(receiver.as_ref(), Expr::Ident(n, _) if n == crate::Syntax::DURATION_TYPE)
             {
@@ -1964,6 +1988,7 @@ pub(crate) fn check_func_body_bundle(
         inferred_lambda_mut_captures: HashSet::new(),
         is_task_spawn: false,
         lambda_param_mutable: false,
+        lambda_param_is_secret_loan: false,
         view_capture_tasks: HashSet::new(),
         view_borrow_escape_tasks: HashSet::new(),
         current_binding_name: None,

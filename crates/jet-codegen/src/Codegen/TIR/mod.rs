@@ -2706,12 +2706,8 @@ pub enum THandleOp {
     LoadableMethod {
         method: String,
     },
-    /// D-TTLVAL1=A: `Expiring<T>` fallible accessors.
+    /// D-CORE-SECRETS1=A: generic `Expiring<T>` fallible accessors.
     ExpiringMethod {
-        method: String,
-    },
-    /// D-TTLVAL1=A: `Rotting<T>` fallible secret accessors.
-    RottingMethod {
         method: String,
     },
     /// D-APPROX1=A: method call on a sketch data structure (HyperLogLog/TDigest/CMS/ReservoirSampler).

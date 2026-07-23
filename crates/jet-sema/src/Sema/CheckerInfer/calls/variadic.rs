@@ -141,7 +141,13 @@ impl<'a> Checker<'a> {
                     let got = self.infer(&mut arg.expr);
                     self.expected_type = saved;
                     if let Some(got) = got {
-                        if got != elem_ty {
+                        let loan =
+                            crate::Sema::Diagnostics::contains_expiring_secret_loan(&got);
+                        if loan {
+                            if let Expr::Ident(name, span) = &arg.expr {
+                                self.mark_moved(name.clone(), *span);
+                            }
+                        } else if got != elem_ty {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!(

@@ -438,12 +438,103 @@
         pub start: std::time::Instant,
     }
 
-    // D-DET1: deterministic injected Clock capability. `now` is the current value
-    // in ms (starts at the caller's seed); `tick(ms)` advances it. No wall-clock
-    // read — reproducible by construction.
-    #[derive(Clone, Debug, PartialEq)]
+    // D-DET1 / D-TTL-CLOCK2=A: manual clocks are deterministic; system clocks
+    // use monotonic elapsed time. Normal clones fork the timeline, while the
+    // private observer lets ExpiringSecret follow its injected clock.
+    #[derive(Debug)]
+    pub enum ClockState {
+        Manual(i64),
+        System {
+            started: std::time::Instant,
+            offset_ms: i64,
+        },
+    }
+
+    #[derive(Debug)]
     pub struct Clock {
-        pub now: i64,
+        state: std::sync::Arc<std::sync::Mutex<ClockState>>,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct ClockObserver {
+        state: std::sync::Arc<std::sync::Mutex<ClockState>>,
+    }
+
+    fn clock_state_now(state: &ClockState) -> i64 {
+        match state {
+            ClockState::Manual(now) => *now,
+            ClockState::System { started, offset_ms } => offset_ms.saturating_add(
+                i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
+            ),
+        }
+    }
+
+    impl Clock {
+        pub fn manual(now: i64) -> Self {
+            Self {
+                state: std::sync::Arc::new(std::sync::Mutex::new(ClockState::Manual(now))),
+            }
+        }
+
+        pub fn system() -> Self {
+            Self {
+                state: std::sync::Arc::new(std::sync::Mutex::new(ClockState::System {
+                    started: std::time::Instant::now(),
+                    offset_ms: 0,
+                })),
+            }
+        }
+
+        pub fn now(&self) -> i64 {
+            clock_state_now(&self.state.lock().unwrap_or_else(|e| e.into_inner()))
+        }
+
+        pub fn set(&mut self, now: i64) {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            match &mut *state {
+                ClockState::Manual(current) => *current = now,
+                ClockState::System { started, offset_ms } => {
+                    let current = offset_ms.saturating_add(
+                        i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX),
+                    );
+                    *started = std::time::Instant::now();
+                    *offset_ms = now.max(current);
+                }
+            }
+        }
+
+        pub fn observer(&self) -> ClockObserver {
+            ClockObserver {
+                state: std::sync::Arc::clone(&self.state),
+            }
+        }
+    }
+
+    impl ClockObserver {
+        pub fn now(&self) -> i64 {
+            clock_state_now(&self.state.lock().unwrap_or_else(|e| e.into_inner()))
+        }
+    }
+
+    impl Clone for Clock {
+        fn clone(&self) -> Self {
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            match &*state {
+                ClockState::Manual(now) => Self::manual(*now),
+                ClockState::System { .. } => Self {
+                    state: std::sync::Arc::new(std::sync::Mutex::new(ClockState::System {
+                        started: std::time::Instant::now(),
+                        offset_ms: clock_state_now(&state),
+                    })),
+                },
+            }
+        }
+    }
+
+    impl PartialEq for Clock {
+        fn eq(&self, other: &Self) -> bool {
+            self.now() == other.now()
+        }
     }
 
     // D-DET1: deterministic injected Rng capability. A SplitMix64 state stream
@@ -1056,7 +1147,7 @@
     }
     impl super::JetShow for Clock {
         fn jet_show(&self) -> String {
-            format!("Clock {{ now: {} }}", self.now)
+            format!("Clock {{ now: {} }}", self.now())
         }
     }
     impl super::JetDebug for Clock {

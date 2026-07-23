@@ -390,6 +390,53 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     }
 }
 
+pub(crate) fn core_crypto_type_name(name: &str) -> Option<&'static str> {
+    match name {
+        "Secret" => Some("Secret"),
+        "SigningKey" => Some("SigningKey"),
+        "VerifyKey" => Some("VerifyKey"),
+        "X25519SecretKey" => Some("X25519SecretKey"),
+        "X25519PublicKey" => Some("X25519PublicKey"),
+        "SharedSecret" => Some("SharedSecret"),
+        "Signature" => Some("Signature"),
+        "Sealed" => Some("Sealed"),
+        "WrappedKey" => Some("WrappedKey"),
+        "WrappedVaultKey" => Some("WrappedVaultKey"),
+        "KeyUnlock" => Some("KeyUnlock"),
+        "PasswordHash" => Some("PasswordHash"),
+        "Digest256" => Some("Digest256"),
+        "Digest512" => Some("Digest512"),
+        "CryptoError" => Some("CryptoError"),
+        "FileCryptoError" => Some("FileCryptoError"),
+        "KeyWrapError" => Some("KeyWrapError"),
+        _ => None,
+    }
+}
+
+pub(crate) fn core_crypto_rust_type_name(name: &str) -> Option<&'static str> {
+    let name = core_crypto_type_name(name)?;
+    match name {
+        "Secret" => Some("Secret"),
+        "SigningKey" => Some("JetSigningKey"),
+        "VerifyKey" => Some("JetVerifyKey"),
+        "X25519SecretKey" => Some("JetX25519SecretKey"),
+        "X25519PublicKey" => Some("JetX25519PublicKey"),
+        "SharedSecret" => Some("JetSharedSecret"),
+        "Signature" => Some("JetSignature"),
+        "Sealed" => Some("JetSealed"),
+        "WrappedKey" => Some("JetWrappedKey"),
+        "WrappedVaultKey" => Some("JetWrappedVaultKey"),
+        "KeyUnlock" => Some("JetVaultKeyUnlock<'_>"),
+        "PasswordHash" => Some("JetPasswordHash"),
+        "Digest256" => Some("JetDigest256"),
+        "Digest512" => Some("JetDigest512"),
+        "CryptoError" => Some("JetCryptoError"),
+        "FileCryptoError" => Some("JetFileCryptoError"),
+        "KeyWrapError" => Some("JetVaultKeyWrapError"),
+        _ => None,
+    }
+}
+
 /// D-LAYOUT1 / D-LAYOUT-GATES1: `layout` runtime types live in their own
 /// top-level `mod jet_layout` (NOT nested inside `mod jet_std`, unlike
 /// `core_rust_type_name`'s entries) — same reason `alloc_handle_rust_type`/
@@ -519,6 +566,7 @@ impl Cx {
     pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
         let (alias, leaf) = name.split_once('.')?;
         match (self.core_imports.get(alias).map(String::as_str), leaf) {
+            (Some("core.crypto" | "jet.crypto"), leaf) => core_crypto_type_name(leaf),
             (Some("core.auth"), "Claims") => Some("Claims"),
             (Some("core.auth"), "AuthError") => Some("AuthError"),
             (Some("core.tls"), "TlsVersion") => Some("TlsVersion"),
@@ -903,18 +951,12 @@ impl Cx {
             Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
                 format!("{}JetAuthError", self.root_prefix)
             }
-            Type::Named(name) if !self.type_names.contains(name) && matches!(name.as_str(), "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "KeyUnlock" | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError" | "KeyWrapError") => {
+            Type::Named(name)
+                if !self.type_names.contains(name)
+                    && core_crypto_rust_type_name(name).is_some() =>
+            {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                let rust = match name.as_str() {
-                    "Secret" => "Secret", "SigningKey" => "JetSigningKey", "VerifyKey" => "JetVerifyKey",
-                    "X25519SecretKey" => "JetX25519SecretKey", "X25519PublicKey" => "JetX25519PublicKey",
-                    "SharedSecret" => "JetSharedSecret", "Signature" => "JetSignature", "Sealed" => "JetSealed",
-                    "WrappedKey" => "JetWrappedKey", "PasswordHash" => "JetPasswordHash",
-                    "WrappedVaultKey" => "JetWrappedVaultKey", "KeyUnlock" => "JetVaultKeyUnlock<'_>",
-                    "KeyWrapError" => "JetVaultKeyWrapError",
-                    "Digest256" => "JetDigest256", "Digest512" => "JetDigest512",
-                    "FileCryptoError" => "JetFileCryptoError", _ => "JetCryptoError",
-                };
+                let rust = core_crypto_rust_type_name(name).unwrap();
                 format!("{ffi}::{rust}")
             }
             Type::Named(name) if matches!(name.as_str(), "KeyStatus" | "VaultError") => {
@@ -1183,6 +1225,10 @@ impl Cx {
                     let rust = if resolved == "Claims" { "JetAuthClaims" } else { "JetAuthError" };
                     return format!("{}{rust}", self.root_prefix);
                 }
+                if let Some(rust) = core_crypto_rust_type_name(resolved) {
+                    let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    return format!("{ffi}::{rust}");
+                }
                 if matches!(resolved,
                     "Address" | "Message" | "Attachment" | "Envelope" | "SmtpSecurity"
                     | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError" | "Limits"
@@ -1448,12 +1494,13 @@ impl Cx {
             Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
                 format!("&mut [{}]", self.rust_type(&args[0]))
             }
-            // D-TTLVAL1=A: Expiring<T> / Rotting<T>.
+            // D-CORE-SECRETS1=A: generic TTL stays distinct from secret lifecycle.
             Type::Apply { name, args } if name == "Expiring" && args.len() == 1 => {
                 format!("JetExpiring<{}>", self.rust_type(&args[0]))
             }
-            Type::Apply { name, args } if name == "Rotting" && args.len() == 1 => {
-                format!("JetRotting<{}>", self.rust_type(&args[0]))
+            // D-TTLVAL1=A: the one secret-lifetime wrapper.
+            Type::Apply { name, args } if name == "ExpiringSecret" && args.len() == 1 => {
+                format!("JetExpiringSecret<{}>", self.rust_type(&args[0]))
             }
             // D-COLLBREADTH1=A: Set<T> → HashSet<T>, Deque<T> → VecDeque<T>.
             Type::Apply { name, args } if name == "Set" && !args.is_empty() => {

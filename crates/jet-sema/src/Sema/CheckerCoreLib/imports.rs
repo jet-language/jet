@@ -92,6 +92,18 @@ impl<'a> Checker<'a> {
                 self.expected_type = saved;
                 if let Some(aty) = aty {
                     let arg_span = arg.expr.span();
+                    if sig.is_pure
+                        && crate::Sema::Diagnostics::is_clock_type(pty)
+                        && !crate::Sema::Diagnostics::is_deterministic_clock_type(&aty)
+                    {
+                        self.diags.push(crate::Sema::e3403(
+                            &format!(
+                                "an unproven Clock passed to pure `{}`",
+                                &mangled[alias.len() + 2..]
+                            ),
+                            Some(arg_span),
+                        ));
+                    }
                     self.check_type_assignable(pty, &aty, arg_span);
                 }
                 self.check_write_arg_change(arg);
@@ -280,6 +292,17 @@ impl<'a> Checker<'a> {
                         .cloned()
                         .unwrap_or_else(|| self.infer(&mut arg.expr));
                     self.expected_type = saved;
+                    if sig.is_pure
+                        && crate::Sema::Diagnostics::is_clock_type(pty)
+                        && aty.as_ref().is_some_and(|ty| {
+                            !crate::Sema::Diagnostics::is_deterministic_clock_type(ty)
+                        })
+                    {
+                        self.diags.push(crate::Sema::e3403(
+                            &format!("an unproven Clock passed to pure `{name}`"),
+                            Some(arg.expr.span()),
+                        ));
+                    }
                     if crate::Sema::FFI::is_callback_boundary_param(sig.is_c_abi, pty) {
                         let safe = match &arg.expr {
                             Expr::Ident(callback, _) => self.funcs.get(callback).is_some_and(|f| {
@@ -298,8 +321,38 @@ impl<'a> Checker<'a> {
                     }
                     if let Some(aty) = aty {
                         let span = arg.expr.span();
-                        let reported = self.check_type_assignable(pty, &aty, span);
-                        if !reported && aty != *pty {
+                        let loan_param_ty = match pty {
+                            Type::Named(qualified) => qualified
+                                .split_once('.')
+                                .and_then(|(alias, leaf)| {
+                                    target.core_imports.get(alias).and_then(|module| {
+                                        if matches!(
+                                            module.as_str(),
+                                            "core.crypto" | "jet.crypto"
+                                        ) && matches!(
+                                            leaf,
+                                            "Secret" | "SigningKey" | "X25519SecretKey"
+                                        ) {
+                                            Some(crate::Sema::Diagnostics::core_crypto_nominal(
+                                                Type::Named(leaf.to_string()),
+                                            ))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                })
+                                .unwrap_or_else(|| pty.clone()),
+                            _ => pty.clone(),
+                        };
+                        let reads_expiring_secret_loan = *pconv == AccessConvention::Read
+                            && arg.convention == AccessConvention::Read
+                            && crate::Sema::Diagnostics::expiring_secret_loan_matches(
+                                &loan_param_ty,
+                                &aty,
+                            );
+                        let reported = reads_expiring_secret_loan
+                            || self.check_type_assignable(pty, &aty, span);
+                        if !reported && aty != *pty && !reads_expiring_secret_loan {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!(

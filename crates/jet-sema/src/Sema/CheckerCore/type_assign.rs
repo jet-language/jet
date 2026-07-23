@@ -233,8 +233,25 @@ impl<'a> Checker<'a> {
                             | "Table" | "Series" | "LazyFrame" | "DataJoin"
                             // D-MEM1 S6 (D-POOLID-API1=A): generational-arena handle pair.
                             | "Pool" | "Id"
+                            // D-TTLVAL1=A / D-TTL-ZEROIZE1=A: one closed
+                            // secret-lifetime wrapper.
+                            | "ExpiringSecret"
                             | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
                     );
+                    if name == "ExpiringSecret"
+                        && (args.len() != 1
+                            || !args.first().is_some_and(
+                                crate::Sema::Diagnostics::is_expiring_secret_member_type,
+                            ))
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            "`ExpiringSecret<T>` requires a secret type".to_string(),
+                            "only Secret, SigningKey, and X25519SecretKey have the audited move-only zeroizing contract required by this wrapper".to_string(),
+                            "use `ExpiringSecret<crypto.Secret>`, `ExpiringSecret<crypto.SigningKey>`, or `ExpiringSecret<crypto.X25519SecretKey>`".to_string(),
+                            Some(span),
+                        ));
+                    }
                     let imported_owner = self.modules.and_then(|modules| {
                         self.imports.values().copied().find(|&idx| {
                             modules[idx].registry.contains(name) && self.type_is_pub_in(idx, name)

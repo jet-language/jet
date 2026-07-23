@@ -693,16 +693,10 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         ("core.time.datetime", "from_timestamp") | ("core.time.datetime", "now") => {
             return Type::Named("DateTime".to_string())
         }
-        // D-TTLVAL1=A: Expiring<T> / Rotting<T> constructors — T from arg 0.
+        // D-CORE-SECRETS1=A: generic TTL constructor; T comes from argument 0.
         ("core.time.expiring", "new") => {
             return Type::Apply {
                 name: "Expiring".to_string(),
-                args: vec![Type::Named("Unknown".to_string())],
-            }
-        }
-        ("core.vault", "rotting_new") => {
-            return Type::Apply {
-                name: "Rotting".to_string(),
                 args: vec![Type::Named("Unknown".to_string())],
             }
         }

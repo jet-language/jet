@@ -523,21 +523,12 @@ fn jet_ring_crypto_sha256_bytes(bs: &Vec<u8>) -> String {
     hash.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-// D-TTLVAL1=A: Expiring<T> / Rotting<T> (pure std, injectable Clock).
+// D-CORE-SECRETS1=A: generic TTL stays in core.time.expiring.
 fn jet_expiring_new<T: Clone>(value: T, ttl_ms: i64, clock_now: i64) -> JetExpiring<T> {
     JetExpiring::new(value, clock_now.saturating_add(ttl_ms))
 }
-fn jet_rotting_new<T: Clone + 'static>(value: T, ttl_ms: i64, clock_now: i64) -> JetRotting<T> {
-    JetRotting::new(value, clock_now.saturating_add(ttl_ms))
-}
 fn jet_expiring_get<T: Clone>(exp: &JetExpiring<T>, now_ms: i64) -> Result<T, JetExpired> {
     exp.get(now_ms)
-}
-fn jet_rotting_get<T: Clone + 'static>(
-    rot: &mut JetRotting<T>,
-    now_ms: i64,
-) -> Result<T, JetExpired> {
-    rot.get(now_ms)
 }
 
 // Minimal SHA-256 (same algorithm as src/sha256.rs — duplicated here so the

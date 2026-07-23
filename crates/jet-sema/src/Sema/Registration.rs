@@ -227,6 +227,13 @@ impl<'a> Checker<'a> {
                 } else {
                     p.ty.clone()
                 });
+                let pty = if f.is_pure
+                    && crate::Sema::Diagnostics::is_clock_type(&pty)
+                {
+                    crate::Sema::Diagnostics::deterministic_clock_type(pty)
+                } else {
+                    pty
+                };
                 // D-LIN1: a parameter never carries the consume duty. Passing a
                 // `@SingleUse` value to a `^` parameter IS its terminal consumption
                 // (spec: "passed to a take parameter … or returned"), so the `^`

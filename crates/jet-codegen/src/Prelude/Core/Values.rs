@@ -405,7 +405,7 @@ impl<T: Clone + JetShow, E: Clone + JetShow> JetShow for JetLoadable<T, E> {
         }
     }
 }
-// D-TTLVAL1=A / D-CRYPTOENV1 c64: TTL-wrapped values and rotting secrets.
+// D-CORE-SECRETS1=A: generic TTL remains separate from secret lifecycle.
 #[derive(Clone, Debug)]
 struct JetExpired;
 impl JetShow for JetExpired {
@@ -436,48 +436,5 @@ impl<T: Clone> JetExpiring<T> {
 impl<T: Clone + JetShow> JetShow for JetExpiring<T> {
     fn jet_show(&self) -> String {
         format!("Expiring(deadline={})", self.deadline_ms)
-    }
-}
-#[derive(Clone, Debug)]
-struct JetRotting<T: Clone> {
-    value: T,
-    deadline_ms: i64,
-    consumed: bool,
-}
-impl<T: Clone + 'static> JetRotting<T> {
-    fn new(value: T, deadline_ms: i64) -> Self {
-        JetRotting {
-            value,
-            deadline_ms,
-            consumed: false,
-        }
-    }
-    fn get(&mut self, now_ms: i64) -> Result<T, JetExpired> {
-        if self.consumed || now_ms > self.deadline_ms {
-            self.zeroize();
-            Err(JetExpired)
-        } else {
-            let v = self.value.clone();
-            self.zeroize();
-            Ok(v)
-        }
-    }
-    fn zeroize(&mut self) {
-        self.consumed = true;
-        if let Some(s) = (&mut self.value as &mut dyn std::any::Any).downcast_mut::<String>() {
-            s.clear();
-        } else if let Some(v) =
-            (&mut self.value as &mut dyn std::any::Any).downcast_mut::<Vec<u8>>()
-        {
-            for b in v.iter_mut() {
-                *b = 0;
-            }
-            v.clear();
-        }
-    }
-}
-impl<T: Clone + JetShow> JetShow for JetRotting<T> {
-    fn jet_show(&self) -> String {
-        format!("Rotting(deadline={})", self.deadline_ms)
     }
 }

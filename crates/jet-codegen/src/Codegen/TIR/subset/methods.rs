@@ -211,6 +211,19 @@ pub(crate) fn method_call_in_subset(
             && args.len() == 1
             && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
     }
+    if recv_type.as_deref() == Some("ExpiringSecret") {
+        if method == "new"
+            && args.len() == 3
+            && matches!(receiver, Expr::Ident(name, _) if name == "ExpiringSecret")
+        {
+            return args
+                .iter()
+                .all(|arg| arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals));
+        }
+        return method == "with"
+            && args.len() == 1
+            && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
+    }
     // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
     // where `step: fn(Int) -> Int` is a field on a covered struct, NOT a user method.
     // Sema (CheckerInfer ~L2329) sets `recv_type == Some(<StructType>)` and re-routes the
@@ -406,6 +419,11 @@ pub(crate) fn method_call_in_subset(
                             .iter()
                             .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
                     }
+                    ("ExpiringSecret", "new", 3) => {
+                        return args
+                            .iter()
+                            .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    }
                     // D-PATHFS1: `Path.from(str)` — static constructor for typed paths.
                     // Like `Set.from`, admitted before `static_method_call_in_subset`
                     // blocks `from` (an intercepted name). Path is not a user type.
@@ -597,8 +615,8 @@ pub(crate) fn method_call_in_subset(
                 .iter()
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
     }
-    // D-TTLVAL1=A: Expiring<T> / Rotting<T> methods.
-    if matches!(recv_type.as_deref(), Some("Expiring" | "Rotting"))
+    // D-CORE-SECRETS1=A: generic Expiring<T> access.
+    if recv_type.as_deref() == Some("Expiring")
         && matches!(
             (method, args.len()),
             ("get", 1) | ("is_valid", 1) | ("force", 1)
@@ -607,7 +625,7 @@ pub(crate) fn method_call_in_subset(
         return expr_in_subset(receiver, cx, locals)
             && args
                 .iter()
-                .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                .all(|arg| arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals));
     }
     // Shape (d7b) [D-RENDERTGT2=A]: a UI backend method.
     if matches!(
@@ -860,8 +878,11 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() {
         return false;
     }
+    let recv_type_leaf = recv_type
+        .as_deref()
+        .map(|name| name.rsplit('.').next().unwrap_or(name));
     if matches!(
-        (recv_type.as_deref(), method, args.len()),
+        (recv_type_leaf, method, args.len()),
         (Some("SigningKey" | "X25519SecretKey"), "public_key", 0)
             | (Some("VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512"), "bytes", 0)
             | (Some("Digest256" | "Digest512"), "hex", 0)
@@ -1061,6 +1082,14 @@ pub(crate) fn static_method_call_in_subset(
 ) -> bool {
     if locals.contains(type_name) {
         return false;
+    }
+    if matches!((type_name, method, args.len()), ("Clock", "system", 0)) {
+        return true;
+    }
+    if matches!((type_name, method, args.len()), ("ExpiringSecret", "new", 3)) {
+        return args
+            .iter()
+            .all(|arg| arg.label.is_none() && expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!((type_name, method, args.len()), ("Int" | "Float", "parse", 1)) {
         return args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals);

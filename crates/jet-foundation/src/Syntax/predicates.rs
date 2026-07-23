@@ -171,7 +171,7 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // D-TIMEDEPTH1=A (ratified 2026-06-26): civil-time constructors.
     "core.time.date",
     "core.time.datetime",
-    // D-TTLVAL1=A: TTL-wrapped cache values.
+    // D-CORE-SECRETS1=A: generic TTL wrapping.
     "core.time.expiring",
     // D-NETDEP1=A / D-HTTPLIB2=B (ratified 2026-06-26): full HTTP library.
     "core.http.client",
@@ -185,7 +185,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     // U13 (D-JPK-SECRETCRYPTO1, card c9jetpackgates): `core.vault.get` reads a
     // secret decrypted from the project's encrypted repo file (`.jet/secrets.age`),
     // via an age-style crypto FFI bridge. D-CORE-SECRETS1=A also places
-    // secret lifecycle (`Rotting<T>`) here; generic TTL remains core.time.expiring.
+    // secret lifecycle (`ExpiringSecret<T>`) here; generic TTL remains
+    // `core.time.expiring`.
     "core.vault",
     "core.vault.expert",
     // D-AUTH-TOKENPOLICY1=A (ratified 2026-07-18): strict standalone JWT/PASETO

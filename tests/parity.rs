@@ -906,7 +906,7 @@ fn ct_build_context_methods() -> BTreeSet<String> {
         "let result = match method {",
         Some("_ => return None.ok_or_else"),
     ));
-    let dispatch = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
+    let dispatch = read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch");
     for method in ["find", "fetch", "embed"] {
         if dispatch.contains(&format!("method == \"{method}\""))
             || dispatch.contains(&format!("\"{method}\" =>"))
@@ -997,6 +997,9 @@ fn value_boundary(owner: &str) -> Option<&'static str> {
     if owner == "Instant" {
         return Some("named clock boundary");
     }
+    if owner == "Clock" {
+        return Some("named clock boundary");
+    }
     if matches!(owner, "Secret" | "WrappedVaultKey") {
         return Some("named native/security boundary");
     }
@@ -1083,6 +1086,7 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
     let core_dispatch_src = read_rust_tree("crates/jet-comptime/src/Comptime");
     let builtin_dispatch_src = read("crates/jet-comptime/src/Comptime/Builtins.rs");
     let dispatch_src = read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs");
+    let dispatch_tree = read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch");
     let ct_core = extract_pairs(&core_dispatch_src);
     let gaps = KNOWN_OPEN_GAPS.iter().copied().collect::<BTreeSet<_>>();
     let syntax_src = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
@@ -1121,7 +1125,7 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
         "pub(super) fn apply_static_type_method(",
         Some("pub(super) fn apply_mutating("),
     ));
-    ct_statics.extend(guarded_static_methods(&dispatch_src));
+    ct_statics.extend(guarded_static_methods(&dispatch_tree));
     let ct_build_context = ct_build_context_methods();
     let sequence_methods = comptime_sequence_methods();
     let view_methods = [
@@ -1294,7 +1298,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (495, 148, 486, 49));
+    assert_eq!((fixed, direct_static, value, bespoke), (495, 149, 486, 48));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1655,7 +1659,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        5844906304385626344,
+        3969329998197754179,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

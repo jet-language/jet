@@ -316,7 +316,10 @@ pub(crate) fn lower_method_call(
             module: module.to_string(), method: helper.to_string(), args: targs, widen_to_vec,
         }};
     }
-    if let Some(kind) = recv_type.as_deref() {
+    if let Some(kind) = recv_type
+        .as_deref()
+        .map(|name| name.rsplit('.').next().unwrap_or(name))
+    {
         let helper = match (kind, method) {
             ("SigningKey", "public_key") => Some("__signing_public"),
             ("X25519SecretKey", "public_key") => Some("__x25519_public"),
@@ -738,6 +741,16 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
+    }
+    if matches!(receiver, Expr::Ident(name, _) if name == Syntax::CLOCK_TYPE)
+        && method == "system"
+        && args.is_empty()
+        && !env.locals.contains_key(Syntax::CLOCK_TYPE)
+    {
+        return TExpr {
+            ty: Type::Named(Syntax::CLOCK_TYPE.to_string()),
+            kind: TExprKind::ConstInline(format!("{}jet_std_clock_system()", cx.root_prefix)),
+        };
     }
     // D-SHAPE-DURATION1=A: a bare `Duration.unit(value)` is a type-owned
     // checked constructor, not an instance/static user method.
@@ -1534,37 +1547,30 @@ pub(crate) fn lower_method_call(
             },
         };
     }
-    // D-TTLVAL1=A: Expiring<T> / Rotting<T> method calls.
-    if matches!(recv_type.as_deref(), Some("Expiring" | "Rotting"))
+    // D-CORE-SECRETS1=A: generic `Expiring<T>` stays in core.time.expiring.
+    if recv_type.as_deref() == Some("Expiring")
         && matches!(method, "get" | "is_valid" | "force")
     {
         let recv_t = lower_expr(receiver, cx, env);
-        let result_ty = match (recv_type.as_deref(), method) {
-            (Some("Expiring") | Some("Rotting"), "get") => Type::Result {
+        let result_ty = match method {
+            "get" => Type::Result {
                 ok: Box::new(match &recv_t.ty {
                     Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
                     _ => Type::Named("Unknown".to_string()),
                 }),
                 err: Box::new(Type::Named("Expired".to_string())),
             },
-            (Some(_), "is_valid") => Type::Bool,
+            "is_valid" => Type::Bool,
             _ => recv_t.ty.clone(),
         };
-        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-        let op = if recv_type.as_deref() == Some("Rotting") {
-            THandleOp::RottingMethod {
-                method: method.to_string(),
-            }
-        } else {
-            THandleOp::ExpiringMethod {
-                method: method.to_string(),
-            }
-        };
+        let targs: Vec<TExpr> = args.iter().map(|arg| lower_expr(&arg.expr, cx, env)).collect();
         return TExpr {
             ty: result_ty,
             kind: TExprKind::HandleMethod {
                 recv: Box::new(recv_t),
-                op,
+                op: THandleOp::ExpiringMethod {
+                    method: method.to_string(),
+                },
                 args: targs,
             },
         };
@@ -1905,6 +1911,7 @@ pub(crate) fn lower_method_call(
         // `add`/`remove`/`ids`/`read`/`edit` collide with Set/List/Map names).
         let is_pool = recv_type.as_deref() == Some("Pool");
         let is_shared = recv_type.as_deref() == Some("Shared");
+        let is_expiring_secret = recv_type.as_deref() == Some("ExpiringSecret");
         if is_pool && matches!(method, "add" | "remove" | "ids") && args.len() <= 1 {
             let recv_t = lower_expr(receiver, cx, env);
             let elem = match &recv_t.ty {
@@ -1984,6 +1991,46 @@ pub(crate) fn lower_method_call(
             return TExpr {
                 ty,
                 kind: TExprKind::ConstInline(format!("({}).{}({})", recv_s, method_out, closure)),
+            };
+        }
+        if is_expiring_secret && method == "with" && args.len() == 1 {
+            let mut recv_shape = recv_peek.as_ref();
+            while let Some(Type::Tagged { inner, .. }) = recv_shape {
+                recv_shape = Some(inner.as_ref());
+            }
+            let inner = match recv_shape {
+                Some(Type::Apply { name, args })
+                    if name == "ExpiringSecret" && !args.is_empty() =>
+                {
+                    args[0].clone()
+                }
+                _ => Type::Int,
+            };
+            let recv_t = lower_expr(receiver, cx, env);
+            let recv_s = emit_tir_expr(&recv_t, cx);
+            let Expr::Lambda(lam) = &args[0].expr else {
+                unreachable!("sema requires a lambda for ExpiringSecret.with");
+            };
+            let expected = std::slice::from_ref(&inner);
+            let tl = lower_lambda_expecting_host_borrow(lam, cx, env, expected, false);
+            let raw = format!(
+                "{}|{}| {}",
+                if tl.is_move { "move " } else { "" },
+                tl.params.join(", "),
+                tl.body
+            );
+            let closure = if tl.prep.is_empty() {
+                raw
+            } else {
+                format!("{{ {} {} }}", tl.prep, raw)
+            };
+            let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                ok: Box::new(lambda_body_ty_expecting(lam, cx, env, Some(expected))),
+                err: Box::new(Type::Named("Expired".to_string())),
+            });
+            return TExpr {
+                ty,
+                kind: TExprKind::ConstInline(format!("({}).with({})", recv_s, closure)),
             };
         }
     }
@@ -2863,6 +2910,39 @@ pub(crate) fn lower_method_call(
                         widen_to_vec: false,
                     }],
                 },
+            };
+        }
+        if type_name == "ExpiringSecret" && method == "new" && args.len() == 3 {
+            let value = lower_expr(&args[0].expr, cx, env);
+            let duration = lower_expr(&args[1].expr, cx, env);
+            let clock = lower_expr(&args[2].expr, cx, env);
+            let elem_ty = match resolved_ret {
+                Some(Type::Apply { name, args })
+                    if name == "ExpiringSecret" && !args.is_empty() =>
+                {
+                    args[0].clone()
+                }
+                _ => value.ty.clone(),
+            };
+            let elem_rust = cx.rust_type(&elem_ty);
+            let value_rust = emit_tir_expr(&value, cx);
+            let duration_rust = emit_tir_expr(&duration, cx);
+            let clock_rust = emit_tir_expr(&clock, cx);
+            return TExpr {
+                ty: Type::Apply {
+                    name: "ExpiringSecret".to_string(),
+                    args: vec![elem_ty],
+                },
+                kind: TExprKind::ConstInline(format!(
+                    "{{ let __jet_expiring_value = {value_rust}; \
+                     let __jet_expiring_ttl = &({duration_rust}); \
+                     let __jet_expiring_clock = &({clock_rust}); \
+                     let __jet_expiring_observer = __jet_expiring_clock.observer(); \
+                     {}JetExpiringSecret::<{}>::new(\
+                         __jet_expiring_value, __jet_expiring_ttl.ms, \
+                         move || __jet_expiring_observer.now()) }}",
+                    cx.root_prefix, elem_rust
+                )),
             };
         }
         // D-HOLE1: `Option.lift2(f, a, b)` → apply `f` to both payloads only when

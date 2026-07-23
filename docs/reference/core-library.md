@@ -607,8 +607,29 @@ remotely erased. Expert raw imports are prepared and committed only through
 `core.vault.expert` inside `@Unsafe`; raw export remains the existing
 `core.crypto.expert` operation.
 
+`ExpiringSecret<T>` is the one secret-lifetime wrapper. `T` is closed to
+`crypto.Secret`, `crypto.SigningKey`, and `crypto.X25519SecretKey`; construction
+moves the credential into the wrapper. The wrapper retains a private observer
+of the injected clock, so ordinary `~clock` copies cannot change its expiry.
+Access is closure-only:
+
+```jet
+clock := time.clock(0)
+ttl := Duration.minutes(5) ?? return
+key := crypto.SigningKey.generate() ?? return
+secret := vault.ExpiringSecret.new(^key, ttl, clock)
+result := secret.with((borrowed) => borrowed.public_key())
+```
+
+`.with` returns `Result<R, Expired>`. Its parameter is a compiler-owned,
+non-escaping read loan: it cannot be moved, copied, stored, returned, or
+captured. Expiry and wrapper drop destroy the owned credential through its
+audited zeroizing `Drop`. A wrapper backed by `Clock.system()` observes time
+and therefore carries the `Time` effect.
+
 Examples: `examples/features/crypto/vault_keys.jet` and
-`examples/features/crypto/vault_key_wrap.jet`.
+`examples/features/crypto/vault_key_wrap.jet`, plus
+`examples/features/memory/expiring_secret.jet`.
 
 ### `core.auth` — strict JWT and PASETO verification
 
@@ -1442,6 +1463,11 @@ fn run() {
 | `tick(ms)` | `Int` | Advance the clock by `ms` (relative) and return the new value (needs `&Clock`) |
 | `advance(to_ms)` | `Int` | Set the clock to the **absolute** instant `to_ms` and return it (needs `&Clock`; D-DET-CAPAPI) |
 | `wait(d)` | `Int` | Advance the clock by a `Duration` `d` and return the new value (needs `&Clock`; D-DET-CAPAPI) |
+| `Clock.system()` | `Clock` | Explicit monotonic production clock. It carries the `Time` effect and cannot enter pure evaluation |
+
+Copying a clock with `~clock` forks an independent timeline. A copied manual
+clock starts at the same value; a copied system clock keeps advancing from the
+same observed instant. Backward mutation never rewinds a system clock.
 
 A runtime `Duration` is built with checked type-owned unit methods such as
 `Duration.seconds(n)?`. Read a whole unit with `d.in(.Milliseconds)?`; the

@@ -50,9 +50,38 @@ impl<'a> Checker<'a> {
                                 "Address" | "Message" | "Attachment" | "Envelope" |
                                 "SmtpSecurity" | "RecipientPolicy" | "RecipientReport" |
                                 "SendReport" | "EmailError" | "Limits" | "SmtpAuth" |
-                                "TlsTrust" | "DkimConfig" | "SmtpConfig" | "Mailer")
+                            "TlsTrust" | "DkimConfig" | "SmtpConfig" | "Mailer")
                         })
                     }) => Type::Named(n.split_once('.').unwrap().1.to_string()),
+                Type::Named(n)
+                    if n.split_once('.').is_some_and(|(alias, leaf)| {
+                        self.core_imports.get(alias).is_some_and(|module| {
+                            matches!(module.as_str(), "core.crypto" | "jet.crypto")
+                                && matches!(
+                                    leaf,
+                                    "Secret"
+                                        | "SigningKey"
+                                        | "VerifyKey"
+                                        | "X25519SecretKey"
+                                        | "X25519PublicKey"
+                                        | "SharedSecret"
+                                        | "Signature"
+                                        | "Sealed"
+                                        | "WrappedKey"
+                                        | "WrappedVaultKey"
+                                        | "KeyUnlock"
+                                        | "PasswordHash"
+                                        | "Digest256"
+                                        | "Digest512"
+                                        | "CryptoError"
+                                        | "FileCryptoError"
+                                        | "KeyWrapError"
+                                )
+                        })
+                    }) =>
+                {
+                    Type::Named(n.split_once('.').unwrap().1.to_string())
+                }
                 // D-ENV-MUTATE1=A: Core docs spell the exported error through
                 // the user's chosen module alias (`env.EnvError`). Canonicalize
                 // that qualified spelling to the one built-in runtime type.

@@ -1964,7 +1964,11 @@ fn dev_default_aot_fallback_matches_io_log() {
 #[test]
 fn dev_default_aot_fallback_runs_resident_boundaries() {
     let dir = std::env::temp_dir();
-    for stem in ["concurrency/task_controls", "memory/entity_tree"] {
+    for stem in [
+        "concurrency/task_controls",
+        "memory/entity_tree",
+        "memory/expiring_secret",
+    ] {
         let file = example_path(stem);
         let expected = compiled_binary_output(&dir, "aot_fallback_resident", 0, stem, &file);
         let got = match dev_iteration(&file, false, false) {

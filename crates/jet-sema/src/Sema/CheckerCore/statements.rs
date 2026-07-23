@@ -181,6 +181,18 @@ impl<'a> Checker<'a> {
                     self.check_lvalue_change(target, "be assigned");
                     let vt = self.infer(value);
                     if !is_compound {
+                        if vt
+                            .as_ref()
+                            .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
+                        {
+                            self.diags.push(Diagnostic::error(
+                                "E0201",
+                                "an ExpiringSecret loan cannot replace an owned value".to_string(),
+                                "the callback parameter is a temporary read-only loan that ends when `.with` returns".to_string(),
+                                "use the loan inside the callback and assign only a non-secret result".to_string(),
+                                Some(value.span()),
+                            ));
+                        }
                         self.reject_borrowed_param_subplace(
                             value,
                             vt.as_ref(),
@@ -293,6 +305,14 @@ impl<'a> Checker<'a> {
                             if let (Some(vt), false) =
                                 (vt.clone(), info.ty == Type::Named(String::new()))
                             {
+                                if crate::Sema::Diagnostics::is_deterministic_clock_type(&info.ty)
+                                    && !crate::Sema::Diagnostics::is_deterministic_clock_type(&vt)
+                                {
+                                    self.diags.push(crate::Sema::e3403(
+                                        "replacing a deterministic Clock with an unproven Clock",
+                                        Some(value.span()),
+                                    ));
+                                }
                                 if vt != info.ty {
                                     self.diags.push(Diagnostic::error(
                                         "E0108",
@@ -1027,6 +1047,18 @@ impl<'a> Checker<'a> {
                                 et.as_ref(),
                                 "be returned as an owned value",
                             );
+                            if et
+                                .as_ref()
+                                .is_some_and(crate::Sema::Diagnostics::contains_expiring_secret_loan)
+                            {
+                                self.diags.push(Diagnostic::error(
+                                    "E0201",
+                                    "an ExpiringSecret loan cannot be returned".to_string(),
+                                    "the callback parameter is valid only while `.with` is running".to_string(),
+                                    "return a non-secret result computed from the loan".to_string(),
+                                    Some(e.span()),
+                                ));
+                            }
                             if let Expr::Ident(n, nspan) = &*e {
                                 if let Some(info) = self.lookup(n) {
                                     if !info.ty.is_scalar()

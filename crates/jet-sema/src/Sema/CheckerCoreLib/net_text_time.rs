@@ -290,7 +290,7 @@ pub fn loadable_method_return(
     }
 }
 
-/// D-TTLVAL1=A: instance methods on `Expiring<T>` / `Rotting<T>`.
+/// D-CORE-SECRETS1=A: instance methods on generic `Expiring<T>`.
 pub fn expiring_method_return(
     type_apply: &Type,
     method: &str,
@@ -298,26 +298,6 @@ pub fn expiring_method_return(
 ) -> Option<Option<Type>> {
     let val_ty = match type_apply {
         Type::Apply { name, args } if name == "Expiring" && args.len() == 1 => args[0].clone(),
-        _ => return None,
-    };
-    match method {
-        "get" => Some(Some(Type::Result {
-            ok: Box::new(val_ty),
-            err: Box::new(Type::Named("Expired".to_string())),
-        })),
-        "is_valid" => Some(Some(Type::Bool)),
-        "force" => Some(Some(val_ty)), // sema rejects the call site separately (E0511)
-        _ => None,
-    }
-}
-
-pub fn rotting_method_return(
-    type_apply: &Type,
-    method: &str,
-    _n_args: usize,
-) -> Option<Option<Type>> {
-    let val_ty = match type_apply {
-        Type::Apply { name, args } if name == "Rotting" && args.len() == 1 => args[0].clone(),
         _ => return None,
     };
     match method {

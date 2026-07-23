@@ -77,7 +77,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
 
 fn is_covered_vault_ty(ty: &Type, cx: &Cx) -> bool {
     matches!(ty, Type::Apply { name, args }
-        if matches!(name.as_str(), "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan")
+        if matches!(name.as_str(), "ExpiringSecret" | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan")
             && args.len() == 1 && is_subset_param_ty(&args[0], cx))
 }
 
@@ -337,6 +337,29 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
         return true;
     }
     if matches!(name.as_str(), "Claims" | "AuthError") {
+        return true;
+    }
+    // Core crypto values already have total `cx.rust_type` mappings. Admitting
+    // them here lets read-only helpers accept ExpiringSecret callback loans;
+    // each helper body still has to pass the ordinary expression/method gates.
+    if matches!(
+        name.as_str(),
+        "Secret"
+            | "SigningKey"
+            | "VerifyKey"
+            | "X25519SecretKey"
+            | "X25519PublicKey"
+            | "SharedSecret"
+            | "Signature"
+            | "Sealed"
+            | "WrappedKey"
+            | "PasswordHash"
+            | "Digest256"
+            | "Digest512"
+            | "CryptoError"
+            | "FileCryptoError"
+            | "KeyWrapError"
+    ) {
         return true;
     }
     // A prelude struct constructable via a struct literal, or a core/prelude struct that

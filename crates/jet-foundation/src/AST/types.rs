@@ -94,6 +94,15 @@ impl Dimension {
 /// The NUL prefix cannot be written as a Jet marker identifier.
 pub const CORE_CRYPTO_NOMINAL_MARKER: &str = "\0core.crypto";
 
+/// Internal provenance for deterministic and system-backed `Clock` values.
+/// The NUL prefix keeps both markers unspellable in Jet source.
+pub const DETERMINISTIC_CLOCK_MARKER: &str = "\0clock.deterministic";
+pub const SYSTEM_CLOCK_MARKER: &str = "\0clock.system";
+
+/// Internal provenance for the temporary read-only value lent by
+/// `ExpiringSecret.with`. It cannot be named in source or stored anywhere.
+pub const EXPIRING_SECRET_LOAN_MARKER: &str = "\0expiring_secret.loan";
+
 /// Compiler-owned representation tag used by generated C++ facade functions.
 /// The tag keeps the source-level callback shape while telling the backend that
 /// this parameter is already a raw C function pointer, not a boxed Jet closure.
@@ -484,7 +493,17 @@ impl Type {
                 )
             }
             Type::Float32 => "F32 (a 32-bit decimal number)".to_string(),
-            Type::Tagged { marker, inner } if marker == CORE_CRYPTO_NOMINAL_MARKER => inner.show(),
+            Type::Tagged { marker, inner }
+                if matches!(
+                    marker.as_str(),
+                    CORE_CRYPTO_NOMINAL_MARKER
+                        | DETERMINISTIC_CLOCK_MARKER
+                        | EXPIRING_SECRET_LOAN_MARKER
+                        | SYSTEM_CLOCK_MARKER
+                ) =>
+            {
+                inner.show()
+            }
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.show()),
         }
     }
@@ -545,7 +564,17 @@ impl Type {
             Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", elem.name(), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
             Type::IntN { signed, bits } => int_spelling(*signed, *bits),
             Type::Float32 => "F32".to_string(),
-            Type::Tagged { marker, inner } if marker == CORE_CRYPTO_NOMINAL_MARKER => inner.name(),
+            Type::Tagged { marker, inner }
+                if matches!(
+                    marker.as_str(),
+                    CORE_CRYPTO_NOMINAL_MARKER
+                        | DETERMINISTIC_CLOCK_MARKER
+                        | EXPIRING_SECRET_LOAN_MARKER
+                        | SYSTEM_CLOCK_MARKER
+                ) =>
+            {
+                inner.name()
+            }
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.name()),
         }
     }

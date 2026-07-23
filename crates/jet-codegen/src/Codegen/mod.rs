@@ -48,6 +48,7 @@ pub use Web::{emit_web, validate_web_tir_support, WebArtifacts, WebTirUnsupporte
 const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Values.rs"),
+    include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
     include_str!("../Prelude/Observe.rs"),
@@ -1317,6 +1318,8 @@ mod tests {
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
+        let expiring_secret =
+            std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
         let runtime_control =
             std::fs::read_to_string(root.join("src/Prelude/Core/RuntimeControl.rs")).unwrap();
@@ -1327,6 +1330,10 @@ mod tests {
         for (relative, source) in [
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
+            (
+                "src/Prelude/Core/ExpiringSecret.rs",
+                expiring_secret.as_str(),
+            ),
             ("src/Prelude/Core.rs", core.as_str()),
             (
                 "src/Prelude/Core/RuntimeControl.rs",
@@ -1356,6 +1363,9 @@ mod tests {
         let values_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Values.rs\")")
             .unwrap();
+        let expiring_secret_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/ExpiringSecret.rs\")")
+            .unwrap();
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
             .unwrap();
@@ -1370,7 +1380,8 @@ mod tests {
             .unwrap();
         assert!(
             unicode_pos < values_pos
-                && values_pos < core_pos
+                && values_pos < expiring_secret_pos
+                && expiring_secret_pos < core_pos
                 && core_pos < control_pos
                 && control_pos < observe_pos
                 && observe_pos < exact_units_pos,
@@ -1383,6 +1394,7 @@ mod tests {
             [
                 unicode.as_str(),
                 values.as_str(),
+                expiring_secret.as_str(),
                 core.as_str(),
                 runtime_control.as_str(),
                 observe.as_str(),
@@ -1396,6 +1408,7 @@ mod tests {
         let expected = [
             unicode.as_str(),
             values.as_str(),
+            expiring_secret.as_str(),
             core.as_str(),
             runtime_control.as_str(),
             observe.as_str(),
@@ -1406,10 +1419,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 213_486, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 213_355, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "5a35651ab05524187bcf8152cdd08c93955550d9d0e3e4377a0265e03f2413e9",
+            "2389f2214de601a0f136f21ab790d2130332760ad76516a4e8db213d0f9ceee1",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }
