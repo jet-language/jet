@@ -78,6 +78,7 @@ const FORBIDDEN: &[&str] = &[
     "#context",
     "#test",
     "#pure",
+    "pure fn",
     "#todo",
     // D-CAP9 retired bare `Ptr<T>` as a standalone TYPE ANNOTATION (`x: Ptr<Int>`,
     // teaches E0210). It did NOT retire `mem.Ptr<T>.from_addr(addr)` — the
@@ -813,13 +814,16 @@ fn artifact_extensions_are_one_closed_kind_specific_family() {
 }
 
 fn forbidden_for_path(path: &Path) -> Vec<&'static str> {
-    if path.extension().and_then(|x| x.to_str()) != Some("rs") {
-        return FORBIDDEN.to_vec();
-    }
     FORBIDDEN
         .iter()
         .copied()
         .filter(|needle| {
+            if *needle == "pure fn" {
+                return path.starts_with("docs");
+            }
+            if path.extension().and_then(|x| x.to_str()) != Some("rs") {
+                return true;
+            }
             !matches!(
                 *needle,
                 "#layout"
