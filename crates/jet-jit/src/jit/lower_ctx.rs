@@ -4,8 +4,9 @@ use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
-    self, ListSpreadPart, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
-    THandleOp, TIfCond, TJitSpawnLambda, TModuleCallForm, TNumericOp, TOrFallback, TStmt, TStrPart,
+    self, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, THandleOp,
+    TIfCond, TJitSpawnLambda, TModuleCallForm, TOrFallback, TStmt, TStrPart,
+    TNumericOp,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, Type, UnOp};
 use std::collections::HashMap;
@@ -382,21 +383,14 @@ impl LowerCtx<'_, '_> {
                 place, op, value, ..
             } => {
                 if op.is_none() {
-                    if let Some((base, field)) = simple_record_field_place(place) {
-                        let base_key = TIR::local_place(base);
+                    if let Some((base, field)) = simple_record_field_place(place)
+                    {
                         if let (Some(var), Some(base_ty)) = (
-                            self.vars
-                                .get(base)
-                                .or_else(|| self.vars.get(base_key.as_str()))
-                                .copied(),
-                            self.var_tys
-                                .get(base)
-                                .or_else(|| self.var_tys.get(base_key.as_str()))
-                                .cloned(),
+                            self.vars.get(base).copied(),
+                            self.var_tys.get(base).cloned(),
                         ) {
-                            let type_name = record_type_key(&base_ty).ok_or_else(|| {
-                                format!("jit field assign recv type: {base_ty:?}")
-                            })?;
+                            let type_name = record_type_key(&base_ty)
+                                .ok_or_else(|| format!("jit field assign recv type: {base_ty:?}"))?;
                             let index = self
                                 .meta
                                 .struct_field_index(&type_name, field)
@@ -1062,13 +1056,20 @@ impl LowerCtx<'_, '_> {
         })
     }
 
-    /// Read and write borrows are handles in the JIT value model. Clone, arc,
-    /// function-coercion, and widening wrappers stay AOT-only.
+    /// `TCallArg` wrapper flags (`mut_borrow`/`clone`/`arc_clone`/`fn_coerce`/
+    /// `widen_to_vec`) are all AOT-only borrow/coercion machinery the JIT's
+    /// value model (bare Cranelift `Value`, no borrow tracking) cannot express;
+    /// bail rather than silently drop the wrapper's semantics.
     fn lower_call_arg(&mut self, arg: &TCallArg) -> Result<Value, String> {
-        if arg.clone || arg.arc_clone || arg.fn_coerce.is_some() || arg.widen_to_vec {
+        if arg.mut_borrow
+            || arg.clone
+            || arg.arc_clone
+            || arg.fn_coerce.is_some()
+            || arg.widen_to_vec
+        {
             return Err("jit call arg wrapper unsupported".to_string());
         }
-        if (arg.borrow || arg.mut_borrow) && !jit_value_type(&arg.value.ty) {
+        if arg.borrow && !jit_value_type(&arg.value.ty) {
             return Err("jit call arg borrow unsupported".to_string());
         }
         self.lower_expr(&arg.value)
@@ -1310,77 +1311,6 @@ impl LowerCtx<'_, '_> {
             };
             let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
             self.b.ins().call(push_ref, &[handle, v]);
-        }
-        Ok(handle)
-    }
-
-    fn lower_list_spread(
-        &mut self,
-        list_ty: &Type,
-        parts: &[ListSpreadPart],
-    ) -> Result<Value, String> {
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[]);
-        let handle = self.b.inst_results(new_call)[0];
-        let push_id = match list_ty {
-            ty if jit_list_float_type(ty) => self.host.coll.list_push_f64,
-            _ => self.host.coll.list_push,
-        };
-        let get_id = match list_ty {
-            ty if jit_list_float_type(ty) => self.host.coll.list_get_f64,
-            _ => self.host.coll.list_get,
-        };
-        for part in parts {
-            match part {
-                ListSpreadPart::Elem(elem) => {
-                    let value = self.lower_expr(elem)?;
-                    let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
-                    self.b.ins().call(push_ref, &[handle, value]);
-                }
-                ListSpreadPart::Spread(list) => {
-                    let source = self.lower_expr(list)?;
-                    let len_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_len, self.b.func);
-                    let len_call = self.b.ins().call(len_ref, &[source]);
-                    let len = self.b.inst_results(len_call)[0];
-                    let header = self.b.create_block();
-                    let body = self.b.create_block();
-                    let exit = self.b.create_block();
-                    let index_var = self.fresh_var(types::I64);
-                    let zero = self.b.ins().iconst(types::I64, 0);
-                    self.b.def_var(index_var, zero);
-                    self.b.ins().jump(header, &[]);
-
-                    self.b.switch_to_block(header);
-                    let index = self.b.use_var(index_var);
-                    let done = self
-                        .b
-                        .ins()
-                        .icmp(IntCC::SignedGreaterThanOrEqual, index, len);
-                    self.b.ins().brif(done, exit, &[], body, &[]);
-
-                    self.b.switch_to_block(body);
-                    self.b.seal_block(body);
-                    let line = self.b.ins().iconst(types::I32, 1);
-                    let get_ref = self.module.declare_func_in_func(get_id, self.b.func);
-                    let get_call = self.b.ins().call(get_ref, &[source, index, line]);
-                    let value = self.b.inst_results(get_call)[0];
-                    self.emit_trap_check()?;
-                    let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
-                    self.b.ins().call(push_ref, &[handle, value]);
-                    let one = self.b.ins().iconst(types::I64, 1);
-                    let next = self.b.ins().iadd(index, one);
-                    self.b.def_var(index_var, next);
-                    self.b.ins().jump(header, &[]);
-
-                    self.b.switch_to_block(exit);
-                    self.b.seal_block(header);
-                    self.b.seal_block(exit);
-                }
-            }
         }
         Ok(handle)
     }
@@ -1717,54 +1647,22 @@ impl LowerCtx<'_, '_> {
                     self.b.seal_block(merge);
                     return Ok(self.b.block_params(merge)[0]);
                 }
-                let channel_receive = matches!(
-                    &value.kind,
-                    TExprKind::HandleMethod {
-                        op: THandleOp::ChannelReceive,
-                        ..
-                    }
-                );
-                let (status, result_handle) = if channel_receive {
-                    (self.lower_result_receive_status(value)?, None)
-                } else {
-                    let handle = self.lower_expr(value)?;
-                    let status_ref = self
-                        .module
-                        .declare_func_in_func(self.host.result_is_ok, self.b.func);
-                    let status_call = self.b.ins().call(status_ref, &[handle]);
-                    (self.b.inst_results(status_call)[0], Some(handle))
-                };
+                let status = self.lower_result_receive_status(value)?;
                 let ok_block = self.b.create_block();
                 let fail_block = self.b.create_block();
                 let merge = self.b.create_block();
-                let result_ty =
-                    clif_ty(&expr.ty).ok_or("jit or-fallback result type unsupported")?;
-                self.b.append_block_param(merge, result_ty);
-                let status_ty = self.b.func.dfg.value_type(status);
-                let zero = self.b.ins().iconst(status_ty, 0);
-                let ok = self.b.ins().icmp(IntCC::NotEqual, status, zero);
-                self.b.ins().brif(ok, ok_block, &[], fail_block, &[]);
+                self.b.append_block_param(merge, types::I64);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let gt = self.b.ins().icmp(IntCC::SignedGreaterThan, status, zero);
+                self.b.ins().brif(gt, ok_block, &[], fail_block, &[]);
                 self.b.switch_to_block(ok_block);
                 self.b.seal_block(ok_block);
-                let val = if let Some(handle) = result_handle {
-                    let ok_ty = value
-                        .ty
-                        .unwrap_result()
-                        .map(|(ok, _)| ok)
-                        .ok_or("jit or-fallback operand is not Result")?;
-                    self.result_payload(handle, ok_ty)?
-                } else {
-                    let one = self.b.ins().iconst(types::I64, 1);
-                    self.b.ins().isub(status, one)
-                };
+                let one = self.b.ins().iconst(types::I64, 1);
+                let val = self.b.ins().isub(status, one);
                 self.b.ins().jump(merge, &[val]);
                 self.b.switch_to_block(fail_block);
                 self.b.seal_block(fail_block);
                 match fallback {
-                    TOrFallback::Value(value) => {
-                        let fallback = self.lower_expr(value)?;
-                        self.b.ins().jump(merge, &[fallback]);
-                    }
                     TOrFallback::Panic(_) => {
                         let line = self.b.ins().iconst(types::I32, 1);
                         let host_ref = self
@@ -1787,7 +1685,7 @@ impl LowerCtx<'_, '_> {
                     TOrFallback::ContinueLabel(name) => {
                         self.emit_loop_fallback(Some(name), "continue", true)?;
                     }
-                    TOrFallback::Return(_) => {
+                    TOrFallback::Value(_) | TOrFallback::Return(_) => {
                         return Err("jit or-fallback unsupported".to_string());
                     }
                 }
@@ -1988,7 +1886,7 @@ impl LowerCtx<'_, '_> {
             TExprKind::AllocNew { .. } => Err("jit allocator constructor unsupported".to_string()),
             TExprKind::JsonLit { .. } => Err("jit JSON literal unsupported".to_string()),
             TExprKind::DbValueLit { .. } => Err("jit DbValue literal unsupported".to_string()),
-            TExprKind::ListSpread { parts } => self.lower_list_spread(&expr.ty, parts),
+            TExprKind::ListSpread { .. } => Err("jit list spread unsupported".to_string()),
             TExprKind::ColumnarListLit { .. } => {
                 Err("jit columnar list literal unsupported".to_string())
             }
