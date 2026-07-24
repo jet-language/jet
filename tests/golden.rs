@@ -2,6 +2,9 @@
 //! rustc is available) build and print exactly its expected output.
 //! Examples are the executable spec (invariant I5).
 //!
+//! `serde/encoding*` examples run via `jet run --release` (D-LENS-RUN1) because
+//! strict default JIT cannot lower the full encoding prelude yet (#728).
+//!
 //! Also enforces:
 //!   I1 — generated code never contains `unsafe`
 //!   I2 — rustc accepting the generated code; a rejection here is a
@@ -200,6 +203,12 @@ fn examples_compile_and_run() {
     );
 }
 
+/// D-LENS-RUN1 / #728: strict JIT cannot lower the full encoding prelude yet;
+/// prove serde encoding examples via native AOT (`jet run --release`).
+fn golden_uses_release_run(stem: &str) -> bool {
+    stem.starts_with("serde/encoding")
+}
+
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // D-JPK-TASKRUN1 / I5 (card #476): task_runner proves both `#Task` entry
     // paths — leaf `greet` stays callable while sibling `seed` calls it.
@@ -210,6 +219,11 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
 
     if entry.stem.starts_with("lowlevel/polyglot_") {
         check_polyglot_binder_example(entry, env);
+        return;
+    }
+
+    if golden_uses_release_run(&entry.stem) {
+        check_golden_entry_release_run(entry, env);
         return;
     }
 
@@ -628,6 +642,58 @@ fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
         }
         let _ = fs::remove_file(&rs);
         let _ = fs::remove_file(&bin);
+    }
+}
+
+fn check_golden_entry_release_run(entry: &GoldenEntry, env: &GoldenEnv) {
+    let stem = entry.stem.as_str();
+    let src = fs::read_to_string(&entry.path).unwrap();
+    let compiled = jet::compile_with_path(&src, &entry.shown).unwrap_or_else(|diags| {
+        panic!(
+            "example {} failed the front end:\n{}",
+            stem,
+            jet::render_diagnostics(&entry.shown, &src, &diags)
+        )
+    });
+    assert!(
+        compiled.rust.contains("fn main()"),
+        "generated Rust for {} has no fn main",
+        stem
+    );
+
+    let jet_bin = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+    let mut run_cmd = Command::new(&jet_bin);
+    run_cmd.args(["run", "--release", entry.path.to_str().expect("example path is utf8")]);
+    let run = run_cmd.output().expect("jet run --release should spawn");
+    assert!(
+        run.status.success(),
+        "example {} failed at runtime via `jet run --release`:\nstdout: {}\nstderr: {}",
+        stem,
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    let out_path = env.ex_dir.join("expected").join(format!("{stem}.out"));
+    assert!(
+        out_path.is_file(),
+        "missing examples/features/expected/{stem}.out; update mode never creates a new channel"
+    );
+    let actual = String::from_utf8_lossy(&run.stdout);
+    if env.update_expected {
+        fs::write(&out_path, actual.as_bytes()).unwrap();
+    } else {
+        let expected = fs::read_to_string(&out_path).unwrap();
+        if actual != expected {
+            panic!(
+                "output mismatch for example {stem}:\n{}",
+                unified_diff(
+                    &format!("examples/features/expected/{stem}.out"),
+                    &format!("examples/features/{stem} stdout (`jet run --release`)"),
+                    &expected,
+                    &actual,
+                )
+            );
+        }
     }
 }
 
