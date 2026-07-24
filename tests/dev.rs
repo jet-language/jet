@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 mod common;
 use common::{have_rustc, panic_message, test_worker_count, FfiBridgeLock};
 use jet::Interpreter::{dev_iteration, run_named_task, RunOutcome};
-use jet::JitBackend::{InterpreterBackend, JitBackend};
+use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
 
 const DEV_DIFF_TIMEOUT: Duration = Duration::from_secs(30);
@@ -1212,7 +1212,7 @@ fn task_program_runs_via_jit() {
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|e| panic!("tasks JIT compile failed: {e}"));
 
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     let jit = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("tasks must run via JIT backend, got: {ds:?}"),
@@ -1307,14 +1307,13 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// c125 Phase 6 seed: uncovered effectful programs run under default dev via
-/// transparent AOT subprocess fallback. Interpreter mode keeps the honest
-/// E2201 boundary; the default backend owns the gap.
+/// c728: uncovered effectful programs report E2211 under default dev; interpreter
+/// mode keeps the honest E2201 boundary.
 #[test]
-fn dev_default_runs_env_program_via_aot_fallback() {
-    let dir = std::env::temp_dir().join(format!("jet_dev_aot_fallback_{}", std::process::id()));
+fn dev_default_reports_jit_gap_for_env_program() {
+    let dir = std::env::temp_dir().join(format!("jet_dev_jit_gap_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("env_fallback.jet");
+    let file = dir.join("env_gap.jet");
     fs::write(
         &file,
         "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
@@ -1332,28 +1331,46 @@ fn dev_default_runs_env_program_via_aot_fallback() {
         RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.env program"),
     }
 
-    let expected = compiled_binary_output(&dir, "aot_fallback", 0, "env_fallback", &shown);
-    let got = match dev_iteration(&shown, false, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => ProgramOutput::ran(stdout, stderr, exit_code),
+    match dev_iteration(&shown, false, false) {
         RunOutcome::Problems(diags) => {
-            panic!("default dev should AOT-fallback-run core.env program: {diags:?}")
+            assert!(
+                diags.iter().any(|d| d.code == "E2211"),
+                "default dev should report a JIT gap, not fallback: {diags:?}"
+            );
+            assert!(
+                diags.iter().any(|d| d.why.contains("JIT gap in run:")),
+                "E2211 should name the function and gap detail: {diags:?}"
+            );
         }
-    };
-    let got = normalize_for_parity("env_fallback", got);
-    let expected = normalize_for_parity("env_fallback", expected);
-    assert_eq!(got, expected);
+        RunOutcome::Ran { .. } => panic!("default dev must not AOT-fallback-run core.env program"),
+    }
 }
 
-/// D-AUTH-TOKENPOLICY1=A: signature verification and expiry checks stay on the
-/// native crypto/clock path; default dev falls back transparently and exactly.
+/// c728 C3: strict Cranelift traces JIT execution and never invokes tier-0 fallback.
 #[test]
-fn dev_default_runs_auth_verification_via_aot_fallback() {
+fn strict_jit_traces_execution_without_fallback() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    jet_jit::reset_jit_trace_for_test();
+    let file = example_path("basics/hello");
+    match dev_iteration(&file, false, false) {
+        RunOutcome::Ran { .. } => {}
+        other => panic!("hello must run via strict JIT: {other:?}"),
+    }
+    assert!(jet_jit::jit_executed_for_test(), "strict path must execute JIT");
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "strict path must not invoke interpreter fallback"
+    );
+}
+
+/// D-AUTH-TOKENPOLICY1=A: auth verification stays on the native path; strict JIT
+/// reports E2211 instead of transparent AOT fallback.
+#[test]
+fn dev_default_reports_jit_gap_for_auth_verification() {
     let _guard = FfiBridgeLock::acquire();
-    let dir = std::env::temp_dir().join(format!("jet_dev_auth_fallback_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_dev_auth_gap_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("auth_fallback.jet");
@@ -1377,12 +1394,15 @@ fn run() {
         RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.auth"),
     }
 
+    match dev_iteration_with_timeout("auth_fallback", &shown, false) {
+        RunOutcome::Problems(diags) => {
+            assert!(diags.iter().any(|d| d.code == "E2211"), "{diags:?}");
+        }
+        RunOutcome::Ran { .. } => panic!("default dev must not AOT-fallback-run core.auth"),
+    }
+
     let expected = compiled_binary_output(&dir, "auth_fallback", 0, "auth_fallback", &shown);
-    let got = match dev_iteration_with_timeout("auth_fallback", &shown, false) {
-        RunOutcome::Ran { stdout, stderr, exit_code } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => panic!("default dev should AOT-fallback-run core.auth: {diags:?}"),
-    };
-    assert_eq!(normalize_for_parity("auth_fallback", got), normalize_for_parity("auth_fallback", expected));
+    assert_eq!(expected.stdout.trim(), "gateway");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -2160,7 +2180,7 @@ fn cranelift_backend_matches_hello() {
         }
     };
 
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     let got = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("cranelift backend did not run hello: {ds:?}"),
@@ -2219,7 +2239,7 @@ fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
     };
 
     let bundle = checked_bundle_from_path(&shown);
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     let got = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{tag}`: {ds:?}"),
@@ -2242,7 +2262,7 @@ fn run_cranelift_outcome(src: &str, tag: &str) -> ProgramOutput {
     );
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|e| panic!("`{tag}` JIT compile failed: {e}"));
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     match backend.run(&bundle, false) {
         RunOutcome::Ran {
             stdout,
@@ -2250,27 +2270,6 @@ fn run_cranelift_outcome(src: &str, tag: &str) -> ProgramOutput {
             exit_code,
         } => ProgramOutput::ran(stdout, stderr, exit_code),
         RunOutcome::Problems(ds) => panic!("`{tag}` JIT returned diagnostics: {ds:?}"),
-    }
-}
-
-struct RejectJitFallback;
-
-impl JitBackend for RejectJitFallback {
-    fn run(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
-        panic!("resident JIT unexpectedly used its fallback")
-    }
-
-    fn hot_swap(
-        &mut self,
-        _: &str,
-        _: &jet::AST::ProgramBundle,
-        _: bool,
-    ) -> Result<RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
-        panic!("resident JIT unexpectedly used its fallback")
-    }
-
-    fn restart(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
-        panic!("resident JIT unexpectedly used its fallback")
     }
 }
 
@@ -2287,7 +2286,7 @@ fn run_cranelift_outcome_without_fallback(src: &str, tag: &str) -> RunOutcome {
     );
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|e| panic!("`{tag}` JIT compile failed: {e}"));
-    let mut backend = CraneliftBackend::new(RejectJitFallback);
+    let mut backend = CraneliftBackend::new();
     backend.run(&bundle, false)
 }
 
@@ -3465,7 +3464,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         }
     };
 
-    let mut backend = CraneliftBackend::new(RejectJitFallback);
+    let mut backend = CraneliftBackend::new();
     let jit = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
@@ -4115,7 +4114,7 @@ fn cranelift_hot_swap_preserves_live_state() {
     let v1 = checked_bundle("fn run() {\n    print(\"v1\")\n}\n", "jit_swap_v1");
     let v2 = checked_bundle("fn run() {\n    print(\"v2\")\n}\n", "jit_swap_v2");
 
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     let out1 = match backend.run(&v1, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("first run failed: {ds:?}"),
@@ -4135,7 +4134,7 @@ fn cranelift_hot_swap_preserves_live_state() {
         "hot_swap must preserve resident invocation count (live state)"
     );
 
-    let mut backend2 = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend2 = CraneliftBackend::new();
     let out3 = match backend2.hot_swap("run", &v1, false) {
         Ok(RunOutcome::Ran { stdout, .. }) => stdout,
         Ok(RunOutcome::Problems(ds)) => panic!("second backend hot_swap failed: {ds:?}"),
@@ -4192,7 +4191,7 @@ fn cranelift_trap_then_hot_swap_continues() {
         jet_jit::resident_jit_safe_bundle_detail(&panics)
     );
 
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     match backend.run(&panics, false) {
         RunOutcome::Problems(diags) => {
             assert!(

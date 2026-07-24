@@ -127,7 +127,7 @@ fn resident_jit_runs_hot_swaps_and_reports_fallible_selected_entry_without_fallb
     assert!(jet_jit::resident_jit_safe_bundle(&v1));
     assert!(jet_jit::resident_jit_safe_bundle(&v2));
 
-    let mut backend = CraneliftBackend::new(RejectJitFallback);
+    let mut backend = CraneliftBackend::new();
     let first = backend.run(&v1, false);
     assert!(matches!(first, RunOutcome::Ran { ref stdout, exit_code: 0, .. } if stdout == "v1\n"));
     let swapped = backend.hot_swap("start", &v2, false).expect("resident hot swap");

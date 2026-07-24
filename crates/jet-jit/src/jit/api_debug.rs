@@ -2,11 +2,13 @@ use jet_codegen::Codegen::TIR::{self, TEnumPayload, TExpr, TExprKind, TIfCond, T
 use jet_foundation::{JitBackend::RunOutcome, AST::{Item, ProgramBundle, Type}};
 use std::collections::HashSet;
 
+use super::gap::{entry_run_name, JitGap};
 use super::resident::{
     ensure_resident_module, fresh_runtime, resident_hot_swap, resident_run_fresh,
     resident_teardown,
 };
 use super::runtime_host::catch_jit_panic;
+use super::trace::note_jit_execution;
 use super::safety::{
     collect_select_arms_jit, count_spawn_sites, jit_list_task_int_type, resident_safe_expr,
     resident_safe_func, resident_safe_func_detail, resident_safe_program,
@@ -20,36 +22,76 @@ pub fn cranelift_host_supported() -> bool {
     cfg!(target_arch = "x86_64")
 }
 
-pub(crate) fn try_resident(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+pub(crate) fn classify_jit_gap(bundle: &ProgramBundle) -> JitGap {
+    let function = entry_run_name(bundle);
     if !cranelift_host_supported() {
-        return None;
+        return JitGap::new(
+            function,
+            "cranelift-jit host path unsupported on this architecture",
+        );
     }
-    let program = TIR::lower_jit_program(bundle)?;
-    Some(catch_jit_panic("resident run", || {
-        resident_run_fresh(&program)
-    }))
+    let detail = resident_jit_safe_bundle_detail(bundle);
+    if !detail.is_empty() {
+        return JitGap::new(function, detail);
+    }
+    JitGap::new(
+        function,
+        format!(
+            "lower_jit_program returned None ({})",
+            TIR::lower_jit_program_fail_reason(bundle)
+        ),
+    )
 }
 
-pub(crate) fn try_resident_hot_swap(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, JitGap> {
     if !cranelift_host_supported() {
-        return None;
+        return Err(classify_jit_gap(bundle));
     }
-    let program = TIR::lower_jit_program(bundle)?;
-    if !resident_safe_program(&program) {
-        return None;
+    let program = match TIR::lower_jit_program(bundle) {
+        Some(program) => program,
+        None => return Err(classify_jit_gap(bundle)),
+    };
+    note_jit_execution();
+    match catch_jit_panic("resident run", || resident_run_fresh(&program)) {
+        Ok(outcome) => Ok(outcome),
+        Err(reason) => Err(JitGap::new(program.entry.clone(), reason)),
     }
-    Some(resident_hot_swap(&program))
 }
 
-pub(crate) fn try_resident_restart(bundle: &ProgramBundle) -> Option<Result<RunOutcome, String>> {
+pub(crate) fn try_resident_hot_swap(bundle: &ProgramBundle) -> Result<RunOutcome, JitGap> {
     if !cranelift_host_supported() {
-        return None;
+        return Err(classify_jit_gap(bundle));
     }
-    let program = TIR::lower_jit_program(bundle)?;
+    let program = match TIR::lower_jit_program(bundle) {
+        Some(program) => program,
+        None => return Err(classify_jit_gap(bundle)),
+    };
     if !resident_safe_program(&program) {
-        return None;
+        return Err(classify_jit_gap(bundle));
     }
-    Some(resident_run_fresh(&program))
+    note_jit_execution();
+    match resident_hot_swap(&program) {
+        Ok(outcome) => Ok(outcome),
+        Err(reason) => Err(JitGap::new(program.entry.clone(), reason)),
+    }
+}
+
+pub(crate) fn try_resident_restart(bundle: &ProgramBundle) -> Result<RunOutcome, JitGap> {
+    if !cranelift_host_supported() {
+        return Err(classify_jit_gap(bundle));
+    }
+    let program = match TIR::lower_jit_program(bundle) {
+        Some(program) => program,
+        None => return Err(classify_jit_gap(bundle)),
+    };
+    if !resident_safe_program(&program) {
+        return Err(classify_jit_gap(bundle));
+    }
+    note_jit_execution();
+    match resident_run_fresh(&program) {
+        Ok(outcome) => Ok(outcome),
+        Err(reason) => Err(JitGap::new(program.entry.clone(), reason)),
+    }
 }
 
 /// Test hook: MixedSwitch arm condition strings from lowered `main`.

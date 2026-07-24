@@ -40,8 +40,9 @@ pub(crate) fn run_dev(
 
     // `--watch=off`: run once and exit (no loop).
     if policy == WatchPolicy::Once {
-        render_dev_iteration(file, try_anyway, mode, use_interpreter);
-        return;
+        let outcome = jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter);
+        render_dev_outcome(&outcome, file, mode);
+        exit_dev_outcome(outcome);
     }
 
     println!("watching {} … (Ctrl-C to stop)", file);
@@ -71,7 +72,8 @@ pub(crate) fn run_dev(
                 prev_bundle.as_ref(),
                 mode,
                 use_interpreter,
-            );
+            )
+            .or(prev_bundle);
         }
     }
 }
@@ -249,45 +251,51 @@ fn render_dev_change(
                             "\n[hot-swap] {} — types stable, code re-applied",
                             module_name
                         );
-                        run_resident_swap(
+                        if !run_resident_swap(
                             &new_bundle,
                             try_anyway,
                             &module_name,
                             file,
                             mode,
                             use_interpreter,
-                        );
+                        ) {
+                            return None;
+                        }
                     }
                     Err(diags) => {
                         // E2210 names what changed; surface it on the restart line.
                         let what = diags.first().map(|d| d.what.clone()).unwrap_or_default();
                         println!("\n[restart] {} — {}", module_name, what);
-                        run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter);
+                        if !run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter)
+                        {
+                            return None;
+                        }
                     }
                 }
             }
             None => {
                 // No baseline yet (first run after an error): a clean restart.
                 println!("\n[restart] {} — first run", module_name);
-                run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter);
+                if !run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter) {
+                    return None;
+                }
             }
         }
     } else {
         // Run-to-completion (default / `--restart`): plain rerun.
         println!("\n— {} changed, re-running —", file);
-        render_outcome(
-            jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter),
-            file,
-            mode,
-        );
+        let outcome = jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter);
+        render_dev_outcome(&outcome, file, mode);
+        if matches!(outcome, jet::Interpreter::RunOutcome::Problems(ref diags) if jet_jit::is_e2211(diags))
+        {
+            return None;
+        }
     }
 
     Some(new_bundle)
 }
 
-/// Hot-swap via the JitBackend seam. `use_interpreter` forces tier-0;
-/// otherwise `CraneliftBackend` uses the same transparent AOT fallback ladder
-/// as `dev_iteration` before reaching the interpreter boundary.
+/// Hot-swap via the strict Cranelift backend (`--interpret` uses tier-0).
 fn run_resident_swap(
     bundle: &jet::AST::ProgramBundle,
     try_anyway: bool,
@@ -295,43 +303,52 @@ fn run_resident_swap(
     file: &str,
     mode: OutputMode,
     use_interpreter: bool,
-) {
-    use jet::JitBackend::{AotFallbackBackend, InterpreterBackend, JitBackend};
+) -> bool {
+    use jet::JitBackend::{InterpreterBackend, JitBackend};
     use jet_jit::CraneliftBackend;
     let outcome = if use_interpreter {
         let mut b = InterpreterBackend::new();
         b.hot_swap(module_name, bundle, try_anyway)
     } else {
-        let mut b = CraneliftBackend::new(AotFallbackBackend::new(InterpreterBackend::new()));
+        let mut b = CraneliftBackend::new();
         b.hot_swap(module_name, bundle, try_anyway)
     };
     match outcome {
-        Ok(o) => render_outcome(o, file, mode),
+        Ok(o) => {
+            render_outcome(o, file, mode);
+            true
+        }
         Err(diags) => {
             let src = fs::read_to_string(file).unwrap_or_default();
             report_problems(mode, file, &src, &diags);
+            !jet_jit::is_e2211(&diags)
         }
     }
 }
 
-/// Clean restart via the JitBackend seam.
+/// Clean restart via the strict Cranelift backend.
 fn run_resident_restart(
     bundle: &jet::AST::ProgramBundle,
     try_anyway: bool,
     file: &str,
     mode: OutputMode,
     use_interpreter: bool,
-) {
-    use jet::JitBackend::{AotFallbackBackend, InterpreterBackend, JitBackend};
+) -> bool {
+    use jet::JitBackend::{InterpreterBackend, JitBackend};
     use jet_jit::CraneliftBackend;
     let outcome = if use_interpreter {
         let mut b = InterpreterBackend::new();
         b.restart(bundle, try_anyway)
     } else {
-        let mut b = CraneliftBackend::new(AotFallbackBackend::new(InterpreterBackend::new()));
+        let mut b = CraneliftBackend::new();
         b.restart(bundle, try_anyway)
     };
+    let ok = match &outcome {
+        jet::Interpreter::RunOutcome::Problems(diags) => !jet_jit::is_e2211(diags),
+        jet::Interpreter::RunOutcome::Ran { .. } => true,
+    };
     render_outcome(outcome, file, mode);
+    ok
 }
 
 /// `jet repl` — interactive REPL session (E2-M18, D-REPL3=A).
@@ -372,13 +389,42 @@ fn render_dev_iteration(
         None
     };
     render_outcome_timed(outcome, file, Some(elapsed), mode);
-    // Load the checked bundle once more as the swap baseline — only when the
-    // program actually ran (a broken file has no running version to diff).
     if let Some(bundle) = bundle {
         run_dev_budget_refresh(file, &bundle, mode);
         Some(bundle)
     } else {
         None
+    }
+}
+
+fn render_dev_outcome(
+    outcome: &jet::Interpreter::RunOutcome,
+    file: &str,
+    mode: OutputMode,
+) {
+    match outcome {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => {
+            print!("{stdout}");
+            if !stderr.is_empty() {
+                eprint!("{stderr}");
+            }
+        }
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            let src = fs::read_to_string(file).unwrap_or_default();
+            report_problems(mode, file, &src, diags);
+        }
+    }
+}
+
+fn exit_dev_outcome(outcome: jet::Interpreter::RunOutcome) {
+    match outcome {
+        jet::Interpreter::RunOutcome::Ran { exit_code, .. } => exit(exit_code),
+        jet::Interpreter::RunOutcome::Problems(diags) => {
+            if jet_jit::is_e2211(&diags) {
+                exit(ExitCodes::ICE);
+            }
+            exit(ExitCodes::USER_ERROR);
+        }
     }
 }
 

@@ -411,9 +411,9 @@ fn run() {
 }
 
 #[test]
-fn default_dev_uses_allocator_aot_fallback_with_native_parity() {
+fn default_dev_reports_e2211_for_allocator_constructors() {
     use jet::Interpreter::RunOutcome;
-    use jet::JitBackend::{AotFallbackBackend, InterpreterBackend, JitBackend};
+    use jet::JitBackend::JitBackend;
 
     if Command::new("rustc").arg("--version").output().is_err() {
         return;
@@ -453,25 +453,21 @@ fn run() {
     if jet_jit::cranelift_host_supported() {
         let gap = jet_jit::try_compile_bundle(&bundle)
             .expect_err("allocator constructors must name their JIT boundary");
-        assert!(gap.contains("automatic resource cleanup uses AOT fallback"), "{gap}");
+        assert!(
+            gap.contains("automatic resource cleanup") || gap.contains("jit "),
+            "{gap}"
+        );
     }
 
-    let mut dev = jet_jit::CraneliftBackend::new(AotFallbackBackend::new(
-        InterpreterBackend::new(),
-    ));
-    let dev_stdout = match dev.run(&bundle, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => {
-            assert_eq!(exit_code, 0, "{stderr}");
-            stdout
+    let mut dev = jet_jit::CraneliftBackend::new();
+    match dev.run(&bundle, false) {
+        RunOutcome::Problems(diags) => {
+            assert!(jet_jit::is_e2211(&diags), "expected E2211, got {diags:?}");
         }
-        RunOutcome::Problems(diags) => panic!("default dev rejected allocators: {diags:?}"),
-    };
-    let (code, native_stdout, stderr) = run_jet("allocator_native_parity", src);
-    assert_eq!(code, 0, "{stderr}");
-    assert_eq!(dev_stdout, native_stdout);
-    assert_eq!(dev_stdout, "1\n2\n3\n4\n5\n");
+        RunOutcome::Ran { .. } => panic!("strict JIT must not AOT-fallback allocator constructors"),
+    }
+
+    let (code, stdout, _) = run_jet("pool_generation", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n2\n3\n4\n5\n");
 }

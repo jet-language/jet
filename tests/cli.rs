@@ -2109,6 +2109,41 @@ fn explain_golden() {
 }
 
 #[test]
+fn explain_e2211_golden() {
+    let out = Command::new(jet())
+        .arg("explain")
+        .arg("E2211")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "jet explain E2211 should succeed");
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(stdout.contains("Jet JIT has a compiler gap"), "{stdout}");
+    assert!(stdout.contains("jet build"), "{stdout}");
+    check_snapshot("explain_E2211.txt", &stdout);
+}
+
+#[test]
+fn default_jet_run_reports_e2211_for_jit_gap() {
+    let dir = isolated_cwd("jit_gap_run");
+    let file = dir.join("env.jet");
+    fs::write(
+        &file,
+        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["run", file.to_str().unwrap()])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(101), "stderr={}", String::from_utf8_lossy(&output.stderr));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Error [E2211]"), "{stderr}");
+    assert!(stderr.contains("JIT gap in run:"), "{stderr}");
+}
+
+#[test]
 fn malformed_advisory_database_is_e2607_snapshot() {
     let dir = isolated_cwd("audit_e2607");
     fs::write(dir.join("pkg.jet"), "package app 0.1.0\n").unwrap();

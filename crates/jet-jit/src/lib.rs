@@ -1,8 +1,7 @@
 //! c139 (D-JITDEP1 / D-JIT2=A) — Cranelift JIT tier-1 backend.
 //!
-//! Architecture: CraneliftBackend<F: JitBackend> where F is the tier-0
-//! fallback. M0 delegates everything to F; M1 uses try-compile lowering to
-//! actually compile + run the covered subset natively.
+//! Architecture: strict `CraneliftBackend` for default `jet run` / `jet dev`.
+//! Missing resident coverage is E2211 (D-LENS-RUN1); no silent AOT fallback.
 //! M2 keeps a resident JIT module + live runtime heap across hot_swap.
 //! M3 widens native lowering: arithmetic, bindings, if/else, calls, loops,
 //! compound assign, &&/|| short-circuit.
@@ -28,9 +27,32 @@ thread_local! {
     static RESIDENT_MODULE: RefCell<Option<ResidentModule>> = const { RefCell::new(None) };
     /// Live heap preserved across type-stable hot_swap; reset on restart.
     static RESIDENT_RUNTIME: RefCell<Option<JitRuntime>> = const { RefCell::new(None) };
+    static PROGRAM_ARGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 static TRY_COMPILE_PANIC_HOOK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+struct ProgramArgsGuard(Vec<String>);
+
+impl Drop for ProgramArgsGuard {
+    fn drop(&mut self) {
+        PROGRAM_ARGS.with(|slot| {
+            *slot.borrow_mut() = std::mem::take(&mut self.0);
+        });
+    }
+}
+
+/// Install argv for one JIT run (`argv[0]` = entry path, then program args).
+pub fn with_program_args<R>(args: &[String], run: impl FnOnce() -> R) -> R {
+    let previous =
+        PROGRAM_ARGS.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), args.to_vec()));
+    let _guard = ProgramArgsGuard(previous);
+    run()
+}
+
+pub(crate) fn program_args() -> Vec<String> {
+    PROGRAM_ARGS.with(|slot| slot.borrow().clone())
+}
 
 /// Runtime-neutral Result carrier used by native JIT code. Cranelift functions
 /// pass one i64 handle for every `Result<T, E>`; payload bits stay exact and
@@ -57,6 +79,10 @@ mod resident;
 mod api_debug;
 #[path = "jit/backend.rs"]
 mod backend;
+#[path = "jit/gap.rs"]
+mod gap;
+#[path = "jit/trace.rs"]
+mod trace;
 
 // `Concurrency.rs` (a real sibling module, not an include! fragment) reaches
 // `JitRuntime` via `super::JitRuntime` — keep that path alive at crate root.
@@ -70,3 +96,8 @@ pub use api_debug::{
     tir_lowers_bundle, try_compile_bundle,
 };
 pub use backend::CraneliftBackend;
+pub use gap::{e2211_diagnostic, entry_run_name, is_e2211, JitGap};
+pub use trace::{
+    fallback_invoked_for_test, jit_executed_for_test, note_fallback_invoked_for_test,
+    reset_jit_trace_for_test,
+};
