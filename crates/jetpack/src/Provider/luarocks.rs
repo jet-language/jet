@@ -929,7 +929,8 @@ mod tests {
         let store = roots.hangar_dir();
         fs::create_dir_all(&store).unwrap();
         let table = SourceTable::empty();
-        let spec = crate::RefSpec::classify_in("luarocks:jetapp#version=2.0-1", &table).unwrap();
+        let spec =
+            crate::RefSpec::classify_in("jetapp#version=2.0-1@luarocks", &table).unwrap();
         let online = Ctx { fixtures: None, store_dir: &store, offline: false, project_dir: Some(&project) };
         let realized = Store::realize_verified(&roots, &online, Store::RealizeRequest::Package { spec: &spec, table: &table }).unwrap();
         let output_root = realized.original_output().to_path_buf();
@@ -941,7 +942,7 @@ mod tests {
         assert!(provenance.contains("package=jetdep:1.0-1:"));
         assert!(provenance.contains("package=jetapp:2.0-1:"));
         let lock = fs::read_to_string(project.join(crate::Syntax::UNIFIED_LOCK_FILE)).unwrap();
-        assert!(lock.contains("luarocks = \"luarocks:jetapp#version=2.0-1\""));
+        assert!(lock.contains("luarocks = \"jetapp#version=2.0-1@luarocks\""));
         assert!(lock.contains("dependencies = [\"jetdep#version=1.0-1\"]"));
 
         let hidden = base.join("repo-offline");

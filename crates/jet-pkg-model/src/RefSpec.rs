@@ -218,8 +218,8 @@ impl SourceTable {
     }
 }
 
-/// A classified ref. `package` is the part after the first `:` — an attr name
-/// for nixpkgs, an `owner/repo[/subpath]` for github, a path for `path`.
+/// A classified ref. `package` is the target before the final `@` — an attr
+/// name for nixpkgs or an `owner/repo[/subpath]` for GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefSpec {
     pub source: Source,
@@ -279,11 +279,12 @@ pub enum RefError {
 }
 
 impl RefError {
-    /// The registered diagnostic code for the errors that carry one. The older
-    /// classifier errors render without a code (CLI-only, pre-registry); the
-    /// workspace-index errors (Slice B) are registered in docs/spec/diagnostics.md.
+    /// The registered diagnostic code for the errors that carry one.
     pub fn code(&self) -> Option<&'static str> {
         match self {
+            RefError::ProviderFirst { .. } | RefError::PathProviderRetired { .. } => {
+                Some("E1317")
+            }
             RefError::AmbiguousMember { .. } => Some("E1230"),
             RefError::UnknownMember { .. } => Some("E1231"),
             _ => None,

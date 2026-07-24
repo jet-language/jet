@@ -377,7 +377,7 @@ fn os_import_missing_source_has_snapshot() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    assert_jetos_stderr_snapshot(
+    assert_jetos_stderr_snapshot_trimmed(
         "import_missing_source",
         &String::from_utf8_lossy(&out.stderr),
     );
@@ -2797,6 +2797,22 @@ fn os_missing_host_is_friendly_and_exits_2() {
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_jetos_stderr_snapshot("missing_host", &stderr);
+}
+
+
+#[test]
+fn os_missing_external_root_is_friendly_and_exits_2() {
+    let root = Scratch::new("os-no-root");
+    let out = jet()
+        .args(["os", "build", "laptop@", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert_jetos_stderr_snapshot_trimmed(
+        "missing_host_root",
+        &String::from_utf8_lossy(&out.stderr),
+    );
 }
 
 

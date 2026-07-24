@@ -745,14 +745,32 @@ module.exports = grammar({
         $.source_ref,
       ),
 
-    // A `name@source` dependency ref (D-JPK-REF1, S59): `tool@github`,
-    // `c@system`, or `c@"vendor"`.
+    // A `target@source` dependency ref (D-JPK-REF1, S59): `tool@github`,
+    // `owner/repo#version=1.2.3@github`, or `acme/tool@vendor`.
     source_ref: ($) =>
       seq(
-        field("name", $.identifier),
+        field(
+          "target",
+          choice($.identifier, $.ref_path_target, $.ref_version_target),
+        ),
         token.immediate("@"),
         field("source", choice($.string_literal, $.ref_target)),
       ),
+
+    ref_path_target: ($) =>
+      seq(
+        choice($.identifier, $.type_identifier),
+        repeat1(seq(token.immediate("/"), $.ref_segment)),
+        optional($.ref_version_suffix),
+      ),
+
+    ref_version_target: ($) =>
+      seq(choice($.identifier, $.type_identifier), $.ref_version_suffix),
+
+    ref_version_suffix: ($) =>
+      seq(token.immediate("#"), token.immediate(/[A-Za-z0-9_.=+-]+/)),
+
+    ref_segment: (_) => token.immediate(/[A-Za-z0-9_.:-]+/),
 
     ref_target: (_) => token.immediate(/[A-Za-z0-9_./:-]+/),
 

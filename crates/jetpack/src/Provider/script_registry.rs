@@ -1902,7 +1902,7 @@ policy: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], deny:
         fs::create_dir_all(&store).unwrap();
         let ctx = Ctx { fixtures: None, store_dir: &store, offline: true, project_dir: Some(&project) };
         let table = SourceTable::empty();
-        let spec = crate::RefSpec::classify_in("ruby:demo#version=1.0", &table).unwrap();
+        let spec = crate::RefSpec::classify_in("demo#version=1.0@ruby", &table).unwrap();
         let authority = cache_authority(Kind::RubyGems, &ctx).unwrap();
         crate::Lock::record_registry_realization(
             &project,
@@ -2023,7 +2023,7 @@ policy: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], deny:
         exercise_provider(
             &base,
             "ruby",
-            "ruby:jetapp#version=2.0.0",
+            "jetapp#version=2.0.0@ruby",
             "ruby-lib",
             "ruby",
             &["-e", "require 'jetapp'; print JetApp.value"],
@@ -2031,7 +2031,7 @@ policy: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], deny:
         exercise_provider(
             &base,
             "perl",
-            "perl:Jet-App#version=2.0",
+            "Jet-App#version=2.0@perl",
             "perl5lib",
             "perl",
             &["-MJetApp", "-e", "print JetApp::value()"],
@@ -2039,7 +2039,7 @@ policy: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], deny:
         exercise_provider(
             &base,
             "php",
-            "php:jet/app#version=2.0.0",
+            "jet/app#version=2.0.0@php",
             "composer-autoload",
             "php",
             &[
@@ -2058,9 +2058,9 @@ policy: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], deny:
         };
         let table = SourceTable::empty();
         let refs = [
-            "ruby:jetapp#version=2.0.0",
-            "perl:Jet-App#version=2.0",
-            "php:jet/app#version=2.0.0",
+            "jetapp#version=2.0.0@ruby",
+            "Jet-App#version=2.0@perl",
+            "jet/app#version=2.0.0@php",
         ]
         .into_iter()
         .map(|reference| crate::RefSpec::classify_in(reference, &table).unwrap())

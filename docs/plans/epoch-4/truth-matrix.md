@@ -56,7 +56,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #139 | schema-only | `Source/Publish/Schema.rs` | #393 landed canonical Store v2; #395 owns the live cache protocol over its envelope and store. |
 | #187 | live | `tests/decisions.rs` | Language memory model; not Jetpack parity. |
 | #188 | live | `tests/syntax_reconciliation.rs` | Companion syntax law only. |
-| #214 | live | `crates/jetpack/src/CLI.rs` | `nixpkgs:` spelling only. |
+| #214 | live | `crates/jetpack/src/CLI.rs` | Historical package-ref spelling only; D-JPK-REF1 later replaced it with `name@source`. |
 | #215 | live | `tests/jetpack_dispatch.rs` | Run visibility only. |
 | #330 | compatibility-only | `crates/jetpack/src/Overlay.rs` | #424/#428 own lock invalidation and provider conformance. |
 | #418 | live | `tests/jetpack_truth.rs` | Truth stop-line only; downstream cards still own breadth. |

@@ -2082,7 +2082,7 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   store/lock path as any other package. `jetpack add <ref> --adapt` prints a
   draft adapter and does not run upstream code.
 - **Direct ecosystem providers (D-JPK-PROVIDERS2):** LuaRocks uses the exact
-  `luarocks:<name>#version=<version>` root. Jetpack resolves the repository
+  `<name>#version=<version>@luarocks` root. Jetpack resolves the repository
   manifest and rockspec dependency closure, verifies every source SHA-256,
   records the qualified ref and closure in `.jet/lock`, and projects the
   realized `LUA_PATH`/`LUA_CPATH` into the environment. Mutable refs, unsupported
@@ -2860,7 +2860,7 @@ exact source that intent resolved to:
 [[source_channel]]
 name = "default"
 channel = "latest"
-exact = "github:acme/tool#v1.2.0"
+exact = "acme/tool#v1.2.0@github"
 ```
 
 `jetpack update [source]` is the only verb that moves `[[source_channel]]`.

@@ -33,15 +33,20 @@ pub(super) fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option
         );
         return None;
     }
-    let config = if root.is_empty() {
-        default_config_path()
+    if root.trim().is_empty() {
+        theme.error_coded(
+            "E0979",
+            &format!("`jet os` target `{raw}` needs a root after `@`"),
+            "D-JPK-REF1: `host@root` uses the text after `@` as the external config root.",
+            "write `jet os switch laptop` or `jet os switch laptop@../machines`.",
+        );
+        return None;
+    }
+    let path = PathBuf::from(root);
+    let config = if path.is_dir() {
+        path.join(Syntax::CONFIG_FILE)
     } else {
-        let path = PathBuf::from(root);
-        if path.is_dir() {
-            path.join(Syntax::CONFIG_FILE)
-        } else {
-            path
-        }
+        path
     };
     Some(Target {
         config,

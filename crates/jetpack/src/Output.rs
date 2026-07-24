@@ -608,12 +608,14 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
             "Both halves of `package@source` must be filled in.",
             &format!("try `{example}`."),
         ),
-        RefError::ProviderFirst { raw, replacement } => theme.error(
+        RefError::ProviderFirst { raw, replacement } => theme.error_coded(
+            "E1317",
             &format!("`{raw}` puts the provider first"),
             "D-JPK-REF1 puts the package or target before `@` and the source after it.",
             &format!("write `{replacement}`."),
         ),
-        RefError::PathProviderRetired { raw, path } => theme.error(
+        RefError::PathProviderRetired { raw, path } => theme.error_coded(
+            "E1317",
             &format!("`{raw}` uses the retired `path` provider word"),
             "Local `./`, `../`, and `/` paths are bare refs.",
             &format!("write `{path}`."),

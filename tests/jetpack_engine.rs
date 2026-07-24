@@ -724,6 +724,38 @@ fn bad_ref_is_friendly_and_exits_2() {
 
 
 #[test]
+fn provider_first_ref_is_coded_and_snapshot_pinned() {
+    let root = Scratch::new("ref-provider-first");
+    let out = jetpack()
+        .args(["run", "github@owner/repo", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert_jetos_stderr_snapshot_trimmed(
+        "ref_provider_first",
+        &String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+
+#[test]
+fn retired_path_provider_is_coded_and_snapshot_pinned() {
+    let root = Scratch::new("ref-path-provider");
+    let out = jetpack()
+        .args(["run", "../vendor/tool@path", "--no-color"])
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert_jetos_stderr_snapshot_trimmed(
+        "ref_path_provider_retired",
+        &String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+
+#[test]
 fn unknown_source_is_friendly() {
     let out = jetpack()
         .args(["build", "wget@brew", "--no-color"])
