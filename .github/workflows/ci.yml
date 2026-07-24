@@ -77,6 +77,11 @@ jobs:
       - name: Platform audit
         run: cargo test --test jetpack_platform
 
+      - name: JIT/AOT example corpus gate (c727)
+        run: |
+          cargo test --test dev example_corpus_strict_jit_aot_differential_gate -- --exact
+          cargo test --test dev jit_try_compile_manifest_matches -- --exact
+
       - name: Native core.os facts and interrupt lifecycle
         run: cargo test --test os_native -- --nocapture
 

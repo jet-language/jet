@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 mod common;
 use common::{have_rustc, panic_message, test_worker_count, FfiBridgeLock};
-use jet::Interpreter::{dev_iteration, run_named_task, RunOutcome};
+use jet::Interpreter::{dev_iteration, dev_run_bundle, run_named_task, RunOutcome};
 use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
 
@@ -179,6 +179,60 @@ fn compiled_binary_output_with_stdin(
         String::from_utf8_lossy(&run.stderr).to_string(),
         run.status.code().unwrap_or(1),
     )
+}
+
+fn try_compiled_binary_output(
+    dir: &std::path::Path,
+    tag: &str,
+    i: usize,
+    stem: &str,
+    file: &str,
+) -> Option<ProgramOutput> {
+    let src = fs::read_to_string(file).ok()?;
+    let compiled = jet::compile_with_path(&src, file).ok()?;
+    let rs = dir.join(format!("jet_{tag}_{i}.rs"));
+    let bin = dir.join(format!("jet_{tag}_{i}"));
+    fs::create_dir_all(dir).ok()?;
+    fs::write(&rs, &compiled.rust).ok()?;
+    let mut rustc_cmd = Command::new("rustc");
+    rustc_cmd
+        .args(["--edition", "2021"])
+        .arg("-O")
+        .arg(&rs)
+        .arg("-o")
+        .arg(&bin);
+    if let Some(link) = &compiled.ffi {
+        rustc_cmd
+            .arg("--extern")
+            .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
+        for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
+            rustc_cmd
+                .arg("-L")
+                .arg(format!("dependency={}", deps_dir.display()));
+        }
+    }
+    let clinks = jet::resolve_c_links(file).ok()?;
+    for arg in clinks {
+        rustc_cmd.arg(arg);
+    }
+    let out = command_output_with_timeout(
+        rustc_cmd,
+        DEV_DIFF_TIMEOUT,
+        &format!("rustc build for `{stem}`"),
+    );
+    if !out.status.success() {
+        return None;
+    }
+    let run = command_output_with_timeout(
+        Command::new(&bin),
+        DEV_DIFF_TIMEOUT,
+        &format!("compiled binary run for `{stem}`"),
+    );
+    Some(ProgramOutput::ran(
+        String::from_utf8_lossy(&run.stdout).to_string(),
+        String::from_utf8_lossy(&run.stderr).to_string(),
+        run.status.code().unwrap_or(1),
+    ))
 }
 
 fn command_output_with_timeout(mut cmd: Command, timeout: Duration, label: &str) -> Output {
@@ -541,7 +595,6 @@ const BOUNDARY_CODES: &[&str] = &[
 const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
     "collections/list_bounds",
     "concurrency/all_failfast",
-    "ui/ui_native_linux",
 ];
 
 fn jit_gap_stem_set() -> std::collections::HashSet<String> {
@@ -3795,6 +3848,460 @@ fn jit_try_compile_manifest_matches() {
     assert_eq!(
         gaps, expected_gaps,
         "JIT compile-gap set drifted; update tests/jit_gaps.txt only for an intentional ratchet move"
+    );
+}
+
+// ── c727: differential example-corpus gate (D-LENS-RUN1 / #688 C1) ─────────
+
+/// Stable exclusion for examples outside the native JIT↔AOT oracle lens.
+fn corpus_gate_exclusion(stem: &str) -> Option<&'static str> {
+    match stem {
+        "game/raylib_window" => Some("interactive display required"),
+        "io/watcher" => Some("filesystem watch loop"),
+        "lowlevel/cross" => Some("cross-target demo"),
+        "net/http_server" | "net/http_server_lifecycle" | "net/http_server_middleware"
+        | "net/http_server_tasks" | "net/http_server_trailers" | "net/socket_echo" => {
+            Some("network service")
+        }
+        "ui/ui_native_linux" => Some("native GTK shell"),
+        _ => None,
+    }
+}
+
+fn example_has_err_golden(stem: &str) -> bool {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("examples/features/expected/{stem}.err.out"))
+        .is_file()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum CorpusGateClass {
+    FrontendRejected,
+    GateExcluded,
+    NonRunnable,
+    ExpectedExit,
+    ResidentJit,
+    E2211,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct CorpusGateRecord {
+    stem: String,
+    class: CorpusGateClass,
+    detail: String,
+}
+
+fn classify_corpus_stem(
+    stem: &str,
+    dir: &std::path::Path,
+    worker: usize,
+    have_rustc: bool,
+) -> CorpusGateRecord {
+    let file = example_path(stem);
+    if let Some(reason) = corpus_gate_exclusion(stem) {
+        return CorpusGateRecord {
+            stem: stem.to_string(),
+            class: CorpusGateClass::GateExcluded,
+            detail: reason.to_string(),
+        };
+    }
+
+    let mut bundle = match jet::Loader::load_entry(&file) {
+        Ok(b) => b,
+        Err(diags) => {
+            let detail = diags
+                .first()
+                .map(|d| format!("{}: {}", d.code, d.what))
+                .unwrap_or_else(|| "load failed".to_string());
+            return CorpusGateRecord {
+                stem: stem.to_string(),
+                class: CorpusGateClass::FrontendRejected,
+                detail,
+            };
+        }
+    };
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    if !errors.is_empty() {
+        let detail = errors
+            .iter()
+            .map(|d| format!("{}: {}", d.code, d.what))
+            .collect::<Vec<_>>()
+            .join("; ");
+        return CorpusGateRecord {
+            stem: stem.to_string(),
+            class: CorpusGateClass::FrontendRejected,
+            detail,
+        };
+    }
+
+    if !jet_jit::resident_jit_safe_bundle(&bundle)
+        && jet_jit::try_compile_bundle(&bundle).is_err()
+        && matches!(stem, "cli/subcommands" | "cli/typed_entry_args")
+    {
+        return CorpusGateRecord {
+            stem: stem.to_string(),
+            class: CorpusGateClass::NonRunnable,
+            detail: "no zero-parameter runnable entry".to_string(),
+        };
+    }
+
+    if !have_rustc {
+        return CorpusGateRecord {
+            stem: stem.to_string(),
+            class: CorpusGateClass::ExpectedExit,
+            detail: "rustc unavailable; oracle skipped".to_string(),
+        };
+    }
+
+    if example_has_err_golden(stem) {
+        return CorpusGateRecord {
+            stem: stem.to_string(),
+            class: CorpusGateClass::ExpectedExit,
+            detail: "golden expects non-zero exit".to_string(),
+        };
+    }
+
+    let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
+    let worker_dir = dir.join(format!("w{worker}"));
+    let aot = try_compiled_binary_output(&worker_dir, "corpus_gate_aot", 0, stem, &file);
+    let aot = match aot {
+        Some(out) => out,
+        None => {
+            return CorpusGateRecord {
+                stem: stem.to_string(),
+                class: CorpusGateClass::ExpectedExit,
+                detail: "AOT compile or run failed".to_string(),
+            };
+        }
+    };
+    if aot.exit_code != 0 {
+        return CorpusGateRecord {
+            stem: stem.to_string(),
+            class: CorpusGateClass::ExpectedExit,
+            detail: format!("AOT exit {}", aot.exit_code),
+        };
+    }
+
+    jet_jit::reset_jit_trace_for_test();
+    let jit = dev_run_bundle(&bundle, false, false);
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "`{stem}` must not invoke interpreter/AOT fallback under strict Cranelift"
+    );
+
+    match jit {
+        RunOutcome::Problems(diags) => {
+            assert!(
+                jet_jit::is_e2211(&diags),
+                "`{stem}` AOT-runnable but strict JIT did not report E2211: {diags:?}"
+            );
+            let detail = diags
+                .iter()
+                .find(|d| d.code == "E2211")
+                .map(|d| d.why.clone())
+                .unwrap_or_else(|| "E2211".to_string());
+            CorpusGateRecord {
+                stem: stem.to_string(),
+                class: CorpusGateClass::E2211,
+                detail,
+            }
+        }
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "`{stem}` must execute resident Cranelift when AOT succeeds"
+            );
+            let jit_out = normalize_for_parity(
+                stem,
+                ProgramOutput::ran(stdout, stderr, exit_code),
+            );
+            let aot_out = normalize_for_parity(stem, aot);
+            assert_eq!(
+                jit_out, aot_out,
+                "`{stem}` resident JIT must match AOT stdout/stderr/exit byte-for-byte"
+            );
+            CorpusGateRecord {
+                stem: stem.to_string(),
+                class: CorpusGateClass::ResidentJit,
+                detail: String::new(),
+            }
+        }
+    }
+}
+
+fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
+    let dir = std::env::temp_dir().join(format!("jet_corpus_gate_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let have_rustc = have_rustc();
+    let mut stems = all_example_stems();
+    if let Ok(filter) = std::env::var("JET_CORPUS_GATE_FILTER") {
+        stems.retain(|stem| stem.contains(&filter));
+    }
+    let dir = Arc::new(dir);
+    let jobs = Arc::new(Mutex::new(std::collections::VecDeque::from(stems)));
+    let records = Arc::new(Mutex::new(Vec::<CorpusGateRecord>::new()));
+    let failures = Arc::new(Mutex::new(Vec::<String>::new()));
+    let mut handles = Vec::new();
+    for worker in 0..test_worker_count(8) {
+        let jobs = Arc::clone(&jobs);
+        let records = Arc::clone(&records);
+        let failures = Arc::clone(&failures);
+        let dir = Arc::clone(&dir);
+        handles.push(std::thread::spawn(move || loop {
+            let Some(stem) = jobs.lock().unwrap().pop_front() else {
+                break;
+            };
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                classify_corpus_stem(&stem, &dir, worker, have_rustc)
+            }));
+            match result {
+                Ok(record) => records.lock().unwrap().push(record),
+                Err(payload) => failures
+                    .lock()
+                    .unwrap()
+                    .push(format!("{stem}: {}", panic_message(payload))),
+            }
+        }));
+    }
+    for handle in handles {
+        handle.join().expect("corpus gate worker panicked");
+    }
+    let failures = failures.lock().unwrap();
+    assert!(
+        failures.is_empty(),
+        "corpus gate classification failures:\n{}",
+        failures.join("\n")
+    );
+    let mut records = records.lock().unwrap().clone();
+    records.sort_by(|left, right| left.stem.cmp(&right.stem));
+    records
+}
+
+fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
+    let mut out = String::from(
+        "# c727: differential example-corpus gate manifest.\n\
+         # Every top-level examples/features/<topic>/*.jet appears in exactly one section.\n\
+         # Update only for intentional ratchet moves.\n\n",
+    );
+    let classes = [
+        CorpusGateClass::FrontendRejected,
+        CorpusGateClass::GateExcluded,
+        CorpusGateClass::NonRunnable,
+        CorpusGateClass::ExpectedExit,
+        CorpusGateClass::ResidentJit,
+        CorpusGateClass::E2211,
+    ];
+    for class in classes {
+        let section = corpus_gate_section_name(&class);
+        let mut section_records: Vec<_> = records
+            .iter()
+            .filter(|record| record.class == class)
+            .collect();
+        section_records.sort_by(|left, right| left.stem.cmp(&right.stem));
+        out.push_str(section);
+        out.push_str(":\n");
+        for record in section_records {
+            if record.detail.is_empty() {
+                out.push_str("  ");
+                out.push_str(&record.stem);
+                out.push('\n');
+            } else {
+                out.push_str("  ");
+                out.push_str(&record.stem);
+                out.push_str(": ");
+                out.push_str(&record.detail);
+                out.push('\n');
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn corpus_gate_section_name(class: &CorpusGateClass) -> &'static str {
+    match class {
+        CorpusGateClass::FrontendRejected => "frontend_rejected",
+        CorpusGateClass::GateExcluded => "gate_excluded",
+        CorpusGateClass::NonRunnable => "non_runnable",
+        CorpusGateClass::ExpectedExit => "expected_exit",
+        CorpusGateClass::ResidentJit => "resident_jit",
+        CorpusGateClass::E2211 => "e2211",
+    }
+}
+
+fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
+    enum Section {
+        None,
+        FrontendRejected,
+        GateExcluded,
+        NonRunnable,
+        ExpectedExit,
+        ResidentJit,
+        E2211,
+    }
+
+    let mut section = Section::None;
+    let mut records = Vec::new();
+    for raw in include_str!("jit_corpus_gate.txt").lines() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        match trimmed {
+            "frontend_rejected:" => {
+                section = Section::FrontendRejected;
+                continue;
+            }
+            "gate_excluded:" => {
+                section = Section::GateExcluded;
+                continue;
+            }
+            "non_runnable:" => {
+                section = Section::NonRunnable;
+                continue;
+            }
+            "expected_exit:" => {
+                section = Section::ExpectedExit;
+                continue;
+            }
+            "resident_jit:" => {
+                section = Section::ResidentJit;
+                continue;
+            }
+            "e2211:" => {
+                section = Section::E2211;
+                continue;
+            }
+            _ => {}
+        }
+        let (stem, detail) = match trimmed.split_once(": ") {
+            Some((stem, detail)) => (stem.to_string(), detail.to_string()),
+            None => (trimmed.to_string(), String::new()),
+        };
+        let class = match section {
+            Section::FrontendRejected => CorpusGateClass::FrontendRejected,
+            Section::GateExcluded => CorpusGateClass::GateExcluded,
+            Section::NonRunnable => CorpusGateClass::NonRunnable,
+            Section::ExpectedExit => CorpusGateClass::ExpectedExit,
+            Section::ResidentJit => CorpusGateClass::ResidentJit,
+            Section::E2211 => CorpusGateClass::E2211,
+            Section::None => panic!("manifest entry outside a section: {trimmed}"),
+        };
+        records.push(CorpusGateRecord {
+            stem,
+            class,
+            detail,
+        });
+    }
+    records.sort_by(|left, right| left.stem.cmp(&right.stem));
+    records
+}
+
+fn print_corpus_gate_manifest(records: &[CorpusGateRecord]) {
+    let classes = [
+        CorpusGateClass::FrontendRejected,
+        CorpusGateClass::GateExcluded,
+        CorpusGateClass::NonRunnable,
+        CorpusGateClass::ExpectedExit,
+        CorpusGateClass::ResidentJit,
+        CorpusGateClass::E2211,
+    ];
+    for class in classes {
+        let section = corpus_gate_section_name(&class);
+        let mut section_records: Vec<_> = records
+            .iter()
+            .filter(|record| record.class == class)
+            .collect();
+        section_records.sort_by(|left, right| left.stem.cmp(&right.stem));
+        if section_records.is_empty() {
+            continue;
+        }
+        eprintln!("{section}:");
+        for record in section_records {
+            if record.detail.is_empty() {
+                eprintln!("  {}", record.stem);
+            } else {
+                eprintln!("  {}: {}", record.stem, record.detail);
+            }
+        }
+        eprintln!();
+    }
+}
+
+/// c727 C1–C4: discover every top-level example, classify it, and ratchet the
+/// manifest. AOT-oracle examples (exit 0) must resident-JIT with backend
+/// attribution or report honest E2211 — never silent fallback.
+///
+/// c727 C5: wired into `.github/workflows/ci.yml` `jetpack-platform` matrix
+/// (Linux, macOS, Windows) via `cargo test --test dev example_corpus_strict_jit_aot_differential_gate`.
+#[test]
+fn example_corpus_strict_jit_aot_differential_gate() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let records = collect_corpus_gate_records();
+    if std::env::var("JET_DUMP_CORPUS_GATE").as_deref() == Ok("1") {
+        print_corpus_gate_manifest(&records);
+        if std::env::var("JET_WRITE_CORPUS_GATE").as_deref() == Ok("1") {
+            let manifest = corpus_gate_manifest_from_records(&records);
+            fs::write(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/jit_corpus_gate.txt"),
+                manifest,
+            )
+            .expect("write tests/jit_corpus_gate.txt");
+        }
+        eprintln!(
+            "c727 corpus gate: {} examples ({} resident JIT, {} E2211)",
+            records.len(),
+            records
+                .iter()
+                .filter(|r| r.class == CorpusGateClass::ResidentJit)
+                .count(),
+            records
+                .iter()
+                .filter(|r| r.class == CorpusGateClass::E2211)
+                .count(),
+        );
+        return;
+    }
+    let expected = parse_corpus_gate_manifest();
+    if std::env::var("JET_CORPUS_GATE_FILTER").is_err() {
+        assert_eq!(
+            records.len(),
+            all_example_stems().len(),
+            "corpus gate must classify every discovered example"
+        );
+    }
+    assert_eq!(
+        records, expected,
+        "corpus gate manifest drifted; refresh tests/jit_corpus_gate.txt with \
+         JET_DUMP_CORPUS_GATE=1 cargo test --test dev example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture"
+    );
+    let aot_oracle: Vec<_> = records
+        .iter()
+        .filter(|r| matches!(r.class, CorpusGateClass::ResidentJit | CorpusGateClass::E2211))
+        .collect();
+    eprintln!(
+        "c727 corpus gate: {} classified, {} AOT-oracle ({} resident JIT, {} E2211)",
+        records.len(),
+        aot_oracle.len(),
+        records
+            .iter()
+            .filter(|r| r.class == CorpusGateClass::ResidentJit)
+            .count(),
+        records
+            .iter()
+            .filter(|r| r.class == CorpusGateClass::E2211)
+            .count(),
     );
 }
 
