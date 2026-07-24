@@ -1927,6 +1927,224 @@ fn run() {{
 }
 
 #[test]
+fn public_client_tls_identity_and_version_bounds() {
+    use std::process::{Command, Stdio};
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_http_client_tls_policy_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let ca_key = dir.join("ca.key.pem");
+    let ca_cert = dir.join("ca.cert.pem");
+    let ca = Command::new("openssl")
+        .args([
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-days",
+            "1",
+            "-subj",
+            "/CN=jet-http-ca",
+            "-keyout",
+        ])
+        .arg(&ca_key)
+        .arg("-out")
+        .arg(&ca_cert)
+        .output()
+        .expect("openssl ca");
+    assert!(ca.status.success(), "{}", String::from_utf8_lossy(&ca.stderr));
+
+    let make_cert = |name: &str, usage: &str| {
+        let key = dir.join(format!("{name}.key.pem"));
+        let csr = dir.join(format!("{name}.csr.pem"));
+        let cert = dir.join(format!("{name}.cert.pem"));
+        let ext = dir.join(format!("{name}.ext"));
+        let serial = dir.join(format!("{name}.srl"));
+        fs::write(
+            &ext,
+            format!("subjectAltName=DNS:localhost\nextendedKeyUsage={usage}\n"),
+        )
+        .unwrap();
+        let req = Command::new("openssl")
+            .args([
+                "req",
+                "-new",
+                "-newkey",
+                "rsa:2048",
+                "-nodes",
+                "-subj",
+                &format!("/CN={name}"),
+                "-keyout",
+            ])
+            .arg(&key)
+            .arg("-out")
+            .arg(&csr)
+            .output()
+            .unwrap();
+        assert!(
+            req.status.success(),
+            "{}",
+            String::from_utf8_lossy(&req.stderr)
+        );
+        let sign = Command::new("openssl")
+            .args([
+                "x509",
+                "-req",
+                "-days",
+                "1",
+                "-CAcreateserial",
+                "-CAserial",
+            ])
+            .arg(&serial)
+            .arg("-CA")
+            .arg(&ca_cert)
+            .arg("-CAkey")
+            .arg(&ca_key)
+            .arg("-extfile")
+            .arg(&ext)
+            .arg("-in")
+            .arg(&csr)
+            .arg("-out")
+            .arg(&cert)
+            .output()
+            .unwrap();
+        assert!(
+            sign.status.success(),
+            "{}",
+            String::from_utf8_lossy(&sign.stderr)
+        );
+        (cert, key)
+    };
+    let (server_cert, server_key) = make_cert("localhost", "serverAuth");
+    let (client_cert, client_key) = make_cert("jet-client", "clientAuth");
+
+    let probe = TcpListener::bind("127.0.0.1:0").unwrap();
+    let version_port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let mut tls12_server = Command::new("openssl")
+        .args([
+            "s_server",
+            "-quiet",
+            "-www",
+            "-tls1_2",
+            "-accept",
+            &version_port.to_string(),
+            "-CAfile",
+        ])
+        .arg(&ca_cert)
+        .arg("-cert")
+        .arg(&server_cert)
+        .arg("-key")
+        .arg(&server_key)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("openssl tls1_2 s_server");
+    std::thread::sleep(Duration::from_millis(250));
+
+    let version_src = format!(
+        r#"
+use core.http.client as http
+use core.tls as tls
+use core.files as fs
+fn run() {{
+    pem :: fs.read_bytes("{ca}") ?? panic("ca")
+    roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+    base :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
+    only13 :: base.with_version_bounds(min: .Tls13, max: .Tls13) ?? panic("tls13")
+    client13 :: http.Client.new().tls(only13).protocols(false, true, false)
+    if client13.send(http.request("GET", "https://localhost:{port}/")) == {{
+        Ok(_) -> print("tls13-ok")
+        Err(_) -> print("tls13-fail")
+    }}
+    only12 :: base.with_version_bounds(min: .Tls12, max: .Tls12) ?? panic("tls12")
+    client12 :: http.Client.new().tls(only12).protocols(false, true, false)
+    resp :: client12.send(http.request("GET", "https://localhost:{port}/")) ?? panic("tls12 send")
+    print(resp.status())
+}}
+"#,
+        ca = ca_cert.display(),
+        port = version_port
+    );
+    let (version_code, version_out, version_err) = common::build_and_run(
+        "jet_http_client_law",
+        "public_tls_version_bounds",
+        &version_src,
+    );
+    let _ = tls12_server.kill();
+    let _ = tls12_server.wait();
+    assert_eq!(version_code, 0, "stderr:\n{version_err}");
+    assert_eq!(version_out, "tls13-fail\n200\n");
+
+    let probe = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mtls_port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let mut mtls_server = Command::new("openssl")
+        .args([
+            "s_server",
+            "-quiet",
+            "-www",
+            "-Verify",
+            "1",
+            "-verify_return_error",
+            "-accept",
+            &mtls_port.to_string(),
+            "-CAfile",
+        ])
+        .arg(&ca_cert)
+        .arg("-cert")
+        .arg(&server_cert)
+        .arg("-key")
+        .arg(&server_key)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("openssl mtls s_server");
+    std::thread::sleep(Duration::from_millis(250));
+
+    let mtls_src = format!(
+        r#"
+use core.http.client as http
+use core.tls as tls
+use core.files as fs
+fn run() {{
+    ca :: fs.read_bytes("{ca}") ?? panic("ca")
+    cert :: fs.read_bytes("{cert}") ?? panic("cert")
+    key :: fs.read_bytes("{key}") ?? panic("key")
+    roots :: tls.RootCertificates.from_pem(ca) ?? panic("roots")
+    identity :: tls.ClientIdentity.from_pem(cert_chain: cert, private_key: key) ?? panic("identity")
+    bare :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("bare")
+    client_bare :: http.Client.new().tls(bare).protocols(false, true, false)
+    if client_bare.send(http.request("GET", "https://localhost:{port}/")) == {{
+        Ok(_) -> print("bare-ok")
+        Err(_) -> print("bare-fail")
+    }}
+    cfg :: bare.with_client_identity(identity) ?? panic("with identity")
+    client :: http.Client.new().tls(cfg).protocols(false, true, false)
+    resp :: client.send(http.request("GET", "https://localhost:{port}/")) ?? panic("mtls send")
+    print(resp.status())
+}}
+"#,
+        ca = ca_cert.display(),
+        cert = client_cert.display(),
+        key = client_key.display(),
+        port = mtls_port
+    );
+    let (mtls_code, mtls_out, mtls_err) =
+        common::build_and_run("jet_http_client_law", "public_tls_client_identity", &mtls_src);
+    let _ = mtls_server.kill();
+    let _ = mtls_server.wait();
+    let _ = fs::remove_dir_all(&dir);
+    assert_eq!(mtls_code, 0, "stderr:\n{mtls_err}");
+    assert_eq!(mtls_out, "bare-fail\n200\n");
+}
+
+#[test]
 fn https_to_http_redirect_denied_unless_allow_http_downgrade() {
     let dir = std::env::temp_dir().join(format!(
         "jet_http_client_law_downgrade_{}",
