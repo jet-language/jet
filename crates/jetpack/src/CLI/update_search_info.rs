@@ -356,7 +356,7 @@ pub(super) fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
         theme.error(
             "override draft needs a package ref",
             "the ref names the package whose typed workspace policy should be drafted.",
-            "write `jetpack override draft nixpkgs:foo --patch patches/foo.patch`.",
+            "write `jetpack override draft foo@nixpkgs --patch patches/foo.patch`.",
         );
         return 2;
     };
@@ -389,7 +389,7 @@ pub(super) fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
                 theme.error(
                     &format!("unknown override draft flag `{other}`"),
                     "override drafts accept `--overlay`, `--provider`, `--channel`, `--patch`, and `--allow-unfree`.",
-                    "write `jetpack override draft nixpkgs:foo --patch patches/foo.patch`.",
+                    "write `jetpack override draft foo@nixpkgs --patch patches/foo.patch`.",
                 );
                 return 2;
             }
@@ -405,8 +405,8 @@ pub(super) fn cmd_override(theme: &Theme, parsed: &Parsed) -> i32 {
         return 2;
     }
     let package = reference
-        .split_once(':')
-        .map(|(_, p)| p)
+        .rsplit_once(Syntax::REF_PROVIDER_AT)
+        .map(|(package, _)| package)
         .unwrap_or(reference)
         .to_string();
     let workspace = std::env::current_dir().unwrap_or_default();

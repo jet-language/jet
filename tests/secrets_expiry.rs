@@ -14,9 +14,9 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(100)
+    clock := Clock.new(100)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
 
     if secret.with((borrowed) => borrowed.public_key()) == Ok(_) {
@@ -36,7 +36,7 @@ fn run() {
         print("sticky")
     }
 
-    thread_key := crypto.SigningKey.generate() ?? panic("thread key")
+    thread_key := crypto.SigningKey.new_random() ?? panic("thread key")
     threaded := vault.ExpiringSecret.new(^thread_key, ttl, clock)
     task := tasks.spawn(take(threaded) () => {
         if threaded.with((borrowed) => borrowed.public_key()) == Ok(_) {
@@ -59,7 +59,7 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
     _ := vault.ExpiringSecret.new("plaintext", ttl, clock)
 }
@@ -76,11 +76,11 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
     bytes := crypto.Secret.from_text("bytes")
-    signing := crypto.SigningKey.generate() ?? panic("signing")
-    agreement := crypto.X25519SecretKey.generate() ?? panic("agreement")
+    signing := crypto.SigningKey.new_random() ?? panic("signing")
+    agreement := crypto.X25519SecretKey.new_random() ?? panic("agreement")
     first := vault.ExpiringSecret.new(^bytes, ttl, clock)
     second := vault.ExpiringSecret.new(^signing, ttl, clock)
     third := vault.ExpiringSecret.new(^agreement, ttl, clock)
@@ -102,9 +102,9 @@ fn inspect_key(key: crypto.SigningKey) -> VerifyKey {
 }
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => inspect_key(borrowed))
 }
@@ -122,9 +122,9 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => crypto.sign(borrowed, [1, 2]))
 }
@@ -153,9 +153,9 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => helper.inspect_key(borrowed))
 }
@@ -181,9 +181,9 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => fake.inspect_key(borrowed))
 }
@@ -231,7 +231,7 @@ use core.vault as vault
 
 fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     _ := vault.ExpiringSecret.new(^key, ttl, 42)
 }
 "#;
@@ -256,7 +256,7 @@ fn inspect(secret: &ExpiringSecret<crypto.SigningKey>) --[]-> Bool {
 }
 fn run() {
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, Clock.system())
     print(inspect(&secret))
 }
@@ -274,9 +274,9 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     _ := vault.ExpiringSecret.new(key, ttl, clock)
 }
 "#;
@@ -292,9 +292,9 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => borrowed)
 }
@@ -310,9 +310,9 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => () => borrowed.public_key())
 }
@@ -330,9 +330,9 @@ use core.time as time
 use core.vault as vault
 
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => {
         saved := [borrowed]
@@ -359,9 +359,9 @@ use core.time as time
 use core.vault as vault
 fn consume(value: ^crypto.SigningKey) {}
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => { consume(^borrowed); return 0 })
 }
@@ -375,9 +375,9 @@ use core.time as time
 use core.vault as vault
 fn collect(values: ...crypto.SigningKey) {}
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => { collect(borrowed); return 0 })
 }
@@ -390,9 +390,9 @@ use core.crypto as crypto
 use core.time as time
 use core.vault as vault
 fn run() {
-    clock := time.clock(0)
+    clock := Clock.new(0)
     ttl := Duration.seconds(1) ?? panic("duration")
-    key := crypto.SigningKey.generate() ?? panic("key")
+    key := crypto.SigningKey.new_random() ?? panic("key")
     secret := vault.ExpiringSecret.new(^key, ttl, clock)
     _ := secret.with((borrowed) => {
         #Unsafe("attempt to discard a loan") { consume(borrowed) }

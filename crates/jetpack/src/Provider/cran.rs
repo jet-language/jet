@@ -671,7 +671,7 @@ mod tests {
         let store = roots.hangar_dir();
         fs::create_dir_all(&store).unwrap();
         let table = SourceTable::empty();
-        let spec = crate::RefSpec::classify_in("cran:jetapp#version=2.0", &table).unwrap();
+        let spec = crate::RefSpec::classify_in("jetapp#version=2.0@cran", &table).unwrap();
         let online = Ctx {
             fixtures: None,
             store_dir: &store,
@@ -703,7 +703,7 @@ mod tests {
         assert!(provenance.contains("package=jetdep:1.0:"));
         assert!(provenance.contains("package=jetapp:2.0:"));
         let lock = fs::read_to_string(project.join(crate::Syntax::UNIFIED_LOCK_FILE)).unwrap();
-        assert!(lock.contains("cran = \"cran:jetapp#version=2.0\""));
+        assert!(lock.contains("cran = \"jetapp#version=2.0@cran\""));
         assert!(lock.contains("dependencies = [\"jetdep\"]"));
 
         let hidden = base.join("cran-offline");

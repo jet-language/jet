@@ -811,6 +811,39 @@ fn emit_tir_stmt(
                 ));
             }
         }
+        TStmt::IndexFieldAssign(assign) => {
+            let b = emit_expr_with_cleanups(&assign.base, cx, active_deferred_closes);
+            let i = emit_expr_with_cleanups(&assign.index, cx, active_deferred_closes);
+            let mut v =
+                emit_expr_with_cleanups(&assign.value, cx, active_deferred_closes);
+            if assign.clone_value {
+                v = format!("({v}).clone()");
+            }
+            let operator = assign.op.map_or("=".to_string(), |op| {
+                format!("{}=", op.spell())
+            });
+            if assign.is_map {
+                out.push_str(&format!(
+                    "{pad}{{ let __jet_v = {v}; let __jet_k = ({i}).clone(); \
+                     let Some(__jet_item) = ({b}).get_mut(&__jet_k) else {{ \
+                     jet_panic({file:?}, {line}, \"map key not found\"); }}; \
+                     __jet_item.{field} {operator} __jet_v; }}\n",
+                    file = cx.file,
+                    line = assign.line,
+                    field = assign.field_rust,
+                ));
+            } else {
+                let index = if assign.index_proven {
+                    format!("({i}).0 as usize")
+                } else {
+                    format!("{i} as usize")
+                };
+                out.push_str(&format!(
+                    "{pad}{{ let __jet_v = {v}; ({b})[{index}].{field} {operator} __jet_v; }}\n",
+                    field = assign.field_rust,
+                ));
+            }
+        }
         TStmt::IndexHookAssign {
             type_name,
             base,

@@ -342,7 +342,7 @@ enum InRepoDep {
     External,
 }
 
-/// Classify a member's dependency for sparse-subtree scoping. Only `path@…`
+/// Classify a member's dependency for sparse-subtree scoping. Only bare path
 /// deps that resolve *inside the repo* are relevant; everything else is fetched
 /// by its own provider and does not widen the sparse checkout.
 fn classify_in_repo_dep(
@@ -374,7 +374,7 @@ fn classify_in_repo_dep(
     InRepoDep::External
 }
 
-/// Resolve a `path@<target>` relative to a member directory, staying inside the
+/// Resolve a bare path relative to a member directory, staying inside the
 /// repo. Returns `None` when the path escapes the repo root (an external local
 /// dep, not our concern for sparse scoping).
 fn join_repo_relative(member_dir: &str, target: &str) -> Option<String> {

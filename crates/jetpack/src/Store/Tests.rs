@@ -128,14 +128,14 @@ mod tests {
         fs::write(out.join("bin/fastfetch"), "fixture").unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
-            "nixpkgs:fastfetch",
+            "fastfetch@nixpkgs",
             "nix",
         );
         let mut e = record_verified(
             &roots,
             "fastfetch",
             "2.1.0",
-            "nixpkgs:fastfetch",
+            "fastfetch@nixpkgs",
             &out.to_string_lossy(),
             &out.join("bin").to_string_lossy(),
             "",
@@ -156,7 +156,7 @@ mod tests {
     fn clean_keeps_fresh_entries() {
         let (roots, _g) = temp_roots();
         for name in ["a", "b"] {
-            let reference = format!("nixpkgs:{name}");
+            let reference = format!("{name}@nixpkgs");
             let out = roots.root.join(format!("{name}-output"));
             fs::create_dir_all(out.join("bin")).unwrap();
             fs::write(out.join("bin").join(name), name).unwrap();
@@ -360,15 +360,15 @@ mod tests {
 
     #[test]
     fn ids_differ_by_ref() {
-        let a = entry_id("x", "1.0", "nixpkgs:x", "/o");
-        let b = entry_id("x", "1.0", "github:o/x", "/o");
+        let a = entry_id("x", "1.0", "x@nixpkgs", "/o");
+        let b = entry_id("x", "1.0", "o/x@github", "/o");
         assert_ne!(a, b);
     }
 
     #[test]
     fn id_omits_empty_version() {
         // Unknown version falls back to `<name>-<fp>`, no dangling segment.
-        let id = entry_id("x", "", "nixpkgs:x", "/o");
+        let id = entry_id("x", "", "x@nixpkgs", "/o");
         assert!(id.starts_with("x-"));
         assert!(!id.starts_with("x--"));
     }
@@ -419,7 +419,7 @@ mod tests {
         fs::write(out.join("payload"), "trusted").unwrap();
         let mut envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
-            "mine:demo",
+            "demo@mine",
             "core-source",
         );
         envelope.platform = "not-this-host".to_string();
@@ -427,7 +427,7 @@ mod tests {
             &roots,
             "demo",
             "1.0",
-            "mine:demo",
+            "demo@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -436,7 +436,7 @@ mod tests {
         )
         .unwrap();
         let mut expectation = test_expectation(&out);
-        assert!(!verified(&roots, "mine:demo", &expectation));
+        assert!(!verified(&roots, "demo@mine", &expectation));
 
         envelope.platform = super::super::super::Envelope::host_platform();
         envelope.provenance.clear();
@@ -444,7 +444,7 @@ mod tests {
             &roots,
             "demo",
             "1.0",
-            "mine:demo",
+            "demo@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -452,15 +452,15 @@ mod tests {
             &test_identity(),
         )
         .unwrap();
-        assert!(!verified(&roots, "mine:demo", &expectation));
+        assert!(!verified(&roots, "demo@mine", &expectation));
 
-        envelope.provenance = "mine:demo via core-source".to_string();
+        envelope.provenance = "demo@mine via core-source".to_string();
         envelope.signature = "unverified-signature-text".to_string();
         record_verified(
             &roots,
             "demo",
             "1.0",
-            "mine:demo",
+            "demo@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -468,14 +468,14 @@ mod tests {
             &test_identity(),
         )
         .unwrap();
-        assert!(!verified(&roots, "mine:demo", &expectation));
+        assert!(!verified(&roots, "demo@mine", &expectation));
 
         envelope.signature.clear();
         record_verified(
             &roots,
             "demo",
             "1.0",
-            "mine:demo",
+            "demo@mine",
             &out.to_string_lossy(),
             &out.join("missing-bin").to_string_lossy(),
             "",
@@ -484,7 +484,7 @@ mod tests {
         )
         .unwrap();
         expectation.owned_output = Some(out.clone());
-        assert!(!verified(&roots, "mine:demo", &expectation));
+        assert!(!verified(&roots, "demo@mine", &expectation));
     }
 
     #[test]
@@ -497,14 +497,14 @@ mod tests {
         fs::write(sibling.join("tool"), "outside").unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
-            "mine:escape",
+            "escape@mine",
             "core-source",
         );
         let mut entry = record_verified(
             &roots,
             "escape",
             "1",
-            "mine:escape",
+            "escape@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -516,7 +516,7 @@ mod tests {
         let proof = verify_cache_entry(
             &roots,
             &entry,
-            "mine:escape",
+            "escape@mine",
             &test_expectation(&out),
         );
         assert!(!proof.closure);
@@ -555,14 +555,14 @@ mod tests {
         fs::write(out.join("payload"), "demo").unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
-            "nixpkgs:demo",
+            "demo@nixpkgs",
             "nix",
         );
         let entry = record(
             &roots,
             "demo",
             "1.0",
-            "nixpkgs:demo",
+            "demo@nixpkgs",
             &out.to_string_lossy(),
             "",
             "",
@@ -591,14 +591,14 @@ mod tests {
         fs::write(expected.join("bad"), "candidate").unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &survivor.to_string_lossy(),
-            "mine:hostile",
+            "hostile@mine",
             "core-source",
         );
         let entry = record_verified(
             &roots,
             "hostile",
             "1.0",
-            "mine:hostile",
+            "hostile@mine",
             &survivor.to_string_lossy(),
             "",
             "",
@@ -719,14 +719,14 @@ mod tests {
         fs::write(out.join("payload"), "trusted").unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
-            "mine:refreshed",
+            "refreshed@mine",
             "core-source",
         );
         let stale = record_verified(
             &roots,
             "refreshed",
             "1.0",
-            "mine:refreshed",
+            "refreshed@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -740,7 +740,7 @@ mod tests {
             &roots,
             "refreshed",
             "1.0",
-            "mine:refreshed",
+            "refreshed@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -753,14 +753,14 @@ mod tests {
 
         quarantine_invalid_entry(&roots, &stale, &test_expectation(&out)).unwrap();
 
-        let current = find_by_reference(&roots, "mine:refreshed").unwrap();
+        let current = find_by_reference(&roots, "refreshed@mine").unwrap();
         assert_eq!(current.cache_identity, fresh_identity);
         let expectation = CacheExpectation {
             identity: fresh_identity,
             owned_output: Some(out),
             allow_unsigned_local: true,
         };
-        assert!(verified(&roots, "mine:refreshed", &expectation));
+        assert!(verified(&roots, "refreshed@mine", &expectation));
     }
 
     #[test]
@@ -771,7 +771,7 @@ mod tests {
         fs::write(out.join("payload"), "trusted").unwrap();
         let mut stale_envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
-            "mine:repaired",
+            "repaired@mine",
             "core-source",
         );
         stale_envelope.provenance.clear();
@@ -779,7 +779,7 @@ mod tests {
             &roots,
             "repaired",
             "1.0",
-            "mine:repaired",
+            "repaired@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -793,7 +793,7 @@ mod tests {
             &roots,
             "repaired",
             "1.0",
-            "mine:repaired",
+            "repaired@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -806,9 +806,9 @@ mod tests {
 
         quarantine_invalid_entry(&roots, &stale, &test_expectation(&out)).unwrap();
 
-        let current = find_by_reference(&roots, "mine:repaired").unwrap();
+        let current = find_by_reference(&roots, "repaired@mine").unwrap();
         assert_eq!(current.envelope.provenance, "repaired provenance");
-        assert!(verified(&roots, "mine:repaired", &test_expectation(&out)));
+        assert!(verified(&roots, "repaired@mine", &test_expectation(&out)));
     }
 
     #[cfg(unix)]
@@ -841,14 +841,14 @@ mod tests {
         fs::write(out.join("payload"), "trusted").unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
-            "mine:leased",
+            "leased@mine",
             "core-source",
         );
         record_verified(
             &roots,
             "leased",
             "1.0",
-            "mine:leased",
+            "leased@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -858,7 +858,7 @@ mod tests {
         .unwrap();
         let hit = find_verified_by_reference(
             &roots,
-            "mine:leased",
+            "leased@mine",
             &test_expectation(&out),
         )
         .unwrap()
@@ -880,14 +880,14 @@ mod tests {
         fs::write(out.join("payload"), "trusted").unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
-            "mine:typed",
+            "typed@mine",
             "core-source",
         );
         let entry = record_verified(
             &roots,
             "typed",
             "1",
-            "mine:typed",
+            "typed@mine",
             &out.to_string_lossy(),
             "",
             "",
@@ -907,7 +907,7 @@ mod tests {
             .stable_path(&out.join("payload").to_string_lossy())
             .is_ok());
 
-        let hit = find_verified_by_reference(&roots, "mine:typed", &test_expectation(&out))
+        let hit = find_verified_by_reference(&roots, "typed@mine", &test_expectation(&out))
             .unwrap()
             .unwrap();
         let cached = VerifiedRealization {
@@ -922,7 +922,7 @@ mod tests {
             id: "missing-1-test".to_string(),
             name: "missing".to_string(),
             version: "1".to_string(),
-            reference: "mine:missing".to_string(),
+            reference: "missing@mine".to_string(),
             out: missing_out.to_string_lossy().into_owned(),
             bin: String::new(),
             rlib: String::new(),
@@ -965,14 +965,14 @@ mod tests {
         symlink("tool-real", &tool).unwrap();
         let envelope = super::super::super::Envelope::Envelope::for_output(
             &out.to_string_lossy(),
-            "mine:fd-view",
+            "fd-view@mine",
             "core-source",
         );
         record_verified(
             &roots,
             "fd-view",
             "1",
-            "mine:fd-view",
+            "fd-view@mine",
             &out.to_string_lossy(),
             &out.join("bin").to_string_lossy(),
             "",
@@ -982,7 +982,7 @@ mod tests {
         .unwrap();
         let hit = find_verified_by_reference(
             &roots,
-            "mine:fd-view",
+            "fd-view@mine",
             &test_expectation(&out),
         )
         .unwrap()
@@ -1849,9 +1849,9 @@ mod tests {
                 ]),
             ).unwrap().encode()
         };
-        first.reference = "nixpkgs:first".into();
+        first.reference = "first@nixpkgs".into();
         first.cache_identity.source_fingerprint = "sha256-first-output".into();
-        first.producer_record = nix_record("/nix/store/action.drv", "/nix/store/first", "nixpkgs:first");
+        first.producer_record = nix_record("/nix/store/action.drv", "/nix/store/first", "first@nixpkgs");
         let action = entry_action_key(&first);
 
         let mut second = first.clone();

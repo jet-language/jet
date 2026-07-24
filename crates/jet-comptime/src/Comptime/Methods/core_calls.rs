@@ -1269,18 +1269,13 @@ pub(super) fn apply_core_call(
             }
         }
         // --- core.time pure constructors ---
-        // D-DET1: testing.fake_clock is the test-facing spelling of the same
-        // caller-seeded deterministic Clock capability as time.clock.
-        ("core.time", "clock") | ("core.testing", "fake_clock") => {
+        // D-DET1: testing.fake_clock is the test-facing spelling of the
+        // caller-seeded deterministic Clock capability built by Clock.new.
+        ("core.testing", "fake_clock") => {
             let seed = match one(0)? {
                 CtValue::Int(v) => *v,
                 _ => {
-                    let api = if method == "clock" {
-                        "time.clock"
-                    } else {
-                        "testing.fake_clock"
-                    };
-                    return Err(unsupported(&format!("{api} expects an Int seed"), span));
+                    return Err(unsupported("testing.fake_clock expects an Int seed", span));
                 }
             };
             Ok(CtValue::Struct {

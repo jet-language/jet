@@ -1,7 +1,7 @@
 //! Jetpack — Jet's package manager engine and Phase 1 CLI (D-JPK*).
 //!
 //! Phase 1 is the Nix-`shell`/`devenv`-class temporary environment:
-//! `jetpack run <source>:<package>` resolves a ref through a provider, realizes
+//! `jetpack run <package>@<source>` resolves a ref through a provider, realizes
 //! it into the Jetpack store, composes an env, and drops the user into a pretty
 //! subshell that `exit` leaves cleanly. Jetpack owns the package lifecycle; Nix
 //! is a compatibility provider (D-JPK5).

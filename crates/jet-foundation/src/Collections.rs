@@ -23,6 +23,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::DURATION_TYPE,
     Syntax::DURATION_UNIT_TYPE,
     Syntax::DURATION_RANGE_ERROR_TYPE,
+    Syntax::EXPIRING_VALUE_TYPE,
     // D-SOLVER-LIB1=A: `Solver` is the Core finite-solver handle. Reserving it
     // prevents a user type from being mistaken for the runtime solver handle.
     Syntax::SOLVER_TYPE,
@@ -385,6 +386,16 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "new", 1) if n == crate::Syntax::SOLVER_TYPE => {
             Some(Some(Type::Named(crate::Syntax::SOLVER_TYPE.to_string())))
         }
+        (Type::Named(n), "new", 1) if n == crate::Syntax::CLOCK_TYPE => {
+            Some(Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())))
+        }
+        // D-SHAPE-CTORVERB1=C: sema replaces Unknown with argument 1's type.
+        (Type::Named(n), "new", 3) if n == crate::Syntax::EXPIRING_VALUE_TYPE => {
+            Some(Some(Type::Apply {
+                name: crate::Syntax::EXPIRING_VALUE_TYPE.to_string(),
+                args: vec![Type::Named("Unknown".to_string())],
+            }))
+        }
         (Type::Named(n), "system", 0) if n == crate::Syntax::CLOCK_TYPE => {
             Some(Some(Type::Named(crate::Syntax::CLOCK_TYPE.to_string())))
         }
@@ -401,7 +412,7 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         }
         (Type::Named(n), "from_text", 1) if n == "Secret" => Some(Some(Type::Named("Secret".into()))),
         (Type::Named(n), "from_bytes", 1) if n == "Secret" => Some(Some(Type::Named("Secret".into()))),
-        (Type::Named(n), "generate", 0) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
+        (Type::Named(n), "new_random", 0) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
         (Type::Named(n), "from_bytes", 1) if matches!(n.as_str(), "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey") => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
         (Type::Named(n), "from_bytes", 1) if n == "WrappedVaultKey" => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("KeyWrapError".into())) })),
         (Type::Named(n), "Recipient", 1) if n == "KeyUnlock" => Some(Some(Type::Named("KeyUnlock".into()))),
@@ -638,7 +649,7 @@ fn stopwatch_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
 /// D-DET1: methods on the deterministic injected `Clock` capability.
 /// `clock.now()` reads the clock's current value (ms); `clock.tick(ms)` advances
 /// it by a relative span and returns the new value. Reproducible — the clock
-/// starts from the seed the caller supplied to `time.clock(seed)` and only moves
+/// starts from the seed the caller supplied to `Clock.new(seed)` and only moves
 /// via explicit advances.
 ///
 /// D-DET-CAPAPI widens the surface: `clock.advance(to_ms)` sets the clock to an
@@ -1150,7 +1161,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             )])
         }
         Type::Named(n) if n == "X25519PublicKey" && method == "from_text" => Some(vec![Type::String]),
-        Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") && method == "generate" => Some(vec![]),
+        Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") && method == "new_random" => Some(vec![]),
         Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey" | "Digest256" | "Digest512" | "PasswordHash") => Some(vec![]),
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => match method {
             "generate" => Some(vec![Type::String, Type::String]),
@@ -1549,6 +1560,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         // generic ([T]) and handled element-aware in the checker dispatch — they are
         // NOT routed here.
         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => match method {
+            "new" => Some(vec![Type::Int]),
             "tick" | "advance" => Some(vec![Type::Int]),
             "wait" => Some(vec![Type::Named(crate::Syntax::DURATION_TYPE.to_string())]),
             _ => Some(vec![]),

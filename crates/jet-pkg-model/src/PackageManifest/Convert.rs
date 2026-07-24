@@ -42,7 +42,7 @@ pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::Manifest::Mani
                 let Some((owner_repo, rev)) = target.rsplit_once('/') else {
                     return Err(bad_dep_shape(
                         &dep.name,
-                        "a `github@owner/repo/rev` dependency needs a pinned rev as its last segment; use the inline `{ git: \"...\", branch/tag: \"...\" }` form to track a moving branch or tag",
+                        "an `owner/repo/rev@github` dependency needs a pinned rev as its last segment; use the inline `{ git: \"...\", branch/tag: \"...\" }` form to track a moving branch or tag",
                     ));
                 };
                 DepSpec::Git {
@@ -54,7 +54,7 @@ pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::Manifest::Mani
                 return Err(bad_dep_shape(
                     &dep.name,
                     &format!(
-                        "`{}` is not a valid source for a Jet library dependency — use `path@`, `github@`, or an inline git struct",
+                        "`{}` is not a valid source for a Jet library dependency — use a bare local path, `owner/repo/rev@github`, or an inline git struct",
                         provider.label()
                     ),
                 ));
@@ -106,7 +106,7 @@ pub fn new_template(name: &str, annotated: bool) -> String {
 
 // Jet package dependencies:
 // deps: {{
-//     helpers:  path@../helpers,
+//     helpers:  ../helpers,
 //     parsekit: {{ git: "https://github.com/acme/parsekit", tag: "v0.4.1" }},
 // }}
 "#

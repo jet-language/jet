@@ -208,10 +208,10 @@ pub struct PackageMeta {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DepSpec {
-    /// Path dependency: `helpers: path@../helpers`.
+    /// Path dependency: `helpers: ../helpers`.
     Path { path: String },
     /// Git dependency with one selector (D-JPK23): `{ git: "...", tag/branch/rev: "..." }`,
-    /// or a `github@owner/repo/rev` provider ref (always a pinned rev).
+    /// or an `owner/repo/rev@github` provider ref (always a pinned rev).
     Git { url: String, selector: GitSelector },
     /// Registry version string (M12.2 only; error in M12.1 during resolution).
     Registry(String),
@@ -366,7 +366,25 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
         ManifestError::BadDepValue { name, value } => e1206(
             &file,
             &format!(
-                "dependency `{name}` has value `{value}`, which is neither a quoted version, a `provider@target` ref, nor an inline git struct"
+                "dependency `{name}` has value `{value}`, which is not a `name#version`, bare path, `target@provider` ref, or inline git struct"
+            ),
+        ),
+        ManifestError::BadDepRef {
+            name,
+            err: crate::RefSpec::RefError::ProviderFirst { raw, replacement },
+        } => e1206(
+            &file,
+            &format!(
+                "dependency `{name}` uses retired provider-first ref `{raw}`; write `{replacement}`"
+            ),
+        ),
+        ManifestError::BadDepRef {
+            name,
+            err: crate::RefSpec::RefError::PathProviderRetired { raw, path },
+        } => e1206(
+            &file,
+            &format!(
+                "dependency `{name}` uses retired path-provider ref `{raw}`; write the bare path `{path}`"
             ),
         ),
         ManifestError::BadDepRef { name, err } => {

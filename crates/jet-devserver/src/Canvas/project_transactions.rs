@@ -696,12 +696,9 @@ fn project_target_text(target: &str) -> Result<&'static str, String> {
 }
 
 fn project_dep_spec(spec: &str) -> Result<jet_driver::Manifest::DepSpec, String> {
-    if let Some(path) = spec.strip_prefix("path@") {
-        if path.trim().is_empty() {
-            return Err(project_edit_error("bad_request", "path dependency needs a path"));
-        }
+    if spec.starts_with("./") || spec.starts_with("../") || spec.starts_with('/') {
         return Ok(jet_driver::Manifest::DepSpec::Path {
-            path: path.to_string(),
+            path: spec.to_string(),
         });
     }
     if spec.starts_with("git@") {

@@ -244,7 +244,7 @@ loading the whole file:
 use core.files as files
 
 fn count_lines(path: String) -> Int ? IOError {
-    handle :: files.open(copy path)?
+    handle :: files.open(~path)?
     n := 0
     loop line; handle.lines() {
         n = (n + 1)
@@ -519,7 +519,7 @@ are linked only through the hidden bridge crate, not the compiler.
 use core.crypto as crypto
 
 fn run() {
-    recipient :: crypto.X25519SecretKey.generate() ?? return
+    recipient :: crypto.X25519SecretKey.new_random() ?? return
     box :: crypto.seal([recipient.public_key()], "hello".bytes(), []) ?? return
     plain :: crypto.open(&recipient, box, []) ?? return
 
@@ -577,7 +577,7 @@ persist; it contains public identity metadata, never key bytes.
 use core.crypto as crypto
 use core.vault as vault
 
-fn provision() -> Void ? vault.VaultError #(Secret) {
+fn provision() --[Secret]-> Void ? vault.VaultError {
     plan :: vault.prepare_generate<crypto.SigningKey>("release")?
     write :: vault.authorize_write(&plan, reason: "create release signer")?
     key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))?
@@ -634,10 +634,14 @@ moves the credential into the wrapper. The wrapper retains a private observer
 of the injected clock, so ordinary `~clock` copies cannot change its expiry.
 Access is closure-only:
 
+Generic cache expiry uses
+`ExpiringValue.new(value, ttl, clock)`. Fresh deterministic values use
+type-owned `.new`; entropy-drawing key constructors use `.new_random`.
+
 ```jet
-clock := time.clock(0)
+clock := Clock.new(0)
 ttl := Duration.minutes(5) ?? return
-key := crypto.SigningKey.generate() ?? return
+key := crypto.SigningKey.new_random() ?? return
 secret := vault.ExpiringSecret.new(^key, ttl, clock)
 result := secret.with((borrowed) => borrowed.public_key())
 ```
@@ -1481,7 +1485,7 @@ fn at(clock: Clock) --[]-> Int {
     return clock.now()             // current value in ms; pure read
 }
 fn run() {
-    c :: time.clock(1000)          // a Clock starting at 1000 ms
+    c :: Clock.new(1000)          // a Clock starting at 1000 ms
     print(at(c))                   // 1000, on every machine
 }
 ```
@@ -1958,8 +1962,8 @@ fn run() {
 `tasks.channel<T>()` returns the send/receive pair directly (D-TUPLE-DESTRUCT1) —
 destructure it with `(tx, rx) := tasks.channel<T>()`. `tasks.channel<T>(capacity:
 N)` creates a bounded channel; `send` parks when the queue already holds `N`
-values and resumes when a receiver drains space. A second sender is `copy tx`
-(D-CAP2's one copy verb — a cheap handle duplicate, not a method on the channel;
+values and resumes when a receiver drains space. A second sender is `~tx`
+(D-SHAPE-COPY1's copy sigil makes a cheap handle duplicate;
 there's no combined channel value).
 
 | Function / type | Returns | What it does |
@@ -1976,7 +1980,7 @@ there's no combined channel value).
 | `tasks.after(ms: N)` | `Receiver<Unit>` | One-shot timer channel |
 | `tasks.after(ms: N, value: fallback)` | `Receiver<T>` | One-shot typed timer channel for timeout values |
 | `tasks.interval(ms: N)` | `Receiver<Int>` | Interval timer channel sending `1`, `2`, ... |
-| `copy sender` | `Sender<T>` | Create another send half (cheap handle duplicate, `copy` verb — not a method) |
+| `~sender` | `Sender<T>` | Create another send half with the copy sigil |
 | `sender.send(value)` | nothing | Move one value into the channel |
 | `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
 

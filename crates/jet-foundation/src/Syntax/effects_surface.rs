@@ -324,8 +324,8 @@ pub const SOURCE_ROOT_DIR: &str = ".jet";
 pub const DEP_TABLE_JET: &str = "dependencies";
 pub const DEP_TABLE_RUST: &str = "dependencies:rust";
 
-/// S59 / D-CFFI2 (ratified): the native-C-library dependency provider name,
-/// written as a `provider@target` ref inside the `deps: { … }` block —
+/// S59 / D-CFFI2 (ratified): the native-C-library dependency name, written in
+/// `name@source` order inside the `deps: { … }` block —
 /// `lib: c@system` (pkg-config, with a bare `-l <lib>` fallback) or
 /// `lib: c@"vendor/path"` (local dir: `-L`/`-I`/`-l`). Replaces the retired
 /// TOML `[dependencies:c]` table. A C dep is a link dep, not a Jet package: it

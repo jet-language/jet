@@ -8,8 +8,8 @@
 //! version = "0.1.0"
 //!
 //! [sources]
-//! core = "path@./packages"
-//! nixpkgs = "github@NixOS/nixpkgs/nixos-24.05"
+//! core = "./packages"
+//! nixpkgs = "NixOS/nixpkgs/nixos-24.05@github"
 //! ```
 //!
 //! A schema layer over the full TOML 1.0 parser in [`super::TOML`] (std-only,
@@ -36,7 +36,7 @@ use std::path::Path;
 pub struct JetpackToml {
     /// `[repo]` table fields.
     pub repo: RepoMeta,
-    /// `[sources]` table: `name → provider@target[#ver]` ref strings.
+    /// `[sources]` table: `name → target@provider` or bare-path ref strings.
     pub sources: Vec<(String, String)>,
     /// Retired `[packages]` entries. Kept only for migration diagnostics.
     pub packages: Vec<(String, String)>,
@@ -396,18 +396,18 @@ mod tests {
     #[test]
     fn parse_sources_table() {
         let raw =
-            "[sources]\ncore = \"path@./pkgs\"\nnixpkgs = \"github@NixOS/nixpkgs/nixos-24.05\"\n";
+            "[sources]\ncore = \"./pkgs\"\nnixpkgs = \"NixOS/nixpkgs/nixos-24.05@github\"\n";
         let m = ok(raw);
         assert_eq!(m.sources.len(), 2);
         assert_eq!(
             m.sources[0],
-            ("core".to_string(), "path@./pkgs".to_string())
+            ("core".to_string(), "./pkgs".to_string())
         );
         assert_eq!(
             m.sources[1],
             (
                 "nixpkgs".to_string(),
-                "github@NixOS/nixpkgs/nixos-24.05".to_string()
+                "NixOS/nixpkgs/nixos-24.05@github".to_string()
             )
         );
     }
@@ -428,7 +428,7 @@ name = \"acme\"
 version = \"0.1.0\"
 
 [sources]
-core = \"path@./packages\"
+core = \"./packages\"
 
 ";
         let (m, es) = parse(raw);

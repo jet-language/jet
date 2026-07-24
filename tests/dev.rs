@@ -3449,6 +3449,22 @@ fn generic_modules_full_example_matches_resident_jit_and_aot() {
 }
 
 #[test]
+fn array_of_structs_field_mutation_three_way() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let file = "examples/features/collections/struct_list_mutation.jet";
+    let expected = golden_stdout("collections/struct_list_mutation");
+    match dev_iteration(file, false, true) {
+        RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
+        RunOutcome::Problems(ds) => {
+            panic!("interpreter must run indexed struct-field mutation: {ds:?}")
+        }
+    }
+    assert_cranelift_three_way(file, "collections/struct_list_mutation");
+}
+
+#[test]
 fn resident_jit_safety_detail_smoke() {
     for stem in [
         "basics/compound",

@@ -2245,7 +2245,7 @@ fn canvas_project_json_projects_workspace_packages_and_files() {
     .unwrap();
     fs::write(
         hello.join("pkg.jet"),
-        "payload: {\n    name: \"hello\",\n    version: \"0.1.0\",\n    target: \"web\",\n}\ndeps: {\n    ranker: \"0.1.0\",\n}\npackages: {\n    hello: executable,\n}\n",
+        "payload: {\n    name: \"hello\",\n    version: \"0.1.0\",\n    target: \"web\",\n}\ndeps: {\n    ranker: ranker#0.1.0,\n}\npackages: {\n    hello: executable,\n}\n",
     )
     .unwrap();
     fs::write(
@@ -2336,7 +2336,7 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     let project_revision = json_field(&project, "project_revision");
     let manifest_revision = jet::Canvas::source_revision(&fs::read_to_string(app.join("pkg.jet")).unwrap());
     let req = format!(
-        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"packages/app/pkg.jet\",\"revision\":\"{}\"}}],\"manifest\":\"packages/app/pkg.jet\",\"name\":\"logging\",\"spec\":\"path@../logging\"}}",
+        "{{\"schema_version\":1,\"op\":\"add_dependency\",\"preview\":true,\"project_revision\":\"{}\",\"files\":[{{\"path\":\"packages/app/pkg.jet\",\"revision\":\"{}\"}}],\"manifest\":\"packages/app/pkg.jet\",\"name\":\"logging\",\"spec\":\"../logging\"}}",
         project_revision, manifest_revision
     );
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
@@ -2344,9 +2344,9 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     assert!(preview.contains("\"protocol\":\"jet.canvas.project.edit\""), "{preview}");
     assert!(preview.contains("\"preview\":true"), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
-    assert!(preview.contains("+    logging: path@../logging,"), "{preview}");
+    assert!(preview.contains("+    logging: ../logging,"), "{preview}");
     let before_apply = fs::read_to_string(app.join("pkg.jet")).unwrap();
-    assert!(!before_apply.contains("logging: path@../logging"), "{before_apply}");
+    assert!(!before_apply.contains("logging: ../logging"), "{before_apply}");
 
     fs::write(app.join("helper.jet"), "fn helper() -> Int {\n    return 2\n}\n").unwrap();
     let apply = req.replace("\"preview\":true", "\"preview\":false");
@@ -2355,7 +2355,7 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     assert!(applied.contains("\"preview\":false"), "{applied}");
     assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
     let after_apply = fs::read_to_string(app.join("pkg.jet")).unwrap();
-    assert!(after_apply.contains("logging: path@../logging"), "{after_apply}");
+    assert!(after_apply.contains("logging: ../logging"), "{after_apply}");
     assert!(
         jetpack::PackageManifest::parse(&after_apply).is_ok(),
         "{after_apply}"
@@ -2448,7 +2448,7 @@ fn canvas_project_transactions_remove_dependency() {
     let dir = temp_dir("project_remove_dep");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: {\n    logging: \"0.1.0\",\n    tools: path@../tools,\n}\n",
+        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: {\n    logging: logging#0.1.0,\n    tools: ../tools,\n}\n",
     )
     .unwrap();
     let entry = dir.join("main.jet");
@@ -2464,7 +2464,7 @@ fn canvas_project_transactions_remove_dependency() {
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
         .expect("remove dependency preview");
     assert!(preview.contains("\"op\":\"remove_dependency\""), "{preview}");
-    assert!(preview.contains("-    logging: \\\"0.1.0\\\","), "{preview}");
+    assert!(preview.contains("-    logging: logging#0.1.0,"), "{preview}");
     assert!(fs::read_to_string(dir.join("pkg.jet")).unwrap().contains("logging"));
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
@@ -2473,7 +2473,7 @@ fn canvas_project_transactions_remove_dependency() {
     assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
     let manifest = fs::read_to_string(dir.join("pkg.jet")).unwrap();
     assert!(!manifest.contains("logging"), "{manifest}");
-    assert!(manifest.contains("tools: path@../tools"), "{manifest}");
+    assert!(manifest.contains("tools: ../tools"), "{manifest}");
     assert!(
         jetpack::PackageManifest::parse(&manifest).is_ok(),
         "{manifest}"

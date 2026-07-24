@@ -350,7 +350,26 @@ impl BuildProfile {
     }
 }
 
+fn command_group_usage(name: &str) -> String {
+    let group = jet::CLI::command_group(name).expect("command group must exist");
+    let mut output = String::new();
+    for action in group.actions {
+        for usage in action.usage.lines() {
+            output.push_str(&format!(
+                "  {} {} {:<48} {}\n",
+                jet::Syntax::BINARY_NAME,
+                group.name,
+                usage,
+                action.summary
+            ));
+        }
+    }
+    output
+}
+
 pub(crate) fn usage() -> String {
+    let inspect_commands = command_group_usage("inspect");
+    let registry_commands = command_group_usage("registry");
     format!(
         "\
 Welcome to {lang}! (v{ver})
@@ -398,10 +417,6 @@ usage:
   {bin} self lsp                    language server (stdio JSON-RPC)
   {bin} gc report                   explain automatic-GC promotions and ownership rewrites
   {bin} self devtools <verb>        run checked developer generators
-  {bin} inspect bind <header.h> --pkg <lib>   generate a C binding cache (S59)
-  {bin} inspect bind cpp <header.hpp> --target <triple> --clang <path> --ar <path>   generate an audited C++ shim and Jet binding
-  {bin} inspect expand <file.{ext}> print semantic facts (D-EXPANDCLI1)
-  {bin} inspect unsafe <file.{ext}> audit unsafe policy and typed obligations
   {bin} version                     print compiler version
   {bin} help                        print this help text
   {bin} ?                           same as help
@@ -417,10 +432,6 @@ package management (M12.1):
   {bin} store fetch --locked        verify lock only, no network
   {bin} update                      refresh @latest / branch selectors
   {bin} update <dep>                update one moving selector
-  {bin} inspect outdated            report Jetpack channel refs with newer locks available
-  {bin} inspect search <query>      search local offline Jetpack package index
-  {bin} inspect info <source>.<package>   show local offline Jetpack package metadata
-  {bin} inspect logs <pkg>          show latest Jetpack build logs
   {bin} store verify                re-check all store entry hashes
   {bin} store generations           list recorded store generations (D-PURE3)
   {bin} store rollback <gen>        roll back to a prior generation (D-PURE3)
@@ -428,12 +439,12 @@ package management (M12.1):
   {bin} store lock <script.jet>     write a script dependency lock
   {bin} clean                       optimize and collect stale Jetpack hangar entries
 
+inspect commands:
+{inspect_commands}
+registry commands:
+{registry_commands}
 supply chain (E2-M8):
-  {bin} registry publish            publish the current package to the registry
-  {bin} registry vendor             copy all dependencies into vendor/
   {bin} build  --sbom <file>        also write an SPDX SBOM next to the binary
-  {bin} inspect audit               check dependencies against the advisory database
-  {bin} inspect sbom                emit a software bill of materials
 
 flags:
   emit --rust <file.{ext}>     print generated Rust source
@@ -461,6 +472,8 @@ flags:
         lang = jet::Syntax::LANG_NAME,
         ver = env!("CARGO_PKG_VERSION"),
         ext = jet::Syntax::FILE_EXT,
+        inspect_commands = inspect_commands,
+        registry_commands = registry_commands,
     )
 }
 
@@ -480,12 +493,12 @@ fn looks_like_jet_source(arg: &str) -> bool {
 
 /// U16 (D-JPK-BRIDGE1=A): `nix run nixpkgs#fastfetch` parity.
 ///
-/// Top-level `jet run nixpkgs:tool` is not a Jet source compile; it is the
-/// package-engine path, with the ratified `<source>:<package>` CLI spelling. Lower it
-/// to `jetpack run nixpkgs:tool -- tool`, preserving the offline fixture flags
+/// Top-level `jet run tool@nixpkgs` is not a Jet source compile; it is the
+/// package-engine path, with the ratified `<package>@<source>` CLI spelling. Lower it
+/// to `jetpack run tool@nixpkgs -- tool`, preserving the offline fixture flags
 /// used by the same provider path and forwarding user args after `--`.
 fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Option<i32> {
-    let (source, package) = target.split_once(jet::Syntax::REF_SEPARATOR)?;
+    let (package, source) = target.rsplit_once(jet::Syntax::REF_PROVIDER_AT)?;
     if source != jet::Syntax::REF_SOURCE_NIXPKGS || package.is_empty() {
         return None;
     }
@@ -493,12 +506,7 @@ fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Opt
     let before_sep = sep.map_or(raw, |i| &raw[..i]);
     let mut fwd = vec![
         "run".to_string(),
-        format!(
-            "{}{}{}",
-            jet::Syntax::REF_SOURCE_NIXPKGS,
-            jet::Syntax::REF_SEPARATOR,
-            package
-        ),
+        target.to_string(),
     ];
     let mut command_args = Vec::new();
     let mut saw_run = false;
@@ -528,14 +536,14 @@ fn dispatch_nixpkgs_run(raw: &[String], target: &str, sep: Option<usize>) -> Opt
             "--color=never" => fwd.push("--no-color".to_string()),
             s if s.starts_with("--") => {
                 eprintln!(
-                    "Error [E2102]: `{}` isn't a flag `jet run nixpkgs:…` understands",
+                    "Error [E2102]: `{}` isn't a flag `jet run …@nixpkgs` understands",
                     s
                 );
                 eprintln!(
                     " Why: this form forwards only package-run flags before `--`; tool arguments go after `--`"
                 );
                 eprintln!(
-                    " Fix: write `jet run nixpkgs:{} -- {}` to pass it to the tool.",
+                    " Fix: write `jet run {}@nixpkgs -- {}` to pass it to the tool.",
                     package, s
                 );
                 return Some(ExitCodes::USAGE);
@@ -632,9 +640,7 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     if let Some(spec) = jet::CLI::command_group(&group) {
         if exhaustive && (raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help")) {
             println!("jet {group} — {}", spec.summary);
-            for action in spec.actions {
-                println!("  {:<15} {}", action.name, action.summary);
-            }
+            print!("{}", command_group_usage(&group));
             exit(ExitCodes::OK);
         }
     }
@@ -1179,7 +1185,7 @@ fn main() {
                 .and_then(|value| value.parse::<u32>().ok())
                 .unwrap_or_else(|| {
                     eprintln!("error: jet inspect live needs a process id");
-                    eprintln!(" fix: run jet inspect live --attach <pid>");
+                    eprintln!(" fix: run jet inspect live <pid>");
                     exit(ExitCodes::USAGE);
                 });
             let once = raw.iter().any(|arg| arg == "--once")
@@ -1456,8 +1462,8 @@ fn main() {
             return;
         }
         "expand" => {
-            // D-EXPANDCLI1=A: `jet inspect expand --facts <lens> <file>` / bare `jet
-            // expand <file>` — the transparency command (card #183).
+            // D-EXPANDCLI1=A: `jet inspect expand --facts <lens> <file>` / bare
+            // `jet inspect expand <file>` — the transparency command (card #183).
             let expand_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_expand(&expand_args, mode.json);
             return;

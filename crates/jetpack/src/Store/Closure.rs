@@ -1808,8 +1808,8 @@ mod integrity_tests {
 
     #[test]
     fn canonical_action_merges_multi_output_alias_projections_and_rejects_conflicting_bytes() {
-        let out = nix_projection_record("alias-out", "out", "sha256-out", "nixpkgs:pkg");
-        let dev = nix_projection_record("alias-dev", "dev", "sha256-dev", "stable:pkg.dev");
+        let out = nix_projection_record("alias-out", "out", "sha256-out", "pkg@nixpkgs");
+        let dev = nix_projection_record("alias-dev", "dev", "sha256-dev", "pkg.dev@stable");
         let objects = ["sha256-out", "sha256-dev"]
             .into_iter()
             .map(|digest| ClosureObject {

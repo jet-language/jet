@@ -170,7 +170,7 @@ fn probe_unresolvable_packages(
         return Ok(Vec::new());
     }
     let flake_ref = nixpkgs_ref
-        .strip_prefix("github@")
+        .strip_suffix("@github")
         .map(|rest| format!("github:{rest}"))
         .ok_or_else(|| format!("nixpkgs ref `{nixpkgs_ref}` is not a github pin"))?;
     let name_list = names
@@ -248,7 +248,7 @@ fn render_live_int_list(values: &[i64]) -> String {
     format!("[{parts}]")
 }
 
-/// The nixpkgs pin from the source's `flake.lock`, in the `github@owner/repo/rev`
+/// The nixpkgs pin from the source's `flake.lock`, in the `owner/repo/rev@github`
 /// source spelling the generated `config.jet` needs for the real tier. A
 /// tarball-type lock (channels.nixos.org) still carries the github rev, so it
 /// pins to `NixOS/nixpkgs` at that rev.
@@ -260,10 +260,10 @@ fn live_nixpkgs_ref(source: &Path) -> Option<String> {
     let rev = import_json_string(locked, "rev")?;
     let owner = import_json_string(locked, "owner").unwrap_or_else(|| "NixOS".to_string());
     let repo = import_json_string(locked, "repo").unwrap_or_else(|| "nixpkgs".to_string());
-    Some(format!("github@{owner}/{repo}/{rev}"))
+    Some(format!("{owner}/{repo}/{rev}@github"))
 }
 
-/// A locked github input's `github@owner/repo/rev` ref from the source's
+/// A locked github input's `owner/repo/rev@github` ref from the source's
 /// `flake.lock`, looked up by node name.
 fn live_locked_github_ref(source: &Path, node: &str) -> Option<String> {
     let text = fs::read_to_string(source.join("flake.lock")).ok()?;
@@ -273,11 +273,11 @@ fn live_locked_github_ref(source: &Path, node: &str) -> Option<String> {
     let owner = import_json_string(locked, "owner")?;
     let repo = import_json_string(locked, "repo")?;
     let rev = import_json_string(locked, "rev")?;
-    Some(format!("github@{owner}/{repo}/{rev}"))
+    Some(format!("{owner}/{repo}/{rev}@github"))
 }
 
 /// Locked github flake inputs other than `nixpkgs` / `root`, as
-/// `(jet_source_label, github@owner/repo/rev)`. Labels are sanitized to Jet
+/// `(jet_source_label, owner/repo/rev@github)`. Labels are sanitized to Jet
 /// idents so they can appear in `sources:` and `label.[pkg, …]` groups.
 fn live_external_github_inputs(source: &Path) -> Vec<(String, String)> {
     let Ok(text) = fs::read_to_string(source.join("flake.lock")) else {
@@ -317,7 +317,7 @@ fn live_external_github_inputs(source: &Path) -> Vec<(String, String)> {
         if !seen_labels.insert(label.clone()) {
             continue;
         }
-        out.push((label, format!("github@{owner}/{repo}/{rev}")));
+        out.push((label, format!("{owner}/{repo}/{rev}@github")));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out
@@ -465,7 +465,7 @@ fn plan_from_live_facts(
             Some(pin) => extra_sources.push(("cachyos".to_string(), pin)),
             None => omissions.push(
                 "boot.kernel .CachyOS: the source flake.lock has no `nix-cachyos-kernel` pin; \
-                 declare a `github@<owner>/nix-cachyos-kernel/<rev>` source before the real tier can build"
+                 declare an `<owner>/nix-cachyos-kernel/<rev>@github` source before the real tier can build"
                     .to_string(),
             ),
         }
@@ -637,7 +637,7 @@ fn plan_from_live_facts(
     }
 
     let nixpkgs_ref = live_nixpkgs_ref(&args.source)
-        .unwrap_or_else(|| "nixpkgs@nixpkgs-unstable".to_string());
+        .unwrap_or_else(|| "nixpkgs-unstable@nixpkgs".to_string());
 
     // Snapshot ownership before the nixpkgs probe strips external packages.
     let system_before: BTreeSet<String> = packages.iter().cloned().collect();

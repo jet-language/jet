@@ -434,6 +434,71 @@ impl LowerCtx<'_, '_> {
                 };
                 self.b.def_var(var, val);
             }
+            TStmt::IndexFieldAssign(assign) => {
+                if assign.is_map {
+                    return Err("jit indexed map field assignment uses AOT fallback".to_string());
+                }
+                // Match AOT evaluation order: the assignment value is evaluated
+                // before the collection place is acquired.
+                let rhs = self.lower_expr(&assign.value)?;
+                let list = self.lower_expr(&assign.base)?;
+                let index = self.lower_expr(&assign.index)?;
+                let line = self.b.ins().iconst(types::I32, assign.line as i64);
+                let get_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                let get_call = self.b.ins().call(get_ref, &[list, index, line]);
+                let handle = self.b.inst_results(get_call)[0];
+                self.emit_trap_check()?;
+
+                let elem_ty = match &assign.base.ty {
+                    Type::List(elem) | Type::FixedList { elem, .. } => elem.as_ref(),
+                    other => {
+                        return Err(format!(
+                            "jit indexed field assignment collection type unsupported: {other:?}"
+                        ));
+                    }
+                };
+                let type_name = record_type_key(elem_ty).ok_or_else(|| {
+                    format!("jit indexed field assignment element type: {elem_ty:?}")
+                })?;
+                let field_index = self
+                    .meta
+                    .struct_field_index(&type_name, &assign.field_rust)
+                    .ok_or_else(|| {
+                        format!(
+                            "jit field `{}` on `{type_name}`",
+                            assign.field_rust
+                        )
+                    })?;
+                let value = if let Some(op) = assign.op {
+                    let current = self.lower_record_field(
+                        handle,
+                        &type_name,
+                        &assign.field_rust,
+                        &assign.field_ty,
+                    )?;
+                    self.apply_binop_to_var(current, op, rhs, &assign.field_ty)?
+                } else {
+                    rhs
+                };
+                let setter = match &assign.field_ty {
+                    Type::Int => self.host.struct_set_i64,
+                    Type::Float => self.host.struct_set_f64,
+                    Type::Bool => self.host.struct_set_bool,
+                    Type::Char => self.host.struct_set_char,
+                    Type::String => self.host.struct_set_str,
+                    other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
+                    other => {
+                        return Err(format!(
+                            "jit indexed field assignment type unsupported: {other:?}"
+                        ));
+                    }
+                };
+                let field_index = self.b.ins().iconst(types::I64, field_index as i64);
+                let setter = self.module.declare_func_in_func(setter, self.b.func);
+                self.b.ins().call(setter, &[handle, field_index, value]);
+            }
             TStmt::Return(Some(expr)) => {
                 let val = self.lower_expr(expr)?;
                 self.emit_shield_leaves_to(0);

@@ -3,7 +3,7 @@
 // an eased interpolation from an injectable `Clock` reading. There is no
 // imperative "tick" that pokes the animated value directly — the clock is
 // the same injectable D-DET1 capability used elsewhere for deterministic
-// tests (`core.time.clock(seed)`), not a global/ambient time signal. That is
+// tests (`Clock.new(seed)`), not a global/ambient time signal. That is
 // exactly the axis D-MOTIONTIME1 decided: injectable Clock over a global
 // time signal, so animation tests are reproducible by construction.
 //
@@ -38,7 +38,7 @@ fn motion_node(x: Float) -> UiNode {
 fn run() {
     // D-DET1 injectable Clock, seeded at 0 — no wall-clock read, reproducible
     // by construction. `elapsed` is a Signal fed by explicit clock reads.
-    clock := time.clock(0)
+    clock := Clock.new(0)
     elapsed :: reactive.signal(clock.now())
     x :: reactive.derived(() => tween(0.0, 100.0, elapsed.get(), 400))
     backend := ui.null_backend()

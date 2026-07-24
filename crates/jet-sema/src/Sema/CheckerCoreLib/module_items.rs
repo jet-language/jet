@@ -113,12 +113,10 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         ],
         // D-RANDSPLIT1=A: CSPRNG namespace — cryptographically secure random bytes.
         "core.crypto.random" => &["bytes"],
-        // D-DET1: `clock` builds a deterministic injected Clock capability.
         "core.time" => &[
             "now",
             "sleep",
             "start",
-            "clock",
             "instant",
             "now_utc",
             "from_unix_ms",
@@ -476,7 +474,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "shared_secret_bytes",
         ],
         // D-CORE-SECRETS1=A: generic TTL remains separate from secret lifecycle.
-        "core.time.expiring" => &["new"],
+        "core.time.expiring" => &[],
         // E2-M10: networking modules.
         "core.net" => &[
             "ip_addr",

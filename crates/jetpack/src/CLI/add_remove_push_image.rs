@@ -16,7 +16,7 @@ use jet_env_model::ModuleEval;
 /// copies real `.jet` source into `./components/` instead of touching the env
 /// file (Tower c134 Phase 4, the ownable component kit). The two never
 /// collide because Jetpack source names are always lowercase
-/// (`nixpkgs`/`github`/`path`/user-declared names), so an exact-case
+/// (`nixpkgs`/`github`/user-declared names), so an exact-case
 /// `Button`-style name can only ever mean a component.
 pub(super) fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
     if parsed.flags.offline {
@@ -26,7 +26,7 @@ pub(super) fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
         theme.error(
             "add what?",
             "`jetpack add` needs a ref or a starter component to add.",
-            "try `jetpack add nixpkgs:ripgrep` or `jetpack add Button`.",
+            "try `jetpack add ripgrep@nixpkgs` or `jetpack add Button`.",
         );
         return 2;
     };
@@ -37,7 +37,7 @@ pub(super) fn cmd_add(theme: &Theme, parsed: &Parsed) -> i32 {
         return cmd_add_adapt(theme, raw);
     }
     let dir = std::env::current_dir().unwrap_or_default();
-    // Classify against the env's declared sources so `add unstable:fd` works
+    // Classify against the env's declared sources so `add fd@unstable` works
     // when `unstable` is already declared.
     let table = EnvFile::load(&dir)
         .map(|ef| ef.source_table())
@@ -124,21 +124,21 @@ fn cmd_add_adapt(theme: &Theme, raw: &str) -> i32 {
             }
         };
         match spec.source {
-            RefSpec::Source::Path => format!("path@{}", spec.package),
-            RefSpec::Source::Github => format!("github@{}", spec.package),
+            RefSpec::Source::Path => spec.package,
+            RefSpec::Source::Github => format!("{}@github", spec.package),
             RefSpec::Source::Named(name) => match table.upstream(&name) {
                 Some(upstream) if upstream.starts_with("path:") => {
-                    format!("path@{}", upstream.trim_start_matches("path:"))
+                    upstream.trim_start_matches("path:").to_string()
                 }
                 Some(upstream) if upstream.starts_with("github:") => {
-                    format!("github@{}", upstream.trim_start_matches("github:"))
+                    format!("{}@github", upstream.trim_start_matches("github:"))
                 }
                 _ => {
                     theme.error_coded(
                         "E1270",
                         "adapter draft needs source bytes",
                         "that named source does not point at a path or GitHub source tree.",
-                        "write `Pkg.adapt(...)` by hand with `source: path@...`.",
+                        "write `Pkg.adapt(...)` by hand with a quoted local `source: \"./...\"` value.",
                     );
                     return 2;
                 }
@@ -147,8 +147,8 @@ fn cmd_add_adapt(theme: &Theme, raw: &str) -> i32 {
                 theme.error_coded(
                     "E1270",
                     "adapter draft needs source bytes",
-                    "`nixpkgs:<pkg>` names a package in an index, not an upstream source tree.",
-                    "use the package's source URL with `source: github@owner/repo#rev` or `source: path@vendor/pkg`.",
+                    "`<pkg>@nixpkgs` names a package in an index, not an upstream source tree.",
+                    "use the package's source URL with `source: owner/repo#rev@github` or `source: \"./vendor/pkg\"`.",
                 );
                 return 2;
             }
@@ -186,7 +186,14 @@ fn cmd_add_adapt(theme: &Theme, raw: &str) -> i32 {
         .filter(|s| !s.is_empty())
         .last()
         .unwrap_or("tool")
-        .trim_end_matches(".git");
+        .trim_end_matches(".git")
+        .to_string();
+    let source = if source.starts_with("./") || source.starts_with("../") || source.starts_with('/')
+    {
+        format!("\"{source}\"")
+    } else {
+        source
+    };
     println!(
         "Pkg.adapt(\n    name: \"{name}\",\n    source: {source},\n    recipe: Recipe.copy(),\n)"
     );
@@ -232,7 +239,7 @@ pub(super) fn cmd_remove(theme: &Theme, parsed: &Parsed) -> i32 {
         theme.error(
             "remove what?",
             "`jetpack remove` needs a ref to remove.",
-            "try `jetpack remove nixpkgs:ripgrep`.",
+            "try `jetpack remove ripgrep@nixpkgs`.",
         );
         return 2;
     };

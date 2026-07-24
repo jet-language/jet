@@ -703,3 +703,76 @@ fn run() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "43\n-1\n3\na\nb\nc\n60\n");
 }
+
+#[test]
+fn array_of_structs_field_mutation() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+struct Point {
+    x: Int
+}
+fn run() {
+    points := [Point.{x: 1}, Point.{x: 2}]
+    points[0].x = 11
+    points[0].x += 1
+    print(points[0].x)
+}
+";
+    let out = jet::compile(src).expect("should compile");
+    assert!(
+        out.rust.contains(
+            "{ let __jet_v = 11i64; (user_points)[0i64 as usize].user_x = __jet_v; }"
+        ),
+        "plain indexed field assignment did not mutate the list element:\n{}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains(").user_x).jet_add((1i64)")
+            && out
+                .rust
+                .contains("(user_points)[0i64 as usize].user_x = __jet_v;"),
+        "compound indexed field assignment did not use the checked add spine:\n{}",
+        out.rust
+    );
+    assert!(
+        !out.rust.contains(".user_x +="),
+        "indexed field compound assignment leaked to Rust +=:\n{}",
+        out.rust
+    );
+    let (code, stdout) = build_and_run("tir_struct_list_mutation", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "12\n");
+}
+
+#[test]
+fn indexed_struct_field_compound_rejects_user_operator_before_codegen() {
+    let src = r#"
+struct Vec2 {
+    x: Int
+    y: Int
+}
+
+struct Holder {
+    value: Vec2
+}
+
+impl Vec2.Add {
+    fn add(self, rhs: Vec2) -> Vec2 {
+        return Vec2.{ x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+fn run() {
+    hs := [Holder.{ value: Vec2.{ x: 1, y: 2 } }]
+    hs[0].value += Vec2.{ x: 3, y: 4 }
+    print("{hs[0].value.x},{hs[0].value.y}")
+}
+"#;
+    let diags = jet::compile(src).expect_err("indexed user operator needs a stable place");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0362"),
+        "indexed field compound assignment reached codegen instead of E0362: {diags:#?}"
+    );
+}

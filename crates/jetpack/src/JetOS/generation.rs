@@ -117,7 +117,7 @@ pub(super) fn build_generation(
         let raw = if pkg.source.is_empty() {
             pkg.name.clone()
         } else {
-            format!("{}:{}", pkg.source, pkg.name)
+            format!("{}@{}", pkg.name, pkg.source)
         };
         let spec = match RefSpec::classify_in(&raw, &plan.table) {
             Ok(spec) => spec,

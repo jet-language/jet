@@ -13,7 +13,7 @@ use crate::Syntax;
 use std::path::Path;
 
 /// Classify an explicit CLI ref, accepting any named source declared in the
-/// current project's env file so `jetpack run stable:ripgrep` works there, and
+/// current project's env file so `jetpack run ripgrep@stable` works there, and
 /// any workspace member so `jetpack run logging` / `jetpack run packages/logging`
 /// resolve in a monorepo (Slice B, D-MONOREF1=A). Prints the diagnostic on failure.
 pub(super) fn classify_or_report(theme: &Theme, raw: &str) -> Result<RefSpec::RefSpec, RefError> {
@@ -146,7 +146,7 @@ pub(super) fn realize_ref_outcome(
     // Fixtures are a testing/offline mechanism only. They never override real
     // resolution: a stray `JETPACK_FIXTURES` in the environment must not
     // silently force fixture mode for an ordinary online run. The provider check
-    // resolves an inferred `github@…` source's kind (U9) so a `core` source is
+    // resolves an inferred `…@github` source's kind (U9) so a `core` source is
     // not mistakenly asked for nix fixtures.
     let fixtures = if flags.offline && uses_nix {
         let fx = fixtures_for(flags);
@@ -411,7 +411,7 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
         ProviderError::BuildFailed(reason) => theme.error(
             "the provider failed to build that package",
             reason,
-            "check the package name, e.g. `nixpkgs:fastfetch`.",
+            "check the package name, e.g. `fastfetch@nixpkgs`.",
         ),
         ProviderError::BadOutput(reason) => theme.error(
             "couldn't understand the provider's output",
@@ -426,7 +426,7 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
         ProviderError::Unsupported(reason) => theme.error(
             "that source can't be realized yet",
             reason,
-            "for now use a `nixpkgs:`/`github:` ref while the native builder lands.",
+            "for now use a `…@nixpkgs` or `…@github` ref while the native builder lands.",
         ),
         ProviderError::CoreBuild(reason) => theme.error(
             "couldn't build that Jet package",
@@ -441,12 +441,12 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
         ProviderError::LuaRocks(reason) => theme.error(
             "could not realize the LuaRocks package",
             reason,
-            "use an exact `luarocks:<name>#version=<version>` ref and verify the repository metadata and source hash",
+            "use an exact `<name>#version=<version>@luarocks` ref and verify the repository metadata and source hash",
         ),
         ProviderError::Registry(registry, reason) => theme.error(
             &format!("could not realize the {registry} package"),
             reason,
-            "use an exact `ruby:`, `perl:`, or `php:` ref and verify registry metadata and source hashes.",
+            "use an exact `…@ruby`, `…@perl`, or `…@php` ref and verify registry metadata and source hashes.",
         ),
         // E1232: sparse subtree fetch + full-clone fallback both failed.
         ProviderError::MonorepoFetch(reason) => theme.error_coded(
@@ -460,7 +460,7 @@ pub(crate) fn report_provider_error(theme: &Theme, err: &ProviderError) {
             "E1233",
             "an in-repo dependency is outside the workspace",
             reason,
-            "add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `source:package` ref.",
+            "add the dependency to the source repo's `workspace.jet` `members:`, or depend on it as an external `package@source` ref.",
         ),
         ProviderError::Adapter(reason) => theme.error_coded(
             "E1270",
@@ -531,7 +531,7 @@ pub(super) fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
                 "no ref was given and there is no {} here.",
                 Syntax::ENV_FILE
             ),
-            "try `jetpack run nixpkgs:fastfetch`, or `jetpack add <ref>` first.",
+            "try `jetpack run fastfetch@nixpkgs`, or `jetpack add <ref>` first.",
         );
         return Err(2);
     };
@@ -562,7 +562,7 @@ pub(super) fn load_project_plan(theme: &Theme) -> Result<RunPlan, i32> {
 
 /// Evaluate the typed `module { … }` env surface (U3/U6/U8) into a plan,
 /// optionally seeding `jetpack.toml` [sources] as defaults. Source refs merge
-/// across modules and `Pkg` sugar resolves to `<source>:<package>` refs; the
+/// across modules and `Pkg` sugar resolves to `package@source` refs; the
 /// merged `prompt` becomes the shell label.
 fn typed_plan_with_defaults(
     theme: &Theme,
@@ -608,7 +608,7 @@ fn typed_plan_with_defaults(
     })
 }
 
-/// Classify a sequence of `<source>:<package>` refs against `table`, printing
+/// Classify a sequence of `package@source` refs against `table`, printing
 /// the first failure and returning exit code 2.
 fn classify_all<'a>(
     theme: &Theme,

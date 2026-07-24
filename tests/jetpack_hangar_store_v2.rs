@@ -237,7 +237,7 @@ fn real_core_provider_registers_canonical_object_and_action_relation() {
         root: root.clone(),
         dev_mode: false,
     };
-    let entry = jetpack::Store::find_by_reference(&roots, "mine:hello").unwrap();
+    let entry = jetpack::Store::find_by_reference(&roots, "hello@mine").unwrap();
     assert_eq!(
         Path::new(&entry.out).parent(),
         Some(root.join("hangar/objects").as_path())

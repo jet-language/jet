@@ -82,7 +82,7 @@ Current transactions:
 Successful response:
 
 ```json
-{"protocol":"jet.canvas.project.edit","schema_version":1,"ok":true,"op":"add_dependency","preview":true,"changed":true,"project_revision":"sha256-...","after_project_revision":"sha256-...","writes":"preview_only","authority":["canvas.source_edit:project"],"audit":{"touched_files":[{"path":"packages/app/pkg.jet","revision":"sha256-...","changed":true}],"diagnostics":[]},"diff":"diff -- packages/app/pkg.jet\n--- before\n+++ after\n+    logging: path@../logging,\n"}
+{"protocol":"jet.canvas.project.edit","schema_version":1,"ok":true,"op":"add_dependency","preview":true,"changed":true,"project_revision":"sha256-...","after_project_revision":"sha256-...","writes":"preview_only","authority":["canvas.source_edit:project"],"audit":{"touched_files":[{"path":"packages/app/pkg.jet","revision":"sha256-...","changed":true}],"diagnostics":[]},"diff":"diff -- packages/app/pkg.jet\n--- before\n+++ after\n+    logging: ../logging,\n"}
 ```
 
 Failure response:

@@ -43,7 +43,7 @@ fn run() {
     sealed :: Path.from(sealed_text)
     opened :: Path.from(opened_text)
     source.write_atomic(abc) ?? panic("file source")
-    file_recipient :: crypto.X25519SecretKey.generate() ?? panic("file recipient")
+    file_recipient :: crypto.X25519SecretKey.new_random() ?? panic("file recipient")
     crypto.file_seal([file_recipient.public_key()], source, sealed) ?? panic("file seal")
     crypto.file_open(&file_recipient, sealed, opened) ?? panic("file open")
     print((fs.read(opened_text) ?? panic("file read")) == "abc")

@@ -71,7 +71,7 @@ pub struct EvaluatedModule {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AdapterPlan {
     pub name: String,
-    /// A provider ref such as `path@vendor/weirdctl`.
+    /// A source ref string such as `"./vendor/weirdctl"`.
     pub source: String,
     pub deps: Vec<Merge::Pkg>,
     pub recipe: AdapterRecipe,
@@ -247,7 +247,7 @@ pub struct VmTestPlan {
 }
 
 /// The runnable shape of a typed `env.jet`, ready for the CLI run/build path:
-/// the named-source table, the package refs to realize (`<source>:<package>`),
+/// the named-source table, the package refs to realize (`package@source`),
 /// and the prompt label. Only the `env` namespace is consulted — `system`/`image`
 /// are the jetos tiers and have no meaning for `jetpack`.
 #[derive(Debug)]

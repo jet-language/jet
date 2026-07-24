@@ -2077,12 +2077,12 @@ dashed-name = ident { "-" ident } ;                (* S84: kebab-case names *)
   by `jet os image`, not by `jet image`.
 - **Ad-hoc adapters (U20):** an `env.<name>.packages` list may contain
   `Pkg.adapt(name:, source:, recipe:)`. `source:` is a provider ref such as
-  `path@vendor/tool`; this U20 slice realizes `Recipe.copy()` and
+  `"./vendor/tool"`; this U20 slice realizes `Recipe.copy()` and
   `Recipe.prebuilt(bin:, as:)` into ordinary hangar packages, with the same
   store/lock path as any other package. `jetpack add <ref> --adapt` prints a
   draft adapter and does not run upstream code.
 - **Direct ecosystem providers (D-JPK-PROVIDERS2):** LuaRocks uses the exact
-  `luarocks:<name>#version=<version>` root. Jetpack resolves the repository
+  `<name>#version=<version>@luarocks` root. Jetpack resolves the repository
   manifest and rockspec dependency closure, verifies every source SHA-256,
   records the qualified ref and closure in `.jet/lock`, and projects the
   realized `LUA_PATH`/`LUA_CPATH` into the environment. Mutable refs, unsupported
@@ -2204,7 +2204,7 @@ capture into a plan model). The U5 merge engine consumes `env` contributions.
 
 `jet os check|init|plan|proof|build|switch|rollback|generations|lift|import|image|vm`
 is active. A bare host (`jet os switch laptop`) selects `system.laptop` in
-`./config.jet`; `path@host` selects an exact external root. Builds create named
+`./config.jet`; `laptop@../machines` selects an exact external root. Builds create named
 generations; `generations` lists newest first; `switch --name <name>` overrides
 the automatic name; `rollback` activates a prior generation. `plan` prints the
 checked system plan without building. `proof` reads the latest generation's
@@ -2860,7 +2860,7 @@ exact source that intent resolved to:
 [[source_channel]]
 name = "default"
 channel = "latest"
-exact = "github:acme/tool#v1.2.0"
+exact = "acme/tool#v1.2.0@github"
 ```
 
 `jetpack update [source]` is the only verb that moves `[[source_channel]]`.
@@ -2890,11 +2890,14 @@ reader ignores; the three identity fields keep this exact `key: value` shape.
 
 ## Command grouping and typed inputs (D-SHAPE6, D-SHAPE-CLI1)
 
-Tool families use one noun-then-verb grammar: `jet inspect dossier` and
-`jet registry publish`. Daily lifecycle commands such as `jet run`, `jet build`,
-and `jet test` stay flat. A bare moved action is E2101 and names its canonical
-grouped route; it is never a compatibility alias. Help, completion, manual, typo
-suggestion, and dispatch views are generated from the same command registry.
+Tool families use one noun-then-verb grammar. D-SHAPE6 moved
+`dossier`, `schema`, `expand`, `live`, and `semindex` under `jet inspect`.
+It moved `publish`, `keygen`, `key`, and `yank` under `jet registry`.
+Other commands in these groups keep their existing grouped routes.
+The daily commands `jet run`, `jet build`, `jet test`, and `jet fmt` stay flat.
+A bare moved action is E2101 and names its canonical grouped route. It is never
+a compatibility alias. Help, completion, manual, typo suggestion, and dispatch
+views use the same command registry.
 
 ### Typed entry-signature CLI parsing (D-CLIFLAG1, D-SHAPE-CLI1, c7cliflag)
 

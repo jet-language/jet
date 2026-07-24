@@ -156,17 +156,16 @@ loved by experts.
   needed.
 - **C FFI is a needed future addition** (S59 ships in **Epoch 2**,
   E2-M14). Rust FFI (M7) ships first; the C ABI story follows in v2.
-- **Purity is a product feature, not just a comptime detail.** `pure fn`
-  (S60 ratified) marks functions the compiler verifies as pure so Jet
-  can eventually replace the Nix language for declarative configuration
-  via `jet eval --pure` (layer 3 post-v1).
+- **Purity is a product feature, not just a comptime detail.** An explicit
+  `--[]->` effect row marks a function as pure (S60, as respelled by
+  D-SHAPE8=A). This can eventually let Jet replace Nix for declarative
+  configuration through `jet eval --pure` (layer 3 post-v1).
 - **Go's territory (networking etc.) is standard-library scope**, built
   out post-v1 — never core-language scope.
-- Invariant **I1 will need a measured amendment** when the expert tier
-  lands: user-facing Jet stays safe-by-default, but vetted, audited
-  low-level helpers in generated code (volatile/MMIO and similar)
-  cannot be expressed without Rust `unsafe` internally. The amendment
-  is owner-gated and not yet drafted.
+- **Invariant I1 was amended by D-LL1** (ratified 2026-06-16). Jet stays
+  memory-safe and type-safe by default. Generated Rust `unsafe` may appear only
+  inside user-written audited `#Unsafe("reason") { … }` or
+  `#Unsafe("reason") fn` regions, or in vetted std/mem internals.
 
 **2026-06-15:** v1 Jet source-library package management is consolidated
 in docs/plans/jetpack-jetos/unified-ecosystem.md (§10: D-PM1…8). Public binary/dev-shell package

@@ -1,11 +1,11 @@
-//! Jetpack ref classifier: `<source>:<package/path>` (D-JPK7/15).
+//! Jetpack ref classifier: `name['#'selector]['@'source]` (D-JPK-REF1=A).
 //!
-//! The only public package syntax in Jetpack. Users never type Nix's `#`
-//! selector — Jetpack translates `:` into the provider's form internally.
+//! A ref reads like an address: the package first, then its source. `#` pins a
+//! version or channel. Bare `./`, `../`, and `/` paths need no provider word.
 //! Examples:
-//!   `nixpkgs:fastfetch`
-//!   `github:halcyonomega/my-fastfetch-jet-config`
-//!   `path:./my-env`
+//!   `fastfetch@nixpkgs`
+//!   `halcyonomega/my-fastfetch-jet-config@github`
+//!   `./my-env`
 
 use crate::Syntax;
 use std::collections::BTreeMap;
@@ -36,7 +36,7 @@ pub enum Source {
 }
 
 impl Source {
-    /// The source token as written before the `:` in a ref.
+    /// The source token as written after the `@` in a ref.
     pub fn label(&self) -> &str {
         match self {
             Source::Nixpkgs => Syntax::REF_SOURCE_NIXPKGS,
@@ -82,7 +82,7 @@ impl Source {
 /// first-party `core` provider (R2). Default is `nix` (R1 behavior).
 ///
 /// `Infer` is a third, *unresolved* state used by the typed surface (U9): a
-/// `github@…` source's kind can't be known during pure `evaluate_env`
+/// `…@github` source's kind can't be known during pure `evaluate_env`
 /// evaluation — it depends on whether the remote repo carries a `pkg.jet`,
 /// which only a realize-time probe (with the offline flag + source cache) can
 /// answer. `Provider::resolve_kind` turns `Infer` into a concrete `Nix`/`Core`
@@ -98,7 +98,7 @@ pub enum ProviderKind {
     Cpan,
     Packagist,
     /// Decide `Nix` vs `Core` at realize time by peeking the source's
-    /// `pkg.jet` (U9). Only the typed `github@…` surface produces this.
+    /// `pkg.jet` (U9). Only the typed `…@github` surface produces this.
     Infer,
 }
 
@@ -148,7 +148,7 @@ pub struct SourceTable {
 
 impl SourceTable {
     /// A table with no declared sources — only the built-ins resolve. This is
-    /// the table for direct CLI refs (`jetpack run nixpkgs:fastfetch`).
+    /// the table for direct CLI refs (`jetpack run fastfetch@nixpkgs`).
     pub fn empty() -> SourceTable {
         SourceTable::default()
     }
@@ -218,8 +218,8 @@ impl SourceTable {
     }
 }
 
-/// A classified ref. `package` is the part after the first `:` — an attr name
-/// for nixpkgs, an `owner/repo[/subpath]` for github, a path for `path`.
+/// A classified ref. `package` is the target before the final `@` — an attr
+/// name for nixpkgs or an `owner/repo[/subpath]` for GitHub.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefSpec {
     pub source: Source,
@@ -238,18 +238,28 @@ impl RefSpec {
 /// diagnostic (see `Output::ref_error`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefError {
-    /// No `:` separator at all, e.g. `fastfetch`.
+    /// No `@` separator at all, e.g. `fastfetch`.
     MissingSeparator(String),
-    /// An empty source or package half, e.g. `:fastfetch` or `nixpkgs:`.
+    /// An empty source or package half, e.g. `@nixpkgs` or `fastfetch@`.
     EmptyHalf(String),
-    /// The source prefix is neither a built-in nor a declared named source.
+    /// A retired provider-first ref that must be flipped, never reinterpreted.
+    ProviderFirst {
+        raw: String,
+        replacement: String,
+    },
+    /// The `path` provider word retired; local paths are bare.
+    PathProviderRetired {
+        raw: String,
+        path: String,
+    },
+    /// The source suffix is neither a built-in nor a declared named source.
     /// `declared` lists the pack's named sources so the message can help.
     UnknownSource {
         source: String,
         raw: String,
         declared: Vec<String>,
     },
-    /// D-MONOREF1=A: bare name with no source prefix, and no workspace member
+    /// D-MONOREF1=A: bare name with no source suffix, and no workspace member
     /// matches, or the match was ambiguous.
     AmbiguousBare(String),
     /// E1230 (D-MONOREF1=A): a bare or path-form ref matched more than one
@@ -269,11 +279,12 @@ pub enum RefError {
 }
 
 impl RefError {
-    /// The registered diagnostic code for the errors that carry one. The older
-    /// classifier errors render without a code (CLI-only, pre-registry); the
-    /// workspace-index errors (Slice B) are registered in docs/spec/diagnostics.md.
+    /// The registered diagnostic code for the errors that carry one.
     pub fn code(&self) -> Option<&'static str> {
         match self {
+            RefError::ProviderFirst { .. } | RefError::PathProviderRetired { .. } => {
+                Some("E1317")
+            }
             RefError::AmbiguousMember { .. } => Some("E1230"),
             RefError::UnknownMember { .. } => Some("E1231"),
             _ => None,
@@ -357,29 +368,58 @@ fn normalize_member_path(p: &str) -> String {
     p.trim_end_matches('/').to_string()
 }
 
-/// Classify a `<source>:<package/path>` ref against only the built-in sources.
+/// True for D-JPK-REF1 bare local-path refs.
+pub fn is_bare_path(raw: &str) -> bool {
+    raw.starts_with("./") || raw.starts_with("../") || raw.starts_with('/')
+}
+
+fn provider_first(provider: &str, target: &str, raw: &str) -> RefError {
+    let replacement = if provider == Syntax::REF_SOURCE_PATH {
+        target.to_string()
+    } else {
+        format!("{target}{}{provider}", Syntax::REF_PROVIDER_AT)
+    };
+    RefError::ProviderFirst {
+        raw: raw.to_string(),
+        replacement,
+    }
+}
+
+/// Classify a `name['#'selector]['@'source]` ref against built-in sources.
 /// This is the strict path for direct CLI refs.
 pub fn classify(raw: &str) -> Result<RefSpec, RefError> {
     classify_in(raw, &SourceTable::empty())
 }
 
 /// Classify a ref, accepting built-in sources plus any named source declared in
-/// `table` (D-JPK17). The split is on the *first* `:` so a package path may
-/// itself contain a colon.
-///
-/// D-MONOREF1=A: also accepts the dot form `source.package` (e.g. `mono.ranker`)
-/// when the left side of the first `.` matches a declared named source. The
-/// colon form (`source:package`) is always tried first; the dot form is a
-/// fallback when no `:` is present.
+/// `table` (D-JPK17). D-JPK-REF1=A puts the package before `@`; a local path is
+/// bare. A provider word before `@` is a teaching error, not a valid package
+/// name, because silently accepting `github@owner/repo` would hide the flip.
 pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> {
     let raw = raw.trim();
 
-    // Primary form: `source:package` (colon separator).
-    if let Some((source, package)) = raw.split_once(Syntax::REF_SEPARATOR) {
+    if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
+        return Ok(RefSpec {
+            source: Source::Path,
+            package: raw.to_string(),
+            raw: raw.to_string(),
+        });
+    }
+
+    if let Some((package, source)) = raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
         if source.is_empty() || package.is_empty() {
             return Err(RefError::EmptyHalf(raw.to_string()));
         }
+        if Source::is_builtin(package) {
+            return Err(provider_first(package, source, raw));
+        }
         let src = match Source::builtin(source) {
+            Some(Source::Path) => {
+                return Err(RefError::PathProviderRetired {
+                    raw: raw.to_string(),
+                    path: package.to_string(),
+                })
+            }
             Some(b) => b,
             None if table.upstream(source).is_some() => Source::Named(source.to_string()),
             None => {
@@ -397,35 +437,19 @@ pub fn classify_in(raw: &str, table: &SourceTable) -> Result<RefSpec, RefError> 
         });
     }
 
-    // D-MONOREF1=A: dot form `source.package` — only when the left side of the
-    // first `.` is a declared named source. Built-ins (`nixpkgs`, `github`,
-    // `path`) never use the dot form (they use colon).
-    if let Some((source_candidate, package)) = raw.split_once('.') {
-        if !source_candidate.is_empty()
-            && !package.is_empty()
-            && table.upstream(source_candidate).is_some()
-        {
-            return Ok(RefSpec {
-                source: Source::Named(source_candidate.to_string()),
-                package: package.to_string(),
-                raw: raw.to_string(),
-            });
-        }
-    }
-
     Err(RefError::MissingSeparator(raw.to_string()))
 }
 
 /// Classify a ref with workspace-member awareness (Slice B, D-MONOREF1=A).
 ///
 /// Resolution order, first match wins:
-///   1. colon form  `source:package`  — via `classify_in` (unchanged)
-///   2. dot form    `source.package`  — via `classify_in` (unchanged)
-///   3. path form   `infra/logging`   — exact relative-path match in the index
-///   4. bare form   `logging`         — exact member-name match in the index
+///   1. source form `package@source` — via `classify_in`
+///   2. local form  `./package` — via `classify_in`
+///   3. path form   `infra/logging` — exact relative-path match in the index
+///   4. bare form   `logging` — exact member-name match in the index
 ///
-/// The colon/dot forms are tried first so an explicit source prefix always wins
-/// over an accidental index collision. Only a ref with no source prefix (what
+/// The source form is tried first so an explicit source suffix always wins
+/// over an accidental index collision. Only a ref with no source suffix (what
 /// `classify_in` reports as `MissingSeparator`) falls through to the index. A
 /// path/bare ref that matches no member is `UnknownMember` (E1231); one that
 /// matches more than one is `AmbiguousMember` (E1230).
@@ -436,7 +460,7 @@ pub fn classify_with_workspace(
 ) -> Result<RefSpec, RefError> {
     match classify_in(raw, table) {
         Ok(spec) => Ok(spec),
-        // No source prefix. Consult the workspace index only when a workspace
+        // No source suffix. Consult the workspace index only when a workspace
         // actually exists — outside a monorepo a bare/path ref is still just a
         // missing-source error (D-JPK7), not an unknown-member error.
         Err(RefError::MissingSeparator(raw_owned)) => {
@@ -514,22 +538,19 @@ fn edit_distance(a: &str, b: &str) -> usize {
 }
 
 // ──────────────────────────────────────────────
-// `provider@target` source refs (U6, was D-JPK18).
+// `target@provider` source refs (D-JPK-REF1=A; amends U6).
 //
 // The typed authoring surface (env.jet/pkg.jet `sources:`/`packages:`) writes source
-// refs as `provider@target` — `github@owner/repo/rev`, `path@../local`,
-// `nixpkgs@channel`. This is distinct from the Phase-1 command-line
-// `source:package` form above (D-JPK18 keeps the colon classifier for
-// compatibility): a provider ref names *where a source comes from*, while a
-// `source:package` ref names *which package within a source*.
+// refs as `target@provider` — `owner/repo/rev@github`, `channel@nixpkgs`.
+// Local paths are bare (`./local`, `../local`, `/opt/local`).
 //
 // This is the foundational classifier (JPK-0 / Chunk 1). Pack-file parsing and
 // the user-facing diagnostics that render these errors land with the manifest
 // reshape + module surface chunks; until then the typed `RefError` is internal.
 // ──────────────────────────────────────────────
 
-/// A classified `provider@target` source ref. `provider` is a built-in source
-/// (github / path / nixpkgs); `target` is the upstream locator the provider
+/// A classified `target@provider` source ref. `provider` is a built-in source
+/// (github / nixpkgs, or path for a bare path); `target` is the upstream locator
 /// understands (a repo+rev, a local path, a channel/pin).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderRef {
@@ -589,18 +610,34 @@ pub fn split_channel_ref(s: &str) -> (&str, Option<ChannelRef>) {
     }
 }
 
-/// Classify a `provider@target` source ref against the built-in providers.
-/// The split is on the *first* `@` so a target may itself contain `@`.
+/// Classify a `target@provider` source ref or a bare local path.
 pub fn classify_provider_ref(raw: &str) -> Result<ProviderRef, RefError> {
     let raw = raw.trim();
-    let (provider, target) = match raw.split_once(Syntax::REF_PROVIDER_AT) {
+    if is_bare_path(raw) && !raw.contains(Syntax::REF_PROVIDER_AT) {
+        return Ok(ProviderRef {
+            provider: Source::Path,
+            target: raw.to_string(),
+            channel: None,
+            raw: raw.to_string(),
+        });
+    }
+    let (target, provider) = match raw.rsplit_once(Syntax::REF_PROVIDER_AT) {
         Some(parts) => parts,
         None => return Err(RefError::MissingSeparator(raw.to_string())),
     };
     if provider.is_empty() || target.is_empty() {
         return Err(RefError::EmptyHalf(raw.to_string()));
     }
+    if Source::is_builtin(target) {
+        return Err(provider_first(target, provider, raw));
+    }
     let provider = match Source::builtin(provider) {
+        Some(Source::Path) => {
+            return Err(RefError::PathProviderRetired {
+                raw: raw.to_string(),
+                path: target.to_string(),
+            })
+        }
         Some(b) => b,
         None => {
             return Err(RefError::UnknownSource {
@@ -625,7 +662,7 @@ mod tests {
 
     #[test]
     fn classifies_nixpkgs() {
-        let r = classify("nixpkgs:fastfetch").unwrap();
+        let r = classify("fastfetch@nixpkgs").unwrap();
         assert_eq!(r.source, Source::Nixpkgs);
         assert_eq!(r.package, "fastfetch");
         assert_eq!(r.short_name(), "fastfetch");
@@ -633,7 +670,7 @@ mod tests {
 
     #[test]
     fn classifies_github_repo() {
-        let r = classify("github:halcyonomega/my-fastfetch-jet-config").unwrap();
+        let r = classify("halcyonomega/my-fastfetch-jet-config@github").unwrap();
         assert_eq!(r.source, Source::Github);
         assert_eq!(r.package, "halcyonomega/my-fastfetch-jet-config");
         assert_eq!(r.short_name(), "my-fastfetch-jet-config");
@@ -641,21 +678,21 @@ mod tests {
 
     #[test]
     fn classifies_local_path() {
-        let r = classify("path:./my-env").unwrap();
+        let r = classify("./my-env").unwrap();
         assert_eq!(r.source, Source::Path);
         assert_eq!(r.package, "./my-env");
     }
 
     #[test]
     fn classifies_direct_cran_root_with_exact_version() {
-        let r = classify("cran:jsonlite#version=1.9.0").unwrap();
+        let r = classify("jsonlite#version=1.9.0@cran").unwrap();
         assert_eq!(r.source, Source::Cran);
         assert_eq!(r.package, "jsonlite#version=1.9.0");
     }
 
     #[test]
     fn classifies_direct_luarocks_root_with_exact_version() {
-        let r = classify("luarocks:luasocket#version=3.1.0-1").unwrap();
+        let r = classify("luasocket#version=3.1.0-1@luarocks").unwrap();
         assert_eq!(r.source, Source::LuaRocks);
         assert_eq!(r.package, "luasocket#version=3.1.0-1");
         assert_eq!(ProviderKind::parse("luarocks"), ProviderKind::LuaRocks);
@@ -665,17 +702,17 @@ mod tests {
     fn classifies_direct_scripting_registry_roots() {
         for (raw, source, provider) in [
             (
-                "ruby:rack#version=3.2.0",
+                "rack#version=3.2.0@ruby",
                 Source::RubyGems,
                 ProviderKind::RubyGems,
             ),
             (
-                "perl:JSON-MaybeXS#version=1.004008",
+                "JSON-MaybeXS#version=1.004008@perl",
                 Source::Cpan,
                 ProviderKind::Cpan,
             ),
             (
-                "php:monolog/monolog#version=3.9.0",
+                "monolog/monolog#version=3.9.0@php",
                 Source::Packagist,
                 ProviderKind::Packagist,
             ),
@@ -697,51 +734,80 @@ mod tests {
     #[test]
     fn rejects_empty_halves() {
         assert!(matches!(
-            classify(":fastfetch"),
+            classify("@nixpkgs"),
             Err(RefError::EmptyHalf(_))
         ));
-        assert!(matches!(classify("nixpkgs:"), Err(RefError::EmptyHalf(_))));
+        assert!(matches!(classify("fastfetch@"), Err(RefError::EmptyHalf(_))));
     }
 
     #[test]
-    fn rejects_hash_selector() {
-        // Users must not type Nix's `#`; `nixpkgs#fastfetch` has no `:`.
+    fn selector_without_source_still_needs_resolution() {
         assert!(matches!(
-            classify("nixpkgs#fastfetch"),
+            classify("fastfetch#latest"),
             Err(RefError::MissingSeparator(_))
         ));
     }
 
     #[test]
     fn rejects_unknown_source() {
-        match classify("brew:wget") {
+        match classify("wget@brew") {
             Err(RefError::UnknownSource { source, .. }) => assert_eq!(source, "brew"),
             other => panic!("expected UnknownSource, got {other:?}"),
         }
     }
 
     #[test]
+    fn old_provider_first_ref_teaches_the_flip() {
+        assert_eq!(
+            classify("github@owner/repo"),
+            Err(RefError::ProviderFirst {
+                raw: "github@owner/repo".into(),
+                replacement: "owner/repo@github".into(),
+            })
+        );
+        assert_eq!(
+            classify("path@../helpers"),
+            Err(RefError::ProviderFirst {
+                raw: "path@../helpers".into(),
+                replacement: "../helpers".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn package_ref_keeps_version_before_source() {
+        let table = SourceTable::from_decls([(
+            "vendor".to_string(),
+            "acme/helpers@github".to_string(),
+            ProviderKind::Core,
+        )]);
+        let r = classify_in("textkit#1.2.0@vendor", &table).unwrap();
+        assert_eq!(r.package, "textkit#1.2.0");
+        assert_eq!(r.source, Source::Named("vendor".into()));
+    }
+
+    #[test]
     fn provider_ref_marks_channel_selectors() {
         assert_eq!(
-            classify_provider_ref("github@openai/codex#latest")
+            classify_provider_ref("openai/codex#latest@github")
                 .unwrap()
                 .channel,
             Some(ChannelRef::Latest)
         );
         assert_eq!(
-            classify_provider_ref("github@openai/codex#main")
+            classify_provider_ref("openai/codex#main@github")
                 .unwrap()
                 .channel,
             Some(ChannelRef::Main)
         );
         assert_eq!(
-            classify_provider_ref("github@openai/codex#v0.x")
+            classify_provider_ref("openai/codex#v0.x@github")
                 .unwrap()
                 .channel,
             Some(ChannelRef::SemverMask("v0.x".to_string()))
         );
         assert_eq!(
-            classify_provider_ref("github@openai/codex#v0.50.1")
+            classify_provider_ref("openai/codex#v0.50.1@github")
                 .unwrap()
                 .channel,
             None
@@ -755,7 +821,7 @@ mod tests {
             "github:NixOS/nixpkgs/nixos-24.05".to_string(),
             ProviderKind::Nix,
         )]);
-        let r = classify_in("stable:ripgrep", &table).unwrap();
+        let r = classify_in("ripgrep@stable", &table).unwrap();
         assert_eq!(r.source, Source::Named("stable".to_string()));
         assert_eq!(r.package, "ripgrep");
         assert_eq!(r.source.label(), "stable");
@@ -767,7 +833,7 @@ mod tests {
             ("stable".to_string(), "u1".to_string(), ProviderKind::Nix),
             ("unstable".to_string(), "u2".to_string(), ProviderKind::Core),
         ]);
-        match classify_in("beta:neovim", &table) {
+        match classify_in("neovim@beta", &table) {
             Err(RefError::UnknownSource { declared, .. }) => {
                 assert_eq!(declared, vec!["stable", "unstable"]);
             }
@@ -778,7 +844,7 @@ mod tests {
     #[test]
     fn builtins_resolve_without_declaration() {
         let table = SourceTable::empty();
-        assert!(classify_in("nixpkgs:fd", &table).is_ok());
+        assert!(classify_in("fd@nixpkgs", &table).is_ok());
         assert!(Source::is_builtin("nixpkgs"));
         assert!(!Source::is_builtin("stable"));
     }
@@ -848,11 +914,11 @@ mod tests {
     }
 
     #[test]
-    fn colon_form_wins_over_index() {
-        // An explicit `source:package` is never shadowed by the index.
+    fn source_form_wins_over_index() {
+        // An explicit `package@source` is never shadowed by the index.
         let table =
             SourceTable::from_decls([("nixpkgs".to_string(), "u".to_string(), ProviderKind::Nix)]);
-        let r = classify_with_workspace("nixpkgs:logging", &table, &ws_index()).unwrap();
+        let r = classify_with_workspace("logging@nixpkgs", &table, &ws_index()).unwrap();
         assert_eq!(r.source, Source::Nixpkgs);
         assert_eq!(r.package, "logging");
     }
@@ -871,36 +937,34 @@ mod tests {
         );
     }
 
-    // ── provider@target source refs (U6) ──
+    // ── target@provider source refs (D-JPK-REF1=A; amends U6) ──
 
     #[test]
     fn provider_ref_github_with_rev() {
-        let r = classify_provider_ref("github@NixOS/nixpkgs/nixos-24.05").unwrap();
+        let r = classify_provider_ref("NixOS/nixpkgs/nixos-24.05@github").unwrap();
         assert_eq!(r.provider, Source::Github);
         assert_eq!(r.target, "NixOS/nixpkgs/nixos-24.05");
     }
 
     #[test]
     fn provider_ref_local_path() {
-        let r = classify_provider_ref("path@../helpers").unwrap();
+        let r = classify_provider_ref("../helpers").unwrap();
         assert_eq!(r.provider, Source::Path);
         assert_eq!(r.target, "../helpers");
     }
 
     #[test]
     fn provider_ref_nixpkgs_channel() {
-        let r = classify_provider_ref("nixpkgs@nixpkgs-unstable").unwrap();
+        let r = classify_provider_ref("nixpkgs-unstable@nixpkgs").unwrap();
         assert_eq!(r.provider, Source::Nixpkgs);
         assert_eq!(r.target, "nixpkgs-unstable");
     }
 
     #[test]
-    fn provider_ref_splits_on_first_at() {
-        // A target may contain `@` (e.g. a future user@host form); only the
-        // first `@` separates provider from target.
-        let r = classify_provider_ref("path@a@b").unwrap();
-        assert_eq!(r.provider, Source::Path);
-        assert_eq!(r.target, "a@b");
+    fn provider_ref_splits_on_last_at() {
+        let r = classify_provider_ref("owner@host/repo@github").unwrap();
+        assert_eq!(r.provider, Source::Github);
+        assert_eq!(r.target, "owner@host/repo");
     }
 
     #[test]
@@ -914,20 +978,38 @@ mod tests {
     #[test]
     fn provider_ref_rejects_empty_halves() {
         assert!(matches!(
-            classify_provider_ref("@target"),
+            classify_provider_ref("@github"),
             Err(RefError::EmptyHalf(_))
         ));
         assert!(matches!(
-            classify_provider_ref("github@"),
+            classify_provider_ref("owner/repo@"),
             Err(RefError::EmptyHalf(_))
         ));
     }
 
     #[test]
     fn provider_ref_rejects_unknown_provider() {
-        match classify_provider_ref("gitlab@owner/repo") {
+        match classify_provider_ref("owner/repo@gitlab") {
             Err(RefError::UnknownSource { source, .. }) => assert_eq!(source, "gitlab"),
             other => panic!("expected UnknownSource, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn provider_ref_rejects_provider_first_and_path_word() {
+        assert_eq!(
+            classify_provider_ref("github@owner/repo"),
+            Err(RefError::ProviderFirst {
+                raw: "github@owner/repo".into(),
+                replacement: "owner/repo@github".into(),
+            })
+        );
+        assert_eq!(
+            classify_provider_ref("../helpers@path"),
+            Err(RefError::PathProviderRetired {
+                raw: "../helpers@path".into(),
+                path: "../helpers".into(),
+            })
+        );
     }
 }

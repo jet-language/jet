@@ -61,6 +61,8 @@ pub struct CommandGroup {
 /// itself (`hangar verify`, `hangar rollback`, `hangar generations`, `hangar du`, …).
 pub struct NestedCommandSpec {
     pub name: &'static str,
+    /// Canonical spelling after the group name. Multiple forms use one line each.
+    pub usage: &'static str,
     pub summary: &'static str,
     pub handler: HandlerKey,
 }
@@ -107,31 +109,31 @@ impl HandlerKey {
 }
 
 const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "publish", summary: "Publish the current package", handler: HandlerKey::Publish },
-    NestedCommandSpec { name: "yank", summary: "Stop new installs of a published version", handler: HandlerKey::Yank },
-    NestedCommandSpec { name: "keygen", summary: "Create a package-signing key", handler: HandlerKey::Keygen },
-    NestedCommandSpec { name: "key", summary: "Manage the package-signing key", handler: HandlerKey::Key },
-    NestedCommandSpec { name: "vendor", summary: "Copy dependencies into vendor/", handler: HandlerKey::Vendor },
+    NestedCommandSpec { name: "publish", usage: "publish [--force] [--no-sign]", summary: "Publish the current package", handler: HandlerKey::Publish },
+    NestedCommandSpec { name: "yank", usage: "yank <version> [--message <reason>]", summary: "Stop new installs of a published version", handler: HandlerKey::Yank },
+    NestedCommandSpec { name: "keygen", usage: "keygen [--registry <name>] [--force]", summary: "Create a package-signing key", handler: HandlerKey::Keygen },
+    NestedCommandSpec { name: "key", usage: "key backup [<dest>] [--registry <name>]", summary: "Manage the package-signing key", handler: HandlerKey::Key },
+    NestedCommandSpec { name: "vendor", usage: "vendor [--vendor-dir <path>]", summary: "Copy dependencies into vendor/", handler: HandlerKey::Vendor },
 ];
 const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "live", summary: "Watch a running Jet process", handler: HandlerKey::Live },
-    NestedCommandSpec { name: "graph", summary: "Show the build graph", handler: HandlerKey::Graph },
-    NestedCommandSpec { name: "query", summary: "Search code and build information", handler: HandlerKey::Query },
-    NestedCommandSpec { name: "explain-build", summary: "Explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild },
-    NestedCommandSpec { name: "impact", summary: "Show code affected by a symbol", handler: HandlerKey::Impact },
-    NestedCommandSpec { name: "dossier", summary: "Show everything known about a file or symbol", handler: HandlerKey::Dossier },
-    NestedCommandSpec { name: "semindex", summary: "Search the code index", handler: HandlerKey::Semindex },
-    NestedCommandSpec { name: "expand", summary: "Show expanded meaning of Jet code", handler: HandlerKey::Expand },
-    NestedCommandSpec { name: "unsafe", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe },
-    NestedCommandSpec { name: "schema", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema },
-    NestedCommandSpec { name: "codemod", summary: "Preview or apply code changes", handler: HandlerKey::Codemod },
-    NestedCommandSpec { name: "audit", summary: "Check dependencies for known vulnerabilities", handler: HandlerKey::Audit },
-    NestedCommandSpec { name: "sbom", summary: "Create a software bill of materials", handler: HandlerKey::Sbom },
-    NestedCommandSpec { name: "bind", summary: "Generate Jet bindings from a C header", handler: HandlerKey::Bind },
-    NestedCommandSpec { name: "logs", summary: "Show recent package build logs", handler: HandlerKey::Logs },
-    NestedCommandSpec { name: "search", summary: "Search the local package catalog", handler: HandlerKey::Search },
-    NestedCommandSpec { name: "info", summary: "Show package details", handler: HandlerKey::Info },
-    NestedCommandSpec { name: "outdated", summary: "List dependencies with available updates", handler: HandlerKey::Outdated },
+    NestedCommandSpec { name: "live", usage: "live <pid>", summary: "Watch a running Jet process", handler: HandlerKey::Live },
+    NestedCommandSpec { name: "graph", usage: "graph <file.jet>", summary: "Show the build graph", handler: HandlerKey::Graph },
+    NestedCommandSpec { name: "query", usage: "query build <file.jet>", summary: "Search code and build information", handler: HandlerKey::Query },
+    NestedCommandSpec { name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "Explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild },
+    NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "Show code affected by a symbol", handler: HandlerKey::Impact },
+    NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "Show everything known about a file or symbol", handler: HandlerKey::Dossier },
+    NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex },
+    NestedCommandSpec { name: "expand", usage: "expand [--facts <lens>] <file.jet>", summary: "Show expanded meaning of Jet code", handler: HandlerKey::Expand },
+    NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe },
+    NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema },
+    NestedCommandSpec { name: "codemod", usage: "codemod dry-run <plan.json>\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod },
+    NestedCommandSpec { name: "audit", usage: "audit [--advisory-db <path>]", summary: "Check dependencies for known vulnerabilities", handler: HandlerKey::Audit },
+    NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: HandlerKey::Sbom },
+    NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: HandlerKey::Bind },
+    NestedCommandSpec { name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: HandlerKey::Logs },
+    NestedCommandSpec { name: "search", usage: "search <query>", summary: "Search the local package catalog", handler: HandlerKey::Search },
+    NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: HandlerKey::Info },
+    NestedCommandSpec { name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: HandlerKey::Outdated },
 ];
 // D-CLI-STORE2=A / D-JPK-STORECLI1=D: the physical store lives under `hangar`.
 // `du` is real (jetpack's honest per-object disk accounting); verify/rollback/
@@ -142,55 +144,55 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
 // route to a real, honest "not built yet" handler rather than a silent no-op
 // or invented behavior.
 const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "verify", summary: "Check package-store integrity", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "repair", summary: "Repair package-store damage (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "copy", summary: "Copy an object between package stores (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "import", summary: "Import an object archive (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "export", summary: "Export an object archive (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "dump", summary: "Create a portable object archive (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "restore", summary: "Restore a portable object archive (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "sign", summary: "Sign a package-store object (currently unavailable)", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "rollback", summary: "Restore an earlier package-store generation", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "generations", summary: "List package-store generations", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "du", summary: "Show disk use for each stored object", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "verify", usage: "verify", summary: "Check package-store integrity", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "repair", usage: "repair", summary: "Repair package-store damage (currently unavailable)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "copy", usage: "copy", summary: "Copy an object between package stores (currently unavailable)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "import", usage: "import", summary: "Import an object archive (currently unavailable)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "export", usage: "export", summary: "Export an object archive (currently unavailable)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "dump", usage: "dump", summary: "Create a portable object archive (currently unavailable)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "restore", usage: "restore", summary: "Restore a portable object archive (currently unavailable)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "sign", usage: "sign", summary: "Sign a package-store object (currently unavailable)", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "rollback", usage: "rollback", summary: "Restore an earlier package-store generation", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "generations", usage: "generations", summary: "List package-store generations", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "du", usage: "du", summary: "Show disk use for each stored object", handler: HandlerKey::Hangar },
 ];
 const GC_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "report", summary: "Show values moved into automatic memory management", handler: HandlerKey::GcReport },
+    NestedCommandSpec { name: "report", usage: "report", summary: "Show values moved into automatic memory management", handler: HandlerKey::GcReport },
 ];
 const PROJECT_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "parts", summary: "List loaded and skipped project modules", handler: HandlerKey::ProjectParts },
+    NestedCommandSpec { name: "parts", usage: "parts", summary: "List loaded and skipped project modules", handler: HandlerKey::ProjectParts },
 ];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "toolchain", summary: "Show the Jet version selected for this project", handler: HandlerKey::Toolchain },
-    NestedCommandSpec { name: "upgrade", summary: "Show how to install a newer Jet release", handler: HandlerKey::Upgrade },
-    NestedCommandSpec { name: "doctor", summary: "Find and fix toolchain problems", handler: HandlerKey::Doctor },
-    NestedCommandSpec { name: "completions", summary: "Print shell completions", handler: HandlerKey::Completions },
-    NestedCommandSpec { name: "man", summary: "Print the Jet manual", handler: HandlerKey::Man },
-    NestedCommandSpec { name: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools },
-    NestedCommandSpec { name: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp },
+    NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "Show the Jet version selected for this project", handler: HandlerKey::Toolchain },
+    NestedCommandSpec { name: "upgrade", usage: "upgrade", summary: "Show how to install a newer Jet release", handler: HandlerKey::Upgrade },
+    NestedCommandSpec { name: "doctor", usage: "doctor", summary: "Find and fix toolchain problems", handler: HandlerKey::Doctor },
+    NestedCommandSpec { name: "completions", usage: "completions", summary: "Print shell completions", handler: HandlerKey::Completions },
+    NestedCommandSpec { name: "man", usage: "man", summary: "Print the Jet manual", handler: HandlerKey::Man },
+    NestedCommandSpec { name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools },
+    NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp },
 ];
 // D-CLI-SURFACE3=B: `push`/`bridge`/`services`/`config` move under `jet os`.
 // This group is *not* exhaustive (see `CommandGroup::exhaustive`) — jetos's
 // own native verbs (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay entirely
 // owned by the `jet os` dispatcher and are not modeled here.
 const OS_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "push", summary: "Deploy one or more Jetos machines", handler: HandlerKey::Push },
-    NestedCommandSpec { name: "bridge", summary: "Convert an existing system configuration to Jet", handler: HandlerKey::Bridge },
-    NestedCommandSpec { name: "services", summary: "Manage development services", handler: HandlerKey::Services },
-    NestedCommandSpec { name: "config", summary: "Manage Jet settings and trust", handler: HandlerKey::Config },
+    NestedCommandSpec { name: "push", usage: "push", summary: "Deploy one or more Jetos machines", handler: HandlerKey::Push },
+    NestedCommandSpec { name: "bridge", usage: "bridge", summary: "Convert an existing system configuration to Jet", handler: HandlerKey::Bridge },
+    NestedCommandSpec { name: "services", usage: "services", summary: "Manage development services", handler: HandlerKey::Services },
+    NestedCommandSpec { name: "config", usage: "config", summary: "Manage Jet settings and trust", handler: HandlerKey::Config },
 ];
 
 // D-PERFSESSION1=D: `jet perf` owns collection/view/compare/export. `run`/
 // `test`/`bench` stay canonical top-level intents and also live here so the
 // group help lists the full family; moved_command excludes those three.
 const PERF_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "run", summary: "Run a program and write a .jettrace", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "test", summary: "Run tests and write a .jettrace", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "bench", summary: "Measure performance and write a .jettrace", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "attach", summary: "Attach to a running process and write a .jettrace", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "view", summary: "Show a .jettrace summary", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "compare", summary: "Compare two .jettrace artifacts", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "export", summary: "Export a loss-declared projection of a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "run", usage: "run", summary: "Run a program and write a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "test", usage: "test", summary: "Run tests and write a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "bench", usage: "bench", summary: "Measure performance and write a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "attach", usage: "attach", summary: "Attach to a running process and write a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "view", usage: "view", summary: "Show a .jettrace summary", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "compare", usage: "compare", summary: "Compare two .jettrace artifacts", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "export", usage: "export", summary: "Export a loss-declared projection of a .jettrace", handler: HandlerKey::Perf },
 ];
 
 pub const COMMAND_GROUPS: &[CommandGroup] = &[
@@ -1108,6 +1110,22 @@ mod tests {
             for action in group.actions {
                 if !matches!(action.name, "import" | "run" | "test" | "bench") {
                     assert_ne!(closest_command(action.name), Some(action.name));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_nested_action_has_canonical_usage() {
+        for group in COMMAND_GROUPS {
+            for action in group.actions {
+                assert!(!action.usage.trim().is_empty(), "missing usage for {} {}", group.name, action.name);
+                for usage in action.usage.lines() {
+                    assert!(
+                        usage == action.name || usage.starts_with(&format!("{} ", action.name)),
+                        "usage `{usage}` does not begin with action name `{}`",
+                        action.name
+                    );
                 }
             }
         }

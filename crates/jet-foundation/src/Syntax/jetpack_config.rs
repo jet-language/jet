@@ -64,7 +64,7 @@ pub const JETPACK_REF_VAR: &str = "JETPACK_REF";
 
 /// D-JPK3/17: the directive calls an `env.jet` author writes. `pkg.source`
 /// takes one arg (default built-in source) or two (named source + upstream/pin,
-/// D-JPK17). Packages reference named sources inline via `<name>:<package>`.
+/// D-JPK17). D-JPK-REF1=A packages reference named sources as `package@source`.
 pub const PACK_DIRECTIVE_SOURCE: &str = "pkg.source";
 pub const PACK_DIRECTIVE_PACKAGES: &str = "pkg.packages";
 pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
@@ -380,8 +380,8 @@ pub const KEY_VERB_BACKUP: &str = "backup";
 pub const KEY_VERBS: &[&str] = &[KEY_VERB_BACKUP];
 pub const PUBLISH_FLAG_NO_SIGN: &str = "--no-sign";
 
-/// D-JPK-OSHOST1=C: a bare host discovers `system.<host>` in the current repo;
-/// `path@host` selects an exact external repo/config root.
+/// D-JPK-REF1=A amends D-JPK-OSHOST1: a bare host discovers `system.<host>` in
+/// the current repo; `host@root` selects an exact external repo/config root.
 pub const OS_HOST_SELECTOR: &str = "@";
 
 /// D-JPK-OSHOST1=C: current-repo/external-root config filename.
@@ -458,8 +458,8 @@ pub const BUILTIN_FIND: &str = "find";
 
 /// U8 (ratified 2026-06-16): `sources:` and `imports:` are module-body fields,
 /// nested inside `module name { … }` as siblings of the typed contributions
-/// (`env.dev: Env { … }`) — not file top-level fields. Amends U4. `sources:`
-/// holds `name: provider@target` entries; `imports:` holds `find(…)` directives.
+/// (`env.dev: Env { … }`) — not file top-level fields. Amends U4. D-JPK-REF1=A
+/// makes `sources:` hold `name: target@provider` or bare-path entries.
 pub const MODULE_FIELD_SOURCES: &str = "sources";
 pub const MODULE_FIELD_IMPORTS: &str = "imports";
 
@@ -481,9 +481,9 @@ pub const PROMPT_PATH_FULL: &str = "Full";
 pub const PROMPT_STRIP_ON: &str = "On";
 pub const PROMPT_STRIP_OFF: &str = "Off";
 
-/// U6 (ratified 2026-06-16): package value type, and the `provider@target`
-/// source-ref separator (`github@owner/repo/rev`, `path@../local`, `nixpkgs@…`).
-/// Provider names reuse REF_SOURCE_* (github / path / nixpkgs).
+/// D-JPK-REF1=A (ratified 2026-07-23, card #733; amends U6/U9): package refs
+/// use `name['#'version-or-channel]['@'source]`; source values use
+/// `target@provider`; local `./`, `../`, and `/` paths are bare.
 pub const TYPE_PKG: &str = "Pkg";
 pub const REF_PROVIDER_AT: &str = "@";
 

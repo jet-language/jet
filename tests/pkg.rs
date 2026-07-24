@@ -69,6 +69,33 @@ fn jet_cmd_env(args: &[&str], cwd: &Path, envs: &[(&str, &str)]) -> std::process
     cmd.output().expect("jet binary should run")
 }
 
+#[test]
+fn shape6_registry_routes_and_retired_bare_snapshots() {
+    let tmp = tmp_dir("shape6_registry");
+    let store = tmp.join("store");
+    fs::create_dir_all(&store).unwrap();
+
+    let key = jet_cmd(&["registry", "key"], &tmp, &store);
+    assert!(!key.status.success());
+    assert_eq!(
+        String::from_utf8(key.stderr).unwrap(),
+        "error: `jet registry key` needs a subcommand — try `jet registry key backup`.\n"
+    );
+
+    for verb in ["publish", "keygen", "key", "yank"] {
+        let bare = jet_cmd(&[verb, "sentinel"], &tmp, &store);
+        assert_eq!(bare.status.code(), Some(2), "bare jet {verb}");
+        assert_eq!(
+            String::from_utf8(bare.stderr).unwrap(),
+            format!(
+                "Error [E2101]: `{verb}` moved under `jet registry`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet registry {verb} sentinel`.\n"
+            )
+        );
+    }
+
+    fs::remove_dir_all(tmp).unwrap();
+}
+
 fn isolated_crypto_helper_paths(home: &Path) -> (PathBuf, PathBuf) {
     let helper = jetpack::FFI::cached_crypto_helper_path();
     let cache_key = helper
@@ -1092,7 +1119,7 @@ deps: {
 
 #[test]
 fn manifest_parse_dep_path() {
-    let raw = manifest_with_deps("root", "0.1.0", "    helpers: path@../helpers,");
+    let raw = manifest_with_deps("root", "0.1.0", "    helpers: ../helpers,");
     let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("path dep should parse");
     let dep = mf.dependencies.get("helpers").expect("missing helpers dep");
     assert!(matches!(dep, jet::Manifest::DepSpec::Path { path } if path == "../helpers"));
@@ -1128,7 +1155,7 @@ fn manifest_parse_e1206_missing_required_field() {
 
 #[test]
 fn manifest_parse_e1209_reserved_nonempty() {
-    let raw = min_manifest("myapp", "0.1.0") + "\ndev_deps: {\n    testlib: path@../testlib,\n}\n";
+    let raw = min_manifest("myapp", "0.1.0") + "\ndev_deps: {\n    testlib: ../testlib,\n}\n";
     let err = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
         .expect_err("non-empty dev_deps should fail E1209");
     assert_eq!(err.code, "E1209");
@@ -1310,7 +1337,7 @@ fn cli_build_enforces_effect_budget_e1220() {
     write(
         &tmp,
         "pkg.jet",
-        &(manifest_with_deps("app", "0.1.0", "    netdep: path@netdep,")
+        &(manifest_with_deps("app", "0.1.0", "    netdep: ./netdep,")
             + "\neffects: {\n    allow: [Fs],\n}\n"),
     );
     write(
@@ -1505,7 +1532,7 @@ fn manifest_add_dep_creates_table_when_absent() {
 #[test]
 fn manifest_remove_dep_removes_correct_entry() {
     let raw = min_manifest("root", "0.1.0")
-        + "\ndeps: {\n    helpers: path@../helpers,\n    other: path@../other,\n}\n";
+        + "\ndeps: {\n    helpers: ../helpers,\n    other: ../other,\n}\n";
     let updated = jet::Manifest::remove_dependency(&raw, "helpers");
     let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
     assert!(
@@ -1903,7 +1930,7 @@ fn path_dep_compiles_ok() {
     write(
         &tmp,
         "pkg.jet",
-        &manifest_with_deps("myapp", "0.1.0", "    greeter: path@greeter,"),
+        &manifest_with_deps("myapp", "0.1.0", "    greeter: ./greeter,"),
     );
     let entry = tmp.join("main.jet");
     fs::write(
@@ -1941,7 +1968,7 @@ fn version_conflict_emits_e1201() {
         &manifest_with_deps(
             "conflict_app",
             "0.1.0",
-            "    liba: path@liba,\n    libb: path@libb,",
+            "    liba: ./liba,\n    libb: ./libb,",
         ),
     );
     let entry = tmp.join("main.jet");
@@ -1968,7 +1995,7 @@ fn stale_lock_emits_e1202() {
     write(
         &tmp,
         "pkg.jet",
-        &manifest_with_deps("app", "0.1.0", "    greeter: path@greeter,"),
+        &manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,"),
     );
     // Lock exists but lists no dependencies — stale.
     write(
@@ -2013,7 +2040,7 @@ fn reserved_section_emits_e1209() {
     write(
         &tmp,
         "pkg.jet",
-        &(min_manifest("app", "0.1.0") + "\ndev_deps: {\n    testlib: path@../testlib,\n}\n"),
+        &(min_manifest("app", "0.1.0") + "\ndev_deps: {\n    testlib: ../testlib,\n}\n"),
     );
     let entry = tmp.join("main.jet");
     fs::write(&entry, "fn run() {}\n").unwrap();
@@ -2035,7 +2062,7 @@ fn fetch_locked_rejects_missing_lock() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    let raw = manifest_with_deps("app", "0.1.0", "    greeter: path@greeter,");
+    let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     write(&tmp, "pkg.jet", &raw);
 
     let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
@@ -2057,7 +2084,7 @@ fn registry_dependency_is_e1207_until_registry_gate_lands() {
     let tmp = tmp_dir("registry_dep_staged");
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
-    let raw = manifest_with_deps("app", "0.1.0", "    textkit: \"1.2.0\",");
+    let raw = manifest_with_deps("app", "0.1.0", "    textkit: textkit#1.2.0,");
     write(&tmp, "pkg.jet", &raw);
     let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
     let opts = jet::Fetch::FetchOptions {
@@ -2463,7 +2490,7 @@ fn cli_vendor_dir_flag_relocates() {
     write(
         &tmp,
         "pkg.jet",
-        &manifest_with_deps("app", "0.1.0", "    greeter: path@greeter,"),
+        &manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,"),
     );
 
     let out = jet_cmd(&["registry", "vendor", "--vendor-dir", "third_party"], &tmp, &store);
@@ -3009,7 +3036,7 @@ fn vendored_offline_locked_build() {
     write(
         &tmp,
         "pkg.jet",
-        &manifest_with_deps("vendored_app", "0.1.0", "    greeter: path@greeter,"),
+        &manifest_with_deps("vendored_app", "0.1.0", "    greeter: ./greeter,"),
     );
     write(
         &tmp,
@@ -3182,7 +3209,7 @@ fn e1217_missing_locked_revision() {
     // the bidirectional completeness check.
     use jet::Lock::{verify_all_manifest_deps_locked, LockFile};
 
-    let raw = manifest_with_deps("app", "0.1.0", "    greeter: path@greeter,");
+    let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     let tmp = tmp_dir("e1217");
     write(&tmp, "pkg.jet", &raw);
     let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
@@ -3710,7 +3737,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     fs::create_dir_all(&dep).unwrap();
     fs::write(
         app.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { dep: path@../dep }\n",
+        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { dep: ../dep }\n",
     )
     .unwrap();
     fs::write(

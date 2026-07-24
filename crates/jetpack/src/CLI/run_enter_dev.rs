@@ -89,9 +89,9 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     let declared_tasks = list_project_tasks(&entry);
 
     // Prefer a project `#Task` over package-ref classification when the first
-    // positional is a bare name (no `source:pkg` colon).
+    // positional is a bare name (no `@source` suffix).
     if let Some(raw) = parsed.positional.first() {
-        if !raw.contains(':') && declared_tasks.iter().any(|t| t == raw) {
+        if !raw.contains(Syntax::REF_PROVIDER_AT) && declared_tasks.iter().any(|t| t == raw) {
             return run_project_task(theme, parsed, &roots, &project_dir, &entry, raw);
         }
     }
@@ -116,7 +116,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
             }
             Err(_) => {
                 // Bare unknown name + declared tasks → E1290 (list them).
-                if !raw.contains(':') && !declared_tasks.is_empty() {
+                if !raw.contains(Syntax::REF_PROVIDER_AT) && !declared_tasks.is_empty() {
                     let list = declared_tasks.join(", ");
                     theme.error_coded(
                         "E1294",
@@ -347,9 +347,9 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
             package: name.clone(),
             raw: format!(
                 "{}{}{}",
-                Syntax::REF_SOURCE_NIXPKGS,
-                Syntax::REF_SEPARATOR,
-                name
+                name,
+                Syntax::REF_PROVIDER_AT,
+                Syntax::REF_SOURCE_NIXPKGS
             ),
         });
     }

@@ -52,7 +52,7 @@ module dev {
         packages: [
             Pkg.adapt(
                 name: "weirdctl",
-                source: path@vendor/weirdctl,
+                source: "./vendor/weirdctl",
                 recipe: Recipe.prebuilt(bin: "missing-bin", as: "weirdctl")
             )
         ],
@@ -127,7 +127,7 @@ fn top_level_explain_dispatches_to_jetpack() {
     assert!(explain.status.success());
     let stdout = String::from_utf8_lossy(&explain.stdout);
     assert!(
-        stdout.contains("ref      adapt:weirdctl:path@vendor/weirdctl"),
+        stdout.contains("ref      adapt:weirdctl:./vendor/weirdctl"),
         "{stdout}"
     );
     assert!(stdout.contains("failed"), "{stdout}");

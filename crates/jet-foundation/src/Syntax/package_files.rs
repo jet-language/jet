@@ -34,8 +34,8 @@ pub const LEGACY_ENTRY_FILE: &str = "main.jet";
 /// D-JPK-FILES (ratified 2026-06-18): `[repo]` table in `jetpack.toml`.
 pub const JTOML_TABLE_REPO: &str = "repo";
 
-/// D-JPK-FILES (ratified 2026-06-18): `[sources]` table in `jetpack.toml` —
-/// named source refs (`name = "provider@target#ver"`).
+/// D-JPK-FILES (ratified 2026-06-18), amended by D-JPK-REF1: `[sources]`
+/// table in `jetpack.toml` — named source refs (`name = "target#ver@provider"`).
 pub const JTOML_TABLE_SOURCES: &str = "sources";
 
 /// D-WORKSPACE1: retired `[packages]` table in `jetpack.toml`. Kept only so

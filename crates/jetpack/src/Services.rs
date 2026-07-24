@@ -30,7 +30,7 @@ use crate::Syntax;
 /// name with no entry and no explicit `init:` is a plain "don't know how to
 /// start this" error, not a silent no-op.
 struct Catalog {
-    /// The `<source>:<package>` ref to realize before spawning (D-JPK-… U6
+    /// The `<package>@<source>` ref to realize before spawning (D-JPK-REF1
     /// ref grammar) — added to the project's package refs automatically.
     pkg_ref: &'static str,
     port: i64,
@@ -41,7 +41,7 @@ struct Catalog {
 fn catalog(name: &str) -> Option<Catalog> {
     match name {
         "redis" => Some(Catalog {
-            pkg_ref: "default:redis",
+            pkg_ref: "redis@default",
             port: 6379,
             init: |port, data_dir| {
                 format!(

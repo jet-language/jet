@@ -839,7 +839,7 @@ name — `module env.dev { packages: […] }`, `module image.server { … }`.
 `system.*` is the jetos host declaration surface.
 
 **U8 — Manifest fields nest in the module body**: a module's `sources:`
-(`name: provider@target` entries, merged by key) and `imports:` are fields
+(`name: target@provider` or bare-path entries, merged by key) and `imports:` are fields
 inside `module name { … }`, never file top-level.
 
 **U4 — Import-tree discovery**: `imports: find("./modules")` auto-discovers
@@ -1009,8 +1009,8 @@ properties. `@` is reserved for locations, addresses, and sources. Thus
 declaration, expression, or brace scope. Braces show extent; the rule name
 states behavior; each rule declares its legal attachment targets. Authority-
 bearing rules require a visible brace scope, reason, and audit treatment, and
-`#Unsafe` remains the sole user-written unsafe gate. `provider@target` and
-`path@host` remain address/source forms. A leading `@Rule` produces E0063
+`#Unsafe` remains the sole user-written unsafe gate. D-JPK-REF1 puts the thing
+before `@` and its source after it. A leading `@Rule` produces E0063
 with the canonical `#Rule` fix.
 
 **D-SHAPE2=A — One applied-rule marker** *(ratified 2026-07-14, card #534;
@@ -1236,6 +1236,10 @@ stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
 keywords (E0056/E0057 retired by D-S14-PAUSE; E0058 retired earlier by
 D-MEM1/S3).
 
+*Supersession (D-SHAPE-COPY1=A, ratified 2026-07-15):* `copy x` is
+historical text in this frozen entry, not current syntax. The current copy
+form is `~x`; the retired `copy` word produces E0991.
+
 *History:* D-CAP7's original text (pre-2026-07-03) had a third visible
 parameter sigil `~T` (edit/mutate), a fourth `*T` in parameter position, and
 an `Infer` tier where a bare `T` param elevated by body usage. D-MEM1
@@ -1289,7 +1293,9 @@ expression (`Expr::Copy`), parses on any expression, formatter round-trips
 it. `.clone()` is not user-typable Jet syntax — `clone` falls through to the
 ordinary "no such method" path (I8). `copy x` on a non-cloneable type is
 E0211; on a scalar it's legal but redundant (already `Copy`). Every fix-it
-that used to suggest `.clone()` now suggests `copy name`. **S5 shipped
+that used to suggest `.clone()` now suggests `copy name`.
+*Supersession:* D-SHAPE-COPY1=A replaces this S4 spelling with `~name`; the
+retired word produces E0991. **S5 shipped
 (2026-07-04)**: `[T]` slice views were already live (`View<T>`, D-DYNARRAY1,
 predates this migration — nothing to build). `String.trim()`/`.after(sep)`/
 `.before(sep)` bound to a local return a zero-copy string view instead of an
@@ -2659,6 +2665,15 @@ aliases or whole-buffer facades.
 
 **D-API-CTOR1=A — constructor-idiom law** *(ratified by owner 2026-07-12, card #513)*: the four shipped idioms become written rubric law — bare `Type(…)` when the arguments ARE the value's components (fallible where narrowing); `.new(…)` for fresh stateful containers; `.over(…)` for non-owning views over existing data; `.from_*(…)` for conversions. `Type.{ }` stays the literal for plain data records. Nothing shipped changes; new construction shapes need a ballot.
 
+**D-SHAPE-CTORVERB1=C — one fresh-value completion stem** *(ratified by
+owner 2026-07-23, card #736)*: deterministic fresh values use type-owned
+`Type.new(…)`; constructors that draw entropy use `Type.new_random(…)`.
+`Clock.new`, `ExpiringValue.new`, `SigningKey.new_random`, and
+`X25519SecretKey.new_random` are the canonical spellings. The former
+`time.clock`, `expiring.new`, and key-type `generate` spellings retire with
+teaching errors. The plain `random` suffix does not extend the closed
+abbreviation list.
+
 **D-SHAPE3a=A — inferred fresh construction** *(ratified by owner 2026-07-14,
 card #536)*: `.new(…)` may omit the receiver only when the surrounding expected
 type plus its arguments determine one receiver type. `Type.new(…)` always remains
@@ -3164,18 +3179,24 @@ its module name is its identity, its file is discovered by walking the tree
 **U7 — Zero-ceremony single files**: `jet run file.jet` never needs a
 manifest, `.jet/`, or any ecosystem file — forever.
 
-**U6 / D-JPK7 / D-JPK15 / VERSION-# — Refs & pins**: manifest source refs are
-`provider@target` (`github@owner/repo`, `path@../local`, `nixpkgs@…`); CLI
-refs are `<source>:<package>` (`jetpack run nixpkgs:fastfetch`; never Nix's
-`#` selector). Versions pin with `#`: `textkit#1.2.0` (`#` = "a pinned
-number", shared with `[T#N]`). Channel refs (`#latest`, `#main`) resolve only
-in network-class verbs; the lock stays exact (D-JPK-CHANNEL1). Git deps
-needing selectors use inline structs (D-JPK23):
+**D-JPK-REF1=A / U6 / U9 / D-JPK-OSHOST1 — Email-order refs**
+*(ratified 2026-07-23, card #733; amends U6, U9, and D-JPK-OSHOST1)*:
+package refs use `name['#'version-or-channel]['@'source]`. Thus the CLI uses
+`fastfetch@nixpkgs`, a named source uses `textkit#1.2.0@vendor`, and a source
+value uses `target@provider`, such as `acme/helpers@github`. Local `./`, `../`,
+and `/` paths are bare; the `path` provider word retires. An old
+`provider@target` ref is a teaching error with the flipped spelling. The parser
+never silently treats a built-in provider name as a package name.
+
+Versions still pin with `#`: `textkit#1.2.0` (`#` = "a pinned number", shared
+with `[T#N]`). Channel refs (`#latest`, `#main`) resolve only in network-class
+verbs; the lock stays exact (D-JPK-CHANNEL1). Git deps that need selectors use
+inline structs (D-JPK23):
 
 ```jet
 deps: {
-    textkit:  "1.2.0",
-    helpers:  path@../helpers,
+    textkit:  textkit#1.2.0,
+    helpers:  ../helpers,
     parsekit: { git: "https://github.com/acme/parsekit", tag: "v0.4.1" },
 }
 ```
@@ -3191,9 +3212,9 @@ D-JPK-NONIX1, no daemon/root per D-JPK-NODAEMON1) and execs it
 read enough of any manifest to fetch the right toolchain. `jet self toolchain`
 shows the pin; `jet update jet` moves it deliberately.
 
-**U9 — Provider inference**: a source is always `name: provider@target`; core
-vs nix is inferred by probing the target for `pkg.jet` (cheap manifest-only
-probe; `nixpkgs@…` never probed). No `via:` marker.
+**U9 — Provider inference**: a source is `name: target@provider`, or a bare
+local path. Core vs nix is inferred by probing the target for `pkg.jet`
+(cheap manifest-only probe; `…@nixpkgs` is never probed). No `via:` marker.
 
 **D-TGT1–4 — Targets**: packages declare `targets:` (no `kind:`); shipped:
 `library`, `executable`, `test`, `example`, `benchmark`; `plugin` reserved.
@@ -3591,9 +3612,9 @@ the latest generation's proof, provenance, health, boot, init, secrets, VM, and
 rollback artifacts. `jetpack` remains the engine process behind the dispatch
 seam; users type `jet os`, not `jetpack os`.
 
-**D-JPK-OSHOST1=C**: a bare host name discovers `system.<host>` in `./config.jet`;
-`path@host` selects an exact external root (directory roots load
-`path/config.jet`; file roots load that file).
+**D-JPK-OSHOST1=C**, as amended by **D-JPK-REF1=A**: a bare host name discovers
+`system.<host>` in `./config.jet`; `host@root` selects an exact external root
+(directory roots load `root/config.jet`; file roots load that file).
 
 **D-JPK-OSGEN1=C**: every build gets an automatic generation name; `jet os
 switch --name <name>` overrides it. `jet os generations` lists newest first.
@@ -4529,14 +4550,14 @@ remains a future card, not a corner cut here.
 
 **D-JPK-TOOLRUN1=A — unified `jetpack tool` noun**: `jetpack tool run <ref>`
 executes a package binary ephemerally across all providers (generalizing the
-nix-only `jetpack run nixpkgs:pkg` bridge); `jetpack tool install <ref>`
+nix-only `jetpack run pkg@nixpkgs` bridge); `jetpack tool install <ref>`
 adds it to the user's default profile (D-JPK-PROFILE1) and projects its
 bins onto PATH as its own generation; `jetpack tool list`/`uninstall`
 manage them. A name collision with a project-local task (D-JPK-TASKRUN1)
 is a checked error naming both.
 
 *Shipped 2026-07-12 (card #477)*: `jetpack tool run|install|list|uninstall`
-CLI surface. Built-in providers (`nixpkgs`/`github`/`path`) realize through
+CLI surface. Built-in providers (`nixpkgs`/`github`/bare paths) realize through
 the existing hangar path; recognized external prefixes (`npm`/`pypi`/`cargo`/…)
 emit E1298 (JPK-TOOL-PROVIDER) instead of silent skip. `tool install` writes
 real symlinks under `~/.jet/bin` plus generation metadata at

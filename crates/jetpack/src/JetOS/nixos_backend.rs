@@ -119,7 +119,7 @@ fn nixpkgs_owner_repo_rev(upstream: &str) -> Option<(String, String, String)> {
 }
 
 /// The system's nixpkgs pin: the first declared source whose upstream is a
-/// `github@NixOS/nixpkgs/<rev-or-ref>` ref (U6 `sources:` block).
+/// `NixOS/nixpkgs/<rev-or-ref>@github` ref (D-JPK-REF1 `sources:` block).
 fn nixpkgs_pin(table: &RefSpec::SourceTable) -> Option<(String, String, String)> {
     table
         .declarations()
@@ -230,7 +230,7 @@ fn parse_package_ref_names(value: &str) -> Vec<String> {
 }
 
 const MISSING_NIXPKGS_PIN: &str =
-    "no declared source resolves to `github@NixOS/nixpkgs/<rev-or-ref>` (the real tier needs exactly one nixpkgs pin)";
+    "no declared source resolves to `NixOS/nixpkgs/<rev-or-ref>@github` (the real tier needs exactly one nixpkgs pin)";
 
 /// Map a `SystemPlan` to a NixOS `configuration.nix` body + package list, or
 /// collect every declaration this backend cannot map (D-JOS-NIXBACKEND1=C —
@@ -258,7 +258,7 @@ fn map_system_to_nixos(
         let raw = if pkg.source.is_empty() {
             pkg.name.clone()
         } else {
-            format!("{}:{}", pkg.source, pkg.name)
+            format!("{}@{}", pkg.name, pkg.source)
         };
         let is_nixpkgs = match RefSpec::classify_in(&raw, table) {
             Ok(spec) => is_nixpkgs_source(&spec.source, table),
@@ -363,7 +363,7 @@ fn map_system_to_nixos(
                         kernel_input = Some(input);
                     }
                     None => unmapped.push(
-                        "option `boot.kernel` `.CachyOS` needs a declared `github@<owner>/nix-cachyos-kernel/<rev>` source for the kernel overlay"
+                        "option `boot.kernel` `.CachyOS` needs a declared `<owner>/nix-cachyos-kernel/<rev>@github` source for the kernel overlay"
                             .to_string(),
                     ),
                 }

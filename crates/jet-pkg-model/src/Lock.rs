@@ -80,7 +80,7 @@ pub struct LockedToolchain {
 }
 
 /// D-JPK-CHANNEL1=A: exact lock for a named source declared with a channel
-/// selector (`github@owner/repo#latest`, `#main`, `#v0.x`). Realize-class
+/// selector (`owner/repo#latest@github`, `#main`, `#v0.x`). Realize-class
 /// commands read `exact`; update-class commands are the only place it moves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedSourceChannel {
@@ -96,7 +96,7 @@ pub enum LockSource {
     Git { url: String, selector: String },
     /// D-JPK-OFFLINE2=B: a package realized through the Nix compatibility
     /// provider. `reference` is the source ref it was realized from
-    /// (`nixpkgs:openssl`); `output` is the realized output path recorded so an
+    /// (`openssl@nixpkgs`); `output` is the realized output path recorded so an
     /// offline reuse can re-verify the on-disk closure against the package's
     /// [`LockEnvelope`] `output_hash`. The ref spelling is a label only — trust
     /// comes from the re-hashed closure, never the text.
@@ -798,7 +798,7 @@ pub fn record_envelope(project_root: &Path, package_name: &str, envelope: LockEn
 /// D-JPK-OFFLINE2=B: after a successful Nix-provider realize, record the locked
 /// source identity (the resolved ref + realized output path) and the produced
 /// output closure envelope into `.jet/lock`, creating the lock if the project
-/// has none (a bare `jetpack build nixpkgs:…` project may carry no manifest yet).
+/// has none (a bare `jetpack build …@nixpkgs` project may carry no manifest yet).
 /// This lock entry is the trust root a later offline realize matches before it
 /// may reuse the hangar copy: the recorded `output_hash` is re-verified against
 /// the on-disk closure, never the ref spelling (card #418). Upserts by package
@@ -1505,13 +1505,13 @@ mod a4_envelope_tests {
             "sha256-deadbeef",
             "x86_64-linux",
             "", // signature slot empty until card #13
-            "mine:hello via core-source",
+            "hello@mine via core-source",
         );
         let lock = base_lock(vec![pkg_with("hello", Some(e.clone()))], Vec::new());
         let text = write(&lock);
         assert!(text.contains("output-hash = \"sha256-deadbeef\""));
         assert!(text.contains("platform = \"x86_64-linux\""));
-        assert!(text.contains("provenance = \"mine:hello via core-source\""));
+        assert!(text.contains("provenance = \"hello@mine via core-source\""));
         assert!(
             !text.contains("signature ="),
             "empty signature slot stays implicit in the file"

@@ -124,7 +124,7 @@ fn offline_build_and_run_use_hangar_cache_with_network_denied() {
     let first = jetpack()
         .args([
             "build",
-            "nixpkgs:greet",
+            "greet@nixpkgs",
             "--no-color",
             "--offline",
             "--fixtures",
@@ -141,7 +141,7 @@ fn offline_build_and_run_use_hangar_cache_with_network_denied() {
     );
 
     let second = jetpack()
-        .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
+        .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_DENY_NETWORK", "1")
@@ -160,7 +160,7 @@ fn offline_build_and_run_use_hangar_cache_with_network_denied() {
     let run = jetpack()
         .args([
             "run",
-            "nixpkgs:greet",
+            "greet@nixpkgs",
             "--no-color",
             "--offline",
             "--",
@@ -257,7 +257,7 @@ fn offline_reuse_refuses_a_tampered_closure() {
     let first = jetpack()
         .args([
             "build",
-            "nixpkgs:greet",
+            "greet@nixpkgs",
             "--no-color",
             "--offline",
             "--fixtures",
@@ -289,7 +289,7 @@ fn offline_reuse_refuses_a_tampered_closure() {
     fs::remove_file(&greet).unwrap();
 
     let second = jetpack()
-        .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
+        .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_DENY_NETWORK", "1")
@@ -317,7 +317,7 @@ fn offline_missing_object_is_loud_e1276() {
     let project = Scratch::new("project");
     let root = Scratch::new("root");
     let out = jetpack()
-        .args(["build", "nixpkgs:greet", "--no-color", "--offline"])
+        .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
         .current_dir(&project.path)
         .env("JETPACK_ROOT", &root.path)
         .env("JETPACK_DENY_NETWORK", "1")
@@ -327,7 +327,7 @@ fn offline_missing_object_is_loud_e1276() {
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("E1276"), "stderr: {stderr}");
-    assert!(stderr.contains("nixpkgs:greet"), "stderr: {stderr}");
+    assert!(stderr.contains("greet@nixpkgs"), "stderr: {stderr}");
 }
 
 #[test]
@@ -337,7 +337,7 @@ fn network_class_verbs_refuse_offline_immediately() {
     for args in [
         &["update", "--no-color", "--offline"][..],
         &["outdated", "--no-color", "--offline"][..],
-        &["add", "nixpkgs:ripgrep", "--no-color", "--offline"][..],
+        &["add", "ripgrep@nixpkgs", "--no-color", "--offline"][..],
     ] {
         let out = jetpack()
             .args(args)

@@ -970,9 +970,11 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     }
     if (module == "core.time.date" && method == "today")
         || (module == "core.time.datetime" && method == "now")
-        || (module == "core.time.expiring" && method == "new")
     {
         return Some("named clock boundary");
+    }
+    if module == "core.time.expiring" && method == "new" {
+        return Some("named E1004 retired spelling boundary");
     }
     None
 }
@@ -983,6 +985,9 @@ fn value_boundary(owner: &str) -> Option<&'static str> {
     }
     if owner == "Clock" {
         return Some("named clock boundary");
+    }
+    if owner == "ExpiringValue" {
+        return Some("named expiry runtime boundary");
     }
     if matches!(owner, "Secret" | "WrappedVaultKey") {
         return Some("named native/security boundary");
@@ -1303,7 +1308,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (497, 149, 486, 49));
+    assert_eq!((fixed, direct_static, value, bespoke), (498, 151, 486, 49));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1312,7 +1317,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "loaded").class, Class::Covered);
     assert_eq!(record(&records, Surface::Bespoke, "core.reactive.loadable", "failed").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Int", "parse").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "Clock", "new").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Set", "from").class, Class::Covered);
+    assert_eq!(record(&records, Surface::DirectStatic, "ExpiringValue", "new").class, Class::Boundary);
     for (owner, method) in [
         ("SortedSet", "from"),
         ("SortedSet", "new"),
@@ -1654,7 +1661,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_181, 839, 0, 342));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_184, 841, 0, 343));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1662,7 +1669,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        2650112878030068292,
+        7692187946673691483,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

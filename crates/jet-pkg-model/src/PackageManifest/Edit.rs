@@ -2,11 +2,11 @@
 //! `pkg.jet` manifest (mirrors the old jet.toml `add_dependency`/`remove`).
 
 /// Render a compiler-side `DepSpec` back into `pkg.jet` dep-value syntax.
-fn render_dep_spec(spec: &crate::Manifest::DepSpec) -> String {
+fn render_dep_spec(name: &str, spec: &crate::Manifest::DepSpec) -> String {
     use crate::Manifest::{DepSpec, GitSelector};
     match spec {
-        DepSpec::Registry(v) => format!("\"{v}\""),
-        DepSpec::Path { path } => format!("path@{path}"),
+        DepSpec::Registry(v) => format!("{name}#{v}"),
+        DepSpec::Path { path } => path.clone(),
         DepSpec::Git { url, selector } => {
             let sel = match selector {
                 GitSelector::Tag(t) => format!("tag: \"{t}\""),
@@ -22,7 +22,7 @@ fn render_dep_spec(spec: &crate::Manifest::DepSpec) -> String {
 /// comments and existing entries. Creates the block if absent. Mirrors the
 /// old jet.toml `add_dependency`, but for Jet-syntax `deps:` blocks (U10).
 pub fn add_dep(raw: &str, name: &str, spec: &crate::Manifest::DepSpec) -> String {
-    let line = format!("    {name}: {},", render_dep_spec(spec));
+    let line = format!("    {name}: {},", render_dep_spec(name, spec));
     insert_or_replace_in_block(raw, "deps", name, &line)
 }
 

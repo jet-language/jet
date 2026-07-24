@@ -200,7 +200,7 @@ module _gaming {
     fn evaluate_env_builds_plan_from_typed_surface() {
         let src = r#"
 module dev {
-    sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
+    sources: { default: NixOS/nixpkgs/nixos-24.05@github }
     env.dev: Env.{
         packages: [default.[ripgrep, fd]],
         prompt: "wordstats",
@@ -209,8 +209,8 @@ module dev {
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
         assert_eq!(plan.prompt.as_deref(), Some("wordstats"));
-        assert_eq!(plan.package_refs, vec!["default:ripgrep", "default:fd"]);
-        // The `provider@target` ref is translated to the colon/flake upstream the
+        assert_eq!(plan.package_refs, vec!["ripgrep@default", "fd@default"]);
+        // The `target@provider` ref is translated to the colon/flake upstream the
         // provider realizes (`github:…#pkg`).
         assert_eq!(
             plan.table.upstream("default"),
@@ -248,12 +248,12 @@ module dev {
 
     #[test]
     fn github_source_kind_is_left_to_inference() {
-        // U9: a `github@…` source can't be classified core-vs-nix at pure
+        // U9: an `…@github` source can't be classified core-vs-nix at pure
         // evaluation time (it depends on a remote `pkg.jet` peek), so the table
         // records `Infer`; `Provider::resolve_kind` decides at realize time.
         let src = r#"
 module dev {
-    sources: { up: github@acme/jet-pkgs/v1 }
+    sources: { up: acme/jet-pkgs/v1@github }
     env.dev: Env.{ packages: [up.hello] }
 }
 "#;
@@ -266,7 +266,7 @@ module dev {
     fn nixpkgs_source_kind_stays_nix() {
         let src = r#"
 module dev {
-    sources: { default: nixpkgs@nixpkgs-unstable }
+    sources: { default: nixpkgs-unstable@nixpkgs }
     env.dev: Env.{ packages: [default.fd] }
 }
 "#;
@@ -278,12 +278,12 @@ module dev {
     fn evaluate_env_bare_package_resolves_to_default_source() {
         let src = r#"
 module dev {
-    sources: { default: nixpkgs@nixpkgs-unstable }
+    sources: { default: nixpkgs-unstable@nixpkgs }
     env.dev: Env.{ packages: [ripgrep] }
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
-        assert_eq!(plan.package_refs, vec!["default:ripgrep"]);
+        assert_eq!(plan.package_refs, vec!["ripgrep@default"]);
     }
 
     #[test]
@@ -294,7 +294,7 @@ module dev {
         packages: [
             Pkg.adapt(
                 name: "weirdctl",
-                source: path@vendor/weirdctl,
+                source: "./vendor/weirdctl",
                 deps: [default.cmake],
                 recipe: Recipe.prebuilt(bin: "weirdctl", as: "weirdctl")
             ),
@@ -304,10 +304,10 @@ module dev {
 }
 "#;
         let plan = evaluate_env(src, &base_dir()).unwrap();
-        assert_eq!(plan.package_refs, vec!["default:ripgrep"]);
+        assert_eq!(plan.package_refs, vec!["ripgrep@default"]);
         assert_eq!(plan.adapters.len(), 1);
         assert_eq!(plan.adapters[0].name, "weirdctl");
-        assert_eq!(plan.adapters[0].source, "path@vendor/weirdctl");
+        assert_eq!(plan.adapters[0].source, "./vendor/weirdctl");
         assert_eq!(
             plan.adapters[0].deps,
             vec![Merge::Pkg::new("default", "cmake")]
@@ -329,7 +329,7 @@ module dev {
         packages: [
             Pkg.adapt(
                 name: "tool",
-                source: path@vendor/tool,
+                source: "./vendor/tool",
                 recipe: Recipe.copy()
             )
         ],
@@ -349,7 +349,7 @@ module dev {
         packages: [
             Pkg.adapt(
                 name: "tool",
-                source: path@vendor/tool,
+                source: "./vendor/tool",
                 recipe: Recipe.build()
             )
         ],
@@ -368,7 +368,7 @@ module dev {
         let rendered = crate::Diagnostics::render_all("env.jet", src, std::slice::from_ref(&err));
         assert_eq!(
             rendered,
-            "Error [E0968]: `nixos-24.05` isn't a `provider@target` source ref\n  --> env.jet:3:25\n    |\n  3 |     sources: { default: nixos-24.05 }\n    |                         ^^^^^^^^^^^\n Why: a named source resolves to an upstream written as `provider@target` (U6) — `github@owner/repo/rev`, `path@../local`, `nixpkgs@channel`\n Fix: write the ref as `provider@target`, e.g. `github@NixOS/nixpkgs/nixos-24.05`\n"
+            "Error [E0968]: `nixos-24.05` isn't a `target@provider` source ref or bare path\n  --> env.jet:3:25\n    |\n  3 |     sources: { default: nixos-24.05 }\n    |                         ^^^^^^^^^^^\n Why: D-JPK-REF1 puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare\n Fix: write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@nixpkgs`, or a bare path such as `../local`\n"
         );
         check_diagnostic_snapshot("E0968", &rendered);
     }
@@ -377,11 +377,11 @@ module dev {
     fn evaluate_env_conflicting_sources_are_a_merge_error() {
         let src = r#"
 module a {
-    sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
+    sources: { default: NixOS/nixpkgs/nixos-24.05@github }
     env.dev: Env.{ packages: [default.ripgrep] }
 }
 module b {
-    sources: { default: github@NixOS/nixpkgs/nixos-23.11 }
+    sources: { default: NixOS/nixpkgs/nixos-23.11@github }
     env.dev: Env.{ packages: [default.fd] }
 }
 "#;
@@ -453,9 +453,9 @@ module b {
             "module tools { env.dev: Env.{ packages: [default.jq] } }",
         )
         .unwrap();
-        let src = "module dev {\n    sources: { default: nixpkgs@nixpkgs-unstable }\n    imports: find(\"./modules\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
+        let src = "module dev {\n    sources: { default: nixpkgs-unstable@nixpkgs }\n    imports: find(\"./modules\")\n    env.dev: Env.{ packages: [default.ripgrep] }\n}\n";
         let plan = evaluate_env(src, &dir).unwrap();
-        assert_eq!(plan.package_refs, vec!["default:ripgrep", "default:jq"]);
+        assert_eq!(plan.package_refs, vec!["ripgrep@default", "jq@default"]);
         assert_eq!(
             plan.table.upstream("default"),
             Some("nixpkgs:nixpkgs-unstable")
@@ -501,7 +501,7 @@ module b {
     fn worked_example_captures_system_and_image() {
         let src = r#"
 module halcyon {
-    sources: { default: github@NixOS/nixpkgs/nixos-24.05 }
+    sources: { default: NixOS/nixpkgs/nixos-24.05@github }
     system.halcyon: {
         target: linux.x64,
         packages: [default.[firefox, btop, ripgrep]],

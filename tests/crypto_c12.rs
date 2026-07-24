@@ -29,7 +29,7 @@ fn nominal_crypto_roles_are_rejected_during_compilation() {
         r#"use core.crypto as crypto
 
 fn run() {
-    recipient :: crypto.X25519SecretKey.generate() ?? return
+    recipient :: crypto.X25519SecretKey.new_random() ?? return
     crypto.sign(recipient, [1, 2, 3]) ?? return
 }
 "#,
@@ -40,8 +40,8 @@ fn run() {
         r#"use core.crypto as crypto
 
 fn run() {
-    signing :: crypto.SigningKey.generate() ?? return
-    recipient :: crypto.X25519SecretKey.generate() ?? return
+    signing :: crypto.SigningKey.new_random() ?? return
+    recipient :: crypto.X25519SecretKey.new_random() ?? return
     sealed :: crypto.seal([recipient.public_key()], [1, 2, 3], []) ?? return
     crypto.open(signing, sealed, []) ?? return
 }

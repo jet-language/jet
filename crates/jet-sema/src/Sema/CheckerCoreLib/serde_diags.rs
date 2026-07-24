@@ -54,6 +54,24 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
 }
 
 pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnostic {
+    if module == "core.time" && name == "clock" {
+        return Diagnostic::error(
+            "E1004",
+            "`time.clock` was retired".to_string(),
+            "deterministic fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)".to_string(),
+            "use `Clock.new(seed)`".to_string(),
+            Some(span),
+        );
+    }
+    if module == "core.time.expiring" && name == "new" {
+        return Diagnostic::error(
+            "E1004",
+            "`expiring.new` was retired".to_string(),
+            "fresh values use a type-owned `new` constructor (D-SHAPE-CTORVERB1)".to_string(),
+            "use `ExpiringValue.new(value, ttl, clock)`".to_string(),
+            Some(span),
+        );
+    }
     if module == "core.event" && name == "policy_async" {
         return Diagnostic::error(
             "E1004",

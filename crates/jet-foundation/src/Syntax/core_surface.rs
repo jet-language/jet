@@ -546,12 +546,18 @@ pub const ATTR_LIVE: &str = "Live"; // D-BLOCKPLANE1
 /// works elsewhere. Erased in codegen (I3) — the block is a plain Rust block.
 pub const ATTR_NONDETERMINISTIC: &str = "Nondeterministic"; // D-BLOCKPLANE1
 
-/// D-DET1 (ratified 2026-06-22): the deterministic injected `Clock` capability
+/// D-DET1 / D-SHAPE-CTORVERB1=C: the deterministic injected `Clock` capability
 /// type. A `#Pure fn` taking a `Clock` param may read time **through it**
 /// (`clock.now()` / `clock.tick(ms)`) — reproducible, because the caller seeded
-/// it (`time.clock(seed)`) — while the ambient `time.now()` stays E3403. An
+/// it (`Clock.new(seed)`) — while the ambient `time.now()` stays E3403. An
 /// ordinary value type, not a module alias; methods are pure-from-the-fn's-view.
 pub const CLOCK_TYPE: &str = "Clock";
+
+/// D-SHAPE-CTORVERB1=C: fresh state uses `new`; entropy-drawing construction
+/// uses `new_random`. The generic TTL wrapper is the type-owned
+/// `ExpiringValue.new(value, ttl, clock)`.
+pub const EXPIRING_VALUE_TYPE: &str = "ExpiringValue";
+pub const METHOD_FRESH_NEW_RANDOM: &str = "new_random";
 
 /// D-DET1 (ratified 2026-06-22): the deterministic injected `Rng` capability
 /// type. A `#Pure fn` taking an `Rng` param may draw randomness **through it**

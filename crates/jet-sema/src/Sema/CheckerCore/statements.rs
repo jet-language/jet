@@ -38,14 +38,21 @@ impl<'a> Checker<'a> {
                 .map(|(_, _, ty, _)| substitute_type(ty, &subst))
         }
 
+        fn compound_expr_type(&self, expr: &Expr) -> Option<Type> {
+            match expr {
+                Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
+                Expr::Field(base, field, _) => self.compound_field_type(base, field),
+                Expr::Index { base, .. } => match self.compound_expr_type(base)? {
+                    Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
+                    Type::Map { value, .. } => Some(*value),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+
         fn compound_field_type(&self, base: &Expr, field: &str) -> Option<Type> {
-            let owner = match base {
-                Expr::Ident(name, _) => self.lookup(name)?.ty.clone(),
-                Expr::Field(parent, parent_field, _) => {
-                    self.compound_field_type(parent, parent_field)?
-                }
-                _ => return None,
-            };
+            let owner = self.compound_expr_type(base)?;
             self.compound_owner_field_type(&owner, field)
         }
 
@@ -84,11 +91,18 @@ impl<'a> Checker<'a> {
                     crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
                     _ => None,
                 };
-                let nested_hook = !matches!(base.as_ref(), Expr::Ident(..))
-                    && trait_name.is_some_and(|trait_name| {
-                        self.compound_field_type(base, field)
-                            .is_some_and(|ty| self.compound_type_implements(&ty, trait_name))
-                    });
+                let nested_hook = trait_name.is_some_and(|trait_name| {
+                    self.compound_field_type(base, field).is_some_and(|ty| {
+                        self.compound_type_implements(&ty, trait_name)
+                            && match base.as_ref() {
+                                Expr::Ident(..) => false,
+                                Expr::Index { .. } => {
+                                    matches!(ty, Type::Named(_) | Type::Apply { .. })
+                                }
+                                _ => true,
+                            }
+                    })
+                });
                 if nested_hook {
                     self.diags.push(Diagnostic::error(
                         "E0362",
@@ -128,11 +142,15 @@ impl<'a> Checker<'a> {
                     op: Some(op),
                     ..
                 } => (|| {
-                    let Expr::Ident(base_name, _) = base.as_ref() else {
+                    if !matches!(base.as_ref(), Expr::Ident(..) | Expr::Index { .. }) {
                         return None;
-                    };
-                    let owner_ty = self.lookup(base_name).map(|info| info.ty.clone())?;
-                    let field_ty = self.compound_owner_field_type(&owner_ty, field)?;
+                    }
+                    let field_ty = self.compound_field_type(base, field)?;
+                    if matches!(base.as_ref(), Expr::Index { .. })
+                        && matches!(&field_ty, Type::Named(_) | Type::Apply { .. })
+                    {
+                        return None;
+                    }
                     let trait_name = match op {
                         crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
                         crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),

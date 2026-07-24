@@ -50,7 +50,7 @@ pub(super) fn load_toml_sources(dir: &Path) -> Result<RefSpec::SourceTable, (Ref
         return Ok(RefSpec::SourceTable::empty());
     };
 
-    // Convert `provider@target` entries in `[sources]` to SourceTable decls.
+    // Convert `target@provider` entries in `[sources]` to SourceTable decls.
     // We use `Infer` as the provider kind so U9 inference runs at realize time,
     // matching the typed `module { … }` surface behaviour.
     let decls = manifest.sources.into_iter().filter_map(|(name, raw_ref)| {

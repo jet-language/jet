@@ -596,28 +596,40 @@ pub fn human_duration(d: std::time::Duration) -> String {
 
 /// Render a ref-classification failure as a friendly diagnostic.
 pub fn ref_error(theme: &Theme, err: &RefError) {
-    let example = "nixpkgs:fastfetch";
+    let example = "fastfetch@nixpkgs";
     match err {
         RefError::MissingSeparator(raw) => theme.error(
             &format!("`{raw}` is missing a source"),
-            "Jetpack refs are written `<source>:<package>`.",
-            &format!("try `{example}` or `github:owner/repo` — no `#`."),
+            "Jetpack refs are written `name#version@source`; `#version` is optional.",
+            &format!("try `{example}` or `owner/repo@github`."),
         ),
         RefError::EmptyHalf(raw) => theme.error(
             &format!("`{raw}` has an empty source or package"),
-            "Both halves of `<source>:<package>` must be filled in.",
+            "Both halves of `package@source` must be filled in.",
             &format!("try `{example}`."),
+        ),
+        RefError::ProviderFirst { raw, replacement } => theme.error_coded(
+            "E1317",
+            &format!("`{raw}` puts the provider first"),
+            "D-JPK-REF1 puts the package or target before `@` and the source after it.",
+            &format!("write `{replacement}`."),
+        ),
+        RefError::PathProviderRetired { raw, path } => theme.error_coded(
+            "E1317",
+            &format!("`{raw}` uses the retired `path` provider word"),
+            "Local `./`, `../`, and `/` paths are bare refs.",
+            &format!("write `{path}`."),
         ),
         RefError::UnknownSource {
             source, declared, ..
         } => {
             let known = if declared.is_empty() {
-                "Sources are the built-ins `nixpkgs`, `github`, and `path`, or names you \
-                 declare in env.jet with `pkg.source(...)`."
+                "Sources are built-ins such as `nixpkgs` and `github`, or names declared \
+                 in env.jet `sources:`."
                     .to_string()
             } else {
                 format!(
-                    "Sources are the built-ins `nixpkgs`, `github`, `path`, or names declared \
+                    "Sources are built-ins such as `nixpkgs` and `github`, or names declared \
                      in env.jet. This env declares: {}.",
                     declared.join(", ")
                 )
@@ -625,15 +637,15 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
             theme.error(
                 &format!("`{source}` is not a known source"),
                 &known,
-                &format!("add `pkg.source(\"{source}\", \"<upstream>\")`, or use a known name."),
+                &format!("declare `{source}` in `sources:`, or use a known source name."),
             )
         }
         // D-MONOREF1=A: bare name with no separator that didn't match a workspace member.
         RefError::AmbiguousBare(raw) => theme.error(
             &format!("`{raw}` is ambiguous — no workspace member matches"),
-            "A bare package name (no `source:` prefix) resolves against the workspace \
+            "A bare package name (no `@source` suffix) resolves against the workspace \
              member list. Either this name isn't a member, or there are multiple matches.",
-            "use `source:package` or `source.package` to be explicit.",
+            "use `package@source` to be explicit.",
         ),
         // E1230: a bare/path ref matched more than one workspace member.
         RefError::AmbiguousMember { query, candidates } => theme.error_coded(
@@ -644,7 +656,7 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
                  this one matches several members: {}.",
                 candidates.join(", ")
             ),
-            "address one member by its path (e.g. `packages/logging`), or use `source:package`.",
+            "address one member by its path (e.g. `packages/logging`), or use `package@source`.",
         ),
         // E1231: a bare/path ref matched no workspace member.
         RefError::UnknownMember { query, suggestions } => {
@@ -656,7 +668,7 @@ pub fn ref_error(theme: &Theme, err: &RefError) {
             theme.error_coded(
                 "E1231",
                 &format!("`{query}` is not a workspace member"),
-                "A bare or path-form ref (no `source:` prefix) must name a member listed in the \
+                "A bare or path-form ref (no `@source` suffix) must name a member listed in the \
                  workspace index (`workspace.jet` `members:`).",
                 &did_you_mean,
             )

@@ -44,7 +44,7 @@ pub fn is_module_surface(src: &str) -> bool {
 
 /// Evaluate a typed `env.jet` (the `module name { sources:/imports:/env.X: }`
 /// surface, U3/U6/U8) into an `EnvPlan`. Sources merge across modules by key
-/// (U5); package sugar resolves to `<source>:<package>` refs; the `prompt`
+/// (U5); package sugar resolves to `package@source` refs; the `prompt`
 /// scalar becomes the label. `imports: find(…)` is parsed but not yet walked
 /// (U4 discovery is a separate chunk).
 pub fn evaluate_env(src: &str, base_dir: &Path) -> Result<EnvPlan, Diagnostic> {
@@ -307,7 +307,7 @@ fn list_jet_files(dir: &Path, imp: &Expr) -> Result<Vec<PathBuf>, Diagnostic> {
 
 /// Merge every enabled module's `sources:` block — across the root and every
 /// discovered unit — into one `(name → upstream)` table (U5: same name +
-/// different ref conflicts, E0967). Each `provider@target` ref (U6) is translated
+/// different ref conflicts, E0967). Each `target@provider` ref (D-JPK-REF1) is translated
 /// to the colon/flake upstream the providers realize (`github:owner/repo/rev`,
 /// `path:./local`, `nixpkgs:channel`).
 fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
@@ -341,7 +341,7 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
                     pref.target
                 );
                 // Probe the resolved target against the *declaring file's* dir,
-                // so a `path@./local` relative resolves where it was written.
+                // so a bare `./local` path resolves where it was written.
                 kinds.insert(s.name.clone(), infer_provider_kind(&pref, &unit.base_dir));
                 map.insert(s.name.clone(), upstream);
             }
@@ -364,10 +364,10 @@ fn build_source_table(units: &[EvalUnit]) -> Result<SourceTable, Diagnostic> {
 /// is a nix flake (→ `nix`).
 ///
 /// The probe must never clone a nixpkgs-sized repo just to classify it:
-/// - `path@…` stats the directory locally (offline, free) — resolved here to a
+/// - a bare path stats the directory locally (offline, free) — resolved here to a
 ///   concrete `Core`/`Nix`;
-/// - `nixpkgs@…` is unconditionally `nix` — never probed;
-/// - `github@…` is left **`Infer`**: its kind depends on whether the remote
+/// - `…@nixpkgs` is unconditionally `nix` — never probed;
+/// - `…@github` is left **`Infer`**: its kind depends on whether the remote
 ///   repo carries a `pkg.jet`, which only a realize-time probe can answer
 ///   (this pure pass has no offline flag or source cache). `Provider::
 ///   resolve_kind` does the lightweight git peek when realization runs.
@@ -388,11 +388,11 @@ fn infer_provider_kind(pref: &RefSpec::ProviderRef, base_dir: &Path) -> Provider
                 ProviderKind::Nix
             }
         }
-        // `github@` can't be classified offline-and-free; defer to a realize-time
+        // `…@github` can't be classified offline-and-free; defer to a realize-time
         // `pkg.jet` peek (U9).
         Source::Github => ProviderKind::Infer,
-        // `nixpkgs@` is always the nix collection; never probed. (`Named` can't
-        // appear in a `provider@target` ref.)
+        // `…@nixpkgs` is always the nix collection; never probed. (`Named` can't
+        // appear in a `target@provider` ref.)
         _ => ProviderKind::Nix,
     }
 }

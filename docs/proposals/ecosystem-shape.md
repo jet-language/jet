@@ -211,7 +211,7 @@ Per-user Hangar is the default (`NEW: D-ECO-HANGARPATH1`):
 Packages, profiles, running processes, builds, toolchains, Systems, and Generations create automatic closure roots. Manual roots cover only external consumers:
 
 ```text
-$ jet hangar register-external-root backup-sdk nixpkgs:ripgrep#2.0.17 --expires-in 12w --yes # NEW: D-JPK-MANUALROOT1
+$ jet hangar register-external-root backup-sdk ripgrep#2.0.17@nixpkgs --expires-in 12w --yes # NEW: D-JPK-MANUALROOT1
 Plan external root
   + backup-sdk
     closure objects: 3
@@ -220,7 +220,7 @@ Plan external root
 Created external root `backup-sdk` at etag 1.1.
 
 $ jet hangar list-external-roots
-backup-sdk  nixpkgs:ripgrep#2.0.17  expires in 12 weeks  etag 1.1
+backup-sdk  ripgrep#2.0.17@nixpkgs  expires in 12 weeks  etag 1.1
 
 $ jet hangar unregister-external-root backup-sdk --etag 1.1 --yes
 Removed external root `backup-sdk`.
@@ -248,7 +248,7 @@ plan -> build -> verify -> canary -> activate -> observe -> rollback
 | U10 package-as-module versus typed values | **Value identity.** D-ECO-DECL1 retires U10's package-is-module rule. Modules remain code namespaces; Package is a value. |
 | `/etc/jet/hangar` versus no-root law | **User Hangar.** Platform user-data paths are default; shared storage is explicit administrator policy. |
 | U28 no daemon versus MULTIUSER1 broker | **Transient verifier boundary.** Socket activation, idle exit, no source evaluation, and independent verification distinguish broker from a resident daemon. |
-| `config.jet` versus unified root | **Root discovery.** `package.jet` supplies Systems and Fleets; `path@host` loads the named Package, not a second OS file model. |
+| `config.jet` versus unified root | **Root discovery.** `package.jet` supplies Systems and Fleets; `host@root` loads the named Package, not a second OS file model. |
 | Native JetOS versus hidden NixOS backend | **Migration-only oracle.** Native JetOS never builds through NixOS. The hidden NixOS realizer is relabeled explicit migration/A-B proof tooling and cannot close native acceptance. |
 | Freeze wording | **Epoch-scoped freeze.** D-JETOS-FREEZE1 constrained Epoch 4 implementation. Epoch 7 ratifications reopened System and Fleet work; it is not a global syntax ban. |
 | Studio status conflict | **Capability labels.** Compatibility projection is shipped; full source transaction, provenance, proof dashboard, and activation handoff remain separate capabilities until each live path passes. |
@@ -576,7 +576,7 @@ deps: .{
     wire: "3.1"
     weirdctl: Pkg.adapt(
         name: "weirdctl"
-        source: github@acme/weirdctl#8a31c9d
+        source: "acme/weirdctl#8a31c9d@github"
         recipe: Recipe.cmake
     )
 }
@@ -827,7 +827,7 @@ A Package may define only an Environment Output; no dummy value or shell hook st
 ```jet
 // NEW: D-ECO-OUTPUT-DEFAULT1
 name: "research"
-sources: .{ upstream: nixpkgs@nixos-unstable }
+sources: .{ upstream: nixos-unstable@nixpkgs }
 environments: .{
     data: .Environment.{
         name: "data"
@@ -1337,7 +1337,7 @@ The S7/S8 shape covers every requirement in the Epoch 4 JetOS research appendix 
 | Deterministic merge and provenance | Field-law composition; `.jet/lock`; `jet explain` shows contributors, priority, winner, and reason. |
 | One-character disable | S7's `system/_nvidia.jet` uses D-ECO-FILEROOT1's proposed discovered-file rule. |
 | File emission | Typed `.{ path, text, mode, replace }` entries projected inside generation (`NEW: D-ECO-JETOS2`). |
-| Stable/unstable sets, overlays, custom derivations | S6 shows `nixpkgs@nixos-unstable`; S7 shows a stable browser Overlay. Custom derivation acceptance uses ordinary Package recipes and is not shown here. |
+| Stable/unstable sets, overlays, custom derivations | S6 shows `nixos-unstable@nixpkgs`; S7 shows a stable browser Overlay. Custom derivation acceptance uses ordinary Package recipes and is not shown here. |
 | One feature spanning system and user scope | A Config may contribute System facts and referenced user Profile facts in one closed value. |
 | KDE, GNOME, Hyprland, Niri and display managers | S7 shows representative KDE selection. GNOME/Hyprland/Niri and display-manager swap acceptance over the same typed field are not shown here. |
 | Theming | S7 shows a representative Theme value. Owner-stack parity across Home Manager/Stylix/NUR-class breadth is acceptance work over the same mechanism, not shown here. |

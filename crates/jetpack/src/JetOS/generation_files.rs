@@ -674,7 +674,7 @@ pub(super) fn render_plan_json(
                     let raw = if p.source.is_empty() {
                         p.name.clone()
                     } else {
-                        format!("{}:{}", p.source, p.name)
+                        format!("{}@{}", p.name, p.source)
                     };
                     JSON::object_of(&[("name", &p.name), ("source", &p.source), ("ref", &raw)])
                 })
@@ -1427,7 +1427,7 @@ mod generation_closure_tests {
         };
         let envelope = crate::Envelope::Envelope::for_output(
             &package.to_string_lossy(),
-            "nixpkgs:package",
+            "package@nixpkgs",
             "nix",
         );
         let identity = Store::CacheIdentity {
@@ -1440,7 +1440,7 @@ mod generation_closure_tests {
             &roots,
             "package",
             "1",
-            "nixpkgs:package",
+            "package@nixpkgs",
             &package.to_string_lossy(),
             "",
             "",
@@ -1453,9 +1453,9 @@ mod generation_closure_tests {
             owned_output: Some(package.clone()),
             allow_unsigned_local: true,
         };
-        let proof = Store::verify_cache_entry(&roots, &entry, "nixpkgs:package", &expectation);
+        let proof = Store::verify_cache_entry(&roots, &entry, "package@nixpkgs", &expectation);
         assert!(proof.trusted(), "{proof:?}");
-        let lease = Store::find_verified_by_reference(&roots, "nixpkgs:package", &expectation)
+        let lease = Store::find_verified_by_reference(&roots, "package@nixpkgs", &expectation)
             .unwrap()
             .unwrap();
         symlink(&package_tool, package.join("bin/tool")).unwrap();

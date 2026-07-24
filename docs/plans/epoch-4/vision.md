@@ -172,7 +172,7 @@ The bridge matches the three daily Nix flows:
 |---|---|
 | `nix-shell -p nodejs ripgrep` | `jet env -p nodejs ripgrep` |
 | `nix develop` in a flake repo | `jet env` detects `flake.nix` / `devenv.nix` when no `env.*` exists |
-| `nix run nixpkgs#fastfetch` | `jet run nixpkgs:fastfetch` |
+| `nix run nixpkgs#fastfetch` | `jet run fastfetch@nixpkgs` |
 
 `jet bridge flake` emits a generated `flake.nix` shim so Nix users can consume
 Jet packages and envs. Adoption is consume, coexist, replace; no flag day.
@@ -218,7 +218,7 @@ module env.dev {
     packages: [
         Pkg.adapt(
             name: "weirdctl",
-            source: github@acme/weirdctl#8a31c9d,
+            source: "acme/weirdctl#8a31c9d@github",
             deps: [default.cmake, default.ninja],
             recipe: Recipe.build(fn(b: BuildContext) {
                 b.exec(cmake, ["-S", ".", "-B", "build"])

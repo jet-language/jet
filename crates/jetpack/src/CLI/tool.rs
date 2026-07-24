@@ -50,7 +50,7 @@ pub(super) fn cmd_tool(theme: &Theme, parsed: &Parsed) -> i32 {
                     "verbs are: {} — ephemeral run or persistent PATH install (D-JPK-TOOLRUN1).",
                     Syntax::TOOL_VERBS.join(", ")
                 ),
-                "try `jetpack tool run nixpkgs:ripgrep -- rg --version`.",
+                "try `jetpack tool run ripgrep@nixpkgs -- rg --version`.",
             );
             2
         }
@@ -61,8 +61,8 @@ fn tool_run(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(raw) = parsed.positional.get(1) else {
         theme.error(
             "`jetpack tool run` needs a package ref",
-            "ephemeral tool execution realizes one `<source>:<package>` and runs its binary once — nothing is left on PATH.",
-            "try `jetpack tool run nixpkgs:ripgrep -- rg --version`.",
+            "ephemeral tool execution realizes one `package@source` ref and runs its binary once — nothing is left on PATH.",
+            "try `jetpack tool run ripgrep@nixpkgs -- rg --version`.",
         );
         return 2;
     };
@@ -103,8 +103,8 @@ fn tool_install(theme: &Theme, parsed: &Parsed) -> i32 {
     let Some(raw) = parsed.positional.get(1) else {
         theme.error(
             "`jetpack tool install` needs a package ref",
-            "persistent install realizes one `<source>:<package>` and projects its bins onto `~/.jet/bin` as a tools-profile generation.",
-            "try `jetpack tool install nixpkgs:ripgrep`.",
+            "persistent install realizes one `package@source` ref and projects its bins onto `~/.jet/bin` as a tools-profile generation.",
+            "try `jetpack tool install ripgrep@nixpkgs`.",
         );
         return 2;
     };
@@ -280,7 +280,7 @@ fn tool_uninstall(theme: &Theme, parsed: &Parsed) -> i32 {
 }
 
 fn reject_unavailable_provider(theme: &Theme, raw: &str) -> Option<i32> {
-    let source = raw.split_once(Syntax::REF_SEPARATOR).map(|(s, _)| s)?;
+    let source = raw.rsplit_once(Syntax::REF_PROVIDER_AT).map(|(_, s)| s)?;
     if !Syntax::TOOL_EXTERNAL_PROVIDERS.contains(&source) {
         return None;
     }
@@ -288,10 +288,10 @@ fn reject_unavailable_provider(theme: &Theme, raw: &str) -> Option<i32> {
         Syntax::TOOL_DIAG_PROVIDER,
         &format!("tool provider `{source}` isn't available yet"),
         &format!(
-            "D-JPK-TOOLRUN1 runs tools across providers, but `{source}:…` has no hangar realization path yet (JPK-TOOL-PROVIDER). Built-in providers that work today: nixpkgs, github, path."
+            "D-JPK-TOOLRUN1 runs tools across providers, but `…@{source}` has no hangar realization path yet (JPK-TOOL-PROVIDER). Built-in providers that work today: nixpkgs, github, and bare local paths."
         ),
         &format!(
-            "use a built-in ref (`nixpkgs:…`, `github:…`, `path:…`), or wait for the `{source}` provider to land."
+            "use a built-in ref (`…@nixpkgs`, `…@github`, or a bare local path), or wait for the `{source}` provider to land."
         ),
     );
     Some(2)
@@ -1392,7 +1392,7 @@ fn run() { }
             name: "tool".into(),
             version: "1".into(),
             source: "path".into(),
-            reference: "path:tool".into(),
+            reference: "./tool".into(),
             bins: vec!["tool".into()],
             members: vec!["tool".into()],
             member_digests: vec![format!("sha256-{}", "e".repeat(64))],
@@ -1414,7 +1414,7 @@ fn run() { }
             name: "left".into(),
             version: "1".into(),
             source: "path".into(),
-            reference: "path:left".into(),
+            reference: "./left".into(),
             bins: vec!["same".into()],
             members: vec!["left".into()],
             member_digests: vec![projection.clone()],
@@ -1428,7 +1428,7 @@ fn run() { }
 
         let mut right = tool.clone();
         right.name = "right".into();
-        right.reference = "path:right".into();
+        right.reference = "./right".into();
         right.members = vec!["right".into()];
         let duplicate = ProfileDispatch::GenerationMetadata {
             generation: 1,

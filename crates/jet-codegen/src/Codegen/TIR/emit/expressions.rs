@@ -2079,7 +2079,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("({}).{}({})", recv, method, a(0))
                     }
                 }
-                // D-CORE-SECRETS1=A: generic Expiring<T> methods.
+                // D-SHAPE-CTORVERB1=C: generic ExpiringValue<T> methods.
                 THandleOp::ExpiringMethod { method } => match method.as_str() {
                     "get" => format!(
                         "{}jet_expiring_get(&({}), {}jet_clock_now(&({})))",

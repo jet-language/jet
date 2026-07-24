@@ -473,7 +473,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     let module = normalized_module.as_str();
     // D-DET1: the deterministic capability constructors carry NO ambient effect —
-    // `time.clock(seed)` / `random.rng(seed)` build a reproducible `Clock`/`Rng`
+    // `Clock.new(seed)` / `random.rng(seed)` build a reproducible `Clock`/`Rng`
     // from a caller-supplied seed (a pure value). Reading time/randomness THROUGH
     // the resulting handle (`clock.now()` / `rng.int(…)`) is a method call on a
     // value, not a module call, so it never reaches `core_effect`. This lets a
@@ -1087,7 +1087,7 @@ pub fn check_callback_bounds(
 }
 
 /// D-REPLAY1: `#Replayable` functions may not reach ambient
-/// Time/Rand/Net/Io. Deterministic handles (`time.clock(seed)`,
+/// Time/Rand/Net/Io. Deterministic handles (`Clock.new(seed)`,
 /// `random.rng(seed)`, mockable capability objects) stay valid because they do
 /// not enter the ambient Core-call effect graph.
 pub fn check_replayable_effects(

@@ -217,7 +217,14 @@ pub fn merge_refs(
 
 pub fn merge_store_entries(index: &mut Index, store_entries: &[StoreEntry]) {
     for entry in store_entries {
-        let Some((source, name)) = entry.reference.split_once(Syntax::REF_SEPARATOR) else {
+        let (source, name) = if let Some((name, source)) =
+            entry.reference.rsplit_once(Syntax::REF_PROVIDER_AT)
+        {
+            (source, name)
+        } else if let Some((source, name)) = entry.reference.split_once(Syntax::REF_SEPARATOR) {
+            // Read pre-D-JPK-REF1 hangar metadata without rewriting it.
+            (source, name)
+        } else {
             continue;
         };
         index.add_package(PackageRecord {
@@ -374,6 +381,9 @@ fn version_after_name<'a>(rest: &'a str, name: &str) -> Option<String> {
 }
 
 fn split_query(query: &str) -> (Option<&str>, &str) {
+    if let Some((name, source)) = query.rsplit_once(Syntax::REF_PROVIDER_AT) {
+        return (Some(source), name);
+    }
     if let Some((source, name)) = query.split_once(Syntax::REF_SEPARATOR) {
         return (Some(source), name);
     }
@@ -494,7 +504,7 @@ mod tests {
     fn index_round_trips_and_searches() {
         let mut index = Index::default();
         let spec = RefSpec::classify_in(
-            "default:ripgrep",
+            "ripgrep@default",
             &RefSpec::SourceTable::from_decls([(
                 "default".to_string(),
                 "nixpkgs:nixos-24.05".to_string(),
@@ -521,7 +531,7 @@ mod tests {
             index.add_package(PackageRecord {
                 source: "default".to_string(),
                 name: name.to_string(),
-                reference: format!("default:{name}"),
+                reference: format!("{name}@default"),
                 version: String::new(),
                 platforms: platform_strings(),
                 docs: String::new(),

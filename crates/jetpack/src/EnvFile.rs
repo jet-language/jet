@@ -37,8 +37,8 @@ pub struct NamedSource {
 
 /// The declared environment, parsed from the directive calls. Sources may be a
 /// single default (`pkg.source("nixpkgs")`) and/or named declarations
-/// (`pkg.source("stable", "github:…")`, D-JPK17). Package entries are written
-/// either bare (resolved against the default source) or `name:package`.
+/// (`pkg.source("stable", "…@github")`, D-JPK17/D-JPK-REF1). Package entries
+/// are either bare (resolved against the default source) or `package@source`.
 ///
 /// `env.jet` is **purely** the dev-shell descriptor (U10): the package index
 /// that maps a package name → its source lives in the source repo's
@@ -76,17 +76,32 @@ impl EnvFile {
                 .as_deref()
                 .map(ProviderKind::parse)
                 .unwrap_or_default();
-            (s.name.clone(), s.upstream.clone(), via)
+            let upstream = super::RefSpec::classify_provider_ref(&s.upstream)
+                .map(|source| {
+                    format!(
+                        "{}{}{}",
+                        source.provider.label(),
+                        Syntax::REF_SEPARATOR,
+                        source.target
+                    )
+                })
+                .unwrap_or_else(|_| s.upstream.clone());
+            (s.name.clone(), upstream, via)
         }))
     }
 
-    /// Resolve one package entry to a full `<source>:<package>` ref: entries
+    /// Resolve one package entry to a full `package@source` ref: entries
     /// that already carry a source pass through; bare entries take the default.
     fn entry_ref(&self, entry: &str) -> String {
-        if entry.contains(Syntax::REF_SEPARATOR) {
+        if entry.contains(Syntax::REF_PROVIDER_AT) || super::RefSpec::is_bare_path(entry) {
             entry.to_string()
         } else {
-            format!("{}{}{}", self.source_label(), Syntax::REF_SEPARATOR, entry)
+            format!(
+                "{}{}{}",
+                entry,
+                Syntax::REF_PROVIDER_AT,
+                self.source_label()
+            )
         }
     }
 
@@ -180,7 +195,7 @@ pub fn parse(text: &str) -> EnvFile {
 }
 
 /// How a ref should be stored as a package entry: bare when it matches the
-/// default source, otherwise `name:package` so the source survives.
+/// default source, otherwise `package@source` so the source survives.
 fn entry_for(ef: &EnvFile, spec: &RefSpec) -> String {
     let source = spec.source.label();
     let is_default = match &spec.source {
@@ -190,7 +205,12 @@ fn entry_for(ef: &EnvFile, spec: &RefSpec) -> String {
     if is_default {
         spec.package.clone()
     } else {
-        format!("{source}{}{}", Syntax::REF_SEPARATOR, spec.package)
+        format!(
+            "{}{}{}",
+            spec.package,
+            Syntax::REF_PROVIDER_AT,
+            source
+        )
     }
 }
 
@@ -212,14 +232,14 @@ pub fn add(dir: &Path, spec: &RefSpec) -> std::io::Result<EnvFile> {
 }
 
 /// Remove a package from the env file in `dir`. Matches on the fully-resolved
-/// ref, so it works whether the entry was stored bare or `name:package`.
+/// ref, so it works whether the entry was stored bare or `package@source`.
 pub fn remove(dir: &Path, spec: &RefSpec) -> std::io::Result<(EnvFile, bool)> {
     let mut ef = load(dir).unwrap_or_default();
     let target = format!(
         "{}{}{}",
-        spec.source.label(),
-        Syntax::REF_SEPARATOR,
-        spec.package
+        spec.package,
+        Syntax::REF_PROVIDER_AT,
+        spec.source.label()
     );
     let before = ef.packages.len();
     let resolved: Vec<String> = ef.packages.iter().map(|p| ef.entry_ref(p)).collect();
@@ -342,9 +362,9 @@ pub fn shell() -> [JSON] {
 use jetpack as pkg;
 pub fn shell() -> [JSON] {
     return [
-        pkg.source("stable", "github:NixOS/nixpkgs/nixos-24.05");
-        pkg.source("unstable", "github:NixOS/nixpkgs/nixpkgs-unstable");
-        pkg.packages(["stable:ripgrep", "unstable:neovim"]);
+        pkg.source("stable", "NixOS/nixpkgs/nixos-24.05@github");
+        pkg.source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github");
+        pkg.packages(["ripgrep@stable", "neovim@unstable"]);
         pkg.prompt("jetpack");
     ];
 }
@@ -359,7 +379,7 @@ pub fn shell() -> [JSON] {
         assert_eq!(ef.prompt.as_deref(), Some("jetpack"));
         assert_eq!(
             ef.refs(),
-            vec!["nixpkgs:ripgrep", "nixpkgs:fd", "nixpkgs:claude-code"]
+            vec!["ripgrep@nixpkgs", "fd@nixpkgs", "claude-code@nixpkgs"]
         );
     }
 
@@ -368,10 +388,10 @@ pub fn shell() -> [JSON] {
         let ef = parse(NAMED);
         assert_eq!(ef.named.len(), 2);
         assert_eq!(ef.named[0].name, "stable");
-        assert_eq!(ef.named[0].upstream, "github:NixOS/nixpkgs/nixos-24.05");
+        assert_eq!(ef.named[0].upstream, "NixOS/nixpkgs/nixos-24.05@github");
         assert_eq!(ef.named[0].via, None);
         assert_eq!(ef.named[1].name, "unstable");
-        assert_eq!(ef.refs(), vec!["stable:ripgrep", "unstable:neovim"]);
+        assert_eq!(ef.refs(), vec!["ripgrep@stable", "neovim@unstable"]);
         // Every declared name classifies against the env's table.
         let table = ef.source_table();
         for r in ef.refs() {
@@ -388,8 +408,8 @@ pub fn shell() -> [JSON] {
 use jetpack as pkg;
 pub fn shell() -> [JSON] {
     return [
-        pkg.source("mine", "path:./jet-pkgs", "core");
-        pkg.packages(["mine:hello"]);
+        pkg.source("mine", "./jet-pkgs", "core");
+        pkg.packages(["hello@mine"]);
     ];
 }
 "#;
@@ -401,7 +421,7 @@ pub fn shell() -> [JSON] {
             ef.source_table().provider("mine"),
             super::super::RefSpec::ProviderKind::Core
         );
-        assert_eq!(ef.packages, vec!["mine:hello"]);
+        assert_eq!(ef.packages, vec!["hello@mine"]);
     }
 
     #[test]
@@ -445,12 +465,12 @@ pub fn shell() -> [JSON] {
     #[test]
     fn add_creates_and_dedupes() {
         let dir = scratch();
-        let ef = add(&dir, &classify("nixpkgs:ripgrep").unwrap()).unwrap();
+        let ef = add(&dir, &classify("ripgrep@nixpkgs").unwrap()).unwrap();
         assert_eq!(ef.packages, vec!["ripgrep"]);
         // adding again is a no-op
-        let ef = add(&dir, &classify("nixpkgs:ripgrep").unwrap()).unwrap();
+        let ef = add(&dir, &classify("ripgrep@nixpkgs").unwrap()).unwrap();
         assert_eq!(ef.packages, vec!["ripgrep"]);
-        let ef = add(&dir, &classify("nixpkgs:fd").unwrap()).unwrap();
+        let ef = add(&dir, &classify("fd@nixpkgs").unwrap()).unwrap();
         assert_eq!(ef.packages, vec!["fd", "ripgrep"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -458,12 +478,12 @@ pub fn shell() -> [JSON] {
     #[test]
     fn remove_edits_file() {
         let dir = scratch();
-        add(&dir, &classify("nixpkgs:ripgrep").unwrap()).unwrap();
-        add(&dir, &classify("nixpkgs:fd").unwrap()).unwrap();
-        let (ef, removed) = remove(&dir, &classify("nixpkgs:fd").unwrap()).unwrap();
+        add(&dir, &classify("ripgrep@nixpkgs").unwrap()).unwrap();
+        add(&dir, &classify("fd@nixpkgs").unwrap()).unwrap();
+        let (ef, removed) = remove(&dir, &classify("fd@nixpkgs").unwrap()).unwrap();
         assert!(removed);
         assert_eq!(ef.packages, vec!["ripgrep"]);
-        let (_ef, removed) = remove(&dir, &classify("nixpkgs:nope").unwrap()).unwrap();
+        let (_ef, removed) = remove(&dir, &classify("nope@nixpkgs").unwrap()).unwrap();
         assert!(!removed);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -475,13 +495,13 @@ pub fn shell() -> [JSON] {
         let table = parse(NAMED).source_table();
         // Adding under a declared named source stores it prefixed and preserves
         // the source declarations.
-        let ef = add(&dir, &classify_in("unstable:fd", &table).unwrap()).unwrap();
-        assert!(ef.packages.contains(&"unstable:fd".to_string()));
+        let ef = add(&dir, &classify_in("fd@unstable", &table).unwrap()).unwrap();
+        assert!(ef.packages.contains(&"fd@unstable".to_string()));
         assert_eq!(ef.named.len(), 2, "named sources must survive an edit");
         // Removing it by its full ref works.
-        let (ef, removed) = remove(&dir, &classify_in("unstable:fd", &table).unwrap()).unwrap();
+        let (ef, removed) = remove(&dir, &classify_in("fd@unstable", &table).unwrap()).unwrap();
         assert!(removed);
-        assert!(!ef.packages.contains(&"unstable:fd".to_string()));
+        assert!(!ef.packages.contains(&"fd@unstable".to_string()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

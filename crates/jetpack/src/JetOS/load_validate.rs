@@ -13,12 +13,12 @@ pub(super) fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option
         theme.error_coded(
             "E0979",
             "`jet os` needs a host to apply",
-            "D-JPK-OSHOST1=C: a bare host selects `system.<host>` in ./config.jet; `path@host` selects an exact external root.",
-            "write `jet os switch laptop` or `jet os switch ../machines@laptop`.",
+            "D-JPK-REF1: a bare host selects `system.<host>` in ./config.jet; `host@root` selects an exact external root.",
+            "write `jet os switch laptop` or `jet os switch laptop@../machines`.",
         );
         return None;
     }
-    let Some((prefix, host)) = raw.rsplit_once(Syntax::OS_HOST_SELECTOR) else {
+    let Some((host, root)) = raw.split_once(Syntax::OS_HOST_SELECTOR) else {
         return Some(Target {
             config: default_config_path(),
             host: raw.to_string(),
@@ -28,20 +28,25 @@ pub(super) fn parse_target_or_report(theme: &Theme, raw: Option<&str>) -> Option
         theme.error_coded(
             "E0979",
             "`jet os` needs a host to apply",
-            "D-JPK-OSHOST1=C: `path@host` uses the text after `@` as the host name.",
-            "write `jet os switch laptop` or `jet os switch ../machines@laptop`.",
+            "D-JPK-REF1: `host@root` uses the text before `@` as the host name.",
+            "write `jet os switch laptop` or `jet os switch laptop@../machines`.",
         );
         return None;
     }
-    let config = if prefix.is_empty() {
-        default_config_path()
+    if root.trim().is_empty() {
+        theme.error_coded(
+            "E0979",
+            &format!("`jet os` target `{raw}` needs a root after `@`"),
+            "D-JPK-REF1: `host@root` uses the text after `@` as the external config root.",
+            "write `jet os switch laptop` or `jet os switch laptop@../machines`.",
+        );
+        return None;
+    }
+    let path = PathBuf::from(root);
+    let config = if path.is_dir() {
+        path.join(Syntax::CONFIG_FILE)
     } else {
-        let path = PathBuf::from(prefix);
-        if path.is_dir() {
-            path.join(Syntax::CONFIG_FILE)
-        } else {
-            path
-        }
+        path
     };
     Some(Target {
         config,
@@ -118,7 +123,7 @@ pub(super) fn load_plan(theme: &Theme, target: &Target) -> Option<EnvPlan> {
                     target.config.display(),
                     target.host
                 ),
-                "create the config file, or pass an explicit path before the `@`.",
+                "create the config file, or pass an explicit root after the `@`.",
             );
             return None;
         }

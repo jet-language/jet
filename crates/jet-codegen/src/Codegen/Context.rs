@@ -1510,7 +1510,9 @@ impl Cx {
                 format!("&mut [{}]", self.rust_type(&args[0]))
             }
             // D-CORE-SECRETS1=A: generic TTL stays distinct from secret lifecycle.
-            Type::Apply { name, args } if name == "Expiring" && args.len() == 1 => {
+            Type::Apply { name, args }
+                if name == Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 =>
+            {
                 format!("JetExpiring<{}>", self.rust_type(&args[0]))
             }
             // D-TTLVAL1=A: the one secret-lifetime wrapper.

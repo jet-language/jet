@@ -11,10 +11,9 @@ use super::super::Merge::MergeError;
 pub(super) fn bad_source_ref(ref_text: &str, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E0968",
-        format!("`{ref_text}` isn't a `provider@target` source ref"),
-        "a named source resolves to an upstream written as `provider@target` (U6) — `github@owner/repo/rev`, `path@../local`, `nixpkgs@channel`".to_string(),
-        "write the ref as `provider@target`, e.g. `github@NixOS/nixpkgs/nixos-24.05`"
-            .to_string(),
+        format!("`{ref_text}` isn't a `target@provider` source ref or bare path"),
+        "D-JPK-REF1 puts the upstream target before `@` and its provider after it; local `./`, `../`, and `/` paths stay bare".to_string(),
+        "write `NixOS/nixpkgs/nixos-24.05@github`, `nixos-unstable@nixpkgs`, or a bare path such as `../local`".to_string(),
         span,
     )
 }

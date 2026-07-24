@@ -974,11 +974,11 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("x"), "hi").unwrap();
-        let e = Envelope::for_output(&dir.to_string_lossy(), "mine:hello", "core-source");
+        let e = Envelope::for_output(&dir.to_string_lossy(), "hello@mine", "core-source");
         assert!(!e.is_empty());
         assert!(e.output_hash.starts_with("sha256-"));
         assert!(!e.platform.is_empty());
-        assert!(e.provenance.contains("mine:hello"));
+        assert!(e.provenance.contains("hello@mine"));
         assert!(e.provenance.contains("core-source"));
         assert!(
             e.signature.is_empty(),

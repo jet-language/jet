@@ -421,7 +421,7 @@ fn run_workspace_members(
             format!("path:{}", abs.display()),
             ProviderKind::Core,
         )]);
-        let raw = format!("{}:{}", member.name, member.name);
+        let raw = format!("{}@{}", member.name, member.name);
         if plan_members.len() > 1 {
             theme.progress_chain(
                 action,

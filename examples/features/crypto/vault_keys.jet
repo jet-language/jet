@@ -14,7 +14,7 @@ fn provision() --[Secret, Io]-> {
 // Compile-time surface proof for the full safe lifecycle. The example's run
 // path remains read-only; applications call a mutation flow only when needed.
 fn lifecycle_surface() --[Secret]-> {
-    key :: crypto.SigningKey.generate() ?? return
+    key :: crypto.SigningKey.new_random() ?? return
     store_plan :: vault.prepare_store<crypto.SigningKey>("staged", ^key) ?? return
     store_write :: vault.authorize_write(&store_plan, "store generated signer") ?? return
     stored :: vault.commit_store(^store_write, ^store_plan) ?? return

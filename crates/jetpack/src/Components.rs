@@ -45,7 +45,7 @@ pub const STARTER_COMPONENTS: &[StarterComponent] = &[
 
 /// Look up a starter component by its exact catalog name. Case-sensitive: a
 /// lowercase `button` does not match `Button` — it falls through to ordinary
-/// `<source>:<package>` ref classification instead of quietly guessing.
+/// `package@source` ref classification instead of quietly guessing.
 pub fn find(name: &str) -> Option<&'static StarterComponent> {
     STARTER_COMPONENTS.iter().find(|c| c.name == name)
 }

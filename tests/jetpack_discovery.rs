@@ -126,7 +126,7 @@ fn info_json_is_stable_and_includes_service_options() {
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
-        stdout.contains("\"reference\":\"default:ripgrep\""),
+        stdout.contains("\"reference\":\"ripgrep@default\""),
         "{stdout}"
     );
     assert!(stdout.contains("\"version\":\"14.1.0\""), "{stdout}");

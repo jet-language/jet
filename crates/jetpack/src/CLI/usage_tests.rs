@@ -15,8 +15,8 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} enter -- cmd                   run a command in the project shell, then exit
   {bin} enter -p <pkg>...              add ad-hoc nixpkgs packages, undeclared
   {bin} enter --flake                  force a foreign flake.nix/devenv.nix shell
-  {bin} run   <source>:<package>       enter a temporary shell with that package
-  {bin} run   <source>:<package> -- cmd run a command in that environment, then exit
+  {bin} run   <package>@<source>       enter a temporary shell with that package
+  {bin} run   <package>@<source> -- cmd run a command in that environment, then exit
   {bin} run                            enter the shell described by ./{pack}
   {bin} dev                            realize the env, then run the project's fn dev()
   {bin} tool run <ref> [-- cmd]        run a package binary ephemerally (D-JPK-TOOLRUN1)
@@ -25,14 +25,14 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} tool uninstall <name>          remove an installed tool from ~/.jet/bin
 
 {manifest}
-  {bin} add    <source>:<package>      add a package to ./{pack}
+  {bin} add    <package>@<source>      add a package to ./{pack}
   {bin} add    <Component>             copy a starter component into ./components
-  {bin} remove <source>:<package>      remove a package from ./{pack}
+  {bin} remove <package>@<source>      remove a package from ./{pack}
   {bin} bridge flake                   print an env.* shim translated from ./flake.nix
 
 {store}
   {bin} doctor [--online]              check hangar, registry, locks, cache, and signing
-  {bin} build [<source>:<package>]     realize a package/environment, don't enter
+  {bin} build [<package>@<source>]     realize a package/environment, don't enter
   {bin} build -p <member>…             (workspace) build only named members
   {bin} build --affected[-since <ref>] (workspace) build changed members + dependents
   {bin} test  [-p <member>…]           (workspace) realize/test selected members
@@ -85,9 +85,9 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} config sandbox allow           allow fallback with L0205 warning
 
 {refs}
-  nixpkgs:fastfetch                    a package from nixpkgs
-  github:owner/repo                    a Jet pack repo (or a flake fallback)
-  path:./my-env                        a local pack/flake directory
+  fastfetch@nixpkgs                    a package from nixpkgs
+  owner/repo@github                    a Jet pack repo (or a flake fallback)
+  ./my-env                             a local pack/flake directory
 
 {components}
   Button, Label, Input, Container      starter kit — ownable, editable .jet source
@@ -158,12 +158,12 @@ mod tests {
 
     #[test]
     fn splits_trailing_command() {
-        let args: Vec<String> = ["nixpkgs:jq", "--", "jq", "--version"]
+        let args: Vec<String> = ["jq@nixpkgs", "--", "jq", "--version"]
             .iter()
             .map(|s| s.to_string())
             .collect();
         let p = parse_args(&args);
-        assert_eq!(p.positional, vec!["nixpkgs:jq"]);
+        assert_eq!(p.positional, vec!["jq@nixpkgs"]);
         assert_eq!(p.command, Some(vec!["jq".into(), "--version".into()]));
     }
 
@@ -171,7 +171,7 @@ mod tests {
     fn parses_flags() {
         let fixtures = std::env::temp_dir().join("fx");
         let fixtures_arg = fixtures.to_string_lossy().to_string();
-        let args: Vec<String> = ["--no-color", "--fixtures", &fixtures_arg, "-y", "nixpkgs:jq"]
+        let args: Vec<String> = ["--no-color", "--fixtures", &fixtures_arg, "-y", "jq@nixpkgs"]
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(p.flags.color, ColorChoice::Never);
         assert!(p.flags.assume_yes);
         assert_eq!(p.flags.fixtures, Some(fixtures));
-        assert_eq!(p.positional, vec!["nixpkgs:jq"]);
+        assert_eq!(p.positional, vec!["jq@nixpkgs"]);
     }
 
     #[test]
@@ -199,13 +199,13 @@ mod tests {
 
     #[test]
     fn parses_long_yes_flag() {
-        let args: Vec<String> = ["--yes", "nixpkgs:jq"]
+        let args: Vec<String> = ["--yes", "jq@nixpkgs"]
             .iter()
             .map(|s| s.to_string())
             .collect();
         let p = parse_args(&args);
         assert!(p.flags.assume_yes);
-        assert_eq!(p.positional, vec!["nixpkgs:jq"]);
+        assert_eq!(p.positional, vec!["jq@nixpkgs"]);
     }
 
     // ── U16: -p / --flake / --pure ──
