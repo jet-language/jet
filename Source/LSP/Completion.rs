@@ -434,7 +434,7 @@ pub(crate) fn compute_completions(
     items
 }
 
-fn use_statement_for_module(
+pub(crate) fn use_statement_for_module(
     current_path: &str,
     workspace_root: Option<&str>,
     module_path: &str,

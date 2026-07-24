@@ -14,7 +14,8 @@ use super::Check::{fixes_from_diagnostics, Fix};
 use super::Completion::compute_completions;
 use super::Features::{
     compute_definition, compute_generated_definition, compute_hover, compute_references,
-    compute_rename, encode_semantic_tokens, encode_semantic_tokens_in_span, format_inlay_hints,
+    compute_refactor_actions, compute_rename, encode_semantic_tokens,
+    encode_semantic_tokens_in_span, format_inlay_hints, RefactorAction,
 };
 use super::Position::{
     apply_lsp_edit, byte_offset_to_lsp, byte_span_to_range, full_document_range, lsp_pos_to_offset,
@@ -116,9 +117,6 @@ impl Server {
             .lex_text(&doc.path, &doc.text)
     }
 
-    fn fixes(&self, doc: &Document) -> Vec<Fix> {
-        fixes_from_diagnostics(self.check(doc))
-    }
 }
 
 // ── JSON-RPC main loop ────────────────────────────────────────────────────────
@@ -803,28 +801,106 @@ fn code_action_response(
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
+    let requested = json_get(params, "range").and_then(range_from_json)?;
+    let requested = Span::new(
+        lsp_pos_to_offset(&doc.text, requested.start),
+        lsp_pos_to_offset(&doc.text, requested.end),
+    );
+    let checked = server.check_with_bundle(doc);
+    let fixes = fixes_from_diagnostics(checked.diags.clone());
+    let mut db = checked
+        .bundle
+        .map(|bundle| build_symbol_db(&bundle, &checked.facts))
+        .unwrap_or_else(SymbolDB::new);
+    merge_workspace_defs(server, doc, &mut db);
+    let tokens = server.lex(doc);
+    let workspace_root = workspace_root_for_path(server, &doc.path);
+    let refactors = compute_refactor_actions(
+        &db,
+        &tokens,
+        &checked.diags,
+        &doc.text,
+        &doc.path,
+        workspace_root.as_deref(),
+        requested,
+    );
     // Go through the SAME unified fix engine the CLI `jet fix` uses, so a fix
     // offered in the editor is byte-identical to a fix applied on the command
     // line.
-    let fixes = server.fixes(doc);
     let mut actions = String::new();
     for (n, fix) in fixes.iter().enumerate() {
         if n > 0 {
             actions.push(',');
         }
-        actions.push_str(&code_action_json(uri, &doc.text, fix));
+        actions.push_str(&code_action_json(uri, doc.version, &doc.text, fix));
+    }
+    for (n, action) in refactors.iter().enumerate() {
+        if !fixes.is_empty() || n > 0 {
+            actions.push(',');
+        }
+        actions.push_str(&refactor_action_json(
+            uri,
+            doc.version,
+            &doc.text,
+            action,
+        ));
     }
     Some(response(id, &format!("[{}]", actions)))
 }
 
-fn code_action_json(uri: &str, src: &str, fix: &Fix) -> String {
-    let range = byte_span_to_range(src, fix.edit.span);
+fn code_action_json(uri: &str, version: i32, src: &str, fix: &Fix) -> String {
+    action_json(
+        uri,
+        version,
+        src,
+        &fix.title,
+        "quickfix",
+        std::slice::from_ref(&fix.edit),
+    )
+}
+
+fn refactor_action_json(
+    uri: &str,
+    version: i32,
+    src: &str,
+    action: &RefactorAction,
+) -> String {
+    action_json(
+        uri,
+        version,
+        src,
+        &action.title,
+        action.kind,
+        &action.edits,
+    )
+}
+
+fn action_json(
+    uri: &str,
+    version: i32,
+    src: &str,
+    title: &str,
+    kind: &str,
+    edits: &[crate::Diagnostics::TextEdit],
+) -> String {
+    let edits = edits
+        .iter()
+        .map(|edit| {
+            format!(
+                r#"{{"range":{},"newText":"{}"}}"#,
+                range_json(byte_span_to_range(src, edit.span)),
+                json_escape(&edit.new_text)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
     format!(
-        r#"{{"title":"{}","kind":"quickfix","edit":{{"changes":{{"{}":[{{"range":{},"newText":"{}"}}]}}}}}}"#,
-        json_escape(&fix.title),
+        r#"{{"title":"{}","kind":"{}","edit":{{"documentChanges":[{{"textDocument":{{"uri":"{}","version":{}}},"edits":[{}]}}]}}}}"#,
+        json_escape(title),
+        kind,
         json_escape(uri),
-        range_json(range),
-        json_escape(&fix.edit.new_text)
+        version,
+        edits,
     )
 }
 
@@ -2136,6 +2212,119 @@ fn collect_jet_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 #[cfg(test)]
 mod project_part_tests {
     use super::*;
+
+    fn code_actions_for(
+        server: &Server,
+        uri: &str,
+        src: &str,
+        start: usize,
+        end: usize,
+    ) -> String {
+        let start = byte_offset_to_lsp(src, start);
+        let end = byte_offset_to_lsp(src, end);
+        let params = parse_json(&format!(
+            r#"{{"textDocument":{{"uri":"{}"}},"range":{{"start":{{"line":{},"character":{}}},"end":{{"line":{},"character":{}}}}},"context":{{"diagnostics":[]}}}}"#,
+            json_escape(uri),
+            start.line,
+            start.character,
+            end.line,
+            end.character,
+        ))
+        .unwrap();
+        code_action_response(server, Some(&params), &JsonValue::Number(1)).unwrap()
+    }
+
+    #[test]
+    fn code_actions_extract_binding_function_and_inline_with_versioned_edits() {
+        let src = "fn run(left: Int, right: Int) {\n    total :: left + right\n    print(total)\n}\n";
+        let root = std::env::temp_dir().join(format!(
+            "jet-lsp-refactor-actions-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        std::fs::write(&main, src).unwrap();
+        let path = main.to_string_lossy().into_owned();
+        let uri = path_to_uri(&path);
+        let mut server = Server::new();
+        server
+            .workspace_roots
+            .push(root.to_string_lossy().into_owned());
+        server.docs.insert(
+            uri.clone(),
+            Document::new(path, src.to_string(), 7),
+        );
+
+        let expr_start = src.find("left + right").unwrap();
+        let extracted = code_actions_for(
+            &server,
+            &uri,
+            src,
+            expr_start,
+            expr_start + "left + right".len(),
+        );
+        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
+        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
+        assert!(extracted.contains("\"kind\":\"refactor.extract\""), "{extracted}");
+        assert!(
+            extracted.contains(&format!(
+                r#""textDocument":{{"uri":"{}","version":7}}"#,
+                json_escape(&uri)
+            )),
+            "{extracted}"
+        );
+
+        let use_start = src.rfind("total").unwrap();
+        let inlined = code_actions_for(
+            &server,
+            &uri,
+            src,
+            use_start,
+            use_start + "total".len(),
+        );
+        assert!(inlined.contains("\"title\":\"Inline `total`\""), "{inlined}");
+        assert!(inlined.contains("\"kind\":\"refactor.inline\""), "{inlined}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn code_action_imports_one_unique_workspace_symbol() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-lsp-import-action-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let helper = root.join("helper.jet");
+        let src = "fn run() { print(answer()) }\n";
+        std::fs::write(&main, src).unwrap();
+        std::fs::write(&helper, "pub fn answer() -> Int { return 42 }\n").unwrap();
+
+        let path = main.to_string_lossy().into_owned();
+        let uri = path_to_uri(&path);
+        let mut server = Server::new();
+        server
+            .workspace_roots
+            .push(root.to_string_lossy().into_owned());
+        server.docs.insert(
+            uri.clone(),
+            Document::new(path, src.to_string(), 3),
+        );
+        let start = src.find("answer").unwrap();
+        let actions = code_actions_for(
+            &server,
+            &uri,
+            src,
+            start,
+            start + "answer".len(),
+        );
+        assert!(actions.contains("\"title\":\"Import `helper`\""), "{actions}");
+        assert!(actions.contains(r#""newText":"use helper\n""#), "{actions}");
+        assert!(actions.contains("\"kind\":\"quickfix\""), "{actions}");
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn e2702_lsp_diagnostic_carries_the_closed_compiler_projection() {

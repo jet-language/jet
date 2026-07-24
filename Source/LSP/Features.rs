@@ -1,11 +1,11 @@
 //! LSP language features: hover, go-to-definition, references, rename,
-//! semantic tokens, inlay hints.
+//! refactors, semantic tokens, inlay hints.
 
-use crate::Diagnostics::Span;
+use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Lexer::{TokKind, Token};
 use crate::Syntax;
 
-use super::Completion::{JET_KEYWORDS, JET_TYPES};
+use super::Completion::{use_statement_for_module, JET_KEYWORDS, JET_TYPES};
 use super::Position::byte_offset_to_lsp;
 use super::SymbolDB::{InlayHint, SymKind, SymbolDB};
 use jet_foundation::JSON::json_escape;
@@ -318,6 +318,529 @@ pub(crate) fn compute_rename(
         return Err(format!("no occurrences of `{}` found", name));
     }
     Ok(spans)
+}
+
+// ── Code actions ──────────────────────────────────────────────────────────────
+
+pub(crate) struct RefactorAction {
+    pub title: String,
+    pub kind: &'static str,
+    pub edits: Vec<TextEdit>,
+}
+
+pub(crate) fn compute_refactor_actions(
+    db: &SymbolDB,
+    tokens: &[Token],
+    diagnostics: &[Diagnostic],
+    src: &str,
+    path: &str,
+    workspace_root: Option<&str>,
+    requested: Span,
+) -> Vec<RefactorAction> {
+    let mut actions = import_actions(db, diagnostics, src, path, workspace_root, requested);
+    let Some(selected) = trim_span(src, requested) else {
+        actions.extend(inline_actions(db, tokens, src, path, requested));
+        return actions;
+    };
+    let Some(initializer) = exact_initializer(db, path, selected) else {
+        actions.extend(inline_actions(db, tokens, src, path, selected));
+        return actions;
+    };
+    let Some(binding) = binding_for_initializer(db, src, path, initializer) else {
+        return actions;
+    };
+    let Some(expression) = src.get(selected.start..selected.end) else {
+        return actions;
+    };
+    let line_start = line_start(src, binding.def_span.start);
+    let indent = &src[line_start..binding.def_span.start];
+    if indent.chars().all(char::is_whitespace) {
+        let name = fresh_name(db, "extracted_value");
+        actions.push(RefactorAction {
+            title: "Extract binding".to_string(),
+            kind: "refactor.extract",
+            edits: vec![
+                TextEdit {
+                    span: Span::new(line_start, line_start),
+                    new_text: format!("{indent}{name} :: {expression}\n"),
+                },
+                TextEdit {
+                    span: selected,
+                    new_text: name,
+                },
+            ],
+        });
+    }
+    if let Some(action) = extract_function_action(db, tokens, src, path, selected, binding) {
+        actions.push(action);
+    }
+    actions
+}
+
+fn import_actions(
+    db: &SymbolDB,
+    diagnostics: &[Diagnostic],
+    src: &str,
+    path: &str,
+    workspace_root: Option<&str>,
+    requested: Span,
+) -> Vec<RefactorAction> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for diagnostic in diagnostics
+        .iter()
+        .filter(|diagnostic| matches!(diagnostic.code.as_str(), "E0102" | "E0107"))
+    {
+        let Some(span) = diagnostic.span.filter(|span| spans_touch(*span, requested)) else {
+            continue;
+        };
+        let Some(name) = src.get(span.start..span.end) else {
+            continue;
+        };
+        let mut modules = db
+            .symbols
+            .lookup(name)
+            .into_iter()
+            .filter(|symbol| {
+                symbol.module_path != path
+                    && matches!(
+                        symbol.provenance,
+                        jet_semindex::SemanticProvenance::Source { .. }
+                    )
+                    && source_symbol_is_exported(symbol)
+                    && !matches!(
+                        &symbol.kind,
+                        jet_semindex::SemanticSymbolKind::Local
+                            | jet_semindex::SemanticSymbolKind::Parameter
+                            | jet_semindex::SemanticSymbolKind::Member
+                    )
+            })
+            .filter_map(|symbol| {
+                use_statement_for_module(path, workspace_root, &symbol.module_path)
+            })
+            .collect::<Vec<_>>();
+        modules.sort();
+        modules.dedup();
+        let [statement] = modules.as_slice() else {
+            continue;
+        };
+        if src.lines().any(|line| line.trim() == statement.trim()) || !seen.insert(statement.clone())
+        {
+            continue;
+        }
+        let module = statement
+            .trim()
+            .strip_prefix("use ")
+            .unwrap_or(statement.trim());
+        out.push(RefactorAction {
+            title: format!("Import `{module}`"),
+            kind: "quickfix",
+            edits: vec![TextEdit {
+                span: Span::new(0, 0),
+                new_text: statement.clone(),
+            }],
+        });
+    }
+    out
+}
+
+fn extract_function_action(
+    db: &SymbolDB,
+    tokens: &[Token],
+    src: &str,
+    path: &str,
+    selected: Span,
+    binding: &jet_semindex::SymDef,
+) -> Option<RefactorAction> {
+    if !is_trivially_pure(tokens, selected) {
+        return None;
+    }
+    let SymKind::Local {
+        mutable: false,
+        ty: Some(return_type),
+    } = &binding.kind
+    else {
+        return None;
+    };
+    if !is_scalar_type(return_type) {
+        return None;
+    }
+    let function = db
+        .index
+        .definition_facts()
+        .iter()
+        .filter(|definition| {
+            definition.module_path == path
+                && definition.kind == "function"
+                && definition.span.start <= selected.start
+                && selected.end <= definition.span.end
+        })
+        .min_by_key(|definition| definition.span.end - definition.span.start);
+    let function = function?;
+
+    let mut inputs: Vec<(&jet_semindex::SymDef, usize)> = Vec::new();
+    for reference in db.refs.iter().filter(|reference| {
+        reference.module_path == path
+            && selected.start <= reference.span.start
+            && reference.span.end <= selected.end
+    }) {
+        let Some(target) = reference.target.as_ref() else {
+            return None;
+        };
+        let Some(definition) = definition_for_anchor(db, target) else {
+            return None;
+        };
+        if selected.start <= definition.def_span.start && definition.def_span.end <= selected.end {
+            continue;
+        }
+        match &definition.kind {
+            SymKind::Param { ty } if is_scalar_type(ty) => {}
+            SymKind::Local {
+                mutable: false,
+                ty: Some(ty),
+            } if is_scalar_type(ty) => {}
+            SymKind::Local { .. } | SymKind::Param { .. } => return None,
+            _ => continue,
+        }
+        if let Some((_, first)) = inputs
+            .iter_mut()
+            .find(|(existing, _)| existing.identity == definition.identity)
+        {
+            *first = (*first).min(reference.span.start);
+        } else {
+            inputs.push((definition, reference.span.start));
+        }
+    }
+    inputs.sort_by_key(|(_, first)| *first);
+    let function_name = fresh_name(db, &format!("extracted_{}", binding.name));
+    let params = inputs
+        .iter()
+        .map(|(definition, _)| {
+            let ty = match &definition.kind {
+                SymKind::Param { ty } | SymKind::Local { ty: Some(ty), .. } => ty,
+                _ => unreachable!(),
+            };
+            format!("{}: {}", definition.name, ty.name())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let args = inputs
+        .iter()
+        .map(|(definition, _)| definition.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let insert = line_start(src, function.span.start);
+    let expression = src.get(selected.start..selected.end)?;
+    Some(RefactorAction {
+        title: "Extract function".to_string(),
+        kind: "refactor.extract",
+        edits: vec![
+            TextEdit {
+                span: Span::new(insert, insert),
+                new_text: format!(
+                    "fn {function_name}({params}) -> {} {{ return {expression} }}\n\n",
+                    return_type.name()
+                ),
+            },
+            TextEdit {
+                span: selected,
+                new_text: format!("{function_name}({args})"),
+            },
+        ],
+    })
+}
+
+fn inline_actions(
+    db: &SymbolDB,
+    tokens: &[Token],
+    src: &str,
+    path: &str,
+    requested: Span,
+) -> Vec<RefactorAction> {
+    let Some(reference) = db.refs.iter().find(|reference| {
+        reference.module_path == path && spans_touch(reference.span, requested)
+    }) else {
+        return Vec::new();
+    };
+    let Some(target) = reference.target.as_ref() else {
+        return Vec::new();
+    };
+    let Some(binding) = definition_for_anchor(db, target) else {
+        return Vec::new();
+    };
+    if !matches!(
+        binding.kind,
+        SymKind::Local {
+            mutable: false,
+            ..
+        }
+    ) {
+        return Vec::new();
+    }
+    if db
+        .refs
+        .iter()
+        .filter(|candidate| {
+            candidate
+                .target
+                .as_ref()
+                .is_some_and(|anchor| same_anchor(anchor, target))
+        })
+        .count()
+        != 1
+    {
+        return Vec::new();
+    }
+    let Some(initializer) = initializer_for_binding(db, src, path, binding) else {
+        return Vec::new();
+    };
+    let initializer_span = Span::new(initializer.span.start, initializer.span.end);
+    if !is_trivially_pure(tokens, initializer_span)
+        || !initializer_refs_are_stable(db, path, initializer_span)
+    {
+        return Vec::new();
+    }
+    let start = line_start(src, binding.def_span.start);
+    let end = line_end_including_newline(src, initializer_span.end);
+    let prefix = &src[start..binding.def_span.start];
+    let suffix = src
+        .get(initializer_span.end..end)
+        .unwrap_or("")
+        .trim_end_matches(['\r', '\n'])
+        .trim();
+    if !prefix.chars().all(char::is_whitespace)
+        || !suffix.trim_end_matches(';').trim().is_empty()
+        || end > reference.span.start
+    {
+        return Vec::new();
+    }
+    let Some(expression) = src.get(initializer_span.start..initializer_span.end) else {
+        return Vec::new();
+    };
+    vec![RefactorAction {
+        title: format!("Inline `{}`", binding.name),
+        kind: "refactor.inline",
+        edits: vec![
+            TextEdit {
+                span: reference.span,
+                new_text: format!("({expression})"),
+            },
+            TextEdit {
+                span: Span::new(start, end),
+                new_text: String::new(),
+            },
+        ],
+    }]
+}
+
+fn initializer_refs_are_stable(db: &SymbolDB, path: &str, span: Span) -> bool {
+    db.refs
+        .iter()
+        .filter(|reference| {
+            reference.module_path == path
+                && span.start <= reference.span.start
+                && reference.span.end <= span.end
+        })
+        .all(|reference| {
+            reference
+                .target
+                .as_ref()
+                .and_then(|target| definition_for_anchor(db, target))
+                .is_some_and(|definition| {
+                    !matches!(
+                        &definition.kind,
+                        SymKind::Local { mutable: true, .. }
+                    )
+                })
+        })
+}
+
+fn source_symbol_is_exported(symbol: &jet_semindex::SemanticSymbol) -> bool {
+    let Some(span) = symbol.span else {
+        return false;
+    };
+    let Ok(source) = std::fs::read_to_string(&symbol.module_path) else {
+        return false;
+    };
+    let start = line_start(&source, span.start);
+    source
+        .get(start..span.start)
+        .is_some_and(|prefix| prefix.split_whitespace().any(|word| word.starts_with("pub")))
+}
+
+fn exact_initializer<'a>(
+    db: &'a SymbolDB,
+    path: &str,
+    selected: Span,
+) -> Option<&'a jet_semindex::StructuralNode> {
+    db.nodes.iter().find(|node| {
+        node.module_path == path
+            && node.class == "expr"
+            && node.slot == "initializer"
+            && node.span.start == selected.start
+            && node.span.end == selected.end
+    })
+}
+
+fn binding_for_initializer<'a>(
+    db: &'a SymbolDB,
+    src: &str,
+    path: &str,
+    initializer: &jet_semindex::StructuralNode,
+) -> Option<&'a jet_semindex::SymDef> {
+    let start = line_start(src, initializer.span.start);
+    db.defs
+        .iter()
+        .filter(|definition| {
+            definition.module_path == path
+                && matches!(&definition.kind, SymKind::Local { .. })
+                && start <= definition.def_span.start
+                && definition.def_span.end <= initializer.span.start
+        })
+        .max_by_key(|definition| definition.def_span.start)
+}
+
+fn initializer_for_binding<'a>(
+    db: &'a SymbolDB,
+    src: &str,
+    path: &str,
+    binding: &jet_semindex::SymDef,
+) -> Option<&'a jet_semindex::StructuralNode> {
+    let end = src[binding.def_span.start..]
+        .find(['\r', '\n'])
+        .map_or(src.len(), |offset| binding.def_span.start + offset);
+    db.nodes
+        .iter()
+        .filter(|node| {
+            node.module_path == path
+                && node.class == "expr"
+                && node.slot == "initializer"
+                && binding.def_span.end <= node.span.start
+                && node.span.end <= end
+        })
+        .min_by_key(|node| node.span.start)
+}
+
+fn definition_for_anchor<'a>(
+    db: &'a SymbolDB,
+    anchor: &jet_semindex::DefinitionAnchor,
+) -> Option<&'a jet_semindex::SymDef> {
+    db.defs.iter().find(|definition| {
+        anchor
+            .semantic_identity
+            .as_ref()
+            .is_some_and(|identity| identity == &definition.identity)
+            || (definition.module_path == anchor.module_path
+                && definition.def_span.start == anchor.def_span.start
+                && definition.def_span.end == anchor.def_span.end)
+    })
+}
+
+fn same_anchor(
+    left: &jet_semindex::DefinitionAnchor,
+    right: &jet_semindex::DefinitionAnchor,
+) -> bool {
+    match (&left.semantic_identity, &right.semantic_identity) {
+        (Some(left), Some(right)) => left == right,
+        _ => {
+            left.module_path == right.module_path
+                && left.def_span.start == right.def_span.start
+                && left.def_span.end == right.def_span.end
+        }
+    }
+}
+
+fn is_scalar_type(ty: &crate::AST::Type) -> bool {
+    matches!(ty.name().as_str(), "Bool" | "Char" | "Int" | "Float")
+}
+
+fn is_trivially_pure(tokens: &[Token], span: Span) -> bool {
+    let mut any = false;
+    for token in tokens.iter().filter(|token| {
+        span.start <= token.span.start
+            && token.span.end <= span.end
+            && token.span.start < token.span.end
+            && !matches!(token.kind, TokKind::Eof)
+    }) {
+        any = true;
+        let safe = match &token.kind {
+            TokKind::Ident(_)
+            | TokKind::Int(_, _)
+            | TokKind::Float(_)
+            | TokKind::Char(_)
+            | TokKind::KwTrue
+            | TokKind::KwFalse
+            | TokKind::LParen
+            | TokKind::RParen
+            | TokKind::Plus
+            | TokKind::Minus
+            | TokKind::Star
+            | TokKind::Slash
+            | TokKind::Percent
+            | TokKind::Amp
+            | TokKind::Pipe
+            | TokKind::Caret
+            | TokKind::Shl
+            | TokKind::Shr
+            | TokKind::AndAnd
+            | TokKind::OrOr
+            | TokKind::Bang
+            | TokKind::EqEq
+            | TokKind::NotEq
+            | TokKind::Lt
+            | TokKind::Gt
+            | TokKind::Le
+            | TokKind::Ge => true,
+            TokKind::Str(parts) => parts
+                .iter()
+                .all(|part| matches!(part, crate::Lexer::StrTokPart::Lit(_))),
+            _ => false,
+        };
+        if !safe {
+            return false;
+        }
+    }
+    any
+}
+
+fn trim_span(src: &str, span: Span) -> Option<Span> {
+    let text = src.get(span.start..span.end)?;
+    let start = text.len() - text.trim_start().len();
+    let end = text.trim_end().len();
+    (start < end).then(|| Span::new(span.start + start, span.start + end))
+}
+
+fn spans_touch(left: Span, right: Span) -> bool {
+    left.start <= right.end && right.start <= left.end
+}
+
+fn line_start(src: &str, offset: usize) -> usize {
+    src[..offset.min(src.len())]
+        .rfind('\n')
+        .map_or(0, |index| index + 1)
+}
+
+fn line_end_including_newline(src: &str, offset: usize) -> usize {
+    src[offset.min(src.len())..]
+        .find('\n')
+        .map_or(src.len(), |index| offset.min(src.len()) + index + 1)
+}
+
+fn fresh_name(db: &SymbolDB, base: &str) -> String {
+    if !db.defs.iter().any(|definition| definition.name == base) {
+        return base.to_string();
+    }
+    for suffix in 2.. {
+        let candidate = format!("{base}_{suffix}");
+        if !db
+            .defs
+            .iter()
+            .any(|definition| definition.name == candidate)
+        {
+            return candidate;
+        }
+    }
+    unreachable!()
 }
 
 // ── Semantic tokens ───────────────────────────────────────────────────────────
