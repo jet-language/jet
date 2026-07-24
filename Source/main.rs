@@ -28,6 +28,7 @@ mod CmdImport;
 mod CmdPerf;
 mod CmdPkg;
 mod CmdProve;
+mod CmdReport;
 mod CmdSchema;
 mod CmdSemIndex;
 mod CmdSupply;
@@ -52,6 +53,7 @@ use CmdPkg::{
     run_remove, run_update,
 };
 use CmdProve::run_prove;
+use CmdReport::run_report;
 use CmdSchema::run_schema;
 use CmdSemIndex::run_semindex;
 use CmdSupply::{
@@ -417,6 +419,7 @@ usage:
   {bin} self lsp                    language server (stdio JSON-RPC)
   {bin} gc report                   explain automatic-GC promotions and ownership rewrites
   {bin} self devtools <verb>        run checked developer generators
+  {bin} report                      write a private local report bundle
   {bin} version                     print compiler version
   {bin} help                        print this help text
   {bin} ?                           same as help
@@ -1222,6 +1225,7 @@ fn main() {
         }
         "diff" => { run_diff(&raw); return; }
         "merge" => { run_merge(&raw); return; }
+        "report" => exit(run_report(&raw[1..])),
         "help" => {
             if let Some(help) = raw.get(1).and_then(|command| structural_help(command)) {
                 print!("{help}");

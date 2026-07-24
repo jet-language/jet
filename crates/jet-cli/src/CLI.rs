@@ -223,7 +223,7 @@ pub fn moved_command(name: &str) -> Option<(&'static CommandGroup, &'static Nest
     // as daily top-level intents while listing them under `jet perf`.
     // Internal handler rows in COMMANDS do not make any other grouped action
     // canonical at the top level.
-    if name == "import" || matches!(name, "run" | "test" | "bench") {
+    if name == "import" || matches!(name, "run" | "test" | "bench" | "report") {
         return None;
     }
     COMMAND_GROUPS.iter().find_map(|group| {
@@ -466,6 +466,11 @@ pub const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
         name: "perf",
         summary: "Collect and inspect performance traces",
+        headline: false,
+    },
+    CommandSpec {
+        name: "report",
+        summary: "Write a private local report bundle",
         headline: false,
     },
     CommandSpec {
@@ -1081,7 +1086,7 @@ mod tests {
     fn moved_commands_are_not_canonical_top_level() {
         for group in COMMAND_GROUPS {
             for action in group.actions {
-                if matches!(action.name, "import" | "run" | "test" | "bench") {
+                if matches!(action.name, "import" | "run" | "test" | "bench" | "report") {
                     assert!(is_canonical_top_level(action.name));
                     assert!(moved_command(action.name).is_none());
                     continue;
@@ -1108,7 +1113,7 @@ mod tests {
     fn typo_suggestions_never_advertise_moved_bare_actions() {
         for group in COMMAND_GROUPS {
             for action in group.actions {
-                if !matches!(action.name, "import" | "run" | "test" | "bench") {
+                if !matches!(action.name, "import" | "run" | "test" | "bench" | "report") {
                     assert_ne!(closest_command(action.name), Some(action.name));
                 }
             }

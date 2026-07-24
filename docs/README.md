@@ -5,6 +5,7 @@ One home per kind of document. Start here.
 | If you want to… | Go to |
 |---|---|
 | Learn Jet in your first hour | [first-hour.md](first-hour.md) |
+| Audit toolchain network and telemetry policy | [reference/network-policy.md](reference/network-policy.md) |
 | Look up the standard library | [reference/core-library.md](reference/core-library.md) |
 | Configure Jet through environment variables | [reference/environment.md](reference/environment.md) |
 | Understand an error code | [reference/errors/](reference/errors/) (generated from snapshots) |
