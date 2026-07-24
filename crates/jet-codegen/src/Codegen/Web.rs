@@ -2053,11 +2053,15 @@ fn tir_js_string(
 ) -> Result<String, ()> {
     if parts.iter().any(|p| matches!(p, TIR::TStrPart::Interp(_, _))) {
         let mut out = String::from("`");
-        for part in parts { match part { TIR::TStrPart::Lit(s) => out.push_str(s), TIR::TStrPart::Interp(e, _) => out.push_str(&format!("${{{}}}", tir_js_expr(e, funcs, file_prefix)?)) } }
+        for part in parts { match part { TIR::TStrPart::Lit(s) => out.push_str(&js_template_literal_text(s)), TIR::TStrPart::Interp(e, _) => out.push_str(&format!("${{{}}}", tir_js_expr(e, funcs, file_prefix)?)) } }
         out.push('`'); Ok(out)
     } else {
         Ok(json_quote(&parts.iter().filter_map(|p| if let TIR::TStrPart::Lit(s) = p { Some(s.as_str()) } else { None }).collect::<String>()))
     }
+}
+
+fn js_template_literal_text(text: &str) -> String {
+    text.replace("//# jet-source-", "\\x2f/# jet-source-")
 }
 
 fn tir_core_call(
@@ -2200,5 +2204,9 @@ mod source_map_tests {
         let mut negative = String::new();
         encode_base64_vlq(-123, &mut negative);
         assert_eq!(negative, "3H");
+        assert_eq!(
+            js_template_literal_text("left\n//# jet-source-line 9\nright"),
+            "left\n\\x2f/# jet-source-line 9\nright"
+        );
     }
 }
