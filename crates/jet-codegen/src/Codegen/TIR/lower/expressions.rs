@@ -1660,10 +1660,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             .unwrap_or(Type::Int);
                     return TExpr {
                         ty: field_ty,
-                        kind: TExprKind::Field {
+                        kind: TExprKind::MethodCall {
                             recv: Box::new(recv),
-                            field_rust: format!("{}()", mangle(member)),
-                            boxed: false,
+                            method: crate::Codegen::TIR::TMethodRef::inherent(member),
+                            args: vec![],
+                            operator_line: None,
                         },
                     };
                 }

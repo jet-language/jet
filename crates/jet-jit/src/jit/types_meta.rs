@@ -158,16 +158,24 @@ impl<'a> JitMeta<'a> {
             .position(|f| f == field_rust)
     }
 
-    pub(crate) fn enum_variant_disc(&self, prefix: &str) -> Option<i64> {
-        let (enum_part, variant) = prefix.rsplit_once("::")?;
-        let enum_name = enum_part.strip_prefix("user_").unwrap_or(enum_part);
+    /// Discriminant index from structured enum + variant Jet names.
+    pub(crate) fn enum_variant_index(&self, enum_name: &str, variant: &str) -> Option<i64> {
         let variants = self.enum_variants.get(enum_name)?;
-        let variant = variant.split_once('(').map_or(variant, |(head, _)| head);
-        let variant_key = variant.strip_prefix("user_").unwrap_or(variant);
+        let mangled = format!("user_{variant}");
         variants
             .iter()
-            .position(|v| v == variant || v.strip_prefix("user_").unwrap_or(v) == variant_key)
+            .position(|v| v == variant || v == &mangled || v.strip_prefix("user_") == Some(variant))
             .map(|i| i as i64)
+    }
+
+    /// Temporary bridge for `EnumLit.prefix` until that node carries structured
+    /// enum/variant names. New call sites must use `enum_variant_index`.
+    pub(crate) fn enum_variant_disc_legacy(&self, prefix: &str) -> Option<i64> {
+        let (enum_part, variant) = prefix.rsplit_once("::")?;
+        let enum_name = enum_part.strip_prefix("user_").unwrap_or(enum_part);
+        let variant = variant.split_once('(').map_or(variant, |(head, _)| head);
+        let variant = variant.strip_prefix("user_").unwrap_or(variant);
+        self.enum_variant_index(enum_name, variant)
     }
 
 }

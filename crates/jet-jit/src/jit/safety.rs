@@ -549,10 +549,13 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             value,
             clone_value,
         } => {
-            let local = place
-                .chars()
-                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
-            let field = op.is_none() && simple_record_field_place(place);
+            let local = place.as_local().is_some_and(|local| {
+                local
+                    .name
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            });
+            let field = op.is_none() && structured_record_field_place(place);
             !clone_value && (local || field) && resident_safe_expr(value, callees)
         }
         TStmt::Return(ret) => ret.as_ref().is_none_or(|e| resident_safe_expr(e, callees)),
@@ -673,18 +676,18 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
     }
 }
 
-fn simple_record_field_place(place: &str) -> bool {
-    let Some((base, field)) = place.strip_prefix('(').and_then(|p| p.split_once(").")) else {
+fn structured_record_field_place(place: &TIR::TPlace) -> bool {
+    let TIR::TPlace::Expr(expr) = place else {
         return false;
     };
-    let base = base
-        .strip_prefix("(*")
-        .and_then(|base| base.strip_suffix(')'))
-        .unwrap_or(base);
-    base.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-        && field
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    matches!(
+        &expr.kind,
+        TIR::TExprKind::Field {
+            recv,
+            boxed: false,
+            ..
+        } if matches!(&recv.kind, TIR::TExprKind::Local(_))
+    )
 }
 
 pub(crate) fn resident_safe_func(tir: &TFunc, callees: &HashSet<String>) -> bool {

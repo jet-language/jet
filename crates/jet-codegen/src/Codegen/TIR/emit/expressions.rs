@@ -92,6 +92,7 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
         TNumericOp::TryFrom {
             dst_rust,
             dst_spelling,
+            ..
         } => format!(
             "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
              \"value doesn't fit in {dst_spelling}\".to_string())"
@@ -101,6 +102,7 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
             dst_spelling,
             lower,
             upper_exclusive,
+            ..
         } => format!(
             "{{ let __jet_value = ({recv}); if __jet_value.is_finite() && \
              __jet_value >= ({lower} as _) && __jet_value < ({upper_exclusive} as _) {{ \

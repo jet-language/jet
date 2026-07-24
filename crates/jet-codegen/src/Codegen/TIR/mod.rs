@@ -2237,14 +2237,17 @@ pub enum TNumericOp {
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
     CastAs { dst_rust: String },
     /// An integer-narrowing conversion → the checked `<{dst}>::try_from(...)` form
-    /// returning `Result<T, String>`. Both strings resolved at lowering.
+    /// returning `Result<T, String>`. `host_kind` is the Cranelift host integer
+    /// width tag; `dst_rust`/`dst_spelling` are emit-only Rust spellings.
     TryFrom {
+        host_kind: i64,
         dst_rust: String,
         dst_spelling: String,
     },
     /// A float-to-integer conversion. Finite in-range values truncate toward zero;
     /// non-finite and out-of-range values return `Err`.
     FloatToInt {
+        host_kind: i64,
         dst_rust: String,
         dst_spelling: String,
         lower: String,
