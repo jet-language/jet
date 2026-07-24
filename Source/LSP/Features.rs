@@ -793,13 +793,7 @@ fn is_total_pure_expr(tokens: &[Token], span: Span) -> bool {
             | TokKind::KwFalse
             | TokKind::AndAnd
             | TokKind::OrOr
-            | TokKind::Bang
-            | TokKind::EqEq
-            | TokKind::NotEq
-            | TokKind::Lt
-            | TokKind::Gt
-            | TokKind::Le
-            | TokKind::Ge => true,
+            | TokKind::Bang => true,
             TokKind::Str(parts) => parts
                 .iter()
                 .all(|part| matches!(part, crate::Lexer::StrTokPart::Lit(_))),

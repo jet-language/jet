@@ -2260,7 +2260,7 @@ mod project_part_tests {
     #[test]
     fn code_actions_extract_binding_function_and_inline_with_versioned_edits() {
         let src =
-            "fn run(left: Int, right: Int) {\n    total :: left < right\n    print(total)\n}\n";
+            "fn run(left: Bool, right: Bool) {\n    total :: left && right\n    print(total)\n}\n";
         let root = std::env::temp_dir().join(format!(
             "jet-lsp-refactor-actions-{}",
             std::process::id()
@@ -2280,13 +2280,13 @@ mod project_part_tests {
             Document::new(path, src.to_string(), 7),
         );
 
-        let expr_start = src.find("left < right").unwrap();
+        let expr_start = src.find("left && right").unwrap();
         let extracted = code_actions_for(
             &server,
             &uri,
             src,
             expr_start,
-            expr_start + "left < right".len(),
+            expr_start + "left && right".len(),
         );
         assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
         assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
@@ -2393,6 +2393,46 @@ mod project_part_tests {
         );
         assert!(!inlined.contains("Inline `value`"), "{inlined}");
         let _ = std::fs::remove_dir_all(partial_root);
+
+        let clock =
+            "fn run(left: Clock, right: Clock) {\n    same :: left == right\n    print(same)\n}\n";
+        let clock_root = std::env::temp_dir().join(format!(
+            "jet-lsp-clock-refactor-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&clock_root);
+        std::fs::create_dir_all(&clock_root).unwrap();
+        let clock_path = clock_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&clock_path, clock).unwrap();
+        let clock_uri = path_to_uri(&clock_path);
+        let mut clock_server = Server::new();
+        clock_server
+            .workspace_roots
+            .push(clock_root.to_string_lossy().into_owned());
+        clock_server.docs.insert(
+            clock_uri.clone(),
+            Document::new(clock_path, clock.to_string(), 1),
+        );
+        let equality = clock.find("left == right").unwrap();
+        let extraction = code_actions_for(
+            &clock_server,
+            &clock_uri,
+            clock,
+            equality,
+            equality + "left == right".len(),
+        );
+        assert!(!extraction.contains("Extract binding"), "{extraction}");
+        assert!(!extraction.contains("Extract function"), "{extraction}");
+        let use_site = clock.rfind("same").unwrap();
+        let inlined = code_actions_for(
+            &clock_server,
+            &clock_uri,
+            clock,
+            use_site,
+            use_site + "same".len(),
+        );
+        assert!(!inlined.contains("Inline `same`"), "{inlined}");
+        let _ = std::fs::remove_dir_all(clock_root);
     }
 
     #[test]
