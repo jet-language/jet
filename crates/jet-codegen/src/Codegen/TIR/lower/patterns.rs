@@ -7,7 +7,6 @@ use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::core_struct_field_rust_name;
-use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::expr_ast_jet_ty;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::LowerEnv;
@@ -469,9 +468,7 @@ pub(crate) fn lower_range_switch(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TStmt {
-    // The subject's emitted string — used for the borrow binding and each range
-    // condition, exactly as `emit_mixed_switch` re-emits the subject.
-    let subject_str = emit_tir_expr(&lower_expr(subject, cx, env), cx);
+    let subject_expr = lower_expr(subject, cx, env);
     let mut tarms = Vec::new();
     for arm in arms {
         let (lo, hi) = arm_head_range(cx, &arm.cond, subject).expect("gate proved range arm");
@@ -487,7 +484,7 @@ pub(crate) fn lower_range_switch(
         lower_stmts(body, cx, &mut branch)
     };
     TStmt::RangeSwitch {
-        subject_str,
+        subject: subject_expr,
         arms: tarms,
         else_body: else_lowered,
     }

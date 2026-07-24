@@ -766,10 +766,11 @@ fn emit_tir_stmt(
         // (Statement.rs): a wrapping block binds `_jet_switch_subject` (unused here,
         // emitted for parity), then an `if/else if … else` chain of range tests.
         TStmt::RangeSwitch {
-            subject_str,
+            subject,
             arms,
             else_body,
         } => {
+            let subject_str = emit_tir_expr(subject, cx);
             out.push_str(&format!("{}{{\n", pad));
             let inner_pad = "    ".repeat(indent + 1);
             out.push_str(&format!(
@@ -1361,10 +1362,11 @@ fn emit_tir_stmt(
         // (Statement.rs) `if/else if … else` chain inside a block that binds
         // `_jet_switch_subject = &(subject)` (emitted for parity even when unused).
         TStmt::MixedSwitch {
-            subject_str,
+            subject,
             arms,
             else_body,
         } => {
+            let subject_str = emit_tir_expr(subject, cx);
             out.push_str(&format!("{}{{\n", pad));
             let inner_pad = "    ".repeat(indent + 1);
             out.push_str(&format!(

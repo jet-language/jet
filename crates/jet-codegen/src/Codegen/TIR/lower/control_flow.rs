@@ -11,7 +11,6 @@ use crate::Codegen::TIR::arm_bin_match_pattern;
 use crate::Codegen::TIR::arm_str_match_pattern;
 use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::lower::bool_and_chain;
 use crate::Codegen::TIR::lower_enum_match;
@@ -704,7 +703,6 @@ pub(crate) fn lower_mixed_switch(
 ) -> TStmt {
     let subject_expr = lower_expr(subject, cx, env);
     let subject_ty = subject_expr.ty.clone();
-    let subject_str = emit_tir_expr(&subject_expr, cx);
     let mut tarms = Vec::new();
     for arm in arms {
         let struct_pat = arm_struct_pattern(cx, &arm.cond, subject);
@@ -740,7 +738,7 @@ pub(crate) fn lower_mixed_switch(
         lower_stmts(body, cx, &mut branch)
     });
     TStmt::MixedSwitch {
-        subject_str,
+        subject: subject_expr,
         arms: tarms,
         else_body: else_lowered,
     }

@@ -1177,10 +1177,9 @@ pub enum TStmt {
     /// binding is unused in this form but emitted for parity). Each arm's `(lo, hi)`
     /// becomes `(subj >= lo && subj <= hi)`, reading the subject's resolved place.
     RangeSwitch {
-        /// The subject's emitted Rust string, used both for the `_jet_switch_subject`
-        /// borrow binding and inside each arm's range condition — exactly as the AST
-        /// path re-emits `subject` (resolved once here).
-        subject_str: String,
+        /// The matched subject expression. Emit borrows it for the
+        /// `_jet_switch_subject` binding and re-emits it in each range test.
+        subject: TExpr,
         arms: Vec<(i64, i64, Vec<TStmt>)>,
         else_body: Vec<TStmt>,
     },
@@ -1271,7 +1270,9 @@ pub enum TStmt {
     /// reproduced exactly. Each arm's condition is resolved to a Rust string at lowering
     /// (emit makes no decision). `else_body` is the optional `else` arm.
     MixedSwitch {
-        subject_str: String,
+        /// The matched subject. Emit borrows it for the parity binding; arm
+        /// conditions are already structured `TExpr` values.
+        subject: TExpr,
         arms: Vec<(TExpr, Vec<TStmt>)>,
         else_body: Option<Vec<TStmt>>,
     },
