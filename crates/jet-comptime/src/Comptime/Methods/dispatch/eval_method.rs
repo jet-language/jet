@@ -11,6 +11,7 @@ impl<'a> Interp<'a> {
         resolved_ret: Option<&Type>,
         args: &[crate::AST::CallArg],
         scope: &mut HashMap<String, CtValue>,
+        mut evaluated_receiver: Option<CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let sequence_result_ty = resolved_ret.cloned().or_else(|| {
             if !matches!(method, "sum" | "product") {
@@ -728,7 +729,10 @@ impl<'a> Interp<'a> {
         // dispatch at the end of this function.
         const HOF_METHODS: &[&str] = &["filter", "map", "each", "sort_by", "find"];
         if HOF_METHODS.contains(&method) {
-            let recv = self.eval(receiver, scope)?;
+            let recv = match evaluated_receiver.take() {
+                Some(value) => value,
+                None => self.eval(receiver, scope)?,
+            };
             match (&recv, method) {
                 (CtValue::List(xs), "filter") => {
                     let f = self.eval(&args[0].expr, scope)?;
@@ -833,6 +837,7 @@ impl<'a> Interp<'a> {
                 (CtValue::None(t), "map") => return Ok(CtValue::None(t.clone())),
                 _ => {}
             }
+            evaluated_receiver = Some(recv);
         }
 
         // D-ANY-JAI1: `reflect.of(x).display()` — same Display-impl-aware
@@ -843,7 +848,10 @@ impl<'a> Interp<'a> {
         // `impl Type.Display` block defines) still falls through to the
         // ordinary instance-method dispatch below, unaffected.
         if method == "display" {
-            let peek = self.eval(receiver, scope)?;
+            let peek = match evaluated_receiver.take() {
+                Some(value) => value,
+                None => self.eval(receiver, scope)?,
+            };
             if let CtValue::Struct { type_name, fields } = &peek {
                 if type_name == "__Reflect" {
                     let inner = fields
@@ -855,11 +863,14 @@ impl<'a> Interp<'a> {
                     return Ok(CtValue::Str(s));
                 }
             }
+            evaluated_receiver = Some(peek);
         }
 
-        let mut evaluated_receiver = None;
         if matches!(method, "add" | "remove" | "ids") {
-            let recv = self.eval(receiver, scope)?;
+            let recv = match evaluated_receiver.take() {
+                Some(value) => value,
+                None => self.eval(receiver, scope)?,
+            };
             if super::super::pool::is_method(&recv, method) {
                 let mut argv = Vec::with_capacity(args.len());
                 for arg in args {
@@ -906,8 +917,8 @@ impl<'a> Interp<'a> {
                 | "to_list"
                 | "any"
         ) {
-            let peek = match &evaluated_receiver {
-                Some(value) => value.clone(),
+            let peek = match evaluated_receiver.take() {
+                Some(value) => value,
                 None => self.eval(receiver, scope)?,
             };
             match (&peek, method) {
@@ -1579,8 +1590,8 @@ impl<'a> Interp<'a> {
             "push", "pop", "insert", "add", "add_new", "remove", "clear", "reverse", "sort",
         ];
         if MUTATING.contains(&method) && matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
-            let mut container = match &evaluated_receiver {
-                Some(value) => value.clone(),
+            let mut container = match evaluated_receiver.take() {
+                Some(value) => value,
                 None => self.eval(receiver, scope)?,
             };
             let handled_here = matches!(&container, CtValue::List(_) | CtValue::Map(_))

@@ -570,6 +570,7 @@ fn view_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<
             Some(Some(Type::Option(Box::new(elem.clone()))))
         }
         ("contains", 1) => Some(Some(Type::Bool)),
+        ("join", 1) => Some(Some(Type::String)),
         // D-ITER1-style closure surface, read-only subset only (D-DYNARRAY1 §2
         // scope: indexing, iteration, `.fold`, `.map`-to-owned).
         ("fold", 2) => Some(Some(Type::Int)), // placeholder; sema refines from init arg
@@ -1529,6 +1530,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
                 "get" | "contains" => Some(vec![elem]),
+                "join" => Some(vec![Type::String]),
                 "fold" => Some(vec![
                     Type::Int, // init — sema refines
                     Type::Fn {

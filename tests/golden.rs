@@ -264,6 +264,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         || stem == "lowlevel/pointer_cast_deref"
         || stem == "lowlevel/inline_c"
         || stem == "lowlevel/inline_asm"
+        || stem == "lowlevel/unsafe_obligations"
         || stem == "memory/rawptr"
         || stem == "effects/single_use_discard"
         || stem == "memory/uninit"
@@ -277,6 +278,9 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             stem
         );
         for (i, line) in user_code.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
             if let Some(col) = line.find("unsafe") {
                 let after = line[col..].trim_start_matches("unsafe").trim_start();
                 assert!(

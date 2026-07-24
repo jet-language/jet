@@ -115,6 +115,50 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
     }
 }
 
+/// Lower a fluent method receiver from the innermost call outward.
+///
+/// Method-call ASTs nest through `receiver`. Walking that spine iteratively
+/// keeps long fluent APIs off the Rust call stack while preserving the normal
+/// method dispatcher for every link.
+fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    let mut calls = Vec::new();
+    let mut cursor = e;
+    while let Expr::MethodCall { receiver, .. } = cursor {
+        calls.push(cursor);
+        cursor = receiver;
+    }
+
+    let mut lowered_receiver = None;
+    while let Some(call) = calls.pop() {
+        let Expr::MethodCall {
+            receiver,
+            method,
+            method_span,
+            type_args,
+            args,
+            recv_type,
+            resolved_ret,
+        } = call
+        else {
+            unreachable!("method chain contains only method calls")
+        };
+        lowered_receiver = Some(lower_method_call(
+            receiver,
+            method,
+            *method_span,
+            type_args,
+            args,
+            recv_type,
+            resolved_ret.as_ref(),
+            cx,
+            env,
+            lowered_receiver,
+        ));
+    }
+
+    lowered_receiver.expect("method chain is non-empty")
+}
+
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match e {
         Expr::Int(n, _, width, _) => TExpr {
@@ -1016,29 +1060,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // c109 Phase 6: a method call. The gate (`method_call_in_subset`) admitted
         // exactly the synthetic `.clone()` or a user instance method on a covered
         // type; lower accordingly. Every dispatch fact is resolved here (totality).
-        Expr::MethodCall {
-            receiver,
-            method,
-            method_span,
-            type_args,
-            args,
-            recv_type,
-            resolved_ret,
-        } => {
-            // D-SERDE6: codegen reads the decode target `T` from `resolved_ret`
-            // (`Result<T,…>`), so the call-site `type_args` need no separate threading.
-            lower_method_call(
-                receiver,
-                method,
-                *method_span,
-                type_args,
-                args,
-                recv_type,
-                resolved_ret.as_ref(),
-                cx,
-                env,
-            )
-        }
+        Expr::MethodCall { .. } => lower_method_chain(e, cx, env),
         Expr::If {
             cond,
             then_body,
