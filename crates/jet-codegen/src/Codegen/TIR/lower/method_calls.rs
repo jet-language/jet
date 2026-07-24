@@ -1,7 +1,6 @@
 use crate::AST::{AccessConvention, Expr, Type};
 use crate::Codegen::alloc_handle_rust_type;
 use crate::Codegen::Cx;
-use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_db_value_type_name;
 use crate::Codegen::is_db_value_variant;
 use crate::Codegen::is_json_type_name;
@@ -55,7 +54,6 @@ use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
 use crate::Codegen::TIR::lower::static_call_type_name_lower;
 use crate::Codegen::TIR::pool_field_ty_hint;
 use crate::Codegen::TIR::render_router_handler;
-use crate::Codegen::TIR::render_safe_locals;
 use crate::Codegen::TIR::render_spawn_lambda;
 use crate::Codegen::TIR::resolve_builtin_op;
 use crate::Codegen::TIR::resolve_closure_op;
@@ -77,7 +75,6 @@ use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::TPreludeArg;
 use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::tir_recv_jet_ty;
-use crate::Codegen::TIR::tir_src_line_at;
 use crate::Codegen::TIR::tls_static_op;
 use crate::Codegen::TIR::http_client_static_op;
 use crate::Codegen::TIR::TModuleCallForm;
@@ -239,73 +236,34 @@ pub(crate) fn lower_method_call(
                 env.locals.remove(temp);
             }
             let ty = inner.ty.clone();
-            let edit = emit_tir_expr(&inner, cx);
-            let emitted = if method == "clear" {
-                format!(
-                    "jet_gc::runtime_or_exit({}.edit_clearing_edges(|__jet_value| {}))",
-                    root, edit
-                )
+            use crate::Codegen::TIR::TGcEditKind;
+            let kind = if method == "clear" {
+                TGcEditKind::Clear
             } else if method == "pop" {
-                format!(
-                    "jet_gc::runtime_or_exit({}.edit_edge_slot_pop(\"collection\", |__jet_value| {}))",
-                    root, edit
-                )
+                TGcEditKind::Pop
             } else if method == "remove" && index_temp.is_some() {
-                format!(
-                    "jet_gc::runtime_or_exit({}.edit_edge_slot_remove(\"collection\", {} as usize, |__jet_value| {}))",
-                    root,
-                    index_temp.as_ref().map(|(temp, _)| temp.as_str()).unwrap_or("0"),
-                    edit
-                )
+                TGcEditKind::RemoveIndex
             } else if method == "insert" && index_temp.is_some() {
-                format!(
-                    "jet_gc::runtime_or_exit({}.edit_edge_slot_insert(\"collection\", {} as usize, &[{}], |__jet_value| {}))",
-                    root,
-                    index_temp.as_ref().map(|(temp, _)| temp.as_str()).unwrap_or("0"),
-                    edges.join(", "),
-                    edit
-                )
+                TGcEditKind::InsertIndex
             } else if method == "prepend" {
-                format!(
-                    "jet_gc::runtime_or_exit({}.edit_edge_slot_prepend(\"collection\", &[{}], |__jet_value| {}))",
-                    root,
-                    edges.join(", "),
-                    edit
-                )
+                TGcEditKind::Prepend
             } else if matches!(method, "push" | "append") {
-                format!(
-                    "jet_gc::runtime_or_exit({}.edit_edge_slot_additive(\"collection\", &[{}], |__jet_value| {}))",
-                    root,
-                    edges.join(", "),
-                    edit
-                )
+                TGcEditKind::Additive
             } else if edges.is_empty() {
-                format!(
-                    "jet_gc::runtime_or_exit({}.edit(|__jet_value| {}))",
-                    root, edit
-                )
+                TGcEditKind::Plain
             } else {
-                format!(
-                    "jet_gc::runtime_or_exit({}.edit_edge_slot(\"method:{}\", &[{}], |__jet_value| {}))",
-                    root,
-                    method_span.start,
-                    edges.join(", "),
-                    edit
-                )
-            };
-            let emitted = if let Some((temp, value)) = index_temp {
-                format!(
-                    "{{ let {} = {}; {} }}",
-                    temp,
-                    emit_tir_expr(&value, cx),
-                    emitted
-                )
-            } else {
-                emitted
+                TGcEditKind::EdgeSlot
             };
             return TExpr {
                 ty,
-                kind: crate::Codegen::TIR::host_raw(emitted),
+                kind: TExprKind::HostCall(Box::new(THostCall::GcEdit {
+                    root,
+                    method_span_start: method_span.start,
+                    edges,
+                    edit: Box::new(inner),
+                    index_temp,
+                    kind,
+                })),
             };
         }
     }
@@ -419,13 +377,12 @@ pub(crate) fn lower_method_call(
                     cx.file.replace(['/', '\\', '.'], "_"),
                     line
                 );
-                let rendered = format!(
-                    "jet_expect(format!(\"{{}}\", ({}).jet_show())).snapshot({snap_path:?})?",
-                    emit_tir_expr(&val, cx)
-                );
                 return TExpr {
                     ty: unit_type(),
-                    kind: TExprKind::HostCall(Box::new(THostCall::Raw(rendered))),
+                    kind: TExprKind::HostCall(Box::new(THostCall::ExpectSnapshot {
+                        value: Box::new(val),
+                        snap_path,
+                    })),
                 };
             }
         }
@@ -1068,22 +1025,16 @@ pub(crate) fn lower_method_call(
             if !env.locals.contains_key(alias)
                 && cx.core_imports.get(alias).is_some_and(|module| module == "core.env")
             {
-                let name = emit_tir_expr(&lower_expr(&args[0].expr, cx, env), cx);
-                let value = emit_tir_expr(&lower_expr(&args[1].expr, cx, env), cx);
-                let (src_line, line, col) = tir_src_line_at(&cx.src, method_span.start);
-                let caret = (method_span.end - method_span.start) as u32;
-                let locals = render_safe_locals(env);
-                let rendered = format!(
-                    "{{ let __jet_env_name = ({name}); let __jet_env_value = ({value}); if let Err(__jet_env_error) = {root}jet_std_env_set(&__jet_env_name, &__jet_env_value) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name}, {src_line}, {col}, {caret}, &format!(\"core.env.set: {{}}\", __jet_env_error.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
-                    cleanup = crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER,
-                    root = cx.root_prefix,
-                    file = escape_rust_str(&cx.file),
-                    fn_name = escape_rust_str(&env.fn_name),
-                    src_line = escape_rust_str(src_line.trim_end()),
-                );
+                let name = lower_expr(&args[0].expr, cx, env);
+                let value = lower_expr(&args[1].expr, cx, env);
+                let loc = crate::Codegen::TIR::capture_panic_loc(&method_span, cx, env);
                 return TExpr {
                     ty: unit_type(),
-                    kind: TExprKind::HostCall(Box::new(THostCall::Raw(rendered))),
+                    kind: TExprKind::HostCall(Box::new(THostCall::EnvSet {
+                        name: Box::new(name),
+                        value: Box::new(value),
+                        loc,
+                    })),
                 };
             }
         }
@@ -2060,19 +2011,17 @@ pub(crate) fn lower_method_call(
                 "ids" => Type::List(Box::new(id_ty)),
                 _ => unreachable!("matches! above admitted only these"),
             };
-            let recv_s = emit_tir_expr(&recv_t, cx);
-            let arg_s: Vec<String> = args
+            let targs: Vec<TExpr> = args
                 .iter()
-                .map(|a| emit_tir_expr(&lower_expr(&a.expr, cx, env), cx))
+                .map(|a| lower_expr(&a.expr, cx, env))
                 .collect();
             return TExpr {
                 ty,
-                kind: crate::Codegen::TIR::host_raw(format!(
-                    "({}).{}({})",
-                    recv_s,
-                    method,
-                    arg_s.join(", ")
-                )),
+                kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                    recv: Box::new(recv_t),
+                    method: method.to_string(),
+                    args: targs,
+                })),
             };
         }
         if is_shared && matches!(method, "read" | "edit") && args.len() == 1 {
@@ -2081,7 +2030,6 @@ pub(crate) fn lower_method_call(
                 _ => Type::Int,
             };
             let recv_t = lower_expr(receiver, cx, env);
-            let recv_s = emit_tir_expr(&recv_t, cx);
             let Expr::Lambda(lam) = &args[0].expr else {
                 unreachable!("sema's finish_shared_read/finish_shared_edit require a lambda arg");
             };
@@ -2089,7 +2037,7 @@ pub(crate) fn lower_method_call(
             // `JetShared::read`/`edit` lend `&T`/`&mut T` directly. This host
             // borrow is not an unmarked function-value parameter and must not
             // receive another D-MEM-PARAM1 Read borrow.
-            let tl = lower_lambda_expecting_host_borrow(
+            let mut tl = lower_lambda_expecting_host_borrow(
                 lam,
                 cx,
                 env,
@@ -2102,27 +2050,31 @@ pub(crate) fn lower_method_call(
             // rejects a value-producing edit here). The closure is stored past the call,
             // so it must `move` its captures. A `.read` (or an `.edit` outside a
             // transaction) is unchanged.
-            let (method_out, ty, force_move) =
+            let (method_out, ty) =
                 if method == "edit" && cx.in_stm_transact.get() {
                     cx.stm_touched.set(true);
-                    ("edit_txn", Type::Tuple(vec![]), true)
+                    tl.is_move = true;
+                    ("edit_txn", Type::Tuple(vec![]))
                 } else {
                     (
                         method,
                         lambda_body_ty_expecting(lam, cx, env, Some(expected)),
-                        tl.is_move,
                     )
                 };
-            let move_kw = if force_move { "move " } else { "" };
-            let raw = format!("{}|{}| {}", move_kw, tl.params.join(", "), tl.body);
-            let closure = if tl.prep.is_empty() {
-                raw
-            } else {
-                format!("{{ {} {} }}", tl.prep, raw)
-            };
             return TExpr {
                 ty,
-                kind: crate::Codegen::TIR::host_raw(format!("({}).{}({})", recv_s, method_out, closure)),
+                kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                    recv: Box::new(recv_t),
+                    method: method_out.to_string(),
+                    args: vec![TExpr {
+                        ty: Type::Fn {
+                            params: vec![inner],
+                            ret: None,
+                            effect_bound: None,
+                        },
+                        kind: TExprKind::Lambda(Box::new(tl)),
+                    }],
+                })),
             };
         }
         if is_expiring_secret && method == "with" && args.len() == 1 {
@@ -2139,30 +2091,29 @@ pub(crate) fn lower_method_call(
                 _ => Type::Int,
             };
             let recv_t = lower_expr(receiver, cx, env);
-            let recv_s = emit_tir_expr(&recv_t, cx);
             let Expr::Lambda(lam) = &args[0].expr else {
                 unreachable!("sema requires a lambda for ExpiringSecret.with");
             };
             let expected = std::slice::from_ref(&inner);
             let tl = lower_lambda_expecting_host_borrow(lam, cx, env, expected, false);
-            let raw = format!(
-                "{}|{}| {}",
-                if tl.is_move { "move " } else { "" },
-                tl.params.join(", "),
-                tl.body
-            );
-            let closure = if tl.prep.is_empty() {
-                raw
-            } else {
-                format!("{{ {} {} }}", tl.prep, raw)
-            };
             let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                 ok: Box::new(lambda_body_ty_expecting(lam, cx, env, Some(expected))),
                 err: Box::new(Type::Named("Expired".to_string())),
             });
             return TExpr {
                 ty,
-                kind: crate::Codegen::TIR::host_raw(format!("({}).with({})", recv_s, closure)),
+                kind: TExprKind::HostCall(Box::new(THostCall::Method {
+                    recv: Box::new(recv_t),
+                    method: "with".to_string(),
+                    args: vec![TExpr {
+                        ty: Type::Fn {
+                            params: vec![inner],
+                            ret: None,
+                            effect_bound: None,
+                        },
+                        kind: TExprKind::Lambda(Box::new(tl)),
+                    }],
+                })),
             };
         }
     }
@@ -3068,25 +3019,17 @@ pub(crate) fn lower_method_call(
                 }
                 _ => value.ty.clone(),
             };
-            let elem_rust = cx.rust_type(&elem_ty);
-            let value_rust = emit_tir_expr(&value, cx);
-            let duration_rust = emit_tir_expr(&duration, cx);
-            let clock_rust = emit_tir_expr(&clock, cx);
             return TExpr {
                 ty: Type::Apply {
                     name: "ExpiringSecret".to_string(),
-                    args: vec![elem_ty],
+                    args: vec![elem_ty.clone()],
                 },
-                kind: crate::Codegen::TIR::host_raw(format!(
-                    "{{ let __jet_expiring_value = {value_rust}; \
-                     let __jet_expiring_ttl = &({duration_rust}); \
-                     let __jet_expiring_clock = &({clock_rust}); \
-                     let __jet_expiring_observer = __jet_expiring_clock.observer(); \
-                     {}JetExpiringSecret::<{}>::new(\
-                         __jet_expiring_value, __jet_expiring_ttl.ms, \
-                         move || __jet_expiring_observer.now()) }}",
-                    cx.root_prefix, elem_rust
-                )),
+                kind: TExprKind::HostCall(Box::new(THostCall::ExpiringSecretNew {
+                    value: Box::new(value),
+                    duration: Box::new(duration),
+                    clock: Box::new(clock),
+                    elem: elem_ty,
+                })),
             };
         }
         if type_name == Syntax::EXPIRING_VALUE_TYPE && method == "new" && args.len() == 3 {
@@ -3106,15 +3049,11 @@ pub(crate) fn lower_method_call(
                     name: Syntax::EXPIRING_VALUE_TYPE.to_string(),
                     args: vec![elem_ty],
                 },
-                kind: crate::Codegen::TIR::host_raw(format!(
-                    "{}jet_expiring_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",
-                    cx.root_prefix,
-                    emit_tir_expr(&value, cx),
-                    cx.root_prefix,
-                    emit_tir_expr(&duration, cx),
-                    cx.root_prefix,
-                    emit_tir_expr(&clock, cx)
-                )),
+                kind: TExprKind::HostCall(Box::new(THostCall::ExpiringValueNew {
+                    value: Box::new(value),
+                    duration: Box::new(duration),
+                    clock: Box::new(clock),
+                })),
             };
         }
         // D-HOLE1: `Option.lift2(f, a, b)` → apply `f` to both payloads only when

@@ -9,7 +9,6 @@ use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::ast_operand_is_integer;
 use crate::Codegen::TIR::call_return_type;
 use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::int_lit_type;
 use crate::Codegen::TIR::is_numeric_bounds_const;
 use crate::Codegen::TIR::ListSpreadPart;
@@ -227,10 +226,9 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             if env.is_gc(name) {
                 return TExpr {
                     ty,
-                    kind: crate::Codegen::TIR::host_raw(format!(
-                        "jet_gc::runtime_or_exit({}.read(|__jet_value| __jet_value.clone()))",
-                        env.place_of(name)
-                    )),
+                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::GcRead {
+                        root: env.place_of(name),
+                    })),
                 };
             }
             TExpr {
@@ -663,10 +661,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             if (call.name == "Sql" || call.name == "Html" || call.name == "Sh")
                 && !cx.sigs.contains_key(&call.name)
             {
-                let is_sql = call.name == "Sql";
-                let is_sh = call.name == "Sh";
                 let mut literals: Vec<String> = Vec::new();
-                let mut holes: Vec<String> = Vec::new();
+                let mut holes: Vec<TExpr> = Vec::new();
                 for (i, a) in call.args.iter().enumerate() {
                     if i % 2 == 0 {
                         let lit = match &a.expr {
@@ -678,57 +674,21 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         };
                         literals.push(lit);
                     } else {
-                        let hole = lower_expr(&a.expr, cx, env);
-                        holes.push(format!("({}).jet_show()", emit_tir_expr(&hole, cx)));
+                        holes.push(lower_expr(&a.expr, cx, env));
                     }
                 }
-                let ty = Type::Named(call.name.clone());
-                let code = if is_sql {
-                    // `literals` is compile-time known here (codegen-time Rust
-                    // `Vec<String>`, not generated code) — the `?`-joined template
-                    // is built now, not with a runtime `+`/`format!` in the output.
-                    let template = literals.join("?");
-                    format!(
-                        "({}.to_string(), vec![{}])",
-                        escape_rust_str(&template),
-                        holes.join(", ")
-                    )
-                } else if is_sh {
-                    let mut argv = Vec::new();
-                    for (i, lit) in literals.iter().enumerate() {
-                        for word in lit.split_whitespace() {
-                            argv.push(format!("{}.to_string()", escape_rust_str(word)));
-                        }
-                        if let Some(hole) = holes.get(i) {
-                            argv.push(hole.clone());
-                        }
-                    }
-                    format!("vec![{}]", argv.join(", "))
-                } else {
-                    // Holes are runtime values — use `format!` (not `+`) so a
-                    // literal segment's `&str` never needs an owned-`String` LHS.
-                    let mut fmt_str = String::new();
-                    let mut fmt_args = Vec::new();
-                    for (i, lit) in literals.iter().enumerate() {
-                        fmt_str.push_str(&lit.replace('{', "{{").replace('}', "}}"));
-                        if let Some(h) = holes.get(i) {
-                            fmt_str.push_str("{}");
-                            fmt_args.push(format!("{}jet_html_escape(&({}))", cx.root_prefix, h));
-                        }
-                    }
-                    if fmt_args.is_empty() {
-                        format!("{}.to_string()", escape_rust_str(&fmt_str))
-                    } else {
-                        format!(
-                            "format!({}, {})",
-                            escape_rust_str(&fmt_str),
-                            fmt_args.join(", ")
-                        )
-                    }
+                let kind = match call.name.as_str() {
+                    "Sql" => crate::Codegen::TIR::TTypedTextInterpKind::Sql,
+                    "Sh" => crate::Codegen::TIR::TTypedTextInterpKind::Sh,
+                    _ => crate::Codegen::TIR::TTypedTextInterpKind::Html,
                 };
                 return TExpr {
-                    ty,
-                    kind: crate::Codegen::TIR::host_raw(code),
+                    ty: Type::Named(call.name.clone()),
+                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedTextInterp {
+                        kind,
+                        literals,
+                        holes,
+                    })),
                 };
             }
             // `print` is ambient only when the user has not defined their own
@@ -1534,10 +1494,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         if is_numeric_bounds_const(member) {
                             return TExpr {
                                 ty: nt.clone(),
-                                kind: crate::Codegen::TIR::host_raw(format!(
-                                    "{}::{}",
-                                    cx.rust_type(&nt),
-                                    member
+                                kind: TExprKind::HostCall(Box::new(
+                                    crate::Codegen::TIR::THostCall::NumericBounds {
+                                        ty: nt.clone(),
+                                        member: member.to_string(),
+                                    },
                                 )),
                             };
                         }

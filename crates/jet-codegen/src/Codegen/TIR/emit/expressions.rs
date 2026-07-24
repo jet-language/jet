@@ -98,26 +98,40 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             edges,
             edit,
             index_temp,
-            replace_all,
+            kind,
         } => {
+            use crate::Codegen::TIR::TGcEditKind;
             let edit_s = emit_tir_expr(edit, cx);
-            let mut emitted = if *replace_all {
-                format!(
-                    "jet_gc::runtime_or_exit({root}.edit_replacing_all_edges(&[{}], |__jet_value| {edit_s}))",
-                    edges.join(", ")
-                )
-            } else if let Some((temp, _)) = index_temp {
-                format!(
-                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_index(\"collection\", {temp} as usize, &[{}], |__jet_value| {edit_s}))",
-                    edges.join(", ")
-                )
-            } else if edges.is_empty() {
-                format!("jet_gc::runtime_or_exit({root}.edit(|__jet_value| {edit_s}))")
-            } else {
-                format!(
-                    "jet_gc::runtime_or_exit({root}.edit_edge_slot(\"method:{method_span_start}\", &[{}], |__jet_value| {edit_s}))",
-                    edges.join(", ")
-                )
+            let edge_list = edges.join(", ");
+            let index = index_temp
+                .as_ref()
+                .map(|(temp, _)| temp.as_str())
+                .unwrap_or("0");
+            let mut emitted = match kind {
+                TGcEditKind::Clear => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_clearing_edges(|__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::Pop => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_pop(\"collection\", |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::RemoveIndex => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_remove(\"collection\", {index} as usize, |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::InsertIndex => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_insert(\"collection\", {index} as usize, &[{edge_list}], |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::Prepend => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_prepend(\"collection\", &[{edge_list}], |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::Additive => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_additive(\"collection\", &[{edge_list}], |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::Plain => {
+                    format!("jet_gc::runtime_or_exit({root}.edit(|__jet_value| {edit_s}))")
+                }
+                TGcEditKind::EdgeSlot => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot(\"method:{method_span_start}\", &[{edge_list}], |__jet_value| {edit_s}))"
+                ),
             };
             if let Some((temp, value)) = index_temp {
                 emitted = format!(
@@ -126,6 +140,9 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 );
             }
             emitted
+        }
+        THostCall::GcRead { root } => {
+            format!("jet_gc::runtime_or_exit({root}.read(|__jet_value| __jet_value.clone()))")
         }
         THostCall::OptionProbe { inner, kind } => {
             let inner_s = emit_tir_expr(inner, cx);
@@ -140,6 +157,25 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 }
             }
         }
+        THostCall::StrMatchScan { parts, probe } => {
+            let (closure, _) =
+                str_match_scan_closure_ex(parts, cx, "_jet_switch_subject.as_str()", true);
+            match probe {
+                crate::Codegen::TIR::TMatchProbe::IsSome => format!("({closure}).is_some()"),
+                crate::Codegen::TIR::TMatchProbe::Unwrap => format!("({closure}).unwrap()"),
+            }
+        }
+        THostCall::BinMatchScan { parts, probe } => {
+            let (closure, _) =
+                bin_match_scan_closure_ex(parts, cx, "(_jet_switch_subject).as_slice()", true);
+            match probe {
+                crate::Codegen::TIR::TMatchProbe::IsSome => format!("({closure}).is_some()"),
+                crate::Codegen::TIR::TMatchProbe::Unwrap => format!("({closure}).unwrap()"),
+            }
+        }
+        THostCall::TupleIndex { base, index } => {
+            format!("({}).{index}", emit_tir_expr(base, cx))
+        }
         THostCall::SwitchSubjectField { field } => {
             let field_rust = recv_ty
                 .map(|ty| emit_field_rust(cx, ty, field))
@@ -153,33 +189,145 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             )
         }
         THostCall::TypedTextInterp { kind, literals, holes } => {
-            let mut parts = Vec::new();
-            for (i, lit) in literals.iter().enumerate() {
-                if !lit.is_empty() {
-                    parts.push(format!("{:?}", lit));
+            use crate::Codegen::TIR::TTypedTextInterpKind;
+            use crate::Codegen::escape_rust_str;
+            match kind {
+                TTypedTextInterpKind::Sql => {
+                    let template = literals.join("?");
+                    let hole_s = holes
+                        .iter()
+                        .map(|h| format!("({}).jet_show()", emit_tir_expr(h, cx)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "({}.to_string(), vec![{hole_s}])",
+                        escape_rust_str(&template)
+                    )
                 }
-                if let Some(hole) = holes.get(i) {
-                    parts.push(emit_tir_expr(hole, cx));
+                TTypedTextInterpKind::Sh => {
+                    let mut argv = Vec::new();
+                    for (i, lit) in literals.iter().enumerate() {
+                        for word in lit.split_whitespace() {
+                            argv.push(format!("{}.to_string()", escape_rust_str(word)));
+                        }
+                        if let Some(hole) = holes.get(i) {
+                            argv.push(format!("({}).jet_show()", emit_tir_expr(hole, cx)));
+                        }
+                    }
+                    format!("vec![{}]", argv.join(", "))
                 }
-            }
-            if literals.len() > holes.len() {
-                if let Some(lit) = literals.last() {
-                    if !lit.is_empty() {
-                        parts.push(format!("{:?}", lit));
+                TTypedTextInterpKind::Html => {
+                    let mut fmt_str = String::new();
+                    let mut fmt_args = Vec::new();
+                    for (i, lit) in literals.iter().enumerate() {
+                        fmt_str.push_str(&lit.replace('{', "{{").replace('}', "}}"));
+                        if let Some(h) = holes.get(i) {
+                            fmt_str.push_str("{}");
+                            fmt_args.push(format!(
+                                "{}jet_html_escape(&({}))",
+                                cx.root_prefix,
+                                emit_tir_expr(h, cx)
+                            ));
+                        }
+                    }
+                    if fmt_args.is_empty() {
+                        format!("{}.to_string()", escape_rust_str(&fmt_str))
+                    } else {
+                        format!(
+                            "format!({}, {})",
+                            escape_rust_str(&fmt_str),
+                            fmt_args.join(", ")
+                        )
                     }
                 }
             }
-            let joined = parts.join(", ");
-            match kind {
-                crate::Codegen::TIR::TTypedTextInterpKind::Html => {
-                    format!("{}jet_html_interp(&[{}])", cx.root_prefix, joined)
-                }
-                crate::Codegen::TIR::TTypedTextInterpKind::Sh => {
-                    format!("{}jet_sh_interp(&[{}])", cx.root_prefix, joined)
-                }
-            }
         }
-        THostCall::Raw(code) => code.clone(),
+        THostCall::ExpectSnapshot { value, snap_path } => {
+            format!(
+                "jet_expect(format!(\"{{}}\", ({}).jet_show())).snapshot({snap_path:?})?",
+                emit_tir_expr(value, cx)
+            )
+        }
+        THostCall::EnvSet { name, value, loc } => {
+            use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
+            use crate::Codegen::escape_rust_str;
+            let name_s = emit_tir_expr(name, cx);
+            let value_s = emit_tir_expr(value, cx);
+            let locals = crate::Codegen::TIR::emit_panic_locals(loc, cx);
+            format!(
+                "{{ let __jet_env_name = ({name_s}); let __jet_env_value = ({value_s}); if let Err(__jet_env_error) = {root}jet_std_env_set(&__jet_env_name, &__jet_env_value) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name}, {src_line}, {col}, {caret}, &format!(\"core.env.set: {{}}\", __jet_env_error.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                root = cx.root_prefix,
+                cleanup = RESOURCE_CLEANUP_MARKER,
+                file = escape_rust_str(&loc.file),
+                line = loc.line,
+                fn_name = escape_rust_str(&loc.fn_name),
+                src_line = escape_rust_str(loc.src_line.trim_end()),
+                col = loc.col,
+                caret = loc.caret,
+            )
+        }
+        THostCall::NumericBounds { ty, member } => {
+            format!("{}::{member}", cx.rust_type(ty))
+        }
+        THostCall::ExpiringSecretNew {
+            value,
+            duration,
+            clock,
+            elem,
+        } => {
+            format!(
+                "{{ let __jet_expiring_value = {}; \
+                 let __jet_expiring_ttl = &({}); \
+                 let __jet_expiring_clock = &({}); \
+                 let __jet_expiring_observer = __jet_expiring_clock.observer(); \
+                 {}JetExpiringSecret::<{}>::new(\
+                     __jet_expiring_value, __jet_expiring_ttl.ms, \
+                     move || __jet_expiring_observer.now()) }}",
+                emit_tir_expr(value, cx),
+                emit_tir_expr(duration, cx),
+                emit_tir_expr(clock, cx),
+                cx.root_prefix,
+                cx.rust_type(elem)
+            )
+        }
+        THostCall::ExpiringValueNew {
+            value,
+            duration,
+            clock,
+        } => {
+            format!(
+                "{}jet_expiring_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",
+                cx.root_prefix,
+                emit_tir_expr(value, cx),
+                cx.root_prefix,
+                emit_tir_expr(duration, cx),
+                cx.root_prefix,
+                emit_tir_expr(clock, cx)
+            )
+        }
+        THostCall::CCallback {
+            symbol,
+            lambda,
+            ret,
+        } => {
+            let ret = ret
+                .as_ref()
+                .map(|ty| format!(" -> {}", cx.rust_type(ty)))
+                .unwrap_or_default();
+            let body = if lambda.body.starts_with('{') {
+                lambda.body.clone()
+            } else {
+                format!("{{ {} }}", lambda.body)
+            };
+            format!(
+                "{{ extern \"C\" fn {}({}){} {} {} }}",
+                symbol,
+                lambda.params.join(", "),
+                ret,
+                body,
+                symbol
+            )
+        }
     }
 }
 

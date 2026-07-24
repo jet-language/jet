@@ -432,11 +432,6 @@ pub(crate) fn unit_type() -> Type {
     Type::Named("Unit".to_string())
 }
 
-pub(crate) fn host_raw(code: impl Into<String>) -> crate::Codegen::TIR::TExprKind {
-    use crate::Codegen::TIR::{TExprKind, THostCall};
-    TExprKind::HostCall(Box::new(THostCall::Raw(code.into())))
-}
-
 pub(crate) fn let_ty_for_opt(
     ty: Option<&Type>,
     cx: &Cx,

@@ -1011,12 +1011,31 @@ pub enum THostCall {
         edges: Vec<String>,
         edit: Box<TExpr>,
         index_temp: Option<(String, TExpr)>,
-        replace_all: bool,
+        kind: TGcEditKind,
     },
-    /// Option/pattern projection helpers: `(closure).is_some()` / `.unwrap()` / field project.
+    /// GC local read: `jet_gc::runtime_or_exit(root.read(|__jet_value| __jet_value.clone()))`.
+    GcRead {
+        root: String,
+    },
+    /// Option/pattern projection helpers: `(inner).is_some()` / `.unwrap()` / field project.
     OptionProbe {
         inner: Box<TExpr>,
         kind: TOptionProbe,
+    },
+    /// D-PARSESTR1: str-match scan against `_jet_switch_subject`; emit builds the IIFE.
+    StrMatchScan {
+        parts: Vec<crate::AST::StrMatchPart>,
+        probe: TMatchProbe,
+    },
+    /// D-BINPAT1: binary-pattern scan against `_jet_switch_subject`.
+    BinMatchScan {
+        parts: Vec<crate::AST::BinMatchPart>,
+        probe: TMatchProbe,
+    },
+    /// Tuple element project: `(base).{index}` (after str/bin-match unwrap).
+    TupleIndex {
+        base: Box<TExpr>,
+        index: usize,
     },
     /// Struct-pattern subject field: `((*_jet_switch_subject).{field})`
     SwitchSubjectField {
@@ -1026,15 +1045,67 @@ pub enum THostCall {
     YieldSend {
         value: Box<TExpr>,
     },
-    /// Html/Sh typed-text interpolation assembled at emit from literals + holes.
+    /// Sql/Html/Sh typed-text constructor from literals + hole exprs.
     TypedTextInterp {
         kind: TTypedTextInterpKind,
         literals: Vec<String>,
         holes: Vec<TExpr>,
     },
-    /// Verbatim Rust expression assembled at lowering (str/bin-match IIFEs, etc.).
-    /// #776 residual — must shrink to zero before criterion 2 closes.
-    Raw(String),
+    /// `expect(x).snapshot()` harness call.
+    ExpectSnapshot {
+        value: Box<TExpr>,
+        snap_path: String,
+    },
+    /// `core.env.set` with rich panic on invalid runtime strings.
+    EnvSet {
+        name: Box<TExpr>,
+        value: Box<TExpr>,
+        loc: TPanicLoc,
+    },
+    /// Numeric bounds constant: `{rust_type(ty)}::{member}`.
+    NumericBounds {
+        ty: Type,
+        member: String,
+    },
+    /// `ExpiringSecret::<T>::new(value, ttl.ms, clock observer)`.
+    ExpiringSecretNew {
+        value: Box<TExpr>,
+        duration: Box<TExpr>,
+        clock: Box<TExpr>,
+        elem: Type,
+    },
+    /// `jet_expiring_new(value, duration_ms, clock_now)`.
+    ExpiringValueNew {
+        value: Box<TExpr>,
+        duration: Box<TExpr>,
+        clock: Box<TExpr>,
+    },
+    /// D-CABI-CALLBACK1: `extern "C" fn` wrapper around a lowered lambda.
+    CCallback {
+        symbol: String,
+        lambda: TLambda,
+        ret: Option<Type>,
+    },
+}
+
+/// Which jet_gc edit wrapper to emit for a collector-owned method call.
+#[derive(Clone, Copy)]
+pub enum TGcEditKind {
+    Clear,
+    Pop,
+    RemoveIndex,
+    InsertIndex,
+    Prepend,
+    Additive,
+    Plain,
+    EdgeSlot,
+}
+
+/// Str/bin-match scan result shape: bool test vs unwrap the hole tuple.
+#[derive(Clone, Copy)]
+pub enum TMatchProbe {
+    IsSome,
+    Unwrap,
 }
 
 pub enum THostArg {
@@ -1065,6 +1136,7 @@ pub enum TTypedTextForm {
 
 #[derive(Clone, Copy)]
 pub enum TTypedTextInterpKind {
+    Sql,
     Html,
     Sh,
 }

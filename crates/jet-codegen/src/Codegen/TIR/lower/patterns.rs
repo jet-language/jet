@@ -1,6 +1,5 @@
 use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
 use crate::Codegen::Cx;
-use crate::Codegen::mangle;
 use crate::Codegen::mangle_variant;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
@@ -21,7 +20,6 @@ use crate::Codegen::TIR::TMatchArm;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TStmt;
-use crate::Codegen::TIR::tuple_join;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::variant_pattern_enum;
 use crate::Codegen::variant_binding_types;
@@ -133,11 +131,22 @@ pub(super) fn lower_reader_take_pattern(
 /// D-PARSESTR1: the bool test for a str-match arm head — whether the scan
 /// closure succeeds. Always refutable (E0148 requires an `else` whenever this
 /// pattern appears in an if-table with no fallback).
-pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
-    let (closure, _) = str_match_scan_closure(pattern, cx);
+pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, _cx: &Cx) -> TExpr {
+    let Pattern::StrMatch { parts, .. } = pattern else {
+        return TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
+                parts: Vec::new(),
+                probe: crate::Codegen::TIR::TMatchProbe::IsSome,
+            })),
+        };
+    };
     TExpr {
         ty: Type::Bool,
-        kind: crate::Codegen::TIR::host_raw(format!("({}).is_some()", closure)),
+        kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
+            parts: parts.clone(),
+            probe: crate::Codegen::TIR::TMatchProbe::IsSome,
+        })),
     }
 }
 
@@ -147,52 +156,55 @@ pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
 /// independently re-derived rather than shared), binds the whole result tuple
 /// to one temp, then projects each hole out of it by field index.
 pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-    let (closure, holes) = str_match_scan_closure(pattern, cx);
+    let (_, holes) = str_match_scan_closure(pattern, cx);
     if holes.is_empty() {
         return Vec::new();
     }
-    let _tuple_ty_str = tuple_join(
-        &holes
-            .iter()
-            .map(|(_, t)| cx.rust_type(t))
-            .collect::<Vec<_>>(),
-    );
-    // `TStmt::Let` always mangles its `name` at emission (Codegen/TIR/emit.rs),
-    // so the tuple temp's REFERENCED name must go through the same `mangle`.
+    let parts = match pattern {
+        Pattern::StrMatch { parts, .. } => parts.clone(),
+        _ => Vec::new(),
+    };
     let tuple_local = "__jet_sm_tuple";
-    let tuple_rust = mangle(tuple_local);
+    let tuple_ty = Type::Tuple(
+        holes
+            .iter()
+            .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+            .collect(),
+    );
     let mut out = vec![TStmt::Let {
         name: tuple_local.to_string(),
         kw: "let",
         let_ty: crate::Codegen::TIR::let_ty_tuple(holes.iter().map(|(_, t)| t.clone()).collect()),
         init: TExpr {
-            ty: Type::Bool,
-            kind: crate::Codegen::TIR::host_raw(format!("({}).unwrap()", closure)),
+            ty: tuple_ty.clone(),
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
+                parts,
+                probe: crate::Codegen::TIR::TMatchProbe::Unwrap,
+            })),
         },
         track_origin: None,
-                gc_promotion: None,
-                gc_transferred: false,
+        gc_promotion: None,
+        gc_transferred: false,
     }];
-    let single = holes.len() == 1;
     for (i, (name, ty)) in holes.iter().enumerate() {
         env.bind(name, TLocal::user(name), Some(ty.clone()));
-        let project = if single {
-            // A one-element Rust tuple is `(x,)`; its sole field is still `.0`.
-            format!("{}.0", tuple_rust)
-        } else {
-            format!("{}.{}", tuple_rust, i)
-        };
         out.push(TStmt::Let {
             name: name.clone(),
             kw: "let",
             let_ty: crate::Codegen::TIR::TLetTy::plain(ty.clone()),
             init: TExpr {
                 ty: ty.clone(),
-                kind: crate::Codegen::TIR::host_raw(project),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TupleIndex {
+                    base: Box::new(TExpr {
+                        ty: tuple_ty.clone(),
+                        kind: TExprKind::Local(TLocal::user(tuple_local)),
+                    }),
+                    index: i,
+                })),
             },
             track_origin: None,
-                gc_promotion: None,
-                gc_transferred: false,
+            gc_promotion: None,
+            gc_transferred: false,
         });
     }
     out
@@ -200,11 +212,17 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
 
 /// D-BINPAT1 (card #506): the bool test for a binary-pattern arm head —
 /// whether the bit-scan closure succeeds. Always refutable (E0148).
-pub(super) fn bin_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
-    let (closure, _) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
+pub(super) fn bin_match_pattern_cond_expr(pattern: &Pattern, _cx: &Cx) -> TExpr {
+    let parts = match pattern {
+        Pattern::BinMatch { parts, .. } => parts.clone(),
+        _ => Vec::new(),
+    };
     TExpr {
         ty: Type::Bool,
-        kind: crate::Codegen::TIR::host_raw(format!("({}).is_some()", closure)),
+        kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::BinMatchScan {
+            parts,
+            probe: crate::Codegen::TIR::TMatchProbe::IsSome,
+        })),
     }
 }
 
@@ -216,49 +234,55 @@ pub(super) fn lower_bin_match_pattern_bindings(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> Vec<TStmt> {
-    let (closure, holes) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
+    let (_, holes) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
     if holes.is_empty() {
         return Vec::new();
     }
-    let _tuple_ty_str = tuple_join(
-        &holes
-            .iter()
-            .map(|(_, t)| cx.rust_type(t))
-            .collect::<Vec<_>>(),
-    );
+    let parts = match pattern {
+        Pattern::BinMatch { parts, .. } => parts.clone(),
+        _ => Vec::new(),
+    };
     let tuple_local = "__jet_bm_tuple";
-    let tuple_rust = mangle(tuple_local);
+    let tuple_ty = Type::Tuple(
+        holes
+            .iter()
+            .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+            .collect(),
+    );
     let mut out = vec![TStmt::Let {
         name: tuple_local.to_string(),
         kw: "let",
         let_ty: crate::Codegen::TIR::let_ty_tuple(holes.iter().map(|(_, t)| t.clone()).collect()),
         init: TExpr {
-            ty: Type::Bool,
-            kind: crate::Codegen::TIR::host_raw(format!("({}).unwrap()", closure)),
+            ty: tuple_ty.clone(),
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::BinMatchScan {
+                parts,
+                probe: crate::Codegen::TIR::TMatchProbe::Unwrap,
+            })),
         },
         track_origin: None,
-                gc_promotion: None,
-                gc_transferred: false,
+        gc_promotion: None,
+        gc_transferred: false,
     }];
-    let single = holes.len() == 1;
     for (i, (name, ty)) in holes.iter().enumerate() {
         env.bind(name, TLocal::user(name), Some(ty.clone()));
-        let project = if single {
-            format!("{}.0", tuple_rust)
-        } else {
-            format!("{}.{}", tuple_rust, i)
-        };
         out.push(TStmt::Let {
             name: name.clone(),
             kw: "let",
             let_ty: crate::Codegen::TIR::TLetTy::plain(ty.clone()),
             init: TExpr {
                 ty: ty.clone(),
-                kind: crate::Codegen::TIR::host_raw(project),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TupleIndex {
+                    base: Box::new(TExpr {
+                        ty: tuple_ty.clone(),
+                        kind: TExprKind::Local(TLocal::user(tuple_local)),
+                    }),
+                    index: i,
+                })),
             },
             track_origin: None,
-                gc_promotion: None,
-                gc_transferred: false,
+            gc_promotion: None,
+            gc_transferred: false,
         });
     }
     out

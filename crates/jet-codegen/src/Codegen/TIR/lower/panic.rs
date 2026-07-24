@@ -116,37 +116,3 @@ pub(crate) fn lower_panic_stop(
     let msg = Box::new(lower_panic_message_expr(&args[0].expr, cx, env));
     (TRequireKind::Panic { msg }, loc)
 }
-
-/// Legacy helper for lowering paths that still assemble a full panic block string
-/// (e.g. `core.env.set` failure wrapper) before `HostCall::Raw`.
-pub(crate) fn render_safe_locals(env: &LowerEnv) -> String {
-    if env.locals.is_empty() {
-        return "String::new()".to_string();
-    }
-    let loc = TPanicLoc {
-        file: String::new(),
-        src_line: String::new(),
-        line: 0,
-        col: 0,
-        caret: 0,
-        fn_name: String::new(),
-        locals: safe_locals_snapshot(env),
-    };
-    let mut parts: Vec<String> = Vec::new();
-    for (_name, place) in &loc.locals {
-        let rust_name = place.rust_name();
-        let value_expr = if place.deref {
-            format!("(*{rust_name}).jet_show()")
-        } else {
-            format!("({rust_name}).jet_show()")
-        };
-        parts.push(value_expr);
-    }
-    let fmt_str = loc
-        .locals
-        .iter()
-        .map(|(n, _)| format!("{n} = {{}}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("format!(\"{fmt_str}\", {})", parts.join(", "))
-}
