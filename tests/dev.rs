@@ -1100,6 +1100,65 @@ fn infinite_loop_hits_e2202_fuel_stop() {
 }
 
 #[test]
+fn fluent_method_chain_preserves_fuel_order_and_spans() {
+    use std::collections::HashMap;
+
+    let run_chain = |links: usize, fuel: u64| {
+        let src = format!(
+            "fn run() {{\n    print(\" x \"{})\n}}\n",
+            ".trim()".repeat(links)
+        );
+        let prog = jet::Parser::parse(&jet::Lexer::lex(&src).0).expect("fixture should parse");
+        let mut funcs: HashMap<String, &jet::AST::Func> = HashMap::new();
+        for item in &prog.items {
+            if let jet::AST::Item::Func(f) = item {
+                funcs.insert(f.name.clone(), f);
+            }
+        }
+        let run = funcs.get("run").copied().expect("fixture has run");
+        let argument = match run.body.first() {
+            Some(jet::AST::Stmt::Expr(jet::AST::Expr::Call(call))) => &call.args[0].expr,
+            other => panic!("expected print call, got {other:?}"),
+        };
+        let mut method_spans = Vec::new();
+        let mut cursor = argument;
+        while let jet::AST::Expr::MethodCall {
+            receiver,
+            method_span,
+            ..
+        } = cursor
+        {
+            method_spans.push(*method_span);
+            cursor = receiver;
+        }
+        let expected_exhaustion_span = method_spans.get(2).copied();
+        let mut sink = jet::Comptime::DevSink::new();
+        let result = jet::Comptime::run_main_with_fuel(
+            run,
+            &funcs,
+            std::path::Path::new("."),
+            &mut sink,
+            fuel,
+        );
+        (result, sink.stdout, expected_exhaustion_span)
+    };
+
+    let (one, stdout, _) = run_chain(1, 4);
+    one.expect("one method link should fit exactly inside four fuel steps");
+    assert_eq!(stdout, "x\n");
+
+    for links in [3, 100] {
+        let (result, _, expected_span) = run_chain(links, 3);
+        let err = result.expect_err("the chain should exhaust three fuel steps");
+        assert_eq!(err.code, "E2202");
+        assert_eq!(
+            err.span, expected_span,
+            "{links}-link chain must fail on the second inner method"
+        );
+    }
+}
+
+#[test]
 fn task_program_hits_e2201_in_interpreter_mode() {
     let file = "examples/features/concurrency/tasks.jet";
     match dev_iteration(file, false, true) {

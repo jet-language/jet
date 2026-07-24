@@ -1119,6 +1119,13 @@ impl<'a> Interp<'a> {
         while let Expr::MethodCall { receiver, .. } = cursor {
             calls.push(cursor);
             cursor = receiver;
+            // `eval` already burned the outer call. Recursive evaluation used
+            // to burn each inner call before dispatching it; preserve that
+            // order here. The non-method base still burns in the innermost
+            // dispatch's ordinary `eval(receiver, ...)`.
+            if matches!(cursor, Expr::MethodCall { .. }) {
+                self.burn(cursor.span())?;
+            }
         }
         let mut evaluated_receiver = None;
         while let Some(call) = calls.pop() {
