@@ -652,6 +652,16 @@ pub(super) fn apply_core_call(
             unsupported(&format!("{}.{}(): missing arg {}", module, method, i), span)
         })
     };
+    let args_bool = |index: usize, default: bool| -> Result<bool, Diagnostic> {
+        match args.get(index) {
+            Some(CtValue::Bool(value)) => Ok(*value),
+            Some(_) => Err(unsupported(
+                &format!("{}.{}(): argument {} must be Bool", module, method, index + 1),
+                span,
+            )),
+            None => Ok(default),
+        }
+    };
 
     match (module, method) {
         // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside
@@ -1553,7 +1563,15 @@ pub(super) fn apply_core_call(
         }
         ("core.encoding.base64", "decode") => {
             let s = as_string(one(0)?, span)?;
-            Ok(match jet_foundation::XmlPull::base_encoding_2026::decode_base64(s) {
+            let allow_whitespace = args_bool(1, false)?;
+            let allow_missing_padding = args_bool(2, false)?;
+            let edition = jet_foundation::PackageEdition::package_edition();
+            Ok(match jet_foundation::base_encoding_dispatch::decode_base64(
+                &edition,
+                s,
+                allow_whitespace,
+                allow_missing_padding,
+            ) {
                 Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
                 Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
             })
@@ -1572,7 +1590,15 @@ pub(super) fn apply_core_call(
         }
         ("core.encoding.base64", "decode_url") => {
             let s = as_string(one(0)?, span)?;
-            Ok(match jet_foundation::XmlPull::base_encoding_2026::decode_base64url(s) {
+            let allow_whitespace = args_bool(1, false)?;
+            let allow_padding = args_bool(2, false)?;
+            let edition = jet_foundation::PackageEdition::package_edition();
+            Ok(match jet_foundation::base_encoding_dispatch::decode_base64url(
+                &edition,
+                s,
+                allow_whitespace,
+                allow_padding,
+            ) {
                 Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
                 Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
             })
@@ -1585,7 +1611,17 @@ pub(super) fn apply_core_call(
         }
         ("core.encoding.base32", "decode") => {
             let s = as_string(one(0)?, span)?;
-            Ok(match jet_foundation::XmlPull::base_encoding_2026::decode_base32(s) {
+            let allow_whitespace = args_bool(1, false)?;
+            let allow_missing_padding = args_bool(2, false)?;
+            let allow_lowercase = args_bool(3, false)?;
+            let edition = jet_foundation::PackageEdition::package_edition();
+            Ok(match jet_foundation::base_encoding_dispatch::decode_base32(
+                &edition,
+                s,
+                allow_whitespace,
+                allow_missing_padding,
+                allow_lowercase,
+            ) {
                 Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
                 Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
             })

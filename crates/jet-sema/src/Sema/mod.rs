@@ -1532,6 +1532,7 @@ mod CheckerTaskGroup;
 use CheckerTaskGroup::TaskGroupCtx;
 mod CheckerValidate;
 mod Diagnostics;
+mod Edition;
 mod Effects;
 mod MemoryFacts;
 pub mod UnsafeObligations;

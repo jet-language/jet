@@ -218,6 +218,8 @@ pub(crate) struct Cx {
     /// `WebBucket`). Defaults to the host OS; the real build pipeline
     /// (`emit_bundle_dbg`) overwrites it from the resolved `--target=<triple>`.
     pub(crate) active_os: crate::Syntax::OsTarget,
+    /// D-ENC712: resolved package edition for encoding surface dispatch.
+    pub(crate) package_edition: String,
     /// D-STM1=A (card #506): true while lowering the body of a `#Transact` block,
     /// so a `Shared<T>.edit(f)` inside it routes to the deferred `edit_txn` (the
     /// atomic Shared plane) instead of taking a lock immediately. Set/restored
@@ -1809,6 +1811,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
+    cx.package_edition = bundle.edition.clone();
 }
 
 fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
@@ -2080,6 +2083,7 @@ pub(crate) fn build_cx_items(
         variadic_bound_fns: HashMap::new(),
         needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         active_os: crate::Syntax::OsTarget::host(),
+        package_edition: "2027".to_string(),
         in_stm_transact: std::cell::Cell::new(false),
         stm_touched: std::cell::Cell::new(false),
     };

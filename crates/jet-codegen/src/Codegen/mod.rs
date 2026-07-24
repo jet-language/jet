@@ -324,6 +324,9 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     "\nmod jet_xml_pull {\n",
     include_str!("../../../jet-foundation/src/XmlPull.rs"),
     "\n}\n",
+    "\nmod jet_base_encoding_strict {\n",
+    include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"),
+    "\n}\n",
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
@@ -1460,6 +1463,7 @@ mod tests {
             inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
             web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
             active_os: crate::Syntax::OsTarget::host(),
+            edition: "2027".to_string(),
         };
         let diagnostics = crate::Sema::check_bundle(&mut bundle, CompileMode::Run);
         assert!(!diagnostics.iter().any(|d| d.severity == crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
@@ -1540,6 +1544,7 @@ mod tests {
             web_partition_report: None,
             dep_roots: HashMap::new(),
             active_os: crate::Syntax::OsTarget::host(),
+            edition: "2027".to_string(),
         };
 
         let diags = crate::Sema::check_bundle(&mut bundle, CompileMode::Run);
@@ -2024,6 +2029,8 @@ pub fn emit_bundle_dbg(
         out.push_str(&format!("// jet:generic-instance module={} fingerprint={} full-key={}\n", provenance.canonical_module, provenance.fingerprint, provenance.full_key_hex));
     }
     out.push_str("#![allow(warnings)]\n\n");
+    let edition_year = bundle.edition.parse::<u16>().unwrap_or(2027);
+    out.push_str(&format!("const __JET_PACKAGE_EDITION: u16 = {edition_year};\n\n"));
     emit_command_metadata(bundle, active_os, &mut out);
     if let Some(ffi) = link {
         out.push_str(&format!("extern crate {};\n\n", ffi.crate_name));

@@ -38,7 +38,7 @@
 // D-ARCH-SOURCE1=A: the REPL is a real outer seam over the compiler driver.
 // Re-export inward compiler vocabulary so moved subsystem source keeps its
 // established `crate::AST`/`crate::Comptime` paths without depending on root.
-pub use jet_driver::{AST, Comptime, Diagnostics, Lexer, Loader, Parser, Sema, Syntax};
+pub use jet_driver::{AST, Comptime, Diagnostics, Lexer, Loader, Manifest, Parser, Sema, Syntax};
 
 pub mod SemanticSymbols;
 pub mod Term;
@@ -1849,6 +1849,7 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OsTarget::host(),
+        edition: crate::Manifest::latest_edition().to_string(),
     }
 }
 

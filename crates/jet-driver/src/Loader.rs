@@ -187,6 +187,7 @@ fn load_entry_with_overlays_mode(
             matches!(name, Syntax::DEFAULT_ENTRY_FILE | Syntax::LEGACY_ENTRY_FILE)
         });
     let mut layer_ceiling = None;
+    let mut package_edition = Manifest::latest_edition().to_string();
     // U11 (D-JPK-SCRIPTDEP1=A): L0203 lints for inline `use pkg#version;`
     // deps found in the manifest-less branch below, merged into
     // `parse_teaching` once that's declared.
@@ -213,6 +214,7 @@ fn load_entry_with_overlays_mode(
             Err(d) => return Err(vec![d]),
             Ok(mf) => {
                 layer_ceiling = mf.package.layer;
+                package_edition = Manifest::effective_edition(&mf);
                 // Check toolchain constraint (E1208).
                 if let Err(d) = Manifest::check_toolchain(&mf, &pack_path.display().to_string()) {
                     return Err(vec![d]);
@@ -510,6 +512,7 @@ fn load_entry_with_overlays_mode(
         // D-OSTARGET2=B: default to the host OS; the driver overrides this from
         // `--target=<triple>` before sema runs (LSP/tests keep the host bucket).
         active_os: Syntax::OsTarget::host(),
+        edition: package_edition,
     };
     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged
     // synthetic modules and resolve C `use` forms before sema sees the tree.

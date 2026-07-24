@@ -476,7 +476,20 @@ pub fn core_fixed_sig(
         ("core.encoding.json", "to_string" | "to_string_pretty") => {
             Some((vec![(read, json)], Some(Type::String)))
         }
-        ("core.encoding.json", "canonical" | "events") => {
+        ("core.encoding.json", "canonical") => {
+            if super::super::Edition::edition_at_least("2027") {
+                Some((
+                    vec![
+                        (read, json.clone()),
+                        (read, Type::Named("EncodingLimits".to_string())),
+                    ],
+                    Some(result_ty(Type::String, encoding_error_ty())),
+                ))
+            } else {
+                Some((vec![(read, json.clone())], Some(Type::String)))
+            }
+        }
+        ("core.encoding.json", "events") => {
             Some((vec![(read, json.clone())], Some(Type::String)))
         }
         ("core.encoding.json", "reader") => Some((
@@ -1844,24 +1857,64 @@ pub fn core_fixed_sig(
         ("core.encoding.base64", "encode") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.base64", "decode") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(list_u8.clone(), Type::String)),
-        )),
+        ("core.encoding.base64", "decode") => {
+            if super::super::Edition::edition_at_least("2027") {
+                Some((
+                    vec![
+                        (read, Type::String),
+                        (read, Type::Bool),
+                        (read, Type::Bool),
+                    ],
+                    Some(result_ty(list_u8.clone(), Type::String)),
+                ))
+            } else {
+                Some((
+                    vec![(read, Type::String)],
+                    Some(result_ty(list_u8.clone(), Type::String)),
+                ))
+            }
+        }
         ("core.encoding.base64", "encode_url") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.base64", "decode_url") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(list_u8.clone(), Type::String)),
-        )),
+        ("core.encoding.base64", "decode_url") => {
+            if super::super::Edition::edition_at_least("2027") {
+                Some((
+                    vec![
+                        (read, Type::String),
+                        (read, Type::Bool),
+                        (read, Type::Bool),
+                    ],
+                    Some(result_ty(list_u8.clone(), Type::String)),
+                ))
+            } else {
+                Some((
+                    vec![(read, Type::String)],
+                    Some(result_ty(list_u8.clone(), Type::String)),
+                ))
+            }
+        }
         ("core.encoding.base32", "encode") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.base32", "decode") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(list_u8.clone(), Type::String)),
-        )),
+        ("core.encoding.base32", "decode") => {
+            if super::super::Edition::edition_at_least("2027") {
+                Some((
+                    vec![
+                        (read, Type::String),
+                        (read, Type::Bool),
+                        (read, Type::Bool),
+                        (read, Type::Bool),
+                    ],
+                    Some(result_ty(list_u8.clone(), Type::String)),
+                ))
+            } else {
+                Some((
+                    vec![(read, Type::String)],
+                    Some(result_ty(list_u8.clone(), Type::String)),
+                ))
+            }
+        }
         // D-UUIDENC1=A: UUID v4 (system CSPRNG) and v7 (injectable Clock).
         // `v4()` reads /dev/urandom; `v7(clock)` extracts the timestamp from the
         // injected Clock so tests can produce a deterministic UUID.

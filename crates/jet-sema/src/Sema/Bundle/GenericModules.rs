@@ -2182,6 +2182,7 @@ mod instance_collision_tests {
             web_partition_report: None,
             dep_roots: HashMap::new(),
             active_os: crate::Syntax::OsTarget::host(),
+            edition: "2027".to_string(),
         }
     }
 

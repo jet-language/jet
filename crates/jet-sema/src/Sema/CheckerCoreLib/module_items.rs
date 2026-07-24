@@ -734,7 +734,11 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.auth" => &["verify_jwt", "verify_paseto"],
         _ => &[],
     };
-    items.iter().map(|s| s.to_string()).collect()
+    let mut out: Vec<String> = items.iter().map(|s| s.to_string()).collect();
+    if module == "core.encoding.cbor" && !super::super::Edition::edition_at_least("2028") {
+        out.push("encode".to_string());
+    }
+    out
 }
 
 /// Ratified nominal types exported by a Core module. Separate from callable

@@ -25,8 +25,29 @@ pub const COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// into a specific era of Jet syntax (docs/spec/release-policy.md). The list is
 /// ordered oldest→newest; the last entry is the newest stable edition, used by
 /// single-file `jet run file.jet` which carries no edition marker (E2-V4).
-const LATEST_EDITION: &str = "2026";
-pub const SUPPORTED_EDITIONS: &[&str] = &[LATEST_EDITION];
+const LATEST_EDITION: &str = "2027";
+pub const SUPPORTED_EDITIONS: &[&str] = &["2026", "2027", "2028"];
+
+/// Parse an edition label like `"2027"` into its year. Unknown labels sort before
+/// every supported edition so comparisons fail closed.
+pub fn edition_year(edition: &str) -> u16 {
+    edition.trim().parse().unwrap_or(0)
+}
+
+/// `true` when `edition` is at least as new as `baseline` under numeric ordering.
+pub fn edition_at_least(edition: &str, baseline: &str) -> bool {
+    edition_year(edition) >= edition_year(baseline)
+}
+
+/// Resolve a manifest's effective edition, defaulting to the newest stable one.
+pub fn effective_edition(manifest: &Manifest) -> String {
+    manifest
+        .package
+        .edition
+        .clone()
+        .filter(|e| !e.trim().is_empty())
+        .unwrap_or_else(|| latest_edition().to_string())
+}
 
 /// The newest stable edition this toolchain ships. Single-file programs and a
 /// manifest with no `edition:` field use this.
@@ -96,8 +117,22 @@ pub struct Deprecation {
     pub removed_in_edition: &'static str,
 }
 
-/// The deprecation registry (D-REL5). Empty pre-1.0 by design; see `Deprecation`.
-pub const DEPRECATIONS: &[Deprecation] = &[];
+/// The deprecation registry (D-REL5). Encoding CBOR forwarding entries ship with
+/// card #712 / D-ENC-CBOR-SURFACE1.
+pub const DEPRECATIONS: &[Deprecation] = &[
+    Deprecation {
+        item: "cbor.encode",
+        since_edition: "2027",
+        replacement: "cbor.to_bytes",
+        removed_in_edition: "2028",
+    },
+    Deprecation {
+        item: "cbor.decode",
+        since_edition: "2027",
+        replacement: "cbor.parse",
+        removed_in_edition: "2028",
+    },
+];
 
 /// Look up a deprecation by the item's spelling.
 pub fn lookup_deprecation(item: &str) -> Option<&'static Deprecation> {

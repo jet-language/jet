@@ -279,7 +279,7 @@ fn ga_feature_size_budgets() {
 // ============================================================================
 
 use jet::Diagnostics::Diagnostic;
-use jet::Manifest::{self, Deprecation};
+use jet::Manifest::{self};
 
 fn release_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/release")
@@ -352,14 +352,7 @@ fn no_edition_field_is_accepted() {
 
 #[test]
 fn deprecation_e2002_and_l2001() {
-    // The real registry is empty pre-1.0. Render from a synthetic deprecation so
-    // the E2002/L2001 wording is pinned and ready for the first real one.
-    let synth = Deprecation {
-        item: "old_keyword",
-        since_edition: "2026",
-        replacement: "new_keyword",
-        removed_in_edition: "2027",
-    };
+    let synth = Manifest::lookup_deprecation("cbor.encode").expect("cbor.encode deprecation");
     let lint = Manifest::l2001(&synth, None);
     let err = Manifest::e2002(&synth, None);
     assert_eq!(lint.code, "L2001");
@@ -378,11 +371,14 @@ fn render_standalone(d: &Diagnostic) -> String {
 }
 
 #[test]
-fn registry_is_honestly_empty_pre_1_0() {
-    // Guards the doc claim: the deprecation registry has no entries yet.
+fn registry_lists_encoding_cbor_migrations() {
     assert!(
-        Manifest::DEPRECATIONS.is_empty(),
-        "DEPRECATIONS is no longer empty — make E2002/L2001 reachable and update docs/spec/diagnostics.md to drop the not-yet-triggerable note"
+        Manifest::DEPRECATIONS.iter().any(|dep| dep.item == "cbor.encode"),
+        "cbor.encode deprecation must stay registered for L2001/E2002"
+    );
+    assert!(
+        Manifest::lookup_deprecation("cbor.decode").is_some(),
+        "cbor.decode deprecation must stay registered for L2001/E2002"
     );
 }
 

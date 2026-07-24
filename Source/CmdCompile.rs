@@ -823,8 +823,9 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
 /// Goes through `jet::LSP::collect_fixes` / `apply_all` — the SAME unified fix
 /// engine the LSP code-action layer uses — so a fix on the command line and a
 /// fix in the editor are byte-identical. `--dry-run` shows the diff without
-/// writing.
-pub(crate) fn run_fix(file: &str, dry_run: bool) {
+/// writing. With `--edition=2027`, apply encoding-surface migrations first
+/// (D-JSONCANON1 / D-ENC-CBOR-SURFACE1 / D-ENCBASE-STRICT1).
+pub(crate) fn run_fix(file: &str, dry_run: bool, edition: Option<&str>) {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
@@ -833,12 +834,22 @@ pub(crate) fn run_fix(file: &str, dry_run: bool) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let fixes = jet::LSP::collect_fixes(file, &src);
-    if fixes.is_empty() {
-        println!("{}: no auto-fixable problems found", file);
-        return;
+    let migrated = if edition == Some("2027") {
+        apply_edition_2027_encoding_fixes(&src)
+    } else {
+        src.clone()
+    };
+    if edition == Some("2027") {
+        for note in edition_2027_encoding_audit(&src, &migrated) {
+            println!("{file}: edition 2027 migration: {note}");
+        }
     }
-    let fixed = jet::LSP::apply_all(&src, &fixes);
+    let fixes = jet::LSP::collect_fixes(file, &migrated);
+    let fixed = if fixes.is_empty() {
+        migrated
+    } else {
+        jet::LSP::apply_all(&migrated, &fixes)
+    };
     if fixed == src {
         println!("{}: no changes made", file);
         return;
@@ -846,24 +857,75 @@ pub(crate) fn run_fix(file: &str, dry_run: bool) {
     let n = fixes.len();
     if dry_run {
         print!("{}", jet::Formatter::unified_diff(file, &src, &fixed));
-        println!(
-            "{}: would apply {} fix{} (dry run; nothing written)",
-            file,
-            n,
-            if n == 1 { "" } else { "es" }
-        );
+        if n == 0 {
+            println!(
+                "{}: would apply edition migration (dry run; nothing written)",
+                file
+            );
+        } else {
+            println!(
+                "{}: would apply {} fix{} (dry run; nothing written)",
+                file,
+                n,
+                if n == 1 { "" } else { "es" }
+            );
+        }
         return;
     }
     fs::write(file, &fixed).unwrap_or_else(|e| {
         eprintln!("error: couldn't write {}: {}", file, e);
         exit(ExitCodes::USER_ERROR);
     });
-    println!(
-        "{}: applied {} fix{}",
-        file,
-        n,
-        if n == 1 { "" } else { "es" }
-    );
+    if n == 0 {
+        println!("{}: applied edition migration", file);
+    } else {
+        println!(
+            "{}: applied {} fix{}",
+            file,
+            n,
+            if n == 1 { "" } else { "es" }
+        );
+    }
+}
+
+fn apply_edition_2027_encoding_fixes(src: &str) -> String {
+    let mut out = src.to_string();
+    out = replace_untyped_call(&out, "cbor.encode(", "cbor.to_bytes(");
+    out = replace_untyped_call(&out, "cbor.decode(", "cbor.parse(");
+    out
+}
+
+fn replace_untyped_call(src: &str, from: &str, to: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut rest = src;
+    while let Some(index) = rest.find(from) {
+        out.push_str(&rest[..index]);
+        let after = &rest[index + from.len()..];
+        if after.starts_with('<') {
+            out.push_str(from);
+        } else {
+            out.push_str(to);
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn edition_2027_encoding_audit(before: &str, after: &str) -> Vec<String> {
+    let mut notes = Vec::new();
+    if before.contains("json.canonical(") {
+        notes.push(
+            "review every `json.canonical(...)` call — edition 2027 requires fallible `json.canonical(data, limits)?` (or an explicit panic fallback)".to_string(),
+        );
+    }
+    if before != after {
+        notes.push("rewrote deprecated CBOR forwarding calls (`encode`/`decode`)".to_string());
+    }
+    if notes.is_empty() {
+        notes.push("no encoding forwarding calls found".to_string());
+    }
+    notes
 }
 
 pub(crate) fn run_new(name: &str, annotated: bool) {
