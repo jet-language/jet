@@ -967,12 +967,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let v = lower_expr(e, cx, env);
             TStmt::ExprStmt(TExpr {
                 ty: unit_type(),
-                kind: crate::Codegen::TIR::host_raw(
-                    format!(
-                        "let _ = __jet_yield_tx.send({});",
-                        emit_tir_expr(&v, cx)
-                    ),
-                ),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::YieldSend {
+                    value: Box::new(v),
+                })),
             })
         }
         // D-IGNORERET2=A: `.drop("reason")` — lower only the receiver (for side effects).

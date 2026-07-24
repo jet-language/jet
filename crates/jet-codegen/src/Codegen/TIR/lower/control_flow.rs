@@ -24,7 +24,6 @@ use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::bin_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::struct_pattern_field_type;
-use crate::Codegen::TIR::lower::struct_pattern_subject_field_expr;
 use crate::Codegen::TIR::static_call_type_name_unchecked;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
@@ -761,9 +760,9 @@ fn struct_pattern_cond_expr(
             let fty = struct_pattern_field_type(cx, subject_ty, field).unwrap_or(Type::Int);
             let lhs = TExpr {
                 ty: fty.clone(),
-                kind: crate::Codegen::TIR::host_raw(struct_pattern_subject_field_expr(
-                    cx, subject_ty, field,
-                )),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::SwitchSubjectField {
+                    field: field.clone(),
+                })),
             };
             let rhs = lower_expr(value, cx, env);
             tests.push(TExpr {
@@ -804,11 +803,15 @@ fn lower_struct_pattern_bindings(
             kw: "let",
             let_ty: crate::Codegen::TIR::TLetTy::plain(fty.clone()),
             init: TExpr {
-                ty: fty,
-                kind: crate::Codegen::TIR::host_raw(format!(
-                    "{}.clone()",
-                    struct_pattern_subject_field_expr(cx, subject_ty, field)
-                )),
+                ty: fty.clone(),
+                kind: TExprKind::Clone(Box::new(TExpr {
+                    ty: fty,
+                    kind: TExprKind::HostCall(Box::new(
+                        crate::Codegen::TIR::THostCall::SwitchSubjectField {
+                            field: field.clone(),
+                        },
+                    )),
+                })),
             },
             track_origin: None,
                 gc_promotion: None,

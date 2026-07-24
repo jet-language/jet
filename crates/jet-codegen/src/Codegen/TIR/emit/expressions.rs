@@ -44,8 +44,17 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
         THostCall::Helper { helper, args } => {
             let arg_str = args
                 .iter()
-                .map(|a| match a {
-                    THostArg::Expr(e) => emit_tir_expr(e, cx),
+                .enumerate()
+                .map(|(i, a)| match a {
+                    THostArg::Expr(e) => {
+                        let s = emit_tir_expr(e, cx);
+                        // D-ERRCTX1: jet_context(recv, || msg)
+                        if helper.ends_with("jet_context") && i == 1 {
+                            format!("|| {s}")
+                        } else {
+                            s
+                        }
+                    }
                     THostArg::Borrow(e) => format!("&({})", emit_tir_expr(e, cx)),
                     THostArg::Lambda(lam) => {
                         let move_kw = if lam.is_move { "move " } else { "" };
@@ -72,11 +81,13 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
         THostCall::TypedText { kind, arg } => {
             let a = emit_tir_expr(arg, cx);
             match kind {
-                TTypedTextForm::SqlRaw => format!("{}jet_sql_raw({a})", cx.root_prefix),
-                TTypedTextForm::HtmlRaw => format!("{}jet_html_raw({a})", cx.root_prefix),
-                TTypedTextForm::ShRaw => format!("{}jet_sh_raw({a})", cx.root_prefix),
-                TTypedTextForm::SqlTemplate => format!("{}jet_sql_template({a})", cx.root_prefix),
-                TTypedTextForm::SqlParams => format!("{}jet_sql_params({a})", cx.root_prefix),
+                TTypedTextForm::SqlRaw => format!("(({a}).clone(), Vec::new())"),
+                TTypedTextForm::HtmlRaw => format!("({a}).clone()"),
+                TTypedTextForm::ShRaw => format!(
+                    "({a}).split_whitespace().map(|word| word.to_string()).collect::<Vec<String>>()"
+                ),
+                TTypedTextForm::SqlTemplate => format!("({a}).0.clone()"),
+                TTypedTextForm::SqlParams => format!("({a}).1.clone()"),
                 TTypedTextForm::HtmlText => format!("({a}).clone()"),
             }
         }
@@ -134,6 +145,12 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 .map(|ty| emit_field_rust(cx, ty, field))
                 .unwrap_or_else(|| mangle(field));
             format!("((*_jet_switch_subject).{field_rust})")
+        }
+        THostCall::YieldSend { value } => {
+            format!(
+                "let _ = __jet_yield_tx.send({});",
+                emit_tir_expr(value, cx)
+            )
         }
         THostCall::TypedTextInterp { kind, literals, holes } => {
             let mut parts = Vec::new();

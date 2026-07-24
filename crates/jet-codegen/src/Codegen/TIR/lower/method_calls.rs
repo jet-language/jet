@@ -436,15 +436,16 @@ pub(crate) fn lower_method_call(
     if method == "context" && recv_type.as_deref() == Some("__Fallible__") {
         let recv = lower_expr(receiver, cx, env);
         let msg = lower_expr(&args[0].expr, cx, env);
-        let code = format!(
-            "{}jet_context({}, || {})",
-            cx.root_prefix,
-            emit_tir_expr(&recv, cx),
-            emit_tir_expr(&msg, cx)
-        );
         return TExpr {
             ty: recv.ty.clone(),
-            kind: crate::Codegen::TIR::host_raw(code),
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::Helper {
+                helper: format!("{}jet_context", cx.root_prefix),
+                args: vec![
+                    crate::Codegen::TIR::THostArg::Expr(recv),
+                    // emit formats as plain expr; wrap as zero-arg closure in emit Helper for jet_context
+                    crate::Codegen::TIR::THostArg::Expr(msg),
+                ],
+            })),
         };
     }
     // D-TYPEDTEXT1=D: `Sql.raw("…")` / `Html.raw("…")` — the audited escape.
@@ -455,19 +456,19 @@ pub(crate) fn lower_method_call(
         if let Expr::Ident(n, _) = receiver {
             if n == "Sql" || n == "Html" || n == Syntax::TYPE_SH {
                 let arg = lower_expr(&args[0].expr, cx, env);
-                let code = if n == "Sql" {
-                    format!("(({}).clone(), Vec::new())", emit_tir_expr(&arg, cx))
+                let kind = if n == "Sql" {
+                    crate::Codegen::TIR::TTypedTextForm::SqlRaw
                 } else if n == Syntax::TYPE_SH {
-                    format!(
-                        "({}).split_whitespace().map(|word| word.to_string()).collect::<Vec<String>>()",
-                        emit_tir_expr(&arg, cx)
-                    )
+                    crate::Codegen::TIR::TTypedTextForm::ShRaw
                 } else {
-                    format!("({}).clone()", emit_tir_expr(&arg, cx))
+                    crate::Codegen::TIR::TTypedTextForm::HtmlRaw
                 };
                 return TExpr {
                     ty: Type::Named(n.clone()),
-                    kind: crate::Codegen::TIR::host_raw(code),
+                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedText {
+                        kind,
+                        arg: Box::new(arg),
+                    })),
                 };
             }
         }
@@ -476,10 +477,10 @@ pub(crate) fn lower_method_call(
     // `.text()` reads the escaped `Html` string.
     if recv_type.as_deref() == Some("Sql") && matches!(method, "template" | "params") {
         let recv = lower_expr(receiver, cx, env);
-        let code = if method == "template" {
-            format!("({}).0.clone()", emit_tir_expr(&recv, cx))
+        let kind = if method == "template" {
+            crate::Codegen::TIR::TTypedTextForm::SqlTemplate
         } else {
-            format!("({}).1.clone()", emit_tir_expr(&recv, cx))
+            crate::Codegen::TIR::TTypedTextForm::SqlParams
         };
         return TExpr {
             ty: if method == "template" {
@@ -487,7 +488,10 @@ pub(crate) fn lower_method_call(
             } else {
                 Type::List(Box::new(Type::String))
             },
-            kind: crate::Codegen::TIR::host_raw(code),
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedText {
+                kind,
+                arg: Box::new(recv),
+            })),
         };
     }
     if recv_type.as_deref() == Some("Html") && method == "text" {
@@ -807,20 +811,19 @@ pub(crate) fn lower_method_call(
             let seed = lower_expr(&args[0].expr, cx, env);
             return TExpr {
                 ty: Type::Named(Syntax::CLOCK_TYPE.to_string()),
-                kind: crate::Codegen::TIR::host_raw(format!(
-                    "{}jet_std_clock_new({})",
-                    cx.root_prefix,
-                    emit_tir_expr(&seed, cx)
-                )),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::Helper {
+                    helper: format!("{}jet_std_clock_new", cx.root_prefix),
+                    args: vec![crate::Codegen::TIR::THostArg::Expr(seed)],
+                })),
             };
         }
         if method == "system" && args.is_empty() {
             return TExpr {
                 ty: Type::Named(Syntax::CLOCK_TYPE.to_string()),
-                kind: crate::Codegen::TIR::host_raw(format!(
-                    "{}jet_std_clock_system()",
-                    cx.root_prefix
-                )),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::Helper {
+                    helper: format!("{}jet_std_clock_system", cx.root_prefix),
+                    args: vec![],
+                })),
             };
         }
     }

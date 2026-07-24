@@ -6,7 +6,6 @@ use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::expr_ast_jet_ty;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::LowerEnv;
@@ -275,12 +274,6 @@ pub(super) fn struct_pattern_field_type(cx: &Cx, subject_ty: &Type, field: &str)
             .map(|(_, t)| t.clone()),
         _ => struct_field_type(cx, subject_ty, field),
     }
-}
-
-pub(super) fn struct_pattern_subject_field_expr(cx: &Cx, subject_ty: &Type, field: &str) -> String {
-    let field_rust =
-        core_struct_field_rust_name(cx, subject_ty, field).unwrap_or_else(|| mangle(field));
-    format!("((*_jet_switch_subject).{})", field_rust)
 }
 
 pub(super) fn bool_and_chain(mut tests: Vec<TExpr>) -> TExpr {

@@ -1022,6 +1022,10 @@ pub enum THostCall {
     SwitchSubjectField {
         field: String,
     },
+    /// Generator `yield e` → `__jet_yield_tx.send(e)`.
+    YieldSend {
+        value: Box<TExpr>,
+    },
     /// Html/Sh typed-text interpolation assembled at emit from literals + holes.
     TypedTextInterp {
         kind: TTypedTextInterpKind,
@@ -1029,6 +1033,7 @@ pub enum THostCall {
         holes: Vec<TExpr>,
     },
     /// Verbatim Rust expression assembled at lowering (str/bin-match IIFEs, etc.).
+    /// #776 residual — must shrink to zero before criterion 2 closes.
     Raw(String),
 }
 
