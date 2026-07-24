@@ -95,12 +95,43 @@ fn write_private(path: &Path, contents: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn restore_private_mode(path: &Path, mode: u32) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("could not inspect `{}` ({error})", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("`{}` is linked outside the report", path.display()));
+    }
+    if metadata.permissions().mode() & 0o7777 != mode {
+        fs::set_permissions(path, fs::Permissions::from_mode(mode))
+            .map_err(|error| format!("could not protect `{}` ({error})", path.display()))?;
+    }
+    let restored = fs::symlink_metadata(path)
+        .map_err(|error| format!("could not inspect `{}` ({error})", path.display()))?;
+    if restored.file_type().is_symlink() || restored.permissions().mode() & 0o7777 != mode {
+        return Err(format!(
+            "`{}` does not have private mode {:04o}",
+            path.display(),
+            mode
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restore_private_mode(_path: &Path, _mode: u32) -> Result<(), String> {
+    Ok(())
+}
+
 fn validate_bundle(bundle: &Path, report: &str) -> Result<(), String> {
     let metadata = fs::symlink_metadata(bundle)
         .map_err(|error| format!("could not inspect `{}` ({error})", bundle.display()))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(format!("`{}` is not a report directory", bundle.display()));
     }
+    restore_private_mode(bundle, 0o700)?;
     let entries = fs::read_dir(bundle)
         .map_err(|error| format!("could not inspect `{}` ({error})", bundle.display()))?
         .collect::<Result<Vec<_>, _>>()
@@ -112,11 +143,13 @@ fn validate_bundle(bundle: &Path, report: &str) -> Result<(), String> {
         let path = bundle.join(name);
         let metadata = fs::symlink_metadata(&path)
             .map_err(|error| format!("could not inspect `{}` ({error})", path.display()))?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_file()
-            || !fs::read_to_string(&path)
-                .map(|contents| contents == expected)
-                .unwrap_or(false)
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!("existing report `{}` was changed", path.display()));
+        }
+        restore_private_mode(&path, 0o600)?;
+        if !fs::read_to_string(&path)
+            .map(|contents| contents == expected)
+            .unwrap_or(false)
         {
             return Err(format!("existing report `{}` was changed", path.display()));
         }

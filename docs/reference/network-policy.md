@@ -44,7 +44,8 @@ The bundle contains two readable text files:
 The bundle excludes source code, paths, the current directory, arguments,
 environment values, hostname, username, machine identifiers, network
 addresses, crash data, and package names. On Unix, Jet sets the directory to
-mode `0700` and each file to mode `0600`.
+mode `0700` and each file to mode `0600`. Reusing an unchanged bundle restores
+those exact private modes before Jet accepts it.
 
 The content hash makes the path repeatable. The same Jet binary on the same
 platform produces the same path and bytes. Jet writes a private staging

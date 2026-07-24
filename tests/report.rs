@@ -94,6 +94,22 @@ fn report_is_explicit_local_private_and_repeatable() {
         assert!(!text.contains(forbidden), "private field leaked: {forbidden}");
     }
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&bundle, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(
+            bundle.join("README.txt"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        fs::set_permissions(
+            bundle.join("report.txt"),
+            fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+    }
+
     let second = run();
     assert!(
         second.status.success(),
@@ -193,46 +209,127 @@ fn report_is_registered_in_cli_surfaces() {
     assert!(jet::CLI::completions_fish().contains("report"));
     assert!(jet::CLI::completions_powershell().contains("report"));
     assert!(jet::CLI::man_page(env!("CARGO_PKG_VERSION")).contains("report"));
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli");
+    for (name, exact) in [
+        ("completions_bash.txt", " budget report bench "),
+        (
+            "completions_zsh.txt",
+            "'report:Write a private local report bundle'",
+        ),
+        (
+            "completions_fish.txt",
+            "-a report -d 'Write a private local report bundle'",
+        ),
+        (
+            "completions_powershell.txt",
+            "'budget','report','bench'",
+        ),
+        (
+            "man.txt",
+            ".B report\nWrite a private local report bundle",
+        ),
+    ] {
+        let golden = fs::read_to_string(root.join(name)).unwrap();
+        assert!(golden.contains(exact), "{name} is missing `{exact}`");
+    }
 }
 
 #[cfg(target_os = "linux")]
-#[test]
-fn ordinary_build_opens_no_internet_connection() {
+fn traced_network_calls(
+    root: &Path,
+    tag: &str,
+    args: &[&str],
+) -> (std::process::Output, Vec<String>) {
     Command::new("strace")
         .arg("-V")
         .output()
         .expect("strace is required for the Linux no-network proof");
-    let root = scratch("build-network");
-    fs::write(root.join("main.jet"), "fn run() { print(\"offline\") }\n").unwrap();
-    let trace = root.join("network.trace");
+    let trace = root.join(format!("{tag}.network.trace"));
     let output = Command::new("strace")
         .args(["-f", "-qq", "-e", "trace=network", "-o"])
         .arg(&trace)
         .arg(jet())
-        .args(["build", "main.jet"])
-        .current_dir(&root)
+        .args(args)
+        .current_dir(root)
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "build failed:\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-    let calls = fs::read_to_string(&trace).unwrap();
-    let internet = calls
+    let calls = fs::read_to_string(&trace)
+        .unwrap()
         .lines()
+        .filter(|line| !line.contains("--- SIG"))
+        .map(str::to_string)
+        .collect();
+    (output, calls)
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn ordinary_build_and_report_open_no_network_connection() {
+    let build_root = scratch("build-network");
+    fs::write(
+        build_root.join("main.jet"),
+        "fn run() { print(\"offline\") }\n",
+    )
+    .unwrap();
+    let (build, calls) = traced_network_calls(&build_root, "build", &["build", "main.jet"]);
+    assert!(
+        build.status.success(),
+        "build failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr),
+    );
+    // rustc uses one local AF_UNIX socket pair to learn whether spawning its
+    // linker succeeded. strace classifies that process IPC as "network", even
+    // though it cannot address a host. Permit only that exact request/reply.
+    let spawn_sockets = calls
+        .iter()
         .filter(|line| {
-            line.contains("socket(AF_INET")
-                || line.contains("socket(AF_INET6")
-                || (line.contains("connect(")
-                    && (line.contains("AF_INET") || line.contains("AF_INET6")))
+            line.contains("socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0,")
+                && line.ends_with("= 0")
+        })
+        .count();
+    let spawn_replies = calls
+        .iter()
+        .filter(|line| line.contains("recvfrom(") && line.ends_with("\", 8, 0, NULL, NULL) = 0"))
+        .count();
+    let unexpected = calls
+        .iter()
+        .filter(|line| {
+            !(line.contains("socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0,")
+                && line.ends_with("= 0"))
+                && !(line.contains("recvfrom(")
+                    && line.ends_with("\", 8, 0, NULL, NULL) = 0"))
         })
         .collect::<Vec<_>>();
     assert!(
-        internet.is_empty(),
-        "ordinary build opened an Internet socket:\n{}",
-        internet.join("\n")
+        unexpected.is_empty(),
+        "ordinary build made an unexpected network syscall:\n{}",
+        unexpected
+            .iter()
+            .map(|line| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
     );
-    let _ = fs::remove_dir_all(root);
+    assert_eq!(
+        spawn_sockets, spawn_replies,
+        "rustc's local exec-status socket/reply must stay paired"
+    );
+
+    let report_root = scratch("report-network");
+    let (report, calls) = traced_network_calls(&report_root, "report", &["report"]);
+    assert!(
+        report.status.success(),
+        "report failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&report.stdout),
+        String::from_utf8_lossy(&report.stderr),
+    );
+    assert!(
+        calls.is_empty(),
+        "jet report made a network syscall:\n{}",
+        calls.join("\n")
+    );
+
+    let _ = fs::remove_dir_all(build_root);
+    let _ = fs::remove_dir_all(report_root);
 }
