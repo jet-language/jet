@@ -456,9 +456,8 @@ impl jet_std::JSONReader {
         if let Some(byte) = self.lookahead {
             return Ok(Some(byte));
         }
-        use std::io::Read;
         let mut byte = [0u8; 1];
-        match self.input.inner.read(&mut byte) {
+        match jet_encoding_file_read(&mut self.input, &mut byte) {
             Ok(0) => Ok(None),
             Ok(_) => {
                 self.lookahead = Some(byte[0]);
@@ -781,8 +780,8 @@ impl jet_std::JSONWriter {
     }
     fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), jet_std::EncodingError> {
         self.ensure_total(bytes.len())?;
-        use std::io::Write;
-        self.output.inner.write_all(bytes).map_err(|e| jet_encoding_io_error(self.total, 1, self.total + 1, e))?;
+        jet_encoding_file_write_all(&mut self.output, bytes)
+            .map_err(|e| jet_encoding_io_error(self.total, 1, self.total + 1, e))?;
         self.total += bytes.len() as i64;
         Ok(())
     }
@@ -1171,7 +1170,7 @@ impl jet_std::JSONWriter {
     fn flush_output(&mut self) -> Result<(), jet_std::EncodingError> {
         if let Some(error) = &self.terminal { return Err(error.clone()); }
         use std::io::Write;
-        self.output.inner.flush().map_err(|e| jet_encoding_io_error(self.total, 1, self.total + 1, e)).or_else(|e| self.fail(e))
+        jet_encoding_file_flush(&mut self.output).map_err(|e| jet_encoding_io_error(self.total, 1, self.total + 1, e)).or_else(|e| self.fail(e))
     }
     fn finish_output(&mut self) -> Result<(), jet_std::EncodingError> {
         if let Some(error) = &self.terminal { return Err(error.clone()); }
@@ -1856,7 +1855,7 @@ impl jet_std::CSVReader {
                 jet_csv_path(self.record_index, field), format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap())));
         }
         let mut one = [0u8; 1];
-        match std::io::Read::read(&mut self.input.inner, &mut one) {
+        match jet_encoding_file_read(&mut self.input, &mut one) {
             Ok(0) => Ok(None),
             Ok(_) => {
                 self.total += 1;
@@ -1959,7 +1958,7 @@ impl jet_std::CSVWriter {
             if self.limits.max_total_bytes.is_some_and(|limit| self.total.saturating_add(2) > limit) {
                 return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0), format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap())));
             }
-            if let Err(e) = std::io::Write::write_all(&mut self.output.inner, b"\r\n") {
+            if let Err(e) = jet_encoding_file_write_all(&mut self.output, b"\r\n") {
                 return self.fail(jet_csv_io_error(e, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0)));
             }
             self.total += 2;
@@ -1977,7 +1976,7 @@ impl jet_std::CSVWriter {
         if self.limits.max_total_bytes.is_some_and(|limit| self.total.saturating_add(wire as i64).saturating_add(2) > limit) {
             return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, row.len().saturating_sub(1)), format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap())));
         }
-        let mut write = |bytes: &[u8]| std::io::Write::write_all(&mut self.output.inner, bytes);
+        let mut write = |bytes: &[u8]| jet_encoding_file_write_all(&mut self.output, bytes);
         let result = (|| -> std::io::Result<()> {
             for (i, field) in row.iter().enumerate() {
                 if i > 0 { write(b",")?; }
@@ -2000,7 +1999,7 @@ impl jet_std::CSVWriter {
         self.record_index += 1;
         Ok(())
     }
-    fn flush_output(&mut self) -> Result<(), jet_std::EncodingError> { if let Some(e) = &self.terminal { return Err(e.clone()); } if let Err(e) = std::io::Write::flush(&mut self.output.inner) { return self.fail(jet_csv_io_error(e, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0))); } Ok(()) }
+    fn flush_output(&mut self) -> Result<(), jet_std::EncodingError> { if let Some(e) = &self.terminal { return Err(e.clone()); } if let Err(e) = jet_encoding_file_flush(&mut self.output) { return self.fail(jet_csv_io_error(e, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0))); } Ok(()) }
     fn finish_output(&mut self) -> Result<(), jet_std::EncodingError> {
         if let Some(e) = &self.terminal { return Err(e.clone()); }
         if self.finished { return Ok(()); }
@@ -2008,7 +2007,7 @@ impl jet_std::CSVWriter {
             if self.limits.max_total_bytes.is_some_and(|limit| self.total.saturating_add(2) > limit) {
                 return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Limit, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0), format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap())));
             }
-            if let Err(e) = std::io::Write::write_all(&mut self.output.inner, b"\r\n") {
+            if let Err(e) = jet_encoding_file_write_all(&mut self.output, b"\r\n") {
                 return self.fail(jet_csv_io_error(e, self.total, self.record_index + 1, 1, jet_csv_path(self.record_index, 0)));
             }
             self.total += 2;
@@ -2482,7 +2481,7 @@ impl jet_std::CBORReader {
             return Err(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit, self.total, self.path(), format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap())));
         }
         let mut byte = [0u8; 1];
-        match std::io::Read::read(&mut self.input.inner, &mut byte) {
+        match jet_encoding_file_read(&mut self.input, &mut byte) {
             Ok(0) => Ok(None),
             Ok(_) => { self.total += 1; Ok(Some(byte[0])) }
             Err(error) => Err(jet_cbor_stream_io(error, self.total, self.path())),
@@ -2760,7 +2759,7 @@ impl jet_std::CBORWriter {
         }
         if self.root_written{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"CBOR writer accepts exactly one root"));}
         if self.limits.max_total_bytes.is_some_and(|n|self.total.saturating_add(size as i64)>n){return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit,self.total,"$".to_string(),format!("max_total_bytes {} exceeded",self.limits.max_total_bytes.unwrap())));}
-        if let Err(e)=std::io::Write::write_all(&mut self.output.inner,&bytes){return self.fail(jet_cbor_stream_io(e,self.total,"$".to_string()));}self.total+=size as i64;self.root_written=true;Ok(())
+        if let Err(e)=jet_encoding_file_write_all(&mut self.output,&bytes){return self.fail(jet_cbor_stream_io(e,self.total,"$".to_string()));}self.total+=size as i64;self.root_written=true;Ok(())
     }
     fn write_key(&mut self,key_text:String)->Result<(),jet_std::EncodingError>{
         let valid=matches!(self.frames.last(),Some(JetCborWriteFrame::Object{key:None,..}));if !valid{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"Key outside CBOR object or before prior value"));}
@@ -2791,7 +2790,7 @@ impl jet_std::CBORWriter {
         entries.sort_by(|a,b|a.0.cmp(&b.0));jet_cbor_stream_len(&mut out,5,entries.len()as u64);for(key,value)in entries{out.extend_from_slice(&key);out.extend_from_slice(&value);}self.accept(out)
     }
     fn write_event(&mut self,event:jet_std::DataEvent)->Result<(),jet_std::EncodingError>{if let Some(e)=&self.terminal{return Err(e.clone())}if self.finished{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"write called after finish"));}match event{jet_std::DataEvent::ArrayStart=>{if self.frames.len()+1>self.limits.max_depth as usize{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit,self.total,"$".to_string(),format!("max_depth {} exceeded",self.limits.max_depth)));}if let Err(error)=self.reserve_frame(){return self.fail(error)}self.frames.push(JetCborWriteFrame::Array{items:Vec::new()});Ok(())},jet_std::DataEvent::ObjectStart=>{if self.frames.len()+1>self.limits.max_depth as usize{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::Limit,self.total,"$".to_string(),format!("max_depth {} exceeded",self.limits.max_depth)));}if let Err(error)=self.reserve_frame(){return self.fail(error)}self.frames.push(JetCborWriteFrame::Object{entries:Vec::new(),key:None});Ok(())},jet_std::DataEvent::Key(key)=>self.write_key(key),jet_std::DataEvent::ArrayEnd=>{let Some(JetCborWriteFrame::Array{items})=self.frames.pop()else{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"ArrayEnd does not match open CBOR container"));};self.close_array(items)},jet_std::DataEvent::ObjectEnd=>{let Some(JetCborWriteFrame::Object{entries,key:None})=self.frames.pop()else{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"ObjectEnd does not match complete CBOR object"));};self.close_object(entries)},scalar=>match self.scalar(scalar){Ok(v)=>self.accept(v),Err(e)=>self.fail(e)}}}
-    fn flush_output(&mut self)->Result<(),jet_std::EncodingError>{if let Some(e)=&self.terminal{return Err(e.clone())}if let Err(e)=std::io::Write::flush(&mut self.output.inner){return self.fail(jet_cbor_stream_io(e,self.total,"$".to_string()));}Ok(())}
+    fn flush_output(&mut self)->Result<(),jet_std::EncodingError>{if let Some(e)=&self.terminal{return Err(e.clone())}if let Err(e)=jet_encoding_file_flush(&mut self.output){return self.fail(jet_cbor_stream_io(e,self.total,"$".to_string()));}Ok(())}
     fn finish_output(&mut self)->Result<(),jet_std::EncodingError>{if let Some(e)=&self.terminal{return Err(e.clone())}if self.finished{return Ok(())}if !self.frames.is_empty()||!self.root_written{return self.fail(jet_cbor_stream_error(jet_std::EncodingErrorKind::State,self.total,"$".to_string(),"finish requires one complete CBOR root"));}self.flush_output()?;self.finished=true;Ok(())}
 }
 fn jet_enc_cbor_writer_write(writer:&mut jet_std::CBORWriter,event:jet_std::DataEvent)->Result<(),jet_std::EncodingError>{writer.write_event(event)}
