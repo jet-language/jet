@@ -538,6 +538,12 @@ const BOUNDARY_CODES: &[&str] = &[
     "E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E1265", "E2211",
 ];
 
+const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
+    "collections/list_bounds",
+    "concurrency/all_failfast",
+    "ui/ui_native_linux",
+];
+
 fn jit_gap_stem_set() -> std::collections::HashSet<String> {
     let (_, gaps, _) = parse_jit_gap_manifest();
     gaps.iter()
@@ -891,13 +897,14 @@ fn dev_default_matches_compiled_binary() {
         stats.jit_gap > 0,
         "expected strict JIT to report E2211 for uncovered examples instead of AOT fallback"
     );
-    let gap_stems = jit_gap_stem_set();
-    for stem in &stats.boundary_stems {
-        assert!(
-            gap_stems.contains(stem) || stem == "io/db_checked_sql",
-            "unexpected default-dev boundary `{stem}` — expected E2211 JIT gap or io/db_checked_sql"
-        );
-    }
+    let mut observed_boundaries = stats.boundary_stems;
+    observed_boundaries.sort();
+    observed_boundaries.dedup();
+    assert_eq!(
+        observed_boundaries,
+        DEFAULT_BACKEND_EXPECTED_BOUNDARIES,
+        "default jet dev boundary set must stay exact"
+    );
     assert_eq!(
         stats.manifested, 0,
         "default jet dev must not carry manifested stdout/stderr/exit-code divergences"
