@@ -185,17 +185,9 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.encoding.xml" => &[
             "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding",
             "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy",
-<<<<<<< HEAD
             "parse", "parse_with", "parse_bytes", "to_string", "to_bytes", "canonical",
             "decode", "decode_bytes", "root", "expanded_name", "attribute", "content",
             "reader", "writer", "XMLReader", "XMLWriter",
-||||||| parent of 77405c61e (fix(#776): wire xml projection APIs; drop bad binary_pattern line)
-            "parse", "parse_with", "parse_bytes", "to_string", "to_bytes", "canonical", "reader", "writer", "XMLReader", "XMLWriter",
-=======
-            "parse", "parse_with", "parse_bytes", "to_string", "to_bytes", "canonical",
-            "root", "expanded_name", "attribute", "content", "decode", "decode_bytes",
-            "reader", "writer", "XMLReader", "XMLWriter",
->>>>>>> 77405c61e (fix(#776): wire xml projection APIs; drop bad binary_pattern line)
         ],
         "core.encoding.cbor" => &[
             "CBOROptions", "CBORError", "CBORErrorKind", "CBORReader", "CBORWriter",
