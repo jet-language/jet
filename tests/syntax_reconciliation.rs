@@ -115,6 +115,8 @@ const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
     "docs/reference/core-library.md",
     "examples/features/serde/datatree_accessors.jet",
     "examples/features/serde/encoding_breadth.jet",
+    "examples/features/serde/encoding_base.jet",
+    "examples/features/serde/encoding_base_expert/main.jet",
 ];
 const ACTIVE_MATURITY_DOCS: &[&str] = &["docs/reference/maturity-tags.md"];
 const MARKER_CENSUS_DOC: &str = "docs/spec/syntax-decisions.md";
