@@ -33,6 +33,16 @@ fn wasm_export_struct_param_is_abi_error() {
 }
 
 #[test]
+fn wasm_export_fn_callback_param_is_abi_error() {
+    let src = include_str!("ui/web_abi_callback.jet");
+    let c = codes(src);
+    assert!(
+        c.iter().any(|x| x == "E-WEB-ABI-TYPE"),
+        "expected E-WEB-ABI-TYPE for fn callback param, got {c:?}"
+    );
+}
+
+#[test]
 fn browser_effect_infers_js_bucket_without_marker() {
     let src = r#"
 use core.ui as ui

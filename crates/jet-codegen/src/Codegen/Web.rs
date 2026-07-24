@@ -2090,13 +2090,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             _ => return Err(()),
         },
         E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => format!("({} ?? {})", tir_js_expr(value, funcs, file_prefix)?, tir_js_expr(fallback, funcs, file_prefix)?),
-        E::Lambda(lam) => {
-            let params = lam.source_params.join(", ");
-            match &lam.executable {
-                TIR::TLambdaBody::Expr(body) => format!("({params}) => ({})", tir_js_expr(body, funcs, file_prefix)?),
-                TIR::TLambdaBody::Block(body) => { let mut rendered = String::new(); emit_tir_js_body(body, &mut rendered, funcs, file_prefix, 1)?; format!("({params}) => {{\n{rendered}}}") }
-            }
-        }
+        E::Lambda(lam) => tir_js_lambda(lam, funcs, file_prefix)?,
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs, file_prefix)?),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => format!("jetDom.makeEffect({})", tir_js_lambda(executable, funcs, file_prefix)?),
         _ => return Err(()),
@@ -2109,12 +2103,28 @@ fn tir_js_lambda(
     file_prefix: Option<&str>,
 ) -> Result<String, ()> {
     let params = lam.source_params.join(", ");
+    let async_kw = |body: &str| {
+        if body.contains("await bridge_") {
+            "async "
+        } else {
+            ""
+        }
+    };
     match &lam.executable {
-        TIR::TLambdaBody::Expr(body) => Ok(format!("({params}) => ({})", tir_js_expr(body, funcs, file_prefix)?)),
+        TIR::TLambdaBody::Expr(body) => {
+            let expr = tir_js_expr(body, funcs, file_prefix)?;
+            Ok(format!(
+                "{}({params}) => ({expr})",
+                async_kw(&expr),
+            ))
+        }
         TIR::TLambdaBody::Block(body) => {
             let mut rendered = String::new();
             emit_tir_js_body(body, &mut rendered, funcs, file_prefix, 1)?;
-            Ok(format!("({params}) => {{\n{rendered}}}"))
+            Ok(format!(
+                "{}({params}) => {{\n{rendered}}}",
+                async_kw(&rendered),
+            ))
         }
     }
 }
