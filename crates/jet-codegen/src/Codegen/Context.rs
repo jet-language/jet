@@ -1049,6 +1049,10 @@ impl Cx {
             Type::Named(name) if name == "HttpRequest" => "JetHttpRequest".to_string(),
             Type::Named(name) if name == "HttpResponse" => "JetHttpResponse".to_string(),
             Type::Named(name) if name == "HttpServerTls" => "JetHttpServerTls".to_string(),
+            // D-WS1=B: WebSocket types.
+            Type::Named(name) if name == "WsConn" => "JetWsConn".to_string(),
+            Type::Named(name) if name == "WsError" => "JetWsError".to_string(),
+            Type::Named(name) if name == "WsMessage" => "JetWsMessage".to_string(),
             // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`)
             // erases to a plain message — never user-constructed.
             // A user enum named `ParseError` (in `type_names`) keeps its own lowering.
@@ -2205,6 +2209,44 @@ pub(crate) fn build_cx_items(
         .insert("HttpError".to_string(), http_errors);
     cx.cloneable.insert("HttpError".to_string());
     cx.cloneable.insert("HttpOperation".to_string());
+    // D-WS1=B
+    let mut ws_errors: Vec<(String, VariantPayload)> = [
+        "InvalidUrl",
+        "InvalidHandshake",
+        "Protocol",
+        "Timeout",
+        "Closed",
+        "Cancelled",
+        "UnsupportedTarget",
+    ]
+    .into_iter()
+    .map(|name| (name.to_string(), VariantPayload::Unit))
+    .collect();
+    ws_errors.push((
+        "MessageTooLarge".to_string(),
+        VariantPayload::Named(vec![VariantField {
+            name: "limit".to_string(),
+            name_span: zero,
+            ty: Type::Int,
+            ty_span: zero,
+        }]),
+    ));
+    ws_errors.push((
+        "Io".to_string(),
+        VariantPayload::Named(vec![VariantField {
+            name: "operation".to_string(),
+            name_span: zero,
+            ty: Type::String,
+            ty_span: zero,
+        }]),
+    ));
+    for (name, _) in &ws_errors {
+        cx.variant_owner.insert(name.clone(), "WsError".to_string());
+    }
+    cx.enum_variants.insert("WsError".to_string(), ws_errors);
+    cx.cloneable.insert("WsError".to_string());
+    cx.cloneable.insert("WsConn".to_string());
+    cx.cloneable.insert("WsMessage".to_string());
     cx.enum_variants.insert(
         Syntax::TYPE_ORDERING.to_string(),
         ["Less", "Equal", "Greater"]

@@ -784,6 +784,32 @@ fn jet_http_server_bind_with_tls(
     mux: JetHttpMux,
     tls_conn: Option<JetHttpTlsConn>,
 ) -> Result<JetHttpServer, String> {
+    // D-HTTP-UNSUPPORTED1=A: refuse before bind I/O on unsupported targets.
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "windows"
+    )))]
+    {
+        let _ = (addr, mux, tls_conn);
+        return Err("unsupported-target:server-bind".to_string());
+    }
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "windows"
+    ))]
+    {
     jet_http_mux_validate(&mux)?;
     let listener = std::net::TcpListener::bind(addr.as_str())
         .map_err(|error| format!("bind on `{addr}` failed: {error}"))?;
@@ -806,6 +832,7 @@ fn jet_http_server_bind_with_tls(
             tls_conn,
         }),
     })
+    }
 }
 
 fn jet_http_server_local_addr(server: &JetHttpServer) -> Result<String, String> { Ok(server.inner.local_addr.clone()) }
@@ -1098,8 +1125,14 @@ fn jet_http_server_handle_stream(
         if request_index > 0 && shutdown.load(Ordering::Acquire) {
             return;
         }
+        // D-WS1=B: expose this connection to core.ws.upgrade during dispatch.
+        let _ws_guard = JetWsStreamGuard::install(stream);
         let response = jet_http_mux_dispatch(mux, request)
             .unwrap_or_else(jet_http_srv_error_response);
+        if jet_ws_take_upgraded() {
+            // Handler completed a WebSocket upgrade on a cloned stream handle.
+            return;
+        }
         let close = close
             || !body.is_drained()
             || (request_version == "HTTP/1.0" && response.body.length().is_none());

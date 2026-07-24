@@ -1746,6 +1746,23 @@ pub(crate) fn lower_method_call(
                 ok: Box::new(Type::Named("HttpShutdownReport".to_string())),
                 err: Box::new(Type::Named("HttpError".to_string())),
             },
+            ("WsConn", "send_text" | "send_bytes" | "close") => Type::Result {
+                ok: Box::new(unit_type()),
+                err: Box::new(Type::Named("WsError".to_string())),
+            },
+            ("WsConn", "recv") => Type::Result {
+                ok: Box::new(Type::Named("WsMessage".to_string())),
+                err: Box::new(Type::Named("WsError".to_string())),
+            },
+            ("WsMessage", "is_text" | "is_binary" | "is_close") => Type::Bool,
+            ("WsMessage", "text") => Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("WsError".to_string())),
+            },
+            ("WsMessage", "bytes") => Type::Result {
+                ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
+                err: Box::new(Type::Named("WsError".to_string())),
+            },
             _ => unit_type(),
         };
         let targs: Vec<TExpr> = args
@@ -1792,6 +1809,8 @@ pub(crate) fn lower_method_call(
         let op = if kind.starts_with("HttpServer")
             || kind == "HttpMux"
             || kind == "HttpHandler"
+            || kind == "WsConn"
+            || kind == "WsMessage"
             || server_message_method
         {
             THandleOp::HttpServerMethod {

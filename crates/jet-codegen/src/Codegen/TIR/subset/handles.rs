@@ -762,6 +762,12 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         }
         ("core.http.client", "request") => return Type::Named("HttpRequest".to_string()),
         ("core.http.server", "mux") => return Type::Named("HttpMux".to_string()),
+        ("core.ws", "connect") | ("core.ws", "upgrade") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("WsConn".to_string())),
+                err: Box::new(Type::Named("WsError".to_string())),
+            };
+        }
         ("core.http.server", "bind") => return Type::Result {
             ok: Box::new(Type::Named("HttpServer".to_string())),
             err: Box::new(Type::String),

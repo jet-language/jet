@@ -2460,6 +2460,33 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             recv,
                             a(0)
                         ),
+                        ("WsConn", "send_text") => {
+                            format!("{}jet_ws_send_text(&({}), &({}))", root, recv, a(0))
+                        }
+                        ("WsConn", "send_bytes") => {
+                            format!("{}jet_ws_send_binary(&({}), &({}))", root, recv, a(0))
+                        }
+                        ("WsConn", "recv") => format!("{}jet_ws_recv(&({}))", root, recv),
+                        ("WsConn", "close") => format!(
+                            "{}jet_ws_close(&({}), {}, &({}))",
+                            root,
+                            recv,
+                            a(0),
+                            a(1)
+                        ),
+                        ("WsMessage", "is_text") => {
+                            format!("{}jet_ws_message_is_text(&({}))", root, recv)
+                        }
+                        ("WsMessage", "is_binary") => {
+                            format!("{}jet_ws_message_is_binary(&({}))", root, recv)
+                        }
+                        ("WsMessage", "is_close") => {
+                            format!("{}jet_ws_message_is_close(&({}))", root, recv)
+                        }
+                        ("WsMessage", "text") => format!("{}jet_ws_message_text(&({}))", root, recv),
+                        ("WsMessage", "bytes") => {
+                            format!("{}jet_ws_message_bytes(&({}))", root, recv)
+                        }
                         ("HttpResponse", "header") => format!(
                             "{}jet_http_srv_response_header({}, &({}), &({}))",
                             root,

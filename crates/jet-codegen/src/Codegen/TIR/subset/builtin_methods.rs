@@ -229,7 +229,9 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
                 | "HttpMux"
                 | "HttpHandler"
                 | "HttpServer"
-                | "HttpServerTls",
+                | "HttpServerTls"
+                | "WsConn"
+                | "WsMessage",
         )
     )
 }
@@ -252,6 +254,8 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"),
         Some("HttpHandler") => method == "handle",
         Some("HttpServer") => matches!(method, "local_addr" | "serve" | "shutdown"),
+        Some("WsConn") => matches!(method, "send_text" | "send_bytes" | "recv" | "close"),
+        Some("WsMessage") => matches!(method, "is_text" | "is_binary" | "is_close" | "text" | "bytes"),
         _ => false,
     }
 }

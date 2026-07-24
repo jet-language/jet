@@ -121,8 +121,10 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.crypto.random",
     // D-CRYPTOENV1=A: expert-only raw crypto primitives.
     "core.crypto.expert",
-    // D-HTTPLIB1-4 (ratified 2026-06-26): HTTP client+server ring package.
+    // D-NETDEP1=A / D-HTTPLIB1-4 (ratified 2026-06-26): HTTP client+server ring package.
     "core.http",
+    // D-WS1=B: standalone WebSocket client/server home.
+    "core.ws",
     // D-REGEXENGINE1=A: std-only linear regex in the generated prelude.
     "core.regex",
     // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: zip/tar containers only.

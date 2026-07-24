@@ -53,6 +53,34 @@ pub fn net_method_return(
         ("HttpHeaders", "remove") => Some(Some(Type::Named("HttpHeaders".to_string()))),
         // D-ROUTE1=A: req.param("name") → String? (none if not a param route or name absent).
         ("HttpRequest", "param") => Some(Some(Type::Option(Box::new(str_ty.clone())))),
+        // D-WS1=B: WebSocket connection and message methods.
+        ("WsConn", "send_text") if n_args == 1 => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("WsError".to_string())),
+        })),
+        ("WsConn", "send_bytes") if n_args == 1 => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("WsError".to_string())),
+        })),
+        ("WsConn", "recv") if n_args == 0 => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("WsMessage".to_string())),
+            err: Box::new(Type::Named("WsError".to_string())),
+        })),
+        ("WsConn", "close") if n_args == 2 => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("WsError".to_string())),
+        })),
+        ("WsMessage", "is_text" | "is_binary" | "is_close") if n_args == 0 => {
+            Some(Some(Type::Bool))
+        }
+        ("WsMessage", "text") if n_args == 0 => Some(Some(Type::Result {
+            ok: Box::new(str_ty.clone()),
+            err: Box::new(Type::Named("WsError".to_string())),
+        })),
+        ("WsMessage", "bytes") if n_args == 0 => Some(Some(Type::Result {
+            ok: Box::new(Type::List(Box::new(u8_ty()))),
+            err: Box::new(Type::Named("WsError".to_string())),
+        })),
         // D-ROUTE1=A: HttpRouter registration methods.
         ("HttpRouter", "get" | "post" | "put" | "delete") => Some(Some(unit.clone())),
         // TcpListener methods.
@@ -389,6 +417,29 @@ pub fn http_type_method_return(
             "handle" => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HttpResponse".to_string())),
                 err: Box::new(Type::Named("HttpError".to_string())),
+            })),
+            _ => None,
+        },
+        Type::Named(n) if n == "WsConn" => match (method, _args.len()) {
+            ("send_text" | "send_bytes", 1) | ("close", 2) => Some(Some(Type::Result {
+                ok: Box::new(unit_ty()),
+                err: Box::new(Type::Named("WsError".to_string())),
+            })),
+            ("recv", 0) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("WsMessage".to_string())),
+                err: Box::new(Type::Named("WsError".to_string())),
+            })),
+            _ => None,
+        },
+        Type::Named(n) if n == "WsMessage" => match (method, _args.len()) {
+            ("is_text" | "is_binary" | "is_close", 0) => Some(Some(Type::Bool)),
+            ("text", 0) => Some(Some(Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("WsError".to_string())),
+            })),
+            ("bytes", 0) => Some(Some(Type::Result {
+                ok: Box::new(Type::List(Box::new(u8_ty()))),
+                err: Box::new(Type::Named("WsError".to_string())),
             })),
             _ => None,
         },

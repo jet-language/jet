@@ -1,8 +1,8 @@
 // ── D-HTTPLIB2=B / D-HTTPLIB4=B: core.http.client — request builder ─────────
 // JetHttpRequest and JetHttpResponse live here (in the generated program's
-// crate) so they're accessible without cross-crate type imports. The ureq
-// bridge functions use only primitive types (i64, String, Vec<String>) and are
-// called through wrappers here. This is the I6-safe pattern.
+// crate) so they're accessible without cross-crate type imports. The native
+// client FFI seam uses only primitive types (i64, String, Vec<String>) through
+// wrappers here. This is the I6-safe pattern.
 
 #[derive(Clone)]
 enum JetHttpProxy {

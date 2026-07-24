@@ -240,6 +240,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName" | "HttpHeaderValue"
         | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpCookieJar" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
+        | "WsConn" | "WsError" | "WsMessage"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
@@ -739,6 +740,44 @@ pub(crate) fn core_http_variants(
     }
     if enum_name == "HttpCookieJar" {
         variants.insert("Memory".to_string(), (zero, VariantPayload::Unit));
+        return Some(variants);
+    }
+    if enum_name == "WsError" {
+        for name in [
+            "InvalidUrl",
+            "InvalidHandshake",
+            "Protocol",
+            "Timeout",
+            "Closed",
+            "Cancelled",
+            "UnsupportedTarget",
+        ] {
+            variants.insert(name.to_string(), (zero, VariantPayload::Unit));
+        }
+        variants.insert(
+            "MessageTooLarge".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![VariantField {
+                    name: "limit".to_string(),
+                    name_span: zero,
+                    ty: Type::Int,
+                    ty_span: zero,
+                }]),
+            ),
+        );
+        variants.insert(
+            "Io".to_string(),
+            (
+                zero,
+                VariantPayload::Named(vec![VariantField {
+                    name: "operation".to_string(),
+                    name_span: zero,
+                    ty: Type::String,
+                    ty_span: zero,
+                }]),
+            ),
+        );
         return Some(variants);
     }
     if enum_name != "HttpError" {

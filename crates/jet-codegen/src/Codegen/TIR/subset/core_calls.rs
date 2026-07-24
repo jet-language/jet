@@ -149,6 +149,10 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     {
         return true;
     }
+    // D-WS1=B: WebSocket entry points live in core.ws (not core.http).
+    if module == "core.ws" && matches!(method, "connect" | "upgrade") {
+        return true;
+    }
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 

@@ -86,6 +86,7 @@ pub enum JetHttpBridgeError {
     Io,
     ResourceUnavailable,
     Cancelled,
+    UnsupportedTarget,
     Internal,
 }
 
@@ -2309,6 +2310,25 @@ pub fn jet_http_client_send_impl(
     form_flat: &[String],
     multipart_flat: &[String],
 ) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "windows"
+    )))]
+    {
+        let _ = (
+            method, url, headers_flat, body, timeout_ms, connect_timeout_ms, read_timeout_ms,
+            total_timeout_ms, dns_timeout_ms, tls_timeout_ms, write_timeout_ms, first_byte_timeout_ms,
+            redirects, proxy, cookies_flat, form_flat, multipart_flat,
+        );
+        return Err(JetHttpBridgeError::UnsupportedTarget);
+    }
+
     let phases = resolve_request_phase_timeouts(
         timeout_ms,
         connect_timeout_ms,
