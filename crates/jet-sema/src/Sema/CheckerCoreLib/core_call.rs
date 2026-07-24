@@ -605,6 +605,57 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(1) { self.expect_core_arg(name, 1, &Type::Named("XMLRenderOptions".to_string()), arg); }
                     return Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("XMLError".to_string())));
                 }
+                ("core.encoding.xml", "decode") if !type_args.is_empty() => {
+                    if !(1..=2).contains(&args.len()) {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(name, 0, &Type::String, arg);
+                    }
+                    if let Some(arg) = args.get_mut(1) {
+                        self.expect_core_arg(name, 1, &Type::Named("XMLParseOptions".to_string()), arg);
+                    }
+                    let t = type_args[0].clone();
+                    self.check_decodable(&t, span);
+                    return Some(result_ty(t, Type::Named("XMLError".to_string())));
+                }
+                ("core.encoding.xml", "decode_bytes") if !type_args.is_empty() => {
+                    if !(1..=2).contains(&args.len()) {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(name, 0, &Type::List(Box::new(u8_ty())), arg);
+                    }
+                    if let Some(arg) = args.get_mut(1) {
+                        self.expect_core_arg(name, 1, &Type::Named("XMLParseOptions".to_string()), arg);
+                    }
+                    let t = type_args[0].clone();
+                    self.check_decodable(&t, span);
+                    return Some(result_ty(t, Type::Named("XMLError".to_string())));
+                }
+                ("core.encoding.xml", "expanded_name") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(name, 0, &Type::Named("DataTree".to_string()), arg);
+                    }
+                    return Some(result_ty(
+                        Type::Tuple(vec![
+                            ("raw".to_string(), Box::new(Type::String)),
+                            (
+                                "prefix".to_string(),
+                                Box::new(Type::Option(Box::new(Type::String))),
+                            ),
+                            ("local".to_string(), Box::new(Type::String)),
+                            (
+                                "namespace_uri".to_string(),
+                                Box::new(Type::Option(Box::new(Type::String))),
+                            ),
+                        ]),
+                        Type::Named("XMLError".to_string()),
+                    ));
+                }
                 ("core.encoding.cbor", "to_bytes" | "to_bytes_canonical") => {
                     if args.len() != 1 { self.diags.push(wrong_core_arity(name, 1, args.len(), span)); }
                     for arg in args.iter_mut() {
@@ -2979,42 +3030,6 @@ impl<'a> Checker<'a> {
                         &mut args[0],
                     );
                     return Some(Type::Named("Unit".to_string()));
-                }
-                // D-WS1=B: core.ws client/server entry points.
-                ("core.ws", "connect") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("connect", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg("connect", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Result {
-                        ok: Box::new(Type::Named("WsConn".to_string())),
-                        err: Box::new(Type::Named("WsError".to_string())),
-                    });
-                }
-                ("core.ws", "upgrade") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("upgrade", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg(
-                        "upgrade",
-                        0,
-                        &Type::Named("HttpRequest".to_string()),
-                        &mut args[0],
-                    );
-                    return Some(Type::Result {
-                        ok: Box::new(Type::Named("WsConn".to_string())),
-                        err: Box::new(Type::Named("WsError".to_string())),
-                    });
                 }
                 // D-TIMEDEPTH1=A: civil-time constructors.
                 ("core.time.date", "new") => {

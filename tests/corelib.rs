@@ -7333,6 +7333,174 @@ fn run() {
 }
 
 #[test]
+fn xml_dual_limits_validate_in_ratified_order_and_fuse_stronger_bounds() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML dual-limits test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!(
+        "jet_xml_dual_limits_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let probe = dir.join("probe.xml");
+    fs::write(&probe, "<a><b><c/></b></a>").unwrap();
+    let probe = probe.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.xml as xml
+use core.files as files
+
+fn run() {{
+    // EncodingLimits fail first even when XMLLimits are also illegal.
+    enc_bad := encoding.EncodingLimits.safe()
+    enc_bad.buffer_bytes = 1
+    xml_bad := xml.XMLParseOptions.safe()
+    xml_bad.limits.max_depth = 0
+    input1 :: files.open("{probe}") ?? panic("open1")
+    if xml.reader(^input1, enc_bad, xml_bad) == {{
+        Ok(_) -> {{ print("accepted") }}
+        Err(error) -> {{
+            print(error.format == encoding.EncodingFormat.XML)
+            print(error.kind == encoding.EncodingErrorKind.Limit)
+            print(error.byte_offset)
+            print(error.line ?? -1)
+            print(error.column ?? -1)
+            print(error.path)
+            print(error.reason)
+        }}
+    }}
+
+    // EncodingLimits ok → XMLLimits field order: max_depth before max_nodes.
+    enc_ok := encoding.EncodingLimits.safe()
+    xml_depth := xml.XMLParseOptions.safe()
+    xml_depth.limits.max_depth = 0
+    xml_depth.limits.max_nodes = 0
+    input2 :: files.open("{probe}") ?? panic("open2")
+    if xml.reader(^input2, enc_ok, xml_depth) == {{
+        Ok(_) -> {{ print("accepted") }}
+        Err(error) -> {{
+            print(error.format == encoding.EncodingFormat.XML)
+            print(error.kind == encoding.EncodingErrorKind.Limit)
+            print(error.byte_offset)
+            print(error.line ?? -1)
+            print(error.column ?? -1)
+            print(error.path)
+            print(error.reason)
+        }}
+    }}
+
+    // Cross-field XMLLimits after ranges.
+    enc_ok2 := encoding.EncodingLimits.safe()
+    xml_cross := xml.XMLParseOptions.safe()
+    xml_cross.limits.max_depth = 2
+    xml_cross.limits.max_entity_depth = 3
+    input3 :: files.open("{probe}") ?? panic("open3")
+    if xml.reader(^input3, enc_ok2, xml_cross) == {{
+        Ok(_) -> {{ print("accepted") }}
+        Err(error) -> {{
+            print(error.format == encoding.EncodingFormat.XML)
+            print(error.kind == encoding.EncodingErrorKind.Limit)
+            print(error.byte_offset)
+            print(error.line ?? -1)
+            print(error.column ?? -1)
+            print(error.path)
+            print(error.reason)
+        }}
+    }}
+
+    // Encoding depth tighter than XML depth: error names the fused bound.
+    // XMLLimits must be self-valid before EncodingLimits fusion.
+    enc_tight := encoding.EncodingLimits.safe()
+    enc_tight.max_depth = 2
+    xml_loose := xml.XMLParseOptions.safe()
+    xml_loose.limits.max_depth = 8
+    xml_loose.limits.max_entity_depth = 8
+    input4 :: files.open("{probe}") ?? panic("open4")
+    reader :: xml.reader(^input4, enc_tight, xml_loose) ?? panic("fused reader")
+    loop true {{
+        result :: reader.next()
+        if result == {{
+            Ok(maybe) -> {{
+                if maybe == {{
+                    Val(_) -> {{}}
+                    None -> {{ print("depth-missed"); break }}
+                }}
+            }}
+            Err(error) -> {{
+                print(error.kind == encoding.EncodingErrorKind.Limit)
+                print(error.reason)
+                break
+            }}
+        }}
+    }}
+
+    // XML depth tighter than Encoding depth.
+    enc_loose := encoding.EncodingLimits.safe()
+    xml_tight := xml.XMLParseOptions.safe()
+    xml_tight.limits.max_depth = 1
+    xml_tight.limits.max_entity_depth = 1
+    deep_input :: files.open("{probe}") ?? panic("open deep")
+    deep_reader :: xml.reader(^deep_input, enc_loose, xml_tight) ?? panic("xml-tight reader")
+    loop true {{
+        result :: deep_reader.next()
+        if result == {{
+            Ok(maybe) -> {{
+                if maybe == {{
+                    Val(_) -> {{}}
+                    None -> {{ print("xml-depth-missed"); break }}
+                }}
+            }}
+            Err(error) -> {{
+                print(error.kind == encoding.EncodingErrorKind.Limit)
+                print(error.reason)
+                break
+            }}
+        }}
+    }}
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_dual_limits", &source, &[], None);
+    assert_eq!(code, 0, "XML dual-limits test failed: {stderr}");
+    assert_eq!(
+        stdout,
+        concat!(
+            "true\n",
+            "true\n",
+            "0\n",
+            "-1\n",
+            "-1\n",
+            "\n",
+            "buffer_bytes 1 is outside 4096..16777216\n",
+            "true\n",
+            "true\n",
+            "0\n",
+            "-1\n",
+            "-1\n",
+            "\n",
+            "XML limit `max_depth` must be between 1 and 4096\n",
+            "true\n",
+            "true\n",
+            "0\n",
+            "-1\n",
+            "-1\n",
+            "\n",
+            "XML limit `max_entity_depth` exceeds `max_depth`\n",
+            "true\n",
+            "XML element nesting exceeds max_depth (2)\n",
+            "true\n",
+            "XML element nesting exceeds max_depth (1)\n",
+        )
+    );
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn xml_whole_byte_verbs_match_comptime_aot_and_dev() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {
@@ -7911,6 +8079,78 @@ fn run() {{
     let mut expected16 = vec![0xff, 0xfe];
     expected16.extend(deterministic.encode_utf16().flat_map(u16::to_le_bytes));
     assert_eq!(fs::read(&utf16).unwrap(), expected16);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn xml_reader_writer_hostile_state_and_exclusive_c14n() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping XML hostile/c14n surface test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_xml_hostile_c14n_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("round.xml");
+    fs::write(
+        &input,
+        "<?xml version='1.0'?>\n<!--c-->\n<root xmlns:a='urn:a' xmlns:b='urn:b'><a:child b:x='1'/></root>\n",
+    )
+    .unwrap();
+    let input = input.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding as encoding
+use core.encoding.xml as xml
+use core.files as files
+
+fn run() {{
+    // Fold/unfold round trip through XMLReader/XMLWriter keeps order + lexical.
+    input :: files.open("{input}") ?? panic("open")
+    out_path := "{input}.out"
+    output :: files.create(out_path) ?? panic("create")
+    reader :: xml.reader(^input) ?? panic("reader")
+    writer :: xml.writer(^output) ?? panic("writer")
+    loop true {{
+        maybe :: reader.next() ?? panic("next")
+        if maybe == {{
+            Val(event) -> {{ writer.write(event) ?? panic("write") }}
+            None -> {{ break }}
+        }}
+    }}
+    writer.finish() ?? panic("finish")
+    print(files.read(out_path) ?? panic("read out"))
+
+    // Hostile: document_end before document_start → State, no bytes.
+    bad_out :: files.create("{input}.bad") ?? panic("bad create")
+    bad :: xml.writer(^bad_out) ?? panic("bad writer")
+    end := DataTree.Object(["$xml_event": DataTree.Text("document_end")])
+    if bad.write(end) == {{
+        Ok(_) -> {{ print("hostile-missed") }}
+        Err(error) -> {{
+            print(error.kind == encoding.EncodingErrorKind.State)
+            print(error.reason)
+        }}
+    }}
+
+    // Exclusive C14N omits unused xmlns on ancestors; utilized prefixes move down.
+    tree :: xml.parse("<root xmlns:a='urn:a' xmlns:b='urn:b'><a:child b:x='1'/></root>") ?? panic("parse")
+    options := xml.XMLCanonical.{{ mode: .Exclusive10, comments: false, inclusive_prefixes: [] }}
+    print(xml.canonical(tree, options) ?? panic("canonical"))
+
+    // InclusiveNamespaces PrefixList forces unused b onto the apex.
+    forced := xml.XMLCanonical.{{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["b"] }}
+    print(xml.canonical(tree, forced) ?? panic("forced"))
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_hostile_c14n", &source, &[], None);
+    assert_eq!(code, 0, "XML hostile/c14n surface failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "<?xml version='1.0'?>\n<!--c-->\n<root xmlns:a='urn:a' xmlns:b='urn:b'><a:child b:x='1'/></root>\n\ntrue\nXML writer expects document_start first\n<root><a:child xmlns:a=\"urn:a\" xmlns:b=\"urn:b\" b:x=\"1\"></a:child></root>\n<root xmlns:b=\"urn:b\"><a:child xmlns:a=\"urn:a\" b:x=\"1\"></a:child></root>\n"
+    );
     let _ = fs::remove_dir_all(&dir);
 }
 

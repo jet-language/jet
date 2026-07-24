@@ -167,6 +167,47 @@ fn run() {
 // entity_ref
 ```
 
+## D-ENCXML-PROJECTION1=A — Focused helpers with a typed name view
+
+Ratified on card #710 (inherited from #296). D-ENCXML1 already fixes the closed
+`$xml` tree, security law, Codable projection keys (`@`, Clark children, `$text`,
+`$content`), and `XMLError`. This decision selects the public helper view only.
+
+### Selected option: Focused helpers with a typed name view
+
+Exact public signatures:
+
+- `decode<T: Codable>(text: String, options: XMLParseOptions = XMLParseOptions.safe()) -> T ? XMLError`
+- `decode_bytes<T: Codable>(bytes: [U8], options: XMLParseOptions = XMLParseOptions.safe()) -> T ? XMLError`
+- `root(document: DataTree) -> DataTree ? XMLError`
+- `expanded_name(node: DataTree) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) ? XMLError`
+- `attribute(element: DataTree, name: String) -> String? ? XMLError`
+- `content(element: DataTree) -> [DataTree] ? XMLError`
+
+Attribute selectors are local names or Clark names, never prefixes. `attribute`
+returns `normalized_value`. A found attribute with an unresolved entity returns
+`XMLError` kind `Entity`. `content` returns exact child nodes in source order.
+Parse failures keep source locations. Projection failures use kind `Shape`, no
+source location, and the deepest known projected path. No additional query or
+wrapper type ships.
+
+```jet
+use core.encoding.xml as xml
+
+document := xml.parse(source)?
+root := xml.root(document)?
+name := xml.expanded_name(root)?
+print(name.local)
+print(name.namespace_uri ?? "none")
+print(xml.attribute(root, "{urn:shop}id")? ?? "missing")
+for child in xml.content(root)? {
+    print(xml.expanded_name(child)?.local)
+}
+
+catalog := xml.decode<Catalog>(source)?
+copy := xml.decode_bytes<Catalog>(wire)?
+```
+
 ## D-JSONCANON1=A — Canonical JSON semantics
 
 Live `json.canonical(DataTree) -> String` is a shipped prototype: it sorts Rust strings, formats Float with Rust debug syntax, renders Bytes as a JSON number array, and cannot fail. Those bytes are deterministic only accidentally and are not RFC 8785. Ratified D-ENCSTREAM1=A requires whole-value and stream modes to share one codec; D-ENCSTREAM-SURFACE1=A requires canonical and ordinary JSON writers to share rejection/lifecycle law. This ballot chooses the one canonical JSON meaning used by both. `json.to_string` and `json.to_string_pretty` remain ordinary JSON renderers and are not hashing contracts.

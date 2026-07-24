@@ -250,6 +250,89 @@ fn jet_std_xml_canonical(d: &jet_std::DataTree, options: &jet_std::XMLCanonical)
     }).map_err(jet_xml_error)
 }
 
+// D-ENCXML-PROJECTION1=A: focused helpers + typed decode over the closed tree.
+fn jet_std_xml_root(document: &jet_std::DataTree) -> Result<jet_std::DataTree, jet_std::XMLError> {
+    let value = jet_xml_from_data_tree(document).map_err(jet_xml_shape_error)?;
+    crate::jet_xml_pull::document_root(&value)
+        .map(jet_xml_to_data_tree)
+        .map_err(jet_xml_error)
+}
+
+fn jet_std_xml_expanded_name(
+    node: &jet_std::DataTree,
+) -> Result<(String, Option<String>, String, Option<String>), jet_std::XMLError> {
+    let value = jet_xml_from_data_tree(node).map_err(jet_xml_shape_error)?;
+    crate::jet_xml_pull::expanded_name_parts(&value).map_err(jet_xml_error)
+}
+
+fn jet_std_xml_attribute(
+    element: &jet_std::DataTree,
+    name: &String,
+) -> Result<Option<String>, jet_std::XMLError> {
+    let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
+    crate::jet_xml_pull::lookup_attribute(&value, name).map_err(jet_xml_error)
+}
+
+fn jet_std_xml_content(element: &jet_std::DataTree) -> Result<Vec<jet_std::DataTree>, jet_std::XMLError> {
+    let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
+    crate::jet_xml_pull::element_content(&value)
+        .map(|nodes| nodes.into_iter().map(jet_xml_to_data_tree).collect())
+        .map_err(jet_xml_error)
+}
+
+fn jet_xml_decode_error(error: jet_std::DecodeError) -> jet_std::XMLError {
+    jet_std::XMLError {
+        kind: jet_std::XMLReason::Shape,
+        byte_offset: None,
+        line: None,
+        column: None,
+        path: if error.path.is_empty() { "$".to_string() } else { error.path },
+        reason: error.reason,
+    }
+}
+
+fn jet_enc_xml_decode_projected<T: user_Decode>(projected: &jet_std::DataTree) -> Result<T, jet_std::XMLError> {
+    match T::jet_decode(projected) {
+        Ok(value) => Ok(value),
+        Err(primary) => {
+            if let jet_std::DataTree::Object(entries) = projected {
+                if let Some((_, jet_std::DataTree::Text(text))) =
+                    entries.iter().find(|(key, _)| key == "$text")
+                {
+                    return T::jet_decode(&jet_std::DataTree::Text(text.clone())).map_err(|secondary| {
+                        if secondary.path.is_empty() && !primary.path.is_empty() {
+                            jet_xml_decode_error(primary)
+                        } else {
+                            jet_xml_decode_error(secondary)
+                        }
+                    });
+                }
+            }
+            Err(jet_xml_decode_error(primary))
+        }
+    }
+}
+
+fn jet_enc_xml_decode<T: user_Decode>(
+    text: &String,
+    options: jet_std::XMLParseOptions,
+) -> Result<T, jet_std::XMLError> {
+    let document = jet_std_xml_parse_with(text, &options)?;
+    let value = jet_xml_from_data_tree(&document).map_err(jet_xml_shape_error)?;
+    let projected = crate::jet_xml_pull::project_document_for_decode(&value).map_err(jet_xml_error)?;
+    jet_enc_xml_decode_projected(&jet_xml_to_data_tree(projected))
+}
+
+fn jet_enc_xml_decode_bytes<T: user_Decode>(
+    bytes: &Vec<u8>,
+    options: jet_std::XMLParseOptions,
+) -> Result<T, jet_std::XMLError> {
+    let document = jet_std_xml_parse_bytes(bytes, options)?;
+    let value = jet_xml_from_data_tree(&document).map_err(jet_xml_shape_error)?;
+    let projected = crate::jet_xml_pull::project_document_for_decode(&value).map_err(jet_xml_error)?;
+    jet_enc_xml_decode_projected(&jet_xml_to_data_tree(projected))
+}
+
 fn jet_cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {
     if n < 24 { out.push((major << 5) | n as u8); }
     else if n <= u8::MAX as u64 { out.extend_from_slice(&[(major << 5) | 24, n as u8]); }
