@@ -153,6 +153,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "WatchEvent" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
         | "DataGroup" | "DataColumn" | "DataStatus" | "DataSummary"
+        | "DataLimits" | "DataError" | "DataErrorKind" | "DataStream" | "DataPivotCell"
         // D-LOGTRACE1=A: typed structured logging values.
         | "LogField" | "LogSpan"
         // D-ITERTOOLS1=A: expanded collection handles.
@@ -414,6 +415,30 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "key" => Some(Type::String),
             "count" => Some(Type::Int),
             "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if type_name == "DataPivotCell" {
+        return match field {
+            "row_key" | "column_key" => Some(Type::String),
+            "count" => Some(Type::Int),
+            "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if type_name == "DataLimits" {
+        return match field {
+            "encoding" => Some(Type::Named("EncodingLimits".to_string())),
+            "max_groups" | "max_sort_rows" | "max_join_rows" | "max_output_rows" => Some(Type::Int),
+            _ => None,
+        };
+    }
+    if type_name == "DataError" {
+        return match field {
+            "kind" => Some(Type::Named("DataErrorKind".to_string())),
+            "operation" | "reason" => Some(Type::String),
+            "row" | "column" | "index" => Some(Type::Option(Box::new(Type::Int))),
+            "cause" => Some(Type::Option(Box::new(Type::Named("EncodingError".to_string())))),
             _ => None,
         };
     }
@@ -1050,6 +1075,7 @@ pub fn encoding_handle_method_return(
             Type::Option(Box::new(Type::List(Box::new(Type::String)))),
             error,
         ))),
+        // DataStream<T>.next is handled specially in method_calls (needs T).
         ("CSVWriter", "write", 1) | ("CSVWriter", "flush" | "finish", 0) => {
             Some(Some(result_ty(unit, error)))
         }
@@ -1108,6 +1134,29 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("max_total_bytes".to_string(), Type::Option(Box::new(Type::Int))),
             ("max_expansion_depth".to_string(), Type::Int),
             ("max_expansion_bytes".to_string(), Type::Int),
+        ]),
+        "DataLimits" => Some(vec![
+            ("encoding".to_string(), Type::Named("EncodingLimits".to_string())),
+            ("max_groups".to_string(), Type::Int),
+            ("max_sort_rows".to_string(), Type::Int),
+            ("max_join_rows".to_string(), Type::Int),
+            ("max_output_rows".to_string(), Type::Int),
+        ]),
+        "DataError" => Some(vec![
+            ("kind".to_string(), Type::Named("DataErrorKind".to_string())),
+            ("operation".to_string(), Type::String),
+            ("row".to_string(), Type::Option(Box::new(Type::Int))),
+            ("column".to_string(), Type::Option(Box::new(Type::Int))),
+            ("index".to_string(), Type::Option(Box::new(Type::Int))),
+            ("reason".to_string(), Type::String),
+            ("cause".to_string(), Type::Option(Box::new(Type::Named("EncodingError".to_string())))),
+        ]),
+        "DataPivotCell" => Some(vec![
+            ("row_key".to_string(), Type::String),
+            ("column_key".to_string(), Type::String),
+            ("count".to_string(), Type::Int),
+            ("sum".to_string(), Type::Float),
+            ("mean".to_string(), Type::Float),
         ]),
         "Limits" => Some(vec![
             ("max_reply_line_bytes".to_string(), Type::Int),
@@ -1295,6 +1344,7 @@ pub(crate) fn core_encoding_variants(
     let units: &[&str] = match enum_name {
         "EncodingFormat" => &["JSON", "JSONL", "CSV", "XML", "CBOR"],
         "EncodingErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"],
+        "DataErrorKind" => &["Decode", "Limit", "IO", "Empty", "InvalidArgument", "NonFinite", "Overflow", "State"],
         "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
         "CBORErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "TypeMismatch", "TrailingData", "NonCanonical"],
         "XMLReason" => &["InvalidEncoding", "Malformed", "MismatchedTag", "InvalidName", "Namespace", "DuplicateAttribute", "Entity", "EntityCycle", "Limit", "Canonicalization", "Shape", "Unsupported"],

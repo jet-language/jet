@@ -543,33 +543,65 @@ pub fn core_fixed_sig(
         // D-DATA-SURFACE1=A / D-DATA-PLOT1=A / D-DATA-STATUS1=A: core.data
         // facade fixed-shape calls. Generic typed table calls are handled in
         // infer_core_call so selectors stay typed by sema.
-        ("core.data", "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev") => Some((
-            vec![(read, Type::List(Box::new(Type::Float)))],
-            Some(Type::Float),
-        )),
-        ("core.data", "quantile") => Some((
-            vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Float)],
-            Some(Type::Float),
-        )),
-        ("core.data", "rolling_mean") => Some((
-            vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Int)],
-            Some(Type::List(Box::new(Type::Float))),
-        )),
-        ("core.data", "describe") => Some((
-            vec![(read, Type::List(Box::new(Type::Float)))],
-            Some(Type::Named("DataSummary".to_string())),
-        )),
+        ("core.data", "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev") => {
+            let args = vec![(read, Type::List(Box::new(Type::Float)))];
+            if super::super::Edition::edition_at_least("2027") {
+                Some((args, Some(result_ty(Type::Float, Type::Named("DataError".to_string())))))
+            } else {
+                Some((args, Some(Type::Float)))
+            }
+        }
+        ("core.data", "quantile") => {
+            let args = vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Float)];
+            if super::super::Edition::edition_at_least("2027") {
+                Some((args, Some(result_ty(Type::Float, Type::Named("DataError".to_string())))))
+            } else {
+                Some((args, Some(Type::Float)))
+            }
+        }
+        ("core.data", "rolling_mean") => {
+            let args = vec![(read, Type::List(Box::new(Type::Float))), (read, Type::Int)];
+            if super::super::Edition::edition_at_least("2027") {
+                Some((
+                    args,
+                    Some(result_ty(
+                        Type::List(Box::new(Type::Float)),
+                        Type::Named("DataError".to_string()),
+                    )),
+                ))
+            } else {
+                Some((args, Some(Type::List(Box::new(Type::Float)))))
+            }
+        }
+        ("core.data", "describe") => {
+            let args = vec![(read, Type::List(Box::new(Type::Float)))];
+            if super::super::Edition::edition_at_least("2027") {
+                Some((
+                    args,
+                    Some(result_ty(
+                        Type::Named("DataSummary".to_string()),
+                        Type::Named("DataError".to_string()),
+                    )),
+                ))
+            } else {
+                Some((args, Some(Type::Named("DataSummary".to_string()))))
+            }
+        }
         ("core.data", "status") => Some((
             vec![],
             Some(Type::List(Box::new(Type::Named("DataStatus".to_string())))),
         )),
-        ("core.data", "bar_text" | "bar_svg") => Some((
-            vec![(
+        ("core.data", "bar_text" | "bar_svg") => {
+            let args = vec![(
                 read,
                 Type::List(Box::new(Type::Named("DataGroup".to_string()))),
-            )],
-            Some(Type::String),
-        )),
+            )];
+            if super::super::Edition::edition_at_least("2027") {
+                Some((args, Some(result_ty(Type::String, Type::Named("DataError".to_string())))))
+            } else {
+                Some((args, Some(Type::String)))
+            }
+        }
         ("core.fmt", "number" | "bytes" | "duration" | "ordinal") => {
             Some((vec![(read, Type::Int)], Some(Type::String)))
         }

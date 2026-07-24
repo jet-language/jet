@@ -352,6 +352,7 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"),
     include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"),
     include_str!("../Prelude/CoreLib/Top/DataFmt.rs"),
+    include_str!("../Prelude/CoreLib/Top/DataFlow.rs"),
     include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"),
     include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"),
     include_str!("../Prelude/CoreLib/Top/DnsResolverPolicy.rs"),
