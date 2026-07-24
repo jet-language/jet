@@ -285,7 +285,12 @@ pub(crate) fn emit_let_ty_clause(let_ty: &TLetTy, cx: &Cx) -> String {
                 .map(|t| cx.rust_type(t))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!(": ({inner})")
+            // Rust `(T)` is grouping, not a 1-tuple — need the trailing comma.
+            if types.len() == 1 {
+                format!(": ({inner},)")
+            } else {
+                format!(": ({inner})")
+            }
         }
         TLetTy::Annotated { ty, mut_fn, wrapper } => {
             let base = if let Type::Fn { params, ret, .. } = ty {
