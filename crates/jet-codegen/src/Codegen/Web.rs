@@ -8,7 +8,7 @@ use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
 use crate::Syntax;
 use crate::AST::{AccessConvention, FfiLink, Func, Item, ProgramBundle, Type};
-use jet_foundation::WebPartition::{WebBucket, WebPartitionMarker};
+use jet_foundation::WebPartition::{partition_key, WebBucket, WebPartitionMarker};
 
 /// Generated web backend artifacts (WASM Rust, JS loader/app, DOM shim, manifest).
 #[derive(Debug, Clone)]
@@ -146,10 +146,7 @@ fn validate_web_items_tir(
     for item in items {
         match item {
             Item::Func(f) => {
-                let key = module_prefix
-                    .map(|m| format!("{m}__{}", f.name))
-                    .or_else(|| file_prefix.map(|m| format!("{m}__{}", f.name)))
-                    .unwrap_or_else(|| f.name.clone());
+                let key = partition_key(file_prefix, module_prefix, &f.name);
                 let bucket = bundle.web_partitions.get(&key).copied().unwrap_or(WebBucket::Wasm);
                 let has_wasm_export = bundle.modules.iter().any(|m| items_have_wasm_export(&m.items));
                 // `dev()` is the host-side programmable dev-server entry. It
@@ -531,12 +528,7 @@ fn collect_module_funcs(
     for item in items {
         match item {
             Item::Func(f) => {
-                let key = match module_prefix {
-                    Some(m) => format!("{m}__{}", f.name),
-                    None => file_prefix
-                        .map(|m| format!("{m}__{}", f.name))
-                        .unwrap_or_else(|| f.name.clone()),
-                };
+                let key = partition_key(file_prefix, module_prefix, &f.name);
                 let bucket = bundle
                     .web_partitions
                     .get(&key)
@@ -1896,14 +1888,11 @@ fn web_name(name: &str) -> &str {
 }
 
 fn qualified_web_key(rust_mod: &str, rust_fn: &str) -> String {
-    format!("{}__{}", web_name(rust_mod), web_name(rust_fn))
+    partition_key(None, Some(web_name(rust_mod)), web_name(rust_fn))
 }
 
 fn local_web_key(file_prefix: Option<&str>, rust_fn: &str) -> String {
-    let name = web_name(rust_fn);
-    file_prefix
-        .map(|prefix| format!("{prefix}__{name}"))
-        .unwrap_or_else(|| name.to_string())
+    partition_key(file_prefix, None, web_name(rust_fn))
 }
 
 fn web_place(name: &str) -> String {

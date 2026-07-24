@@ -1,5 +1,8 @@
 //! D-WASM1=A (c123 M1): web JS/WASM partition sema.
 
+use std::fs;
+use std::path::PathBuf;
+
 fn codes(src: &str) -> Vec<String> {
     jet::compile(src)
         .err()
@@ -202,5 +205,129 @@ fn dom_fn() {
     assert_eq!(
         bundle.web_partitions.get("dom_fn"),
         Some(&jet::Syntax::WebBucket::Js)
+    );
+}
+
+fn temp_web_project(stem: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("jet_web_partition_{stem}_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    for (path, src) in files {
+        fs::write(dir.join(path), src).unwrap();
+    }
+    dir
+}
+
+fn manifest_partitions(manifest: &str) -> Vec<(String, String)> {
+    let start = manifest
+        .find("\"partitions\": {")
+        .expect("manifest missing partitions");
+    let body = &manifest[start..];
+    let end = body.find("\n  }").expect("manifest partitions block unterminated");
+    body[..end]
+        .lines()
+        .skip(1)
+        .map(|line| {
+            let line = line.trim().trim_end_matches(',');
+            let (key, bucket) = line.split_once(':').expect("partition line");
+            (
+                key.trim().trim_matches('"').to_string(),
+                bucket.trim().trim_matches('"').to_string(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn imported_same_leaf_helpers_keep_distinct_buckets() {
+    let dir = temp_web_project(
+        "same_leaf",
+        &[
+            (
+                "main.jet",
+                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#Target(Js)\nfn run() { print(left.value() + right.value()) }\n",
+            ),
+            (
+                "left.jet",
+                "#Target(Js)\nfn helper() -> Int { return 1 }\n#Target(Js)\npub fn value() -> Int { return helper() }\n",
+            ),
+            (
+                "right.jet",
+                "fn helper() -> Int { return 2 }\n#WasmExport\npub fn value() -> Int { return helper() }\n",
+            ),
+        ],
+    );
+    let out = jet::compile_web(dir.join("main.jet").to_str().unwrap())
+        .expect("same-leaf partition fixture should compile");
+    let web = out.web.expect("web artifacts");
+    let mut parts = manifest_partitions(&web.manifest_json);
+    parts.sort();
+    let mut expected = [
+        ("left__helper".into(), "Js".into()),
+        ("left__value".into(), "Js".into()),
+        ("right__helper".into(), "Wasm".into()),
+        ("right__value".into(), "Wasm".into()),
+        ("run".into(), "Js".into()),
+    ];
+    expected.sort();
+    assert_eq!(parts, expected);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn wasm_export_and_target_pins_are_deterministic() {
+    let src = r#"#Target(Web)
+#WasmExport
+fn exported() -> Int { return 3 }
+
+#Target(Wasm)
+fn pinned() -> Int { return 4 }
+
+#Target(Js)
+fn run() { print(exported()) }
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_partition_pins.jet")
+        .expect("pinned partition fixture should compile");
+    let web = out.web.expect("web artifacts");
+    let mut parts = manifest_partitions(&web.manifest_json);
+    parts.sort();
+    let mut expected = [
+        ("exported".into(), "Wasm".into()),
+        ("pinned".into(), "Wasm".into()),
+        ("run".into(), "Js".into()),
+    ];
+    expected.sort();
+    assert_eq!(parts, expected);
+    let report = out
+        .web_partition_report
+        .expect("web compile should set partition report");
+    let repeat = jet::compile_web_with_path(src, "tests/fixtures/web_partition_pins.jet")
+        .expect("repeat compile")
+        .web_partition_report
+        .expect("repeat report");
+    assert_eq!(report, repeat, "partition report must be stable across compiles");
+}
+
+#[test]
+fn inline_module_callback_keeps_qualified_js_partition() {
+    let src = r#"#Target(Web)
+module handlers {
+    #Target(Js)
+    pub fn init() { print("ready") }
+}
+#Target(Js)
+fn run() { handlers.init() }
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_partition_callback.jet")
+        .expect("callback partition fixture should compile");
+    let web = out.web.expect("web artifacts");
+    let parts = manifest_partitions(&web.manifest_json);
+    assert!(
+        parts.iter().any(|(k, b)| k == "handlers__init" && b == "Js"),
+        "callback module must stay JS-qualified: {parts:?}"
+    );
+    assert!(
+        parts.iter().any(|(k, b)| k == "run" && b == "Js"),
+        "entry must stay JS: {parts:?}"
     );
 }

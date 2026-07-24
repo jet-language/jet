@@ -3,6 +3,7 @@
 use crate::Diagnostics::Diagnostic;
 use crate::Generics::{DECODE, ENCODE};
 use crate::Syntax::{self, WebBucket, WebPartitionMarker};
+use jet_foundation::WebPartition::{partition_effect_key, partition_key};
 use crate::AST::{EnumDef, Item, ProgramBundle, StructDef, Type, VariantPayload};
 use std::collections::HashMap;
 
@@ -205,14 +206,11 @@ fn collect_funcs(
                     Some(m) => format!("{m}__{}", f.name),
                     None => effect_key(None, &f.name),
                 };
-                let key = if !is_entry && module_prefix.is_none() {
-                    format!("{file_alias}__{}", f.name)
-                } else {
-                    local_key.clone()
-                };
+                let file_prefix = (!is_entry && module_prefix.is_none()).then_some(file_alias);
+                let key = partition_key(file_prefix, module_prefix, &f.name);
                 out.push(FuncWebMeta {
                     key,
-                    effect_key: format!("{file_alias}::{local_key}"),
+                    effect_key: partition_effect_key(file_alias, &local_key),
                     name: f.name.clone(),
                     name_span: f.name_span,
                     marker: f.web_marker,

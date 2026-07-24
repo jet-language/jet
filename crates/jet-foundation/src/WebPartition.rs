@@ -57,6 +57,28 @@ impl WebPartitionMarker {
     }
 }
 
+/// Canonical web-partition map key for one function (D-WASM1 / #702).
+///
+/// `file_prefix` is `Some(module.alias)` for non-entry file modules and `None` for
+/// the entry module. `module_prefix` is `Some(inline_module_name)` inside `#module`.
+pub fn partition_key(
+    file_prefix: Option<&str>,
+    module_prefix: Option<&str>,
+    fn_name: &str,
+) -> String {
+    match module_prefix {
+        Some(module) => format!("{module}__{fn_name}"),
+        None => file_prefix
+            .map(|alias| format!("{alias}__{fn_name}"))
+            .unwrap_or_else(|| fn_name.to_string()),
+    }
+}
+
+/// Effect-solver row key for a function collected from one loaded file.
+pub fn partition_effect_key(file_alias: &str, local_key: &str) -> String {
+    format!("{file_alias}::{local_key}")
+}
+
 /// D-JSBIND1=A: scalars, `String`, and homogeneous `[T]` / `[String: T]` of ABI-safe
 /// element types. `Named` / `Apply` Codable structs and enums are checked in sema where
 /// the bundle's type definitions are available.
@@ -148,5 +170,19 @@ mod tests {
         assert!(is_abi_safe_type(&Type::String));
         assert!(is_abi_safe_type(&Type::List(Box::new(Type::Int))));
         assert!(!is_abi_safe_type(&Type::Named("Point".to_string())));
+    }
+
+    #[test]
+    fn partition_key_qualified_identities() {
+        assert_eq!(partition_key(None, None, "run"), "run");
+        assert_eq!(partition_key(Some("left"), None, "helper"), "left__helper");
+        assert_eq!(
+            partition_key(None, Some("math"), "double"),
+            "math__double"
+        );
+        assert_eq!(
+            partition_key(Some("left"), Some("inner"), "helper"),
+            "inner__helper"
+        );
     }
 }
