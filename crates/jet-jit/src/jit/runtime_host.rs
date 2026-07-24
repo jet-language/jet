@@ -471,6 +471,12 @@ extern "C" fn jet_jit_struct_new(n: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(n as usize))
 }
 
+extern "C" fn jet_jit_struct_assign(dst: i64, src: i64) {
+    with_runtime_mut(|rt| {
+        let _ = rt.heap.record_assign_from(dst, src);
+    });
+}
+
 extern "C" fn jet_jit_struct_get_i64(h: i64, idx: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.record_get_int(h, idx).unwrap_or(0))
 }
@@ -784,6 +790,7 @@ pub(crate) struct HostFns {
     pub(crate) numeric_predicate: FuncId,
     pub(crate) numeric_bit_count: FuncId,
     pub(crate) struct_new: FuncId,
+    pub(crate) struct_assign: FuncId,
     pub(crate) struct_get_i64: FuncId,
     pub(crate) struct_get_f64: FuncId,
     pub(crate) struct_get_bool: FuncId,
@@ -856,6 +863,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_numeric_predicate", jet_jit_numeric_predicate as *const u8);
     builder.symbol("jet_jit_numeric_bit_count", jet_jit_numeric_bit_count as *const u8);
     builder.symbol("jet_jit_struct_new", jet_jit_struct_new as *const u8);
+    builder.symbol("jet_jit_struct_assign", jet_jit_struct_assign as *const u8);
     builder.symbol(
         "jet_jit_struct_get_i64",
         jet_jit_struct_get_i64 as *const u8,
@@ -1012,6 +1020,9 @@ fn declare_host_fns(
     let mut sig_struct_new = Signature::new(cc);
     sig_struct_new.params.push(AbiParam::new(types::I64));
     sig_struct_new.returns.push(AbiParam::new(types::I64));
+    let mut sig_struct_assign = Signature::new(cc);
+    sig_struct_assign.params.push(AbiParam::new(types::I64));
+    sig_struct_assign.params.push(AbiParam::new(types::I64));
     let mut sig_struct_get_i64 = Signature::new(cc);
     sig_struct_get_i64.params.push(AbiParam::new(types::I64));
     sig_struct_get_i64.params.push(AbiParam::new(types::I64));
@@ -1141,6 +1152,7 @@ fn declare_host_fns(
         numeric_predicate: import("jet_jit_numeric_predicate", &sig_f64_i64_i8)?,
         numeric_bit_count: import("jet_jit_numeric_bit_count", &sig_i64_i64_i64)?,
         struct_new: import("jet_jit_struct_new", &sig_struct_new)?,
+        struct_assign: import("jet_jit_struct_assign", &sig_struct_assign)?,
         struct_get_i64: import("jet_jit_struct_get_i64", &sig_struct_get_i64)?,
         struct_get_f64: import("jet_jit_struct_get_f64", &sig_struct_get_f64)?,
         struct_get_bool: import("jet_jit_struct_get_bool", &sig_struct_get_i8)?,

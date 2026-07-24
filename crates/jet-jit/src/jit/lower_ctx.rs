@@ -413,6 +413,17 @@ impl LowerCtx<'_, '_> {
                     .get(&key)
                     .copied()
                     .ok_or_else(|| format!("jit assign to unknown place `{}`", local.name))?;
+                // D-MUTSELF1: `(*self) = New{…}` must write through the receiver
+                // handle, not replace the local SSA pointer (AOT: `(*self) = …`).
+                if local.deref && op.is_none() {
+                    let dst = self.b.use_var(var);
+                    let src = self.lower_expr(value)?;
+                    let assign = self
+                        .module
+                        .declare_func_in_func(self.host.struct_assign, self.b.func);
+                    self.b.ins().call(assign, &[dst, src]);
+                    return Ok(());
+                }
                 let val = if let Some(op) = op {
                     let current = self.b.use_var(var);
                     let rhs = self.lower_expr(value)?;
