@@ -69,6 +69,33 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
 
+### Safe Jet data-race guarantee
+
+A data race is two tasks that access the same memory at the same time when at
+least one access writes and the accesses do not use a synchronization rule.
+**Safe Jet programs cannot contain a data race.** An attempt to create one does
+not compile.
+
+The guarantee covers all Jet-owned concurrency paths:
+
+- A task created by `tasks.spawn` or `g.task` owns or copies its captures.
+  Sema rejects a mutable capture, a borrowed view, or another value that cannot
+  cross a task boundary.
+- A channel moves a sendable owned value. The sender cannot keep an alias that
+  permits unsynchronized writes after the send.
+- A task group changes child lifetimes and cancellation only. Its children use
+  the same capture and result checks as ordinary tasks.
+- `para_map`, `para_filter`, `para_partition`, and `para_fold` reject mutable
+  captures and values that workers cannot safely share or transfer.
+- `Shared<T>` is the explicit shared-mutation path. Its `read` and `edit`
+  closures use a lock-scoped view. `#Transact` uses the same handles and commits
+  their changes atomically.
+
+This is a guarantee for safe Jet source and Jet-owned Core APIs. Code inside an
+`#Unsafe("reason")` region, a foreign implementation, or a vetted runtime
+internal must uphold its boundary contract. Those explicit boundaries are not
+proof that arbitrary foreign code has no internal data race.
+
 ### Private traced collector substrate
 
 D-DEP-GC1=A has one dependency-free collector implementation in
