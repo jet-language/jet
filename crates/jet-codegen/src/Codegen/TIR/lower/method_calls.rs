@@ -71,6 +71,7 @@ use crate::Codegen::TIR::TEnumPayload;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::THandleOp;
+use crate::Codegen::TIR::THostCall;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::TPreludeArg;
@@ -304,7 +305,7 @@ pub(crate) fn lower_method_call(
             };
             return TExpr {
                 ty,
-                kind: TExprKind::ConstInline(emitted),
+                kind: crate::Codegen::TIR::host_raw(emitted),
             };
         }
     }
@@ -424,10 +425,7 @@ pub(crate) fn lower_method_call(
                 );
                 return TExpr {
                     ty: unit_type(),
-                    kind: TExprKind::RequireStop {
-                        rendered,
-                        always_stops: false,
-                    },
+                    kind: TExprKind::HostCall(Box::new(THostCall::Raw(rendered))),
                 };
             }
         }
@@ -446,7 +444,7 @@ pub(crate) fn lower_method_call(
         );
         return TExpr {
             ty: recv.ty.clone(),
-            kind: TExprKind::ConstInline(code),
+            kind: crate::Codegen::TIR::host_raw(code),
         };
     }
     // D-TYPEDTEXT1=D: `Sql.raw("…")` / `Html.raw("…")` — the audited escape.
@@ -469,7 +467,7 @@ pub(crate) fn lower_method_call(
                 };
                 return TExpr {
                     ty: Type::Named(n.clone()),
-                    kind: TExprKind::ConstInline(code),
+                    kind: crate::Codegen::TIR::host_raw(code),
                 };
             }
         }
@@ -489,14 +487,14 @@ pub(crate) fn lower_method_call(
             } else {
                 Type::List(Box::new(Type::String))
             },
-            kind: TExprKind::ConstInline(code),
+            kind: crate::Codegen::TIR::host_raw(code),
         };
     }
     if recv_type.as_deref() == Some("Html") && method == "text" {
         let recv = lower_expr(receiver, cx, env);
         return TExpr {
             ty: Type::String,
-            kind: TExprKind::ConstInline(format!("({}).clone()", emit_tir_expr(&recv, cx))),
+            kind: TExprKind::Clone(Box::new(recv)),
         };
     }
     // D-TASKSCOPE1=A / D-NURSERY1=A: structured taskgroup methods.
@@ -756,7 +754,7 @@ pub(crate) fn lower_method_call(
             ty: ret_ty,
             kind: TExprKind::FnFieldCall {
                 recv: Box::new(recv),
-                field_rust: mangle(method),
+                field: method.to_string(),
                 args: targs,
             },
         };
@@ -809,7 +807,7 @@ pub(crate) fn lower_method_call(
             let seed = lower_expr(&args[0].expr, cx, env);
             return TExpr {
                 ty: Type::Named(Syntax::CLOCK_TYPE.to_string()),
-                kind: TExprKind::ConstInline(format!(
+                kind: crate::Codegen::TIR::host_raw(format!(
                     "{}jet_std_clock_new({})",
                     cx.root_prefix,
                     emit_tir_expr(&seed, cx)
@@ -819,7 +817,7 @@ pub(crate) fn lower_method_call(
         if method == "system" && args.is_empty() {
             return TExpr {
                 ty: Type::Named(Syntax::CLOCK_TYPE.to_string()),
-                kind: TExprKind::ConstInline(format!(
+                kind: crate::Codegen::TIR::host_raw(format!(
                     "{}jet_std_clock_system()",
                     cx.root_prefix
                 )),
@@ -916,7 +914,7 @@ pub(crate) fn lower_method_call(
             let recv = if args.is_empty() {
                 TExpr {
                     ty: unit_type(),
-                    kind: TExprKind::ConstInline("()".to_string()),
+                    kind: TExprKind::Unit,
                 }
             } else {
                 lower_expr(&args[0].expr, cx, env)
@@ -953,7 +951,7 @@ pub(crate) fn lower_method_call(
                 kind: TExprKind::HandleMethod {
                     recv: Box::new(TExpr {
                         ty: unit_type(),
-                        kind: TExprKind::ConstInline("()".to_string()),
+                        kind: TExprKind::Unit,
                     }),
                     op,
                     args: args.iter().map(|arg| lower_expr(&arg.expr, cx, env)).collect(),
@@ -966,7 +964,7 @@ pub(crate) fn lower_method_call(
                 kind: TExprKind::HandleMethod {
                     recv: Box::new(TExpr {
                         ty: unit_type(),
-                        kind: TExprKind::ConstInline("()".to_string()),
+                        kind: TExprKind::Unit,
                     }),
                     op,
                     args: Vec::new(),
@@ -1082,10 +1080,7 @@ pub(crate) fn lower_method_call(
                 );
                 return TExpr {
                     ty: unit_type(),
-                    kind: TExprKind::RequireStop {
-                        rendered,
-                        always_stops: false,
-                    },
+                    kind: TExprKind::HostCall(Box::new(THostCall::Raw(rendered))),
                 };
             }
         }
@@ -2069,7 +2064,7 @@ pub(crate) fn lower_method_call(
                 .collect();
             return TExpr {
                 ty,
-                kind: TExprKind::ConstInline(format!(
+                kind: crate::Codegen::TIR::host_raw(format!(
                     "({}).{}({})",
                     recv_s,
                     method,
@@ -2124,7 +2119,7 @@ pub(crate) fn lower_method_call(
             };
             return TExpr {
                 ty,
-                kind: TExprKind::ConstInline(format!("({}).{}({})", recv_s, method_out, closure)),
+                kind: crate::Codegen::TIR::host_raw(format!("({}).{}({})", recv_s, method_out, closure)),
             };
         }
         if is_expiring_secret && method == "with" && args.len() == 1 {
@@ -2164,7 +2159,7 @@ pub(crate) fn lower_method_call(
             });
             return TExpr {
                 ty,
-                kind: TExprKind::ConstInline(format!("({}).with({})", recv_s, closure)),
+                kind: crate::Codegen::TIR::host_raw(format!("({}).with({})", recv_s, closure)),
             };
         }
     }
@@ -3079,7 +3074,7 @@ pub(crate) fn lower_method_call(
                     name: "ExpiringSecret".to_string(),
                     args: vec![elem_ty],
                 },
-                kind: TExprKind::ConstInline(format!(
+                kind: crate::Codegen::TIR::host_raw(format!(
                     "{{ let __jet_expiring_value = {value_rust}; \
                      let __jet_expiring_ttl = &({duration_rust}); \
                      let __jet_expiring_clock = &({clock_rust}); \
@@ -3108,7 +3103,7 @@ pub(crate) fn lower_method_call(
                     name: Syntax::EXPIRING_VALUE_TYPE.to_string(),
                     args: vec![elem_ty],
                 },
-                kind: TExprKind::ConstInline(format!(
+                kind: crate::Codegen::TIR::host_raw(format!(
                     "{}jet_expiring_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",
                     cx.root_prefix,
                     emit_tir_expr(&value, cx),

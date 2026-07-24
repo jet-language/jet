@@ -136,7 +136,7 @@ pub(crate) fn lower_one_call_arg(
         (Expr::Ident(name, _), Some((_, ty)))
             if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() => TExpr {
             ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
-            kind: TExprKind::ConstInline(cx.mangle_name(name)),
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FnName(name.clone()))),
         },
         (Expr::Lambda(lam), Some((_, ty)))
             if a.flags.c_callback_symbol && callback_fn_type(ty).is_some() =>
@@ -157,7 +157,7 @@ pub(crate) fn lower_one_call_arg(
             };
             TExpr {
                 ty: conv.as_ref().map(|(_, t)| t.clone()).unwrap(),
-                kind: TExprKind::ConstInline(format!(
+                kind: crate::Codegen::TIR::host_raw(format!(
                     "{{ extern \"C\" fn {}({}){} {} {} }}",
                     name,
                     tl.params.join(", "),
@@ -205,7 +205,7 @@ pub(crate) fn lower_one_call_arg(
                 );
             let (_, ty) = conv.as_ref().expect("matched Some above");
             Some(TFnCoerce {
-                fn_type_rust: cx.rust_type(ty),
+                ty: ty.clone(),
                 already_boxed,
             })
         }

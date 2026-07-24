@@ -1,20 +1,43 @@
 use crate::AST::{Type};
 use crate::Codegen::Cx;
+use crate::Codegen::escape_rust_str;
+use crate::Codegen::TIR::emit::emit_panic_locals;
+use crate::Codegen::TIR::emit::emit_panic_message_expr;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_stmts;
+use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TOrFallback;
 use crate::Codegen::TIR::TStmt;
 
 /// c109 Phase 8/15: format a `??` fallback right-hand side, mirroring
 /// `emit_or_fallback_rhs` (Statement.rs). Value and early-`return` (Phase 8); the
-/// `panic(…)` form (Phase 15) carries its fully-rendered statement string from lowering.
+/// `panic(…)` form (Phase 15) carries structured panic facts from lowering.
 pub(crate) fn emit_tir_orfallback_rhs(fallback: &TOrFallback, cx: &Cx) -> String {
     match fallback {
         TOrFallback::Value(e) => emit_tir_expr(e, cx),
         TOrFallback::Return(None) => "return".to_string(),
         TOrFallback::Return(Some(e)) => format!("return {}", emit_tir_expr(e, cx)),
-        TOrFallback::Panic(rendered) => rendered.clone(),
+        TOrFallback::Panic { msg, loc } => {
+            if cx.test_mode {
+                return format!(
+                    "{{ return Err({}); }}",
+                    emit_panic_message_expr(msg, cx)
+                );
+            }
+            format!(
+                "{{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
+                cleanup = RESOURCE_CLEANUP_MARKER,
+                file = escape_rust_str(&loc.file),
+                line = loc.line,
+                fn_name_esc = escape_rust_str(&loc.fn_name),
+                src_line_esc = escape_rust_str(&loc.src_line),
+                col = loc.col,
+                caret = loc.caret,
+                msg = emit_panic_message_expr(msg, cx),
+                locals = emit_panic_locals(loc, cx),
+            )
+        }
         TOrFallback::Break => "break".to_string(),
         TOrFallback::Continue => "continue".to_string(),
         TOrFallback::BreakLabel(name) => format!("break 'jet_{name}"),

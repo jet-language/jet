@@ -452,18 +452,18 @@ impl LowerCtx<'_, '_> {
                 })?;
                 let field_index = self
                     .meta
-                    .struct_field_index(&type_name, &assign.field_rust)
+                    .struct_field_index(&type_name, &assign.field)
                     .ok_or_else(|| {
                         format!(
                             "jit field `{}` on `{type_name}`",
-                            assign.field_rust
+                            assign.field
                         )
                     })?;
                 let value = if let Some(op) = assign.op {
                     let current = self.lower_record_field(
                         handle,
                         &type_name,
-                        &assign.field_rust,
+                        &assign.field,
                         &assign.field_ty,
                     )?;
                     self.apply_binop_to_var(current, op, rhs, &assign.field_ty)?
@@ -1281,13 +1281,13 @@ impl LowerCtx<'_, '_> {
         &mut self,
         handle: Value,
         type_name: &str,
-        field_rust: &str,
+        field: &str,
         fallback_ty: &Type,
     ) -> Result<Value, String> {
         let idx = self
             .meta
-            .struct_field_index(type_name, field_rust)
-            .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))?
+            .struct_field_index(type_name, field)
+            .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?
             as i64;
         let idx_val = self.b.ins().iconst(types::I64, idx);
         // TIR has already substituted any generic owner arguments. The
@@ -1668,7 +1668,7 @@ impl LowerCtx<'_, '_> {
                         TOrFallback::ContinueLabel(name) => {
                             self.emit_loop_fallback(Some(name), "continue", true)?;
                         }
-                        TOrFallback::Return(_) | TOrFallback::Panic(_) => {
+                        TOrFallback::Return(_) | TOrFallback::Panic { .. } => {
                             return Err("jit option fallback unsupported".to_string());
                         }
                     }
@@ -1692,7 +1692,7 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(fail_block);
                 self.b.seal_block(fail_block);
                 match fallback {
-                    TOrFallback::Panic(_) => {
+                    TOrFallback::Panic { .. } => {
                         let line = self.b.ins().iconst(types::I32, 1);
                         let host_ref = self
                             .module
@@ -1769,13 +1769,13 @@ impl LowerCtx<'_, '_> {
             TExprKind::StructLit { fields, .. } => self.lower_struct_lit(fields),
             TExprKind::TupleLit { fields, .. } => self.lower_tuple_lit(fields),
             TExprKind::Field {
-                recv, field_rust, ..
+                recv, field, ..
             } => {
                 let handle = self.lower_expr(recv)?;
                 let type_name = record_type_key(&recv.ty)
                     .or_else(|| self.method_struct.clone())
                     .ok_or("jit field recv type")?;
-                self.lower_record_field(handle, &type_name, field_rust, &expr.ty)
+                self.lower_record_field(handle, &type_name, field, &expr.ty)
             }
             TExprKind::MethodCall {
                 recv,
@@ -1857,7 +1857,14 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iadd(v, one))
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
-            TExprKind::ConstInline(_) => Err("jit const inline unsupported".to_string()),
+            TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
+            TExprKind::CtLit(jet_foundation::AST::CtValue::Int(v)) => {
+                Ok(self.b.ins().iconst(types::I64, *v))
+            }
+            TExprKind::CtLit(_)
+            | TExprKind::HostCall(_)
+            | TExprKind::DefaultLit
+            | TExprKind::Uninit => Err("jit host/default/uninit/ct-lit unsupported".to_string()),
             TExprKind::ConstRef(_) => Err("jit const ref unsupported".to_string()),
             TExprKind::DataEntriesToMap(_) => Err("jit data-entries-to-map unsupported".to_string()),
             TExprKind::PoolSlot { .. } => Err("jit pool slot unsupported".to_string()),
@@ -2377,7 +2384,7 @@ impl LowerCtx<'_, '_> {
         }
         let source = match &inner.kind {
             TExprKind::Local(local) => format!("local {}", local.name),
-            TExprKind::Field { field_rust, .. } => format!("field {field_rust}"),
+            TExprKind::Field { field, .. } => format!("field {field}"),
             TExprKind::MethodCall { method, .. } => format!("method {}", method.name),
             _ => "other expression".to_string(),
         };
@@ -3202,7 +3209,7 @@ fn structured_record_field_place(place: &TPlace) -> Option<(&TLocal, &str)> {
     };
     let TExprKind::Field {
         recv,
-        field_rust,
+        field,
         boxed: false,
     } = &expr.kind
     else {
@@ -3211,5 +3218,5 @@ fn structured_record_field_place(place: &TPlace) -> Option<(&TLocal, &str)> {
     let TExprKind::Local(local) = &recv.kind else {
         return None;
     };
-    Some((local, field_rust.as_str()))
+    Some((local, field.as_str()))
 }

@@ -9,7 +9,6 @@ use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::ast_operand_is_integer;
 use crate::Codegen::TIR::call_return_type;
 use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::int_lit_type;
 use crate::Codegen::TIR::is_numeric_bounds_const;
@@ -25,9 +24,10 @@ use crate::Codegen::TIR::lower::lower_incdec_place;
 use crate::Codegen::TIR::lower_method_call;
 use crate::Codegen::TIR::lower_one_call_arg;
 use crate::Codegen::TIR::lower_stmts;
-use crate::Codegen::TIR::render_panic_stop;
-use crate::Codegen::TIR::render_require;
-use crate::Codegen::TIR::render_require_eq;
+use crate::Codegen::TIR::lower_panic_stop;
+use crate::Codegen::TIR::lower_require_eq_stop;
+use crate::Codegen::TIR::lower_require_stop;
+use crate::Codegen::TIR::TRequireKind;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TBuiltinOp;
@@ -42,7 +42,6 @@ use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::tuple_fields_plain;
 use crate::Codegen::tuple_struct_name;
-use crate::Codegen::user_type_rust;
 use crate::Diagnostics::Span;
 use crate::Syntax;
 
@@ -77,7 +76,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
                     pool: Box::new(pool_t),
                     id: Box::new(id_t),
                     mutable: true,
-                    field_rust: None,
+                    field: None,
                     line,
                 },
             },
@@ -89,7 +88,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
                         pool: Box::new(pool_t),
                         id: Box::new(id_t),
                         mutable: true,
-                        field_rust: Some(mangle(f)),
+                        field: Some(f.to_string()),
                         line,
                     },
                 }
@@ -228,7 +227,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             if env.is_gc(name) {
                 return TExpr {
                     ty,
-                    kind: TExprKind::ConstInline(format!(
+                    kind: crate::Codegen::TIR::host_raw(format!(
                         "jet_gc::runtime_or_exit({}.read(|__jet_value| __jet_value.clone()))",
                         env.place_of(name)
                     )),
@@ -243,11 +242,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             value: Some(value), ..
         } => TExpr {
             ty: value.jet_type(),
-            kind: TExprKind::ConstInline(value.serialize()),
+            kind: TExprKind::CtLit(value.clone()),
         },
         Expr::ComptimeSplice { .. } => TExpr {
             ty: Type::Int,
-            kind: TExprKind::ConstInline("Default::default()".to_string()),
+            kind: TExprKind::DefaultLit,
         },
         // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`). The
         // Function-type parameters are unmarked, therefore Read under D-MEM-PARAM1.
@@ -729,7 +728,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
                 return TExpr {
                     ty,
-                    kind: TExprKind::ConstInline(code),
+                    kind: crate::Codegen::TIR::host_raw(code),
                 };
             }
             // `print` is ambient only when the user has not defined their own
@@ -762,33 +761,34 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // name (`cx.sigs.contains_key` would be true then).
             if !cx.sigs.contains_key(&call.name) && !env.locals.contains_key(&call.name) {
                 if call.name == Syntax::BUILTIN_REQUIRE {
+                    let (kind, loc) = lower_require_stop(call, cx, env);
                     return TExpr {
                         ty: unit_type(),
                         kind: TExprKind::RequireStop {
-                            rendered: render_require(call, cx, env),
+                            kind,
+                            loc,
                             always_stops: false,
                         },
                     };
                 }
                 if call.name == Syntax::BUILTIN_REQUIRE_EQ {
+                    let (kind, loc) = lower_require_eq_stop(call, cx, env);
                     return TExpr {
                         ty: unit_type(),
                         kind: TExprKind::RequireStop {
-                            rendered: render_require_eq(call, cx, env),
+                            kind,
+                            loc,
                             always_stops: false,
                         },
                     };
                 }
                 if call.name == Syntax::BUILTIN_PANIC {
+                    let (kind, loc) = lower_panic_stop(&call.name_span, &call.args, cx, env);
                     return TExpr {
                         ty: unit_type(),
                         kind: TExprKind::RequireStop {
-                            rendered: render_panic_stop(
-                                &call.name_span,
-                                &call.args,
-                                cx,
-                                env,
-                            ),
+                            kind,
+                            loc,
                             always_stops: true,
                         },
                     };
@@ -1140,7 +1140,6 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named(type_name.clone()),
                         kind: TExprKind::StructLit {
-                            rust_type: format!("{}jet_std::{}", cx.root_prefix, type_name),
                             fields: tfields,
                             extra: None,
                             as_trait: None,
@@ -1158,7 +1157,6 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named(type_name.clone()),
                         kind: TExprKind::StructLit {
-                            rust_type: format!("{}jet_std::{}", cx.root_prefix, type_name),
                             fields: tfields,
                             extra: None,
                             as_trait: None,
@@ -1176,7 +1174,6 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named(type_name.clone()),
                         kind: TExprKind::StructLit {
-                            rust_type: format!("{}jet_std::{}", cx.root_prefix, type_name),
                             fields: tfields,
                             extra: None,
                             as_trait: None,
@@ -1193,71 +1190,47 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named(type_name.clone()),
                         kind: TExprKind::StructLit {
-                            rust_type: if matches!(type_name.as_str(), "DkimConfig" | "SmtpConfig") {
-                                format!("{}jet_email::{}::<{}::Secret>", cx.root_prefix, type_name,
-                                    cx.ffi_crate.as_deref().unwrap_or("jet_ffi"))
-                            } else { cx.rust_type(&Type::Named(type_name.clone())) },
                             fields: tfields,
                             extra: None,
                             as_trait: None,
                         },
                     };
                 }
-                let mod_name = cx
-                    .import_mods
-                    .get(alias)
-                    .map(|s| s.as_str())
-                    .unwrap_or("user_unknown");
-                let rust_type = if type_args.is_empty() {
-                    format!("{}{}::{}", cx.root_prefix, mod_name, mangle(type_name))
-                } else {
-                    format!(
-                        "{}{}::{}::<{}>",
-                        cx.root_prefix,
-                        mod_name,
-                        mangle(type_name),
-                        type_args
-                            .iter()
-                            .map(|a| cx.rust_type(a))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                };
-                // A foreign struct's fields are never local boxed edges (boxed_edges
-                // hold this module's recursive structs), so no field is boxed here.
                 let tfields = fields
                     .iter()
-                    .map(|(n, _, fe)| (mangle(n), lower_expr(fe, cx, env), false))
+                    .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
                     .collect();
                 return TExpr {
-                    ty: Type::Named(type_name.clone()),
+                    ty: if type_args.is_empty() {
+                        Type::Named(type_name.clone())
+                    } else {
+                        Type::Apply {
+                            name: type_name.clone(),
+                            args: type_args.clone(),
+                        }
+                    },
                     kind: TExprKind::StructLit {
-                        rust_type,
                         fields: tfields,
                         extra: None,
                         as_trait: None,
                     },
                 };
             }
-            // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse) uses the
-            // `is_prelude_struct` branch of `emit_struct_lit`: a `<root>Jet…` Rust head,
-            // PLAIN (unmangled) field names, and — for HttpRequest — an injected
-            // route metadata fields. Reproduce them byte-for-byte.
-            if let Some(rust) = net_handle_rust_type(type_name) {
+            // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse).
+            if net_handle_rust_type(type_name).is_some() {
                 // A prelude struct has no boxed (recursive) edges.
                 let mut tfields: Vec<(String, TExpr, bool)> = fields
                     .iter()
                     .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
                     .collect();
                 let extra = if type_name == "HttpRequest" {
-                    Some("params: std::collections::BTreeMap::new(), route_template: None".to_string())
+                    Some(crate::Codegen::TIR::TStructExtra::HttpRequestParams)
                 } else {
                     None
                 };
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
                     kind: TExprKind::StructLit {
-                        rust_type: format!("{}{}", cx.root_prefix, rust),
                         fields: tfields.drain(..).collect(),
                         extra,
                         as_trait: None,
@@ -1274,9 +1247,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .collect();
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
-                    kind: TExprKind::StructLit {
-                        rust_type: format!("{}jet_std::TextWidth", cx.root_prefix),
-                        fields: tfields,
+                        kind: TExprKind::StructLit {
+                            fields: tfields,
                         extra: None,
                         as_trait: None,
                     },
@@ -1289,8 +1261,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .collect();
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
-                    kind: TExprKind::StructLit {
-                        rust_type: format!("{}jet_std::JetAsyncPolicy", cx.root_prefix),
+                        kind: TExprKind::StructLit {
                         fields: tfields,
                         extra: None,
                         as_trait: None,
@@ -1306,8 +1277,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .collect();
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
-                    kind: TExprKind::StructLit {
-                        rust_type: format!("{}jet_std::DecodeError", cx.root_prefix),
+                        kind: TExprKind::StructLit {
                         fields: tfields,
                         extra: None,
                         as_trait: None,
@@ -1325,8 +1295,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .collect();
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
-                    kind: TExprKind::StructLit {
-                        rust_type: format!("{}jet_std::{type_name}", cx.root_prefix),
+                        kind: TExprKind::StructLit {
                         fields: tfields,
                         extra: None,
                         as_trait: None,
@@ -1342,8 +1311,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .collect();
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
-                    kind: TExprKind::StructLit {
-                        rust_type: format!("{}jet_std::FieldError", cx.root_prefix),
+                        kind: TExprKind::StructLit {
                         fields: tfields,
                         extra: None,
                         as_trait: None,
@@ -1358,10 +1326,6 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
                     kind: TExprKind::StructLit {
-                        rust_type: if matches!(type_name.as_str(), "DkimConfig" | "SmtpConfig") {
-                            format!("{}jet_email::{}::<{}::Secret>", cx.root_prefix, type_name,
-                                cx.ffi_crate.as_deref().unwrap_or("jet_ffi"))
-                        } else { cx.rust_type(&Type::Named(type_name.clone())) },
                         fields: tfields,
                         extra: None,
                         as_trait: None,
@@ -1374,23 +1338,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // c109: an UNqualified FOREIGN struct (`Note { … }`, no `import_ns`) prefixes its
             // module head (`{root}user_<mod>::user_<Note>`), exactly as `user_type_apply_rust`
             // — or rustc can't find the type (E0422). A local struct keeps the plain head.
-            let head = match cx.foreign_types.get(type_name) {
-                Some(rust_mod) => format!("{}{}::user_{}", cx.root_prefix, rust_mod, type_name),
-                None => user_type_rust(type_name),
-            };
-            let rust_type = if type_args.is_empty() {
-                head
-            } else {
-                format!(
-                    "{}::<{}>",
-                    head,
-                    type_args
-                        .iter()
-                        .map(|a| cx.rust_type(a))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
+            // Struct head spelling comes from `TExpr.ty` at emit (`cx.rust_type`).
             // D-PATCH1: partial `T.Patch.{ … }` — fill omitted fields with `None`,
             // wrap provided scalars in `Some(…)`.
             if type_name.ends_with(".Patch")
@@ -1405,7 +1353,6 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 let tfields = all
                     .iter()
                     .map(|(fname, fty)| {
-                        let m = mangle(fname);
                         let te = if let Some(fe) = provided.get(fname.as_str()) {
                             let inner = lower_expr(fe, cx, env);
                             TExpr {
@@ -1418,13 +1365,12 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 kind: TExprKind::Absent,
                             }
                         };
-                        (m, te, false)
+                        (fname.clone(), te, false)
                     })
                     .collect();
                 return TExpr {
                     ty: Type::Named(type_name.clone()),
                     kind: TExprKind::StructLit {
-                        rust_type,
                         fields: tfields,
                         extra: None,
                         as_trait: None,
@@ -1439,7 +1385,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .map(|(n, _, fe)| {
                     let boxed = cx.boxed_edges.contains(&(type_name.clone(), n.clone()));
                     let value = lower_owned_expr(fe, cx, env);
-                    (mangle(n), value, boxed)
+                    (n.clone(), value, boxed)
                 })
                 .collect();
             // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
@@ -1455,7 +1401,6 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             TExpr {
                 ty,
                 kind: TExprKind::StructLit {
-                    rust_type,
                     fields: tfields,
                     extra: None,
                     as_trait: trait_coerce,
@@ -1589,7 +1534,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         if is_numeric_bounds_const(member) {
                             return TExpr {
                                 ty: nt.clone(),
-                                kind: TExprKind::ConstInline(format!(
+                                kind: crate::Codegen::TIR::host_raw(format!(
                                     "{}::{}",
                                     cx.rust_type(&nt),
                                     member
@@ -1693,8 +1638,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // Source/Prelude/Core.rs declare unprefixed fields — B2). Reproduce
             // `core_struct_field_rust_name` (Expression.rs) from the resolved receiver
             // type so the field read is byte-exact for both core and user structs.
-            let field_rust =
-                core_struct_field_rust_name(cx, &recv.ty, member).unwrap_or_else(|| mangle(member));
+            let field = member.to_string();
             // A self-referential (recursive) edge has Rust type `Box<…>`; the read derefs
             // to the inner type (total fact from `cx.boxed_edges`, keyed on the receiver's
             // resolved struct name — mirrors the AST `boxed_field_read`).
@@ -1706,7 +1650,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty: field_ty,
                 kind: TExprKind::Field {
                     recv: Box::new(recv),
-                    field_rust,
+                    field,
                     boxed,
                 },
             }
@@ -1963,7 +1907,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         pool: Box::new(base_t),
                         id: Box::new(index_t),
                         mutable: false,
-                        field_rust: None,
+                        field: None,
                         line,
                     },
                 };
@@ -1973,11 +1917,12 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     Type::FixedList { elem, .. } => (**elem).clone(),
                     _ => Type::Int,
                 };
-                let b = emit_tir_expr(&base_t, cx);
-                let i = emit_tir_expr(&index_t, cx);
                 return TExpr {
                     ty: elem_ty,
-                    kind: TExprKind::ConstInline(format!("(({b})[({i}).0 as usize].clone())")),
+                    kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::FixedListIndex {
+                        base: Box::new(base_t),
+                        index: Box::new(index_t),
+                    })),
                 };
             }
             let result_ty = match &base_t.ty {
@@ -2162,7 +2107,9 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // `emit_panic_stop`/`safe_locals_expr`, so emit reads nothing from
                 // `cx.src`/`cx.current_fn`.
                 OrFallback::Panic { name_span, args } => {
-                    TOrFallback::Panic(render_panic_stop(name_span, args, cx, env))
+                    let (kind, loc) = lower_panic_stop(name_span, args, cx, env);
+                    let TRequireKind::Panic { msg } = kind else { unreachable!() };
+                    TOrFallback::Panic { msg, loc }
                 }
                 OrFallback::Break(_) => TOrFallback::Break,
                 OrFallback::Continue(_) => TOrFallback::Continue,
@@ -2193,7 +2140,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty: base_t.ty.clone(),
                 kind: TExprKind::OptField {
                     base: Box::new(base_t),
-                    member_rust: mangle(member),
+                    member: member.to_string(),
                     flatten: *flatten,
                 },
             }
@@ -2274,7 +2221,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             TExpr {
                 ty: crate::Sema::ptr_type(elem.clone()),
                 kind: TExprKind::PtrFromAddr {
-                    elem_rust: cx.rust_type(elem),
+                    elem: elem.clone(),
                     addr: Box::new(taddr),
                 },
             }

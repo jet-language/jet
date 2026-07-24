@@ -333,11 +333,11 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::Print(operand) => {
             web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
         }
-        TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
+        TIR::TExprKind::Field { recv, field, boxed: false } => {
             let TIR::TExprKind::Local(local) = &recv.kind else { return false };
             reconstructions.iter().any(|r| {
                 r.local_rust == local.rust_name()
-                    && r.fields.iter().any(|(field, _, _)| field == field_rust)
+                    && r.fields.iter().any(|(fname, _, _)| fname == field)
             })
         }
         TIR::TExprKind::Index {
@@ -427,7 +427,8 @@ fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
 fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     use TIR::TExprKind as E;
     match &expr.kind {
-        E::IntLit(..) | E::FloatLit(_) | E::BoolLit(_) | E::CharLit(_) | E::Local(_) | E::ConstInline(_) => true,
+        E::IntLit(..) | E::FloatLit(_) | E::BoolLit(_) | E::CharLit(_) | E::Local(_)
+        | E::Unit | E::DefaultLit | E::CtLit(_) => true,
         E::StrLit(parts) => parts.iter().all(|p| match p { TIR::TStrPart::Lit(_) => true, TIR::TStrPart::Interp(e, _) => web_expr_supported(e) }),
         E::Binary { lhs, rhs, .. } => web_expr_supported(lhs) && web_expr_supported(rhs),
         E::Unary { operand, .. } | E::Clone(operand) | E::MaterializeView(operand) | E::DistinctRaw(operand) | E::Print(operand) => web_expr_supported(operand),
@@ -1513,15 +1514,15 @@ fn wasm_emit_expr(
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
         TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?),
-        TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
+        TIR::TExprKind::Field { recv, field, boxed: false } => {
             let TIR::TExprKind::Local(local) = &recv.kind else { return Err(()) };
             if !reconstructions.iter().any(|r| {
                 r.local_rust == local.rust_name()
-                    && r.fields.iter().any(|(field, _, _)| field == field_rust)
+                    && r.fields.iter().any(|(fname, _, _)| fname == field)
             }) {
                 return Err(());
             }
-            format!("({}).{}", wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?, field_rust)
+            format!("({}).{}", wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?, web_name(field))
         }
         TIR::TExprKind::Index {
             base,
@@ -2020,12 +2021,15 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::CharLit(c) => json_quote(&c.to_string()),
         E::StrLit(parts) => tir_js_string(parts, funcs, file_prefix)?,
         E::Local(local) => web_local(local),
-        E::ConstInline(value) => value.clone(),
+        E::Unit => "()".to_string(),
+        E::DefaultLit => "undefined".to_string(),
+        E::CtLit(value) => value.serialize(),
+        E::Uninit | E::HostCall(_) => return Err(()),
         E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op), tir_js_expr(rhs, funcs, file_prefix)?),
         E::Unary { op, operand } => format!("({}{})", unop(op), tir_js_expr(operand, funcs, file_prefix)?),
         E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
-        E::Field { recv, field_rust, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field_rust)),
+        E::Field { recv, field, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field)),
         E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
         E::ListLit(elements) => format!("[{}]", elements.iter().map(|element| tir_js_expr(element, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", ")),
         E::MapLit(entries) => format!(

@@ -392,7 +392,7 @@ fn lower_if_cond_atom(
                     let prefix = TStmt::Let {
                         name: name.clone(),
                         kw: "let",
-                        ty_clause: format!(": {}", cx.rust_type(&map_ty)),
+                        let_ty: crate::Codegen::TIR::TLetTy::plain(map_ty.clone()),
                         init: TExpr {
                             ty: map_ty.clone(),
                             kind: TExprKind::DataEntriesToMap(TLocal::generated(&obj_tmp)),
@@ -761,7 +761,7 @@ fn struct_pattern_cond_expr(
             let fty = struct_pattern_field_type(cx, subject_ty, field).unwrap_or(Type::Int);
             let lhs = TExpr {
                 ty: fty.clone(),
-                kind: TExprKind::ConstInline(struct_pattern_subject_field_expr(
+                kind: crate::Codegen::TIR::host_raw(struct_pattern_subject_field_expr(
                     cx, subject_ty, field,
                 )),
             };
@@ -802,10 +802,10 @@ fn lower_struct_pattern_bindings(
         out.push(TStmt::Let {
             name: local.clone(),
             kw: "let",
-            ty_clause: format!(": {}", cx.rust_type(&fty)),
+            let_ty: crate::Codegen::TIR::TLetTy::plain(fty.clone()),
             init: TExpr {
                 ty: fty,
-                kind: TExprKind::ConstInline(format!(
+                kind: crate::Codegen::TIR::host_raw(format!(
                     "{}.clone()",
                     struct_pattern_subject_field_expr(cx, subject_ty, field)
                 )),

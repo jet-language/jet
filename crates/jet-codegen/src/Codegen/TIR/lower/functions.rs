@@ -49,7 +49,7 @@ fn bind_resource_param(
     guards.push(TStmt::Let {
         name: guard_name.clone(),
         kw: "let mut",
-        ty_clause: format!(": JetResource<{}>", cx.rust_type(ty)),
+        let_ty: crate::Codegen::TIR::TLetTy::resource(ty.clone()),
         init: TExpr {
             ty: ty.clone(),
             kind: TExprKind::ResourceNew(Box::new(TExpr {

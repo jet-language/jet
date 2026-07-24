@@ -23,6 +23,7 @@ use crate::Codegen::TIR::lower::tracked_float_origin;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TLetTy;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIndexFieldAssign;
@@ -491,19 +492,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let ty =
                     b.ty.as_ref()
                         .expect("E0421 ensures a `:= uninit` binding has a type");
-                let rust_ty = cx.rust_type(ty);
-                let init_str = format!(
-                    "unsafe {{ std::mem::MaybeUninit::<{}>::uninit().assume_init() }}",
-                    rust_ty
-                );
                 env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let mut",
-                    ty_clause: format!(": {}", rust_ty),
+                    let_ty: crate::Codegen::TIR::let_ty_for_opt(Some(ty), cx, false, false, false),
                     init: TExpr {
                         ty: ty.clone(),
-                        kind: TExprKind::ConstInline(init_str),
+                        kind: TExprKind::Uninit,
                     },
                     track_origin: None,
                 gc_promotion: None,
@@ -521,7 +517,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
-                    ty_clause: String::new(),
+                    let_ty: TLetTy::Inferred,
                     init,
                     track_origin: None,
                 gc_promotion: None,
@@ -543,7 +539,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
-                    ty_clause: String::new(),
+                    let_ty: TLetTy::Inferred,
                     init,
                     track_origin: None,
                 gc_promotion: None,
@@ -565,7 +561,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
-                    ty_clause: ": &str".to_string(),
+                    let_ty: TLetTy::StrView,
                     init,
                     track_origin: None,
                 gc_promotion: None,
@@ -580,33 +576,21 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
             // facts are pre-resolved (I3): no inference here.
             if b.is_comptime {
-                let serialized =
-                    b.ct.as_ref()
-                        .map(|v| v.serialize())
-                        .unwrap_or_else(|| "Default::default()".to_string());
-                // Mirror `emit_let`'s type clause exactly (a Fn type via `rust_fn_trait`,
-                // others via `rust_type`). A comptime value is never fn-typed, but match
-                // the AST shape verbatim for total byte-parity.
-                let ty_clause =
-                    b.ty.as_ref()
-                        .map(|t| {
-                            if let Type::Fn { params, ret, .. } = t {
-                                format!(": {}", cx.rust_fn_trait(params, ret.as_deref(), false))
-                            } else {
-                                format!(": {}", cx.rust_type(t))
-                            }
-                        })
-                        .unwrap_or_default();
+                let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
                 let init = TExpr {
                     ty: b.ty.clone().unwrap_or(Type::Int),
-                    kind: lower_comptime_scalar(b.ct.as_ref())
-                        .unwrap_or(TExprKind::ConstInline(serialized)),
+                    kind: lower_comptime_scalar(b.ct.as_ref()).unwrap_or_else(|| {
+                        b.ct
+                            .as_ref()
+                            .map(|v| TExprKind::CtLit(v.clone()))
+                            .unwrap_or(TExprKind::DefaultLit)
+                    }),
                 };
                 env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
-                    ty_clause,
+                    let_ty,
                     init,
                     track_origin: None,
                 gc_promotion: None,
@@ -707,22 +691,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
             // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
             // inferred binding.
-            let mut ty_clause =
-                b.ty.as_ref()
-                    .map(|t| {
-                        if let Type::Fn { params, ret, .. } = t {
-                            format!(": {}", cx.rust_fn_trait(params, ret.as_deref(), mut_fn))
-                        } else {
-                            format!(": {}", cx.rust_type(t))
-                        }
-                    })
-                .unwrap_or_default();
-            if is_resource && b.ty.is_some() {
-                ty_clause = format!(": JetResource<{}>", cx.rust_type(&ty));
-            }
-            if b.gc_promotion.is_some() || b.gc_transferred {
-                ty_clause = format!(": jet_gc::AutomaticRoot<{}>", cx.rust_type(&ty));
-            }
+            let let_ty = crate::Codegen::TIR::let_ty_for_opt(
+                b.ty.as_ref(),
+                cx,
+                mut_fn,
+                is_resource,
+                b.gc_promotion.is_some() || b.gc_transferred,
+            );
             let track_origin = tracked_float_origin(b, &ty, cx);
             let binding_name = if is_resource {
                 format!("__jet_resource_{}_{}", b.name, b.name_span.start)
@@ -744,7 +719,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             TStmt::Let {
                 name: binding_name,
                 kw,
-                ty_clause,
+                let_ty,
                 init,
                 track_origin,
                 gc_promotion: b.gc_promotion.clone(),
@@ -813,7 +788,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                                 pool: Box::new(base_t),
                                 id: Box::new(index_t),
                                 mutable: true,
-                                field_rust: None,
+                                field: None,
                                 line,
                             },
                         })),
@@ -875,7 +850,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                                 index: lower_expr(index, cx, env),
                                 is_map,
                                 index_proven,
-                                field_rust: mangle(field),
+                                field: field.to_string(),
                                 field_ty,
                                 op: *op,
                                 value: lower_expr(value, cx, env),
@@ -942,7 +917,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                             pool: Box::new(pool_t),
                             id: Box::new(id_t),
                             mutable: true,
-                            field_rust: Some(mangle(field)),
+                            field: Some(field.to_string()),
                             line,
                         },
                     }));
@@ -992,7 +967,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let v = lower_expr(e, cx, env);
             TStmt::ExprStmt(TExpr {
                 ty: unit_type(),
-                kind: TExprKind::ConstInline(
+                kind: crate::Codegen::TIR::host_raw(
                     format!(
                         "let _ = __jet_yield_tx.send({});",
                         emit_tir_expr(&v, cx)
@@ -1062,7 +1037,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let init_stmt = Box::new(TStmt::Let {
                 name: init.name.clone(),
                 kw: "let mut",
-                ty_clause: String::new(),
+                let_ty: TLetTy::Inferred,
                 init: init_val,
                 track_origin: None,
                 gc_promotion: None,

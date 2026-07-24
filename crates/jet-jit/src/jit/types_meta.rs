@@ -151,11 +151,12 @@ impl<'a> JitMeta<'a> {
         self.distinct_bases.get(name)
     }
 
-    pub(crate) fn struct_field_index(&self, type_name: &str, field_rust: &str) -> Option<usize> {
-        self.struct_fields
-            .get(type_name)?
+    pub(crate) fn struct_field_index(&self, type_name: &str, field: &str) -> Option<usize> {
+        let fields = self.struct_fields.get(type_name)?;
+        let mangled = format!("user_{field}");
+        fields
             .iter()
-            .position(|f| f == field_rust)
+            .position(|f| f == field || f == &mangled || f.strip_prefix("user_") == Some(field))
     }
 
     /// Discriminant index from structured enum + variant Jet names.

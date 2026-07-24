@@ -1,6 +1,8 @@
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::user_type_rust;
+use crate::Codegen::TIR::emit::emit_field_rust;
+use crate::Codegen::TIR::emit::emit_let_ty_clause;
 use crate::Codegen::TIR::emit::emit_math_swizzle_assign_stmt;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_pattern;
@@ -238,12 +240,13 @@ fn emit_tir_stmt(
         TStmt::Let {
             name,
             kw,
-            ty_clause,
+            let_ty,
             init,
             track_origin,
             gc_promotion,
             gc_transferred: _,
         } => {
+            let ty_clause = emit_let_ty_clause(let_ty, cx);
             let fixed_bytes = match &init.kind {
                 crate::Codegen::TIR::TExprKind::AllocNew { ctor } => {
                     ctor.strip_prefix("__JET_FIXED_INLINE:")
@@ -843,7 +846,7 @@ fn emit_tir_stmt(
                      __jet_item.{field} {operator} __jet_v; }}\n",
                     file = cx.file,
                     line = assign.line,
-                    field = assign.field_rust,
+                    field = emit_field_rust(cx, &assign.base.ty, &assign.field),
                 ));
             } else {
                 let index = if assign.index_proven {
@@ -853,7 +856,7 @@ fn emit_tir_stmt(
                 };
                 out.push_str(&format!(
                     "{pad}{{ let __jet_v = {v}; ({b})[{index}].{field} {operator} __jet_v; }}\n",
-                    field = assign.field_rust,
+                    field = emit_field_rust(cx, &assign.base.ty, &assign.field),
                 ));
             }
         }

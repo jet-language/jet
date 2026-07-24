@@ -138,7 +138,7 @@ pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
     let (closure, _) = str_match_scan_closure(pattern, cx);
     TExpr {
         ty: Type::Bool,
-        kind: TExprKind::ConstInline(format!("({}).is_some()", closure)),
+        kind: crate::Codegen::TIR::host_raw(format!("({}).is_some()", closure)),
     }
 }
 
@@ -152,7 +152,7 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
     if holes.is_empty() {
         return Vec::new();
     }
-    let tuple_ty_str = tuple_join(
+    let _tuple_ty_str = tuple_join(
         &holes
             .iter()
             .map(|(_, t)| cx.rust_type(t))
@@ -165,10 +165,10 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
     let mut out = vec![TStmt::Let {
         name: tuple_local.to_string(),
         kw: "let",
-        ty_clause: format!(": ({})", tuple_ty_str),
+        let_ty: crate::Codegen::TIR::let_ty_tuple(holes.iter().map(|(_, t)| t.clone()).collect()),
         init: TExpr {
             ty: Type::Bool,
-            kind: TExprKind::ConstInline(format!("({}).unwrap()", closure)),
+            kind: crate::Codegen::TIR::host_raw(format!("({}).unwrap()", closure)),
         },
         track_origin: None,
                 gc_promotion: None,
@@ -186,10 +186,10 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
         out.push(TStmt::Let {
             name: name.clone(),
             kw: "let",
-            ty_clause: format!(": {}", cx.rust_type(ty)),
+            let_ty: crate::Codegen::TIR::TLetTy::plain(ty.clone()),
             init: TExpr {
                 ty: ty.clone(),
-                kind: TExprKind::ConstInline(project),
+                kind: crate::Codegen::TIR::host_raw(project),
             },
             track_origin: None,
                 gc_promotion: None,
@@ -205,7 +205,7 @@ pub(super) fn bin_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
     let (closure, _) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
     TExpr {
         ty: Type::Bool,
-        kind: TExprKind::ConstInline(format!("({}).is_some()", closure)),
+        kind: crate::Codegen::TIR::host_raw(format!("({}).is_some()", closure)),
     }
 }
 
@@ -221,7 +221,7 @@ pub(super) fn lower_bin_match_pattern_bindings(
     if holes.is_empty() {
         return Vec::new();
     }
-    let tuple_ty_str = tuple_join(
+    let _tuple_ty_str = tuple_join(
         &holes
             .iter()
             .map(|(_, t)| cx.rust_type(t))
@@ -232,10 +232,10 @@ pub(super) fn lower_bin_match_pattern_bindings(
     let mut out = vec![TStmt::Let {
         name: tuple_local.to_string(),
         kw: "let",
-        ty_clause: format!(": ({})", tuple_ty_str),
+        let_ty: crate::Codegen::TIR::let_ty_tuple(holes.iter().map(|(_, t)| t.clone()).collect()),
         init: TExpr {
             ty: Type::Bool,
-            kind: TExprKind::ConstInline(format!("({}).unwrap()", closure)),
+            kind: crate::Codegen::TIR::host_raw(format!("({}).unwrap()", closure)),
         },
         track_origin: None,
                 gc_promotion: None,
@@ -252,10 +252,10 @@ pub(super) fn lower_bin_match_pattern_bindings(
         out.push(TStmt::Let {
             name: name.clone(),
             kw: "let",
-            ty_clause: format!(": {}", cx.rust_type(ty)),
+            let_ty: crate::Codegen::TIR::TLetTy::plain(ty.clone()),
             init: TExpr {
                 ty: ty.clone(),
-                kind: TExprKind::ConstInline(project),
+                kind: crate::Codegen::TIR::host_raw(project),
             },
             track_origin: None,
                 gc_promotion: None,

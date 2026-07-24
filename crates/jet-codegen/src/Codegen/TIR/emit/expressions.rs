@@ -6,6 +6,8 @@ use crate::Codegen::TIR::emit::collect_select_arms;
 use crate::Codegen::TIR::emit::emit_http_bridge_error;
 use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
+use crate::Codegen::TIR::emit::emit_field_rust;
+use crate::Codegen::TIR::emit::emit_require_stop;
 use crate::Codegen::TIR::emit_tir_call_args;
 use crate::Codegen::TIR::emit_tir_core_call;
 use crate::Codegen::TIR::emit_static_owner;
@@ -28,9 +30,141 @@ use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::TModuleCallForm;
+use crate::Codegen::TIR::TStructExtra;
 use crate::Codegen::TIR::TNumericOp;
+use crate::Codegen::TIR::THostArg;
+use crate::Codegen::TIR::THostCall;
+use crate::Codegen::TIR::TOptionProbe;
+use crate::Codegen::TIR::TTypedTextForm;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::tuple_join;
+
+pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) -> String {
+    match call {
+        THostCall::Helper { helper, args } => {
+            let arg_str = args
+                .iter()
+                .map(|a| match a {
+                    THostArg::Expr(e) => emit_tir_expr(e, cx),
+                    THostArg::Borrow(e) => format!("&({})", emit_tir_expr(e, cx)),
+                    THostArg::Lambda(lam) => {
+                        let move_kw = if lam.is_move { "move " } else { "" };
+                        format!("{}|{}| {}", move_kw, lam.params.join(", "), lam.body)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{helper}({arg_str})")
+        }
+        THostCall::Method { recv, method, args } => {
+            let arg_str = args
+                .iter()
+                .map(|a| emit_tir_expr(a, cx))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({}).{method}({arg_str})", emit_tir_expr(recv, cx))
+        }
+        THostCall::FixedListIndex { base, index } => format!(
+            "(({b})[({i}).0 as usize].clone())",
+            b = emit_tir_expr(base, cx),
+            i = emit_tir_expr(index, cx),
+        ),
+        THostCall::TypedText { kind, arg } => {
+            let a = emit_tir_expr(arg, cx);
+            match kind {
+                TTypedTextForm::SqlRaw => format!("{}jet_sql_raw({a})", cx.root_prefix),
+                TTypedTextForm::HtmlRaw => format!("{}jet_html_raw({a})", cx.root_prefix),
+                TTypedTextForm::ShRaw => format!("{}jet_sh_raw({a})", cx.root_prefix),
+                TTypedTextForm::SqlTemplate => format!("{}jet_sql_template({a})", cx.root_prefix),
+                TTypedTextForm::SqlParams => format!("{}jet_sql_params({a})", cx.root_prefix),
+                TTypedTextForm::HtmlText => format!("({a}).clone()"),
+            }
+        }
+        THostCall::FnName(name) => cx.mangle_name(name),
+        THostCall::GcEdit {
+            root,
+            method_span_start,
+            edges,
+            edit,
+            index_temp,
+            replace_all,
+        } => {
+            let edit_s = emit_tir_expr(edit, cx);
+            let mut emitted = if *replace_all {
+                format!(
+                    "jet_gc::runtime_or_exit({root}.edit_replacing_all_edges(&[{}], |__jet_value| {edit_s}))",
+                    edges.join(", ")
+                )
+            } else if let Some((temp, _)) = index_temp {
+                format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_index(\"collection\", {temp} as usize, &[{}], |__jet_value| {edit_s}))",
+                    edges.join(", ")
+                )
+            } else if edges.is_empty() {
+                format!("jet_gc::runtime_or_exit({root}.edit(|__jet_value| {edit_s}))")
+            } else {
+                format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot(\"method:{method_span_start}\", &[{}], |__jet_value| {edit_s}))",
+                    edges.join(", ")
+                )
+            };
+            if let Some((temp, value)) = index_temp {
+                emitted = format!(
+                    "{{ let {temp} = {}; {emitted} }}",
+                    emit_tir_expr(value, cx)
+                );
+            }
+            emitted
+        }
+        THostCall::OptionProbe { inner, kind } => {
+            let inner_s = emit_tir_expr(inner, cx);
+            match kind {
+                TOptionProbe::IsSome => format!("({inner_s}).is_some()"),
+                TOptionProbe::Unwrap => format!("({inner_s}).unwrap()"),
+                TOptionProbe::Field(field) => {
+                    let field_rust = recv_ty
+                        .map(|ty| emit_field_rust(cx, ty, field))
+                        .unwrap_or_else(|| mangle(field));
+                    format!("({inner_s}).{field_rust}")
+                }
+            }
+        }
+        THostCall::SwitchSubjectField { field } => {
+            let field_rust = recv_ty
+                .map(|ty| emit_field_rust(cx, ty, field))
+                .unwrap_or_else(|| mangle(field));
+            format!("((*_jet_switch_subject).{field_rust})")
+        }
+        THostCall::TypedTextInterp { kind, literals, holes } => {
+            let mut parts = Vec::new();
+            for (i, lit) in literals.iter().enumerate() {
+                if !lit.is_empty() {
+                    parts.push(format!("{:?}", lit));
+                }
+                if let Some(hole) = holes.get(i) {
+                    parts.push(emit_tir_expr(hole, cx));
+                }
+            }
+            if literals.len() > holes.len() {
+                if let Some(lit) = literals.last() {
+                    if !lit.is_empty() {
+                        parts.push(format!("{:?}", lit));
+                    }
+                }
+            }
+            let joined = parts.join(", ");
+            match kind {
+                crate::Codegen::TIR::TTypedTextInterpKind::Html => {
+                    format!("{}jet_html_interp(&[{}])", cx.root_prefix, joined)
+                }
+                crate::Codegen::TIR::TTypedTextInterpKind::Sh => {
+                    format!("{}jet_sh_interp(&[{}])", cx.root_prefix, joined)
+                }
+            }
+        }
+        THostCall::Raw(code) => code.clone(),
+    }
+}
 
 fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx) -> String {
     if let TIfCond::And { left, right } = cond {
@@ -145,8 +279,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 emit_tir_pattern(pattern, cx)
             )
         }
-        // c109 Phase 24: a comptime const inlined verbatim (the pre-rendered value).
-        TExprKind::ConstInline(val) => val.clone(),
+        TExprKind::Unit => "()".to_string(),
+        TExprKind::DefaultLit => "Default::default()".to_string(),
+        TExprKind::Uninit => format!(
+            "unsafe {{ std::mem::MaybeUninit::<{}>::uninit().assume_init() }}",
+            cx.rust_type(&e.ty)
+        ),
+        TExprKind::CtLit(value) => value.serialize(),
+        TExprKind::HostCall(call) => emit_host_call(call, None, cx),
         // A declared const's Rust static name, resolved from its Jet name here so
         // the TIR node carries only the name.
         TExprKind::ConstRef(name) => cx
@@ -201,14 +341,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Some(p) => format!("{}(Some(&({})))", helper, emit_tir_expr(p, cx)),
             }
         }
-        // c109 Phase 26: a `require`/`require_eq`/`panic` rich-report builtin. The whole
-        // `{ … }` block emit string was rendered at lowering (byte-for-byte the AST
-        // helper); emit reads it verbatim. As a statement-position call it is wrapped
-        // `{ … };` by `TStmt::ExprStmt`, matching the AST `Stmt::Expr` `{ … };`.
-        TExprKind::RequireStop { rendered, .. } => rendered.replace(
-            crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER,
-            "",
-        ),
+        TExprKind::RequireStop { kind, loc, .. } => emit_require_stop(kind, loc, cx),
         TExprKind::Call { name, args } => {
             let arg_str = emit_tir_call_args(args, cx);
             format!("{}({})", cx.mangle_name(name), arg_str)
@@ -381,12 +514,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         // c109 Phase 27: a call through a fn-typed struct field. Mirrors the AST
         // `emit_method_call` fn-field branch: `(({recv}).{field})({args})`.
-        TExprKind::FnFieldCall {
-            recv,
-            field_rust,
-            args,
-        } => {
+        TExprKind::FnFieldCall { recv, field, args } => {
             let arg_str = emit_tir_call_args(args, cx);
+            let field_rust = emit_field_rust(cx, &recv.ty, field);
             format!(
                 "(({}).{})({})",
                 emit_tir_expr(recv, cx),
@@ -846,62 +976,76 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 3: `user_S { f: v, … }`. The Rust head and mangled field
         // names were resolved at lowering; values format like any other node.
         TExprKind::StructLit {
-            rust_type,
             fields,
             extra,
             as_trait,
         } => {
+            let rust_type = cx.rust_type(&e.ty);
+            let plain_fields = matches!(
+                &e.ty,
+                Type::Named(n) if crate::Codegen::net_handle_rust_type(n).is_some()
+                    || matches!(
+                        n.as_str(),
+                        "TextWidth"
+                            | "AsyncPolicy"
+                            | "DecodeError"
+                            | "FieldError"
+                            | "CBOROptions"
+                            | "CBORError"
+                            | "XMLLimits"
+                            | "XMLParseOptions"
+                            | "XMLRenderOptions"
+                            | "XMLCanonical"
+                            | "XMLError"
+                    )
+            );
             let mut parts = fields
                 .iter()
-                .map(|(field_rust, v, boxed)| {
+                .map(|(field, v, boxed)| {
+                    let field_rust = if plain_fields {
+                        field.clone()
+                    } else {
+                        emit_field_rust(cx, &e.ty, field)
+                    };
                     let value = emit_tir_expr(v, cx);
-                    // c109: a boxed (self-referential) field is wrapped `Box::new(…)`,
-                    // exactly as `emit_struct_lit`. The `boxed` flag is total (resolved
-                    // at lowering from `cx.boxed_edges`).
                     let value = if *boxed {
-                        format!("Box::new({})", value)
+                        format!("Box::new({value})")
                     } else {
                         value
                     };
-                    format!("{}: {}", field_rust, value)
+                    format!("{field_rust}: {value}")
                 })
                 .collect::<Vec<_>>();
-            // c109 Phase 17: a prelude struct's injected field (HttpRequest's `params`),
-            // appended verbatim after the user fields, exactly as `emit_struct_lit` does.
-            if let Some(extra) = extra {
-                parts.push(extra.clone());
+            if let Some(TStructExtra::HttpRequestParams) = extra {
+                parts.push("params: std::collections::BTreeMap::new()".to_string());
+                parts.push("route_template: None".to_string());
             }
-            let lit = format!("{} {{ {} }}", rust_type, parts.join(", "));
-            // c109 Phase 30: a trait-object coercion wraps the whole literal, byte-for-byte
-            // `emit_struct_lit`'s `as_trait` branch (Source/Codegen/Expression.rs ~L342).
+            let lit = format!("{rust_type} {{ {} }}", parts.join(", "));
             match as_trait {
-                Some(trait_rust) => format!("Box::new({lit}) as Box<dyn {trait_rust}>"),
+                Some(trait_name) => {
+                    let trait_rust = crate::Generics::user_trait_rust(trait_name);
+                    format!("Box::new({lit}) as Box<dyn {trait_rust}>")
+                }
                 None => lit,
             }
         }
         // c109 Phase 3: `(recv).field`. Mirrors the AST `Expr::Field` emit form
         // exactly (no deref, no clone — owning reads were rewritten to a `.clone()`
         // MethodCall in sema and excluded from the subset).
-        TExprKind::Field {
-            recv,
-            field_rust,
-            boxed,
-        } => {
-            let read = format!("({}).{}", emit_tir_expr(recv, cx), field_rust);
+        TExprKind::Field { recv, field, boxed } => {
+            let field_rust = emit_field_rust(cx, &recv.ty, field);
+            let read = format!("({}).{field_rust}", emit_tir_expr(recv, cx));
             if *boxed {
-                format!("(*{})", read)
+                format!("(*{read})")
             } else {
                 read
             }
         }
-        // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` — `(({addr}) as usize as *mut {T})`,
-        // byte-for-byte `emit_expr`'s `PtrFromAddr` arm. The cast is safe Rust (no
-        // `unsafe`); `elem_rust` was resolved at lowering.
-        TExprKind::PtrFromAddr { elem_rust, addr } => {
+        TExprKind::PtrFromAddr { elem, addr } => {
             format!(
                 "(({}) as usize as *mut {})",
                 emit_tir_expr(addr, cx),
-                elem_rust
+                cx.rust_type(elem)
             )
         }
         // D-CAP9: postfix `p.*` deref → Rust `(*(p))`. The `unsafe` is supplied by
@@ -1145,7 +1289,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             pool,
             id,
             mutable,
-            field_rust,
+            field,
             line,
         } => {
             let p = emit_tir_expr(pool, cx);
@@ -1163,8 +1307,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     file = cx.file,
                 )
             };
-            match field_rust {
-                Some(field) => format!("{base}.{field}"),
+            match field {
+                Some(field) => {
+                    let field_rust = emit_field_rust(cx, &pool.ty, field);
+                    format!("{base}.{field_rust}")
+                }
                 None => base,
             }
         }
@@ -1294,15 +1441,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // the total `flatten` fact (flatten → `and_then`, else → `map`).
         TExprKind::OptField {
             base,
-            member_rust,
+            member,
             flatten,
         } => {
             let combinator = if *flatten { "and_then" } else { "map" };
+            let member_rust = emit_field_rust(cx, &base.ty, member);
             format!(
-                "({}).clone().{}(|__optv| __optv.{})",
+                "({}).clone().{combinator}(|__optv| __optv.{member_rust})",
                 emit_tir_expr(base, cx),
-                combinator,
-                member_rust
             )
         }
         // c109 Phase 11: a lambda/closure literal. All decisions (prep/move/box) were

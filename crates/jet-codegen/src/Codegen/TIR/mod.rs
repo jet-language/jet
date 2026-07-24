@@ -962,12 +962,190 @@ pub struct TIndexFieldAssign {
     pub index: TExpr,
     pub is_map: bool,
     pub index_proven: bool,
-    pub field_rust: String,
+    /// Jet field name; emit mangles.
+    pub field: String,
     pub field_ty: Type,
     pub op: Option<BinOp>,
     pub value: TExpr,
     pub clone_value: bool,
     pub line: usize,
+}
+
+
+/// Injected prelude struct fields (HttpRequest route metadata). Emit spells lines.
+#[derive(Clone)]
+pub enum TStructExtra {
+    /// HttpRequest: `params: BTreeMap::new(), route_template: None`
+    HttpRequestParams,
+}
+
+/// Host/prelude call assembled only in emit — structured pieces, no Rust source text.
+pub enum THostCall {
+    /// `{root}{helper}({args…})` with per-arg wrap style.
+    Helper {
+        helper: String,
+        args: Vec<THostArg>,
+    },
+    /// `(recv).{method}({args})`
+    Method {
+        recv: Box<TExpr>,
+        method: String,
+        args: Vec<TExpr>,
+    },
+    /// `(({base})[({index}).0 as usize].clone())` FixedList index.
+    FixedListIndex {
+        base: Box<TExpr>,
+        index: Box<TExpr>,
+    },
+    /// Typed-text audited escapes / projections.
+    TypedText {
+        kind: TTypedTextForm,
+        arg: Box<TExpr>,
+    },
+    /// Bare fn name used as a value before FnValue wrapping (Jet name).
+    FnName(String),
+    /// GC edit expression — structured slots; emit formats jet_gc edit wrappers.
+    GcEdit {
+        root: String,
+        method_span_start: usize,
+        edges: Vec<String>,
+        edit: Box<TExpr>,
+        index_temp: Option<(String, TExpr)>,
+        replace_all: bool,
+    },
+    /// Option/pattern projection helpers: `(closure).is_some()` / `.unwrap()` / field project.
+    OptionProbe {
+        inner: Box<TExpr>,
+        kind: TOptionProbe,
+    },
+    /// Struct-pattern subject field: `((*_jet_switch_subject).{field})`
+    SwitchSubjectField {
+        field: String,
+    },
+    /// Html/Sh typed-text interpolation assembled at emit from literals + holes.
+    TypedTextInterp {
+        kind: TTypedTextInterpKind,
+        literals: Vec<String>,
+        holes: Vec<TExpr>,
+    },
+    /// Verbatim Rust expression assembled at lowering (str/bin-match IIFEs, etc.).
+    Raw(String),
+}
+
+pub enum THostArg {
+    Expr(TExpr),
+    /// Wrap as `&(expr)`
+    Borrow(TExpr),
+    /// Pre-lowered lambda (structured); emit uses TLambda spelling.
+    Lambda(TLambda),
+}
+
+#[derive(Clone)]
+pub enum TOptionProbe {
+    IsSome,
+    Unwrap,
+    /// Project a Jet field after unwrap: `.{field}.clone()`
+    Field(String),
+}
+
+#[derive(Clone, Copy)]
+pub enum TTypedTextForm {
+    SqlRaw,
+    HtmlRaw,
+    ShRaw,
+    SqlTemplate,
+    SqlParams,
+    HtmlText,
+}
+
+#[derive(Clone, Copy)]
+pub enum TTypedTextInterpKind {
+    Html,
+    Sh,
+}
+
+/// Let binding type annotation. Emit spells the `: …` clause (I3: no Rust text here).
+#[derive(Clone)]
+pub enum TLetTy {
+    Inferred,
+    /// `: &str` for a string-view binding.
+    StrView,
+    /// Explicit Jet type, optionally wrapped for resources / GC roots.
+    Annotated {
+        ty: Type,
+        mut_fn: bool,
+        wrapper: TLetWrapper,
+    },
+    /// Pattern-binding tuple annotation spelled `(T0, T1, …)`.
+    Tuple(Vec<Type>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TLetWrapper {
+    None,
+    Resource,
+    AutomaticRoot,
+}
+
+impl TLetTy {
+    pub fn inferred() -> Self {
+        Self::Inferred
+    }
+
+    pub fn plain(ty: Type) -> Self {
+        Self::Annotated {
+            ty,
+            mut_fn: false,
+            wrapper: TLetWrapper::None,
+        }
+    }
+
+    pub fn of(ty: Type, mut_fn: bool, wrapper: TLetWrapper) -> Self {
+        Self::Annotated {
+            ty,
+            mut_fn,
+            wrapper,
+        }
+    }
+
+    pub fn resource(ty: Type) -> Self {
+        Self::of(ty, false, TLetWrapper::Resource)
+    }
+
+    pub fn automatic_root(ty: Type) -> Self {
+        Self::of(ty, false, TLetWrapper::AutomaticRoot)
+    }
+}
+
+/// Source location + locals snapshot for rich require/panic reports.
+/// Emit alone formats `jet_panic_rich` / test-mode `return Err`.
+#[derive(Clone)]
+pub struct TPanicLoc {
+    pub file: String,
+    pub src_line: String,
+    pub line: u32,
+    pub col: u32,
+    pub caret: u32,
+    pub fn_name: String,
+    /// `(display_name, place)` for scalar locals shown in debug panics.
+    pub locals: Vec<(String, TLocal)>,
+}
+
+pub enum TRequireKind {
+    /// `require(cond[, msg])`
+    Require {
+        cond: Box<TExpr>,
+        msg: Option<Box<TExpr>>,
+    },
+    /// `require_eq(left, right)`
+    RequireEq {
+        left: Box<TExpr>,
+        right: Box<TExpr>,
+    },
+    /// `panic(msg)` / `?? panic(msg)`
+    Panic {
+        msg: Box<TExpr>,
+    },
 }
 
 /// A lowered statement. Only the constructs the Phase-1 subset allows.
@@ -977,14 +1155,13 @@ pub enum TStmt {
     /// `kw` is `"let"` or `"let mut"` (the `mut` accounts for the source `mutable`
     /// flag AND the forced-mut cases — a handle binding FileReader/FileWriter/
     /// TcpStream/HttpRouter/Arena/… needs `let mut` even when bound immutably, and an
-    /// escaping FnMut lambda binding); `ty_clause` is the rendered `": <type>"` (empty
-    /// for an inferred binding; a Fn type renders via `rust_fn_trait`, others via
-    /// `rust_type`). The binding's resolved type is carried on the `LowerEnv` slot (for
-    /// downstream facts), so it is not duplicated on the node.
+    /// escaping FnMut lambda binding); `let_ty` is the structured annotation (emit
+    /// spells the `: …` clause). The binding's resolved type is carried on the
+    /// `LowerEnv` slot (for downstream facts), so it is not duplicated on the node.
     Let {
         name: String,
         kw: &'static str,
-        ty_clause: String,
+        let_ty: TLetTy,
         init: TExpr,
         /// D-PROVENANCE1=B: if present, record this Float binding's origin after
         /// initialization. Empty for every untracked/non-Float binding.
@@ -1476,18 +1653,13 @@ pub enum TExprKind {
     /// A local or parameter slot, resolved to its Jet binding name plus the
     /// by-reference deref fact. Emit spells the Rust place; no engine parses it.
     Local(TLocal),
-    /// c109 Phase 24: a comptime CONST ident inlined at the use site. Carries the
-    /// pre-rendered Rust value string (`cx.consts[name]`, total — the same string
-    /// `emit_expr`'s `Ident` arm splices), so emit just emits it verbatim. The const's
-    /// `TExpr.ty` is a placeholder (never read — a const operand resolves to `None` in
-    /// `ast_operand_is_integer`, so it never enables the overflow trap, and a covered
-    /// const use — interpolation, a binding RHS — reads the binding/`.jet_show()` type,
-    /// not this).
-    ///
-    /// Scalar comptime values never reach this variant: `lower_comptime_scalar`
-    /// routes an int/bool/char through the structured literal nodes, so a
-    /// non-Rust engine never has to parse the text.
-    ConstInline(String),
+    /// Unit / default / uninit / comptime / host forms — structured facts only.
+    /// Scalar comptime values use IntLit/BoolLit/CharLit via `lower_comptime_scalar`.
+    Unit,
+    DefaultLit,
+    Uninit,
+    CtLit(crate::AST::CtValue),
+    HostCall(Box<THostCall>),
     /// A reference to a declared (non-comptime) const, by its Jet name. Emit
     /// resolves the Rust static name; other engines look the value up by the
     /// same Jet name in their own const table.
@@ -1574,17 +1746,14 @@ pub enum TExprKind {
         prompt: Option<Box<TExpr>>,
     },
     /// c109 Phase 26: a `require(cond[, msg])` / `require_eq(a, b)` / `panic(msg)`
-    /// rich-runtime-report builtin (S36). The ENTIRE emit string (`{ if !(cond) {
-    /// jet_panic_rich(…); } }` in the default build, or the `test_mode` `{ if !(cond) {
-    /// return Err(…); } }` form) is rendered at lowering — byte-for-byte
-    /// `emit_require`/`emit_require_eq`/`emit_panic_stop` (Source/Codegen/Statement.rs).
-    /// Every input (the source line / col / caret, the escaped file + fn name, the
-    /// sorted scalar-locals snapshot via `render_safe_locals`, the test-mode flag) is
-    /// total at lowering, so emit reads nothing from `cx.src`/`cx.current_fn` (I3).
+    /// rich-runtime-report builtin (S36). Structured facts only — emit formats
+    /// `jet_panic_rich` / test-mode `return Err` (I3: no `cx.src` re-read for
+    /// location; `loc` was captured at lowering).
     RequireStop {
-        rendered: String,
+        kind: TRequireKind,
+        loc: TPanicLoc,
         /// True only for the unconditional builtin `panic(...)`; `require`
-        /// carries the same rendered representation but may fall through.
+        /// may fall through when the condition holds.
         always_stops: bool,
     },
     /// Binary op. `overflow` is the *computed* decision (true → emit the
@@ -1645,50 +1814,30 @@ pub enum TExprKind {
         postfix: bool,
         ty: Type,
     },
-    /// c109 Phase 3: a struct literal `S { f: v, … }`. `rust_type` is the already
-    /// resolved Rust type head (`user_S` or `user_S::<…>`); each field carries its
-    /// *mangled* Rust name and its value expression. No clone/coercion is applied
-    /// at the literal site (mirrors the AST path: a field value is emitted as-is —
-    /// the value's own move/clone facts already live in its sub-expression).
+    /// c109 Phase 3: a struct literal `S { f: v, … }`. The head type is `TExpr.ty`;
+    /// each field carries its Jet name (emit mangles) and value. No clone/coercion
+    /// at the literal site (mirrors the AST path).
     StructLit {
-        rust_type: String,
-        /// Each field carries its mangled Rust name, its value expression, and a
-        /// `boxed` flag. c109: a self-referential struct field has Rust type `Box<…>`
-        /// (`cx.boxed_edges`), so its construction value must be wrapped `Box::new(…)`
-        /// (E0308 otherwise) — exactly as `emit_struct_lit` does on the AST path. The
-        /// flag is resolved at lowering (a total fact), never re-derived in emit.
+        /// Each field: Jet name, value, and `boxed` for self-referential `Box<…>` edges.
         fields: Vec<(String, TExpr, bool)>,
-        /// c109 Phase 17: an extra raw field line appended verbatim after the user fields
-        /// (e.g. HttpRequest's injected route metadata fields).
-        /// `None` for a plain user struct.
-        extra: Option<String>,
-        /// c109 Phase 30: a TRAIT-OBJECT coercion (`Circle {…}` in a `[Shape]` list, S48).
-        /// When `Some(trait_rust)` — the already-resolved `Generics::user_trait_rust` name —
-        /// the whole literal is wrapped `Box::new({lit}) as Box<dyn {trait_rust}>`, exactly as
-        /// `emit_struct_lit`'s `as_trait` branch. `None` for a non-coerced literal.
+        /// c109 Phase 17: injected prelude fields (HttpRequest route metadata).
+        /// Structured — emit spells the Rust field lines.
+        extra: Option<TStructExtra>,
+        /// c109 Phase 30: TRAIT-OBJECT coercion — Jet trait name; emit wraps
+        /// `Box::new({lit}) as Box<dyn {trait_rust}>`.
         as_trait: Option<String>,
     },
-    /// c109 Phase 3: a struct field *read* `recv.field` in borrow position. The
-    /// AST path never derefs/clones a plain field read (Rust reads the place;
-    /// owning reads were already rewritten to a `.clone()` MethodCall in sema and
-    /// are excluded from the subset). `field_rust` is the mangled field name.
-    /// `boxed` is set for a self-referential (recursive) edge — its Rust type is
-    /// `Box<…>`, so the read is wrapped `(*(…))` to deref to the inner type, exactly
-    /// as the AST `boxed_field_read` (Expression.rs). The flag is total (resolved
-    /// from `cx.boxed_edges` at lowering — never re-derived in emit, per I3).
+    /// c109 Phase 3: a struct field *read* `recv.field` in borrow position.
+    /// `field` is the Jet field name (emit mangles / core-renames).
     Field {
         recv: Box<TExpr>,
-        field_rust: String,
+        field: String,
         boxed: bool,
     },
-    /// c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr`, S58, E2-M13).
-    /// Builds a raw `*mut T` from an integer address. The cast itself is safe in Rust
-    /// (only *using* the pointer needs `unsafe`, supplied by the surrounding `#Unsafe`
-    /// region/fn), so this introduces no `unsafe` by itself. `elem_rust` is the already
-    /// resolved Rust element type (`cx.rust_type(elem)`); `addr` is the address expr.
-    /// Reproduces `emit_expr`'s `PtrFromAddr` arm: `(({addr}) as usize as *mut {elem})`.
+    /// c109 Phase 18: `mem.Ptr<T>.from_addr(addr)`. `elem` is the Jet element type;
+    /// emit spells `(({addr}) as usize as *mut {elem})`.
     PtrFromAddr {
-        elem_rust: String,
+        elem: Type,
         addr: Box<TExpr>,
     },
     /// D-CAP9: postfix `p.*` — dereference a raw pointer. Emits Rust `(*(p))`. The
@@ -1810,7 +1959,8 @@ pub enum TExprKind {
         pool: Box<TExpr>,
         id: Box<TExpr>,
         mutable: bool,
-        field_rust: Option<String>,
+        /// Jet field name when narrowing `pool[id].field`; emit mangles.
+        field: Option<String>,
         line: usize,
     },
     /// D-INDEX-HOOK: `mytype[k]` when the type implements `Index`.
@@ -1887,7 +2037,8 @@ pub enum TExprKind {
     /// `None` to `emit_call_args` — no param convention, only each arg's own clone flags).
     FnFieldCall {
         recv: Box<TExpr>,
-        field_rust: String,
+        /// Jet field name; emit mangles.
+        field: String,
         args: Vec<TCallArg>,
     },
     /// c109 Phase 7: a STATIC (associated) method call `Type.make(args)`. Resolved
@@ -1991,7 +2142,8 @@ pub enum TExprKind {
     /// `(base).clone().{and_then|map}(|__optv| __optv.{member})` exactly.
     OptField {
         base: Box<TExpr>,
-        member_rust: String,
+        /// Jet member name; emit mangles.
+        member: String,
         flatten: bool,
     },
     /// c109 Phase 11: a lambda/closure literal (`Expr::Lambda`). Every capture/
@@ -2391,11 +2543,11 @@ pub enum TTryConvert {
 pub enum TOrFallback {
     Value(Box<TExpr>),
     Return(Option<Box<TExpr>>),
-    /// The fully-rendered `{ jet_panic_rich(…); }` statement string, resolved at
-    /// lowering — byte-identical to `emit_panic_stop`'s output. The interpolated panic
-    /// message (which itself may contain lowered sub-expressions) and the locals
-    /// snapshot are baked in here.
-    Panic(String),
+    /// Structured panic stop — emit formats `jet_panic_rich`.
+    Panic {
+        msg: Box<TExpr>,
+        loc: TPanicLoc,
+    },
     /// D-ORRETURN-ERG1=B: `?? break` — loop exit.
     Break,
     /// D-ORRETURN-ERG1=B: `?? next` — loop skip.
@@ -3166,11 +3318,9 @@ pub struct TCallArg {
 
 /// c109 Phase 13: the resolved Fn-typed-argument coercion (`emit_call_args`).
 pub struct TFnCoerce {
-    /// The target fn-type, rendered as a Rust type string (`cx.rust_type(ty)`).
-    pub fn_type_rust: String,
-    /// Whether the value already produces a `Box::new(…)` (a bare fn-name value, or a
-    /// fn-typed local ident) — so emit applies only ` as <fn-type>`, never re-boxing.
-    /// Reproduces `emit_call_args`' `already_boxed` decision, resolved at lowering.
+    /// Target fn type; emit spells via `cx.rust_type`.
+    pub ty: Type,
+    /// Whether the value already produces a `Box::new(…)` — emit applies only ` as <fn-type>`.
     pub already_boxed: bool,
 }
 
