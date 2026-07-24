@@ -1145,7 +1145,43 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             extra,
             as_trait,
         } => {
-            let rust_type = cx.rust_type(&e.ty);
+            // Value-position generic heads need turbofish (`Foo::<T> {…}`);
+            // `cx.rust_type` spells type-position `Foo<T>` and rustc rejects it.
+            let rust_type = match &e.ty {
+                Type::Apply { name, args } if !args.is_empty() => {
+                    let head = match cx.foreign_types.get(name) {
+                        Some(rust_mod) => {
+                            format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(name))
+                        }
+                        None => {
+                            if let Some((alias, leaf)) = name.split_once('.') {
+                                cx.import_mods.get(alias).map_or_else(
+                                    || user_type_rust(name),
+                                    |rust_mod| {
+                                        format!(
+                                            "{}{}::{}",
+                                            cx.root_prefix,
+                                            rust_mod,
+                                            user_type_rust(leaf)
+                                        )
+                                    },
+                                )
+                            } else {
+                                user_type_rust(name)
+                            }
+                        }
+                    };
+                    format!(
+                        "{}::<{}>",
+                        head,
+                        args.iter()
+                            .map(|a| cx.rust_type(a))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+                _ => cx.rust_type(&e.ty),
+            };
             let plain_fields = matches!(
                 &e.ty,
                 Type::Named(n) if crate::Codegen::net_handle_rust_type(n).is_some()

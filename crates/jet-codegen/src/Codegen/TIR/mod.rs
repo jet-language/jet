@@ -2612,11 +2612,8 @@ pub enum TTryConvert {
 
 /// c109 Phase 8: the resolved right-hand side of a `??` fallback (`AST::OrFallback`).
 /// `Value` is an expression; `Return` is an early `return [expr]` from the enclosing
-/// function. c109 Phase 15: `Panic` reproduces `emit_panic_stop`/`safe_locals_expr`
-/// (the `a ?? panic(…)` form) — all of its inputs (the panic message, source line,
-/// column, caret width, function name, file, and the sorted scalar-locals snapshot)
-/// are resolved at lowering into a single pre-rendered Rust string, so emit makes no
-/// decision (I3) and never reaches into `cx.src`/`cx.current_fn` for it.
+/// function. c109 Phase 15 / #776: `Panic` carries structured message + `TPanicLoc`;
+/// emit alone formats `jet_panic_rich` (I3: no pre-rendered Rust blob on the node).
 pub enum TOrFallback {
     Value(Box<TExpr>),
     Return(Option<Box<TExpr>>),
