@@ -1130,6 +1130,35 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line)
             }
         }
+        // D-MEM1 S6: `pool[id]` / `pool[id].field` — generation-checked get or
+        // get_mut place. Mutable writes and mutating receivers use get_mut.
+        TExprKind::PoolSlot {
+            pool,
+            id,
+            mutable,
+            field_rust,
+            line,
+        } => {
+            let p = emit_tir_expr(pool, cx);
+            let i = emit_tir_expr(id, cx);
+            let base = if *mutable {
+                format!(
+                    "(*{root}jet_std::jet_pool_get_mut(&mut ({p}), {i}, {file:?}, {line}))",
+                    root = cx.root_prefix,
+                    file = cx.file,
+                )
+            } else {
+                format!(
+                    "{root}jet_std::jet_pool_get(&({p}), {i}, {file:?}, {line})",
+                    root = cx.root_prefix,
+                    file = cx.file,
+                )
+            };
+            match field_rust {
+                Some(field) => format!("{base}.{field}"),
+                None => base,
+            }
+        }
         TExprKind::IndexHook {
             type_name,
             base,

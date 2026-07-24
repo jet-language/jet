@@ -1,6 +1,5 @@
 use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
 use crate::Codegen::Cx;
-use crate::Codegen::emit_match_pattern;
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_variant;
 use crate::Codegen::TIR::arm_fallible_pattern;
@@ -366,21 +365,10 @@ pub(crate) fn lower_fallible_match(
     let fallthrough = else_body.is_none();
     TStmt::EnumMatch {
         scrutinee,
+        clone_subject,
         arms: tarms,
         else_body: else_lowered,
         fallthrough,
-    }
-}
-
-/// c109 Phase 8: the Rust match pattern for a fallible/optional pattern, mirroring
-/// `emit_match_pattern`'s Ok/Err/Present/Absent arms (Statement.rs).
-pub(crate) fn tir_fallible_pattern(pattern: &Pattern) -> String {
-    match pattern {
-        Pattern::Ok { binding, .. } => format!("Ok({})", mangle(binding)),
-        Pattern::Err { binding, .. } => format!("Err({})", mangle(binding)),
-        Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
-        Pattern::Absent(_) => "None".to_string(),
-        _ => unreachable!("non-fallible pattern in fallible match (gate)"),
     }
 }
 
@@ -467,6 +455,7 @@ pub(crate) fn lower_enum_match(
     let fallthrough = else_body.is_none();
     TStmt::EnumMatch {
         scrutinee,
+        clone_subject,
         arms: tarms,
         else_body: else_lowered,
         fallthrough,
@@ -502,17 +491,6 @@ pub(crate) fn lower_range_switch(
         arms: tarms,
         else_body: else_lowered,
     }
-}
-
-/// TIR-local reproduction of codegen's `emit_match_pattern` for the enum-match (shape
-/// A) case the subset covers. c109 Phase 24: this now DELEGATES to the AST
-/// `emit_match_pattern` (made `pub(crate)`), which is PURE formatting (it takes only
-/// `cx` + the pattern + the resolved enum type — no env, no inference), so reusing it is
-/// byte-parity-safe and automatically handles the FOREIGN-enum (`{root}{mod}::user_<T>::
-/// user_<V>`) and JSON (`{root}jet_std::Json::<Variant>`, non-mangled) variant prefixes
-/// the subset now admits — the same reuse Phase 22 made for `emit_if_let_pattern`.
-pub(crate) fn tir_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
-    emit_match_pattern(cx, pattern, enum_type)
 }
 
 /// TIR-local reproduction of codegen's `emit_range_guard` (Statement.rs): a payload
