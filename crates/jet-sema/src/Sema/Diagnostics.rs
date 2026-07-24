@@ -35,7 +35,23 @@ pub(crate) fn type_fix_hint(want: &Type, got: &Type) -> String {
             bits
         ),
         (Type::String, _) => "put the value in text with interpolation: \"{x}\"".to_string(),
+        (Type::Named(name), _) if name.ends_with(".Rng") => {
+            format!("use {} here", Syntax::RNG_TYPE)
+        }
         _ => format!("use {} here", want.show()),
+    }
+}
+
+#[cfg(test)]
+mod polish_tests {
+    use super::*;
+
+    #[test]
+    fn rng_type_fix_uses_the_bare_type_name() {
+        assert_eq!(
+            type_fix_hint(&Type::Named("random.Rng".to_string()), &Type::Int),
+            "use Rng here"
+        );
     }
 }
 

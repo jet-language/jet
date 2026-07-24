@@ -2,8 +2,9 @@
 // repo actually unit-tests (store business logic + HTTP API); tower.js is a
 // DOM-only client with no test harness anywhere in this repo (importing it
 // under plain Node throws — it wires `document.addEventListener` at module
-// scope), so the section's live rendering is proven by the temp-server curl
-// self-check in the card's verification notes, not here.
+// scope). Owner Now/beacon lists ONLY needsAcceptance cards (visual/UI/UX);
+// bare phase=verify is agent technical closeout and must not appear there.
+// Client filter lives in board-state.js ownerVerifyQueue (unit-tested).
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
@@ -112,16 +113,34 @@ test('laneOf: a verify-phase card with an open acceptance ballot stays lane veri
   assert.equal(lane.lane, 'verify', `expected verify lane, got ${JSON.stringify(lane)}`);
 });
 
-test('a verify-phase card with no needsAcceptance flag carries no D-ACCEPT ballot — the client renders it as a bare row', () => {
+test('laneOf: needsAcceptance + open D-ACCEPT is owner visual duty; bare verify stays agent', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Visual', needsAcceptance: true }, cfg));
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Technical' }, cfg));
+  st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'verify', by: 'agent' }, cfg));
+  const s = st.load();
+  const visual = laneOf(s.cards.find(c => c.num === 1), s.decisions, s.cards);
+  const bare = laneOf(s.cards.find(c => c.num === 2), s.decisions, s.cards);
+  assert.equal(visual.lane, 'verify');
+  assert.equal(visual.who, 'owner');
+  assert.match(visual.label, /visual/i);
+  assert.equal(bare.lane, 'verify');
+  assert.equal(bare.who, 'agent');
+  assert.match(bare.label, /technical/i);
+});
+
+test('a verify-phase card with no needsAcceptance flag carries no D-ACCEPT ballot — agent technical closeout, not owner Now', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'Manually parked in verify' }, cfg));
-  // no criteria, no flag — an agent (or a stray CLI call) parked it in verify
-  // directly, never going through the done-gate at all.
+  // no criteria, no flag — agent technical verify lane; must NOT become an owner duty
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'verify', by: 'some-agent' }, cfg));
   const c = st.load().cards[0];
   assert.equal(c.phase, 'verify');
   assert.equal(c.needsAcceptance, false);
   assert.equal(st.load().decisions.find(x => x.id === 'D-ACCEPT-1'), undefined);
+  const lane = laneOf(c, st.load().decisions, st.load().cards);
+  assert.equal(lane.who, 'agent');
 });
 
 // ---- server: the Accept / Bounce actions the Now page's buttons drive -------
@@ -350,7 +369,7 @@ test('remote device: accepted without any auth.token — restriction removed by 
   }
 });
 
-test('a card parked in verify without the flag has no D-ACCEPT ballot but is still in state.cards for the Now page to list', async () => {
+test('a card parked in verify without the flag has no D-ACCEPT and is agent work — not an owner Now visual check', async () => {
   await post('card/add', { title: 'Unflagged in verify', by: 'owner' });
   const upd = await post('card/update', { id: '#5', phase: 'verify', by: 'some-agent' });
   assert.equal(upd.status, 200);
@@ -358,5 +377,6 @@ test('a card parked in verify without the flag has no D-ACCEPT ballot but is sti
   const card = state.cards.find(c => c.num === 5);
   assert.equal(card.phase, 'verify');
   assert.equal(card.needsAcceptance, false);
+  assert.equal(card.lane.who, 'agent');
   assert.equal(state.decisions.find(d => d.id === 'D-ACCEPT-5'), undefined);
 });

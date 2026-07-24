@@ -170,12 +170,14 @@ orphaned work. A green build never waives review.
 
 Technical verification is agent-owned: the implementer runs every machine-verifiable
 requirement, however many there are, and the independent reviewer validates the
-evidence. Do not create owner-acceptance cards or `needsAcceptance` gates for
-technical correctness. Reserve owner acceptance for unavailable hardware,
-platforms, or real environments; visual confirmation the harness cannot perform;
-or genuine UI, UX, or DX taste and design judgment. Tell the owner only what to
-observe and why human inspection is needed, as a brief checklist; omit the machine
-verification details agents already own.
+evidence. Agents meet criteria, independently verify, and close with `--phase done`.
+Never park a technical card in `verify` for the owner, and never mint owner
+verification for tests, builds, diffs, or other machine proof.
+
+Owner verification (`needsAcceptance` / Now “visual check”) is **only** for
+look-and-feel with human eyes: UI/UX/DX taste, visual presentation, copy polish,
+or a real environment the harness cannot replace. Tell the owner only what to
+look at and what “good” looks like; omit machine-verification details.
 
 Use targeted tests during implementation and review. Close each bounded card
 from scoped proof and independent review. Run

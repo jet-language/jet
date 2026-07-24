@@ -1129,11 +1129,7 @@ impl<'a> Checker<'a> {
                         ),
                         "write access (`&`) can only be granted to a named binding, not an expression"
                             .to_string(),
-                        format!(
-                            "bind the value first: `x {} ...` then pass `{}x`",
-                            Syntax::SIGIL_BIND_MUT,
-                            Syntax::SIGIL_WRITE
-                        ),
+                        self.non_name_write_argument_fix(&arg.expr),
                         Some(arg.span),
                     ));
                 }

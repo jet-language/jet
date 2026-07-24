@@ -158,7 +158,7 @@ impl<'a> Checker<'a> {
                             format!("`{}` needs a plain named binding after it", Syntax::SIGIL_WRITE),
                             "write access (`&`) can only be granted to a named binding, not an expression"
                                 .to_string(),
-                            "bind the value first, then pass the binding".to_string(),
+                            self.non_name_write_argument_fix(&arg.expr),
                             Some(arg.span),
                         ));
                     }

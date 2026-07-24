@@ -81,6 +81,15 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
             Some(span),
         );
     }
+    if module == "jet.crypto" && name == "constant_time_eq" {
+        return Diagnostic::error(
+            "E1004",
+            "`crypto.constant_time_eq` was retired".to_string(),
+            "`eq` is not one of Jet's blessed API abbreviations".to_string(),
+            "use `crypto.constant_time_equal_bytes(a, b)`".to_string(),
+            Some(span),
+        );
+    }
     let items = core_module_items(module);
     let mut fix = if items.is_empty() {
         "import a specific core module, like `import core.files as fs;`".to_string()
@@ -93,7 +102,7 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
     Diagnostic::error(
         "E1004",
         format!("`{}` has no item `{}`", module, name),
-        "standard library modules expose only their documented M10 items".to_string(),
+        "standard library modules expose a fixed set of public items".to_string(),
         fix,
         Some(span),
     )

@@ -1154,6 +1154,22 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Continue(span))
             }
+            TokKind::Ident(name)
+                if name == Syntax::FOREIGN_CONTINUE
+                    && matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace) =>
+            {
+                let span = self.bump().span;
+                self.diags.push(Diagnostic::error(
+                    "E0003",
+                    "Jet spells this loop step `next`, not `continue`".to_string(),
+                    "`next` skips the rest of the current loop pass and starts the next one"
+                        .to_string(),
+                    "write `next`".to_string(),
+                    Some(span),
+                ));
+                self.finish_stmt()?;
+                Ok(Stmt::Continue(span))
+            }
             // D-LOOPLABEL3=A: named loop exits are statement-shaped dot calls.
             TokKind::Ident(_)
                 if matches!(self.peek2().kind, TokKind::Dot)

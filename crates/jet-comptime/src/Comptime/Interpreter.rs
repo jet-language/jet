@@ -263,6 +263,30 @@ pub(super) struct Interp<'a> {
     /// `decode_traced<T>`'s fast path — try the current shape, done — the same
     /// zero-cost identity codegen's trait default gives every other type.
     pub(super) migrations: &'a HashMap<String, Vec<&'a crate::AST::MigrationDecl>>,
+    pub(super) list_write_windows: HashMap<String, (String, i64)>,
+}
+
+fn numeric_bounds_constant(type_name: &str, member: &str) -> Option<CtValue> {
+    if let Some(value) = numeric_float_constant(type_name, member) {
+        return Some(CtValue::Float(value));
+    }
+    let ty = crate::AST::numeric_type_from_name(type_name)?;
+    match ty {
+        Type::Int => match member {
+            "MIN" => Some(CtValue::Int(i64::MIN)),
+            "MAX" => Some(CtValue::Int(i64::MAX)),
+            _ => None,
+        },
+        Type::IntN { signed, bits } => {
+            let (lo, hi) = crate::AST::int_range(signed, bits);
+            match member {
+                "MIN" => Some(CtValue::Int(lo as i64)),
+                "MAX" => Some(CtValue::Int(hi as i64)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 fn numeric_float_constant(type_name: &str, member: &str) -> Option<CtFloat> {
@@ -498,6 +522,15 @@ impl<'a> Interp<'a> {
                     if let Some(ty) = &b.ty {
                         v = coerce_value_to_type(v, ty);
                         self.binding_types.insert(b.name.clone(), ty.clone());
+                    }
+                    if let Expr::Place(inner, crate::AST::PlaceAccess::Write, _) = &b.init {
+                        if let Expr::Slice { base, start, .. } = inner.as_ref() {
+                            if let Expr::Ident(owner, _) = base.as_ref() {
+                                let start = as_int(&self.eval(start, scope)?, start.span())?;
+                                self.list_write_windows
+                                    .insert(b.name.clone(), (owner.clone(), start));
+                            }
+                        }
                     }
                     scope.insert(b.name.clone(), v);
                 }
@@ -995,19 +1028,20 @@ impl<'a> Interp<'a> {
                 let Expr::Ident(bname, _) = base.as_ref() else {
                     return Err(unsupported("this indexed assignment", *span));
                 };
+                let (owner, start) = list_index_target(self, bname);
                 let key = self.eval(index, scope)?;
                 let mut container = scope
-                    .get(bname)
+                    .get(owner.as_str())
                     .cloned()
                     .ok_or_else(|| unsupported("this indexed assignment", *span))?;
-                let value_type = self.binding_types.get(bname).and_then(|ty| match ty {
+                let value_type = self.binding_types.get(owner.as_str()).and_then(|ty| match ty {
                     Type::List(elem) | Type::FixedList { elem, .. } => Some((**elem).clone()),
                     Type::Map { value, .. } => Some((**value).clone()),
                     _ => None,
                 });
                 match &mut container {
                     CtValue::List(xs) => {
-                        let i = as_int(&key, index.span())?;
+                        let i = as_int(&key, index.span())? + start;
                         let mut new = match op {
                             None => rhs,
                             Some(op) => {
@@ -1040,7 +1074,7 @@ impl<'a> Interp<'a> {
                     }
                     _ => return Err(unsupported("this indexed assignment", *span)),
                 }
-                scope.insert(bname.clone(), container);
+                scope.insert(owner.clone(), container);
                 Ok(())
             }
             crate::AST::LValue::Field { base, field, span } => {
@@ -1260,23 +1294,35 @@ impl<'a> Interp<'a> {
             Expr::Index {
                 base, index, span, ..
             } => {
+                let i = as_int(&self.eval(index, scope)?, index.span())?;
+                if let Expr::Ident(name, _) = base.as_ref() {
+                    let (owner, start) = list_index_target(self, name);
+                    if owner != *name {
+                        let container = scope
+                            .get(owner.as_str())
+                            .cloned()
+                            .ok_or_else(|| unsupported("this indexed read", *span))?;
+                        if let CtValue::List(xs) = container {
+                            return list_get(&xs, start + i, *span);
+                        }
+                    }
+                }
                 let b = self.eval(base, scope)?;
-                let i = self.eval(index, scope)?;
                 match b {
-                    CtValue::List(xs) => list_get(&xs, as_int(&i, index.span())?, *span),
+                    CtValue::List(xs) => list_get(&xs, i, *span),
                     CtValue::Bytes(bs) => {
                         let xs: Vec<CtValue> =
                             bs.iter().map(|byte| CtValue::Int(*byte as i64)).collect();
-                        list_get(&xs, as_int(&i, index.span())?, *span)
+                        list_get(&xs, i, *span)
                     }
                     CtValue::Map(m) => {
-                        let k = CtKey::from_value(i)
+                        let k = CtKey::from_value(CtValue::Int(i))
                             .ok_or_else(|| unsupported("this map key type", index.span()))?;
                         m.get(&k).cloned().ok_or_else(|| map_missing(*span))
                     }
                     other => {
                         if let Some(result) =
-                            super::MathLayout::lane_at(&other, as_int(&i, index.span())?, *span)
+                            super::MathLayout::lane_at(&other, i, *span)
                         {
                             result
                         } else {
@@ -1287,13 +1333,15 @@ impl<'a> Interp<'a> {
             }
             Expr::Field(inner, member, span) => {
                 if let Expr::Ident(type_name, _) = inner.as_ref() {
-                    if let Some(value) = numeric_float_constant(type_name, member) {
-                        return Ok(CtValue::Float(value));
+                    if let Some(value) = numeric_bounds_constant(type_name, member) {
+                        return Ok(value);
                     }
                     // If the name is in scope as a variable, do field access on
                     // the value (e.g. TypeInfo struct from a derive body).
                     // Otherwise it is an enum-variant literal (Color.Red).
-                    if !scope.contains_key(type_name.as_str()) {
+                    if !scope.contains_key(type_name.as_str())
+                        && crate::AST::numeric_type_from_name(type_name).is_none()
+                    {
                         return Ok(CtValue::Enum {
                             type_name: type_name.clone(),
                             variant: member.clone(),
@@ -2043,6 +2091,14 @@ fn fn_value(name: &str, func: &Func, span: Span) -> CtValue {
         captured: HashMap::new(),
         return_type: func.return_type.clone(),
     }))
+}
+
+fn list_index_target(interp: &Interp<'_>, base: &str) -> (String, i64) {
+    if let Some((owner, start)) = interp.list_write_windows.get(base) {
+        (owner.clone(), *start)
+    } else {
+        (base.to_string(), 0)
+    }
 }
 
 fn list_get(xs: &[CtValue], i: i64, span: Span) -> Result<CtValue, Diagnostic> {

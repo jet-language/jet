@@ -85,6 +85,17 @@ impl<'a> Parser<'a> {
         }
     
         fn parse_or_fallback(&mut self, allow_struct_lit: bool) -> Result<OrFallback, Diagnostic> {
+            if matches!(self.peek().kind, TokKind::LBrace) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "a `??` fallback cannot be a bare block".to_string(),
+                    "`??` accepts one fallback value or a control action, not a block with several steps"
+                        .to_string(),
+                    "write `value ?? fallback`, `value ?? return`, or `value ?? make_fallback()`"
+                        .to_string(),
+                    Some(self.peek().span),
+                ));
+            }
             if matches!(self.peek().kind, TokKind::KwReturn) {
                 let span = self.bump().span;
                 if self.starts_expr(&self.peek().kind) {

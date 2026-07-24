@@ -180,6 +180,7 @@ pub fn run_build_entry(
         distinct_ranges: &program.distinct_ranges,
         distinct_bases: &program.distinct_bases,
         migrations: &program.migrations,
+        list_write_windows: HashMap::new(),
     };
     let mut frame = HashMap::new();
     frame.insert(build.params[0].name.clone(), context.clone());
@@ -346,6 +347,7 @@ pub fn evaluate_with_imports_opts(
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
     };
     let mut scope = globals.clone();
     interp.eval(init, &mut scope)
@@ -418,6 +420,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
     };
     let mut scope = globals.clone();
     let val = interp.eval(init, &mut scope)?;
@@ -502,6 +505,7 @@ pub fn run_main(
         distinct_ranges: &program.distinct_ranges,
         distinct_bases: &program.distinct_bases,
         migrations: &program.migrations,
+        list_write_windows: HashMap::new(),
     };
     let mut scope = HashMap::new();
     match interp.exec_block(&main.body, &mut scope) {
@@ -553,6 +557,7 @@ pub fn run_main_debug(
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -594,6 +599,7 @@ pub fn run_main_value(
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
     };
     let mut scope = HashMap::new();
     match interp.exec_block(&main.body, &mut scope)? {
@@ -638,6 +644,7 @@ pub fn run_main_with_fuel(
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -680,6 +687,7 @@ pub fn run_repl_main_with_fuel(
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
     };
     let mut scope = HashMap::new();
     interp.exec_block(&main.body, &mut scope)?;
@@ -816,6 +824,7 @@ fn run_repl_step_inner(
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
     };
     // Split: run all statements except the last; then handle the last specially
     // if it is a bare expression (for display) and not suppressed.
@@ -896,6 +905,7 @@ pub fn run_block_with_imports(
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
     };
     let mut scope = globals.clone();
     interp.exec_block(stmts, &mut scope)?;
@@ -1030,6 +1040,7 @@ pub fn evaluate_derive_body(
         distinct_ranges: empty_distinct(),
         distinct_bases: empty_distinct_bases(),
         migrations: empty_migrations(),
+        list_write_windows: HashMap::new(),
     };
     let mut scope = HashMap::new();
     scope.insert(type_param.to_string(), type_info);

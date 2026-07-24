@@ -50,11 +50,15 @@ approval alone is not completion evidence.
 
 ## Owner acceptance boundary
 
-Technical correctness belongs to agents. Do not create a manual owner acceptance
-gate for tests, diagnostics, safety, compatibility, or other technical claims.
-Use owner acceptance only for unavailable hardware/platforms/environments;
-visual confirmation the harness cannot perform; or genuine UI/UX/DX taste.
-Give the owner a brief observable checklist only.
+Technical correctness belongs to agents. Meet criteria, independently verify,
+and `--phase done`. Never park a technical card in `verify` for the owner, and
+never set `needsAcceptance` for tests, diagnostics, safety, compatibility, or
+other machine-verifiable claims.
+
+Owner verification (`needsAcceptance` / Now “visual check”) is **only** for
+look-and-feel with human eyes: UI/UX/DX taste, visual presentation, copy polish,
+or a real environment the harness cannot replace. Give the owner a brief
+observable checklist only — omit machine evidence.
 
 ## Blessing snapshots and generated docs
 

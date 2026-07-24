@@ -69,20 +69,22 @@ everything as JSON; `tower status` is the human summary.
    `tower card update <#> --phase building --log "started: X" --by <me>`.
    Phase honesty: `planning`→(`deciding` if decisions raised, else `ready`);
    `ready`→`building`; `building`→`verify` on claimed done; `verify`→`done`
-   only after real verification. Never close what you haven't verified.
+   only after real **agent** verification. Never close what you haven't verified.
    If the card has a `criteria[]` checklist, meet each item as you finish it
    (`tower card criteria <#> --meet n --evidence "…" --by <me>`) and get a
    *different* agent to verify (`--verify n`) — the board refuses `--phase
    done` (`E_CRITERIA`) while any item is unverified, and refuses a verifier
-   who is also the builder (`E_CRITERIA_SELF`). Cards flagged
-   `needsAcceptance` mint an owner accept/bounce ballot once the checklist is
-   clean; the card waits in `verify` for that ratification, not `done`. Do not
-   set it for technical correctness: agents own every machine-verifiable
-   requirement, however many there are, plus the independent review. Use it only
-   for unavailable hardware, platforms, or real environments; visual confirmation
-   the harness cannot perform; or genuine UI, UX, or DX taste and design judgment.
-   Give the owner only a brief observable checklist and why human inspection is
-   needed; omit machine-verification details.
+   who is also the builder (`E_CRITERIA_SELF`).
+   **Owner verification is not technical review.** Do not leave technical cards
+   sitting in `verify` for the owner. Agents own machine proof and independent
+   technical criteria verify, then `--phase done` themselves.
+   Cards flagged `needsAcceptance` mint an owner accept/bounce ballot once the
+   checklist is clean; the card waits in `verify` for that ratification, not
+   `done`. Set `needsAcceptance` **only** for: visual/UI/UX/DX taste and design
+   judgment; surfaces the harness cannot screenshot-judge; unavailable
+   hardware/platforms/real environments. Never for tests, criteria, diffs,
+   builds, or other machine-verifiable correctness. Give the owner only a brief
+   observable look-and-feel checklist; omit machine-verification details.
 5. Report through the board itself: a `--log` entry on each card you advanced
    and a question/ballot for anything newly blocked on the owner — those are
    what the owner sees (live SSE UI — web push removed).

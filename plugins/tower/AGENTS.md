@@ -98,9 +98,9 @@ tower card release '#12' --by me              # if you stop without finishing
 tower card release '#12' --by me --handoff "parser done, sema left, watch X"  # required if the card is `building`
 ```
 
-Phase honesty: `verify → done` only after real verification, by a different
-session/agent than the one that claimed done when possible. If the board and
-reality disagree, fix the board.
+Phase honesty: `verify → done` only after real **agent** verification, by a
+different session/agent than the one that claimed done when possible. Bare
+`verify` is never an owner duty. If the board and reality disagree, fix the board.
 
 ### Exit criteria gate `done`
 
@@ -120,10 +120,15 @@ from whoever met it (`E_CRITERIA_SELF`) — one agent cannot sign off its own
 work. Cards with no criteria are unaffected (legacy behavior). `--by owner`
 always bypasses both the checklist gate and the acceptance step below.
 
-Flag a card `needsAcceptance` only when an explicit owner verdict about UX, DX,
-visual presentation, copy, or taste is required—not for technical correctness.
-Agents own machine verification and the independent technical review; a card that
-needs owner acceptance must name the exact experience the owner should inspect:
+Flag a card `needsAcceptance` **only** when the owner must judge look-and-feel
+with their eyes: UI/UX/DX taste, visual presentation, copy polish, or a real
+environment the harness cannot replace. **Never** for technical correctness,
+tests, criteria, builds, diffs, or agent review — agents own all of that and
+close with `--phase done` themselves after criteria are verified.
+
+A card that needs owner acceptance must name the exact surface the owner should
+look at (what to open, what “good” looks like). Do not dump machine evidence
+into the owner checklist.
 
 ```
 tower card update '#12' --needs-acceptance true --by owner

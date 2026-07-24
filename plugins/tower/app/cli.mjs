@@ -564,13 +564,13 @@ function renderBrief(p, t) {
   }
   const items = p.criteria.items;
   if (items.length) {
-    L.push('', heading(`CRITERIA${p.criteria.needsAcceptance ? '  (needsAcceptance — owner ballot on close)' : ''}`));
+    L.push('', heading(`CRITERIA${p.criteria.needsAcceptance ? '  (needsAcceptance — owner visual/UX ballot on close)' : ''}`));
     for (const it of items) {
       const state = (it.status === 'verified' ? t.success : it.status === 'met' ? t.warn : t.dim)(`[${it.status}]`);
       L.push(`  ${t.border(`#${it.n}`)} ${state} ${it.text}${it.metBy ? `  ${t.dim(`met:${it.metBy}`)}` : ''}${it.verifiedBy ? `  ${t.dim(`verified:${it.verifiedBy}`)}` : ''}${it.evidence ? `  ${t.border('—')} ${it.evidence}` : ''}`);
     }
   } else if (p.criteria.needsAcceptance) {
-    L.push('', heading('CRITERIA  (none — needsAcceptance: owner ballot on close)'));
+    L.push('', heading('CRITERIA  (none — needsAcceptance: owner visual/UX ballot on close)'));
   }
   if (p.decisions.length) {
     L.push('', heading('DECISIONS'));

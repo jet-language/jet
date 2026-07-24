@@ -49,8 +49,11 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   (explicit doc-path pointers, merged with auto-harvested ones in `tower brief`).
 - **Exit criteria** — a card's `criteria[]` checklist (open → met → verified)
   gates `--phase done` for anyone but the owner, and the verifier must differ
-  from whoever met it. Flag a card `needsAcceptance` to also require an owner
-  accept/bounce ballot (auto-minted) once its checklist is clean.
+  from whoever met it. Flag a card `needsAcceptance` **only** for owner
+  visual/UI/UX/DX taste (or a real environment eyes-only check). That mints an
+  accept/bounce ballot once the checklist is clean. Never use it for technical
+  correctness — agents meet, independently verify, and `--phase done` themselves.
+  Bare `verify` is agent work and must not appear in the owner's Now queue.
   Acceptance is owner-UI-only: generic ratify, batch clearance, CLI
   `--by owner`, and agent quotes cannot resolve `D-ACCEPT-*`; rejected
   attempts remain in the audit log.

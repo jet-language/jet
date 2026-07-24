@@ -835,7 +835,7 @@ pub fn jet_crypto_blake3_impl(data: &Vec<u8>) -> String {
     digest.to_hex().to_string()
 }
 
-pub fn jet_crypto_constant_time_eq_impl(a: &Vec<u8>, b: &Vec<u8>) -> bool {
+pub fn jet_crypto_constant_time_equal_bytes_impl(a: &Vec<u8>, b: &Vec<u8>) -> bool {
     a.as_slice().ct_eq(b.as_slice()).into()
 }
 

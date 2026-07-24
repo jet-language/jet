@@ -5,7 +5,7 @@ use crate::Syntax;
 use crate::AST::{Expr, Marker, Type};
 
 pub const MONEY_LINT_NAMES: &[&str] =
-    &["price", "cost", "amount", "total", "fee", "balance", "tax"];
+    &["price", "cost", "amount", "fee", "balance", "tax"];
 
 pub fn is_bigint_type_name(name: &str) -> bool {
     name == Syntax::TYPE_BIGINT
@@ -30,6 +30,17 @@ pub fn type_is_decimal(ty: &Type) -> bool {
 pub fn is_money_like_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     MONEY_LINT_NAMES.iter().any(|m| lower.contains(m))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_money_like_name;
+
+    #[test]
+    fn total_is_not_assumed_to_mean_money() {
+        assert!(!is_money_like_name("total"));
+        assert!(is_money_like_name("total_price"));
+    }
 }
 
 /// D-DECIMAL1: `#[allow(float_money)]` suppresses the default-on money lint.

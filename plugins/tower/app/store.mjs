@@ -331,7 +331,16 @@ export function laneOf(card, decisions, cards) {
   if (card.phase === 'planning' || card.phase === 'triage') return { lane: 'plan', who: 'agent', label: card.plan ? 'Vet the plan + raise decisions' : 'Build a plan + raise decisions' };
   if (card.phase === 'ready')    return { lane: 'implement', who: 'agent', label: 'Ready to implement' };
   if (card.phase === 'building') return { lane: 'building', who: 'agent', label: 'Continue building' };
-  if (card.phase === 'verify')   return { lane: 'verify', who: 'agent', label: 'Verify 100%, then close' };
+  if (card.phase === 'verify') {
+    // needsAcceptance = owner visual/UX/DX taste only. Bare verify = agent technical closeout.
+    if (card.needsAcceptance) {
+      const acceptOpen = decisions.some(d => d.id === `D-ACCEPT-${card.num}` && d.status !== 'ratified');
+      return acceptOpen
+        ? { lane: 'verify', who: 'owner', label: 'Owner visual/UX acceptance' }
+        : { lane: 'verify', who: 'agent', label: 'Finish criteria, then owner visual check' };
+    }
+    return { lane: 'verify', who: 'agent', label: 'Agent technical verify, then close' };
+  }
   return { lane: 'blocked', who: null, label: '' };
 }
 
@@ -1198,7 +1207,9 @@ const BRIEF_RULES = [
   'Log advances with --by.',
   'Phase honesty: building → verify → done.',
   'Criteria: meet as you finish; verifier must differ (E_CRITERIA_SELF).',
-  'verify → done only after real verification; needsAcceptance cards wait for owner ballot.',
+  'Technical cards: agents meet+verify criteria then --phase done. Never park them for owner review.',
+  'needsAcceptance ONLY for visual/UI/UX/DX taste or real-world eyes — never technical correctness.',
+  'Owner Now/beacon shows needsAcceptance only; bare verify is agent work.',
   'Release mid-card needs --handoff.',
 ];
 

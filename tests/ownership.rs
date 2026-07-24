@@ -1,5 +1,30 @@
 //! Tests for M2 ownership / borrow transpiler rules (SAFETY DEFAULTS).
 
+#[test]
+fn discard_binding_is_not_a_referenceable_local() {
+    let src = r#"
+fn consume(value: ^String) {
+    print(value)
+}
+
+fn run() {
+    _ :: "discarded"
+    consume(^_)
+}
+"#;
+    let diags = jet::compile(src).expect_err("the discard name must not be referenceable");
+    assert!(
+        diags.iter().any(|diagnostic| diagnostic.code == "E0107"),
+        "expected the ordinary unknown-name error: {diags:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|diagnostic| !diagnostic.fix.contains("~_")),
+        "a discard must never receive a copy suggestion: {diags:?}"
+    );
+}
+
 /// D-MEM1/S2: no clone is ever silent (I8) — the former lint (`L0201`) is now
 /// a hard error (`E0209`), regardless of liveness.
 #[test]

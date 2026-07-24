@@ -1,3 +1,5 @@
+import { boardEpochs, cardMatches, sortCards, ownerVerifyQueue, openAcceptanceBallot } from './board-state.js';
+
 // Tower client. Vanilla JS, no framework, no build.
 // Two views: Now (everything blocked on the owner) and Board (epochs →
 // milestones → cards). The beacon on the left edge carries one lit segment
@@ -207,19 +209,9 @@ function ageChip(iso) {
 }
 const ageOf = (it) => it.type === 'decision' ? it.decision.created : it.type === 'verify' ? (it.ballot ? it.ballot.created : it.card.updated) : it.card.created;
 
-// #515: every card sitting in the verify lane — with its acceptance ballot
-// (D-ACCEPT-<num>) when one was minted, or bare when a card landed in
-// verify without ever being flagged needsAcceptance. Either way it's owner
-// work waiting to happen, so it must not hide.
-const openAcceptanceBallot = (c) =>
-  (c.decisions || []).find(d => d.id === `D-ACCEPT-${c.num}` && d.status !== 'ratified') || null;
-
-function verifyQueue() {
-  return S.cards.filter(c => c.phase === 'verify').map(c => ({
-    card: c,
-    ballot: openAcceptanceBallot(c),
-  }));
-}
+// Owner verification queue: ONLY needsAcceptance cards (visual/UI/UX/DX taste).
+// Bare phase=verify is agent technical closeout — never surfaces on Now/beacon.
+const verifyQueue = () => ownerVerifyQueue(S.cards);
 
 // Every owner-blocking item, in the order the beacon + Now view show them.
 // Acceptance ballots are excluded from the plain 'decision' bucket — they
@@ -318,9 +310,9 @@ function viewNow() {
   const section = (title) => v.appendChild(el(`<div class="nowsection"><span class="nowsection__t">${title}</span><span class="nowsection__rule"></span></div>`));
 
   // #515: top priority placement — cards done building and waiting on the
-  // owner's own eyes go first, above the ballot deck.
+  // owner's eyes go first only for needsAcceptance (visual/UX) cards.
   const verifies = items.filter(i => i.type === 'verify');
-  if (verifies.length) section('Needs your verification');
+  if (verifies.length) section('Needs your visual check');
   for (const it of verifies) v.appendChild(dutyVerify(it.card, it.ballot));
 
   const decs = items.filter(i => i.type === 'decision');
@@ -461,22 +453,22 @@ function dutyVerify(card, ballot) {
   const rest = content.proof.slice(PROOF_INLINE_MAX);
   const waitingOnAgent = card.needsAcceptance && !ballot;
   const yourCheck = waitingOnAgent
-    ? 'Technical verification still in progress — acceptance unlocks after all criteria pass.'
-    : content.visualCheck || 'Everything machine-verified — accept to close.';
+    ? 'Agents still finishing machine criteria — visual accept unlocks after that.'
+    : content.visualCheck || 'Look at the surface yourself — confirm it looks clean, modern, and right. Agents already own technical proof.';
   const node = el(`<div class="duty duty--verify">
-      <div class="duty__top"><span class="duty__kind">Verify</span>
+      <div class="duty__top"><span class="duty__kind">Visual check</span>
         <span class="num">${ticket(card)}</span>
-        <span class="duty__meta">${ballot ? esc(ballot.id) : 'in verify — no acceptance ballot yet'}</span>${ageChip(ballot ? ballot.created : card.updated)}</div>
+        <span class="duty__meta">${ballot ? esc(ballot.id) : 'needsAcceptance — waiting on ballot'}</span>${ageChip(ballot ? ballot.created : card.updated)}</div>
       <h2 class="duty__title">${esc(card.title)}</h2>
       <div class="verifyblock">
-        <div class="verifyblock__h">Proof</div>
+        <div class="verifyblock__h">What agents already proved</div>
         <ul class="verifyblock__list">${inline.map(t => `<li>${esc(t)}</li>`).join('') || '<li class="verifyblock__empty">(nothing recorded — open the card)</li>'}</ul>
         ${rest.length ? `<details class="verifyblock__more"><summary>+${rest.length} more</summary><ul class="verifyblock__list">${rest.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
-        <div class="verifyblock__h">Your check</div>
+        <div class="verifyblock__h">Your eyes only</div>
         <p class="verifyblock__visual">${esc(yourCheck)}</p>
       </div>
       <div class="duty__actions">
-        <button class="btn btn--red btn--sm" data-accept ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent verification' : 'Accept — close the card'}</button>
+        <button class="btn btn--red btn--sm" data-accept ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : 'Accept — looks right'}</button>
         <button class="btn btn--ghost btn--sm" data-bounce ${waitingOnAgent ? 'disabled' : ''}>Bounce</button>
         <button class="btn btn--ghost btn--sm" data-open>Open card</button>
       </div>
@@ -557,11 +549,18 @@ async function archivedCountFor(epochId) {
 // table) fused with the old Board tab's idea-capture + new-card UI. See
 // README.md.
 let radarFilterText = '';
-const radarSort = {}; // table key -> { col, dir }
+let radarWorkflow = 'all';
+let radarPriority = 'all';
+let radarShowClosed = false;
+let radarSort = { col: 'workflow', dir: 'asc' };
 
 function radarMatches(c, needle) {
-  if (!needle) return true;
-  return ('#' + c.num).includes(needle) || c.title.toLowerCase().includes(needle);
+  return cardMatches(c, {
+    text: needle,
+    workflow: radarWorkflow,
+    priority: radarPriority,
+    showClosed: radarShowClosed,
+  });
 }
 
 function viewBoard() {
@@ -575,7 +574,28 @@ function viewBoard() {
       </div></div>
     <div class="capture"><input id="idea-input" placeholder="Capture an idea — it waits in Ideas until you make it a card…">
       <button class="btn" id="idea-btn">Capture</button></div>
-    <div class="capture"><input id="radar-filter" placeholder="Filter by # or title…" value="${esc(radarFilterText)}"></div>
+    <div class="radar-tools">
+      <input id="radar-filter" aria-label="Filter cards" placeholder="Filter by # or title…" value="${esc(radarFilterText)}">
+      <select id="radar-workflow" aria-label="Filter by workflow">
+        <option value="all">All work</option>
+        <option value="0" ${radarWorkflow === '0' ? 'selected' : ''}>Verify only</option>
+        <option value="1" ${radarWorkflow === '1' ? 'selected' : ''}>Ready / unblocked</option>
+        <option value="2" ${radarWorkflow === '2' ? 'selected' : ''}>Build / plan</option>
+        <option value="3" ${radarWorkflow === '3' ? 'selected' : ''}>Blocked</option>
+      </select>
+      <select id="radar-priority" aria-label="Filter by priority">
+        <option value="all">All priorities</option>
+        ${(CFG().priorities || ['P0', 'P1', 'P2', 'P3']).map(p => `<option value="${esc(p)}" ${radarPriority === p ? 'selected' : ''}>${esc(p)}</option>`).join('')}
+      </select>
+      <select id="radar-sort" aria-label="Sort cards">
+        ${[
+          ['workflow', 'Workflow'], ['workOrder', 'Work order'], ['priority', 'Priority'],
+          ['updated', 'Updated'], ['num', 'Card number'], ['title', 'Title'],
+        ].map(([value, label]) => `<option value="${value}" ${radarSort.col === value ? 'selected' : ''}>Sort: ${label}</option>`).join('')}
+      </select>
+      <button class="btn btn--ghost" id="radar-direction" aria-label="Reverse sort" title="Reverse sort">${radarSort.dir === 'asc' ? '↑' : '↓'}</button>
+      <label class="radar-tools__check"><input id="radar-closed" type="checkbox" ${radarShowClosed ? 'checked' : ''}> Show closed</label>
+    </div>
     <div id="radar-body"></div>`;
 
   $('#new-card').addEventListener('click', async () => {
@@ -590,6 +610,14 @@ function viewBoard() {
   $('#idea-input').addEventListener('keydown', e => { if (e.key === 'Enter') fire(); });
   $('#radar-mode').addEventListener('click', () => api('ui/toggle', { key: 'radar-cards' }));
   $('#radar-filter').addEventListener('input', (e) => { radarFilterText = e.target.value; renderRadarBody(); });
+  $('#radar-workflow').addEventListener('change', (e) => { radarWorkflow = e.target.value; renderRadarBody(); });
+  $('#radar-priority').addEventListener('change', (e) => { radarPriority = e.target.value; renderRadarBody(); });
+  $('#radar-sort').addEventListener('change', (e) => { radarSort = { ...radarSort, col: e.target.value }; renderRadarBody(); });
+  $('#radar-direction').addEventListener('click', () => {
+    radarSort = { ...radarSort, dir: radarSort.dir === 'asc' ? 'desc' : 'asc' };
+    viewBoard();
+  });
+  $('#radar-closed').addEventListener('change', (e) => { radarShowClosed = e.target.checked; renderRadarBody(); });
 
   // Ideas bay — the triage half of idea-capture, kept from Board so a
   // captured idea has somewhere to be promoted or dismissed.
@@ -616,7 +644,7 @@ function viewBoard() {
 }
 
 // One body per section, honoring the card/table mode toggle.
-const radarList = (key, cards, cardsMode) => cardsMode ? grid(cards) : opsTable(key, cards);
+const radarList = (key, cards, cardsMode) => cardsMode ? grid(sortCards(cards, radarSort, CFG().priorities)) : opsTable(key, cards);
 
 function renderRadarBody() {
   const body = $('#radar-body');
@@ -625,10 +653,10 @@ function renderRadarBody() {
   body.innerHTML = '';
   const needle = radarFilterText.trim().toLowerCase();
   const cardsMode = isOpen('radar-cards', false);
-  const radar = S.radar || [];
+  const radar = boardEpochs(S.radar || [], S.epochs, S.cards, S.milestones, radarShowClosed);
 
   // Sidequests: their own section — off-plan work, not part of any epoch.
-  const sq = S.cards.filter(c => c.track === 'sidequest' && !['done', 'frozen'].includes(c.phase));
+  const sq = S.cards.filter(c => c.track === 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
   if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'off-plan work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
 
   if (!radar.length && !sq.length) {
@@ -666,10 +694,10 @@ function radarEpochSection(r, needle, cardsMode) {
       body.appendChild(ledgerLine);
       archivedCountFor(r.id).then(n => { if (n) ledgerLine.textContent = `ledger: ${r.done} done live · ${n} archived`; });
 
-      const active = S.cards.filter(c => c.epoch === r.id && c.track !== 'sidequest' && !['done', 'frozen'].includes(c.phase));
+      const active = S.cards.filter(c => c.epoch === r.id && c.track !== 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
       const activeShown = active.filter(c => radarMatches(c, needle));
-      body.appendChild(el(`<div class="radar__subhead">Active</div>`));
-      body.appendChild(activeShown.length ? radarList(r.id, activeShown, cardsMode) : el(`<p class="epoch__goal">${active.length ? 'no match' : 'no active cards'}</p>`));
+      body.appendChild(el(`<div class="radar__subhead">${radarShowClosed ? 'Cards' : 'Active'}</div>`));
+      body.appendChild(activeShown.length ? radarList(r.id, activeShown, cardsMode) : el(`<p class="epoch__goal">${active.length ? 'no match' : 'no cards'}</p>`));
     });
 }
 
@@ -716,23 +744,8 @@ const OPS_COLS = [
   { k: 'workOrder', label: 'Order' },
   { k: 'updated', label: 'Updated' },
 ];
-const opsSortVal = (c, col) => {
-  if (col === 'workOrder') return c.workOrder == null ? Infinity : c.workOrder;
-  if (col === 'num') return c.num ?? 0;
-  if (col === 'priority') return PR[c.priority] ?? 9;
-  if (col === 'updated') return c.updated || '';
-  if (col === 'lane') return c.lane?.label || '';
-  return String(c[col] || '').toLowerCase();
-};
 function sortOpsRows(key, cards) {
-  const st = radarSort[key] || { col: 'workOrder', dir: 'asc' };
-  const dir = st.dir === 'asc' ? 1 : -1;
-  return [...cards].sort((a, b) => {
-    const av = opsSortVal(a, st.col), bv = opsSortVal(b, st.col);
-    if (av < bv) return -1 * dir;
-    if (av > bv) return 1 * dir;
-    return (a.num ?? 0) - (b.num ?? 0);
-  });
+  return sortCards(cards, radarSort, CFG().priorities);
 }
 function ageAgo(dateStr) {
   if (!dateStr) return '—';
@@ -742,16 +755,14 @@ function ageAgo(dateStr) {
 }
 
 function opsTable(key, cards) {
-  const st = radarSort[key] || { col: 'workOrder', dir: 'asc' };
   const sorted = sortOpsRows(key, cards);
   const wrap = el(`<div class="opswrap"><table class="ops"><thead><tr>
-      ${OPS_COLS.map(c => `<th data-col="${c.k}">${esc(c.label)}${st.col === c.k ? (st.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`).join('')}
+      ${OPS_COLS.map(c => `<th data-col="${c.k}">${esc(c.label)}${radarSort.col === c.k ? (radarSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`).join('')}
     </tr></thead><tbody></tbody></table></div>`);
   wrap.querySelectorAll('th').forEach(th => th.addEventListener('click', () => {
     const col = th.dataset.col;
-    const cur = radarSort[key] || { col: 'workOrder', dir: 'asc' };
-    radarSort[key] = cur.col === col ? { col, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' };
-    renderRadarBody();
+    radarSort = radarSort.col === col ? { col, dir: radarSort.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' };
+    viewBoard();
   }));
   const tbody = $('tbody', wrap);
   for (const c of sorted) tbody.appendChild(opsRow(c));
@@ -794,8 +805,9 @@ function showDetail(id) {
   const sel = (k, opts, cur) => `<select data-fld="${k}">${opts.map(o => `<option value="${esc(o)}" ${o === cur ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
   const acceptanceBallot = openAcceptanceBallot(c);
   const waitingOnAgent = c.phase === 'verify' && c.needsAcceptance && !acceptanceBallot;
+  // Owner CTA only for needsAcceptance visual/UX cards. Bare verify is agent work.
   const cta = c.phase === 'frozen' ? `<button class="btn btn--red" id="cta-unfreeze">Unfreeze — start work</button>`
-    : c.phase === 'verify' ? `<button class="btn btn--red" id="cta-done" ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent verification' : acceptanceBallot ? 'Accept — close the card' : 'Mark verified — close'}</button>` : '';
+    : (c.phase === 'verify' && c.needsAcceptance) ? `<button class="btn btn--red" id="cta-done" ${waitingOnAgent ? 'disabled' : ''}>${waitingOnAgent ? 'Waiting for agent criteria' : acceptanceBallot ? 'Accept — looks right' : 'Accept — looks right'}</button>` : '';
   m.innerHTML = `<div class="modal__panel">
     <div class="modal__bar">
       ${c.workOrder != null ? `<span class="order">${c.workOrder}</span>` : ''}
@@ -819,7 +831,7 @@ function showDetail(id) {
       <div class="fld" style="margin-bottom:16px"><div class="fld__k">Plan</div><input data-fld="plan" value="${esc(c.plan || '')}" placeholder="— (agents fill this in the plan lane)"></div>
       <div class="modal__h">Description</div>
       <div class="prose" contenteditable="plaintext-only" data-fld="body">${md(c.body)}</div>
-      <div class="modal__h">Exit criteria <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner acceptance</label></div>
+      <div class="modal__h">Exit criteria <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner visual/UX check</label></div>
       <div id="m-criteria"></div>
       <div class="modal__h">Decisions</div><div id="m-decisions"></div>
       <div class="modal__h">Notes &amp; questions</div><div id="m-q"></div>

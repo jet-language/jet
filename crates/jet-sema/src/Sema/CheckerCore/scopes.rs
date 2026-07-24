@@ -66,6 +66,9 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn lookup(&self, name: &str) -> Option<&LocalInfo> {
+            if name == "_" {
+                return None;
+            }
             self.scopes.iter().rev().find_map(|s| s.get(name))
         }
     
@@ -81,6 +84,9 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn declare(&mut self, name: &str, name_span: Span, info: LocalInfo) {
+            if name == "_" {
+                return;
+            }
             if self.lookup(name).is_some()
                 || self.consts.contains_key(name)
                 || self.loop_labels.iter().any(|label| label == name)
@@ -125,6 +131,9 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn declare_loop_var(&mut self, name: String, name_span: Span, ty: &Type) {
+            if name == "_" {
+                return;
+            }
             if self.lookup(&name).is_some()
                 || self.consts.contains_key(&name)
                 || self.loop_labels.iter().any(|label| label == &name)

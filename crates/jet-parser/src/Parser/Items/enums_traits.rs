@@ -204,10 +204,32 @@ impl<'a> Parser<'a> {
                     Ok(VariantPayload::Named(fields))
                 } else {
                     let (ty, ty_span) = self.type_()?;
+                    if matches!(self.peek().kind, TokKind::Comma) {
+                        return Err(Diagnostic::error(
+                            "E0003",
+                            "a positional enum variant can carry only one value".to_string(),
+                            "one positional payload has one type; variants with two or more values use named fields"
+                                .to_string(),
+                            "name each field, for example `Hit(text: String, count: Int)`"
+                                .to_string(),
+                            Some(self.peek().span),
+                        ));
+                    }
                     Ok(VariantPayload::Single(ty, ty_span))
                 }
             } else {
                 let (ty, ty_span) = self.type_()?;
+                if matches!(self.peek().kind, TokKind::Comma) {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "a positional enum variant can carry only one value".to_string(),
+                        "one positional payload has one type; variants with two or more values use named fields"
+                            .to_string(),
+                        "name each field, for example `Hit(text: String, count: Int)`"
+                            .to_string(),
+                        Some(self.peek().span),
+                    ));
+                }
                 Ok(VariantPayload::Single(ty, ty_span))
             }
         }

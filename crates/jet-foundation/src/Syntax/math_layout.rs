@@ -224,6 +224,9 @@ pub const RETIRED_LOOP_STEP: &str = "step";
 pub const KW_BREAK: &str = "break";
 /// D-LOOP-CONTROLWORD1=B: contextual statement/fallback control.
 pub const KW_NEXT: &str = "next";
+/// D-LOOP-CONTROLWORD1=B: common foreign spelling recognized only for the
+/// E0003 teaching error that points at `next`.
+pub const FOREIGN_CONTINUE: &str = "continue";
 
 /// S24 / D-IF1 (ratified 2026-06-18): `if` is the one branching keyword.
 pub const KW_SWITCH: &str = "if";

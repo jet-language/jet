@@ -1343,6 +1343,9 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
+        if !tracks_named_move(&name) {
+            return;
+        }
         if self.reject_expiring_secret_loan_change(&name, "be moved", span) {
             return;
         }
@@ -1360,6 +1363,27 @@ impl<'a> Checker<'a> {
             }
         }
         self.moved.insert(name, span);
+    }
+
+    pub(crate) fn non_name_write_argument_fix(&self, expr: &Expr) -> String {
+        let indexes_list = matches!(expr, Expr::Index { .. })
+            && expr_root_ident(expr)
+                .and_then(|name| self.lookup(name))
+                .is_some_and(|info| {
+                    matches!(&info.ty, Type::List(_) | Type::FixedList { .. })
+                });
+        if indexes_list {
+            format!(
+                "change the helper to accept a list window, then pass a range write window such as `{}xs[a..b]`",
+                Syntax::SIGIL_WRITE,
+            )
+        } else {
+            format!(
+                "bind the value first: `x {} ...` then pass `{}x`",
+                Syntax::SIGIL_BIND_MUT,
+                Syntax::SIGIL_WRITE,
+            )
+        }
     }
 
     fn reject_expiring_secret_loan_change(
@@ -2146,6 +2170,21 @@ impl<'a> Checker<'a> {
             }
         }
         Some(Type::Option(Box::new(elem_ty)))
+    }
+}
+
+fn tracks_named_move(name: &str) -> bool {
+    name != "_"
+}
+
+#[cfg(test)]
+mod discard_tests {
+    use super::tracks_named_move;
+
+    #[test]
+    fn discard_binding_never_enters_move_tracking() {
+        assert!(!tracks_named_move("_"));
+        assert!(tracks_named_move("value"));
     }
 }
 

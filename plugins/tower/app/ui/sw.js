@@ -1,7 +1,7 @@
 // Tower service worker: static-shell cache only.
 // Web push / VAPID removed (owner D-VERDICT-460-1). Live board updates use SSE.
-const SHELL = 'tower-shell-v4';
-const ASSETS = ['/', '/tower.css', '/tower.js', '/icon.svg', '/manifest.webmanifest'];
+const SHELL = 'tower-shell-v6';
+const ASSETS = ['/', '/tower.css', '/tower.js', '/board-state.js', '/icon.svg', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
