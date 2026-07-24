@@ -136,6 +136,146 @@ pub fn local_place(name: &str) -> String {
     super::mangle(name)
 }
 
+/// One local or parameter slot, carried as structure instead of a Rust place
+/// string. Every engine resolves a slot from these three facts alone.
+///
+/// `name` is the slot's identity: a user binding carries its Jet name, which Rust
+/// spells `user_<name>`; a compiler-generated temp (`generated`) carries its own
+/// reserved identifier, which can never collide with a mangled user name.
+/// `deref` records a by-reference slot, which Rust reads through `(*…)`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TLocal {
+    pub name: String,
+    pub generated: bool,
+    pub deref: bool,
+}
+
+impl TLocal {
+    /// A user binding, read by value.
+    pub fn user(name: impl Into<String>) -> TLocal {
+        TLocal {
+            name: name.into(),
+            generated: false,
+            deref: false,
+        }
+    }
+
+    /// A compiler-generated temp slot, read by value.
+    pub fn generated(name: impl Into<String>) -> TLocal {
+        TLocal {
+            name: name.into(),
+            generated: true,
+            deref: false,
+        }
+    }
+
+    /// The same slot read through a by-reference deref.
+    pub fn through_ref(mut self) -> TLocal {
+        self.deref = true;
+        self
+    }
+
+    /// The Rust binding identifier for this slot, without the deref wrapper.
+    pub fn rust_name(&self) -> String {
+        if self.generated {
+            self.name.clone()
+        } else {
+            local_place(&self.name)
+        }
+    }
+
+    /// The Rust place this slot reads and writes.
+    pub fn rust_place(&self) -> String {
+        let rust = self.rust_name();
+        if self.deref {
+            format!("(*{rust})")
+        } else {
+            rust
+        }
+    }
+}
+
+/// A resolved user method identity. `name` is the Jet method name — the key the
+/// JIT and interpreter dispatch on. `mangled` records the one Rust spelling fact:
+/// an inherent method becomes `user_<name>`, while a trait-impl or dynamic-dispatch
+/// method keeps the bare name the trait owns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TMethodRef {
+    pub name: String,
+    pub mangled: bool,
+}
+
+impl TMethodRef {
+    /// An inherent user method — Rust spells it `user_<name>`.
+    pub fn inherent(name: impl Into<String>) -> TMethodRef {
+        TMethodRef {
+            name: name.into(),
+            mangled: true,
+        }
+    }
+
+    /// A trait-owned method — Rust spells it bare (the trait declared the name).
+    pub fn bare(name: impl Into<String>) -> TMethodRef {
+        TMethodRef {
+            name: name.into(),
+            mangled: false,
+        }
+    }
+
+    /// The Rust method name.
+    pub fn rust(&self) -> String {
+        if self.mangled {
+            super::mangle(&self.name)
+        } else {
+            self.name.clone()
+        }
+    }
+}
+
+/// One generic argument of a prelude container type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TPreludeArg {
+    /// A resolved Jet type; the emitter spells it via `cx.rust_type`.
+    Jet(Type),
+    /// A host counter with no Jet spelling (the multiset's `usize` tally).
+    HostUsize,
+}
+
+/// The owner of a static (associated) call.
+pub enum TStaticOwner {
+    /// A user type the front end compiles. Both the Rust spelling and the JIT's
+    /// compiled-function key derive from this Jet type name.
+    User(String),
+    /// A prelude/host type the front end never compiles. `path` is a resolved
+    /// symbol path, not composed source: `rooted` prefixes the generated crate
+    /// root, and `generics` are resolved arguments the emitter spells.
+    Prelude {
+        rooted: bool,
+        path: String,
+        generics: Vec<TPreludeArg>,
+    },
+}
+
+/// An assignable place. Every engine reads the structure directly: a local slot
+/// by name, or the already-structured place expression a field/index/pool write
+/// targets. Rust spelling happens only in the emit layer.
+pub enum TPlace {
+    Local(TLocal),
+    /// A structured place expression — a field-read chain, a swizzle lane, a
+    /// `Pool` slot. Its own node carries the facts; nothing is pre-rendered.
+    Expr(Box<TExpr>),
+}
+
+impl TPlace {
+    /// The local slot this place is rooted in, when it is a plain local.
+    pub fn as_local(&self) -> Option<&TLocal> {
+        match self {
+            TPlace::Local(local) => Some(local),
+            TPlace::Expr(_) => None,
+        }
+    }
+}
+
 fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc>) -> Option<()> {
     let mut pending = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
     let mut processed = std::collections::BTreeSet::new();
@@ -787,11 +927,11 @@ pub enum TIfCond {
         right: Box<TIfCond>,
     },
     IfLet {
-        pat_str: String,
+        pattern: TPattern,
         subj: TExpr,
     },
     IsNone { subj: TExpr },
-    Matches { pat_str: String, subj: TExpr },
+    Matches { pattern: TPattern, subj: TExpr },
 }
 
 /// D-DOTSCOPE1: which `#Test` scope member a `TStmt::ScopeMember` is.
@@ -934,9 +1074,10 @@ pub enum TStmt {
     /// `place [op]= value;` to a plain local (subset excludes indexed assigns).
     /// `op` is the compound-assignment operator (`+=` etc.) or `None` for `=`.
     Assign {
-        /// The Rust *place* string for the local, already resolved (e.g. `user_x`
-        /// or `(*user_x)` for a deref'd parameter). Codegen does not re-resolve it.
-        place: String,
+        /// The structured target: a local slot, or a place expression (a field
+        /// chain, a `Pool` slot). Every engine reads the structure; only emit
+        /// spells Rust.
+        place: TPlace,
         op: Option<BinOp>,
         value: TExpr,
         /// c150: true when the value is a borrowed non-scalar ident (a `Read`-convention
@@ -1021,10 +1162,10 @@ pub enum TStmt {
     /// explicit `else`); sema already proved exhaustiveness (E0307), so the dead arm
     /// exists only because rustc cannot see that proof.
     EnumMatch {
-        /// The fully-resolved Rust scrutinee string. For a by-reference subject it
-        /// is `({rust_name}).clone()` (cloned so the match owns the value); for a
-        /// by-value subject it is the subject's emitted form. Resolved at lowering.
-        scrutinee: String,
+        /// The matched subject. A by-reference subject sets `clone_subject` so the
+        /// match owns the value; the slot itself is read without its deref.
+        scrutinee: TExpr,
+        clone_subject: bool,
         arms: Vec<TMatchArm>,
         else_body: Option<Vec<TStmt>>,
         fallthrough: bool,
@@ -1075,23 +1216,24 @@ pub enum TStmt {
         clone_value: bool,
     },
     /// c109 Phase 5/22: collection iteration `loop x; coll` / `loop k, v; map`
-    /// (`Stmt::For` with `ForKind::In`). The collection's emitted Rust string is
-    /// resolved at lowering. `var2` distinguishes the two-binding map form (which
-    /// iterates `(coll).iter()` and clones each key/value) from the single-binding
-    /// form (`(coll).iter().cloned()`), reproducing `emit_for_in` exactly.
-    /// `method_kind` (c109 Phase 22) carries the method-call-collection iteration
-    /// form (`.chars()` char iteration, `.lines()` streaming reads) resolved at
-    /// lowering off the same `emit_for_in` branch; `None` is the plain `.iter()`
-    /// form (incl. a non-special method-call collection like `.split(…)`, which the
-    /// AST routes to the `.iter().cloned()` default). When `method_kind` is set the
-    /// `collection_str` holds the *receiver* string (not the whole method call), and
+    /// (`Stmt::For` with `ForKind::In`). `var2` distinguishes the two-binding map
+    /// form (which iterates `(coll).iter()` and clones each key/value) from the
+    /// single-binding form (`(coll).iter().cloned()`), reproducing `emit_for_in`
+    /// exactly. `method_kind` (c109 Phase 22) carries the method-call-collection
+    /// iteration form (`.chars()` char iteration, `.lines()` streaming reads)
+    /// resolved at lowering off the same `emit_for_in` branch; `None` is the plain
+    /// `.iter()` form (incl. a non-special method-call collection like `.split(…)`,
+    /// which the AST routes to the `.iter().cloned()` default). When `method_kind`
+    /// is set `source` holds the method *receiver* (not the whole method call), and
     /// `var2` is always `None` (a method-call collection is single-binding only).
     ForIn {
         label: Option<String>,
         var: String,
         var2: Option<String>,
-        collection_str: String,
-        /// Target-neutral collection expression for non-Rust backends.
+        /// The expression iterated over: the method receiver for a `method_kind`
+        /// form, otherwise the whole collection.
+        source: TExpr,
+        /// The whole collection expression, whose type carries the element type.
         collection: TExpr,
         /// D-LOOP-ADVANCE2=A source stride, evaluated once before the first pull.
         step: Option<TExpr>,
@@ -1151,8 +1293,8 @@ pub enum TStmt {
     Region(Vec<TStmt>),
     /// D-LAYOUT1 / D-LAYOUT-GATES1: `layout NAME { … }` — a Cassowary-style
     /// constraint block. Unlike `Region`/the taskgroup path, this DOES need a
-    /// real runtime object: `rust_place` is the emitted `let` binding for a
-    /// fresh `jet_layout::Handle`, `label` is the source name (for the
+    /// real runtime object: `handle` is the slot the fresh `jet_layout::Handle`
+    /// binds into, `label` is the source name (for the
     /// handle's debug/conflict-report label), and `body` is the block's
     /// statements lowered on the SAME env the handle was just bound into (the
     /// parser already desugared every `box.anchor` read to an ordinary
@@ -1160,7 +1302,7 @@ pub enum TStmt {
     /// nothing but plain statements — no layout-specific TIR shape needed
     /// beyond the handle construction itself).
     Layout {
-        rust_place: String,
+        handle: TLocal,
         label: String,
         body: Vec<TStmt>,
     },
@@ -1212,16 +1354,17 @@ pub enum TStmt {
     /// irreversible-effect rejection (E0746, D-TXN2) and rollback are sema's job;
     /// codegen is dumb (I3): effects/transaction state are a compile-time fact.
     Transact {
-        /// The mangled Rust name of the transaction handle (`user_<name>`), or `None`
-        /// for a bare `#Transact { … }` with no handle (no `on_commit`/`on_rollback`
-        /// hooks). When `snapshots` is non-empty a handle is synthesized even for a
-        /// bare block, so the auto-snapshot has a transaction to register on.
-        handle: Option<String>,
-        /// D-TXN-ROLLBACK layer 1+2: each entry is `(&mut <place>, Option<RustTy>)`.
-        /// `None` → clone-based snapshot via `jet_txn::snapshot`.
-        /// `Some(ty)` → the place implements `Rollback`; use `jet_txn::snapshot_custom`
-        /// with `<ty>::restore` so the custom cheap diff runs instead of a full clone.
-        snapshots: Vec<(String, Option<String>)>,
+        /// The transaction handle's slot, or `None` for a bare `#Transact { … }`
+        /// with no handle (no `on_commit`/`on_rollback` hooks). When `snapshots` is
+        /// non-empty a handle is synthesized even for a bare block, so the
+        /// auto-snapshot has a transaction to register on.
+        handle: Option<TLocal>,
+        /// D-TXN-ROLLBACK layer 1+2: each snapshotted local plus, when the local's
+        /// type implements `Rollback`, that type. Without a type the snapshot is
+        /// clone-based (`jet_txn::snapshot`); with one it uses
+        /// `jet_txn::snapshot_custom` and `<ty>::restore`, so the custom cheap diff
+        /// runs instead of a full clone.
+        snapshots: Vec<(TLocal, Option<Type>)>,
         /// D-STM1=A (card #506): true when the block touches the `Shared<T>` plane
         /// (some `.edit` inside routed to `edit_txn`), so emission wraps the body in
         /// `jet_stm::begin()` … `.commit()` — the atomic multi-handle commit. False
@@ -1244,9 +1387,66 @@ pub enum TStmt {
 /// `user_Http::user_Good(__jet_range_0)`); `guard` is the optional `if …` range
 /// guard. Both are computed once at lowering — emit only formats them.
 pub struct TMatchArm {
-    pub pattern: String,
-    pub guard: Option<String>,
+    pub pattern: TPattern,
     pub body: Vec<TStmt>,
+}
+
+/// A pattern carried as structure instead of a rendered Rust pattern: the source
+/// pattern sema checked, the resolved owning enum, and the syntactic position it
+/// tests in. Every engine reads the pattern itself; only emit spells Rust.
+#[derive(Debug, Clone)]
+pub struct TPattern {
+    pub pattern: crate::AST::Pattern,
+    /// The owning enum, when the subject is a user/foreign/core enum.
+    pub enum_type: Option<String>,
+    pub position: TPatternPosition,
+}
+
+/// Where a `TPattern` is tested. The position decides how much a match binds,
+/// which is a semantic fact each engine needs, not a spelling detail.
+#[derive(Debug, Clone)]
+pub enum TPatternPosition {
+    /// A binding test that destructures payload slots into locals (`if x == Ok(v)`).
+    Binding,
+    /// A match-arm head, which also binds payload slots.
+    Arm,
+    /// A payload-free variant path, compared by value.
+    VariantPath,
+    /// D-ENC-DYN1: a `Data` object test that captures the raw entry pairs into
+    /// `temp`; a body prefix collects them into the map the body sees.
+    DataEntries { temp: String },
+}
+
+impl TPattern {
+    /// A match-arm head over `enum_type`.
+    pub fn arm(pattern: crate::AST::Pattern, enum_type: Option<String>) -> TPattern {
+        TPattern {
+            pattern,
+            enum_type,
+            position: TPatternPosition::Arm,
+        }
+    }
+
+    /// A payload-binding test (`if let` position).
+    pub fn binding(pattern: crate::AST::Pattern) -> TPattern {
+        TPattern {
+            pattern,
+            enum_type: None,
+            position: TPatternPosition::Binding,
+        }
+    }
+
+    /// The variant this pattern tests, when it tests one.
+    pub fn variant(&self) -> Option<&str> {
+        match &self.pattern {
+            crate::AST::Pattern::Variant { variant, .. } => Some(variant),
+            crate::AST::Pattern::Or(alts, _) => match alts.first() {
+                Some(crate::AST::Pattern::Variant { variant, .. }) => Some(variant),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 /// One piece of a D-VARIADIC1 list spread literal — either a single element or `...list`.
@@ -1272,9 +1472,9 @@ pub enum TExprKind {
     /// String literal / interpolation. Each part is literal text or an
     /// interpolated TExpr (totally typed, like every other node).
     StrLit(Vec<TStrPart>),
-    /// A local or parameter, rendered as its already-resolved Rust *place*
-    /// string (handles parameter deref). No env lookup at emit time.
-    Local(String),
+    /// A local or parameter slot, resolved to its Jet binding name plus the
+    /// by-reference deref fact. Emit spells the Rust place; no engine parses it.
+    Local(TLocal),
     /// c109 Phase 24: a comptime CONST ident inlined at the use site. Carries the
     /// pre-rendered Rust value string (`cx.consts[name]`, total — the same string
     /// `emit_expr`'s `Ident` arm splices), so emit just emits it verbatim. The const's
@@ -1282,7 +1482,18 @@ pub enum TExprKind {
     /// `ast_operand_is_integer`, so it never enables the overflow trap, and a covered
     /// const use — interpolation, a binding RHS — reads the binding/`.jet_show()` type,
     /// not this).
+    ///
+    /// Scalar comptime values never reach this variant: `lower_comptime_scalar`
+    /// routes an int/bool/char through the structured literal nodes, so a
+    /// non-Rust engine never has to parse the text.
     ConstInline(String),
+    /// A reference to a declared (non-comptime) const, by its Jet name. Emit
+    /// resolves the Rust static name; other engines look the value up by the
+    /// same Jet name in their own const table.
+    ConstRef(String),
+    /// D-ENC-DYN1: collect the ordered `Data` object entries a
+    /// `TPatternPosition::DataEntries` test captured into the user-visible map.
+    DataEntriesToMap(TLocal),
     /// Call to a plain top-level function. Each arg carries its emit decisions.
     Call {
         name: String,
@@ -1425,11 +1636,11 @@ pub enum TExprKind {
         op: UnOp,
         operand: Box<TExpr>,
     },
-    /// D-INCR1: `++`/`--` on a mutable integer lvalue. `place` is the assign/read
-    /// Rust place (total at lowering). `postfix`: return old value before update.
+    /// D-INCR1: `++`/`--` on a mutable integer lvalue. `place` is the structured
+    /// assign/read target. `postfix`: return old value before update.
     IncDec {
         op: crate::AST::IncDecOp,
-        place: String,
+        place: TPlace,
         postfix: bool,
         ty: Type,
     },
@@ -1586,6 +1797,18 @@ pub enum TExprKind {
         is_map: bool,
         line: usize,
     },
+    /// D-MEM1 S6: `pool[id]` / `pool[id].field` — a generation-checked slot in a
+    /// `Pool<T>`. `mutable` selects the in-place `jet_pool_get_mut` place over the
+    /// `jet_pool_get` value clone, so a write or a mutating receiver edits the
+    /// stored element instead of a throwaway copy. `field_rust` narrows the place
+    /// to one mangled field.
+    PoolSlot {
+        pool: Box<TExpr>,
+        id: Box<TExpr>,
+        mutable: bool,
+        field_rust: Option<String>,
+        line: usize,
+    },
     /// D-INDEX-HOOK: `mytype[k]` when the type implements `Index`.
     IndexHook {
         type_name: String,
@@ -1646,7 +1869,7 @@ pub enum TExprKind {
     /// borrow/clone decisions, mirroring `emit_call_args`.
     MethodCall {
         recv: Box<TExpr>,
-        method_rust: String,
+        method: TMethodRef,
         args: Vec<TCallArg>,
         /// Hidden source bridge for generic arithmetic trait dispatch. User
         /// methods keep their two-argument surface; primitive impls receive
@@ -1668,9 +1891,9 @@ pub enum TExprKind {
     /// already-resolved Rust type head (`user_<Type>`), `method_rust` the mangled
     /// method name. Mirrors the AST type-name dispatch (Expression.rs ~L1644).
     StaticCall {
-        type_prefix: String,
+        owner: TStaticOwner,
         owner_type: Option<Type>,
-        method_rust: String,
+        method: TMethodRef,
         args: Vec<TCallArg>,
     },
     /// c109 Phase 9: a built-in collection/string method (`emit_builtin_method`).
@@ -1789,7 +2012,7 @@ pub enum TExprKind {
     /// switch arms (group names expand to or-patterns over their leaves).
     PatternMatches {
         subj: Box<TExpr>,
-        pat_str: String,
+        pattern: TPattern,
     },
     FanOut {
         calls: Vec<TExpr>,

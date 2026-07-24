@@ -21,6 +21,8 @@ use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::TMatchArm;
+use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::tuple_join;
 use crate::Codegen::TIR::unit_type;
@@ -176,8 +178,7 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
     }];
     let single = holes.len() == 1;
     for (i, (name, ty)) in holes.iter().enumerate() {
-        let local_rust = mangle(name);
-        env.bind(name, local_rust, Some(ty.clone()));
+        env.bind(name, TLocal::user(name), Some(ty.clone()));
         let project = if single {
             // A one-element Rust tuple is `(x,)`; its sole field is still `.0`.
             format!("{}.0", tuple_rust)
@@ -244,8 +245,7 @@ pub(super) fn lower_bin_match_pattern_bindings(
     }];
     let single = holes.len() == 1;
     for (i, (name, ty)) in holes.iter().enumerate() {
-        let local_rust = mangle(name);
-        env.bind(name, local_rust, Some(ty.clone()));
+        env.bind(name, TLocal::user(name), Some(ty.clone()));
         let project = if single {
             format!("{}.0", tuple_rust)
         } else {
@@ -329,24 +329,30 @@ pub(crate) fn lower_fallible_match(
     // subject in-subset is never a deref'd slot (it is a fn-call value or an owned
     // local), so the scrutinee is the plain emitted form — matching the AST path,
     // whose `subj` clone branch only fires for a deref'd `Ident`.
-    let scrutinee = match subject {
+    let (scrutinee, clone_subject) = match subject {
         Expr::Ident(name, _) if env.is_borrowed(name) => {
-            format!("({}).clone()", env.rust_name_of(name))
+            let mut by_value = env.local_of(name);
+            by_value.deref = false;
+            (
+                TExpr {
+                    ty: subject_ty.clone(),
+                    kind: TExprKind::Local(by_value),
+                },
+                true,
+            )
         }
-        _ => emit_tir_expr(&subject_t, cx),
+        _ => (subject_t, false),
     };
     let mut tarms = Vec::new();
     for arm in arms {
         let pattern =
             arm_fallible_pattern(cx, &arm.cond, subject).expect("gate proved fallible arm");
-        let pat = tir_fallible_pattern(&pattern);
         // An arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
         let mut body_env = fork_panic(env);
         tir_add_fallible_binding(&pattern, &mut body_env, &subject_ty);
         let body = lower_stmts(&arm.body, cx, &mut body_env);
         tarms.push(TMatchArm {
-            pattern: pat,
-            guard: None,
+            pattern: TPattern::binding(pattern),
             body,
         });
     }
@@ -402,7 +408,7 @@ pub(crate) fn tir_add_fallible_binding(pattern: &Pattern, env: &mut LowerEnv, su
         // `null` (Absent) binds nothing.
         _ => return,
     };
-    env.bind(&binding, mangle(&binding), ty);
+    env.bind(&binding, TLocal::user(&binding), ty);
 }
 
 pub(crate) fn lower_enum_match(
@@ -413,14 +419,24 @@ pub(crate) fn lower_enum_match(
     env: &mut LowerEnv,
 ) -> TStmt {
     // The match owns the value. Mirror `emit_pattern_match_switch`: a by-reference
-    // subject (a deref'd enum param) is cloned as `({rust_name}).clone()` — the
-    // borrow itself is cloned, NOT the deref'd place. Any other subject emits its
-    // plain form.
-    let scrutinee = match subject {
+    // subject (a deref'd enum param) is cloned — the borrow itself is cloned, NOT
+    // the deref'd place, so the scrutinee carries the slot *without* its deref and
+    // the clone is recorded as a fact.
+    let (scrutinee, clone_subject) = match subject {
         Expr::Ident(name, _) if env.is_borrowed(name) => {
-            format!("({}).clone()", env.rust_name_of(name))
+            let slot = env.local_of(name);
+            let ty = env.ty_of(name).unwrap_or(Type::Int);
+            let mut by_value = slot.clone();
+            by_value.deref = false;
+            (
+                TExpr {
+                    ty,
+                    kind: TExprKind::Local(by_value),
+                },
+                true,
+            )
         }
-        _ => emit_tir_expr(&lower_expr(subject, cx, env), cx),
+        _ => (lower_expr(subject, cx, env), false),
     };
     // Resolve the owning enum once — drives the Rust variant prefix in patterns.
     let enum_type = arms.iter().find_map(|a| {
@@ -431,16 +447,13 @@ pub(crate) fn lower_enum_match(
     let mut tarms = Vec::new();
     for arm in arms {
         let pattern = arm_variant_pattern(cx, &arm.cond, subject).expect("gate proved variant arm");
-        let pat = tir_match_pattern(cx, &pattern, enum_type.as_deref());
-        let guard = tir_range_guard(&pattern);
         // The arm body sees the variant's payload bindings, typed from the layout. The
         // arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
         let mut body_env = fork_panic(env);
         tir_add_pattern_bindings(cx, &pattern, &mut body_env, subject_ty.as_ref());
         let body = lower_stmts(&arm.body, cx, &mut body_env);
         tarms.push(TMatchArm {
-            pattern: pat,
-            guard,
+            pattern: TPattern::arm(pattern, enum_type.clone()),
             body,
         });
     }
@@ -564,7 +577,7 @@ pub(crate) fn tir_add_pattern_bindings(
                         .as_ref()
                         .and_then(|ts| ts.get(i).cloned())
                         .unwrap_or(Type::Int);
-                    env.bind(name, mangle(name), Some(ty));
+                    env.bind(name, TLocal::user(name), Some(ty));
                 }
             }
         }

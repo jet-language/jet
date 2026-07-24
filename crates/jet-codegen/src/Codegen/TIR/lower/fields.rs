@@ -1,19 +1,21 @@
 use crate::AST::{Expr, Type, UnOp};
 use crate::Codegen::Cx;
-use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Syntax;
 
-/// D-INCR1: Rust place string for `++`/`--` read/update on an lvalue operand.
-pub(super) fn lower_incdec_place(operand: &Expr, cx: &Cx, env: &mut LowerEnv) -> String {
+/// D-INCR1: the structured place `++`/`--` reads and updates. A bare identifier
+/// resolves to its slot; anything else is the already-structured place expression
+/// the operand lowers to.
+pub(super) fn lower_incdec_place(
+    operand: &Expr,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> crate::Codegen::TIR::TPlace {
+    use crate::Codegen::TIR::TPlace;
     match operand {
-        Expr::Ident(name, _) => env.place_of(name),
-        Expr::Field(base, field, span) => {
-            let field_expr = Expr::Field(base.clone(), field.clone(), *span);
-            emit_tir_expr(&lower_expr(&field_expr, cx, env), cx)
-        }
-        other => emit_tir_expr(&lower_expr(other, cx, env), cx),
+        Expr::Ident(name, _) => TPlace::Local(env.local_of(name)),
+        other => TPlace::Expr(Box::new(lower_expr(other, cx, env))),
     }
 }
 
@@ -428,6 +430,22 @@ pub(crate) fn int_lit_type(width: &Option<(bool, u8)>) -> Type {
 
 pub(crate) fn unit_type() -> Type {
     Type::Named("Unit".to_string())
+}
+
+/// A comptime scalar as a structured literal node. Sema already folded the
+/// value, so the scalar cases carry the number/flag/char itself instead of the
+/// rendered Rust text — every engine reads the fact, and emit still renders the
+/// same bytes `CtValue::serialize` would have produced.
+pub(crate) fn lower_comptime_scalar(
+    value: Option<&crate::AST::CtValue>,
+) -> Option<crate::Codegen::TIR::TExprKind> {
+    use crate::Codegen::TIR::TExprKind;
+    match value? {
+        crate::AST::CtValue::Int(int) => Some(TExprKind::IntLit(*int, None)),
+        crate::AST::CtValue::Bool(flag) => Some(TExprKind::BoolLit(*flag)),
+        crate::AST::CtValue::Char(ch) => Some(TExprKind::CharLit(*ch)),
+        _ => None,
+    }
 }
 
 /// The resolved return type of a called plain function: its declared return

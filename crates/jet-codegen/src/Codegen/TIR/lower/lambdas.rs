@@ -19,6 +19,7 @@ use crate::Codegen::TIR::TJitSpawnBody;
 use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::TLambdaBody;
+use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::unit_type;
 use std::collections::HashSet;
 
@@ -116,7 +117,7 @@ fn lower_lambda_expecting_with_host_borrow(
             cap,
             env.place_of(name)
         ));
-        lam_env.bind(name, cap, None);
+        lam_env.bind(name, TLocal::generated(&cap), None);
     }
     // Params bind as `mangle(name)` (no deref), typed from the annotation, falling
     // back to `expected_params` at the same position (D-MEM1 S6: this fallback
@@ -132,9 +133,9 @@ fn lower_lambda_expecting_with_host_borrow(
         let place = if host_borrow.is_some()
             || (!by_value && ty.as_ref().is_some_and(|t| !t.is_scalar()))
         {
-            format!("(*{})", mangle(&p.name))
+            TLocal::user(&p.name).through_ref()
         } else {
-            mangle(&p.name)
+            TLocal::user(&p.name)
         };
         lam_env.bind(&p.name, place, ty);
     }
@@ -235,12 +236,12 @@ pub(crate) fn lower_spawn_lambda_for_jit(lam: &Lambda, cx: &Cx, env: &LowerEnv) 
 
     let mut lam_env = fork_panic(env);
     for cap in &captures {
-        lam_env.bind(&cap.name, mangle(&cap.name), Some(cap.ty.clone()));
+        lam_env.bind(&cap.name, TLocal::user(&cap.name), Some(cap.ty.clone()));
     }
     for p in &lam.params {
         lam_env.bind(
             &p.name,
-            mangle(&p.name),
+            TLocal::user(&p.name),
             p.ty.clone().or_else(|| Some(Type::Int)),
         );
     }
@@ -299,10 +300,10 @@ pub(crate) fn render_spawn_lambda(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Stri
             cap,
             env.place_of(name)
         ));
-        lam_env.bind(name, cap, None);
+        lam_env.bind(name, TLocal::generated(&cap), None);
     }
     for p in &lam.params {
-        lam_env.bind(&p.name, mangle(&p.name), p.ty.clone());
+        lam_env.bind(&p.name, TLocal::user(&p.name), p.ty.clone());
     }
     let params: Vec<String> = lam
         .params
@@ -346,7 +347,7 @@ pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: 
             cap,
             outer_env.place_of(name)
         ));
-        lam_env.bind(name, cap, outer_env.ty_of(name));
+        lam_env.bind(name, TLocal::generated(&cap), outer_env.ty_of(name));
     }
     let mut inner = String::new();
     let lowered = lower_stmts(stmts, cx, &mut lam_env);

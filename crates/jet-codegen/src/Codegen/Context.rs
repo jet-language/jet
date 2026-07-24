@@ -66,6 +66,9 @@ pub(crate) struct Cx {
     /// expression its total result `Type` without re-inferring in codegen.
     pub(crate) method_rets: HashMap<(String, String), Option<Type>>,
     pub(crate) consts: HashMap<String, String>,
+    /// The evaluated value behind each comptime const, so lowering can hand a
+    /// structured literal to every engine instead of the rendered Rust text.
+    pub(crate) const_values: HashMap<String, CtValue>,
     pub(crate) type_names: HashSet<String>,
     /// D-DIST1 (c109 Phase 23): distinct-type name -> (base type, is_numeric). A
     /// distinct type renders to a `#[repr(transparent)]` newtype `user_<Name>(pub
@@ -2030,6 +2033,7 @@ pub(crate) fn build_cx_items(
         method_self_convs: HashMap::new(),
         method_rets: HashMap::new(),
         consts: HashMap::new(),
+        const_values: HashMap::new(),
         type_names: HashSet::new(),
         distinct_types: HashMap::new(),
         distinct_ranges: HashMap::new(),
@@ -2406,6 +2410,9 @@ pub(crate) fn build_cx_items(
                         (None, _) => "Default::default()".to_string(),
                     };
                     cx.consts.insert(c.name.clone(), serialized);
+                    if let Some(value) = c.ct.as_ref() {
+                        cx.const_values.insert(c.name.clone(), value.clone());
+                    }
                 } else {
                     cx.consts
                         .insert(c.name.clone(), mangle(&c.name).to_uppercase());

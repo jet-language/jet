@@ -71,6 +71,10 @@ use crate::Codegen::TIR::TEnumPayload;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::THandleOp;
+use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TMethodRef;
+use crate::Codegen::TIR::TPreludeArg;
+use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::tir_enum_lit_prefix;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::tir_src_line_at;
@@ -81,6 +85,44 @@ use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
 use crate::Syntax;
 use std::collections::HashSet;
+
+/// A prelude/host static-call owner whose path is prefixed by the generated
+/// crate root (`{root}jet_std::…`).
+fn rooted_owner(path: impl Into<String>) -> TStaticOwner {
+    TStaticOwner::Prelude {
+        rooted: true,
+        path: path.into(),
+        generics: Vec::new(),
+    }
+}
+
+/// The same, with resolved generic arguments the emitter spells.
+fn rooted_generic_owner(path: impl Into<String>, generics: Vec<TPreludeArg>) -> TStaticOwner {
+    TStaticOwner::Prelude {
+        rooted: true,
+        path: path.into(),
+        generics,
+    }
+}
+
+/// A host static-call owner spelled without the crate root (a `std::` path or a
+/// prelude type the generated crate has already imported).
+fn host_owner(path: impl Into<String>) -> TStaticOwner {
+    TStaticOwner::Prelude {
+        rooted: false,
+        path: path.into(),
+        generics: Vec::new(),
+    }
+}
+
+/// The same, with resolved generic arguments the emitter spells.
+fn host_generic_owner(path: impl Into<String>, generics: Vec<TPreludeArg>) -> TStaticOwner {
+    TStaticOwner::Prelude {
+        rooted: false,
+        path: path.into(),
+        generics,
+    }
+}
 
 fn builtin_arg_takes_ownership(op: &TBuiltinOp, index: usize) -> bool {
     match op {
@@ -159,17 +201,24 @@ pub(crate) fn lower_method_call(
                         return None;
                     }
                     let source_name = format!("__jet_gc_index_{}", method_span.start);
-                    let rust_name = source_name.clone();
                     lowered_args[0].expr = Expr::Ident(source_name.clone(), arg.span);
-                    env.bind(&source_name, rust_name.clone(), Some(lowered.ty.clone()));
-                    Some((rust_name, lowered))
+                    env.bind(
+                        &source_name,
+                        TLocal::generated(&source_name),
+                        Some(lowered.ty.clone()),
+                    );
+                    Some((source_name, lowered))
                 })
             } else {
                 None
             };
             let saved = env.locals.get(name).cloned();
             env.gc_locals.remove(name);
-            env.bind(name, "(*__jet_value)".to_string(), saved.as_ref().and_then(|(_, ty)| ty.clone()));
+            env.bind(
+                name,
+                TLocal::generated("__jet_value").through_ref(),
+                saved.as_ref().and_then(|(_, ty)| ty.clone()),
+            );
             let inner = lower_method_call(
                 receiver,
                 method,
@@ -281,7 +330,7 @@ pub(crate) fn lower_method_call(
             ty: resolved_ret.cloned().unwrap_or_else(unit_type),
             kind: TExprKind::MethodCall {
                 recv: Box::new(recv),
-                method_rust: method.to_string(),
+                method: TMethodRef::bare(method),
                 args: targs,
                 operator_line: matches!(method, "add" | "sub" | "mul" | "div")
                     .then(|| crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32),
@@ -2450,9 +2499,9 @@ pub(crate) fn lower_method_call(
                 return TExpr {
                     ty: Type::Named("EncodingLimits".to_string()),
                     kind: TExprKind::StaticCall {
-                        type_prefix: format!("{}jet_std::EncodingLimits", cx.root_prefix),
+                        owner: rooted_owner("jet_std::EncodingLimits"),
                         owner_type: None,
-                        method_rust: "safe".to_string(),
+                        method: TMethodRef::bare("safe"),
                         args: vec![],
                     },
                 };
@@ -2463,9 +2512,9 @@ pub(crate) fn lower_method_call(
                 return TExpr {
                     ty: Type::Named("CBOROptions".to_string()),
                     kind: TExprKind::StaticCall {
-                        type_prefix: format!("{}jet_std::CBOROptions", cx.root_prefix),
+                        owner: rooted_owner("jet_std::CBOROptions"),
                         owner_type: None,
-                        method_rust: "safe".to_string(),
+                        method: TMethodRef::bare("safe"),
                         args: vec![],
                     },
                 };
@@ -2476,9 +2525,9 @@ pub(crate) fn lower_method_call(
                 return TExpr {
                     ty: Type::Named(leaf.clone()),
                     kind: TExprKind::StaticCall {
-                        type_prefix: format!("{}jet_std::{leaf}", cx.root_prefix),
+                        owner: rooted_owner(format!("jet_std::{leaf}")),
                         owner_type: None,
-                        method_rust: "safe".to_string(),
+                        method: TMethodRef::bare("safe"),
                         args: vec![],
                     },
                 };
@@ -2489,9 +2538,9 @@ pub(crate) fn lower_method_call(
                 return TExpr {
                     ty: Type::Named("Limits".to_string()),
                     kind: TExprKind::StaticCall {
-                        type_prefix: format!("{}jet_email::Limits", cx.root_prefix),
+                        owner: rooted_owner("jet_email::Limits"),
                         owner_type: None,
-                        method_rust: "safe".to_string(),
+                        method: TMethodRef::bare("safe"),
                         args: vec![],
                     },
                 };
@@ -2521,9 +2570,9 @@ pub(crate) fn lower_method_call(
             return TExpr {
                 ty: resolved_ret.cloned().unwrap_or_else(|| Type::Named(type_name.clone())),
                 kind: TExprKind::StaticCall {
-                    type_prefix: format!("{}Jet{}", cx.root_prefix, type_name),
+                    owner: rooted_owner(format!("Jet{type_name}")),
                     owner_type: None,
-                    method_rust: method_rust.to_string(),
+                    method: TMethodRef::bare(method_rust),
                     args: args.iter().map(|argument| lower_one_call_arg(argument, None, env, cx)).collect(),
                 },
             };
@@ -2787,16 +2836,18 @@ pub(crate) fn lower_method_call(
                 Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
                 _ => Type::Int,
             };
-            let elem_rust = cx.rust_type(&elem_ty);
             return TExpr {
                 ty: Type::Apply {
                     name: crate::Syntax::TYPE_SORTED_SET.to_string(),
-                    args: vec![elem_ty],
+                    args: vec![elem_ty.clone()],
                 },
                 kind: TExprKind::StaticCall {
-                    type_prefix: format!("std::collections::BTreeSet::<{}>", elem_rust),
+                    owner: host_generic_owner(
+                        "std::collections::BTreeSet",
+                        vec![TPreludeArg::Jet(elem_ty)],
+                    ),
                     owner_type: None,
-                    method_rust: "new".to_string(),
+                    method: TMethodRef::bare("new"),
                     args: vec![],
                 },
             };
@@ -2824,16 +2875,18 @@ pub(crate) fn lower_method_call(
                 Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
                 _ => Type::Int,
             };
-            let elem_rust = cx.rust_type(&elem_ty);
             return TExpr {
                 ty: Type::Apply {
                     name: crate::Syntax::TYPE_PRIORITY_QUEUE.to_string(),
-                    args: vec![elem_ty],
+                    args: vec![elem_ty.clone()],
                 },
                 kind: TExprKind::StaticCall {
-                    type_prefix: format!("std::collections::BinaryHeap::<{}>", elem_rust),
+                    owner: host_generic_owner(
+                        "std::collections::BinaryHeap",
+                        vec![TPreludeArg::Jet(elem_ty)],
+                    ),
                     owner_type: None,
-                    method_rust: "new".to_string(),
+                    method: TMethodRef::bare("new"),
                     args: vec![],
                 },
             };
@@ -2852,9 +2905,9 @@ pub(crate) fn lower_method_call(
                     args: vec![key_ty, value_ty],
                 },
                 kind: TExprKind::StaticCall {
-                    type_prefix: "JetLru".to_string(),
+                    owner: host_owner("JetLru"),
                     owner_type: None,
-                    method_rust: "new".to_string(),
+                    method: TMethodRef::bare("new"),
                     args: vec![TCallArg {
                         value: cap_arg,
                         borrow: false,
@@ -2871,9 +2924,9 @@ pub(crate) fn lower_method_call(
             return TExpr {
                 ty: Type::Named(crate::Syntax::TYPE_BIT_SET.to_string()),
                 kind: TExprKind::StaticCall {
-                    type_prefix: "JetBitSet".to_string(),
+                    owner: host_owner("JetBitSet"),
                     owner_type: None,
-                    method_rust: "new".to_string(),
+                    method: TMethodRef::bare("new"),
                     args: vec![],
                 },
             };
@@ -2882,9 +2935,9 @@ pub(crate) fn lower_method_call(
             return TExpr {
                 ty: Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
                 kind: TExprKind::StaticCall {
-                    type_prefix: "JetByteBuffer".to_string(),
+                    owner: host_owner("JetByteBuffer"),
                     owner_type: None,
-                    method_rust: "new".to_string(),
+                    method: TMethodRef::bare("new"),
                     args: vec![],
                 },
             };
@@ -2907,17 +2960,19 @@ pub(crate) fn lower_method_call(
                 Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
                 _ => Type::Int,
             };
-            let elem_rust = cx.rust_type(&elem_ty);
             let deque_ty = Type::Apply {
                 name: "Deque".to_string(),
-                args: vec![elem_ty],
+                args: vec![elem_ty.clone()],
             };
             return TExpr {
                 ty: deque_ty,
                 kind: TExprKind::StaticCall {
-                    type_prefix: format!("std::collections::VecDeque::<{}>", elem_rust),
+                    owner: host_generic_owner(
+                        "std::collections::VecDeque",
+                        vec![TPreludeArg::Jet(elem_ty)],
+                    ),
                     owner_type: None,
-                    method_rust: "new".to_string(),
+                    method: TMethodRef::bare("new"),
                     args: vec![],
                 },
             };
@@ -2928,17 +2983,19 @@ pub(crate) fn lower_method_call(
                 Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
                 _ => Type::Int,
             };
-            let elem_rust = cx.rust_type(&elem_ty);
             let bag_ty = Type::Apply {
                 name: "Bag".to_string(),
-                args: vec![elem_ty],
+                args: vec![elem_ty.clone()],
             };
             return TExpr {
                 ty: bag_ty,
                 kind: TExprKind::StaticCall {
-                    type_prefix: format!("std::collections::HashMap::<{}, usize>", elem_rust),
+                    owner: host_generic_owner(
+                        "std::collections::HashMap",
+                        vec![TPreludeArg::Jet(elem_ty), TPreludeArg::HostUsize],
+                    ),
                     owner_type: None,
-                    method_rust: "new".to_string(),
+                    method: TMethodRef::bare("new"),
                     args: vec![],
                 },
             };
@@ -2951,17 +3008,19 @@ pub(crate) fn lower_method_call(
                 Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
                 _ => Type::Int,
             };
-            let elem_rust = cx.rust_type(&elem_ty);
             let pool_ty = Type::Apply {
                 name: "Pool".to_string(),
-                args: vec![elem_ty],
+                args: vec![elem_ty.clone()],
             };
             return TExpr {
                 ty: pool_ty,
                 kind: TExprKind::StaticCall {
-                    type_prefix: format!("{}jet_std::JetPool::<{}>", cx.root_prefix, elem_rust),
+                    owner: rooted_generic_owner(
+                        "jet_std::JetPool",
+                        vec![TPreludeArg::Jet(elem_ty)],
+                    ),
                     owner_type: None,
-                    method_rust: "new".to_string(),
+                    method: TMethodRef::bare("new"),
                     args: vec![],
                 },
             };
@@ -2972,13 +3031,15 @@ pub(crate) fn lower_method_call(
         if type_name == "Shared" && method == "new" && args.len() == 1 {
             let arg_t = lower_expr(&args[0].expr, cx, env);
             let elem_ty = arg_t.ty.clone();
-            let elem_rust = cx.rust_type(&elem_ty);
             return TExpr {
-                ty: Type::Shared(Box::new(elem_ty)),
+                ty: Type::Shared(Box::new(elem_ty.clone())),
                 kind: TExprKind::StaticCall {
-                    type_prefix: format!("{}jet_std::JetShared::<{}>", cx.root_prefix, elem_rust),
+                    owner: rooted_generic_owner(
+                        "jet_std::JetShared",
+                        vec![TPreludeArg::Jet(elem_ty)],
+                    ),
                     owner_type: None,
-                    method_rust: "new".to_string(),
+                    method: TMethodRef::bare("new"),
                     args: vec![TCallArg {
                         value: arg_t,
                         borrow: false,
@@ -3164,10 +3225,9 @@ pub(crate) fn lower_method_call(
         return TExpr {
             ty: ret_ty,
             kind: TExprKind::StaticCall {
-                // The AST path uses `cx.type_prefix(type_name)` = `user_<T>`.
-                type_prefix: cx.type_prefix(&type_name),
+                owner: TStaticOwner::User(type_name.clone()),
                 owner_type: Some(owner_type),
-                method_rust: mangle(method),
+                method: TMethodRef::inherent(method),
                 args: targs,
             },
         };
@@ -3195,7 +3255,7 @@ pub(crate) fn lower_method_call(
                 ty: ret_ty,
                 kind: TExprKind::MethodCall {
                     recv: Box::new(recv),
-                    method_rust: method.to_string(),
+                    method: TMethodRef::bare(method),
                     args: targs,
                     operator_line: None,
                 },
@@ -3231,13 +3291,13 @@ pub(crate) fn lower_method_call(
     // S62: a trait-impl method is called by its bare name (the trait impl owns it);
     // a plain user method is `user_<method>`. This mirrors `emit_method_call`'s
     // `trait_methods` check exactly — decided here, total, never re-derived in emit.
-    let method_rust = if cx
+    let method_ref = if cx
         .trait_methods
         .contains(&(ty_name.clone(), method.to_string()))
     {
-        method.to_string()
+        TMethodRef::bare(method)
     } else {
-        mangle(method)
+        TMethodRef::inherent(method)
     };
     // The result type, read from the resolved method return (total fact). It is
     // rarely load-bearing in emit (a binding carries sema's `b.ty`; arithmetic on a
@@ -3256,7 +3316,7 @@ pub(crate) fn lower_method_call(
         ty: ret_ty,
         kind: TExprKind::MethodCall {
             recv: Box::new(recv),
-            method_rust,
+            method: method_ref,
             args: targs,
             operator_line: None,
         },

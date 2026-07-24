@@ -3,7 +3,77 @@ use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TPattern;
+use crate::Codegen::TIR::TPatternPosition;
+use crate::Codegen::TIR::TPlace;
+use crate::Codegen::TIR::TPreludeArg;
+use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::TStrPart;
+
+/// The Rust pattern a `TPattern` spells. The position decides which of codegen's
+/// three pattern shapes applies; the pattern and its owning enum are the only
+/// other facts, both already resolved at lowering.
+pub(crate) fn emit_tir_pattern(pattern: &TPattern, cx: &Cx) -> String {
+    match &pattern.position {
+        TPatternPosition::Binding => {
+            crate::Codegen::emit_if_let_pattern(cx, &pattern.pattern)
+        }
+        TPatternPosition::Arm => crate::Codegen::emit_match_pattern(
+            cx,
+            &pattern.pattern,
+            pattern.enum_type.as_deref(),
+        ),
+        // A variant of a resolved enum layout compares against the bare variant
+        // path (no payload slots) — `tir_enum_lit_prefix` owns that spelling.
+        TPatternPosition::VariantPath => {
+            let owner = pattern.enum_type.as_deref().unwrap_or_default();
+            let variant = pattern.variant().unwrap_or_default();
+            crate::Codegen::TIR::tir_enum_lit_prefix(cx, owner, variant)
+        }
+        // D-ENC-DYN1: `DataTree::Object` binds its ordered entry vector to a temp;
+        // the body's prefix `let` collects it into the user-visible map.
+        TPatternPosition::DataEntries { temp } => {
+            format!("{}jet_std::DataTree::Object({})", cx.root_prefix, temp)
+        }
+    }
+}
+
+/// The Rust place an assignment/increment writes. A local slot spells itself; a
+/// structured place expression emits like any other node.
+pub(crate) fn emit_tir_place(place: &TPlace, cx: &Cx) -> String {
+    match place {
+        TPlace::Local(slot) => slot.rust_place(),
+        TPlace::Expr(expr) => emit_tir_expr(expr, cx),
+    }
+}
+
+/// The Rust type head a static call qualifies with. A user type resolves through
+/// `cx.type_prefix`; a prelude/host owner spells its resolved symbol path plus
+/// any generic arguments.
+pub(crate) fn emit_static_owner(owner: &TStaticOwner, cx: &Cx) -> String {
+    match owner {
+        TStaticOwner::User(type_name) => cx.type_prefix(type_name),
+        TStaticOwner::Prelude {
+            rooted,
+            path,
+            generics,
+        } => {
+            let root = if *rooted { cx.root_prefix.as_str() } else { "" };
+            if generics.is_empty() {
+                return format!("{root}{path}");
+            }
+            let args = generics
+                .iter()
+                .map(|arg| match arg {
+                    TPreludeArg::Jet(ty) => cx.rust_type(ty),
+                    TPreludeArg::HostUsize => "usize".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{root}{path}::<{args}>")
+        }
+    }
+}
 
 /// c109 Phase 6: format call/method arguments, reproducing `emit_call_args`
 /// (Source/Codegen/Expression.rs) byte-for-byte. The clone wrapper (`.clone()` or

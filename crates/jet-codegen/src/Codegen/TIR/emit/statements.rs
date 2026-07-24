@@ -3,6 +3,9 @@ use crate::Codegen::mangle;
 use crate::Codegen::user_type_rust;
 use crate::Codegen::TIR::emit::emit_math_swizzle_assign_stmt;
 use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::emit_tir_pattern;
+use crate::Codegen::TIR::emit_tir_place;
+use crate::Codegen::TIR::tir_range_guard;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
@@ -132,10 +135,10 @@ fn emit_if_head(
             pad,
             emit_expr_with_cleanups(cond, cx, active_cleanups)
         )),
-        TIfCond::IfLet { pat_str, subj } => out.push_str(&format!(
+        TIfCond::IfLet { pattern, subj } => out.push_str(&format!(
             "{}if let {} = {} {{\n",
             pad,
-            pat_str,
+            emit_tir_pattern(pattern, cx),
             emit_expr_with_cleanups(subj, cx, active_cleanups),
         )),
         TIfCond::IsNone { subj } => out.push_str(&format!(
@@ -143,11 +146,11 @@ fn emit_if_head(
             pad,
             emit_expr_with_cleanups(subj, cx, active_cleanups)
         )),
-        TIfCond::Matches { pat_str, subj } => out.push_str(&format!(
+        TIfCond::Matches { pattern, subj } => out.push_str(&format!(
             "{}if matches!(&({}), {}) {{\n",
             pad,
             emit_expr_with_cleanups(subj, cx, active_cleanups),
-            pat_str
+            emit_tir_pattern(pattern, cx)
         )),
         TIfCond::And { .. } => unreachable!("conjunction heads are atomic"),
     }
@@ -461,6 +464,7 @@ fn emit_tir_stmt(
             } else {
                 v
             };
+            let place = emit_tir_place(place, cx);
             match op {
                 Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.spell(), v)),
                 None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
@@ -705,17 +709,25 @@ fn emit_tir_stmt(
         // lowering. Arm bodies emit at indent+2.
         TStmt::EnumMatch {
             scrutinee,
+            clone_subject,
             arms,
             else_body,
             fallthrough,
         } => {
-            out.push_str(&format!("{}match {} {{\n", pad, scrutinee));
+            let subject = emit_tir_expr(scrutinee, cx);
+            let subject = if *clone_subject {
+                format!("({subject}).clone()")
+            } else {
+                subject
+            };
+            out.push_str(&format!("{}match {} {{\n", pad, subject));
             for arm in arms {
-                match &arm.guard {
+                let pattern = emit_tir_pattern(&arm.pattern, cx);
+                match tir_range_guard(&arm.pattern.pattern) {
                     Some(guard) => {
-                        out.push_str(&format!("{}    {} if {} => {{\n", pad, arm.pattern, guard))
+                        out.push_str(&format!("{}    {} if {} => {{\n", pad, pattern, guard))
                     }
-                    None => out.push_str(&format!("{}    {} => {{\n", pad, arm.pattern)),
+                    None => out.push_str(&format!("{}    {} => {{\n", pad, pattern)),
                 }
                 emit_tir_stmts_nested(
                     &arm.body,
@@ -885,7 +897,7 @@ fn emit_tir_stmt(
             label,
             var,
             var2,
-            collection_str,
+            source,
             collection,
             step,
             method_kind,
@@ -897,10 +909,11 @@ fn emit_tir_stmt(
             let mut stride_wrapper = false;
             let source_storage;
             let stride_suffix;
+            let source_rust = emit_tir_expr(source, cx);
             let collection_str = if let Some(step) = step {
                 stride_wrapper = true;
                 let stride = emit_expr_with_cleanups(step, cx, active_deferred_closes);
-                out.push_str(&format!("{}{{ let _jet_loop_source = {};\n", pad, collection_str));
+                out.push_str(&format!("{}{{ let _jet_loop_source = {};\n", pad, source_rust));
                 out.push_str(&format!("{}    let _jet_loop_stride = {};\n", pad, stride));
                 out.push_str(&format!("{}    if _jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
                 source_storage = "_jet_loop_source".to_string();
@@ -908,10 +921,10 @@ fn emit_tir_stmt(
                 source_storage.as_str()
             } else {
                 stride_suffix = String::new();
-                collection_str.as_str()
+                source_rust.as_str()
             };
             // c109 Phase 22: a method-call collection takes a distinct `emit_for_in`
-            // branch (`collection_str` holds the RECEIVER for chars/lines). Only the
+            // branch (`source` holds the RECEIVER for chars/lines). Only the
             // stdin form opens an extra block that needs an extra closing brace.
             let mut needs_extra_close = false;
             match method_kind {
@@ -1229,13 +1242,15 @@ fn emit_tir_stmt(
         // statements AFTER this one (`NAME.value(v)`, `NAME.suggest(…)`),
         // unlike `Region`/taskgroup, which are genuinely lexical.
         TStmt::Layout {
-            rust_place,
+            handle,
             label,
             body,
         } => {
             out.push_str(&format!(
                 "{}let {} = jet_layout::Handle::new({:?});\n",
-                pad, rust_place, label
+                pad,
+                handle.rust_place(),
+                label
             ));
             emit_tir_stmts_inline(body, cx, out, indent, active_deferred_closes);
         }
@@ -1268,7 +1283,7 @@ fn emit_tir_stmt(
             // block with neither handle nor snapshots erases to a plain block (its only
             // job was the D-TXN2 ceiling).
             let effective_handle: Option<String> = match handle {
-                Some(h) => Some(h.clone()),
+                Some(h) => Some(h.rust_place()),
                 None if !snapshots.is_empty() => Some("__jet_txn".to_string()),
                 None => None,
             };
@@ -1280,19 +1295,19 @@ fn emit_tir_stmt(
                     ));
                     // D-TXN-ROLLBACK layer 1+2: snapshot each mutated root BEFORE
                     // the body runs. Clone-based (None) or custom Rollback (Some).
-                    for (place_ref, rollback_ty) in snapshots {
+                    for (slot, rollback_ty) in snapshots {
+                        let place = slot.rust_place();
                         match rollback_ty {
                             None => {
                                 out.push_str(&format!(
-                                    "{}{}jet_txn::snapshot(&mut {}, {});\n",
-                                    inner_pad, cx.root_prefix, handle, place_ref
+                                    "{}{}jet_txn::snapshot(&mut {}, &mut {});\n",
+                                    inner_pad, cx.root_prefix, handle, place
                                 ));
                             }
                             Some(ty) => {
-                                let bare = place_ref.trim_start_matches("&mut ").to_string();
                                 out.push_str(&format!(
-                                    "{}{{ let __snap = ({}).snapshot(); {}jet_txn::snapshot_custom(&mut {}, {}, __snap, {}::restore); }}\n",
-                                    inner_pad, bare, cx.root_prefix, handle, place_ref, ty
+                                    "{}{{ let __snap = ({}).snapshot(); {}jet_txn::snapshot_custom(&mut {}, &mut {}, __snap, {}::restore); }}\n",
+                                    inner_pad, place, cx.root_prefix, handle, place, user_type_rust(&ty.name())
                                 ));
                             }
                         }

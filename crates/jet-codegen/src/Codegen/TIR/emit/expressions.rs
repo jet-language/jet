@@ -8,7 +8,10 @@ use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
 use crate::Codegen::TIR::emit_tir_call_args;
 use crate::Codegen::TIR::emit_tir_core_call;
+use crate::Codegen::TIR::emit_static_owner;
 use crate::Codegen::TIR::emit_tir_orfallback_rhs;
+use crate::Codegen::TIR::emit_tir_pattern;
+use crate::Codegen::TIR::emit_tir_place;
 use crate::Codegen::TIR::emit_tir_str;
 use crate::Codegen::TIR::emit_tir_value_block;
 use crate::Codegen::TIR::TIfCond;
@@ -41,9 +44,9 @@ fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx)
             then_block,
             else_block
         ),
-        TIfCond::IfLet { pat_str, subj } => format!(
+        TIfCond::IfLet { pattern, subj } => format!(
             "if let {} = {} {} else {}",
-            pat_str,
+            emit_tir_pattern(pattern, cx),
             emit_tir_expr(subj, cx),
             then_block,
             else_block
@@ -54,10 +57,10 @@ fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx)
             then_block,
             else_block
         ),
-        TIfCond::Matches { pat_str, subj } => format!(
+        TIfCond::Matches { pattern, subj } => format!(
             "if matches!(&({}), {}) {} else {}",
             emit_tir_expr(subj, cx),
-            pat_str,
+            emit_tir_pattern(pattern, cx),
             then_block,
             else_block
         ),
@@ -131,13 +134,27 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::BoolLit(b) => b.to_string(),
         TExprKind::CharLit(c) => format!("{:?}", c),
         TExprKind::StrLit(parts) => emit_tir_str(parts, cx),
-        TExprKind::Local(place) => place.clone(),
+        TExprKind::Local(slot) => slot.rust_place(),
         // D-TAG1: binding-free enum variant/group pattern test.
-        TExprKind::PatternMatches { subj, pat_str } => {
-            format!("matches!(&({}), {})", emit_tir_expr(subj, cx), pat_str)
+        TExprKind::PatternMatches { subj, pattern } => {
+            format!(
+                "matches!(&({}), {})",
+                emit_tir_expr(subj, cx),
+                emit_tir_pattern(pattern, cx)
+            )
         }
         // c109 Phase 24: a comptime const inlined verbatim (the pre-rendered value).
         TExprKind::ConstInline(val) => val.clone(),
+        // A declared const's Rust static name, resolved from its Jet name here so
+        // the TIR node carries only the name.
+        TExprKind::ConstRef(name) => cx
+            .consts
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| mangle(name).to_uppercase()),
+        TExprKind::DataEntriesToMap(entries) => {
+            format!("{}.into_iter().collect()", entries.rust_place())
+        }
         TExprKind::Print(arg) => {
             // Parallel `jet test` runs each test on its own thread (per-test
             // isolation, D-TESTKIT1 gap #3); a bare `println!` from inside a test
@@ -338,10 +355,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // lowering — emit only formats.
         TExprKind::MethodCall {
             recv,
-            method_rust,
+            method,
             args,
             operator_line,
         } => {
+            let method_rust = method.rust();
             let arg_str = emit_tir_call_args(args, cx);
             if let Some(line) = operator_line {
                 let trait_name = match method_rust.as_str() {
@@ -377,18 +395,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 7: a static method call. Mirrors the AST type-name dispatch:
         // `user_<Type>::user_<method>(args)`. All facts resolved at lowering.
         TExprKind::StaticCall {
-            type_prefix,
+            owner,
             owner_type,
-            method_rust,
+            method,
             args,
         } => {
             let arg_str = emit_tir_call_args(args, cx);
             let owner = match owner_type {
                 Some(ty @ Type::Apply { .. }) => format!("<{}>", cx.rust_type(ty)),
                 Some(ty) => cx.rust_type(ty),
-                None => type_prefix.clone(),
+                None => emit_static_owner(owner, cx),
             };
-            format!("{}::{}({})", owner, method_rust, arg_str)
+            format!("{}::{}({})", owner, method.rust(), arg_str)
         }
         // c109 Phase 9: a built-in collection/string method. The Map-vs-List-vs-String
         // branch was resolved into `op` at lowering; emit only formats, reproducing
@@ -816,6 +834,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 crate::AST::IncDecOp::Inc => "+",
                 crate::AST::IncDecOp::Dec => "-",
             };
+            let place = emit_tir_place(place, cx);
             if *postfix {
                 format!("{{ let __jet_old = {place}; {place} {delta}= 1; __jet_old }}")
             } else {

@@ -199,15 +199,14 @@ pub(crate) fn render_safe_locals(env: &LowerEnv) -> String {
             if !safe {
                 return None;
             }
-            // `safe_locals_expr` builds `(*rust_name).jet_show()` for a deref'd slot and
-            // `(rust_name).jet_show()` otherwise. The replica's `place` is exactly
-            // `(*rust_name)` (deref) or `rust_name` — decode it back so the rendered
-            // string is byte-identical (NOT `((*rust_name)).jet_show()`).
-            let value_expr = if place.starts_with("(*") && place.ends_with(')') {
-                let rust_name = &place[2..place.len() - 1];
-                format!("(*{}).jet_show()", rust_name)
+            // `safe_locals_expr` builds `(*rust_name).jet_show()` for a deref'd slot
+            // and `(rust_name).jet_show()` otherwise. The slot's `deref` fact says
+            // which, so no place string has to be decoded back.
+            let rust_name = place.rust_name();
+            let value_expr = if place.deref {
+                format!("(*{rust_name}).jet_show()")
             } else {
-                format!("({}).jet_show()", place)
+                format!("({rust_name}).jet_show()")
             };
             Some((name.clone(), value_expr))
         })

@@ -1,6 +1,5 @@
 use crate::AST::{AccessConvention, Expr, Lambda, LambdaBody, Stmt, Type};
 use crate::Codegen::Cx;
-use crate::Codegen::mangle;
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
@@ -10,6 +9,7 @@ use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TExternArg;
 use crate::Codegen::TIR::TFnCoerce;
+use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::unit_type;
 
 /// Last expression-producing statement in a lambda block (mirrors sema tail rules).
@@ -60,7 +60,9 @@ pub(crate) fn lambda_body_ty_expecting(
             let ty =
                 p.ty.clone()
                     .or_else(|| expected_params.and_then(|ps| ps.get(i)).cloned());
-            lam_env.locals.insert(p.name.clone(), (mangle(&p.name), ty));
+            lam_env
+                .locals
+                .insert(p.name.clone(), (TLocal::user(&p.name), ty));
         }
         lam_env
     }

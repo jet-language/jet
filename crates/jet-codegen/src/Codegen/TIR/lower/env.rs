@@ -1,5 +1,5 @@
 use crate::AST::{Expr, LValue, Stmt, Type};
-use crate::Codegen::mangle;
+use crate::Codegen::TIR::TLocal;
 use crate::Syntax;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -21,7 +21,7 @@ use std::rc::Rc;
 /// partiality where it is load-bearing" lesson, again).
 
 pub(crate) struct LowerEnv {
-    pub(super) locals: HashMap<String, (String, Option<Type>)>,
+    pub(super) locals: HashMap<String, (TLocal, Option<Type>)>,
     /// c109 Phase 8: the enclosing function's unmangled Jet name, used by a `?`
     /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
     /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
@@ -104,36 +104,35 @@ impl LowerEnv {
     /// Bind `name` to its resolved Rust place + type. The same lexical map drives
     /// expression resolution and rich-panic locals, so an out-of-scope branch binding
     /// can never be captured in generated Rust.
-    pub(super) fn bind(&mut self, name: &str, place: String, ty: Option<Type>) {
-        self.locals.insert(name.to_string(), (place, ty));
+    pub(super) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
+        self.locals.insert(name.to_string(), (slot, ty));
+    }
+    /// The structured slot for `name`. This is the single fact every engine
+    /// resolves a local by; the Rust spellings below derive from it.
+    pub(super) fn local_of(&self, name: &str) -> TLocal {
+        match self.locals.get(name) {
+            Some((slot, _)) => slot.clone(),
+            None => TLocal::user(name),
+        }
     }
     pub(super) fn place_of(&self, name: &str) -> String {
-        match self.locals.get(name) {
-            Some((place, _)) => place.clone(),
-            None => mangle(name),
-        }
+        self.local_of(name).rust_place()
     }
     pub(super) fn ty_of(&self, name: &str) -> Option<Type> {
         self.locals.get(name).and_then(|(_, t)| t.clone())
     }
-    /// c109 Phase 4: a name reads as a borrow when its resolved place is a deref
-    /// (`(*name)`) — a by-reference parameter slot. The match lowering clones such
-    /// a subject so the `match` owns the value, mirroring `emit_pattern_match_switch`.
+    /// c109 Phase 4: a name reads as a borrow when its slot is a deref — a
+    /// by-reference parameter. The match lowering clones such a subject so the
+    /// `match` owns the value, mirroring `emit_pattern_match_switch`.
     pub(super) fn is_borrowed(&self, name: &str) -> bool {
         self.borrowed_locals.contains(name)
-            || matches!(self.locals.get(name), Some((place, _)) if place.starts_with("(*"))
+            || matches!(self.locals.get(name), Some((slot, _)) if slot.deref)
     }
     /// The bare Rust binding name (without the deref wrapper), e.g. `user_light`
-    /// for a slot whose place is `(*user_light)`. Used by the match-subject clone,
-    /// which clones the borrow itself (`(user_light).clone()`), not `(*user_light)`.
+    /// for a by-reference slot. Used by the match-subject clone, which clones the
+    /// borrow itself (`(user_light).clone()`), not `(*user_light)`.
     pub(super) fn rust_name_of(&self, name: &str) -> String {
-        match self.locals.get(name) {
-            Some((place, _)) if place.starts_with("(*") && place.ends_with(')') => {
-                place[2..place.len() - 1].to_string()
-            }
-            Some((place, _)) => place.clone(),
-            None => mangle(name),
-        }
+        self.local_of(name).rust_name()
     }
 }
 

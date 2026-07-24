@@ -812,11 +812,18 @@ impl LowerCtx<'_, '_> {
             TStmt::ForIn {
                 label,
                 var,
-                collection_str,
+                source,
+                collection,
                 step,
+                method_kind,
                 body,
                 ..
             } => {
+                // The streaming/`.chars()` iteration forms need host iterators the
+                // JIT does not model; fall back to the AOT tier for them.
+                if method_kind.is_some() {
+                    return Err("jit for-in method-call collection unsupported".to_string());
+                }
                 let stride = match step {
                     Some(step) => {
                         let stride = self.lower_expr(step)?;
@@ -831,19 +838,15 @@ impl LowerCtx<'_, '_> {
                     }
                     None => self.b.ins().iconst(types::I64, 1),
                 };
-                let coll_place = collection_str.trim().to_string();
-                let coll_ty = self
-                    .var_tys
-                    .get(&coll_place)
-                    .ok_or_else(|| format!("jit for-in unknown collection `{coll_place}`"))?;
-                let elem_ty = jit_list_iter_elem_type(coll_ty).ok_or_else(|| {
-                    format!("jit for-in collection type unsupported: {coll_ty:?}")
+                let elem_ty = jit_list_iter_elem_type(&collection.ty).ok_or_else(|| {
+                    format!(
+                        "jit for-in collection type unsupported: {:?}",
+                        collection.ty
+                    )
                 })?;
-                let coll_var = self
-                    .vars
-                    .get(&coll_place)
-                    .copied()
-                    .ok_or_else(|| format!("jit for-in unknown collection `{coll_place}`"))?;
+                // The collection value is computed once, before the loop header, so it
+                // dominates both the header and the body.
+                let coll = self.lower_expr(source)?;
                 let header = self.b.create_block();
                 let body_block = self.b.create_block();
                 let step_block = self.b.create_block();
@@ -855,7 +858,6 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(header);
                 let idx = self.b.use_var(idx_var);
-                let coll = self.b.use_var(coll_var);
                 let len_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.list_len, self.b.func);

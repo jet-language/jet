@@ -20,6 +20,7 @@ use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
 use crate::Codegen::TIR::lower_lambda;
 use crate::Codegen::TIR::lower::lower_binding_free_variant_pattern_test;
+use crate::Codegen::TIR::lower::lower_comptime_scalar;
 use crate::Codegen::TIR::lower::lower_incdec_place;
 use crate::Codegen::TIR::lower_method_call;
 use crate::Codegen::TIR::lower_one_call_arg;
@@ -197,10 +198,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // AST `emit_expr` Ident arm returns `cx.consts[name]` before any env/fn-value
             // check — so a const takes precedence even over a same-named local, matching
             // byte-for-byte). The `ty` is a placeholder (never read — see `ConstInline`).
-            if let Some(val) = cx.consts.get(name) {
+            if cx.consts.contains_key(name) {
                 return TExpr {
                     ty: env.ty_of(name).unwrap_or(Type::Int),
-                    kind: TExprKind::ConstInline(val.clone()),
+                    kind: lower_comptime_scalar(cx.const_values.get(name))
+                        .unwrap_or_else(|| TExprKind::ConstRef(name.clone())),
                 };
             }
             // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
@@ -230,7 +232,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
             TExpr {
                 ty,
-                kind: TExprKind::Local(env.place_of(name)),
+                kind: TExprKind::Local(env.local_of(name)),
             }
         }
         Expr::ComptimeSplice {
@@ -605,7 +607,7 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
                 let callee_t = TExpr {
                     ty: callee_ty,
-                    kind: TExprKind::Local(env.place_of(&call.name)),
+                    kind: TExprKind::Local(env.local_of(&call.name)),
                 };
                 let params = match &callee_t.ty {
                     Type::Fn { params, .. } => Some(params.as_slice()),
