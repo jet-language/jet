@@ -623,6 +623,7 @@ pub fn core_fixed_sig(
             vec![(read, json.clone()), (read, Type::Named("XMLCanonical".to_string()))],
             Some(result_ty(Type::String, Type::Named("XMLError".to_string()))),
         )),
+<<<<<<< HEAD
         // D-ENCXML-PROJECTION1=A: focused helpers. `decode`/`decode_bytes`/`expanded_name`
         // return types come from core_call (turbofish / named tuple).
         ("core.encoding.xml", "root") => Some((
@@ -643,6 +644,42 @@ pub fn core_fixed_sig(
                 Type::Named("XMLError".to_string()),
             )),
         )),
+||||||| parent of 77405c61e (fix(#776): wire xml projection APIs; drop bad binary_pattern line)
+=======
+        ("core.encoding.xml", "root") => Some((
+            vec![(read, json.clone())],
+            Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
+        )),
+        ("core.encoding.xml", "expanded_name") => Some((
+            vec![(read, json.clone())],
+            Some(result_ty(
+                Type::Tuple(vec![
+                    ("raw".to_string(), Box::new(Type::String)),
+                    ("prefix".to_string(), Box::new(Type::Option(Box::new(Type::String)))),
+                    ("local".to_string(), Box::new(Type::String)),
+                    (
+                        "namespace_uri".to_string(),
+                        Box::new(Type::Option(Box::new(Type::String))),
+                    ),
+                ]),
+                Type::Named("XMLError".to_string()),
+            )),
+        )),
+        ("core.encoding.xml", "attribute") => Some((
+            vec![(read, json.clone()), (read, Type::String)],
+            Some(result_ty(
+                Type::Option(Box::new(Type::String)),
+                Type::Named("XMLError".to_string()),
+            )),
+        )),
+        ("core.encoding.xml", "content") => Some((
+            vec![(read, json.clone())],
+            Some(result_ty(
+                Type::List(Box::new(json.clone())),
+                Type::Named("XMLError".to_string()),
+            )),
+        )),
+>>>>>>> 77405c61e (fix(#776): wire xml projection APIs; drop bad binary_pattern line)
         ("core.encoding.xml", "reader") => Some((
             vec![
                 (moved, Type::Named("FileReader".to_string())),

@@ -1071,6 +1071,7 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.xml", "canonical") => {
             format!("{}(&({}), &({}))", helper("jet_std_xml_canonical"), arg(0), arg(1))
         }
+<<<<<<< HEAD
         ("core.encoding.xml", "root") => {
             format!("{}(&({}))", helper("jet_std_xml_root"), arg(0))
         }
@@ -1137,6 +1138,49 @@ pub(crate) fn emit_tir_core_call(
                 options
             )
         }
+||||||| parent of 77405c61e (fix(#776): wire xml projection APIs; drop bad binary_pattern line)
+=======
+        ("core.encoding.xml", "root") => {
+            format!("{}(&({}))", helper("jet_std_xml_root"), arg(0))
+        }
+        ("core.encoding.xml", "expanded_name") => {
+            format!("{}(&({}))", helper("jet_std_xml_expanded_name"), arg(0))
+        }
+        ("core.encoding.xml", "attribute") => {
+            format!("{}(&({}), &({}))", helper("jet_std_xml_attribute"), arg(0), arg(1))
+        }
+        ("core.encoding.xml", "content") => {
+            format!("{}(&({}))", helper("jet_std_xml_content"), arg(0))
+        }
+        ("core.encoding.xml", "decode") => {
+            let options = if args.len() > 1 {
+                arg(1)
+            } else {
+                format!("{}jet_std::XMLParseOptions::safe()", cx.root_prefix)
+            };
+            format!(
+                "{}::<{}>(&({}), {})",
+                helper("jet_enc_xml_decode"),
+                enc_target_rust(ret_ty, cx),
+                arg(0),
+                options
+            )
+        }
+        ("core.encoding.xml", "decode_bytes") => {
+            let options = if args.len() > 1 {
+                arg(1)
+            } else {
+                format!("{}jet_std::XMLParseOptions::safe()", cx.root_prefix)
+            };
+            format!(
+                "{}::<{}>(&({}), {})",
+                helper("jet_enc_xml_decode_bytes"),
+                enc_target_rust(ret_ty, cx),
+                arg(0),
+                options
+            )
+        }
+>>>>>>> 77405c61e (fix(#776): wire xml projection APIs; drop bad binary_pattern line)
         ("core.encoding.cbor", "parse") => {
             let options = if args.len() > 1 { arg(1) } else { format!("{}jet_std::CBOROptions::safe()", cx.root_prefix) };
             format!("{}(&({}), {})", helper("jet_enc_cbor_parse"), arg(0), options)
