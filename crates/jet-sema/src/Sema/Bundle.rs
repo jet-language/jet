@@ -947,6 +947,27 @@ fn check_bundle_opts_for_output(
     freestanding: bool,
     allow_impure: bool,
     explicit_output: Option<&str>,
+    incremental: Option<&mut IncrementalSemaCache>,
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+    let edition = bundle.edition.clone();
+    super::Edition::with_package_edition(&edition, || {
+        check_bundle_opts_for_output_inner(
+            bundle,
+            mode,
+            freestanding,
+            allow_impure,
+            explicit_output,
+            incremental,
+        )
+    })
+}
+
+fn check_bundle_opts_for_output_inner(
+    bundle: &mut ProgramBundle,
+    mode: CompileMode,
+    freestanding: bool,
+    allow_impure: bool,
+    explicit_output: Option<&str>,
     mut incremental: Option<&mut IncrementalSemaCache>,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
     let mut diags = super::BudgetSpecs::validate_bundle(bundle);
@@ -2524,6 +2545,7 @@ mod structure_tests {
             web_partition_report: None,
             dep_roots: HashMap::new(),
             active_os: crate::Syntax::OsTarget::host(),
+            edition: "2027".to_string(),
         }
     }
 

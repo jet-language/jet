@@ -550,6 +550,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--online", help: "with doctor: allow network checks" },
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
     FlagSpec { long: "--dry-run", help: "with fix: show changes without writing" },
+    FlagSpec { long: "--edition", help: "with fix: apply edition migration rewrites --edition=<year>" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
     FlagSpec { long: "--restart", help: "with dev: always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "with dev: hot-swap compatible edits and restart after type changes" },

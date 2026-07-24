@@ -124,6 +124,10 @@ pub(crate) fn emit_tir_core_call(
         }
     };
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
+    let edition_at_least = |baseline: &str| {
+        let year = |edition: &str| edition.parse::<u16>().unwrap_or(2026);
+        year(&cx.package_edition) >= year(baseline)
+    };
     let regex_fn = |name: &str| {
         let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
         format!("{}::{}", crate_name, name)
@@ -801,7 +805,21 @@ pub(crate) fn emit_tir_core_call(
             }
         }
         ("core.encoding.json", "canonical") => {
-            format!("{}(&({}))", helper("jet_std_json_render_canonical"), arg(0))
+            if edition_at_least("2027") {
+                let limits = if args.len() > 1 {
+                    arg(1)
+                } else {
+                    format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix)
+                };
+                format!(
+                    "{}(&({}), &{})",
+                    helper("jet_enc_json_canonical"),
+                    arg(0),
+                    limits
+                )
+            } else {
+                format!("{}(&({}))", helper("jet_std_json_render_canonical"), arg(0))
+            }
         }
         ("core.encoding.json", "events") => {
             format!("{}(&({}))", helper("jet_std_json_events"), arg(0))
@@ -1075,6 +1093,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.cbor", "to_bytes_canonical") => {
             format!("{}(&({}))", helper("jet_enc_cbor_to_bytes_canonical"), arg(0))
         }
+        ("core.encoding.cbor", "encode") => {
+            format!("{}(&({}))", helper("jet_enc_cbor_encode"), arg(0))
+        }
         ("core.encoding.cbor", "reader") => {
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
             format!("{}({}, {})", helper("jet_enc_cbor_reader"), arg(0), limits)
@@ -1123,13 +1144,39 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.encoding.cbor", "decode") => {
             let options = if args.len() > 1 { arg(1) } else { format!("{}jet_std::CBOROptions::safe()", cx.root_prefix) };
-            // CBOR decodes one whole Codable value. Unlike CSV, a list return is
-            // the target itself, not a row wrapper whose element type is T.
-            let target = match ret_ty {
-                Type::Result { ok, .. } => cx.rust_type(ok),
-                other => cx.rust_type(other),
-            };
-            format!("{}::<{}>(&({}), {})", helper("jet_enc_cbor_decode"), target, arg(0), options)
+            match ret_ty {
+                Type::Result { ok, err, .. }
+                    if matches!(err.as_ref(), Type::Named(name) if name == "String") =>
+                {
+                    format!("{}(&({}))", helper("jet_enc_cbor_decode_legacy"), arg(0))
+                }
+                Type::Result { ok, .. }
+                    if matches!(ok.as_ref(), Type::Named(name) if name == "DataTree")
+                        && edition_at_least("2027") =>
+                {
+                    format!("{}(&({}), {})", helper("jet_enc_cbor_parse"), arg(0), options)
+                }
+                Type::Result { ok, .. } => {
+                    let target = cx.rust_type(ok);
+                    format!(
+                        "{}::<{}>(&({}), {})",
+                        helper("jet_enc_cbor_decode"),
+                        target,
+                        arg(0),
+                        options
+                    )
+                }
+                other => {
+                    let target = cx.rust_type(other);
+                    format!(
+                        "{}::<{}>(&({}), {})",
+                        helper("jet_enc_cbor_decode"),
+                        target,
+                        arg(0),
+                        options
+                    )
+                }
+            }
         }
         // D-UUIDENC1=A: hex and base64 encode/decode.
         ("core.encoding.hex", "encode") => {
@@ -1142,19 +1189,57 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", helper("jet_std_b64_encode"), arg(0))
         }
         ("core.encoding.base64", "decode") => {
-            format!("{}(&({}))", helper("jet_std_b64_decode"), arg(0))
+            if edition_at_least("2027") {
+                let allow_ws = if args.len() > 1 { arg(1) } else { "false".to_string() };
+                let allow_pad = if args.len() > 2 { arg(2) } else { "false".to_string() };
+                format!(
+                    "{}(&({}), {}, {})",
+                    helper("jet_std_b64_decode_opts"),
+                    arg(0),
+                    allow_ws,
+                    allow_pad
+                )
+            } else {
+                format!("{}(&({}))", helper("jet_std_b64_decode"), arg(0))
+            }
         }
         ("core.encoding.base64", "encode_url") => {
             format!("{}(&({}))", helper("jet_std_b64url_encode"), arg(0))
         }
         ("core.encoding.base64", "decode_url") => {
-            format!("{}(&({}))", helper("jet_std_b64url_decode"), arg(0))
+            if edition_at_least("2027") {
+                let allow_ws = if args.len() > 1 { arg(1) } else { "false".to_string() };
+                let allow_pad = if args.len() > 2 { arg(2) } else { "false".to_string() };
+                format!(
+                    "{}(&({}), {}, {})",
+                    helper("jet_std_b64url_decode_opts"),
+                    arg(0),
+                    allow_ws,
+                    allow_pad
+                )
+            } else {
+                format!("{}(&({}))", helper("jet_std_b64url_decode"), arg(0))
+            }
         }
         ("core.encoding.base32", "encode") => {
             format!("{}(&({}))", helper("jet_std_base32_encode"), arg(0))
         }
         ("core.encoding.base32", "decode") => {
-            format!("{}(&({}))", helper("jet_std_base32_decode"), arg(0))
+            if edition_at_least("2027") {
+                let allow_ws = if args.len() > 1 { arg(1) } else { "false".to_string() };
+                let allow_pad = if args.len() > 2 { arg(2) } else { "false".to_string() };
+                let allow_lower = if args.len() > 3 { arg(3) } else { "false".to_string() };
+                format!(
+                    "{}(&({}), {}, {}, {})",
+                    helper("jet_std_base32_decode_opts"),
+                    arg(0),
+                    allow_ws,
+                    allow_pad,
+                    allow_lower
+                )
+            } else {
+                format!("{}(&({}))", helper("jet_std_base32_decode"), arg(0))
+            }
         }
         // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
         ("core.uuid", "v4") => format!("{}()", helper("jet_std_uuid_v4")),

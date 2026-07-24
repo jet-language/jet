@@ -2796,3 +2796,153 @@ impl jet_std::CBORWriter {
 fn jet_enc_cbor_writer_write(writer:&mut jet_std::CBORWriter,event:jet_std::DataEvent)->Result<(),jet_std::EncodingError>{writer.write_event(event)}
 fn jet_enc_cbor_writer_flush(writer:&mut jet_std::CBORWriter)->Result<(),jet_std::EncodingError>{writer.flush_output()}
 fn jet_enc_cbor_writer_finish(writer:&mut jet_std::CBORWriter)->Result<(),jet_std::EncodingError>{writer.finish_output()}
+
+fn jet_json_canonical_quote_text(text: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(b'"');
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for ch in text.chars() {
+        match ch {
+            '"' => out.extend_from_slice(b"\\\""),
+            '\\' => out.extend_from_slice(b"\\\\"),
+            '\n' => out.extend_from_slice(b"\\n"),
+            '\r' => out.extend_from_slice(b"\\r"),
+            '\t' => out.extend_from_slice(b"\\t"),
+            '\u{08}' => out.extend_from_slice(b"\\b"),
+            '\u{0c}' => out.extend_from_slice(b"\\f"),
+            c if c <= '\u{1f}' => {
+                let value = c as usize;
+                out.extend_from_slice(&[
+                    b'\\',
+                    b'u',
+                    HEX[(value >> 12) & 15],
+                    HEX[(value >> 8) & 15],
+                    HEX[(value >> 4) & 15],
+                    HEX[value & 15],
+                ]);
+            }
+            c => {
+                let mut encoded = [0u8; 4];
+                out.extend_from_slice(c.encode_utf8(&mut encoded).as_bytes());
+            }
+        }
+    }
+    out.push(b'"');
+    out
+}
+
+fn jet_enc_json_canonical_tree(
+    value: &jet_std::DataTree,
+    limits: &jet_std::EncodingLimits,
+    depth: i64,
+) -> Result<Vec<u8>, jet_std::EncodingError> {
+    if depth > limits.max_depth {
+        return Err(jet_encoding_error(
+            jet_std::EncodingErrorKind::Limit,
+            0,
+            1,
+            1,
+            format!("max_depth {} exceeded", limits.max_depth),
+        ));
+    }
+    match value {
+        jet_std::DataTree::Null => Ok(b"null".to_vec()),
+        jet_std::DataTree::Bool(true) => Ok(b"true".to_vec()),
+        jet_std::DataTree::Bool(false) => Ok(b"false".to_vec()),
+        jet_std::DataTree::Int(n) => {
+            if (*n as f64) as i128 != *n as i128 {
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::Unsupported,
+                    0,
+                    1,
+                    1,
+                    "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text",
+                ));
+            }
+            Ok(jet_json_jcs_number(*n as f64).into_bytes())
+        }
+        jet_std::DataTree::Float(f) => {
+            if !f.is_finite() {
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::Unsupported,
+                    0,
+                    1,
+                    1,
+                    "JCS cannot encode a non-finite Float",
+                ));
+            }
+            Ok(jet_json_jcs_number(*f).into_bytes())
+        }
+        jet_std::DataTree::Text(s) => Ok(jet_json_canonical_quote_text(s)),
+        jet_std::DataTree::Bytes(_) => Err(jet_encoding_error(
+            jet_std::EncodingErrorKind::Unsupported,
+            0,
+            1,
+            1,
+            "JSON cannot encode Bytes; encode bytes as Text explicitly",
+        )),
+        jet_std::DataTree::Array(items) => {
+            let mut out = Vec::from(b"[");
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push(b',');
+                }
+                out.extend_from_slice(&jet_enc_json_canonical_tree(item, limits, depth + 1)?);
+            }
+            out.push(b']');
+            Ok(out)
+        }
+        jet_std::DataTree::Object(entries) => {
+            let mut sorted = entries.clone();
+            sorted.sort_by(|left, right| jet_json_jcs_key_cmp(&left.0, &right.0));
+            if sorted.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+                return Err(jet_encoding_error(
+                    jet_std::EncodingErrorKind::Syntax,
+                    0,
+                    1,
+                    1,
+                    "JCS requires unique object keys",
+                ));
+            }
+            let mut out = Vec::from(b"{");
+            for (index, (key, item)) in sorted.iter().enumerate() {
+                if index > 0 {
+                    out.push(b',');
+                }
+                out.extend_from_slice(&jet_json_canonical_quote_text(key));
+                out.push(b':');
+                out.extend_from_slice(&jet_enc_json_canonical_tree(item, limits, depth + 1)?);
+            }
+            out.push(b'}');
+            Ok(out)
+        }
+    }
+}
+
+fn jet_enc_json_canonical(
+    value: &jet_std::DataTree,
+    limits: &jet_std::EncodingLimits,
+) -> Result<String, jet_std::EncodingError> {
+    let bytes = jet_enc_json_canonical_tree(value, limits, 1)?;
+    if limits.max_total_bytes.is_some_and(|max| bytes.len() as i64 > max) {
+        return Err(jet_encoding_error(
+            jet_std::EncodingErrorKind::Limit,
+            0,
+            1,
+            1,
+            format!(
+                "max_total_bytes {} exceeded",
+                limits.max_total_bytes.unwrap_or(0)
+            ),
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| {
+        jet_encoding_error(
+            jet_std::EncodingErrorKind::Unsupported,
+            0,
+            1,
+            1,
+            "canonical JSON output is not UTF-8",
+        )
+    })
+}

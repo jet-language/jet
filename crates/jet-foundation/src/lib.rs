@@ -25,6 +25,12 @@ pub mod Terminal;
 pub mod Traits;
 pub mod WebPartition;
 pub mod XmlPull;
+#[path = "BaseEncodingStrict.rs"]
+pub mod base_encoding_strict;
+#[path = "BaseEncodingDispatch.rs"]
+pub mod base_encoding_dispatch;
+#[path = "PackageEdition.rs"]
+pub mod PackageEdition;
 pub use BuildEffects::BuildEffect;
 pub use ExactUnitConversion::{
     UnitRoundingMode, UNIT_ROUNDING_NEGATIVE_DIGITS, UNIT_ROUNDING_UNREPRESENTABLE,

@@ -329,6 +329,9 @@ pub struct ProgramBundle {
     /// the arm matching this OS, and it must equal codegen's `active_os` so the
     /// selected arm's gated `impl` is the one codegen keeps.
     pub active_os: crate::OsTarget::OsTarget,
+    /// D-REL3 / card #712: resolved package edition (`"2026"`, `"2027"`, …).
+    /// Single-file programs use the toolchain's newest stable edition.
+    pub edition: String,
 }
 
 #[derive(Debug)]

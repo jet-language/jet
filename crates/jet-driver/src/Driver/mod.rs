@@ -1827,6 +1827,7 @@ fn compile_src_with_options_and_policy(
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OsTarget::host(),
+        edition: crate::Manifest::latest_edition().to_string(),
     };
     // Active foreign caches may contribute generated C-ABI bridge modules.
     if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
@@ -2114,6 +2115,7 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
         active_os: crate::Syntax::OsTarget::host(),
+        edition: crate::Manifest::latest_edition().to_string(),
     };
     if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
         return diags;

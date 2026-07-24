@@ -1978,7 +1978,13 @@ fn main() {
     };
 
     match cmd {
-        "fix" => run_fix(target, jet_argv.iter().any(|a| a == "--dry-run")),
+        "fix" => {
+            let dry_run = jet_argv.iter().any(|a| a == "--dry-run");
+            let edition = jet_argv
+                .iter()
+                .find_map(|a| a.strip_prefix("--edition=").map(str::to_string));
+            run_fix(target, dry_run, edition.as_deref());
+        }
         "new" => run_new(target, annotated),
         "test" => {
             let update_snapshots = jet_argv
