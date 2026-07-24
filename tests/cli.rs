@@ -20,6 +20,13 @@ fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
 
+/// D-LENS-RUN1: native execution proof for programs default `jet run` cannot JIT.
+fn jet_run_release(file: &str) -> Command {
+    let mut cmd = Command::new(jet());
+    cmd.args(["run", "--release", file]);
+    cmd
+}
+
 fn output_with_retry(cmd: &mut Command) -> Output {
     let mut last = None;
     for attempt in 0..8 {
@@ -80,7 +87,7 @@ fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
     let bind=Command::new(jet()).args(["inspect","bind","lua","ops.lua","--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Lua bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     let cache=dir.join(".jet/bindings/lua");assert!(cache.join("libjet_lua_ops.a").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("state=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n"));
     let generated=fs::read_to_string(cache.join("ops.jet")).unwrap();assert!(generated.contains("pub struct TableView")&&generated.contains("pub fn counters_view(session: Session, deadline_ms: Int) -> TableView ? LuaError")&&generated.contains("pub fn view_get_int(view: TableView, key: String) -> Int ? LuaError")&&generated.contains("pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool ? LuaError"));
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded Lua binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded Lua binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::copy(root.join("tests/fixtures/lua_lifecycle.c"),dir.join("lifecycle.c")).unwrap();let lua_dir=fs::read_to_string(cache.join("ops.lua-path")).unwrap();let lua_dir=lua_dir.trim();let link_dir=format!("-L{lua_dir}");let rpath=format!("-Wl,-rpath,{lua_dir}");
     let cc=Command::new("cc").arg("lifecycle.c").args(["-L.jet/bindings/lua","-l:libjet_lua_ops.a"]).arg(link_dir).arg(rpath).args(["-llua","-lpthread","-ldl","-lm","-o","lifecycle"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"Lua lifecycle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let lifecycle=Command::new(dir.join("lifecycle")).current_dir(&dir).output().unwrap();assert!(lifecycle.status.success(),"Lua lifecycle probe failed: {:?}",lifecycle.status.code());
 }
@@ -1331,7 +1338,7 @@ fn run(args: RunArgs) {
     )
     .unwrap();
     let typed = Command::new(jet())
-        .args(["run", "typed.jet", "--", "--name", "Ada", "--verbose"])
+        .args(["run", "--release", "typed.jet", "--", "--name", "Ada", "--verbose"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -1343,7 +1350,7 @@ fn run(args: RunArgs) {
     assert_eq!(String::from_utf8_lossy(&typed.stdout), "Ada\n2\ntrue\n");
 
     let help = Command::new(jet())
-        .args(["run", "typed.jet", "--", "--help"])
+        .args(["run", "--release", "typed.jet", "--", "--help"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -1410,7 +1417,7 @@ fn run(args: RunArgs) {
 
     fs::write(dir.join("plain.jet"), "fn run() { print(\"plain\") }\n").unwrap();
     let plain = Command::new(jet())
-        .args(["run", "plain.jet"])
+        .args(["run", "--release", "plain.jet"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -1460,7 +1467,7 @@ fn run(args: RunArgs) {
     .unwrap();
 
     let run = Command::new(jet())
-        .args(["run", "run.jet", "--", "--name", "Ada", "--verbose"])
+        .args(["run", "--release", "run.jet", "--", "--name", "Ada", "--verbose"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -1517,7 +1524,7 @@ fn run(cmd: Cmd) {}
     .unwrap();
 
     let run = Command::new(jet())
-        .args(["run", "run.jet", "--", "serve", "--port", "8080"])
+        .args(["run", "--release", "run.jet", "--", "serve", "--port", "8080"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -1598,7 +1605,7 @@ fn run(args: RunArgs) { print(args.name) }
     .unwrap();
 
     let run = Command::new(jet())
-        .args(["run", "run.jet", "--", "--name", "Ada"])
+        .args(["run", "--release", "run.jet", "--", "--name", "Ada"])
         .current_dir(&dir)
         .output()
         .unwrap();
@@ -1811,7 +1818,8 @@ fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
             if jet::CLI::is_canonical_top_level(action.name) {
                 continue;
             }
-            let replacement = format!("jet {} {}", group.name, action.name);
+            let owner = jet::CLI::moved_command_group(action.name).unwrap_or(group.name);
+            let replacement = format!("jet {} {}", owner, action.name);
             let out = Command::new(jet()).arg(action.name).arg("sentinel").output().unwrap();
             assert_eq!(out.status.code(), Some(2), "bare {}", action.name);
             let stderr = String::from_utf8_lossy(&out.stderr);
@@ -2489,7 +2497,7 @@ end module scalar_math
     )
     .unwrap();
     let run = Command::new(jet())
-        .args(["run", "main.jet"])
+        .args(["run", "--release", "main.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -2546,7 +2554,7 @@ end module matrix_math
     )
     .unwrap();
     let run = Command::new(jet())
-        .args(["run", "main.jet"])
+        .args(["run", "--release", "main.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -2565,7 +2573,7 @@ end module matrix_math
     )
     .unwrap();
     let bad = Command::new(jet())
-        .args(["run", "bad.jet"])
+        .args(["run", "--release", "bad.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -2624,7 +2632,7 @@ func main() {}
     )
     .unwrap();
     let run = Command::new(jet())
-        .args(["run", "main.jet"])
+        .args(["run", "--release", "main.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -2693,7 +2701,7 @@ func main() {}
     )
     .unwrap();
     let run = Command::new(jet())
-        .args(["run", "main.jet"])
+        .args(["run", "--release", "main.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
@@ -2770,7 +2778,7 @@ fn run() --[Java, Io]-> {
     counter.close(^handle)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(run.status.success(),"embedded JVM binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n5.0\n-7\n");
     assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden foreign detail"));
@@ -2809,7 +2817,7 @@ fn run() --[DotNet, Io]-> {
     counter.close(^handle)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded CoreCLR binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n5.0\n-7\n");assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden managed detail"));
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded CoreCLR binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n5.0\n-7\n");assert!(!String::from_utf8_lossy(&run.stderr).contains("hidden managed detail"));
 }
 
 #[test]
@@ -2835,7 +2843,7 @@ fn run() --[Tcl, Io]-> {
     tcl.close(^session)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(run.status.success(),"embedded Tcl binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n43\n42\n2.5\ntcl-error\n");
     assert!(!String::from_utf8_lossy(&run.stderr).contains("foreign stack secret"));
@@ -2883,7 +2891,7 @@ fn run() --[Ada, Io]-> {
     print(geo.calls(0) ?? -1)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(run.status.success(),"generated Ada binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout),"-1.0\n0\n42.0\n1\n");
 }
@@ -2936,7 +2944,7 @@ fn run() --[Pascal, Io]-> {
     print(inv.destroyed_count())
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(run.status.success(),"generated Pascal binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n42\n0\n1\n");
     fs::write(dir.join("stale.c"),r#"#include <stdint.h>
 extern int64_t jet_pascal_inventory_counter_new(int64_t);
@@ -3013,7 +3021,7 @@ fn run() --[PowerShell, Io]-> {
     ops.close(^session)
 }
 "#).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PowerShell binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"{\"count\":1,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n{\"count\":2,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n\"failed\"\n\"timeout\"\n");
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PowerShell binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),"{\"count\":1,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n{\"count\":2,\"list\":[1,\"two\"],\"nested\":{\"ok\":true},\"nothing\":null,\"scalar\":3.5}\n\"failed\"\n\"timeout\"\n");
     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -3043,7 +3051,7 @@ fn perl_bind_round_trips_datatree_state_timeout_and_cancellation() {
     let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/perl");fs::copy(example.join("ops.pl"),&script).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","perl"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Perl bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/perl");assert!(cache.join("libjet_perl_ops.a").is_file());assert!(cache.join("ops_worker.pl").is_file());assert!(cache.join("ops.provenance").is_file());
     fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Perl binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Perl binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -3073,7 +3081,7 @@ fn ruby_bind_round_trips_datatree_state_timeout_and_cancellation() {
     let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/ruby");fs::copy(example.join("ops.rb"),&script).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","ruby"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Ruby bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/ruby");assert!(cache.join("libjet_ruby_ops.a").is_file());assert!(cache.join("ops_worker.rb").is_file());assert!(cache.join("ops.provenance").is_file());
     fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Ruby binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated Ruby binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("cancel.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -3103,7 +3111,7 @@ fn php_bind_runs_a_persistent_bounded_worker_pool() {
     let example=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/interop/php");fs::copy(example.join("ops.php"),&script).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","php"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"PHP bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/php");assert!(cache.join("libjet_php_ops.a").is_file());assert!(cache.join("ops_worker.php").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("pool_workers=4"));
     fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PHP binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated PHP binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("pool.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <time.h>
@@ -3159,7 +3167,7 @@ hostile_plot <- function(input) {
 "#).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","r"]).arg(&script).args(["--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"R bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));let cache=dir.join(".jet/bindings/r");assert!(cache.join("libjet_r_ops.a").is_file());assert!(cache.join("ops_worker.R").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("workers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"));assert!(!provenance.to_ascii_lowercase().contains("cran"));
     fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
-    let run=Command::new(jet()).args(["run","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated R binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
+    let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"generated R binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::write(dir.join("lifecycle.c"),r#"#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -3627,7 +3635,7 @@ fn passthrough_forwards_tokens_after_separator() {
     // three forwarded tokens. io.args().len() == 4.
     let p = args_fixture(&line!().to_string());
     let out = Command::new(jet())
-        .args(["run", p.to_str().unwrap(), "--", "--port", "8080", "x"])
+        .args(["run", "--release", p.to_str().unwrap(), "--", "--port", "8080", "x"])
         .output()
         .unwrap();
     assert_eq!(
@@ -3648,7 +3656,7 @@ fn bare_separator_gives_empty_passthrough() {
     // `jet run file.jet --` — bare `--` with nothing after; program sees 1 arg.
     let p = args_fixture(&line!().to_string());
     let out = Command::new(jet())
-        .args(["run", p.to_str().unwrap(), "--"])
+        .args(["run", "--release", p.to_str().unwrap(), "--"])
         .output()
         .unwrap();
     assert_eq!(
@@ -3670,7 +3678,7 @@ fn no_separator_positional_regression() {
     // guard). `jet run file.jet hello` → len == 2.
     let p = args_fixture(&line!().to_string());
     let out = Command::new(jet())
-        .args(["run", p.to_str().unwrap(), "hello"])
+        .args(["run", "--release", p.to_str().unwrap(), "hello"])
         .output()
         .unwrap();
     assert_eq!(
