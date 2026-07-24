@@ -738,7 +738,7 @@ fn decode_source_map_mappings(map: &str) -> Vec<(usize, usize, usize, usize, usi
 
 #[test]
 fn js_source_map_uses_line_markers_and_hides_host_paths() {
-    let src = "#Target(Web)\n#Target(Js)\nfn run() {\n\n    first :: 1\n    print(\"left {first}\\n//# jet-source-line 999\\nright\")\n}\n";
+    let src = "#Target(Web)\n#Target(Js)\nfn run() {\n\n    first :: 1\n    print(\"left {first}\\n//# __jet_source_map line 999\\nright\")\n}\n";
     let shown = format!(
         "{}/private/build-host/project/main.jet",
         std::env::temp_dir().display()
@@ -761,13 +761,13 @@ fn js_source_map_uses_line_markers_and_hides_host_paths() {
     assert!(
         first
             .js_source_map
-            .contains("\"#Target(Web)\\n#Target(Js)\\nfn run() {\\n\\n    first :: 1\\n    print(\\\"left {first}\\\\n//# jet-source-line 999\\\\nright\\\")\\n}\\n\""),
+            .contains("\"#Target(Web)\\n#Target(Js)\\nfn run() {\\n\\n    first :: 1\\n    print(\\\"left {first}\\\\n//# __jet_source_map line 999\\\\nright\\\")\\n}\\n\""),
         "sourcesContent must contain the exact Jet bytes:\n{}",
         first.js_source_map
     );
     assert!(!first.js_source_map.contains("/private/build-host"));
     assert!(
-        first.js_app.contains("\\x2f/# jet-source-line 999"),
+        first.js_app.contains("//# __jet_source_map line 999"),
         "user text must survive internal marker stripping:\n{}",
         first.js_app
     );
