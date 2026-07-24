@@ -2361,6 +2361,15 @@ reads an input value or text content. `web.storage.local` and
 `web.storage.session` provide `get`, `set`, `remove`, and `clear`; `get` returns
 `String?` so ordinary `??` handles missing keys.
 
+**Web build (hybrid JS + Wasm).** `jet build --target web <entry.jet>` emits
+`build/app.js`, `build/app.wasm`, `build/jet_dom_runtime.js`, and
+`build/web.manifest.json`. View code with `Browser` effects (or `#Target(Js)`)
+lowers to the DOM shim; pure compute may compile to Wasm and export through
+`#WasmExport`. Unsupported executable forms fail at preflight with
+`E-WEB-TIR-UNSUPPORTED` rather than silent omission. Example index, scoped
+test matrix, and explicit non-goals:
+`docs/sidequests/web-backend-wasm.md`.
+
 ---
 
 ### `core.mem` — arenas and regions
