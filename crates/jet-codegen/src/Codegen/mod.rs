@@ -346,6 +346,7 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"),
     include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"),
     include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs"),
+    include_str!("../Prelude/CoreLib/Top/EncodingHostileIo.rs"),
     include_str!("../Prelude/CoreLib/Top/EncodingStream.rs"),
     include_str!("../Prelude/CoreLib/Top/DataFmt.rs"),
     include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"),
