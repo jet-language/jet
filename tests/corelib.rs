@@ -3307,6 +3307,29 @@ fn run() {
 }
 
 #[test]
+fn core_args_nested_subcommand_does_not_overflow() {
+    let src = r#"
+use core.args as args
+
+fn run() {
+    serve :: args.spec()
+        .option_int("port", "listen port", "PORT")
+    spec :: args.spec()
+        .flag_short("verbose", "v", "print extra detail")
+        .option_int("jobs", "worker count", "N")
+        .option_default("mode", "run mode", "MODE", "fast")
+        .option_choice("color", "color policy", "WHEN", "auto,always,never")
+        .repeat("tag", "classification tag", "TAG")
+        .subcommand("serve", "run the server", serve)
+        .version("args-audit 1.0")
+    print(spec.help().contains("serve"))
+}
+"#;
+    let out = compile_temp("args_nested_subcommand.jet", src);
+    assert!(out.rust.contains("jet_args_subcommand"));
+}
+
+#[test]
 fn core_os_facts_and_interrupt_hook_compile() {
     let dir = std::env::temp_dir().join(format!("jet_corelib_os_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();

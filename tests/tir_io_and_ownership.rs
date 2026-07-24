@@ -211,6 +211,26 @@ fn run() {
     assert!(diag.fix.contains("~s"), "{diag:?}");
 }
 
+/// D-MEM-PARAM1=A: extracting an owned optional payload from a read
+/// parameter also needs an explicit copy before codegen.
+#[test]
+fn borrowed_parameter_option_fallback_needs_explicit_copy() {
+    let src = "\
+struct Config {
+    path: String?
+}
+fn selected(config: Config) -> String {
+    return config.path ?? \"default.toml\"
+}
+fn run() {
+    print(selected(Config.{ path: None }))
+}
+";
+    let diags = jet::compile(src).expect_err("borrowed optional payload needs an explicit copy");
+    let diag = diags.iter().find(|d| d.code == "E0120").expect("E0120");
+    assert!(diag.fix.contains('~'), "{diag:?}");
+}
+
 /// D-MUTSELF1: a `mut self` method that assigns a field in place — `self.field = v`
 /// and the compound `self.field += v` (S17) — lowers to `((*self)).field = …` on the
 /// `&mut Self` receiver. rustc accepts it (I2); the receiver mutates as written.

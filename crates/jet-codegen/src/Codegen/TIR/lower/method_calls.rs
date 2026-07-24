@@ -40,7 +40,6 @@ use crate::Codegen::TIR::lower_core_closure_call;
 use crate::Codegen::TIR::lower::core_module_path_from_receiver;
 use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::LowerEnv;
-use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_expr_as_mut_place;
 use crate::Codegen::TIR::lower_owned_expr;
 use crate::Codegen::TIR::lower_lambda;
@@ -126,7 +125,18 @@ pub(crate) fn lower_method_call(
     resolved_ret: Option<&Type>,
     cx: &Cx,
     env: &mut LowerEnv,
+    lowered_receiver: Option<TExpr>,
 ) -> TExpr {
+    let lowered_receiver = std::cell::RefCell::new(lowered_receiver);
+    let lower_expr = |expr: &Expr, cx: &Cx, env: &mut LowerEnv| {
+        if std::ptr::eq(expr, receiver) {
+            if let Some(lowered) = lowered_receiver.borrow_mut().take() {
+                return lowered;
+            }
+        }
+        crate::Codegen::TIR::lower_expr(expr, cx, env)
+    };
+
     if let Expr::Ident(name, _) = receiver {
         if env.is_gc(name) {
             let root = env.place_of(name);
@@ -170,6 +180,7 @@ pub(crate) fn lower_method_call(
                 resolved_ret,
                 cx,
                 env,
+                None,
             );
             if let Some((place, ty)) = saved {
                 env.bind(name, place, ty);

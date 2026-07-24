@@ -1104,6 +1104,59 @@ impl<'a> Interp<'a> {
         }
     }
 
+    /// Evaluate a fluent method receiver from the innermost call outward.
+    ///
+    /// Method-call ASTs nest through `receiver`. Walking that spine first keeps
+    /// long fluent APIs off the Rust call stack while preserving the ordinary
+    /// method dispatcher for every link.
+    fn eval_method_chain(
+        &mut self,
+        expr: &Expr,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let mut calls = Vec::new();
+        let mut cursor = expr;
+        while let Expr::MethodCall { receiver, .. } = cursor {
+            calls.push(cursor);
+            cursor = receiver;
+            // `eval` already burned the outer call. Recursive evaluation used
+            // to burn each inner call before dispatching it; preserve that
+            // order here. The non-method base still burns in the innermost
+            // dispatch's ordinary `eval(receiver, ...)`.
+            if matches!(cursor, Expr::MethodCall { .. }) {
+                self.burn(cursor.span())?;
+            }
+        }
+        let mut evaluated_receiver = None;
+        while let Some(call) = calls.pop() {
+            let Expr::MethodCall {
+                receiver,
+                method,
+                method_span,
+                type_args,
+                args,
+                recv_type,
+                resolved_ret,
+                ..
+            } = call
+            else {
+                unreachable!("method chain contains only method calls")
+            };
+            evaluated_receiver = Some(self.eval_method(
+                receiver,
+                method,
+                *method_span,
+                type_args,
+                recv_type.as_deref(),
+                resolved_ret.as_ref(),
+                args,
+                scope,
+                evaluated_receiver,
+            )?);
+        }
+        evaluated_receiver.ok_or_else(|| unsupported("an empty method chain", expr.span()))
+    }
+
     pub(super) fn eval(
         &mut self,
         e: &Expr,
@@ -1404,25 +1457,7 @@ impl<'a> Interp<'a> {
                 }
                 self.call_closure(&f, vals, *span)
             }
-            Expr::MethodCall {
-                receiver,
-                method,
-                method_span,
-                type_args,
-                args,
-                recv_type,
-                resolved_ret,
-                ..
-            } => self.eval_method(
-                receiver,
-                method,
-                *method_span,
-                type_args,
-                recv_type.as_deref(),
-                resolved_ret.as_ref(),
-                args,
-                scope,
-            ),
+            Expr::MethodCall { .. } => self.eval_method_chain(e, scope),
             Expr::If {
                 cond,
                 then_body,

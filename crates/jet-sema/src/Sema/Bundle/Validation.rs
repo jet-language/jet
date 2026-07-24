@@ -984,12 +984,7 @@ fn check_func_body_incremental(
     cache: Option<&mut IncrementalSemaCache>,
     cache_allowed: bool,
 ) -> Vec<Diagnostic> {
-    // The checked function contains source spans used by diagnostics and IDE
-    // facts. Include them in the cache input so whitespace-only edits cannot
-    // reuse stale positions even when the canonical AST is unchanged.
-    let debug = format!("{function:?}");
     let cache_allowed = cache_allowed && !stmts_have_comptime_evaluation(&function.body);
-    let input = debug.into_bytes();
     let Some(cache) = cache.filter(|_| cache_allowed) else {
         return check_func_body_bundle(
             function,
@@ -1011,6 +1006,13 @@ fn check_func_body_incremental(
             pending_diagnostics_out,
         );
     };
+    // The checked function contains source spans used by diagnostics and IDE
+    // facts. Include them in the cache input so whitespace-only edits cannot
+    // reuse stale positions even when the canonical AST is unchanged. Build
+    // this recursive Debug form only when the caller can actually use the
+    // cache: deep fluent expressions can exceed the ordinary test-thread stack,
+    // and disabled-cache checks have no fingerprint consumer.
+    let input = format!("{function:?}").into_bytes();
     if let Some(hit) = cache.get(&key, &input) {
         *function = hit.function;
         summaries.extend(hit.summaries);

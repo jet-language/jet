@@ -101,7 +101,7 @@ struct Person {
     age: Int
 }
 fn name_of(p: Person) -> String {
-    return p.name
+    return ~p.name
 }
 fn run() {
     p :: Person.{ name: \"Grace\", age: 40 }
@@ -644,12 +644,12 @@ fn list_and_map_remove() {
     }
     let src = "\
 fn drop_first(xs: [Int]) -> Int {
-    ys := xs
+    ys := ~xs
     r := ys.remove(0)
     return ys.len()
 }
 fn drop_key(m: [String: Int]) -> Int {
-    m2 := m
+    m2 := ~m
     r := m2.remove(\"a\")
     return m2.len()
 }
@@ -681,6 +681,24 @@ fn run() {
     let (code, stdout) = build_and_run("tir_join", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "a-b-c\n");
+}
+
+/// `join(sep)` also works on a borrowed list window.
+#[test]
+fn view_join_with_separator() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    words := [\"a\", \"b\", \"c\"]
+    middle :: words[0..1]
+    print(middle.join(\"-\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_view_join", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "a-b\n");
 }
 
 /// A `when` over a fallible value with `ok`/`err` patterns (Shape C). The subject

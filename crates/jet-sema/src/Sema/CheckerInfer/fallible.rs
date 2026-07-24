@@ -275,6 +275,11 @@ impl<'a> Checker<'a> {
                 return None;
             }
         };
+        self.reject_borrowed_param_subplace(
+            value,
+            Some(&payload),
+            "supply an owned fallback payload",
+        );
         match fallback {
             OrFallback::Value(e) => {
                 // Infer in place: sema rewrites inside the fallback (index
