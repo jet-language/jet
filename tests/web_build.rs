@@ -806,6 +806,25 @@ fn web_body_outside_tir_is_diagnostic() {
 }
 
 #[test]
+fn web_unsupported_tui_backend_method_is_preflight_diagnostic() {
+    let src = r#"#Target(Web)
+use core.ui as ui
+
+#Target(Js)
+fn run() {
+    b :: ui.tui_backend()
+    print(b.frame_lines())
+}
+"#;
+    let diags = jet::compile_web_with_path(src, "tests/fixtures/web_tui_frame_lines.jet")
+        .expect_err("Tui-only backend methods must not pass JS preflight");
+    assert!(
+        diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"),
+        "{diags:?}"
+    );
+}
+
+#[test]
 fn web_executable_emission_is_structurally_tir_only() {
     let source = include_str!("../crates/jet-codegen/src/Codegen/Web.rs");
     assert!(source.contains("tir: TIR::TFunc"), "web functions must retain lowered TFunc");

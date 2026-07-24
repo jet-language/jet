@@ -397,6 +397,35 @@ fn web_lambda_supported(lam: &TIR::TLambda) -> bool {
     }
 }
 
+/// JS DOM backend methods with a `jetDom.*` lowering (must match `tir_js_expr`).
+fn web_js_ui_backend_method_supported(method: &str, argc: usize) -> bool {
+    matches!(
+        (method, argc),
+        ("measure", 2)
+            | ("layout", 2)
+            | ("paint", 1)
+            | ("commands", 0)
+            | ("on_event", 1)
+            | ("set_focus_group", 1)
+            | ("focused_label", 0)
+    )
+}
+
+/// Handle calls the JS preflight and emitter both understand (D-WEBTIR1).
+fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
+    match op {
+        TIR::THandleOp::UiBackendMethod { method } => {
+            web_js_ui_backend_method_supported(method, argc)
+        }
+        TIR::THandleOp::ReactiveGet => argc == 0,
+        TIR::THandleOp::ReactiveSet => argc == 1,
+        TIR::THandleOp::ReactiveEffectMethod { method } => {
+            argc == 0 && matches!(method.as_str(), "unsubscribe" | "is_active")
+        }
+        _ => false,
+    }
+}
+
 fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     use TIR::TExprKind as E;
     match &expr.kind {
@@ -414,7 +443,11 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
-        E::HandleMethod { recv, op, args } => matches!(op, TIR::THandleOp::UiBackendMethod { .. } | TIR::THandleOp::ReactiveGet | TIR::THandleOp::ReactiveSet | TIR::THandleOp::ReactiveEffectMethod { .. }) && web_expr_supported(recv) && args.iter().all(web_expr_supported),
+        E::HandleMethod { recv, op, args } => {
+            web_js_handle_method_supported(op, args.len())
+                && web_expr_supported(recv)
+                && args.iter().all(web_expr_supported)
+        }
         E::NumericMethod { recv, op: TIR::TNumericOp::CastAs { .. } | TIR::TNumericOp::FloatToInt { .. } } => web_expr_supported(recv),
         E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => web_expr_supported(value) && web_expr_supported(fallback),
         E::Lambda(lam) => web_lambda_supported(lam),
@@ -2023,27 +2056,38 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs, file_prefix)?),
         E::MethodCall { recv, method_rust, args, .. } => format!("{}.{}({})", tir_js_expr(recv, funcs, file_prefix)?, web_name(method_rust), tir_call_args(args, funcs, file_prefix)?),
         E::CoreCall { module, method, args, .. } => tir_core_call(module, method, args, funcs, file_prefix)?,
-        E::HandleMethod { recv, op: TIR::THandleOp::UiBackendMethod { method }, args } => {
+        E::HandleMethod { recv, op, args } => {
+            if !web_js_handle_method_supported(op, args.len()) {
+                return Err(());
+            }
             let recv = tir_js_expr(recv, funcs, file_prefix)?;
             let a = tir_plain_args(args, funcs, file_prefix)?;
-            match (method.as_str(), a.len()) {
-                ("measure", 2) => format!("jetDom.measure({}, {})", a[0], a[1]),
-                ("layout", 2) => format!("jetDom.layout({recv}, {}, {})", a[0], a[1]),
-                ("paint", 1) => format!("jetDom.paint({recv}, {})", a[0]),
-                ("commands", 0) => format!("jetDom.commands({recv})"),
-                ("on_event", 1) => format!("jetDom.onEvent({recv}, {})", a[0]),
-                ("set_focus_group", 1) => format!("jetDom.setFocusGroup({recv}, {})", a[0]),
-                ("focused_label", 0) => format!("jetDom.focusedLabel({recv})"),
-                _ => return Err(()),
-            }
-        }
-        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveGet, args } if args.is_empty() => format!("{}.get()", tir_js_expr(recv, funcs, file_prefix)?),
-        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveSet, args } if args.len() == 1 => format!("{}.set({})", tir_js_expr(recv, funcs, file_prefix)?, tir_js_expr(&args[0], funcs, file_prefix)?),
-        E::HandleMethod { recv, op: TIR::THandleOp::ReactiveEffectMethod { method }, args } if args.is_empty() => {
-            let recv = tir_js_expr(recv, funcs, file_prefix)?;
-            match method.as_str() {
-                "unsubscribe" => format!("{recv}.unsubscribe()"),
-                "is_active" => format!("{recv}.isActive()"),
+            match op {
+                TIR::THandleOp::UiBackendMethod { method } => match (method.as_str(), a.len()) {
+                    ("measure", 2) => format!("jetDom.measure({}, {})", a[0], a[1]),
+                    ("layout", 2) => format!("jetDom.layout({recv}, {}, {})", a[0], a[1]),
+                    ("paint", 1) => format!("jetDom.paint({recv}, {})", a[0]),
+                    ("commands", 0) => format!("jetDom.commands({recv})"),
+                    ("on_event", 1) => format!("jetDom.onEvent({recv}, {})", a[0]),
+                    ("set_focus_group", 1) => {
+                        format!("jetDom.setFocusGroup({recv}, {})", a[0])
+                    }
+                    ("focused_label", 0) => format!("jetDom.focusedLabel({recv})"),
+                    _ => return Err(()),
+                },
+                TIR::THandleOp::ReactiveGet if a.is_empty() => {
+                    format!("{recv}.get()")
+                }
+                TIR::THandleOp::ReactiveSet if a.len() == 1 => {
+                    format!("{recv}.set({})", a[0])
+                }
+                TIR::THandleOp::ReactiveEffectMethod { method } if a.is_empty() => {
+                    match method.as_str() {
+                        "unsubscribe" => format!("{recv}.unsubscribe()"),
+                        "is_active" => format!("{recv}.isActive()"),
+                        _ => return Err(()),
+                    }
+                }
                 _ => return Err(()),
             }
         }
@@ -2211,6 +2255,33 @@ fn unop(op: &crate::AST::UnOp) -> &'static str {
     match op {
         Neg => "-",
         Not => "!",
+    }
+}
+
+#[cfg(test)]
+mod tir_contract_tests {
+    use super::*;
+    use super::TIR::THandleOp;
+
+    #[test]
+    fn js_handle_preflight_matches_emit_table() {
+        assert!(web_js_ui_backend_method_supported("paint", 1));
+        assert!(!web_js_ui_backend_method_supported("frame_lines", 0));
+        assert!(!web_js_ui_backend_method_supported("label", 1));
+        assert!(web_js_handle_method_supported(&THandleOp::ReactiveGet, 0));
+        assert!(!web_js_handle_method_supported(&THandleOp::ReactiveGet, 1));
+        assert!(web_js_handle_method_supported(
+            &THandleOp::ReactiveEffectMethod {
+                method: "is_active".to_string(),
+            },
+            0,
+        ));
+        assert!(!web_js_handle_method_supported(
+            &THandleOp::ReactiveEffectMethod {
+                method: "pause".to_string(),
+            },
+            0,
+        ));
     }
 }
 
