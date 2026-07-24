@@ -1,0 +1,18 @@
+// Browser acceptance fixture: a later paint drops a child node from the tree.
+#Target(Web)
+use core.ui as ui
+
+#Target(Js)
+fn render(show: Bool) {
+    backend :: ui.null_backend()
+    tree := ui.box([ui.node("keep", 80.0, 24.0)])
+    if show {
+        tree = ui.box([ui.node("keep", 80.0, 24.0), ui.node("drop", 80.0, 24.0)])
+    }
+    constraint :: ui.constraint(0.0, 0.0, 120.0, 60.0)
+    size :: backend.measure(tree, constraint)
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
+}
+
+fn run() {}
