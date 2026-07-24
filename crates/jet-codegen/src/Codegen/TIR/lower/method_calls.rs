@@ -75,7 +75,6 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::TPreludeArg;
 use crate::Codegen::TIR::TStaticOwner;
-use crate::Codegen::TIR::tir_enum_lit_prefix;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::tir_src_line_at;
 use crate::Codegen::TIR::tls_static_op;
@@ -988,7 +987,6 @@ pub(crate) fn lower_method_call(
                 // `cx.enum_variants`; lower `Key.Variant(args)` to a TIR enum lit.
                 let key_type = crate::Syntax::TYPE_KEY;
                 if type_name == key_type && is_key_variant(method) {
-                    let prefix = tir_enum_lit_prefix(cx, type_name, method);
                     let payload = if args.is_empty() {
                         TEnumPayload::Unit
                     } else {
@@ -1007,7 +1005,11 @@ pub(crate) fn lower_method_call(
                     };
                     return TExpr {
                         ty: Type::Named(type_name.clone()),
-                        kind: TExprKind::EnumLit { prefix, payload },
+                        kind: TExprKind::EnumLit {
+                            enum_type: type_name.clone(),
+                            variant: method.to_string(),
+                            payload,
+                        },
                     };
                 }
                 if type_name == "DataEvent"
@@ -1025,14 +1027,14 @@ pub(crate) fn lower_method_call(
                     return TExpr {
                         ty: Type::Named("DataEvent".to_string()),
                         kind: TExprKind::EnumLit {
-                            prefix: format!("{}jet_std::DataEvent::{}", cx.root_prefix, method),
+                            enum_type: "DataEvent".to_string(),
+                            variant: method.to_string(),
                             payload,
                         },
                     };
                 }
                 if let Some(variants) = cx.enum_variants.get(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
-                        let prefix = tir_enum_lit_prefix(cx, type_name, method);
                         let payload = if args.is_empty() {
                             TEnumPayload::Unit
                         } else {
@@ -1046,7 +1048,11 @@ pub(crate) fn lower_method_call(
                         };
                         return TExpr {
                             ty: Type::Named(type_name.clone()),
-                            kind: TExprKind::EnumLit { prefix, payload },
+                            kind: TExprKind::EnumLit {
+                                enum_type: type_name.clone(),
+                                variant: method.to_string(),
+                                payload,
+                            },
                         };
                     }
                 }

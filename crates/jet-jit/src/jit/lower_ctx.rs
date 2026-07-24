@@ -1825,17 +1825,23 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
             }
-            TExprKind::EnumLit { prefix, payload } => match payload {
+            TExprKind::EnumLit {
+                enum_type,
+                variant,
+                payload,
+            } => match payload {
                 TEnumPayload::Unit => {
                     let disc = self
                         .meta
-                        .enum_variant_disc_legacy(prefix)
-                        .ok_or_else(|| format!("jit enum lit `{prefix}`"))?;
+                        .enum_variant_index(enum_type, variant)
+                        .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     Ok(self.b.ins().iconst(types::I64, disc))
                 }
                 TEnumPayload::Positional(values) if values.len() == 1 && matches!(values[0].value.ty, Type::Int) => {
-                    let disc = self.meta.enum_variant_disc_legacy(prefix)
-                        .ok_or_else(|| format!("jit enum lit `{prefix}`"))?;
+                    let disc = self
+                        .meta
+                        .enum_variant_index(enum_type, variant)
+                        .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     let payload = self.lower_expr(&values[0].value)?;
                     let shifted = self.b.ins().ishl_imm(payload, 8);
                     let disc = self.b.ins().iconst(types::I64, disc);

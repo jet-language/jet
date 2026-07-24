@@ -35,7 +35,6 @@ use crate::Codegen::TIR::TEnumPayload;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TFnValueKind;
-use crate::Codegen::TIR::tir_enum_lit_prefix;
 use crate::Codegen::TIR::TModuleCallForm;
 use crate::Codegen::TIR::TOrFallback;
 use crate::Codegen::TIR::TStrPart;
@@ -71,23 +70,28 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
             Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
             _ => Type::Int,
         };
-        let p = emit_tir_expr(&pool_t, cx);
-        let i = emit_tir_expr(&id_t, cx);
-        let base_place = format!(
-            "(*{root}jet_std::jet_pool_get_mut(&mut ({p}), {i}, {file:?}, {line}))",
-            root = cx.root_prefix,
-            file = cx.file,
-        );
         match field {
             None => TExpr {
                 ty: elem_ty,
-                kind: TExprKind::ConstInline(base_place),
+                kind: TExprKind::PoolSlot {
+                    pool: Box::new(pool_t),
+                    id: Box::new(id_t),
+                    mutable: true,
+                    field_rust: None,
+                    line,
+                },
             },
             Some(f) => {
                 let field_ty = struct_field_type(cx, &elem_ty, f).unwrap_or(Type::Int);
                 TExpr {
                     ty: field_ty,
-                    kind: TExprKind::ConstInline(format!("{}.{}", base_place, mangle(f))),
+                    kind: TExprKind::PoolSlot {
+                        pool: Box::new(pool_t),
+                        id: Box::new(id_t),
+                        mutable: true,
+                        field_rust: Some(mangle(f)),
+                        line,
+                    },
                 }
             }
         }
@@ -1477,7 +1481,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named(enum_name.clone()),
                         kind: TExprKind::EnumLit {
-                            prefix: tir_enum_lit_prefix(cx, enum_name, member),
+                            enum_type: enum_name.clone(),
+                            variant: member.clone(),
                             payload: TEnumPayload::Unit,
                         },
                     };
@@ -1489,7 +1494,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named("DataEvent".to_string()),
                         kind: TExprKind::EnumLit {
-                            prefix: format!("{}jet_std::DataEvent::{}", cx.root_prefix, member),
+                            enum_type: "DataEvent".to_string(),
+                            variant: member.clone(),
                             payload: TEnumPayload::Unit,
                         },
                     };
@@ -1506,7 +1512,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named(enum_name.clone()),
                         kind: TExprKind::EnumLit {
-                            prefix: format!("{}jet_std::{}::{}", cx.root_prefix, enum_name, member),
+                            enum_type: enum_name.clone(),
+                            variant: member.clone(),
                             payload: TEnumPayload::Unit,
                         },
                     };
@@ -1521,7 +1528,8 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: Type::Named(resolved_enum.to_string()),
                         kind: TExprKind::EnumLit {
-                            prefix: format!("{}jet_email::{}::{}", cx.root_prefix, resolved_enum, member),
+                            enum_type: resolved_enum.to_string(),
+                            variant: member.clone(),
                             payload: TEnumPayload::Unit,
                         },
                     };
@@ -1534,20 +1542,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     // `Field` arm (Expression.rs ~L232): `{root}{mod}::user_<Enum>::<V>`.
                     // Keyed on the ENUM-name (`enum_name`, the receiver) in `cx.foreign_types`,
                     // NOT the variant — matching the AST byte-for-byte.
-                    let prefix = match cx.foreign_types.get(enum_name.as_str()) {
-                        Some(rust_mod) => format!(
-                            "{}{}::user_{}::{}",
-                            cx.root_prefix,
-                            rust_mod,
-                            enum_name,
-                            mangle(member)
-                        ),
-                        None => format!("user_{}::{}", enum_name, mangle(member)),
-                    };
                     return TExpr {
                         ty: Type::Named(enum_name.clone()),
                         kind: TExprKind::EnumLit {
-                            prefix,
+                            enum_type: enum_name.clone(),
+                            variant: member.clone(),
                             payload: TEnumPayload::Unit,
                         },
                     };
@@ -1727,7 +1726,6 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let resolved_type = cx
                 .core_qualified_rust_type_name(type_name)
                 .unwrap_or(type_name.as_str());
-            let prefix = tir_enum_lit_prefix(cx, resolved_type, variant);
             let payload = if args.is_empty() {
                 TEnumPayload::Unit
             } else if args.iter().all(|a| matches!(a, EnumLitArg::Positional(_))) {
@@ -1776,7 +1774,11 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             };
             TExpr {
                 ty: Type::Named(resolved_type.to_string()),
-                kind: TExprKind::EnumLit { prefix, payload },
+                kind: TExprKind::EnumLit {
+                    enum_type: resolved_type.to_string(),
+                    variant: variant.clone(),
+                    payload,
+                },
             }
         }
         // c109 Phase 5: a list literal. Lowers each element as-is (mirrors the AST
@@ -1955,15 +1957,15 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                     _ => Type::Int,
                 };
-                let b = emit_tir_expr(&base_t, cx);
-                let i = emit_tir_expr(&index_t, cx);
                 return TExpr {
                     ty: elem_ty,
-                    kind: TExprKind::ConstInline(format!(
-                        "{root}jet_std::jet_pool_get(&({b}), {i}, {file:?}, {line})",
-                        root = cx.root_prefix,
-                        file = cx.file,
-                    )),
+                    kind: TExprKind::PoolSlot {
+                        pool: Box::new(base_t),
+                        id: Box::new(index_t),
+                        mutable: false,
+                        field_rust: None,
+                        line,
+                    },
                 };
             }
             if matches!(kind, IndexKind::FixedListProof) {

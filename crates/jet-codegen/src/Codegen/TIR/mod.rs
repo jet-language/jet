@@ -1711,7 +1711,10 @@ pub enum TExprKind {
     /// needed (a scalar arg is never borrowed-in-env, never a boxed edge — the AST
     /// path's `emit_boxed_enum_arg` is a no-op for these), keeping emit decision-free.
     EnumLit {
-        prefix: String,
+        /// Jet enum type name. Emit spells the Rust path via `tir_enum_lit_prefix`.
+        enum_type: String,
+        /// Jet variant name.
+        variant: String,
         payload: TEnumPayload,
     },
     /// c109 Phase 24: a prelude `JSON` enum construction (`JSON.Null` /

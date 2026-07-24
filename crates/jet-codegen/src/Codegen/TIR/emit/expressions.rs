@@ -924,8 +924,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 4/16: an enum literal. Prefix + payload were resolved at lowering;
         // emit applies each arg's resolved `clone`/`boxed` wrappers (mirroring
         // `emit_boxed_enum_arg`: `(…).clone()` first, then `Box::new(…)`).
-        TExprKind::EnumLit { prefix, payload } => match payload {
-            TEnumPayload::Unit => prefix.clone(),
+        TExprKind::EnumLit {
+            enum_type,
+            variant,
+            payload,
+        } => {
+            let prefix = crate::Codegen::TIR::tir_enum_lit_prefix(cx, enum_type, variant);
+            match payload {
+            TEnumPayload::Unit => prefix,
             TEnumPayload::Positional(vals) => {
                 let pos = vals
                     .iter()
@@ -942,6 +948,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     .join(", ");
                 format!("{} {{ {} }}", prefix, parts)
             }
+        }
         },
         // c109 Phase 24: a JSON construction — `{root}jet_std::Json::<Variant>(<arg>)`.
         // Reproduces `emit_core_json_lit` (Expression.rs): the arg is wrapped in

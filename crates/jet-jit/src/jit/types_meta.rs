@@ -168,14 +168,4 @@ impl<'a> JitMeta<'a> {
             .map(|i| i as i64)
     }
 
-    /// Temporary bridge for `EnumLit.prefix` until that node carries structured
-    /// enum/variant names. New call sites must use `enum_variant_index`.
-    pub(crate) fn enum_variant_disc_legacy(&self, prefix: &str) -> Option<i64> {
-        let (enum_part, variant) = prefix.rsplit_once("::")?;
-        let enum_name = enum_part.strip_prefix("user_").unwrap_or(enum_part);
-        let variant = variant.split_once('(').map_or(variant, |(head, _)| head);
-        let variant = variant.strip_prefix("user_").unwrap_or(variant);
-        self.enum_variant_index(enum_name, variant)
-    }
-
 }
