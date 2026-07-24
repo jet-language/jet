@@ -365,7 +365,8 @@ fn core_provider_compiles_ring_package_to_rlib() {
 
     let upstream = format!("path:{}", ring_repo.to_string_lossy());
     let table = SourceTable::from_decls([("ring".to_string(), upstream, ProviderKind::Core)]);
-    let spec = classify_in("ring:archive", &table).unwrap();
+    // D-JPK-REF1=A: package@source (email order). Old colon form was source:package.
+    let spec = classify_in("archive@ring", &table).unwrap();
     let ctx = Ctx {
         fixtures: None,
         store_dir: &store,
