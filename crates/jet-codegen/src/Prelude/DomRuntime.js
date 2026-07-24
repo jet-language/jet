@@ -536,21 +536,38 @@ function abiAddU32(total, amount, label) {
  *  [String: Int] params: contiguous LE [count][key-len][utf8][i64]… . */
 export function marshalAbi(value, kind, wasm) {
   if (kind === "string") {
-    const bytes = new TextEncoder().encode(String(value ?? ""));
-    if (bytes.length === 0) return 0n;
-    const ptr = wasm.jet_abi_string_alloc(bytes.length);
-    new Uint8Array(wasm.memory.buffer, ptr, bytes.length).set(bytes);
-    return (BigInt(ptr) << 32n) | BigInt(bytes.length);
+    const encoded = new TextEncoder().encode(String(value ?? ""));
+    if (!ArrayBuffer.isView(encoded) || encoded.BYTES_PER_ELEMENT !== 1) {
+      throw new TypeError("string ABI expects UTF-8 bytes");
+    }
+    if (encoded.length === 0) return 0n;
+    abiU32(encoded.length, "string ABI byte length");
+    const ptr = abiWasmU32(
+      wasm.jet_abi_string_alloc(encoded.length),
+      "string ABI allocation pointer",
+    );
+    try {
+      new Uint8Array(wasm.memory.buffer, ptr, encoded.length).set(encoded);
+      return (BigInt(ptr) << 32n) | BigInt(encoded.length);
+    } catch (error) {
+      wasm.jet_abi_string_free(ptr, encoded.length);
+      throw error;
+    }
   }
   if (kind === "list-int") {
     const arr = Array.isArray(value) ? value : [];
     if (arr.length === 0) return 0n;
     const ptr = wasm.jet_abi_list_i64_alloc(arr.length);
-    const view = new BigInt64Array(wasm.memory.buffer, ptr, arr.length);
-    for (let i = 0; i < arr.length; i++) {
-      view[i] = BigInt(arr[i]);
+    try {
+      const view = new BigInt64Array(wasm.memory.buffer, ptr, arr.length);
+      for (let i = 0; i < arr.length; i++) {
+        view[i] = BigInt(arr[i]);
+      }
+      return (BigInt(ptr) << 32n) | BigInt(arr.length);
+    } catch (error) {
+      wasm.jet_abi_list_i64_free(ptr, arr.length);
+      throw error;
     }
-    return (BigInt(ptr) << 32n) | BigInt(arr.length);
   }
   if (kind === "list-string") {
     const arr = Array.isArray(value) ? value : [];
@@ -560,17 +577,22 @@ export function marshalAbi(value, kind, wasm) {
     let byteLen = 4;
     for (const p of parts) byteLen += 4 + p.length;
     const ptr = wasm.jet_abi_list_string_alloc(byteLen);
-    const bytes = new Uint8Array(wasm.memory.buffer, ptr, byteLen);
-    const view = new DataView(wasm.memory.buffer, ptr, byteLen);
-    view.setUint32(0, arr.length, true);
-    let o = 4;
-    for (const p of parts) {
-      view.setUint32(o, p.length, true);
-      o += 4;
-      bytes.set(p, o);
-      o += p.length;
+    try {
+      const bytes = new Uint8Array(wasm.memory.buffer, ptr, byteLen);
+      const view = new DataView(wasm.memory.buffer, ptr, byteLen);
+      view.setUint32(0, arr.length, true);
+      let o = 4;
+      for (const p of parts) {
+        view.setUint32(o, p.length, true);
+        o += 4;
+        bytes.set(p, o);
+        o += p.length;
+      }
+      return (BigInt(ptr) << 32n) | BigInt(byteLen);
+    } catch (error) {
+      wasm.jet_abi_list_string_free(ptr, byteLen);
+      throw error;
     }
-    return (BigInt(ptr) << 32n) | BigInt(byteLen);
   }
   if (kind === "map-string-int") {
     if (!(value instanceof Map)) {
@@ -639,20 +661,28 @@ export function marshalAbi(value, kind, wasm) {
  *  [String: Int] returns are packed u64 blobs; frees via jet_abi_map_string_i64_free. */
 export function unmarshalAbi(value, kind, wasm) {
   if (kind === "string") {
-    const packed = typeof value === "bigint" ? value : BigInt(value);
-    const ptr = Number(packed >> 32n);
-    const len = Number(packed & 0xffffffffn);
-    const bytes = new Uint8Array(wasm.memory.buffer, ptr, len).slice();
-    wasm.jet_abi_string_free(ptr, len);
+    const packed = BigInt.asUintN(64, typeof value === "bigint" ? value : BigInt(value));
+    const ptr = Number((packed >> 32n) & 0xffffffffn) >>> 0;
+    const len = Number(packed & 0xffffffffn) >>> 0;
+    let bytes;
+    try {
+      bytes = new Uint8Array(wasm.memory.buffer, ptr, len).slice();
+    } finally {
+      wasm.jet_abi_string_free(ptr, len);
+    }
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   }
   if (kind === "list-int") {
-    const packed = typeof value === "bigint" ? value : BigInt(value);
-    const ptr = Number(packed >> 32n);
-    const len = Number(packed & 0xffffffffn);
-    const view = new BigInt64Array(wasm.memory.buffer, ptr, len);
-    const out = Array.from(view, (x) => Number(x));
-    wasm.jet_abi_list_i64_free(ptr, len);
+    const packed = BigInt.asUintN(64, typeof value === "bigint" ? value : BigInt(value));
+    const ptr = Number((packed >> 32n) & 0xffffffffn) >>> 0;
+    const len = Number(packed & 0xffffffffn) >>> 0;
+    let out;
+    try {
+      const view = new BigInt64Array(wasm.memory.buffer, ptr, len);
+      out = Array.from(view, (x) => Number(x));
+    } finally {
+      wasm.jet_abi_list_i64_free(ptr, len);
+    }
     return out;
   }
   if (kind === "list-string") {

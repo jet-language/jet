@@ -2077,3 +2077,203 @@ console.log("ok");
     assert_eq!(String::from_utf8_lossy(&node.stdout), "ok\n");
     let _ = fs::remove_dir_all(&dir);
 }
+
+const WASM_CALLBACK_HARNESS: &str = r##"
+class FakeElement {
+  constructor(id) {
+    this.id = id;
+    this.listeners = new Map();
+  }
+  addEventListener(name, handler) {
+    const list = this.listeners.get(name) ?? [];
+    list.push(handler);
+    this.listeners.set(name, list);
+  }
+  dispatchEvent(ev) {
+    ev.target = this;
+    for (const handler of this.listeners.get(ev.type) ?? []) handler(ev);
+  }
+}
+class FakeDocument {
+  constructor() {
+    this.button = new FakeElement("go");
+  }
+  querySelector(sel) {
+    return sel === "#go" ? this.button : null;
+  }
+  getElementById(id) {
+    return id === "go" ? this.button : null;
+  }
+  createElement(tag) {
+    return new FakeElement(tag);
+  }
+}
+globalThis.document = new FakeDocument();
+
+const { init } = await import("./app.js");
+init();
+document.button.dispatchEvent({ type: "click" });
+"##;
+
+fn run_node_harness(dir: &PathBuf, filename: &str, harness: &str) -> String {
+    let harness_path = dir.join("build").join(filename);
+    fs::write(&harness_path, harness).unwrap();
+    let node = Command::new("node")
+        .current_dir(dir.join("build"))
+        .arg(filename)
+        .output()
+        .unwrap();
+    assert!(
+        node.status.success(),
+        "node harness {filename} failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&node.stdout),
+        String::from_utf8_lossy(&node.stderr)
+    );
+    String::from_utf8_lossy(&node.stdout).into_owned()
+}
+
+#[test]
+fn web_wasm_event_callback_bridge_roundtrip() {
+    // D-JSBIND1 / criterion #3: a JS event callback must call through the
+    // generated Wasm bridge and preserve Int ABI semantics.
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web_build wasm callback (need rustc + node)");
+        return;
+    }
+    let src = include_str!("../examples/features/web/web_wasm_callback.jet");
+    let dir = build_web_fixture("wasm_callback", src, "examples/features/web/web_wasm_callback.jet");
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        js.contains("await bridge_double(21)"),
+        "click handler must call the Wasm bridge:\n{js}"
+    );
+    let stdout = run_node_harness(&dir, "wasm_callback_harness.mjs", WASM_CALLBACK_HARNESS);
+    let expected = include_str!("../examples/features/expected/web/web_wasm_callback.out");
+    assert_eq!(stdout, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_abi_string_and_list_marshal_errors_are_hostile() {
+    // D-JSBIND1 / criterion #3: runtime ABI errors must reject hostile inputs
+    // and free allocations taken before a write failure (string + list-int).
+    if !have_tool("node") {
+        eprintln!("note: skipping ABI error harness (need node)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_abi_errors_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("build")).unwrap();
+    fs::write(
+        dir.join("build/jet_dom_runtime.js"),
+        include_str!("../crates/jet-codegen/src/Prelude/DomRuntime.js"),
+    )
+    .unwrap();
+    let harness = r#"
+import { marshalAbi, unmarshalAbi } from "./jet_dom_runtime.js";
+
+function check(ok, message) {
+  if (!ok) throw new Error(message);
+}
+
+const frees = [];
+let cursor = 16;
+const wasm = {
+  memory: { buffer: new ArrayBuffer(4096) },
+  jet_abi_string_alloc(len) {
+    const ptr = cursor;
+    cursor += len;
+    return ptr;
+  },
+  jet_abi_string_free(ptr, len) {
+    frees.push(["string", ptr, len]);
+  },
+  jet_abi_list_i64_alloc(len) {
+    const ptr = cursor;
+    cursor += len * 8;
+    return ptr;
+  },
+  jet_abi_list_i64_free(ptr, len) {
+    frees.push(["list-int", ptr, len]);
+  },
+};
+
+const bounded = {
+  memory: { buffer: new ArrayBuffer(64) },
+  jet_abi_string_alloc() { return 60; },
+  jet_abi_string_free(ptr, len) { frees.push(["string", ptr, len]); },
+  jet_abi_list_i64_alloc() { return 48; },
+  jet_abi_list_i64_free(ptr, len) { frees.push(["list-int", ptr, len]); },
+};
+
+const RealTextEncoder = globalThis.TextEncoder;
+globalThis.TextEncoder = class {
+  encode() {
+    return { length: 0xfffffff4 };
+  }
+};
+try {
+  marshalAbi("x", "string", bounded);
+  throw new Error("string length overflow accepted");
+} catch (error) {
+  check(error instanceof TypeError, "string length overflow was not a TypeError");
+}
+check(!frees.some((entry) => entry[0] === "string"), "string length overflow allocated");
+globalThis.TextEncoder = RealTextEncoder;
+
+try {
+  marshalAbi("12345", "string", bounded);
+  throw new Error("bounded string write unexpectedly succeeded");
+} catch (error) {
+  check(error instanceof RangeError, "bounded string write did not fail at memory boundary");
+}
+check(frees.some((entry) => entry[0] === "string" && entry[1] === 60), "string write failure leaked");
+
+const highBit = {
+  memory: { buffer: new ArrayBuffer(64) },
+  jet_abi_string_alloc() { return -2147483648; },
+  jet_abi_string_free(ptr, len) { frees.push(["string", ptr, len]); },
+  jet_abi_list_i64_alloc() { return -2147483648; },
+  jet_abi_list_i64_free(ptr, len) { frees.push(["list-int", ptr, len]); },
+};
+try {
+  marshalAbi("x", "string", highBit);
+  throw new Error("high-bit string pointer unexpectedly fit bounded memory");
+} catch (error) {
+  check(error instanceof RangeError, "high-bit string pointer did not reach the memory boundary");
+}
+check(
+  frees.some((entry) => entry[0] === "string" && entry[1] === 0x80000000),
+  "signed string allocation pointer was not freed as u32",
+);
+
+try {
+  unmarshalAbi((0x80000000n << 32n) | 4n, "string", highBit);
+  throw new Error("high-bit string return pointer unexpectedly fit bounded memory");
+} catch (error) {
+  check(error instanceof RangeError, "high-bit string return pointer did not reach the memory boundary");
+}
+check(
+  frees.some((entry) => entry[0] === "string" && entry[1] === 0x80000000 && entry[2] === 4),
+  "high-bit string return pointer was not freed as u32",
+);
+
+try {
+  unmarshalAbi((0x80000000n << 32n) | 2n, "list-int", highBit);
+  throw new Error("high-bit list return pointer unexpectedly fit bounded memory");
+} catch (error) {
+  check(error instanceof RangeError, "high-bit list return pointer did not reach the memory boundary");
+}
+check(
+  frees.some((entry) => entry[0] === "list-int" && entry[1] === 0x80000000 && entry[2] === 2),
+  "high-bit list return pointer was not freed as u32",
+);
+
+console.log("ok");
+"#;
+    assert_eq!(
+        run_node_harness(&dir, "abi_error_harness.mjs", harness),
+        "ok\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
