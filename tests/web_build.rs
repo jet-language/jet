@@ -666,6 +666,129 @@ fn compile_web_file_loads() {
     assert!(out.web.is_some());
 }
 
+fn source_map_string_field<'a>(map: &'a str, field: &str) -> &'a str {
+    let prefix = format!("\"{field}\":\"");
+    let value = map
+        .split_once(&prefix)
+        .unwrap_or_else(|| panic!("missing source-map field `{field}`:\n{map}"))
+        .1;
+    value
+        .split_once('"')
+        .unwrap_or_else(|| panic!("unterminated source-map field `{field}`:\n{map}"))
+        .0
+}
+
+fn decode_source_map_mappings(map: &str) -> Vec<(usize, usize, usize, usize, usize)> {
+    fn digit(byte: u8) -> i64 {
+        match byte {
+            b'A'..=b'Z' => i64::from(byte - b'A'),
+            b'a'..=b'z' => i64::from(byte - b'a') + 26,
+            b'0'..=b'9' => i64::from(byte - b'0') + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => panic!("invalid base64 VLQ byte: {byte}"),
+        }
+    }
+
+    fn segment(encoded: &str) -> Vec<i64> {
+        let mut values = Vec::new();
+        let mut value = 0i64;
+        let mut shift = 0;
+        for byte in encoded.bytes() {
+            let digit = digit(byte);
+            value |= (digit & 31) << shift;
+            if digit & 32 == 0 {
+                let negative = value & 1 == 1;
+                let magnitude = value >> 1;
+                values.push(if negative { -magnitude } else { magnitude });
+                value = 0;
+                shift = 0;
+            } else {
+                shift += 5;
+            }
+        }
+        assert_eq!(shift, 0, "unterminated base64 VLQ segment: {encoded}");
+        values
+    }
+
+    let mut out = Vec::new();
+    let mut source = 0i64;
+    let mut original_line = 0i64;
+    let mut original_column = 0i64;
+    for (generated_line, line) in source_map_string_field(map, "mappings").split(';').enumerate() {
+        let mut generated_column = 0i64;
+        for encoded in line.split(',').filter(|segment| !segment.is_empty()) {
+            let values = segment(encoded);
+            assert_eq!(values.len(), 4, "expected an unmapped-name segment");
+            generated_column += values[0];
+            source += values[1];
+            original_line += values[2];
+            original_column += values[3];
+            out.push((
+                generated_line,
+                usize::try_from(generated_column).unwrap(),
+                usize::try_from(source).unwrap(),
+                usize::try_from(original_line).unwrap(),
+                usize::try_from(original_column).unwrap(),
+            ));
+        }
+    }
+    out
+}
+
+#[test]
+fn js_source_map_uses_line_markers_and_hides_host_paths() {
+    let src = "#Target(Web)\n#Target(Js)\nfn run() {\n\n    first :: 1\n    print(first)\n}\n";
+    let shown = format!(
+        "{}/private/build-host/project/main.jet",
+        std::env::temp_dir().display()
+    );
+    let first = jet::compile_web_with_path(src, &shown)
+        .expect("web source-map fixture")
+        .web
+        .expect("web artifacts");
+    let second = jet::compile_web_with_path(src, &shown)
+        .expect("repeat web source-map fixture")
+        .web
+        .expect("web artifacts");
+
+    assert_eq!(first.js_app, second.js_app);
+    assert_eq!(first.js_source_map, second.js_source_map);
+    assert!(!first.js_app.contains("sourceMappingURL="));
+    assert!(first.js_source_map.starts_with(
+        "{\"version\":3,\"file\":\"app.js\",\"sources\":[\"main.jet\"],\"sourcesContent\":["
+    ));
+    assert!(
+        first
+            .js_source_map
+            .contains("\"#Target(Web)\\n#Target(Js)\\nfn run() {\\n\\n    first :: 1\\n    print(first)\\n}\\n\""),
+        "sourcesContent must contain the exact Jet bytes:\n{}",
+        first.js_source_map
+    );
+    assert!(!first.js_source_map.contains("/private/build-host"));
+
+    let mappings = decode_source_map_mappings(&first.js_source_map);
+    assert_eq!(
+        mappings
+            .iter()
+            .map(|(_, _, source, original_line, original_column)| {
+                (*source, *original_line, *original_column)
+            })
+            .collect::<Vec<_>>(),
+        vec![(0, 4, 0), (0, 5, 0)]
+    );
+    for (generated_line, generated_column, _, _, _) in mappings {
+        let line = first.js_app.lines().nth(generated_line).unwrap();
+        let first_code = line.find(|c: char| !c.is_whitespace()).unwrap();
+        assert_eq!(generated_column, line[..first_code].encode_utf16().count());
+        assert!(
+            line[first_code..].starts_with("let first =")
+                || line[first_code..].starts_with("jetDom.print(first);"),
+            "mapping does not point at a Jet statement: {line}"
+        );
+    }
+}
+
 #[test]
 fn web_body_outside_tir_is_diagnostic() {
     let src = include_str!("ui/web_tir_unsupported.jet");
