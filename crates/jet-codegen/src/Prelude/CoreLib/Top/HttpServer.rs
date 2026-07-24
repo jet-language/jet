@@ -4436,3 +4436,169 @@ fn jet_http_srv_request_id(next: JetHttpHandler) -> JetHttpHandler {
 fn jet_http_srv_install_request_id(mux: &JetHttpMux) {
     jet_http_mux_middleware(mux, jet_http_srv_request_id);
 }
+
+// ── D-HTTP-HANDLER-MW1=A: nested core.http.middleware Handler wrappers ───────
+
+#[derive(Clone, Debug)]
+struct JetHttpCorsPolicy {
+    allow_origin: String,
+    allow_methods: String,
+    allow_headers: String,
+    max_age_secs: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum JetHttpCompressEncoding {
+    Gzip,
+}
+
+fn jet_http_cors_policy(origin: &String) -> JetHttpCorsPolicy {
+    JetHttpCorsPolicy {
+        allow_origin: origin.clone(),
+        allow_methods: "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS".to_string(),
+        allow_headers: "content-type, authorization, x-request-id".to_string(),
+        max_age_secs: 86_400,
+    }
+}
+
+fn jet_http_mw_timeout(duration: &jet_std::Duration, next: JetHttpHandler) -> JetHttpHandler {
+    let budget = std::time::Duration::from_millis(duration.ms.max(0) as u64);
+    std::sync::Arc::new(move |req| {
+        let control = JetTaskControl::new();
+        let cancel = control.clone();
+        let timer = jet_scheduler_spawn(move || {
+            std::thread::sleep(budget);
+            cancel.cancel();
+        });
+        let next = next.clone();
+        let join = jet_scheduler_spawn_blocking_with_control(move || next(req), control.clone());
+        let deadline = std::time::Instant::now() + budget;
+        loop {
+            if let Some(result) = join.try_recv() {
+                let _ = timer.drain();
+                return match result {
+                    JetSchedulerResult::Value(response) => response,
+                    JetSchedulerResult::Cancelled => Ok(jet_http_srv_empty_response(504)),
+                    JetSchedulerResult::Panicked => Ok(jet_http_srv_internal_response()),
+                };
+            }
+            if std::time::Instant::now() >= deadline {
+                control.cancel();
+                let _ = join.drain();
+                let _ = timer.drain();
+                return Ok(jet_http_srv_empty_response(504));
+            }
+            std::thread::yield_now();
+        }
+    })
+}
+
+fn jet_http_mw_body_limit(max_bytes: i64, next: JetHttpHandler) -> JetHttpHandler {
+    std::sync::Arc::new(move |req| {
+        if !jet_http_srv_req_under_limit(&req, max_bytes) {
+            return Err(JetHttpError::BodyTooLarge { limit: max_bytes });
+        }
+        next.clone()(req)
+    })
+}
+
+fn jet_http_mw_cors(policy: &JetHttpCorsPolicy, next: JetHttpHandler) -> JetHttpHandler {
+    let policy = policy.clone();
+    std::sync::Arc::new(move |req| {
+        if req.method == "OPTIONS" {
+            let mut response = jet_http_srv_empty_response(204);
+            let _ = response.headers.set("access-control-allow-origin", &policy.allow_origin);
+            let _ = response.headers.set("access-control-allow-methods", &policy.allow_methods);
+            let _ = response.headers.set("access-control-allow-headers", &policy.allow_headers);
+            if policy.max_age_secs > 0 {
+                let _ = response.headers.set("access-control-max-age", &policy.max_age_secs.to_string());
+            }
+            return Ok(response);
+        }
+        let origin = req.headers.get("origin").cloned();
+        let mut response = next.clone()(req)?;
+        if origin.as_deref() == Some(policy.allow_origin.as_str()) || policy.allow_origin == "*" {
+            let _ = response.headers.set("access-control-allow-origin", &policy.allow_origin);
+        }
+        Ok(response)
+    })
+}
+
+fn jet_http_gzip_stored(input: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len() + 32);
+    out.extend_from_slice(&[0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0x00, 0xff]);
+    let mut pos = 0usize;
+    while pos < input.len() {
+        let chunk = (input.len() - pos).min(65_535);
+        let final_block = pos + chunk >= input.len();
+        out.push(if final_block { 0x01 } else { 0x00 });
+        let len = chunk as u16;
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&(!len).to_le_bytes());
+        out.extend_from_slice(&input[pos..pos + chunk]);
+        pos += chunk;
+    }
+    out.extend_from_slice(&jet_http_crc32(input).to_le_bytes());
+    out.extend_from_slice(&(input.len() as u32).to_le_bytes());
+    out
+}
+
+fn jet_http_mw_compress(encoding: JetHttpCompressEncoding, next: JetHttpHandler) -> JetHttpHandler {
+    std::sync::Arc::new(move |req| {
+        let accepts_gzip = req
+            .headers
+            .get("accept-encoding")
+            .is_some_and(|value| value.split(',').any(|part| part.trim().eq_ignore_ascii_case("gzip")));
+        let mut response = next.clone()(req)?;
+        if !accepts_gzip || encoding != JetHttpCompressEncoding::Gzip {
+            return Ok(response);
+        }
+        if response.suppress_body {
+            return Ok(response);
+        }
+        let plain = match response.body.bytes(JET_HTTP_MAX_BODY_BYTES) {
+            Ok(bytes) => bytes,
+            Err(_) => return Ok(response),
+        };
+        if plain.is_empty() {
+            return Ok(response);
+        }
+        let compressed = jet_http_gzip_stored(&plain);
+        response.body = JetHttpBody::from_bytes(compressed);
+        let _ = response.headers.set("content-encoding", "gzip");
+        response.headers.remove("content-length");
+        Ok(response)
+    })
+}
+
+fn jet_http_mw_access_log(next: JetHttpHandler) -> JetHttpHandler {
+    std::sync::Arc::new(move |req| {
+        let started = std::time::Instant::now();
+        let method = req.method.clone();
+        let path = req.path.split('?').next().unwrap_or(&req.path).to_string();
+        let route = req.route_template.clone().unwrap_or_else(|| path.clone());
+        let request_id = req.headers.get("x-request-id").cloned().unwrap_or_default();
+        let response = next.clone()(req)?;
+        let status = response.status;
+        let duration_ms = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+        let line = format!(
+            "request_id={request_id} method={method} path={path} route={route} status={status} duration_ms={duration_ms}"
+        );
+        jet_log_emit("info", &line, &[]);
+        Ok(response)
+    })
+}
+
+fn jet_http_mux_as_handler(mux: JetHttpMux) -> JetHttpHandler {
+    std::sync::Arc::new(move |req| {
+        Ok(jet_http_mux_dispatch(&mux, req).unwrap_or_else(jet_http_srv_error_response))
+    })
+}
+
+fn jet_http_srv_static_files_handler(root: String) -> JetHttpHandler {
+    std::sync::Arc::new(move |req| {
+        jet_http_srv_static_files(&req, std::path::Path::new(&root)).map_err(|_| JetHttpError::Io {
+            operation: "read static file".to_string(),
+        })
+    })
+}

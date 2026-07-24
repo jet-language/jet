@@ -239,7 +239,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName" | "HttpHeaderValue"
-        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpCookieJar" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport"
+        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpCookieJar" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport" | "HttpCorsPolicy" | "HttpCompressEncoding"
         | "WsConn" | "WsError" | "WsMessage"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
@@ -740,6 +740,10 @@ pub(crate) fn core_http_variants(
     }
     if enum_name == "HttpCookieJar" {
         variants.insert("Memory".to_string(), (zero, VariantPayload::Unit));
+        return Some(variants);
+    }
+    if enum_name == "HttpCompressEncoding" {
+        variants.insert("Gzip".to_string(), (zero, VariantPayload::Unit));
         return Some(variants);
     }
     if enum_name == "WsError" {

@@ -2521,6 +2521,30 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "request_id") => {
             format!("jet_http_srv_install_request_id(&({}))", arg(0))
         }
+        ("core.http.server", "mux_handler") => {
+            format!("jet_http_mux_as_handler({})", arg(0))
+        }
+        ("core.http.server", "static_files") => {
+            format!("jet_http_srv_static_files_handler(({}).clone())", arg(0))
+        }
+        ("core.http.middleware", "timeout") => {
+            format!("jet_http_mw_timeout(&({}), ({}))", arg(0), arg(1))
+        }
+        ("core.http.middleware", "body_limit") => {
+            format!("jet_http_mw_body_limit({}, ({}))", arg(0), arg(1))
+        }
+        ("core.http.middleware", "cors_policy") => {
+            format!("jet_http_cors_policy(&({}))", arg(0))
+        }
+        ("core.http.middleware", "cors") => {
+            format!("jet_http_mw_cors(&({}), ({}))", arg(0), arg(1))
+        }
+        ("core.http.middleware", "compress") => {
+            format!("jet_http_mw_compress(({}), ({}))", arg(0), arg(1))
+        }
+        ("core.http.middleware", "access_log") => {
+            format!("jet_http_mw_access_log(({}))", arg(0))
+        }
         // D-TIMEDEPTH1=A: civil-time constructors.
         ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),
         ("core.time.date", "today") => format!("JetDate::today_utc()"),
