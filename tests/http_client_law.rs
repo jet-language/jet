@@ -3035,27 +3035,31 @@ fn wait_for_pooled_rst() {
                 .flatten()
         })
         .collect::<Vec<_>>();
-    assert_eq!(
-        sockets.len(),
-        1,
-        "expected exactly one pooled TCP socket: {sockets:?}"
+    assert!(
+        !sockets.is_empty(),
+        "expected a pooled TCP socket after warm/reuse"
     );
-    let mut socket = PollFd {
-        fd: sockets[0],
-        events: POLLIN,
-        revents: 0,
-    };
-    let ready = unsafe { poll(&mut socket, 1, 2000) };
-    assert_eq!(
-        ready, 1,
-        "pooled socket reset was not observed before retry"
-    );
-    assert_ne!(
-        socket.revents & POLLERR,
-        0,
-        "pooled socket has no pending reset: {:#x}",
-        socket.revents
-    );
+    // Other runtime FDs (netlink, resolver) can also appear as socket:[...].
+    // Wait until the RST is visible on at least one of them.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        for &fd in &sockets {
+            let mut socket = PollFd {
+                fd,
+                events: POLLIN,
+                revents: 0,
+            };
+            let ready = unsafe { poll(&mut socket, 1, 0) };
+            if ready == 1 && socket.revents & POLLERR != 0 {
+                return;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "pooled socket reset was not observed before retry; sockets={sockets:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
 }
 
 fn main() {

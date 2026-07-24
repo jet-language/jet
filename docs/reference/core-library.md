@@ -511,10 +511,11 @@ Card 301 audit state:
 | Transparent Content-Encoding decoding | Partial across both facets: the native client advertises and decodes gzip by default, hides decoded Content-Encoding/Length while retaining `raw_content_encoding()`, supports `.raw_encoding()`, and fails closed on unsupported encodings (exact `http_client_law`). Plaintext and TLS HTTP/1.x server requests decode native gzip after transfer framing, remove the stale Content-Encoding/Length view, reject unsupported coding with 415 and malformed gzip with 400, and cap encoded plus decoded bodies at the server limit with 413. HTTP/2 request decoding and response compression middleware remain open. |
 | Graceful shutdown | Shipped for HTTP/1.x and HTTP/2 over cleartext or TLS: `Server.bind`/`serve`/`shutdown(grace)` stop accepts, send HTTP/2 GOAWAY with the accepted last-stream id, drain active work until grace, cancel stragglers, refuse new streams/requests (including TLS keep-alive reuse), and return bounded report counts |
 | Pooling and HTTP/2 | Shipped across both facets: shared native `Client` pools HTTP/1.1 keepalive after drained bodies and multiplexed HTTP/2 sessions (ALPN plus explicit h2c); concurrent streams open without holding the connection mutex across HEADERS waits, with exact `http_client_law` interop coverage for reuse, hostile HPACK, and TLS ALPN. Native HTTP/2 server serving runs over cleartext preface and rustls ALPN with flow control and graceful GOAWAY drain. |
-| WebSocket | Ratified as standalone `core.ws` (D-WS1=B); implementation and interoperability proof remain open |
+| WebSocket | Shipped in standalone `core.ws` (D-WS1=B): client `connect` / server `upgrade`, live echo, hostile handshake fail-closed, and cancellation-safe close are covered by `tests/ws_law.rs` plus `examples/features/net/ws_echo.jet`. WebSocket APIs are not exported from `core.http`. |
 
-Examples: `examples/features/net/http_rest_service.jet` and
-`examples/features/net/http_server_trailers.jet`.
+Examples: `examples/features/net/http_rest_service.jet`,
+`examples/features/net/http_server_trailers.jet`, and
+`examples/features/net/ws_echo.jet`.
 
 ### `core.crypto` — safe envelopes and expert primitives
 
