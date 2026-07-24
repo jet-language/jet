@@ -83,6 +83,7 @@ pub(crate) fn emit_http_bridge_error(ffi: &str, error: &str) -> String {
          {ffi}::JetHttpBridgeError::Io => JetHttpError::Io {{ operation: \"transport\".to_string() }}, \
          {ffi}::JetHttpBridgeError::ResourceUnavailable => JetHttpError::ResourceUnavailable {{ resource: \"transport\".to_string() }}, \
          {ffi}::JetHttpBridgeError::Cancelled => JetHttpError::Cancelled, \
+         {ffi}::JetHttpBridgeError::UnsupportedTarget => JetHttpError::UnsupportedTarget {{ operation: JetHttpOperation::Send }}, \
          {ffi}::JetHttpBridgeError::Internal => JetHttpError::Internal {{ incident_id: \"http-transport\".to_string() }} }}"
     )
 }
@@ -2558,13 +2559,13 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "bind") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
-                "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
+                "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| if e == \"unsupported-target:server-bind\" {{ JetHttpError::UnsupportedTarget {{ operation: JetHttpOperation::ServerBind }} }} else {{ JetHttpError::Io {{ operation: e }} }})",
                 arg(0),
                 arg(1),
                 arg(2)
             )
         }
-        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHttpError::Io {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
+        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|e| if e == \"unsupported-target:server-bind\" {{ JetHttpError::UnsupportedTarget {{ operation: JetHttpOperation::ServerBind }} }} else {{ JetHttpError::Io {{ operation: e }} }})", arg(0), arg(1)),
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
         ("core.http.server", "serve") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
