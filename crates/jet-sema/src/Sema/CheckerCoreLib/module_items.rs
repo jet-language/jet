@@ -695,6 +695,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.http.server" => &[
             "bind",
             "mux",
+            "mux_handler",
             "serve",
             "serve_once",
             "serve_once_listener",
@@ -703,8 +704,17 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "sse",
             "static_file",
             "static_file_range",
+            "static_files",
             "access_log",
             "request_id",
+        ],
+        "core.http.middleware" => &[
+            "timeout",
+            "body_limit",
+            "cors",
+            "cors_policy",
+            "compress",
+            "access_log",
         ],
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.
@@ -744,5 +754,6 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         | ("jet.http" | "core.http.client" | "core.http.server",
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
             | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HttpError" | "Client" | "Proxy")
+        | ("core.http.middleware", "CorsPolicy" | "CompressEncoding")
     )
 }

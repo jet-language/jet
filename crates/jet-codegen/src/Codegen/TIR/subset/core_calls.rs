@@ -127,7 +127,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
         return true;
     }
     // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors. NOT in `core_fixed_sig`.
-    if matches!(module, "core.http.client" | "core.http.server")
+    if matches!(module, "core.http.client" | "core.http.server" | "core.http.middleware")
         && matches!(
             method,
             "get"
@@ -135,6 +135,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
                 | "request"
                 | "bind"
                 | "mux"
+                | "mux_handler"
                 | "serve"
                 | "serve_once"
                 | "serve_once_listener"
@@ -143,8 +144,14 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
                 | "sse"
                 | "static_file"
                 | "static_file_range"
+                | "static_files"
                 | "access_log"
                 | "request_id"
+                | "timeout"
+                | "body_limit"
+                | "cors"
+                | "cors_policy"
+                | "compress"
         )
     {
         return true;

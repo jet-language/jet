@@ -98,6 +98,22 @@ static JET_OBSERVE_QUEUED: std::sync::atomic::AtomicUsize = std::sync::atomic::A
 fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>> { None }
 fn jet_observe_task_update(_state: &'static str, _wait: &str, _deadline_ms: Option<i64>) {}
 
+struct LogField {
+    key: String,
+    value: String,
+}
+
+static HTTP_ACCESS_LOG_LINES: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> =
+    std::sync::OnceLock::new();
+
+fn jet_log_emit(_level: &str, msg: &str, _fields: &[LogField]) {
+    HTTP_ACCESS_LOG_LINES
+        .get_or_init(|| std::sync::Mutex::new(Vec::new()))
+        .lock()
+        .unwrap()
+        .push(msg.to_string());
+}
+
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpMessage.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
@@ -5165,4 +5181,95 @@ fn rustls_exchange(
         }
     }
     String::from_utf8_lossy(&raw).into_owned()
+}
+
+#[test]
+fn builtin_middleware_timeout_body_limit_cors_compress_and_access_log() {
+    HTTP_ACCESS_LOG_LINES
+        .get_or_init(|| std::sync::Mutex::new(Vec::new()))
+        .lock()
+        .unwrap()
+        .clear();
+
+    let slow = jet_http_mw_timeout(
+        &jet_std::Duration { ms: 30 },
+        std::sync::Arc::new(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            Ok(jet_http_srv_response(200, &"slow".to_string()))
+        }),
+    );
+    let timed = slow(JetHttpRequest::server(
+        "GET",
+        "/slow".to_string(),
+        Vec::new(),
+        Default::default(),
+    ));
+    assert_eq!(timed.unwrap().status, 504);
+
+    let limited = jet_http_mw_body_limit(
+        4,
+        std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"ok".to_string()))),
+    );
+    let mut big = JetHttpRequest::server("POST", "/".to_string(), vec![0; 8], Default::default());
+    big.body = JetHttpBody::from_bytes(vec![0; 8]);
+    assert!(matches!(
+        limited(big),
+        Err(JetHttpError::BodyTooLarge { limit: 4 })
+    ));
+
+    let policy = jet_http_cors_policy(&"https://app.example".to_string());
+    let cors = jet_http_mw_cors(
+        &policy,
+        std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"ok".to_string()))),
+    );
+    let mut preflight_headers = JetHttpHeaders::new();
+    preflight_headers.append("origin", "https://app.example").unwrap();
+    let preflight = JetHttpRequest::server("OPTIONS", "/api".to_string(), Vec::new(), preflight_headers);
+    let preflight = cors(preflight).unwrap();
+    assert_eq!(preflight.status, 204);
+    assert_eq!(
+        preflight.headers.get("access-control-allow-origin"),
+        Some(&"https://app.example".to_string())
+    );
+
+    let compress = jet_http_mw_compress(
+        JetHttpCompressEncoding::Gzip,
+        std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"compressible".to_string()))),
+    );
+    let mut gzip_headers = JetHttpHeaders::new();
+    gzip_headers.append("accept-encoding", "gzip").unwrap();
+    let gzip = compress(JetHttpRequest::server("GET", "/".to_string(), Vec::new(), gzip_headers)).unwrap();
+    assert_eq!(gzip.headers.get("content-encoding"), Some(&"gzip".to_string()));
+    assert!(gzip.body.bytes(64).unwrap().starts_with(&[0x1f, 0x8b]));
+
+    let logged = jet_http_mw_access_log(std::sync::Arc::new(|_| Ok(jet_http_srv_response(201, &"x".to_string()))));
+    let mut req = JetHttpRequest::server("GET", "/logs/1".to_string(), Vec::new(), Default::default());
+    req.route_template = Some("/logs/:id".to_string());
+    assert_eq!(logged(req).unwrap().status, 201);
+    let lines = HTTP_ACCESS_LOG_LINES.get().unwrap().lock().unwrap();
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].contains("route=/logs/:id"));
+    assert!(lines[0].contains("status=201"));
+    assert!(!lines[0].contains("secret"));
+}
+
+#[test]
+fn static_files_handler_serves_root_index_and_rejects_traversal() {
+    let root = std::env::temp_dir().join(format!(
+        "jet-http-static-handler-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+    ));
+    std::fs::create_dir_all(root.join("nested")).unwrap();
+    std::fs::write(root.join("index.html"), b"index").unwrap();
+    std::fs::write(root.join("nested/data.bin"), [1, 2, 3]).unwrap();
+    let handler = jet_http_srv_static_files_handler(root.to_string_lossy().into_owned());
+    let ok = handler(JetHttpRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), Default::default())).unwrap();
+    assert_eq!(ok.status, 200);
+    assert_eq!(ok.body.bytes(16).unwrap(), vec![1, 2, 3]);
+    let index = handler(JetHttpRequest::server("GET", "/".to_string(), Vec::new(), Default::default())).unwrap();
+    assert_eq!(index.body.bytes(16).unwrap(), b"index");
+    let blocked = handler(JetHttpRequest::server("GET", "/../secret".to_string(), Vec::new(), Default::default())).unwrap();
+    assert_eq!(blocked.status, 404);
+    std::fs::remove_dir_all(root).unwrap();
 }

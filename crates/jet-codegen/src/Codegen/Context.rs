@@ -546,6 +546,8 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "HttpRedirectPolicy" => Some("JetHttpRedirectPolicy"),
         "HttpRetryPolicy" => Some("JetHttpRetryPolicy"),
         "HttpCookieJar" => Some("JetHttpCookieJar"),
+        "HttpCorsPolicy" => Some("JetHttpCorsPolicy"),
+        "HttpCompressEncoding" => Some("JetHttpCompressEncoding"),
         "HttpRouter" => Some("JetHttpRouter"),
         _ => None,
     }
@@ -1032,6 +1034,8 @@ impl Cx {
             Type::Named(name) if name == "HttpRedirectPolicy" => "JetHttpRedirectPolicy".to_string(),
             Type::Named(name) if name == "HttpRetryPolicy" => "JetHttpRetryPolicy".to_string(),
             Type::Named(name) if name == "HttpCookieJar" => "JetHttpCookieJar".to_string(),
+            Type::Named(name) if name == "HttpCorsPolicy" => "JetHttpCorsPolicy".to_string(),
+            Type::Named(name) if name == "HttpCompressEncoding" => "JetHttpCompressEncoding".to_string(),
             Type::Named(name) if name == "HttpMethod" => "JetHttpMethod".to_string(),
             Type::Named(name) if name == "HttpStatus" => "JetHttpStatus".to_string(),
             Type::Named(name) if name == "HttpVersion" => "JetHttpVersion".to_string(),
@@ -2160,6 +2164,13 @@ pub(crate) fn build_cx_items(
     cx.enum_variants
         .insert("HttpCookieJar".to_string(), http_cookie_jar);
     cx.cloneable.insert("HttpCookieJar".to_string());
+    let http_compress_encoding = vec![("Gzip".to_string(), VariantPayload::Unit)];
+    cx.variant_owner
+        .insert("Gzip".to_string(), "HttpCompressEncoding".to_string());
+    cx.enum_variants
+        .insert("HttpCompressEncoding".to_string(), http_compress_encoding);
+    cx.cloneable.insert("HttpCompressEncoding".to_string());
+    cx.cloneable.insert("HttpCorsPolicy".to_string());
     let mut http_errors = [
         "InvalidMethod",
         "InvalidUrl",
