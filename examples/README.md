@@ -27,6 +27,6 @@ Suggested learning order:
 | `concurrency/` | tasks, channels, select, race/cancel, deadlines, scheduler |
 | `crypto/` | envelope, signing, key migration |
 | `ui/` | view tree, styles, component kit, motion, a11y, reactive TUI |
-| `web/` | web hello, wasm compute, DOM click, showcase |
+| `web/` | hybrid JS DOM + Wasm compute — see `docs/sidequests/web-backend-wasm.md` for the full example index, build commands, and unsupported-breadth list |
 | `lowlevel/` | ffi, c layout, simd, freestanding, cross-compile |
 | `tooling/` | tests, bench, debug, property tests, build profiles |
