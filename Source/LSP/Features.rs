@@ -335,9 +335,20 @@ pub(crate) fn compute_refactor_actions(
     src: &str,
     path: &str,
     workspace_root: Option<&str>,
+    import_sources: &std::collections::HashMap<String, String>,
+    excluded_import_paths: &std::collections::HashSet<String>,
     requested: Span,
 ) -> Vec<RefactorAction> {
-    let mut actions = import_actions(db, diagnostics, src, path, workspace_root, requested);
+    let mut actions = import_actions(
+        db,
+        diagnostics,
+        src,
+        path,
+        workspace_root,
+        import_sources,
+        excluded_import_paths,
+        requested,
+    );
     let Some(selected) = trim_span(src, requested) else {
         actions.extend(inline_actions(db, tokens, src, path, requested));
         return actions;
@@ -354,7 +365,7 @@ pub(crate) fn compute_refactor_actions(
     };
     let line_start = line_start(src, binding.def_span.start);
     let indent = &src[line_start..binding.def_span.start];
-    if indent.chars().all(char::is_whitespace) {
+    if indent.chars().all(char::is_whitespace) && is_total_pure_expr(tokens, selected) {
         let name = fresh_name(db, "extracted_value");
         actions.push(RefactorAction {
             title: "Extract binding".to_string(),
@@ -383,6 +394,8 @@ fn import_actions(
     src: &str,
     path: &str,
     workspace_root: Option<&str>,
+    import_sources: &std::collections::HashMap<String, String>,
+    excluded_import_paths: &std::collections::HashSet<String>,
     requested: Span,
 ) -> Vec<RefactorAction> {
     let mut out = Vec::new();
@@ -403,11 +416,12 @@ fn import_actions(
             .into_iter()
             .filter(|symbol| {
                 symbol.module_path != path
+                    && !excluded_import_paths.contains(&symbol.module_path)
                     && matches!(
                         symbol.provenance,
                         jet_semindex::SemanticProvenance::Source { .. }
                     )
-                    && source_symbol_is_exported(symbol)
+                    && source_symbol_is_exported(symbol, import_sources)
                     && !matches!(
                         &symbol.kind,
                         jet_semindex::SemanticSymbolKind::Local
@@ -452,7 +466,7 @@ fn extract_function_action(
     selected: Span,
     binding: &jet_semindex::SymDef,
 ) -> Option<RefactorAction> {
-    if !is_trivially_pure(tokens, selected) {
+    if !is_total_pure_expr(tokens, selected) {
         return None;
     }
     let SymKind::Local {
@@ -595,7 +609,7 @@ fn inline_actions(
         return Vec::new();
     };
     let initializer_span = Span::new(initializer.span.start, initializer.span.end);
-    if !is_trivially_pure(tokens, initializer_span)
+    if !is_total_pure_expr(tokens, initializer_span)
         || !initializer_refs_are_stable(db, path, initializer_span)
     {
         return Vec::new();
@@ -655,17 +669,24 @@ fn initializer_refs_are_stable(db: &SymbolDB, path: &str, span: Span) -> bool {
         })
 }
 
-fn source_symbol_is_exported(symbol: &jet_semindex::SemanticSymbol) -> bool {
+fn source_symbol_is_exported(
+    symbol: &jet_semindex::SemanticSymbol,
+    sources: &std::collections::HashMap<String, String>,
+) -> bool {
     let Some(span) = symbol.span else {
         return false;
     };
-    let Ok(source) = std::fs::read_to_string(&symbol.module_path) else {
+    let Some(source) = sources.get(&symbol.module_path) else {
         return false;
     };
-    let start = line_start(&source, span.start);
+    let start = line_start(source, span.start);
     source
         .get(start..span.start)
-        .is_some_and(|prefix| prefix.split_whitespace().any(|word| word.starts_with("pub")))
+        .is_some_and(|prefix| {
+            prefix
+                .split_whitespace()
+                .any(|word| word == "pub" || word.starts_with("pub("))
+        })
 }
 
 fn exact_initializer<'a>(
@@ -754,7 +775,7 @@ fn is_scalar_type(ty: &crate::AST::Type) -> bool {
     matches!(ty.name().as_str(), "Bool" | "Char" | "Int" | "Float")
 }
 
-fn is_trivially_pure(tokens: &[Token], span: Span) -> bool {
+fn is_total_pure_expr(tokens: &[Token], span: Span) -> bool {
     let mut any = false;
     for token in tokens.iter().filter(|token| {
         span.start <= token.span.start
@@ -770,18 +791,6 @@ fn is_trivially_pure(tokens: &[Token], span: Span) -> bool {
             | TokKind::Char(_)
             | TokKind::KwTrue
             | TokKind::KwFalse
-            | TokKind::LParen
-            | TokKind::RParen
-            | TokKind::Plus
-            | TokKind::Minus
-            | TokKind::Star
-            | TokKind::Slash
-            | TokKind::Percent
-            | TokKind::Amp
-            | TokKind::Pipe
-            | TokKind::Caret
-            | TokKind::Shl
-            | TokKind::Shr
             | TokKind::AndAnd
             | TokKind::OrOr
             | TokKind::Bang

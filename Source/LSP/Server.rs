@@ -812,9 +812,19 @@ fn code_action_response(
         .bundle
         .map(|bundle| build_symbol_db(&bundle, &checked.facts))
         .unwrap_or_else(SymbolDB::new);
-    merge_workspace_defs(server, doc, &mut db);
+    let import_sources = merge_workspace_defs_with_sources(server, doc, &mut db);
     let tokens = server.lex(doc);
     let workspace_root = workspace_root_for_path(server, &doc.path);
+    let excluded_import_paths = server
+        .docs
+        .values()
+        .filter(|open| {
+            std::fs::read_to_string(&open.path)
+                .map(|saved| saved != open.text)
+                .unwrap_or(true)
+        })
+        .map(|open| open.path.clone())
+        .collect();
     let refactors = compute_refactor_actions(
         &db,
         &tokens,
@@ -822,6 +832,8 @@ fn code_action_response(
         &doc.text,
         &doc.path,
         workspace_root.as_deref(),
+        &import_sources,
+        &excluded_import_paths,
         requested,
     );
     // Go through the SAME unified fix engine the CLI `jet fix` uses, so a fix
@@ -2112,10 +2124,20 @@ fn type_hierarchy_item_params(params: Option<&JsonValue>) -> Option<(&str, &str)
 }
 
 fn merge_workspace_defs(server: &Server, current: &Document, db: &mut SymbolDB) {
+    let _ = merge_workspace_defs_with_sources(server, current, db);
+}
+
+fn merge_workspace_defs_with_sources(
+    server: &Server,
+    current: &Document,
+    db: &mut SymbolDB,
+) -> HashMap<String, String> {
+    let mut sources = HashMap::new();
     for (path, text) in workspace_sources(server, Some(&current.path)) {
         if path == current.path {
             continue;
         }
+        sources.insert(path.clone(), text.clone());
         let checked = server.queries.borrow_mut().check_text(&path, &text, true);
         if let Some(bundle) = checked.bundle {
             let mut other = build_symbol_db(&bundle, &checked.effect_facts);
@@ -2127,6 +2149,7 @@ fn merge_workspace_defs(server: &Server, current: &Document, db: &mut SymbolDB) 
             db.inlay.append(&mut other.inlay);
         }
     }
+    sources
 }
 
 fn workspace_sources(server: &Server, root_hint: Option<&str>) -> Vec<(String, String)> {
@@ -2236,7 +2259,8 @@ mod project_part_tests {
 
     #[test]
     fn code_actions_extract_binding_function_and_inline_with_versioned_edits() {
-        let src = "fn run(left: Int, right: Int) {\n    total :: left + right\n    print(total)\n}\n";
+        let src =
+            "fn run(left: Int, right: Int) {\n    total :: left < right\n    print(total)\n}\n";
         let root = std::env::temp_dir().join(format!(
             "jet-lsp-refactor-actions-{}",
             std::process::id()
@@ -2256,13 +2280,13 @@ mod project_part_tests {
             Document::new(path, src.to_string(), 7),
         );
 
-        let expr_start = src.find("left + right").unwrap();
+        let expr_start = src.find("left < right").unwrap();
         let extracted = code_actions_for(
             &server,
             &uri,
             src,
             expr_start,
-            expr_start + "left + right".len(),
+            expr_start + "left < right".len(),
         );
         assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
         assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
@@ -2286,6 +2310,89 @@ mod project_part_tests {
         assert!(inlined.contains("\"title\":\"Inline `total`\""), "{inlined}");
         assert!(inlined.contains("\"kind\":\"refactor.inline\""), "{inlined}");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn code_actions_reject_effects_reordering_and_possible_traps() {
+        let effectful = "fn next() -> Int { print(\"effect\"); return 1 }\nfn run() {\n    value :: next()\n    print(\"between\")\n    print(value)\n}\n";
+        let effect_root = std::env::temp_dir().join(format!(
+            "jet-lsp-effect-refactor-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&effect_root);
+        std::fs::create_dir_all(&effect_root).unwrap();
+        let effect_path = effect_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&effect_path, effectful).unwrap();
+        let effect_uri = path_to_uri(&effect_path);
+        let mut effect_server = Server::new();
+        effect_server
+            .workspace_roots
+            .push(effect_root.to_string_lossy().into_owned());
+        effect_server.docs.insert(
+            effect_uri.clone(),
+            Document::new(effect_path, effectful.to_string(), 1),
+        );
+
+        let call = effectful.find("next()\n").unwrap();
+        let extraction = code_actions_for(
+            &effect_server,
+            &effect_uri,
+            effectful,
+            call,
+            call + "next()".len(),
+        );
+        assert!(!extraction.contains("Extract binding"), "{extraction}");
+        assert!(!extraction.contains("Extract function"), "{extraction}");
+        let use_site = effectful.rfind("value").unwrap();
+        let reordered = code_actions_for(
+            &effect_server,
+            &effect_uri,
+            effectful,
+            use_site,
+            use_site + "value".len(),
+        );
+        assert!(!reordered.contains("Inline `value`"), "{reordered}");
+        let _ = std::fs::remove_dir_all(effect_root);
+
+        let partial =
+            "fn run(left: Int, right: Int) {\n    value :: left / right\n    print(value)\n}\n";
+        let partial_root = std::env::temp_dir().join(format!(
+            "jet-lsp-partial-refactor-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&partial_root);
+        std::fs::create_dir_all(&partial_root).unwrap();
+        let partial_path = partial_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&partial_path, partial).unwrap();
+        let partial_uri = path_to_uri(&partial_path);
+        let mut partial_server = Server::new();
+        partial_server
+            .workspace_roots
+            .push(partial_root.to_string_lossy().into_owned());
+        partial_server.docs.insert(
+            partial_uri.clone(),
+            Document::new(partial_path, partial.to_string(), 1),
+        );
+        let division = partial.find("left / right").unwrap();
+        let extraction = code_actions_for(
+            &partial_server,
+            &partial_uri,
+            partial,
+            division,
+            division + "left / right".len(),
+        );
+        assert!(!extraction.contains("Extract binding"), "{extraction}");
+        assert!(!extraction.contains("Extract function"), "{extraction}");
+        let use_site = partial.rfind("value").unwrap();
+        let inlined = code_actions_for(
+            &partial_server,
+            &partial_uri,
+            partial,
+            use_site,
+            use_site + "value".len(),
+        );
+        assert!(!inlined.contains("Inline `value`"), "{inlined}");
+        let _ = std::fs::remove_dir_all(partial_root);
     }
 
     #[test]
@@ -2323,6 +2430,49 @@ mod project_part_tests {
         assert!(actions.contains("\"title\":\"Import `helper`\""), "{actions}");
         assert!(actions.contains(r#""newText":"use helper\n""#), "{actions}");
         assert!(actions.contains("\"kind\":\"quickfix\""), "{actions}");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn code_action_import_excludes_a_dirty_dependency_overlay() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-lsp-dirty-import-action-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let main = root.join("main.jet");
+        let helper = root.join("helper.jet");
+        let src = "fn run() { print(answer()) }\n";
+        let saved_helper = "pub fn answer() -> Int { return 42 }\n";
+        let unsaved_helper = "fn answer() -> Int { return 42 }\n";
+        std::fs::write(&main, src).unwrap();
+        std::fs::write(&helper, saved_helper).unwrap();
+
+        let path = main.to_string_lossy().into_owned();
+        let helper_path = helper.to_string_lossy().into_owned();
+        let uri = path_to_uri(&path);
+        let helper_uri = path_to_uri(&helper_path);
+        let mut server = Server::new();
+        server
+            .workspace_roots
+            .push(root.to_string_lossy().into_owned());
+        server
+            .docs
+            .insert(uri.clone(), Document::new(path, src.to_string(), 1));
+        server.docs.insert(
+            helper_uri,
+            Document::new(helper_path, unsaved_helper.to_string(), 2),
+        );
+        let start = src.find("answer").unwrap();
+        let actions = code_actions_for(
+            &server,
+            &uri,
+            src,
+            start,
+            start + "answer".len(),
+        );
+        assert!(!actions.contains("Import `helper`"), "{actions}");
         let _ = std::fs::remove_dir_all(root);
     }
 
