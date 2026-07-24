@@ -5,6 +5,7 @@
 //! schema identity and verify are the durable seam.
 
 use crate::PerformanceBudget::{stable_id, verify_stable_id, CanonicalJson};
+use crate::SHA256;
 use crate::Syntax::ARTIFACT_EXT_TRACE;
 use std::collections::BTreeMap;
 
@@ -53,6 +54,50 @@ impl TraceToolchain {
             ("jet_version".into(), CanonicalJson::String(self.jet_version.clone())),
             ("runner_id".into(), CanonicalJson::String(self.runner_id.clone())),
             ("stdlib_id".into(), CanonicalJson::String(self.stdlib_id.clone())),
+        ])
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceHardware {
+    pub cpu_arch: String,
+    pub logical_cpus: u64,
+    pub os: String,
+    pub target: String,
+}
+
+impl TraceHardware {
+    pub fn current() -> Self {
+        Self {
+            cpu_arch: std::env::consts::ARCH.into(),
+            logical_cpus: std::thread::available_parallelism()
+                .map(|n| n.get() as u64)
+                .unwrap_or(1),
+            os: std::env::consts::OS.into(),
+            target: option_env!("JET_BUILD_TARGET").unwrap_or("unknown").into(),
+        }
+    }
+
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        let body = CanonicalJson::object([
+            ("cpu_arch".into(), CanonicalJson::String(self.cpu_arch.clone())),
+            (
+                "logical_cpus".into(),
+                CanonicalJson::Integer(self.logical_cpus.to_string()),
+            ),
+            ("os".into(), CanonicalJson::String(self.os.clone())),
+            ("target".into(), CanonicalJson::String(self.target.clone())),
+        ])?;
+        let fingerprint = stable_id(&body);
+        CanonicalJson::object([
+            ("cpu_arch".into(), CanonicalJson::String(self.cpu_arch.clone())),
+            ("fingerprint".into(), CanonicalJson::String(fingerprint)),
+            (
+                "logical_cpus".into(),
+                CanonicalJson::Integer(self.logical_cpus.to_string()),
+            ),
+            ("os".into(), CanonicalJson::String(self.os.clone())),
+            ("target".into(), CanonicalJson::String(self.target.clone())),
         ])
     }
 }
@@ -471,11 +516,70 @@ impl SourceIdentity {
     }
 }
 
+/// Embedded source map so a `.jettrace` views offline without the repo
+/// (D-PERFSESSION1). `map` is opaque Source Map v3 JSON text; `sha256` covers
+/// those exact bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TraceSourceMap {
+    pub kind: String,
+    pub path: String,
+    pub sha256: String,
+    pub map: String,
+}
+
+impl TraceSourceMap {
+    /// Identity Jet map with `sourcesContent` for offline symbol/source truth.
+    pub fn jet_with_source(path: &str, source: &str) -> Self {
+        let map = CanonicalJson::object([
+            ("file".into(), CanonicalJson::String(path.into())),
+            ("mappings".into(), CanonicalJson::String(String::new())),
+            ("names".into(), CanonicalJson::Array(Vec::new())),
+            (
+                "sources".into(),
+                CanonicalJson::Array(vec![CanonicalJson::String(path.into())]),
+            ),
+            (
+                "sourcesContent".into(),
+                CanonicalJson::Array(vec![CanonicalJson::String(source.into())]),
+            ),
+            ("version".into(), CanonicalJson::Integer("3".into())),
+        ])
+        .expect("jet source map keys are unique");
+        let map = String::from_utf8(map.bytes()).expect("canonical json is utf-8");
+        Self {
+            kind: "jet".into(),
+            path: path.into(),
+            sha256: SHA256::sha256_hex(map.as_bytes()),
+            map,
+        }
+    }
+
+    /// Wrap an already-emitted Source Map v3 body (for example web `app.js.map`).
+    pub fn from_map_bytes(kind: &str, path: &str, map: &str) -> Self {
+        Self {
+            kind: kind.into(),
+            path: path.into(),
+            sha256: SHA256::sha256_hex(map.as_bytes()),
+            map: map.into(),
+        }
+    }
+
+    pub fn to_json(&self) -> Result<CanonicalJson, String> {
+        CanonicalJson::object([
+            ("kind".into(), CanonicalJson::String(self.kind.clone())),
+            ("map".into(), CanonicalJson::String(self.map.clone())),
+            ("path".into(), CanonicalJson::String(self.path.clone())),
+            ("sha256".into(), CanonicalJson::String(self.sha256.clone())),
+        ])
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TraceSkeleton {
     pub command: String,
     pub argv: Vec<String>,
     pub toolchain: TraceToolchain,
+    pub hardware: TraceHardware,
     pub capture_policy: CapturePolicy,
     pub samples: Vec<TraceSample>,
     pub allocations: Vec<TraceAllocation>,
@@ -486,6 +590,7 @@ pub struct TraceSkeleton {
     pub native: Vec<TraceNative>,
     pub spans: Vec<TraceSpan>,
     pub source_identity: Vec<SourceIdentity>,
+    pub source_maps: Vec<TraceSourceMap>,
 }
 
 impl TraceSkeleton {
@@ -536,17 +641,25 @@ impl TraceSkeleton {
             .iter()
             .map(SourceIdentity::to_json)
             .collect::<Result<Vec<_>, _>>()?;
+        let mut source_maps = self.source_maps.clone();
+        source_maps.sort_by(|a, b| a.path.cmp(&b.path).then(a.kind.cmp(&b.kind)));
+        let source_maps = source_maps
+            .iter()
+            .map(TraceSourceMap::to_json)
+            .collect::<Result<Vec<_>, _>>()?;
         CanonicalJson::object([
             ("allocations".into(), CanonicalJson::Array(allocations)),
             ("argv".into(), argv),
             ("browser".into(), CanonicalJson::Array(browser)),
             ("capture_policy".into(), self.capture_policy.to_json()?),
             ("command".into(), CanonicalJson::String(self.command.clone())),
+            ("hardware".into(), self.hardware.to_json()?),
             ("io".into(), CanonicalJson::Array(io)),
             ("locks".into(), CanonicalJson::Array(locks)),
             ("native".into(), CanonicalJson::Array(native)),
             ("samples".into(), CanonicalJson::Array(samples)),
             ("source_identity".into(), CanonicalJson::Array(source_identity)),
+            ("source_maps".into(), CanonicalJson::Array(source_maps)),
             ("spans".into(), CanonicalJson::Array(spans)),
             ("tasks".into(), CanonicalJson::Array(tasks)),
             ("toolchain".into(), self.toolchain.to_json()?),
@@ -615,11 +728,13 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
             "browser",
             "capture_policy",
             "command",
+            "hardware",
             "io",
             "locks",
             "native",
             "samples",
             "source_identity",
+            "source_maps",
             "spans",
             "tasks",
             "toolchain",
@@ -634,12 +749,13 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
         }
         _ => return Err("content.argv is not an array".into()),
     }
-    for key in ["browser", "native", "spans"] {
+    for key in ["browser", "native", "spans", "source_maps"] {
         match &fields[key] {
             CanonicalJson::Array(_) => {}
             _ => return Err(format!("content.{key} is not an array")),
         }
     }
+    validate_hardware(&fields["hardware"])?;
     let limits = validate_capture_policy(&fields["capture_policy"])?;
     validate_browser(&fields["browser"], limits.browser_rows)?;
     validate_samples(&fields["samples"])?;
@@ -650,7 +766,32 @@ fn validate_content(value: &CanonicalJson) -> Result<(), String> {
     validate_native(&fields["native"], &tasks, limits.native_rows)?;
     validate_spans(&fields["spans"], &tasks, limits.span_rows)?;
     validate_source_identity(&fields["source_identity"])?;
+    validate_source_maps(&fields["source_maps"])?;
     validate_toolchain(&fields["toolchain"])?;
+    Ok(())
+}
+
+fn validate_hardware(value: &CanonicalJson) -> Result<(), String> {
+    let fields = object_keys(
+        value,
+        "content.hardware",
+        &["cpu_arch", "fingerprint", "logical_cpus", "os", "target"],
+    )?;
+    text(&fields["cpu_arch"], "content.hardware.cpu_arch")?;
+    text(&fields["os"], "content.hardware.os")?;
+    text(&fields["target"], "content.hardware.target")?;
+    unsigned(&fields["logical_cpus"], "content.hardware.logical_cpus")?;
+    let claimed = text(&fields["fingerprint"], "content.hardware.fingerprint")?;
+    if claimed.len() != 64 || !claimed.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+        return Err("content.hardware.fingerprint is not lowercase Hex64".into());
+    }
+    let body = CanonicalJson::object([
+        ("cpu_arch".into(), fields["cpu_arch"].clone()),
+        ("logical_cpus".into(), fields["logical_cpus"].clone()),
+        ("os".into(), fields["os"].clone()),
+        ("target".into(), fields["target"].clone()),
+    ])?;
+    verify_stable_id(&body, claimed)?;
     Ok(())
 }
 
@@ -1103,6 +1244,36 @@ fn validate_source_identity(value: &CanonicalJson) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_source_maps(value: &CanonicalJson) -> Result<(), String> {
+    let items = match value {
+        CanonicalJson::Array(items) => items,
+        _ => return Err("content.source_maps is not an array".into()),
+    };
+    let mut prior_path: Option<&str> = None;
+    for (i, item) in items.iter().enumerate() {
+        let label = format!("content.source_maps[{i}]");
+        let fields = object_keys(item, &label, &["kind", "map", "path", "sha256"])?;
+        let kind = text(&fields["kind"], &format!("{label}.kind"))?;
+        if !matches!(kind, "jet" | "js") {
+            return Err(format!("{label}.kind must be jet or js"));
+        }
+        let path = text(&fields["path"], &format!("{label}.path"))?;
+        if prior_path.is_some_and(|prior| prior > path) {
+            return Err("content.source_maps is not sorted by path".into());
+        }
+        prior_path = Some(path);
+        let map = text(&fields["map"], &format!("{label}.map"))?;
+        let hash = text(&fields["sha256"], &format!("{label}.sha256"))?;
+        if hash.len() != 64 || !hash.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')) {
+            return Err(format!("{label}.sha256 is not lowercase Hex64"));
+        }
+        if hash != SHA256::sha256_hex(map.as_bytes()) {
+            return Err(format!("{label}.sha256 does not match map bytes"));
+        }
+    }
+    Ok(())
+}
+
 fn unsigned(value: &CanonicalJson, label: &str) -> Result<u64, String> {
     match value {
         CanonicalJson::Integer(text) => text
@@ -1388,6 +1559,12 @@ mod tests {
                 stdlib_id: "stdlib-test".into(),
                 runner_id: "runner-test".into(),
             },
+            hardware: TraceHardware {
+                cpu_arch: "x86_64".into(),
+                logical_cpus: 1,
+                os: "linux".into(),
+                target: "x86_64-unknown-linux-gnu".into(),
+            },
             capture_policy: CapturePolicy::default_exclusions(),
             samples: Vec::new(),
             allocations: Vec::new(),
@@ -1398,6 +1575,7 @@ mod tests {
             native: Vec::new(),
             spans: Vec::new(),
             source_identity: Vec::new(),
+            source_maps: Vec::new(),
         }
     }
 
@@ -2039,5 +2217,42 @@ mod tests {
         .unwrap();
         let err = verify_jettrace(&wrapper.bytes()).unwrap_err();
         assert!(err.contains("newer jet toolchain"), "{err}");
+    }
+
+    #[test]
+    fn embedded_source_maps_hash_and_sort_for_offline_truth() {
+        let mut skeleton = sample_skeleton();
+        skeleton.source_maps.push(TraceSourceMap::jet_with_source(
+            "b.jet",
+            "fn run() {}\n",
+        ));
+        skeleton.source_maps.push(TraceSourceMap::jet_with_source(
+            "a.jet",
+            "fn run() {}\n",
+        ));
+        let bytes = build_skeleton_bytes(&skeleton).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains("\"source_maps\":[{"), "{text}");
+        assert!(text.contains("\"kind\":\"jet\""), "{text}");
+        assert!(text.contains("sourcesContent"), "{text}");
+        // Sorted by path: a.jet before b.jet.
+        let a = text.find("\"path\":\"a.jet\"").unwrap();
+        let b = text.find("\"path\":\"b.jet\"").unwrap();
+        assert!(a < b, "{text}");
+        verify_jettrace(&bytes).unwrap();
+
+        let mut content = skeleton.content_json().unwrap();
+        let CanonicalJson::Object(fields) = &mut content else {
+            unreachable!()
+        };
+        let CanonicalJson::Array(maps) = fields.get_mut("source_maps").unwrap() else {
+            unreachable!()
+        };
+        let CanonicalJson::Object(first) = &mut maps[0] else {
+            unreachable!()
+        };
+        first.insert("sha256".into(), CanonicalJson::String("0".repeat(64)));
+        let err = verify_jettrace(&jettrace_artifact(content).bytes()).unwrap_err();
+        assert!(err.contains("does not match map bytes"), "{err}");
     }
 }

@@ -11,9 +11,9 @@
 use jet_foundation::JetTrace::{
     artifact_extension, build_skeleton_bytes, entrypoint_name_from_source, fn_names_from_source,
     trace_id, verify_jettrace, CapturePolicy, JetSymbolRef, SourceIdentity, TraceAllocation,
-    TraceBrowser, TraceIo, TraceLock, TraceNative, TraceSample, TraceSkeleton, TraceSpan, TraceTask,
-    TraceToolchain, TRACE_SCHEMA, TRACE_IO_ROW_LIMIT, TRACE_SPAN_ROW_LIMIT,
-    TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
+    TraceBrowser, TraceHardware, TraceIo, TraceLock, TraceNative, TraceSample, TraceSkeleton,
+    TraceSourceMap, TraceSpan, TraceTask, TraceToolchain, DEFAULT_EXCLUSIONS, TRACE_SCHEMA,
+    TRACE_IO_ROW_LIMIT, TRACE_SPAN_ROW_LIMIT, TRACE_TASK_ROW_LIMIT, TRACE_VERSION,
 };
 use jet_foundation::PerformanceBudget::CanonicalJson;
 use jet_foundation::SHA256;
@@ -45,6 +45,7 @@ struct CaptureBundle {
     spans: Vec<TraceSpan>,
     span_rows_truncated: bool,
     source_identity: Vec<SourceIdentity>,
+    source_maps: Vec<TraceSourceMap>,
     task_rows_truncated: bool,
 }
 
@@ -64,6 +65,7 @@ impl CaptureBundle {
             spans: Vec::new(),
             span_rows_truncated: false,
             source_identity: Vec::new(),
+            source_maps: Vec::new(),
             task_rows_truncated: false,
         }
     }
@@ -178,7 +180,13 @@ fn run_session(action: &str, args: &[String]) -> i32 {
     };
     let mut argv = vec![action.to_string()];
     argv.extend(args.iter().cloned());
-    match write_session_trace(action, &argv, parsed.out.as_deref(), capture) {
+    match write_session_trace(
+        action,
+        &argv,
+        parsed.out.as_deref(),
+        capture,
+        &parsed.capture_allowlist,
+    ) {
         Ok(path) => eprintln!("trace: {}", path.display()),
         Err(message) => {
             eprintln!("Error [E2102]: {message}");
@@ -191,6 +199,8 @@ fn run_session(action: &str, args: &[String]) -> i32 {
 struct SessionArgs {
     out: Option<String>,
     source: Option<String>,
+    /// Expert `--capture` allowlist (subset of D-PERFSESSION1 default exclusions).
+    capture_allowlist: Vec<String>,
     /// Base-intent argv after the action name (perf-only flags stripped).
     child_args: Vec<String>,
 }
@@ -198,6 +208,7 @@ struct SessionArgs {
 fn parse_session_args(args: &[String]) -> Result<SessionArgs, String> {
     let mut out = None;
     let mut source = None;
+    let mut capture_allowlist = Vec::new();
     let mut child_args = Vec::new();
     let mut i = 0usize;
     let mut passthrough = false;
@@ -227,6 +238,19 @@ fn parse_session_args(args: &[String]) -> Result<SessionArgs, String> {
             i += 2;
             continue;
         }
+        if let Some(value) = arg.strip_prefix("--capture=") {
+            capture_allowlist = parse_capture_allowlist(value)?;
+            i += 1;
+            continue;
+        }
+        if arg == "--capture" {
+            let Some(value) = args.get(i + 1) else {
+                return Err("`--capture` needs a comma-separated allowlist".into());
+            };
+            capture_allowlist = parse_capture_allowlist(value)?;
+            i += 2;
+            continue;
+        }
         if arg.starts_with('-') {
             child_args.push(args[i].clone());
             i += 1;
@@ -244,14 +268,39 @@ fn parse_session_args(args: &[String]) -> Result<SessionArgs, String> {
     Ok(SessionArgs {
         out,
         source,
+        capture_allowlist,
         child_args,
     })
+}
+
+fn parse_capture_allowlist(raw: &str) -> Result<Vec<String>, String> {
+    let mut items = Vec::new();
+    for part in raw.split(',') {
+        let item = part.trim();
+        if item.is_empty() {
+            continue;
+        }
+        if !DEFAULT_EXCLUSIONS.contains(&item) {
+            return Err(format!(
+                "`--capture` item `{item}` is not a D-PERFSESSION1 privacy field; allowed: {}",
+                DEFAULT_EXCLUSIONS.join(", ")
+            ));
+        }
+        items.push(item.to_string());
+    }
+    if items.is_empty() {
+        return Err("`--capture` needs at least one privacy field".into());
+    }
+    items.sort();
+    items.dedup();
+    Ok(items)
 }
 
 fn attach(args: &[String]) -> i32 {
     let mut pid = None;
     let mut out = None;
     let mut source = None;
+    let mut capture_allowlist = Vec::new();
     let mut i = 0usize;
     while i < args.len() {
         let arg = args[i].as_str();
@@ -280,6 +329,32 @@ fn attach(args: &[String]) -> i32 {
                 return 2;
             };
             source = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--capture=") {
+            match parse_capture_allowlist(value) {
+                Ok(items) => capture_allowlist = items,
+                Err(message) => {
+                    eprintln!("Error [E2102]: {message}");
+                    return 2;
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if arg == "--capture" {
+            let Some(value) = args.get(i + 1) else {
+                eprintln!("Error [E2102]: `--capture` needs a comma-separated allowlist");
+                return 2;
+            };
+            match parse_capture_allowlist(value) {
+                Ok(items) => capture_allowlist = items,
+                Err(message) => {
+                    eprintln!("Error [E2102]: {message}");
+                    return 2;
+                }
+            }
             i += 2;
             continue;
         }
@@ -318,11 +393,22 @@ fn attach(args: &[String]) -> i32 {
         }
     };
     let capture = if let Some(browser_capture) = browser_capture {
-        if source.as_deref().is_some_and(|path| !browser_capture.sources.iter().any(|source| source.path == path)) {
+        if source
+            .as_deref()
+            .is_some_and(|path| !browser_capture.sources.iter().any(|source| source.path == path))
+        {
             eprintln!("Error [E2102]: `--source` does not match the devserver browser session");
             return 2;
         }
-        match capture_browser(browser_capture) {
+        let browser = match capture_browser(browser_capture) {
+            Ok(bundle) => bundle,
+            Err(message) => {
+                eprintln!("Error [E2102]: {message}");
+                return 2;
+            }
+        };
+        // D-PERF-BROWSER-TRANSPORT1=A: one artifact merges host + browser facts.
+        match merge_host_onto_browser(pid, source.as_deref(), browser) {
             Ok(bundle) => bundle,
             Err(message) => {
                 eprintln!("Error [E2102]: {message}");
@@ -378,7 +464,17 @@ fn attach(args: &[String]) -> i32 {
         argv.push("--source".into());
         argv.push(path.clone());
     }
-    match write_session_trace("attach", &argv, out.as_deref(), capture) {
+    if !capture_allowlist.is_empty() {
+        argv.push("--capture".into());
+        argv.push(capture_allowlist.join(","));
+    }
+    match write_session_trace(
+        "attach",
+        &argv,
+        out.as_deref(),
+        capture,
+        &capture_allowlist,
+    ) {
         Ok(path) => {
             eprintln!("trace: {}", path.display());
             0
@@ -411,10 +507,32 @@ fn read_browser_capture(pid: u32, activate: bool) -> Result<jet::DevServer::Brow
 
 fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<CaptureBundle, String> {
     let mut bundle = CaptureBundle::empty();
-    bundle.source_identity = capture.sources.iter().map(|source| SourceIdentity { path: source.path.clone(), sha256: source.sha256.clone(), symbols: source.symbols.clone() }).collect();
-    let symbols = capture.sources.iter().flat_map(|source| source.symbols.iter().map(move |(name, _)| (name.as_str(), source.path.as_str()))).collect::<BTreeMap<_, _>>();
+    bundle.source_identity = capture
+        .sources
+        .iter()
+        .map(|source| SourceIdentity {
+            path: source.path.clone(),
+            sha256: source.sha256.clone(),
+            symbols: source.symbols.clone(),
+        })
+        .collect();
+    if let Some(map) = &capture.source_map {
+        bundle.source_maps.push(TraceSourceMap::from_map_bytes("js", "app.js", map));
+    }
+    let symbols = capture
+        .sources
+        .iter()
+        .flat_map(|source| {
+            source
+                .symbols
+                .iter()
+                .map(move |(name, _)| (name.as_str(), source.path.as_str()))
+        })
+        .collect::<BTreeMap<_, _>>();
     for row in capture.rows {
-        let path = symbols.get(row.symbol.as_str()).ok_or_else(|| format!("browser trace named unknown compiler symbol `{}`", row.symbol))?;
+        let path = symbols.get(row.symbol.as_str()).ok_or_else(|| {
+            format!("browser trace named unknown compiler symbol `{}`", row.symbol)
+        })?;
         bundle.browser.push(TraceBrowser {
             class: row.class,
             duration_ns: row.duration_ns,
@@ -427,6 +545,180 @@ fn capture_browser(capture: jet::DevServer::BrowserTrace::Capture) -> Result<Cap
     }
     bundle.browser_rows_truncated = capture.truncated;
     Ok(bundle)
+}
+
+/// Join host observe/native facts onto a browser capture without rereading
+/// compiler source identities from disk (D-PERF-BROWSER-TRANSPORT1=A).
+fn merge_host_onto_browser(
+    pid: u32,
+    source: Option<&str>,
+    mut browser: CaptureBundle,
+) -> Result<CaptureBundle, String> {
+    let symbol = attribution_symbol(&browser.source_identity, source).ok_or_else(|| {
+        "browser capture has no Jet symbol identity for host attribution".to_string()
+    })?;
+    let timing = process_times(pid);
+    let wall_ns = timing.map(|(wall_ns, _)| wall_ns).unwrap_or(0);
+    let cpu_ns = timing.map(|(_, cpu_ns)| cpu_ns);
+    if wall_ns > 0 {
+        browser.samples.push(TraceSample {
+            domain: "wall".into(),
+            duration_ns: wall_ns,
+            symbol: symbol.clone(),
+        });
+    }
+    if let Some(cpu_ns) = cpu_ns.filter(|ns| *ns > 0) {
+        browser.samples.push(TraceSample {
+            domain: "cpu".into(),
+            duration_ns: cpu_ns,
+            symbol: symbol.clone(),
+        });
+    }
+    let native_timing = timing
+        .map(|(_, duration_ns)| NativeTimingInput::Captured {
+            duration_ns,
+            observed_at_ns: 0,
+            process_id: pid,
+        })
+        .unwrap_or_else(|| NativeTimingInput::unavailable(wall_ns));
+    let snapshot = jet::DevServer::LiveInspect::read(pid).ok();
+    let snapshot_tasks = snapshot
+        .as_deref()
+        .and_then(|snapshot| {
+            let process_id = u32::try_from(json_u64(snapshot, "pid")?).ok()?;
+            Some(observe_tasks(snapshot, process_id))
+        })
+        .unwrap_or_default();
+    if let Some(snapshot) = snapshot.as_deref() {
+        let (alloc_count, alloc_bytes) = observe_arena_resources(snapshot);
+        if alloc_count > 0 || alloc_bytes > 0 {
+            browser.allocations.push(TraceAllocation {
+                count: alloc_count,
+                bytes: alloc_bytes,
+                symbol: symbol.clone(),
+            });
+        }
+        for observed in observe_locks(snapshot) {
+            browser.locks.push(TraceLock {
+                kind: "channel".into(),
+                id: observed.id,
+                depth: observed.depth,
+                capacity: observed.capacity,
+                send_waiters: observed.send_waiters,
+                recv_waiters: observed.recv_waiters,
+                closed: observed.closed,
+                symbol: symbol.clone(),
+            });
+        }
+    }
+    let mut observed_tasks = snapshot_tasks.rows.clone();
+    observed_tasks.sort_by_key(ObservedTask::key);
+    let trace_task_ids = trace_task_id_map(&observed_tasks);
+    for observed in &observed_tasks {
+        let id = trace_task_ids[&observed.key()];
+        let parent = if observed.parent == 0 {
+            0
+        } else {
+            *trace_task_ids
+                .get(&(observed.process_id, observed.parent))
+                .ok_or_else(|| {
+                    format!(
+                        "observed task {} in process {} has missing parent {}",
+                        observed.id, observed.process_id, observed.parent
+                    )
+                })?
+        };
+        browser.tasks.push(TraceTask {
+            id,
+            parent,
+            state: observed.state.clone(),
+            wait: observed.wait.clone(),
+            cancelled: observed.cancelled,
+            symbol: symbol.clone(),
+        });
+    }
+    browser.task_rows_truncated = snapshot_tasks.truncated;
+    for observed in observe_io(&snapshot_tasks.rows) {
+        let Some(task_id) = trace_task_ids.get(&observed.task).copied() else {
+            continue;
+        };
+        browser.io.push(TraceIo {
+            end_ns: wall_ns,
+            kind: observed.kind,
+            start_ns: wall_ns,
+            task_id,
+            wait: observed.wait,
+            symbol: symbol.clone(),
+        });
+    }
+    let root_task_id = match &native_timing {
+        NativeTimingInput::Captured { process_id, .. } => observed_tasks
+            .iter()
+            .find(|task| task.process_id == *process_id && task.parent == 0)
+            .and_then(|task| trace_task_ids.get(&task.key()))
+            .copied(),
+        NativeTimingInput::Unavailable { .. } => None,
+    };
+    browser.native.push(match (&native_timing, root_task_id) {
+        (
+            NativeTimingInput::Captured {
+                duration_ns,
+                observed_at_ns,
+                ..
+            },
+            Some(task_id),
+        ) => TraceNative {
+            clock: "process_cpu".into(),
+            duration_ns: Some(*duration_ns),
+            observed_at_ns: *observed_at_ns,
+            reason: String::new(),
+            status: "captured".into(),
+            symbol: symbol.clone(),
+            target: env!("JET_BUILD_TARGET").into(),
+            task_id: Some(task_id),
+        },
+        (NativeTimingInput::Captured { observed_at_ns, .. }, None) => TraceNative {
+            clock: "process_cpu".into(),
+            duration_ns: None,
+            observed_at_ns: *observed_at_ns,
+            reason: "root task causality was not observable".into(),
+            status: "unavailable".into(),
+            symbol: symbol.clone(),
+            target: env!("JET_BUILD_TARGET").into(),
+            task_id: None,
+        },
+        (NativeTimingInput::Unavailable { observed_at_ns, reason }, _) => TraceNative {
+            clock: "process_cpu".into(),
+            duration_ns: None,
+            observed_at_ns: *observed_at_ns,
+            reason: reason.clone(),
+            status: "unavailable".into(),
+            symbol: symbol.clone(),
+            target: env!("JET_BUILD_TARGET").into(),
+            task_id: None,
+        },
+    });
+    Ok(browser)
+}
+
+fn attribution_symbol(
+    sources: &[SourceIdentity],
+    preferred_path: Option<&str>,
+) -> Option<JetSymbolRef> {
+    let source = preferred_path
+        .and_then(|path| sources.iter().find(|source| source.path == path))
+        .or_else(|| sources.first())?;
+    let name = source
+        .symbols
+        .iter()
+        .find(|(name, kind)| kind == "fn" && name == "run")
+        .or_else(|| source.symbols.iter().find(|(_, kind)| kind == "fn"))
+        .or_else(|| source.symbols.first())
+        .map(|(name, _)| name.clone())?;
+    Some(JetSymbolRef {
+        path: source.path.clone(),
+        name,
+    })
 }
 
 fn capture_from_source(
@@ -691,13 +983,14 @@ fn capture_from_source(
             .map(|timeline| timeline.span_rows_truncated)
             .unwrap_or(false),
         source_identity: vec![SourceIdentity {
-            path: path_text,
+            path: path_text.clone(),
             sha256,
             symbols: fn_names
                 .into_iter()
                 .map(|name| (name, "fn".into()))
                 .collect(),
         }],
+        source_maps: vec![TraceSourceMap::jet_with_source(&path_text, &src)],
         task_rows_truncated: io_timeline
             .map(|timeline| timeline.task_rows_truncated)
             .unwrap_or(snapshot_tasks.truncated),
@@ -1368,68 +1661,377 @@ fn ticks_to_ns(ticks: u64, ticks_per_second: u64) -> Option<u64> {
 }
 
 fn view(args: &[String]) -> i32 {
-    let Some(path) = args.first() else {
+    let mut path = None;
+    let mut mode = ViewMode::Text;
+    let mut frames = FramesMode::Jet;
+    let mut i = 0usize;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if arg == "--json" {
+            mode = ViewMode::Json;
+            i += 1;
+            continue;
+        }
+        if arg == "--html" {
+            mode = ViewMode::Html;
+            i += 1;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--frames=") {
+            frames = match value {
+                "jet" => FramesMode::Jet,
+                "all" => FramesMode::All,
+                _ => {
+                    eprintln!("Error [E2102]: `--frames` accepts only `jet` or `all`");
+                    return 2;
+                }
+            };
+            i += 1;
+            continue;
+        }
+        if arg == "--frames" {
+            let Some(value) = args.get(i + 1) else {
+                eprintln!("Error [E2102]: `--frames` needs `jet` or `all`");
+                return 2;
+            };
+            frames = match value.as_str() {
+                "jet" => FramesMode::Jet,
+                "all" => FramesMode::All,
+                _ => {
+                    eprintln!("Error [E2102]: `--frames` accepts only `jet` or `all`");
+                    return 2;
+                }
+            };
+            i += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            eprintln!("Error [E2102]: unknown `jet perf view` flag `{arg}`");
+            eprintln!(
+                " Fix: jet perf view <path{ARTIFACT_EXT_TRACE}> [--json|--html] [--frames=jet|all]"
+            );
+            return 2;
+        }
+        if path.is_some() {
+            eprintln!("Error [E2102]: `jet perf view` takes one trace path");
+            return 2;
+        }
+        path = Some(arg.to_string());
+        i += 1;
+    }
+    let Some(path) = path else {
         eprintln!("Error [E2102]: `jet perf view` needs a {ARTIFACT_EXT_TRACE} path");
         return 2;
     };
-    if args.len() != 1 {
-        eprintln!("Error [E2102]: `jet perf view` takes exactly one trace path");
-        return 2;
-    }
-    match read_verified(path) {
-        Ok(trace) => {
-            let id = trace_id(&trace).unwrap_or("unknown");
-            let command = content_command(&trace).unwrap_or("unknown");
-            println!("schema {TRACE_SCHEMA} v{TRACE_VERSION}");
-            println!("trace {id}");
-            println!("command {command}");
-            if let Some((domain, ns, symbol)) = first_sample(&trace) {
-                println!("sample {domain} {ns}ns · {symbol}");
-            }
-            if let Some((count, bytes, symbol)) = first_allocation(&trace) {
-                println!("alloc count={count} bytes={bytes} · {symbol}");
-            }
-            if let Some((n, symbol)) = browser_summary(&trace) {
-                println!("browser count={n} · {symbol}");
-            }
-            if let Some((n, child_n, symbol)) = task_summary(&trace) {
-                println!("tasks count={n} children={child_n} · {symbol}");
-            }
-            if let Some((n, waiters, symbol)) = lock_summary(&trace) {
-                println!("locks count={n} waiters={waiters} · {symbol}");
-            }
-            if let Some((n, symbol)) = io_summary(&trace) {
-                println!("io count={n} · {symbol}");
-            }
-            if let Some(summary) = native_summary(&trace) {
-                println!("{summary}");
-            }
-            if let Some(summary) = span_summary(&trace) {
-                println!("{summary}");
-            }
-            0
-        }
+    let trace = match read_verified(&path) {
+        Ok(trace) => trace,
         Err(message) => {
             eprintln!("Error [E2102]: {message}");
-            2
+            return 2;
+        }
+    };
+    match mode {
+        ViewMode::Text => {
+            render_view_text(&trace, frames, use_color());
+            0
+        }
+        ViewMode::Json => {
+            print!("{}", String::from_utf8_lossy(&view_json(&trace, frames).bytes()));
+            0
+        }
+        ViewMode::Html => {
+            print!("{}", view_html(&trace, frames));
+            0
         }
     }
 }
 
+enum ViewMode {
+    Text,
+    Json,
+    Html,
+}
+
+#[derive(Clone, Copy)]
+enum FramesMode {
+    Jet,
+    All,
+}
+
+fn use_color() -> bool {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    if std::env::var_os("JET_FORCE_COLOR").is_some() {
+        return true;
+    }
+    std::io::IsTerminal::is_terminal(&std::io::stdout())
+}
+
+fn render_view_text(trace: &CanonicalJson, frames: FramesMode, color: bool) {
+    let id = trace_id(trace).unwrap_or("unknown");
+    let command = content_command(trace).unwrap_or("unknown");
+    let bold = if color { "\u{1b}[1m" } else { "" };
+    let reset = if color { "\u{1b}[0m" } else { "" };
+    println!("{bold}schema{reset} {TRACE_SCHEMA} v{TRACE_VERSION}");
+    println!("{bold}trace{reset} {id}");
+    println!("{bold}command{reset} {command}");
+    println!(
+        "{bold}frames{reset} {}",
+        match frames {
+            FramesMode::Jet => "jet",
+            FramesMode::All => "all",
+        }
+    );
+    if let Some((domain, ns, symbol)) = first_sample(trace) {
+        println!("sample {domain} {ns}ns · {symbol}");
+    }
+    if let Some((count, bytes, symbol)) = first_allocation(trace) {
+        println!("alloc count={count} bytes={bytes} · {symbol}");
+    }
+    if let Some((n, symbol)) = browser_summary(trace) {
+        println!("browser count={n} · {symbol}");
+    }
+    if let Some((n, child_n, symbol)) = task_summary(trace) {
+        println!("tasks count={n} children={child_n} · {symbol}");
+    }
+    if let Some((n, waiters, symbol)) = lock_summary(trace) {
+        println!("locks count={n} waiters={waiters} · {symbol}");
+    }
+    if let Some((n, symbol)) = io_summary(trace) {
+        println!("io count={n} · {symbol}");
+    }
+    if let Some(summary) = native_summary(trace) {
+        println!("{summary}");
+    }
+    if let Some(summary) = span_summary(trace) {
+        println!("{summary}");
+    }
+    if frames_show_generated(frames) {
+        println!("generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)");
+    }
+    let flame = ascii_flame(trace);
+    if !flame.is_empty() {
+        println!("{bold}flamegraph{reset}");
+        for line in flame {
+            println!("{line}");
+        }
+    }
+    let timeline = ascii_timeline(trace);
+    if !timeline.is_empty() {
+        println!("{bold}timeline{reset}");
+        for line in timeline {
+            println!("{line}");
+        }
+    }
+}
+
+fn frames_show_generated(frames: FramesMode) -> bool {
+    matches!(frames, FramesMode::All)
+}
+
+fn ascii_flame(trace: &CanonicalJson) -> Vec<String> {
+    let mut rows = Vec::new();
+    if let Some((domain, ns, symbol)) = first_sample(trace) {
+        let width = ((ns.parse::<u64>().unwrap_or(1).min(40)) as usize).max(1);
+        rows.push(format!("{symbol} {domain} {}", "#".repeat(width)));
+    }
+    if let Some((n, symbol)) = browser_summary(trace) {
+        let width = n.min(40).max(1);
+        rows.push(format!("{symbol} browser {}", "#".repeat(width)));
+    }
+    rows
+}
+
+fn ascii_timeline(trace: &CanonicalJson) -> Vec<String> {
+    let mut rows = Vec::new();
+    if let Some(items) = content_array(trace, "browser") {
+        for item in items.iter().take(8) {
+            let CanonicalJson::Object(fields) = item else {
+                continue;
+            };
+            let start = match fields.get("start_ns") {
+                Some(CanonicalJson::Integer(text)) => text.clone(),
+                _ => continue,
+            };
+            let dur = match fields.get("duration_ns") {
+                Some(CanonicalJson::Integer(text)) => text.clone(),
+                _ => continue,
+            };
+            let name = match fields.get("symbol").and_then(symbol_label) {
+                Some(name) => name,
+                None => "browser".into(),
+            };
+            rows.push(format!("[{start}+{dur}] {name}"));
+        }
+    }
+    if let Some(items) = content_array(trace, "spans") {
+        for item in items.iter().take(8) {
+            let CanonicalJson::Object(fields) = item else {
+                continue;
+            };
+            if fields.get("status") != Some(&CanonicalJson::String("captured".into())) {
+                continue;
+            }
+            let start = match fields.get("start_ns") {
+                Some(CanonicalJson::Integer(text)) => text.clone(),
+                _ => continue,
+            };
+            let end = match fields.get("end_ns") {
+                Some(CanonicalJson::Integer(text)) => text.clone(),
+                _ => continue,
+            };
+            let name = match fields.get("symbol").and_then(symbol_label) {
+                Some(name) => name,
+                None => "span".into(),
+            };
+            rows.push(format!("[{start}..{end}] {name}"));
+        }
+    }
+    rows
+}
+
+fn view_json(trace: &CanonicalJson, frames: FramesMode) -> CanonicalJson {
+    CanonicalJson::object([
+        (
+            "flamegraph".into(),
+            CanonicalJson::Array(
+                ascii_flame(trace)
+                    .into_iter()
+                    .map(CanonicalJson::String)
+                    .collect(),
+            ),
+        ),
+        (
+            "frames".into(),
+            CanonicalJson::String(
+                match frames {
+                    FramesMode::Jet => "jet",
+                    FramesMode::All => "all",
+                }
+                .into(),
+            ),
+        ),
+        ("kind".into(), CanonicalJson::String("jet.trace.view".into())),
+        ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
+        (
+            "timeline".into(),
+            CanonicalJson::Array(
+                ascii_timeline(trace)
+                    .into_iter()
+                    .map(CanonicalJson::String)
+                    .collect(),
+            ),
+        ),
+        ("trace".into(), trace.clone()),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+    ])
+    .expect("view json keys are unique")
+}
+
+fn view_html(trace: &CanonicalJson, frames: FramesMode) -> String {
+    let id = trace_id(trace).unwrap_or("unknown");
+    let flame = ascii_flame(trace)
+        .into_iter()
+        .map(|line| format!("<li>{}</li>", html_escape(&line)))
+        .collect::<Vec<_>>()
+        .join("");
+    let timeline = ascii_timeline(trace)
+        .into_iter()
+        .map(|line| format!("<li>{}</li>", html_escape(&line)))
+        .collect::<Vec<_>>()
+        .join("");
+    let frames_label = match frames {
+        FramesMode::Jet => "jet",
+        FramesMode::All => "all",
+    };
+    format!(
+        r#"<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>jettrace {id}</title>
+<style>
+body{{font:14px/1.4 ui-monospace,monospace;margin:1.5rem;background:#111;color:#eee}}
+h1,h2{{font-weight:600}}
+.bar{{display:inline-block;height:10px;background:#6cf;margin-left:.5rem}}
+section{{margin:1rem 0}}
+</style></head><body>
+<h1>jettrace {id}</h1>
+<p>schema {TRACE_SCHEMA} v{TRACE_VERSION} · frames={frames_label}</p>
+<section><h2>flamegraph</h2><ul id="flame">{flame}</ul></section>
+<section><h2>timeline</h2><ul id="timeline">{timeline}</ul></section>
+<script>
+const flame=document.getElementById('flame');
+for (const li of flame.querySelectorAll('li')) {{
+  const m=li.textContent.match(/#+/);
+  if(!m) continue;
+  const bar=document.createElement('span');
+  bar.className='bar';
+  bar.style.width=(m[0].length*4)+'px';
+  li.appendChild(bar);
+}}
+</script>
+</body></html>
+"#
+    )
+}
+
+fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 fn compare(args: &[String]) -> i32 {
-    if args.len() != 2 {
+    let mut paths = Vec::new();
+    let mut override_identity = false;
+    let mut baseline_name = None;
+    let mut i = 0usize;
+    while i < args.len() {
+        let arg = args[i].as_str();
+        if arg == "--override-identity" {
+            override_identity = true;
+            i += 1;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--baseline=") {
+            baseline_name = Some(value.to_string());
+            i += 1;
+            continue;
+        }
+        if arg == "--baseline" {
+            let Some(value) = args.get(i + 1) else {
+                eprintln!("Error [E2102]: `--baseline` needs a pinned baseline name");
+                return 2;
+            };
+            baseline_name = Some(value.clone());
+            i += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            eprintln!("Error [E2102]: unknown `jet perf compare` flag `{arg}`");
+            eprintln!(
+                " Fix: jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]"
+            );
+            return 2;
+        }
+        paths.push(arg.to_string());
+        i += 1;
+    }
+    if paths.len() != 2 {
         eprintln!("Error [E2102]: `jet perf compare` needs two {ARTIFACT_EXT_TRACE} paths");
-        eprintln!(" Fix: jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE}");
+        eprintln!(
+            " Fix: jet perf compare base{ARTIFACT_EXT_TRACE} head{ARTIFACT_EXT_TRACE} [--baseline <name>] [--override-identity]"
+        );
         return 2;
     }
-    let base = match read_verified(&args[0]) {
+    let base = match read_verified(&paths[0]) {
         Ok(trace) => trace,
         Err(message) => {
             eprintln!("Error [E2102]: base trace: {message}");
             return 2;
         }
     };
-    let head = match read_verified(&args[1]) {
+    let head = match read_verified(&paths[1]) {
         Ok(trace) => trace,
         Err(message) => {
             eprintln!("Error [E2102]: head trace: {message}");
@@ -1438,33 +2040,195 @@ fn compare(args: &[String]) -> i32 {
     };
     let base_tool = toolchain_digest(&base);
     let head_tool = toolchain_digest(&head);
-    if base_tool != head_tool {
-        eprintln!("Error [E2102]: toolchain identity mismatch between traces");
-        eprintln!(" Why: compare requires matching toolchain digests (D-PERFSESSION1)");
-        eprintln!(" Fix: recapture both traces with the same jet toolchain, or wait for an explicit override");
+    let base_hw = hardware_fingerprint(&base);
+    let head_hw = hardware_fingerprint(&head);
+    let identity_mismatch = base_tool != head_tool || base_hw != head_hw;
+    if identity_mismatch && !override_identity {
+        if base_tool != head_tool {
+            eprintln!("Error [E2102]: toolchain identity mismatch between traces");
+            eprintln!(" Why: compare requires matching toolchain digests (D-PERFSESSION1)");
+        } else {
+            eprintln!("Error [E2102]: hardware identity mismatch between traces");
+            eprintln!(" Why: compare requires matching hardware fingerprints (D-PERFSESSION1)");
+        }
+        eprintln!(
+            " Fix: recapture both traces on the same machine/toolchain, or pass `--override-identity`"
+        );
         return 1;
     }
+    if let Some(name) = &baseline_name {
+        if let Err(message) = require_pinned_baseline(name) {
+            eprintln!("Error [E2102]: {message}");
+            eprintln!(" Why: `--baseline` selects a D-PERFBUDGET-BASELINE1 pinned name");
+            eprintln!(" Fix: create the baseline with `jet budget update --baseline {name}`, or omit `--baseline`");
+            return 1;
+        }
+    }
+    let deltas = compare_domain_deltas(&base, &head);
+    let budget_line = budget_compare_line(&base, &head, baseline_name.as_deref());
+    let override_note = if identity_mismatch && override_identity {
+        " · identity override"
+    } else {
+        ""
+    };
+    let baseline_note = baseline_name
+        .as_ref()
+        .map(|name| format!(" · baseline {name}"))
+        .unwrap_or_default();
     println!(
-        "compare ok · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {} · head {}",
+        "compare ok · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {} · head {}{override_note}{baseline_note}",
         trace_id(&base).unwrap_or("unknown"),
-        trace_id(&head).unwrap_or("unknown")
+        trace_id(&head).unwrap_or("unknown"),
     );
+    if !deltas.is_empty() {
+        println!("deltas: {}", deltas.join(" · "));
+    }
+    println!("{budget_line}");
     0
+}
+
+fn require_pinned_baseline(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name.contains('.')
+        || name.contains('\\')
+        || name.starts_with('/')
+        || name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'/')
+    {
+        return Err(format!("baseline name `{name}` is not a pinned BaselineName"));
+    }
+    let cwd = std::env::current_dir().map_err(|e| format!("cannot resolve cwd: {e}"))?;
+    let root = jet::Loader::find_manifest_root(&cwd).unwrap_or(cwd);
+    let path = root
+        .join(".jet")
+        .join("perf")
+        .join("baselines")
+        .join("names")
+        .join(format!("{name}.json"));
+    if !path.is_file() {
+        return Err(format!(
+            "pinned baseline `{name}` is missing at {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn hardware_fingerprint(trace: &CanonicalJson) -> Option<String> {
+    content_object(trace)?
+        .get("hardware")
+        .and_then(|value| match value {
+            CanonicalJson::Object(fields) => match fields.get("fingerprint") {
+                Some(CanonicalJson::String(text)) => Some(text.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+}
+
+fn compare_domain_deltas(base: &CanonicalJson, head: &CanonicalJson) -> Vec<String> {
+    let mut out = Vec::new();
+    if let (Some(b), Some(h)) = (sample_duration(base, "wall"), sample_duration(head, "wall")) {
+        out.push(format!("wall {b}->{h} ns"));
+    }
+    if let (Some(b), Some(h)) = (sample_duration(base, "cpu"), sample_duration(head, "cpu")) {
+        out.push(format!("cpu {b}->{h} ns"));
+    }
+    if let (Some(b), Some(h)) = (allocation_bytes(base), allocation_bytes(head)) {
+        out.push(format!("alloc {b}->{h} B"));
+    }
+    out
+}
+
+fn sample_duration(trace: &CanonicalJson, domain: &str) -> Option<u64> {
+    let samples = match content_object(trace)?.get("samples")? {
+        CanonicalJson::Array(items) => items,
+        _ => return None,
+    };
+    for sample in samples {
+        let CanonicalJson::Object(fields) = sample else {
+            continue;
+        };
+        if fields.get("domain") == Some(&CanonicalJson::String(domain.into())) {
+            if let Some(CanonicalJson::Integer(text)) = fields.get("duration_ns") {
+                return text.parse().ok();
+            }
+        }
+    }
+    None
+}
+
+fn allocation_bytes(trace: &CanonicalJson) -> Option<u64> {
+    let allocations = match content_object(trace)?.get("allocations")? {
+        CanonicalJson::Array(items) => items,
+        _ => return None,
+    };
+    let CanonicalJson::Object(fields) = allocations.first()? else {
+        return None;
+    };
+    match fields.get("bytes")? {
+        CanonicalJson::Integer(text) => text.parse().ok(),
+        _ => None,
+    }
+}
+
+fn budget_compare_line(base: &CanonicalJson, head: &CanonicalJson, baseline: Option<&str>) -> String {
+    // #241 budgets: wall AbsoluteFrom/RelativeTo against the pinned base trace.
+    match (sample_duration(base, "wall"), sample_duration(head, "wall")) {
+        (Some(base_ns), Some(head_ns)) if base_ns > 0 => {
+            let bad = head_ns.saturating_sub(base_ns);
+            let bp = (bad as u128).saturating_mul(10_000) / base_ns as u128;
+            let name = baseline.unwrap_or("trace-baseline");
+            format!(
+                "budgets: wall RelativeTo({name}) regression={bp}bp · base={base_ns}ns head={head_ns}ns"
+            )
+        }
+        _ => "budgets: no comparable wall samples for #241 RelativeTo evaluation".into(),
+    }
 }
 
 fn export(args: &[String]) -> i32 {
     let mut path = None;
+    let mut mode = ExportMode::Json;
     let mut i = 0usize;
     while i < args.len() {
         let arg = args[i].as_str();
-        if arg == "--json" {
-            i += 1;
-            continue;
-        }
-        if arg.starts_with('-') {
-            eprintln!("Error [E2102]: unknown `jet perf export` flag `{arg}`");
-            eprintln!(" Fix: jet perf export <path{ARTIFACT_EXT_TRACE}> [--json]");
-            return 2;
+        match arg {
+            "--json" => {
+                mode = ExportMode::Json;
+                i += 1;
+                continue;
+            }
+            "--pprof" => {
+                mode = ExportMode::Pprof;
+                i += 1;
+                continue;
+            }
+            "--otel" => {
+                mode = ExportMode::Otel;
+                i += 1;
+                continue;
+            }
+            "--chrome" => {
+                mode = ExportMode::Chrome;
+                i += 1;
+                continue;
+            }
+            "--emit-profile-map" => {
+                mode = ExportMode::ProfileMap;
+                i += 1;
+                continue;
+            }
+            _ if arg.starts_with('-') => {
+                eprintln!("Error [E2102]: unknown `jet perf export` flag `{arg}`");
+                eprintln!(
+                    " Fix: jet perf export <path{ARTIFACT_EXT_TRACE}> [--json|--pprof|--otel|--chrome|--emit-profile-map]"
+                );
+                return 2;
+            }
+            _ => {}
         }
         if path.is_some() {
             eprintln!("Error [E2102]: `jet perf export` takes one trace path");
@@ -1484,29 +2248,215 @@ fn export(args: &[String]) -> i32 {
             return 2;
         }
     };
-    let loss = if first_sample(&trace).is_some()
-        || first_allocation(&trace).is_some()
-        || browser_summary(&trace).is_some()
-        || task_summary(&trace).is_some()
-        || lock_summary(&trace).is_some()
-        || io_summary(&trace).is_some()
-        || native_summary(&trace).is_some()
-        || span_summary(&trace).is_some()
+    let projection = match mode {
+        ExportMode::Json => export_json_envelope(&trace),
+        ExportMode::Pprof => export_pprof_projection(&trace),
+        ExportMode::Otel => export_otel_projection(&trace),
+        ExportMode::Chrome => export_chrome_projection(&trace),
+        ExportMode::ProfileMap => export_profile_map_projection(&trace),
+    };
+    print!("{}", String::from_utf8_lossy(&projection.bytes()));
+    0
+}
+
+enum ExportMode {
+    Json,
+    Pprof,
+    Otel,
+    Chrome,
+    ProfileMap,
+}
+
+fn export_json_envelope(trace: &CanonicalJson) -> CanonicalJson {
+    let loss = if first_sample(trace).is_some()
+        || first_allocation(trace).is_some()
+        || browser_summary(trace).is_some()
+        || task_summary(trace).is_some()
+        || lock_summary(trace).is_some()
+        || io_summary(trace).is_some()
+        || native_summary(trace).is_some()
+        || span_summary(trace).is_some()
     {
         "json-envelope; domains present are wall/cpu/alloc/browser/tasks/locks/io/native/spans only — no pprof/otel/chrome payloads"
     } else {
         "json-envelope-only; no pprof/otel/chrome payloads in skeleton"
     };
-    let projection = CanonicalJson::object([
+    CanonicalJson::object([
         ("kind".into(), CanonicalJson::String("jet.trace.projection".into())),
         ("loss".into(), CanonicalJson::String(loss.into())),
         ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
-        ("trace".into(), trace),
+        ("trace".into(), trace.clone()),
         ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
     ])
-    .expect("projection keys are unique");
-    print!("{}", String::from_utf8_lossy(&projection.bytes()));
-    0
+    .expect("projection keys are unique")
+}
+
+fn export_pprof_projection(trace: &CanonicalJson) -> CanonicalJson {
+    let mut samples = Vec::new();
+    if let Some(wall) = sample_duration(trace, "wall") {
+        samples.push(CanonicalJson::object([
+            ("location".into(), CanonicalJson::String("wall".into())),
+            ("value".into(), CanonicalJson::Integer(wall.to_string())),
+        ]).unwrap());
+    }
+    if let Some(cpu) = sample_duration(trace, "cpu") {
+        samples.push(CanonicalJson::object([
+            ("location".into(), CanonicalJson::String("cpu".into())),
+            ("value".into(), CanonicalJson::Integer(cpu.to_string())),
+        ]).unwrap());
+    }
+    CanonicalJson::object([
+        ("kind".into(), CanonicalJson::String("jet.trace.pprof-projection".into())),
+        (
+            "loss".into(),
+            CanonicalJson::String(
+                "pprof-json; samples are Jet wall/cpu only — no native stack frames, no gzip proto, no labels beyond domain"
+                    .into(),
+            ),
+        ),
+        ("samples".into(), CanonicalJson::Array(samples)),
+        ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
+        ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+    ])
+    .expect("pprof projection keys are unique")
+}
+
+fn export_otel_projection(trace: &CanonicalJson) -> CanonicalJson {
+    let mut spans = Vec::new();
+    if let Some(content) = content_object(trace) {
+        if let Some(CanonicalJson::Array(items)) = content.get("spans") {
+            for item in items {
+                spans.push(item.clone());
+            }
+        }
+        if let Some(CanonicalJson::Array(items)) = content.get("browser") {
+            for item in items {
+                spans.push(item.clone());
+            }
+        }
+    }
+    CanonicalJson::object([
+        ("kind".into(), CanonicalJson::String("jet.trace.otel-projection".into())),
+        (
+            "loss".into(),
+            CanonicalJson::String(
+                "otel-json; Jet spans/browser only — no resource attributes, no OTLP protobuf, no baggage/traceparent wire"
+                    .into(),
+            ),
+        ),
+        ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
+        ("spans".into(), CanonicalJson::Array(spans)),
+        ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+    ])
+    .expect("otel projection keys are unique")
+}
+
+fn export_chrome_projection(trace: &CanonicalJson) -> CanonicalJson {
+    let mut events = Vec::new();
+    if let Some(wall) = sample_duration(trace, "wall") {
+        events.push(
+            CanonicalJson::object([
+                ("dur".into(), CanonicalJson::Integer(wall.to_string())),
+                ("name".into(), CanonicalJson::String("wall".into())),
+                ("ph".into(), CanonicalJson::String("X".into())),
+                ("pid".into(), CanonicalJson::Integer("1".into())),
+                ("tid".into(), CanonicalJson::Integer("1".into())),
+                ("ts".into(), CanonicalJson::Integer("0".into())),
+            ])
+            .unwrap(),
+        );
+    }
+    if let Some(content) = content_object(trace) {
+        if let Some(CanonicalJson::Array(items)) = content.get("browser") {
+            for item in items {
+                let CanonicalJson::Object(fields) = item else {
+                    continue;
+                };
+                let start = match fields.get("start_ns") {
+                    Some(CanonicalJson::Integer(text)) => text.clone(),
+                    _ => continue,
+                };
+                let dur = match fields.get("duration_ns") {
+                    Some(CanonicalJson::Integer(text)) => text.clone(),
+                    _ => continue,
+                };
+                let name = match fields.get("symbol") {
+                    Some(CanonicalJson::Object(symbol)) => match symbol.get("name") {
+                        Some(CanonicalJson::String(name)) => name.clone(),
+                        _ => "browser".into(),
+                    },
+                    _ => "browser".into(),
+                };
+                events.push(
+                    CanonicalJson::object([
+                        ("dur".into(), CanonicalJson::Integer(dur)),
+                        ("name".into(), CanonicalJson::String(name)),
+                        ("ph".into(), CanonicalJson::String("X".into())),
+                        ("pid".into(), CanonicalJson::Integer("1".into())),
+                        ("tid".into(), CanonicalJson::Integer("2".into())),
+                        ("ts".into(), CanonicalJson::Integer(start)),
+                    ])
+                    .unwrap(),
+                );
+            }
+        }
+    }
+    CanonicalJson::object([
+        (
+            "kind".into(),
+            CanonicalJson::String("jet.trace.chrome-projection".into()),
+        ),
+        (
+            "loss".into(),
+            CanonicalJson::String(
+                "chrome-trace-json; X events from wall/browser only — no thread names, no async flows, no screenshot/counter tracks"
+                    .into(),
+            ),
+        ),
+        ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
+        ("traceEvents".into(), CanonicalJson::Array(events)),
+        ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+    ])
+    .expect("chrome projection keys are unique")
+}
+
+fn export_profile_map_projection(trace: &CanonicalJson) -> CanonicalJson {
+    let mut symbols = Vec::new();
+    let mut maps = Vec::new();
+    if let Some(content) = content_object(trace) {
+        if let Some(CanonicalJson::Array(items)) = content.get("source_identity") {
+            for item in items {
+                symbols.push(item.clone());
+            }
+        }
+        if let Some(CanonicalJson::Array(items)) = content.get("source_maps") {
+            for item in items {
+                maps.push(item.clone());
+            }
+        }
+    }
+    CanonicalJson::object([
+        (
+            "kind".into(),
+            CanonicalJson::String("jet.trace.profile-map-projection".into()),
+        ),
+        (
+            "loss".into(),
+            CanonicalJson::String(
+                "profile-map; source_identity+source_maps only — no Rust/LLVM frames, no address ranges, no DWARF"
+                    .into(),
+            ),
+        ),
+        ("schema".into(), CanonicalJson::String(TRACE_SCHEMA.into())),
+        ("source_identity".into(), CanonicalJson::Array(symbols)),
+        ("source_maps".into(), CanonicalJson::Array(maps)),
+        ("trace_id".into(), CanonicalJson::String(trace_id(trace).unwrap_or("unknown").into())),
+        ("version".into(), CanonicalJson::Integer(TRACE_VERSION.into())),
+    ])
+    .expect("profile-map projection keys are unique")
 }
 
 fn write_session_trace(
@@ -1514,8 +2464,10 @@ fn write_session_trace(
     argv: &[String],
     out: Option<&str>,
     capture: CaptureBundle,
+    capture_allowlist: &[String],
 ) -> Result<PathBuf, String> {
     let mut capture_policy = CapturePolicy::default_exclusions();
+    capture_policy.allowlist = capture_allowlist.to_vec();
     capture_policy.io_rows_truncated = capture.io_rows_truncated;
     capture_policy.browser_rows_truncated = capture.browser_rows_truncated;
     capture_policy.native_rows_truncated = capture.native_rows_truncated;
@@ -1525,6 +2477,7 @@ fn write_session_trace(
         command: command.into(),
         argv: argv.to_vec(),
         toolchain: current_toolchain(),
+        hardware: TraceHardware::current(),
         capture_policy,
         samples: capture.samples,
         allocations: capture.allocations,
@@ -1535,6 +2488,7 @@ fn write_session_trace(
         native: capture.native,
         spans: capture.spans,
         source_identity: capture.source_identity,
+        source_maps: capture.source_maps,
     };
     let bytes = build_skeleton_bytes(&skeleton)?;
     let path = match out {
@@ -1647,10 +2601,18 @@ fn toolchain_digest(trace: &CanonicalJson) -> Option<&str> {
     }
 }
 
+fn content_object(trace: &CanonicalJson) -> Option<&BTreeMap<String, CanonicalJson>> {
+    let CanonicalJson::Object(fields) = trace else {
+        return None;
+    };
+    match fields.get("content")? {
+        CanonicalJson::Object(content) => Some(content),
+        _ => None,
+    }
+}
+
 fn content_array<'a>(trace: &'a CanonicalJson, key: &str) -> Option<&'a [CanonicalJson]> {
-    let CanonicalJson::Object(fields) = trace else { return None };
-    let CanonicalJson::Object(content) = fields.get("content")? else { return None };
-    match content.get(key)? {
+    match content_object(trace)?.get(key)? {
         CanonicalJson::Array(items) => Some(items.as_slice()),
         _ => None,
     }

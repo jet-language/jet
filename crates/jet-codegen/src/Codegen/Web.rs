@@ -86,7 +86,7 @@ pub fn emit_web(
     let sources = js_sources(bundle);
     let (js_app, js_source_map, handlers) =
         emit_js_app(bundle, &funcs, &sources, &source_marker)?;
-    let manifest_json = emit_manifest(bundle, &funcs, &handlers);
+    let manifest_json = emit_manifest(bundle, &funcs, &handlers, &js_source_map);
     Ok(WebArtifacts {
         manifest_json,
         wasm_rust,
@@ -637,7 +637,12 @@ fn json_quote(s: &str) -> String {
     out
 }
 
-fn emit_manifest(bundle: &ProgramBundle, funcs: &[FuncWeb], handlers: &[(String, String)]) -> String {
+fn emit_manifest(
+    bundle: &ProgramBundle,
+    funcs: &[FuncWeb],
+    handlers: &[(String, String)],
+    js_source_map: &str,
+) -> String {
     let mut parts = Vec::new();
     parts.push("  \"version\": 2".to_string());
     parts.push("  \"status\": \"m2\"".to_string());
@@ -656,7 +661,14 @@ fn emit_manifest(bundle: &ProgramBundle, funcs: &[FuncWeb], handlers: &[(String,
         "  \"entryFile\": {}",
         json_quote(&bundle.modules[bundle.entry].display)
     ));
-    parts.push(format!("  \"traceMap\": {}", json_quote(&hex(&trace_map(bundle, funcs, handlers)))));
+    parts.push(format!(
+        "  \"traceMap\": {}",
+        json_quote(&hex(&trace_map(bundle, funcs, handlers)))
+    ));
+    parts.push(format!(
+        "  \"sourceMap\": {}",
+        json_quote(&hex(js_source_map))
+    ));
     let mut partition_lines = Vec::new();
     for f in funcs {
         partition_lines.push(format!(

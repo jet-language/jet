@@ -116,7 +116,63 @@ fn run() { handlers.init() }
     assert!(text.contains("\"name\":\"handlers__init$handler0\""), "{text}");
     assert!(text.contains(&format!("\"sha256\":\"{}\"", jet::SHA256::sha256_hex(original.as_bytes()))), "{text}");
     assert!(!text.contains(&jet::SHA256::sha256_hex(b"fn run() {}\n")), "source was reread: {text}");
+    assert!(text.contains("\"source_maps\":[{"), "missing embedded source maps: {text}");
+    assert!(text.contains("\"kind\":\"js\""), "missing js source map: {text}");
+    // Host facts merge into the same artifact (D-PERF-BROWSER-TRANSPORT1=A).
+    assert!(
+        text.contains("\"domain\":\"wall\"") || text.contains("\"domain\":\"cpu\"") || text.contains("\"native\":[{"),
+        "browser attach missing host domains: {text}"
+    );
     drop(relay);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn perf_run_records_capture_allowlist_and_source_maps() {
+    let root = temp_workspace();
+    let source = root.join("allow.jet");
+    fs::write(&source, "fn run() { print(\"ok\\n\") }\n").unwrap();
+    let out = root.join("allow.jettrace");
+    let run = run_jet(
+        &root,
+        &[
+            "perf",
+            "run",
+            "allow.jet",
+            "--capture=urls,values",
+            "--out",
+            out.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        run.status.success(),
+        "perf run failed: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let text = fs::read_to_string(&out).unwrap();
+    verify_jettrace(text.as_bytes()).unwrap();
+    assert!(
+        text.contains("\"allowlist\":[\"urls\",\"values\"]"),
+        "allowlist missing from capture_policy: {text}"
+    );
+    assert!(text.contains("\"source_maps\":[{"), "{text}");
+    assert!(text.contains("\"kind\":\"jet\""), "{text}");
+    assert!(text.contains("sourcesContent"), "{text}");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn perf_capture_rejects_unknown_allowlist_field() {
+    let root = temp_workspace();
+    let source = root.join("bad.jet");
+    fs::write(&source, "fn run() {}\n").unwrap();
+    let run = run_jet(
+        &root,
+        &["perf", "run", "bad.jet", "--capture=cookies", "--out", "x.jettrace"],
+    );
+    assert_eq!(run.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("cookies"), "{stderr}");
     let _ = fs::remove_dir_all(root);
 }
 
@@ -600,6 +656,32 @@ fn perf_attach_view_compare_export_share_one_jettrace_truth() {
     assert!(stdout.contains("schema jet.trace v1"), "{stdout}");
     assert!(stdout.contains("command attach"), "{stdout}");
 
+    let view_json = run_jet(&root, &["perf", "view", out.to_str().unwrap(), "--json"]);
+    let view_json_out = String::from_utf8_lossy(&view_json.stdout);
+    assert!(view_json.status.success(), "{}", String::from_utf8_lossy(&view_json.stderr));
+    assert!(view_json_out.contains("\"kind\":\"jet.trace.view\""), "{view_json_out}");
+    assert!(view_json_out.contains("\"timeline\":"), "{view_json_out}");
+    assert!(view_json_out.contains("\"flamegraph\":"), "{view_json_out}");
+
+    let view_html = run_jet(&root, &["perf", "view", out.to_str().unwrap(), "--html"]);
+    let html = String::from_utf8_lossy(&view_html.stdout);
+    assert!(view_html.status.success(), "{}", String::from_utf8_lossy(&view_html.stderr));
+    assert!(html.contains("<!doctype html>"), "{html}");
+    assert!(html.contains("flamegraph"), "{html}");
+    assert!(html.contains("timeline"), "{html}");
+
+    let no_color = Command::new(jet())
+        .current_dir(&root)
+        .env("NO_COLOR", "1")
+        .args(["perf", "view", out.to_str().unwrap(), "--frames=all"])
+        .output()
+        .unwrap();
+    let no_color_out = String::from_utf8_lossy(&no_color.stdout);
+    assert!(no_color.status.success(), "{}", String::from_utf8_lossy(&no_color.stderr));
+    assert!(!no_color_out.contains('\u{1b}'), "NO_COLOR leaked ANSI: {no_color_out}");
+    assert!(no_color_out.contains("frames all"), "{no_color_out}");
+    assert!(no_color_out.contains("generated-frames:"), "{no_color_out}");
+
     let compare = run_jet(
         &root,
         &[
@@ -626,6 +708,65 @@ fn perf_attach_view_compare_export_share_one_jettrace_truth() {
     assert!(exported.contains("\"kind\":\"jet.trace.projection\""), "{exported}");
     assert!(exported.contains("\"loss\":"), "{exported}");
     assert!(exported.contains("\"schema\":\"jet.trace\""), "{exported}");
+
+    let pprof = run_jet(&root, &["perf", "export", out.to_str().unwrap(), "--pprof"]);
+    let pprof_out = String::from_utf8_lossy(&pprof.stdout);
+    assert!(pprof.status.success(), "{}", String::from_utf8_lossy(&pprof.stderr));
+    assert!(pprof_out.contains("\"kind\":\"jet.trace.pprof-projection\""), "{pprof_out}");
+    assert!(pprof_out.contains("\"loss\":"), "{pprof_out}");
+
+    let otel = run_jet(&root, &["perf", "export", out.to_str().unwrap(), "--otel"]);
+    assert!(otel.status.success(), "{}", String::from_utf8_lossy(&otel.stderr));
+    assert!(
+        String::from_utf8_lossy(&otel.stdout).contains("otel-projection"),
+        "{}",
+        String::from_utf8_lossy(&otel.stdout)
+    );
+
+    let chrome = run_jet(&root, &["perf", "export", out.to_str().unwrap(), "--chrome"]);
+    assert!(chrome.status.success(), "{}", String::from_utf8_lossy(&chrome.stderr));
+    assert!(
+        String::from_utf8_lossy(&chrome.stdout).contains("chrome-projection"),
+        "{}",
+        String::from_utf8_lossy(&chrome.stdout)
+    );
+
+    let profile_map = run_jet(
+        &root,
+        &["perf", "export", out.to_str().unwrap(), "--emit-profile-map"],
+    );
+    assert!(
+        profile_map.status.success(),
+        "{}",
+        String::from_utf8_lossy(&profile_map.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&profile_map.stdout).contains("profile-map-projection"),
+        "{}",
+        String::from_utf8_lossy(&profile_map.stdout)
+    );
+
+    // Identity override path stays available for mismatched hardware/toolchain.
+    let overridden = run_jet(
+        &root,
+        &[
+            "perf",
+            "compare",
+            out.to_str().unwrap(),
+            out.to_str().unwrap(),
+            "--override-identity",
+        ],
+    );
+    assert!(
+        overridden.status.success(),
+        "{}",
+        String::from_utf8_lossy(&overridden.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&overridden.stdout).contains("budgets:"),
+        "{}",
+        String::from_utf8_lossy(&overridden.stdout)
+    );
 
     let corrupt = root.join("corrupt.jettrace");
     fs::write(&corrupt, b"{\"schema\":\"jet.trace\"}\n").unwrap();

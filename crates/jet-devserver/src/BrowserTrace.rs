@@ -25,11 +25,16 @@ pub struct Row {
 pub struct Capture {
     pub rows: Vec<Row>,
     pub sources: Vec<Source>,
+    pub source_map: Option<String>,
     pub truncated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Source { pub path: String, pub sha256: String, pub symbols: Vec<(String, String)> }
+pub struct Source {
+    pub path: String,
+    pub sha256: String,
+    pub symbols: Vec<(String, String)>,
+}
 
 pub struct Relay {
     file: Mutex<File>,
@@ -42,7 +47,7 @@ pub struct Relay {
 impl Relay {
     pub fn new(manifest: &str) -> Result<Self, String> {
         supported()?;
-        let sources = sources_from_manifest(manifest)?;
+        let (sources, source_map) = identity_from_manifest(manifest)?;
         let path = relay_path(std::process::id());
         let _ = fs::remove_file(&path);
         let mut options = OpenOptions::new();
@@ -58,12 +63,16 @@ impl Relay {
         let nonce = nonce();
         let pid = std::process::id();
         let started = process_start_marker(pid).ok_or("browser trace process identity cannot be verified")?;
-        writeln!(
-            file,
+        let mut header = format!(
             "{SCHEMA}\t{nonce}\t{pid}\t{started}\t{}",
             hex(encode_sources(&sources).as_bytes())
-        )
-        .map_err(|error| format!("cannot initialize browser trace relay: {error}"))?;
+        );
+        if let Some(map) = &source_map {
+            header.push('\t');
+            header.push_str(&hex(map.as_bytes()));
+        }
+        writeln!(file, "{header}")
+            .map_err(|error| format!("cannot initialize browser trace relay: {error}"))?;
         file.flush()
             .map_err(|error| format!("cannot flush browser trace relay: {error}"))?;
         Ok(Self {
@@ -215,6 +224,10 @@ fn read_with_process_state(pid: u32, process: ProcessState) -> Result<Capture, S
         .ok_or("browser trace relay process id is missing")?;
     let started = parts.next().ok_or("browser trace relay process identity is missing")?;
     let sources = decode_sources(&unhex(parts.next().ok_or("browser trace relay source map is missing")?)?)?;
+    let source_map = match parts.next() {
+        Some(value) => Some(unhex(value)?),
+        None => None,
+    };
     if matches!(process, ProcessState::Unknown) {
         return Err("browser trace process identity cannot be verified".into());
     }
@@ -259,7 +272,12 @@ fn read_with_process_state(pid: u32, process: ProcessState) -> Result<Capture, S
             symbol,
         });
     }
-    Ok(Capture { rows, sources, truncated })
+    Ok(Capture {
+        rows,
+        sources,
+        source_map,
+        truncated,
+    })
 }
 
 pub fn relay_path(pid: u32) -> PathBuf {
@@ -325,10 +343,33 @@ fn secure_read(path: &PathBuf, limit: u64, label: &str) -> Result<String, String
 }
 
 pub fn sources_from_manifest(manifest: &str) -> Result<Vec<Source>, String> {
+    Ok(identity_from_manifest(manifest)?.0)
+}
+
+fn identity_from_manifest(manifest: &str) -> Result<(Vec<Source>, Option<String>), String> {
     let key = "\"traceMap\": \"";
-    let start = manifest.find(key).map(|index| index + key.len()).ok_or("web manifest has no compiler trace map")?;
-    let end = manifest[start..].find('"').map(|index| start + index).ok_or("web manifest trace map is malformed")?;
-    decode_sources(&unhex(&manifest[start..end])?)
+    let start = manifest
+        .find(key)
+        .map(|index| index + key.len())
+        .ok_or("web manifest has no compiler trace map")?;
+    let end = manifest[start..]
+        .find('"')
+        .map(|index| start + index)
+        .ok_or("web manifest trace map is malformed")?;
+    let sources = decode_sources(&unhex(&manifest[start..end])?)?;
+    let map_key = "\"sourceMap\": \"";
+    let source_map = match manifest.find(map_key) {
+        Some(index) => {
+            let start = index + map_key.len();
+            let end = manifest[start..]
+                .find('"')
+                .map(|index| start + index)
+                .ok_or("web manifest source map is malformed")?;
+            Some(unhex(&manifest[start..end])?)
+        }
+        None => None,
+    };
+    Ok((sources, source_map))
 }
 
 fn encode_sources(sources: &[Source]) -> String {
