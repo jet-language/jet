@@ -1,7 +1,15 @@
-Error [E0003]: there's nothing inside this `{ }` to show
-  --> tests/ui/cbor_encode_removed/main.jet:5:28
+Error [E2002]: `cbor.encode` was removed in edition 2028
+  --> tests/ui/cbor_encode_removed/main.jet:6:14
     |
-  5 |     let tree = json.parse("{}")?
-    |                            ^^
- Why: interpolation puts a value into the text, so the braces need a value
- Fix: put a value inside, like `{name}`, or write `{{}}` for literal braces
+  6 |     _ = cbor.encode(tree)
+    |              ^^^^^^
+ Why: `cbor.encode` was deprecated in edition 2027 and no longer exists in this edition; it has reached the end of its migration window.
+ Fix: use `cbor.to_bytes` instead, or run `jet fix` to migrate automatically.
+
+Error [E0107]: nothing named `_` exists here
+  --> tests/ui/cbor_encode_removed/main.jet:6:5
+    |
+  6 |     _ = cbor.encode(tree)
+    |     ^
+ Why: a name must be declared before it's used
+ Fix: declare it first: `_ :: ...`
