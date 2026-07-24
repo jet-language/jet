@@ -69,14 +69,11 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-jit` | dev/JIT execution tier over codegen/TIR facts | internal fallback only |
 | `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
 
-### Safe Jet data-race guarantee
+### Concurrency boundary safety status
 
 A data race is two tasks that access the same memory at the same time when at
 least one access writes and the accesses do not use a synchronization rule.
-**Safe Jet programs cannot contain a data race.** An attempt to create one does
-not compile.
-
-The guarantee covers all Jet-owned concurrency paths:
+Sema already closes these common paths:
 
 - A task created by `tasks.spawn` or `g.task` owns or copies its captures.
   Sema rejects a mutable capture, a borrowed view, or another value that cannot
@@ -91,10 +88,18 @@ The guarantee covers all Jet-owned concurrency paths:
   closures use a lock-scoped view. `#Transact` uses the same handles and commits
   their changes atomically.
 
-This is a guarantee for safe Jet source and Jet-owned Core APIs. Code inside an
-`#Unsafe("reason")` region, a foreign implementation, or a vetted runtime
-internal must uphold its boundary contract. Those explicit boundaries are not
-proof that arbitrary foreign code has no internal data race.
+These checks do not yet form a complete language guarantee.
+`Signal<T>`, `Derived<T>`, and `Computed<T>` are single-thread reactive handles
+backed by `Rc` and `RefCell`. The current capture rule can copy them into a task
+or task group, or move them through a channel. A native build then relies on
+rustc to reject the generated thread crossing. That is an I2/I3 violation even
+when no unsafe binary is produced, and JIT/dev parity is not proved.
+
+Card #752 and D-DATARACE1 own the open choice between a static sendability rule
+and a runtime detector. Until that decision ships, Jet must not claim that all
+safe programs are data-race free. Code inside an `#Unsafe("reason")` region, a
+foreign implementation, or a vetted runtime internal must also uphold its
+boundary contract.
 
 ### Private traced collector substrate
 

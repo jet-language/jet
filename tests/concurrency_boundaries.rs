@@ -151,18 +151,3 @@ fn run() {
         "safe control must lower through the synchronized Shared<T> runtime"
     );
 }
-
-#[test]
-fn architecture_states_the_bounded_guarantee() {
-    let spec = std::fs::read_to_string("docs/spec/architecture.md")
-        .expect("read the authoritative architecture spec");
-    let spec = spec.split_whitespace().collect::<Vec<_>>().join(" ");
-    for law in [
-        "Safe Jet programs cannot contain a data race.",
-        "A channel moves a sendable owned value.",
-        "`Shared<T>` is the explicit shared-mutation path.",
-        "Those explicit boundaries are not proof that arbitrary foreign code has no internal data race.",
-    ] {
-        assert!(spec.contains(law), "missing architecture law: {law}");
-    }
-}
