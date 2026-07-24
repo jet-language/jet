@@ -226,6 +226,50 @@ pub(crate) fn run_compile_cmd(
         report_problems(mode, file, &src, &[diag]);
         exit(ExitCodes::USAGE);
     }
+
+    // D-LENS-RUN1: default native `jet run` is strict Cranelift. Explicit
+    // profiles and artifact-oriented flags keep the AOT escape hatch.
+    if cmd == "run"
+        && matches!(profile, BuildProfile::Default)
+        && cross_target.is_none()
+        && output_name.is_none()
+        && !emit_rust
+        && !small
+        && !freestanding
+        && !allow_impure
+        && build_grants.is_empty()
+        && !capabilities_json
+        && !sbom
+        && !is_web
+        && !is_plugin
+    {
+        let args = program_args
+            .iter()
+            .map(|arg| arg.as_str())
+            .collect::<Vec<_>>();
+        let outcome = jet::Interpreter::run_jit_once_with_args(file, &args);
+        match outcome {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                print!("{stdout}");
+                eprint!("{stderr}");
+                exit(exit_code);
+            }
+            jet::Interpreter::RunOutcome::Problems(diags) => {
+                let lens_defect = jet_jit::is_e2211(&diags);
+                report_problems(mode, file, &src, &diags);
+                exit(if lens_defect {
+                    ExitCodes::ICE
+                } else {
+                    ExitCodes::USER_ERROR
+                });
+            }
+        }
+    }
+
     // D-BUILDNORM1=A (Tower #85): compute the content-cache key from the
     // program's canonical *pre-sema* AST, up front. `mode_tag` keeps the three
     // native codegen shapes (plain, `--freestanding`, `--allow-impure`) in

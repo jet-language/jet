@@ -7,6 +7,7 @@ covered:
   basics/branches
   basics/compound
   basics/counted_loop
+  basics/default_refs
   basics/digits
   basics/fizzbuzz
   basics/functions
@@ -16,15 +17,19 @@ covered:
   basics/increment
   basics/method_chain
   basics/multiline_string
+  basics/named_args
   basics/numbers
   basics/range_step
   basics/switch
   basics/values
   collections/list_bounds
   collections/struct_list_mutation
+  comptime/comptime_splice
   comptime/doctests
+  comptime/reflect
   concurrency/all_failfast
   concurrency/cancel_cleanup
+  concurrency/completion_order
   concurrency/pipeline
   concurrency/race_cancel
   concurrency/scheduler_spawn
@@ -38,59 +43,79 @@ covered:
   devloop/task_runner
   effects/effect_caps
   effects/effect_prohibition
+  effects/effect_trait_bound
   effects/effect_tree
   effects/effects
+  effects/method_receivers
   effects/move_no_uaf
   effects/pure
   effects/share_boundary
+  effects/single_use
   errors/fallible_run
   lowlevel/cross
   lowlevel/layout_c
+  memory/ref_field
   modules/generic_modules
+  modules/inline_module
+  modules/module_inline_sibling
   modules/pub_file
+  modules/selective_imports
   operators/chained_comparison
   operators/user_defined
+  serde/user_derive
   syntax/maturity_tags
   text/bigint
   tooling/bench
   tooling/canvas_blueprint_demo
   tooling/debug
   tooling/fidelity
+  tooling/internal_project_parts
   tooling/meta_attribute
+  tooling/output_callable
   tooling/solve_puzzle
   tooling/statement_attributes
   tooling/test_members
   tooling/tests
+  types/associated_types
+  types/computed_field
+  types/dimensional_quantities
   types/dot_construction
   types/enums
+  types/external_methods
+  types/generic_constructor_inference
+  types/inferred_new
   types/structs
+  types/tags_and_traits
+  types/typestate
   web/web_compute
+  web/web_wasm_range
+  web/web_wasm_string
+  web/web_wasm_string_param
 
 gaps:
   basics/bare_lambda_param: jit param type unsupported: Fn { params: [Int], ret: None, effect_bound: None }
   basics/callbacks: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
   basics/closures: run: jit closure method unsupported
-  basics/default_refs: run: jit missing static `Rect::square`
   basics/fan_out: run: jit fan-out expression unsupported
+  basics/first_hour: run: jit core call unsupported
   basics/labeled_loops: run: jit for-in unknown collection `vec![1i64, 2i64, 3i64]`
-  basics/loop_forms: jit compile panicked before returning an unsupported reason
-  basics/named_args: run: jit missing static `Rect::new`
+  basics/loop_forms: run: jit for-in unknown collection `vec![10i64, 20i64, 30i64]`
   basics/pattern_matching: describe_conn: jit enum pattern `user_Conn::user_Active(user_id) | user_Conn::user_Reconnecting(user_id)`
   basics/printable: run: jit string interp type unsupported: Named("Greeting")
-  basics/tuples: run: jit clone unsupported
+  basics/tuples: run: jit clone unsupported type: Tuple([("x", Int), ("y", Int)]), local user_p
   basics/variadics_spread: jit param type unsupported: List(String)
-  cli/subcommands: lower_jit_program returned None (no plain run)
-  cli/typed_entry_args: lower_jit_program returned None (no plain run)
+  cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
+  cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
   collections/deque: run: jit static `std::collections::VecDeque::<i64>::new`
-  collections/dynamic-array-view: run: jit builtin method unsupported
+  collections/dynamic-array-view: run: jit clone unsupported type: List(Named("Incident")), other expression
   collections/filter_map: parse_int: jit result status unsupported
   collections/fixed_arrays: sum: jit for-in unknown collection `(*user_xs)`
-  collections/index_hook: run: jit record field unsupported: List(Named("Cell"))
+  collections/index_hook: Grid::get: jit field type unsupported: List(Named("Cell"))
   collections/iter_adapters: run: jit builtin method unsupported
-  collections/iter_hook: run: jit for-in collection type unsupported: Named("Crate")
+  collections/iter_hook: BagIter::next: jit place borrow unsupported
   collections/iter_tools_audit: run: jit builtin method unsupported
   collections/list_remove_bounds: run: jit builtin method unsupported
-  collections/lists: run: run: verifier: VerifierErrors([VerifierError { location: inst38, context: Some("v28, v29 = call fn12(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "arg 2 (v26) has type i64, expected i32" }, VerifierError { location: inst38, context: Some("v28, v29 = call fn12(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8"), message: "mismatched argument count for `v28, v29 = call fn12(v0, v25, v26, v27)  ; v25 = 1, v26 = 2, v27 = 8`: got 4, expected 3" }])
+  collections/lists: run: jit builtin method unsupported
   collections/map_key: run: jit map literal unsupported
   collections/set: run: jit builtin method unsupported
   collections/sketch: run: jit core call unsupported
@@ -99,14 +124,12 @@ gaps:
   comptime/comptime_core: run: jit const inline unsupported
   comptime/comptime_if: run: jit inline comptime branch unsupported
   comptime/comptime_parse: safe_int: jit result status unsupported
-  comptime/comptime_splice: run: jit missing method `Cube::label`
   comptime/comptime_table: run: jit const inline unsupported
   comptime/comptime_tiers: run: jit const inline unsupported
   comptime/embed: check_nonempty: jit require/panic stop unsupported
   comptime/embed_bytes: jit param type unsupported: List(IntN { signed: false, bits: 8 })
   comptime/find: run: jit const inline unsupported
   comptime/find_empty: run: jit const inline unsupported
-  comptime/reflect: Widget::show: jit clone unsupported
   concurrency/deadline_context: run: jit context block unsupported
   concurrency/detached_task: run: jit handle method unsupported
   concurrency/parallel_iter: run: jit closure method unsupported
@@ -114,31 +137,31 @@ gaps:
   concurrency/protocol: drive: jit result status unsupported
   concurrency/task_controls: run: jit handle method unsupported
   concurrency/task_runtime_audit: run: jit core call unsupported
+  crypto/auth_tokens: run: jit result status unsupported
   crypto/crypto_envelope: run: jit result status unsupported
-  crypto/crypto_migration: run: jit unsafe region unsupported
+  crypto/crypto_migration: run: jit result status unsupported
   crypto/crypto_sign: run: jit result status unsupported
   crypto/crypto_suite: run: jit core call unsupported
   crypto/hash: run: jit builtin method unsupported
   crypto/random_api_split: run: jit core call unsupported
   crypto/typed_crypto: run: jit result status unsupported
+  crypto/vault_key_wrap: recipient_surface: jit result status unsupported
+  crypto/vault_keys: provision: jit result status unsupported
   crypto/vault_secret: handler: jit core call unsupported
   devloop/persist: run: jit const inline unsupported
-  effects/all_sigils: deposit: jit assign to unknown place `((*user_a)).user_balance`
-  effects/asset_pipeline: normalize: jit assign to unknown place `((*user_img)).user_gamma`
-  effects/capability_sigils: damage: jit assign to unknown place `((*user_p)).user_hp`
+  effects/all_sigils: run: jit call arg wrapper unsupported
+  effects/asset_pipeline: run: jit call arg wrapper unsupported
+  effects/capability_sigils: run: jit call arg wrapper unsupported
   effects/determinism: roll_at: jit handle method unsupported
   effects/effect_grant: run: jit result status unsupported
   effects/effect_higher_order: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
   effects/effect_levers: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: Some([]) }
-  effects/effect_trait_bound: run: jit missing method `Square::area`
-  effects/infer_capability: bump: jit assign to unknown place `((*user_c)).user_value`
-  effects/infer_receiver: hurt: jit missing method `Player::damage`
-  effects/method_receivers: run: jit missing method `Buffer::peek`
-  effects/mix_write_take: equip: jit assign to unknown place `((*user_p)).user_hp`
-  effects/self_mutation: Tracker::take_hit: jit assign to unknown place `((*self)).user_hits`
-  effects/single_use: acquire: jit clone unsupported
-  effects/single_use_discard: issue: jit clone unsupported
-  effects/smart_context: run: jit allocator constructor unsupported
+  effects/infer_capability: run: jit call arg wrapper unsupported
+  effects/infer_receiver: run: jit call arg wrapper unsupported
+  effects/mix_write_take: run: jit call arg wrapper unsupported
+  effects/self_mutation: Tracker::reset: jit assign to unknown place `(*self)`
+  effects/single_use_discard: run: jit unsafe region unsupported
+  effects/smart_context: run: automatic resource cleanup uses AOT fallback
   effects/taint: shell_arg: jit builtin method unsupported
   errors/discard_fallible: run: jit core call unsupported
   errors/error_context: load_config: jit const inline unsupported
@@ -160,8 +183,8 @@ gaps:
   io/cli_args: run: jit core call unsupported
   io/compress_gzip: run: jit core call unsupported
   io/compress_zstd: run: jit core call unsupported
-  io/db: run: jit core call unsupported
-  io/db_checked_sql: run: jit core call unsupported
+  io/db: run: automatic resource cleanup uses AOT fallback
+  io/db_checked_sql: run: automatic resource cleanup uses AOT fallback
   io/db_read_footprint: person_count: jit result status unsupported
   io/dir_entry: run: jit result status unsupported
   io/env_overlay: run: jit require/panic stop unsupported
@@ -177,50 +200,53 @@ gaps:
   io/process_builder: run: jit result status unsupported
   io/scope_guard: with_guards: jit scope guard closure unsupported
   io/stdin_filter: run: jit for-in unknown collection `jet_std_io_stdin()`
-  io/stream: count_lines: jit core call unsupported
+  io/stream: count_lines: automatic resource cleanup uses AOT fallback
   io/terminal: describe_key: jit if-let condition unsupported
   io/terminal_parity: run: jit require/panic stop unsupported
   io/watcher: run: jit core call unsupported
   lowlevel/ffi: run: jit extern call unsupported
   lowlevel/freestanding: run: jit core call unsupported
+  lowlevel/inline_asm: add_registers: jit function missing return
+  lowlevel/inline_c: add: jit function missing return
   lowlevel/layout_columnar: jit param type unsupported: List(Named("Particle"))
   lowlevel/linalg_simd: run: jit math builtin unsupported
   lowlevel/lowlevel: run: jit unsafe region unsupported
   lowlevel/os_target_gating: run: jit inline comptime branch unsupported
   lowlevel/pointer_cast_deref: run: jit unsafe region unsupported
   lowlevel/sized_floats: run: jit core call unsupported
-  lowlevel/sized_integers: run: jit let type unsupported: IntN { signed: false, bits: 8 }
+  lowlevel/sized_integers: run: jit unary neg unsupported type: IntN { signed: true, bits: 8 }
   lowlevel/swizzle: run: jit math builtin unsupported
+  lowlevel/unsafe_obligations: run: jit unsafe region unsupported
   math/math_audit: run: jit core call unsupported
   math/random_audit: run: jit core call unsupported
-  memory/arena: run: jit allocator constructor unsupported
-  memory/arena_parse: run: jit allocator constructor unsupported
-  memory/arena_regions: run: jit allocator constructor unsupported
-  memory/copy_verb: archive: jit clone unsupported
+  memory/arena: run: automatic resource cleanup uses AOT fallback
+  memory/arena_parse: run: automatic resource cleanup uses AOT fallback
+  memory/arena_regions: run: automatic resource cleanup uses AOT fallback
+  memory/copy_verb: run: jit clone unsupported type: Named("Ticket"), local user_t
   memory/entity_tree: run: jit static `jet_std::JetPool::<user_Node>::new`
   memory/entity_world: tick: jit for-in unknown collection `((*user_world)).ids()`
-  memory/expiring_secret: foreign ABI boundary requires the native build/link path; resident JIT has no foreign symbol resolver
-  memory/gc_cyclic: run: jit allocator constructor unsupported
-  memory/no_alloc_policy: integrate: jit assign to unknown place `((*user_e)).user_pos`
-  memory/ownership: bump: jit assign to unknown place `(*user_n)`
+  memory/expiring_secret: run: jit const inline unsupported
+  memory/gc_cyclic: promoted_cycle: jit enum positional payload unsupported
+  memory/no_alloc_policy: run: jit call arg wrapper unsupported
+  memory/ownership: jit param type unsupported: Fn { params: [String], ret: Some(Int), effect_bound: None }
+  memory/parameter_modes: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
+  memory/place_windows: run: jit builtin method unsupported
   memory/pool_stale_id: run: jit static `jet_std::JetPool::<user_Player>::new`
   memory/rawptr: run: jit unsafe region unsupported
-  memory/ref_field: describe: jit clone unsupported
+  memory/resource_close: run: automatic resource cleanup uses AOT fallback
+  memory/returned_views: first: jit builtin method unsupported
   memory/shared_config: jit param type unsupported: Shared(Named("AppConfig"))
   memory/shared_transact: jit param type unsupported: Shared(Named("Account"))
   memory/string_view: run: jit builtin method unsupported
   memory/uninit: run: jit const inline unsupported
   memory/uninit_buffer: run: jit const inline unsupported
-  modules/inline_module: run: jit module call unsupported
-  modules/library: run: jit missing method `Person::greeting`
-  modules/module_inline_sibling: run: jit module call unsupported
-  modules/selective_imports: run: jit module call unsupported
+  modules/library: Person::greeting: jit place borrow unsupported
   net/email_dkim: run: jit core call unsupported
   net/email_message: run: jit result status unsupported
   net/http_client: jit result status unsupported
   net/http_get: jit result status unsupported
   net/http_rest_service: jit result status unsupported
-  net/http_routes: jit result status unsupported
+  net/http_routes: jit for-in unknown collection `vec![0i64, 1i64, 2i64, 3i64]`
   net/http_server: run: jit core call unsupported
   net/http_server_lifecycle: jit result status unsupported
   net/http_server_limits: jit result status unsupported
@@ -244,14 +270,19 @@ gaps:
   serde/decode_traced: run: jit result status unsupported
   serde/encoding: run: jit result status unsupported
   serde/encoding_breadth: run: jit result status unsupported
-  serde/hand_codec: run: jit core call unsupported
+  serde/encoding_cbor_stream: write_catalog: automatic resource cleanup uses AOT fallback
+  serde/encoding_csv_stream: write_catalog: automatic resource cleanup uses AOT fallback
+  serde/encoding_json_stream: write_catalog: automatic resource cleanup uses AOT fallback
+  serde/encoding_jsonl_stream: write_catalog: automatic resource cleanup uses AOT fallback
+  serde/encoding_stream_types: run: jit static `jet_std::EncodingLimits::safe`
+  serde/encoding_xml_stream: xml_name: jit JSON literal unsupported
+  serde/hand_codec: Email::encode: jit JSON literal unsupported
   serde/json: run: jit result status unsupported
   serde/json_coerce: run: jit result status unsupported
   serde/json_typed: run: jit result status unsupported
   serde/serde_derive: run: jit record field unsupported: List(String)
   serde/serde_generic: run: jit core call unsupported
   serde/toml: run: jit result status unsupported
-  serde/user_derive: run: jit missing method `Point::debug_string`
   serde/validate: report: jit unknown place `user_Signup::user_validate(&((*user_signup)))`
   serde/yaml: run: jit result status unsupported
   streams/generators: count: jit const inline unsupported
@@ -262,63 +293,68 @@ gaps:
   text/hex_base64: run: jit core call unsupported
   text/human_format: run: jit core call unsupported
   text/regex: run: jit result status unsupported
+  text/runtime_duration: run: jit result status unsupported
   text/string_parse: run: jit result status unsupported
   text/strings: run: jit for-in unknown collection `"héllo".to_string()`
   text/time_calendar: run: jit result status unsupported
   text/unicode_text: run: jit core call unsupported
-  text/unicode_text_audit: run: jit core call unsupported
+  text/unicode_text_audit: run: jit core.text call unsupported: byte_count
   text/uuid: run: jit core call unsupported
   tooling/data_core: run: jit result status unsupported
+  tooling/data_json: run: jit result status unsupported
   tooling/data_pipeline: must_stay_deferred: jit require/panic stop unsupported
+  tooling/data_schema: run: jit result status unsupported
   tooling/debug_native: word_count: jit for-in unknown collection `jet_string_split(&((*user_text)), &" ".to_string())`
   tooling/fuzz_demo: reverse: jit for-in unknown collection `(*user_xs)`
-  tooling/panic_report: summarize: jit require/panic stop unsupported
+  tooling/panic_report: summarize: jit place borrow unsupported
   tooling/property_tests: reverse: jit for-in unknown collection `(*user_xs)`
-  tooling/provenance_track: run: jit numeric method unsupported
+  tooling/provenance_track: run: jit numeric origin unsupported
   tooling/testing_helpers: run: jit core call unsupported
   tooling/todo_hole: not_yet: jit todo expression unsupported
-  types/associated_types: run: jit missing method `Nums::at`
-  types/capability_bundles: run: jit call to unknown function `Usd`
-  types/computed_field: Stats::threat: jit field `user_attack()` on `Stats`
+  types/affine_unit_types: run: jit result status unsupported
+  types/capability_bundles: run: jit binary op unsupported
   types/display_debug: run: jit string interp type unsupported: Named("User")
-  types/distinct_types: greet: jit distinct raw unsupported
-  types/enum_dot: area: jit enum pattern `user_Shape::user_Circle(user_r)`
-  types/enum_dot_patterns: area: jit enum pattern `user_Shape::user_Circle(user_r)`
-  types/external_methods: run: jit missing static `Point::origin`
+  types/distinct_types: run: jit binary op unsupported
+  types/enum_dot: area: area: verifier: VerifierErrors([VerifierError { location: inst11, context: Some("v10 = fmul.f64 v9, v8  ; v9 = 0x1.921f9f01b866ep1"), message: "arg 1 (v8) has type i64, expected f64" }, VerifierError { location: inst12, context: Some("v11 = fmul.f64 v10, v8"), message: "arg 1 (v8) has type i64, expected f64" }, VerifierError { location: inst23, context: Some("v20 = fmul.i64 v19, v19"), message: "has an invalid controlling type i64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: true, 5: true, 6: true, 7: true }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst24, context: Some("return v20"), message: "result 0 has type i64, must match function signature of f64" }])
+  types/enum_dot_patterns: area: area: verifier: VerifierErrors([VerifierError { location: inst10, context: Some("v9 = fmul.i64 v8, v8"), message: "has an invalid controlling type i64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: true, 5: true, 6: true, 7: true }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst11, context: Some("return v9"), message: "result 0 has type i64, must match function signature of f64" }, VerifierError { location: inst21, context: Some("v18 = fmul.i64 v17, v17"), message: "has an invalid controlling type i64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: true, 5: true, 6: true, 7: true }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst22, context: Some("return v18"), message: "result 0 has type i64, must match function signature of f64" }])
   types/generic_types: run: jit call to unknown function `make_pair`
   types/measurement: run: jit core call unsupported
   types/nested_enum_groups: run: jit enum lit `user_Damage::user_Fire__Burn`
-  types/no_any_alternatives: label: jit enum pattern `user_Payload::user_Name(user_s)`
+  types/no_any_alternatives: run: jit call to unknown function `echo`
   types/option: run: jit if-let condition unsupported
   types/option_combinators: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "has an invalid controlling type f64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: true, 4: true, 5: true, 6: true, 7: true }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "arg 1 (v7) has type i64, expected f64" }, VerifierError { location: inst9, context: Some("return v8"), message: "result 0 has type f64, must match function signature of i64" }])
+  types/optional_result_variants: run: jit unknown place `user_optional(true)`
   types/patchable: run: jit missing method `Employee::apply`
-  types/range_types: checked: jit range-checked ctor unsupported
+  types/range_types: run: jit result status unsupported
   types/recursive_enum: run: jit enum positional payload unsupported
   types/refinements: jit param type unsupported: FixedList { elem: String, len: 4, len_symbol: None }
   types/renderable-varargs-multi: run: jit call to unknown function `announce__va1`
   types/renderable-varargs: run: jit call to unknown function `log_all__va4`
-  types/tags_and_traits: run: jit missing method `Doc::greet`
   types/traits: print_area: jit missing method `Shape::name`
   types/type_alias: run: jit result status unsupported
-  types/typestate: run: jit missing static `Reservation::book`
-  types/unit_family: subtotal: jit call to unknown function `Usd`
-  types/unit_literals: run: jit call to unknown function `Ms`
+  types/unit_family: subtotal: subtotal: verifier: VerifierErrors([VerifierError { location: inst1, context: Some("v3 = fmul.i64 v0, v2"), message: "has an invalid controlling type i64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: true, 5: true, 6: true, 7: true }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst1, context: Some("v3 = fmul.i64 v0, v2"), message: "arg 1 (v2) has type f64, expected i64" }])
+  types/unit_literals: run: jit binary op unsupported
   types/value_tag_type: jit param type unsupported: Tagged { marker: "Raw", inner: Int }
-  ui/events: run: jit core call unsupported
+  ui/events: show_publish: jit enum pattern `jet_std::JetHookOutcome::Continue(user_value)`
   ui/layout_basic: run: jit layout block unsupported
   ui/loadable: run: jit core call unsupported
   ui/reactive: run: jit core call unsupported
   ui/reactive_scope: run: jit core call unsupported
   ui/ui_a11y: run: jit core call unsupported
-  ui/ui_component_kit: jit param type unsupported: List(Named("View"))
-  ui/ui_motion: tween: jit numeric method unsupported
+  ui/ui_component_kit: jit param type unsupported: List(Named("UiNode"))
+  ui/ui_motion: motion_node: jit core call unsupported
   ui/ui_native_linux: run: jit inline comptime branch unsupported
   ui/ui_null_backend: run: jit core call unsupported
   ui/ui_tui_reactive: run: jit core call unsupported
-  ui/ui_typed_style: describe: jit enum pattern `user_View::user_Text { user_text: user_text, user_style: user_style }`
-  ui/ui_view_tree: jit param type unsupported: List(String)
-  web/ui_showcase: jit param type unsupported: List(Named("View"))
+  ui/ui_typed_style: styled_text: jit core call unsupported
+  ui/ui_view_tree: jit param type unsupported: List(Named("UiNode"))
+  web/ui_showcase: jit param type unsupported: List(Named("UiNode"))
   web/ui_web_click: dev: jit core call unsupported
   web/ui_web_reactive: run: jit core call unsupported
   web/web_hello: run: jit core call unsupported
+  web/web_wasm_for_in: sum_list: jit for-in unknown collection `(*user_xs)`
+  web/web_wasm_list: run: jit print type unsupported
+  web/web_wasm_list_string: jit param type unsupported: List(String)
+  web/web_wasm_map: jit param type unsupported: Map { key: String, key_span: Some(Span { start: 202, end: 208 }), value: Int }
+
 parity_divergences:

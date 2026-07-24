@@ -1,18 +1,7 @@
-//! E2-M4 — `jet dev` whole-program interpreter driver.
+//! E2-M4 / D-LENS-RUN1 — shared JIT-lens execution driver.
 //!
-//! This is the dev-loop convenience layer (D-DEV1…D-DEV4): it re-checks and
-//! re-runs the entry file on every save, streaming output, for sub-200ms
-//! feedback. It does NOT introduce a second interpreter — it reuses the M9.5
-//! comptime tree-walker (`crate::comptime`) to execute `fn run()`. The bytes
-//! it produces are identical to the compiled program (I2); the differential
-//! battery in `tests/dev.rs` is the enforcement.
-//!
-//! Hard line (I2/I3): nothing here ever produces a release artifact. `jet
-//! build`/`jet run` never touch this path. When the interpreter can't run a
-//! program (FFI, tasks/channels, `#Unsafe`/`core.mem`, native-only Core), it
-//! stops with **E2201** naming the feature and `jet build`/`jet run` — unless
-//! the user opted in with "try anyway" (D-DEV1), which runs past the boundary
-//! with no guarantees.
+//! Default `jet run` and `jet dev` execute through strict Cranelift. The
+//! tier-0 interpreter is explicit (`jet dev --interpret`) only.
 
 use std::collections::HashMap;
 
@@ -463,7 +452,7 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
 /// `use_interpreter` — D-JIT2=A: when false (default for `jet dev`), the
 /// Cranelift tier-1 backend wraps the interpreter; when true (`--interpret`),
 /// tier-0 interpreter only.
-pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> RunOutcome {
+fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
     match crate::Loader::load_entry_with_overlay(file, None, false) {
         Ok(mut bundle) => {
             let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
@@ -472,10 +461,39 @@ pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> Run
                 .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
                 .collect();
             if !errors.is_empty() {
-                return RunOutcome::Problems(errors);
+                return Err(errors);
             }
-            dev_run_bundle(&bundle, try_anyway, use_interpreter)
+            Ok(bundle)
         }
+        Err(diags) => Err(diags),
+    }
+}
+
+/// D-LENS-RUN1: load, check, and execute one native program through strict JIT.
+pub fn run_jit_once(file: &str) -> RunOutcome {
+    run_jit_once_with_args(file, &[])
+}
+
+/// D-LENS-RUN1: strict Cranelift run with the same argv shape AOT would see.
+pub fn run_jit_once_with_args(file: &str, program_args: &[&str]) -> RunOutcome {
+    match checked_bundle(file) {
+        Ok(bundle) => {
+            let mut args = Vec::with_capacity(program_args.len() + 1);
+            args.push(file.to_string());
+            args.extend(program_args.iter().map(|arg| (*arg).to_string()));
+            jet_jit::with_program_args(&args, || {
+                use crate::JitBackend::JitBackend;
+                let mut backend = jet_jit::CraneliftBackend::new();
+                backend.run(&bundle, false)
+            })
+        }
+        Err(diags) => RunOutcome::Problems(diags),
+    }
+}
+
+pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> RunOutcome {
+    match checked_bundle(file) {
+        Ok(bundle) => dev_run_bundle(&bundle, try_anyway, use_interpreter),
         Err(diags) => RunOutcome::Problems(diags),
     }
 }
@@ -486,31 +504,14 @@ pub fn dev_run_bundle(
     try_anyway: bool,
     use_interpreter: bool,
 ) -> RunOutcome {
-    use crate::JitBackend::{AotFallbackBackend, InterpreterBackend, JitBackend};
+    use crate::JitBackend::{InterpreterBackend, JitBackend};
     if use_interpreter {
         let mut backend = InterpreterBackend::new();
         backend.run(bundle, try_anyway)
     } else {
-        let mut backend =
-            jet_jit::CraneliftBackend::new(AotFallbackBackend::new(InterpreterBackend::new()));
-        let outcome = backend.run(bundle, try_anyway);
-        // A resident JIT panic trap (E0953) means native user code panicked —
-        // e.g. a task-body divide-by-zero — but the in-process JIT cannot
-        // reproduce the exact AOT panic stderr/exit envelope (a caught task
-        // panic prints "panic: a task panicked" and exits 70). The backend layer
-        // CONTAINS the trap (never exits the process, never unwinds a JIT frame)
-        // and reports E0953; here at the `jet dev` driver seam we re-run through
-        // the AOT tier so default `jet dev` stays functionally identical to
-        // `jet run` for panic demos (owner requirement 2026-06-30). The
-        // hot_swap/restart live-loop paths keep the resident diagnostic
-        // authoritative — this parity re-run is `run`-only.
-        if let RunOutcome::Problems(ref diags) = outcome {
-            if diags.iter().any(|d| d.code == "E0953") {
-                let mut aot = AotFallbackBackend::new(InterpreterBackend::new());
-                return aot.run(bundle, try_anyway);
-            }
-        }
-        outcome
+        use crate::JitBackend::JitBackend;
+        let mut backend = jet_jit::CraneliftBackend::new();
+        backend.run(bundle, try_anyway)
     }
 }
 

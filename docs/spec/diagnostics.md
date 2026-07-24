@@ -701,6 +701,7 @@ renumbered, and no new `W` code may be allocated.
 | E2203 | interp | `jet debug` can't step through a feature its interpreter doesn't cover (task/FFI/`#Unsafe`/native std); names it and `jet build`/`jet run` (D-DBG3) |
 | E2204 | interp | `jet debug` session ended early — the user typed `quit` at the `(jet)` prompt before the program finished (D-DBG3) |
 | E2210 | interp | a `jet dev` edit changed a type surface, so the dev loop restarts instead of swapping (c77, D-HOTSWAP1) |
+| E2211 | jit   | resident Cranelift cannot lower a checked native program; compiler defect, never an AOT fallback (D-LENS-RUN1, #728) |
 | L2001 | jet   | a deprecated item still compiles but should be migrated; suggests `jet fix` (E2-M2, D-REL5) |
 | L2101 | jet   | `jet self doctor` advisory: a rustc / cache / PATH problem with a fix (E2-M3, D-DX2) |
 | E2701 | runtime | malformed input to a ring library parse function — row/line number and detail (E2-M9) |
@@ -799,6 +800,7 @@ build path; it never silently falls back to a different answer.
 | E2203 | `jet debug` can't step through this program yet — it uses a feature the debugger's interpreter doesn't cover (a task/channel, `extern rust`/C FFI, an `#Unsafe`/`core.mem` region, or a native-only core module like files/clock/random/environment/process). | `jet debug` steps your program in the same interpreter `jet dev` uses; features that touch threads, foreign code, raw memory, or the outside world can't be stepped at the Jet source level yet. | Run `jet build` then the binary, or `jet run <file>` to compile and run it; for a step-through, remove the unsupported feature or wait for the native-debugger milestone (D-DBG3 step 2). |
 | E2204 | The `jet debug` session ended before the program finished — you typed `quit` at the `(jet)` prompt. | Quitting the debugger stops the interpreted run; the program did not run to completion. | Run `jet debug <file>` again and use `continue` (or `c`) to run to the end, or `jet run <file>` to run it without the debugger. |
 | E2210 | This edit changed a type, so `jet dev` is restarting instead of swapping (the message names what changed — a struct field, an enum variant, or a function signature). | A hot swap re-applies code while the program's types stay the same; changing the shape of your data means the running code is rebuilt cleanly from the new types. | Nothing to fix — `jet dev` restarted with the new types; this note just explains why the swap became a restart. Type-stable edits (function bodies, statements) swap without a restart. |
+| E2211 | Jet JIT has a compiler gap for this checked program. | `jet run` uses the JIT lens and does not hide a JIT compiler gap by running AOT. The detail names the function and the missing JIT or TIR coverage. | Run `jet build <file>` and the binary for now, then report E2211 with the detail below. |
 
 ## Range arm porting diagnostics (C25/D-RANGE2)
 

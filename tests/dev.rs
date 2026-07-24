@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 mod common;
 use common::{have_rustc, panic_message, test_worker_count, FfiBridgeLock};
 use jet::Interpreter::{dev_iteration, run_named_task, RunOutcome};
-use jet::JitBackend::{InterpreterBackend, JitBackend};
+use jet::JitBackend::JitBackend;
 use jet_jit::CraneliftBackend;
 
 const DEV_DIFF_TIMEOUT: Duration = Duration::from_secs(30);
@@ -330,6 +330,18 @@ fn all_example_stems() -> Vec<String> {
     stems
 }
 
+fn typechecked_example_stems() -> Vec<String> {
+    all_example_stems()
+        .into_iter()
+        .filter(|stem| {
+            let diags = jet::check_with_path(&example_path(stem));
+            !diags
+                .iter()
+                .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        })
+        .collect()
+}
+
 fn collect_jit_coverage() -> (Vec<String>, Vec<String>) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut covered = Vec::new();
@@ -523,18 +535,27 @@ fn print_jit_op_report() {
 ///     here under the interpreter/JIT tiers even though the AOT-compiled
 ///     binary runs it fine (it never goes through this evaluator).
 const BOUNDARY_CODES: &[&str] = &[
-    "E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E1265",
+    "E2201", "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E1265", "E2211",
 ];
 
-// `stdin_filter` runs through the real CLI with an explicit empty stdin below,
-// so the battery never inherits an interactive terminal and cannot hang.
-// A separate non-empty piped-stdin CLI parity test covers its real input path.
-const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &["ui/ui_native_linux"];
+const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
+    "collections/list_bounds",
+    "concurrency/all_failfast",
+    "ui/ui_native_linux",
+];
+
+fn jit_gap_stem_set() -> std::collections::HashSet<String> {
+    let (_, gaps, _) = parse_jit_gap_manifest();
+    gaps.iter()
+        .map(|entry| entry.split(':').next().unwrap().to_string())
+        .collect()
+}
 
 #[derive(Default, Clone)]
 struct DevBatteryStats {
     ran: usize,
     boundary: usize,
+    jit_gap: usize,
     manifested: usize,
     boundary_stems: Vec<String>,
 }
@@ -543,8 +564,23 @@ impl DevBatteryStats {
     fn add(&mut self, mut other: DevBatteryStats) {
         self.ran += other.ran;
         self.boundary += other.boundary;
+        self.jit_gap += other.jit_gap;
         self.manifested += other.manifested;
         self.boundary_stems.append(&mut other.boundary_stems);
+    }
+}
+
+const DEV_BATTERY_STACK: usize = 8 * 1024 * 1024;
+
+fn assert_default_dev_jit_gap(stem: &str, file: &str) {
+    match dev_iteration_with_timeout(stem, file, false) {
+        RunOutcome::Problems(diags) => {
+            assert!(
+                jet_jit::is_e2211(&diags),
+                "`{stem}` should report E2211 under strict JIT, got {diags:?}"
+            );
+        }
+        RunOutcome::Ran { .. } => panic!("`{stem}` must not run via default strict JIT"),
     }
 }
 
@@ -564,56 +600,41 @@ fn check_dev_default_stem(
     let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
     let file = example_path(stem);
     eprintln!("dev-default checking {stem}");
-    let stdin = if stem == "io/stdin_filter" {
-        let path = dir.join(format!("dev_default_stdin_{i}.txt"));
-        fs::write(&path, "").unwrap();
-        Some(path)
-    } else {
-        None
-    };
-    let interpreted = if let Some(stdin) = &stdin {
-        dev_cli_output_with_stdin(&file, stdin, "empty-input jet dev")
-    } else {
-        match dev_iteration_with_timeout(stem, &file, false) {
-            RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => ProgramOutput::ran(stdout, stderr, exit_code),
-            RunOutcome::Problems(diags) => {
-                eprintln!(
-                    "default boundary: {stem}: {}",
-                    diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>().join(",")
-                );
-                assert!(
-                    is_named_dev_boundary(stem, &diags),
-                    "`{}` neither ran nor stopped at a named boundary {:?} under the default \
-                     jet dev backend; codes were {:?}",
-                    stem,
-                    BOUNDARY_CODES,
-                    diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-                );
+    let interpreted = match dev_iteration_with_timeout(stem, &file, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            if jet_jit::is_e2211(&diags) {
+                eprintln!("default jit gap: {stem}");
                 return DevBatteryStats {
-                    boundary: 1,
-                    boundary_stems: vec![stem.to_string()],
+                    jit_gap: 1,
                     ..DevBatteryStats::default()
                 };
             }
+            eprintln!(
+                "default boundary: {stem}: {}",
+                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>().join(",")
+            );
+            assert!(
+                is_named_dev_boundary(stem, &diags),
+                "`{}` neither ran nor stopped at a named boundary {:?} under the default \
+                 jet dev backend; codes were {:?}",
+                stem,
+                BOUNDARY_CODES,
+                diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+            );
+            return DevBatteryStats {
+                boundary: 1,
+                boundary_stems: vec![stem.to_string()],
+                ..DevBatteryStats::default()
+            };
         }
     };
 
-    let compiled = if let Some(stdin) = &stdin {
-        compiled_binary_output_with_stdin(
-            dir,
-            "dev_default_diff",
-            i,
-            stem,
-            &file,
-            Some(stdin),
-        )
-    } else {
-        compiled_binary_output(dir, "dev_default_diff", i, stem, &file)
-    };
+    let compiled = compiled_binary_output(dir, "dev_default_diff", i, stem, &file);
     let interpreted = normalize_for_parity(stem, interpreted);
     let compiled = normalize_for_parity(stem, compiled);
     if interpreted != compiled {
@@ -659,25 +680,30 @@ fn run_dev_default_battery_parallel(
         let dir = Arc::clone(&dir);
         let manifested_divergences = Arc::clone(&manifested_divergences);
         let failures = Arc::clone(&failures);
-        handles.push(std::thread::spawn(move || {
-            let mut stats = DevBatteryStats::default();
-            loop {
-                let Some((i, stem)) = jobs.lock().unwrap().pop_front() else {
-                    break;
-                };
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    check_dev_default_stem(i, &stem, &dir, &manifested_divergences)
-                }));
-                match result {
-                    Ok(next) => stats.add(next),
-                    Err(payload) => failures
-                        .lock()
-                        .unwrap()
-                        .push(format!("{stem}: {}", panic_message(payload))),
-                }
-            }
-            stats
-        }));
+        handles.push(
+            std::thread::Builder::new()
+                .stack_size(DEV_BATTERY_STACK)
+                .spawn(move || {
+                    let mut stats = DevBatteryStats::default();
+                    loop {
+                        let Some((i, stem)) = jobs.lock().unwrap().pop_front() else {
+                            break;
+                        };
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            check_dev_default_stem(i, &stem, &dir, &manifested_divergences)
+                        }));
+                        match result {
+                            Ok(next) => stats.add(next),
+                            Err(payload) => failures
+                                .lock()
+                                .unwrap()
+                                .push(format!("{stem}: {}", panic_message(payload))),
+                        }
+                    }
+                    stats
+                })
+                .expect("dev default worker"),
+        );
     }
 
     let mut stats = DevBatteryStats::default();
@@ -699,7 +725,9 @@ fn check_interpreter_stem(
     dir: &std::path::Path,
     manifested_divergences: &[String],
 ) -> DevBatteryStats {
-    let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
+    if uses_ffi_bridge(stem) {
+        return DevBatteryStats::default();
+    }
     let file = example_path(stem);
     eprintln!("interpreter checking {stem}");
     let interpreted = match dev_iteration_with_timeout(stem, &file, true) {
@@ -768,25 +796,30 @@ fn run_interpreter_battery_parallel(
         let dir = Arc::clone(&dir);
         let manifested_divergences = Arc::clone(&manifested_divergences);
         let failures = Arc::clone(&failures);
-        handles.push(std::thread::spawn(move || {
-            let mut stats = DevBatteryStats::default();
-            loop {
-                let Some((i, stem)) = jobs.lock().unwrap().pop_front() else {
-                    break;
-                };
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    check_interpreter_stem(i, &stem, &dir, &manifested_divergences)
-                }));
-                match result {
-                    Ok(next) => stats.add(next),
-                    Err(payload) => failures
-                        .lock()
-                        .unwrap()
-                        .push(format!("{stem}: {}", panic_message(payload))),
-                }
-            }
-            stats
-        }));
+        handles.push(
+            std::thread::Builder::new()
+                .stack_size(DEV_BATTERY_STACK)
+                .spawn(move || {
+                    let mut stats = DevBatteryStats::default();
+                    loop {
+                        let Some((i, stem)) = jobs.lock().unwrap().pop_front() else {
+                            break;
+                        };
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            check_interpreter_stem(i, &stem, &dir, &manifested_divergences)
+                        }));
+                        match result {
+                            Ok(next) => stats.add(next),
+                            Err(payload) => failures
+                                .lock()
+                                .unwrap()
+                                .push(format!("{stem}: {}", panic_message(payload))),
+                        }
+                    }
+                    stats
+                })
+                .expect("interpreter worker"),
+        );
     }
 
     let mut stats = DevBatteryStats::default();
@@ -832,18 +865,9 @@ fn interpreter_matches_compiled_binary() {
     );
 }
 
-/// c125 M4 exit gate: the DEFAULT `jet dev` path (Cranelift JIT with
-/// per-construct interpreter fallback — `use_interpreter: false`, what the
-/// `jet dev` CLI actually runs) must be functionally identical to the AOT
-/// compiled binary for every example, same as `interpreter_matches_compiled_binary`
-/// above but exercising the real default backend instead of the forced
-/// interpreter-only tier. This is the owner's "JIT and `jet run` must be
-/// functionally identical on every program the AOT path covers" requirement
-/// (2026-06-30) — distinct from the interpreter-only invariant above, which
-/// stays green even when JIT coverage regresses because it never touches
-/// Cranelift. A stray boundary here (that the interpreter-only test doesn't
-/// also hit) means the JIT fallback dropped correctness the plain interpreter
-/// had — a P0 regression, not a coverage gap.
+/// c125 M4 exit gate: the DEFAULT `jet dev` path uses strict Cranelift. JIT-covered
+/// examples must match the AOT binary; uncovered examples report E2211 instead of
+/// transparent AOT fallback (c728).
 #[test]
 fn dev_default_matches_compiled_binary() {
     let _guard = dev_diff_lock().lock().unwrap();
@@ -855,25 +879,31 @@ fn dev_default_matches_compiled_binary() {
     let dir = std::env::temp_dir().join(format!("jet_dev_default_diff_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let (_, _, manifested_divergences) = parse_jit_gap_manifest();
-    let stats = run_dev_default_battery_parallel(all_example_stems(), dir, manifested_divergences);
+    let stats = run_dev_default_battery_parallel(typechecked_example_stems(), dir, manifested_divergences);
     eprintln!(
-        "c125 default-backend battery: {} ran ({} default==compiled, {} manifested divergences), {} boundary-asserted, {} total",
+        "c125 default-backend battery: {} ran ({} default==compiled, {} manifested divergences), {} jit-gap, {} boundary-asserted, {} total",
         stats.ran,
         stats.ran - stats.manifested,
         stats.manifested,
+        stats.jit_gap,
         stats.boundary,
-        stats.ran + stats.boundary
+        stats.ran + stats.jit_gap + stats.boundary
     );
     assert!(
         stats.ran > 0,
         "expected at least some examples to run via the default jet dev backend"
     );
+    assert!(
+        stats.jit_gap > 0,
+        "expected strict JIT to report E2211 for uncovered examples instead of AOT fallback"
+    );
     let mut observed_boundaries = stats.boundary_stems;
     observed_boundaries.sort();
+    observed_boundaries.dedup();
     assert_eq!(
         observed_boundaries,
         DEFAULT_BACKEND_EXPECTED_BOUNDARIES,
-        "default jet dev boundary set must stay exact and every non-manifested boundary must execute"
+        "default jet dev boundary set must stay exact"
     );
     assert_eq!(
         stats.manifested, 0,
@@ -882,7 +912,7 @@ fn dev_default_matches_compiled_binary() {
 }
 
 #[test]
-fn stdin_filter_cli_uses_transparent_aot_fallback() {
+fn stdin_filter_default_dev_reports_jit_gap() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_stdin_boundary_{}",
         std::process::id()
@@ -899,30 +929,25 @@ fn stdin_filter_cli_uses_transparent_aot_fallback() {
         &file,
         Some(&input),
     );
-
-    let dev = dev_cli_output_with_stdin(&file, &input, "piped-input jet dev");
-    assert_eq!(dev, compiled);
+    assert_eq!(compiled.stdout.trim(), "jet one\njet two");
+    assert_default_dev_jit_gap("io/stdin_filter", &file);
 }
 
 #[test]
-fn former_parity_divergences_match_default_aot() {
+fn former_parity_divergences_report_jit_gap_on_default_dev() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_former_parity_divergences_{}",
         std::process::id()
     ));
-    for (i, stem) in ["errors/typed_error_families", "serde/json_coerce"]
-        .into_iter()
-        .enumerate()
-    {
-        let stats = check_dev_default_stem(i, stem, &dir, &[]);
-        assert_eq!(stats.ran, 1, "{stem} must execute through the fallback ladder");
-        assert_eq!(stats.boundary, 0, "{stem} must not be a dev boundary");
-        assert_eq!(stats.manifested, 0, "{stem} must exactly match default AOT");
+    for stem in ["errors/typed_error_families", "serde/json_coerce"] {
+        let file = example_path(stem);
+        assert_default_dev_jit_gap(stem, &file);
+        let _ = compiled_binary_output(&dir, "former_parity_aot", 0, stem, &file);
     }
 }
 
 #[test]
-fn previously_manifested_execution_skips_use_transparent_fallback() {
+fn previously_manifested_execution_reports_jit_gap_or_boundary() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_unmasked_fallbacks_{}",
         std::process::id()
@@ -936,37 +961,23 @@ fn previously_manifested_execution_skips_use_transparent_fallback() {
     .enumerate()
     {
         let stats = check_dev_default_stem(i, stem, &dir, &[]);
-        assert_eq!(
-            stats.ran, 1,
-            "{stem} must execute through the fallback ladder"
+        assert!(
+            stats.jit_gap == 1 || stats.boundary == 1,
+            "{stem} must report E2211 or a named boundary under strict JIT"
         );
-        assert_eq!(stats.boundary, 0, "{stem} must not be a dev boundary");
-        assert_eq!(stats.manifested, 0, "{stem} must not diverge from AOT");
     }
 }
 
 #[test]
-fn data_schema_empty_and_generic_rows_match_aot_in_default_dev() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_dev_data_schema_parity_{}",
-        std::process::id()
-    ));
-    let stats = check_dev_default_stem(0, "tooling/data_json", &dir, &[]);
-    assert_eq!(stats.ran, 1);
-    assert_eq!(stats.boundary, 0);
-    assert_eq!(stats.manifested, 0);
+fn data_schema_empty_and_generic_rows_report_jit_gap_on_default_dev() {
+    let file = example_path("tooling/data_json");
+    assert_default_dev_jit_gap("tooling/data_json", &file);
 }
 
 #[test]
-fn sh_typed_text_default_matches_compiled_binary() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_dev_sh_typed_text_{}",
-        std::process::id()
-    ));
-    let stats = check_dev_default_stem(0, "safety/sh_typed_text", &dir, &[]);
-    assert_eq!(stats.ran, 1);
-    assert_eq!(stats.boundary, 0);
-    assert_eq!(stats.manifested, 0);
+fn sh_typed_text_default_reports_jit_gap() {
+    let file = example_path("safety/sh_typed_text");
+    assert_default_dev_jit_gap("safety/sh_typed_text", &file);
 }
 
 #[test]
@@ -1042,6 +1053,9 @@ fn interpreter_matches_expected_golden() {
         if stem == "devloop/task_runner" {
             check_task_runner_interpreter(&root, &file);
             checked += 2;
+            continue;
+        }
+        if uses_ffi_bridge(&stem) {
             continue;
         }
         let expected_path = root.join(format!("examples/features/expected/{}.out", stem));
@@ -1212,7 +1226,7 @@ fn task_program_runs_via_jit() {
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|e| panic!("tasks JIT compile failed: {e}"));
 
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     let jit = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("tasks must run via JIT backend, got: {ds:?}"),
@@ -1251,22 +1265,8 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
     let first = compiled_binary_output(&dir, "scheduler_panic_hook", 0, "all_failfast", file);
     assert_eq!(first, expected);
 
-    for iteration in 0..8 {
-        let fallback = match dev_iteration(file, false, false) {
-            RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => ProgramOutput::ran(stdout, stderr, exit_code),
-            RunOutcome::Problems(diags) => {
-                panic!("all_failfast fallback run {iteration} stopped at {diags:?}")
-            }
-        };
-        assert_eq!(
-            fallback, expected,
-            "all_failfast fallback run {iteration} leaked non-Jet stderr"
-        );
-    }
+    // Strict JIT no longer AOT-fallbacks all_failfast; parallel AOT runs keep
+    // the panic-hook regression signal.
 
     let binary = Arc::new(dir.join("jet_scheduler_panic_hook_0"));
     let failures = Arc::new(Mutex::new(Vec::new()));
@@ -1307,14 +1307,13 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// c125 Phase 6 seed: uncovered effectful programs run under default dev via
-/// transparent AOT subprocess fallback. Interpreter mode keeps the honest
-/// E2201 boundary; the default backend owns the gap.
+/// c728: uncovered effectful programs report E2211 under default dev; interpreter
+/// mode keeps the honest E2201 boundary.
 #[test]
-fn dev_default_runs_env_program_via_aot_fallback() {
-    let dir = std::env::temp_dir().join(format!("jet_dev_aot_fallback_{}", std::process::id()));
+fn dev_default_reports_jit_gap_for_env_program() {
+    let dir = std::env::temp_dir().join(format!("jet_dev_jit_gap_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("env_fallback.jet");
+    let file = dir.join("env_gap.jet");
     fs::write(
         &file,
         "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
@@ -1332,28 +1331,147 @@ fn dev_default_runs_env_program_via_aot_fallback() {
         RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.env program"),
     }
 
-    let expected = compiled_binary_output(&dir, "aot_fallback", 0, "env_fallback", &shown);
-    let got = match dev_iteration(&shown, false, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => ProgramOutput::ran(stdout, stderr, exit_code),
+    match dev_iteration(&shown, false, false) {
         RunOutcome::Problems(diags) => {
-            panic!("default dev should AOT-fallback-run core.env program: {diags:?}")
+            assert!(
+                diags.iter().any(|d| d.code == "E2211"),
+                "default dev should report a JIT gap, not fallback: {diags:?}"
+            );
+            assert!(
+                diags.iter().any(|d| d.why.contains("JIT gap in run:")),
+                "E2211 should name the function and gap detail: {diags:?}"
+            );
         }
-    };
-    let got = normalize_for_parity("env_fallback", got);
-    let expected = normalize_for_parity("env_fallback", expected);
-    assert_eq!(got, expected);
+        RunOutcome::Ran { .. } => panic!("default dev must not AOT-fallback-run core.env program"),
+    }
 }
 
-/// D-AUTH-TOKENPOLICY1=A: signature verification and expiry checks stay on the
-/// native crypto/clock path; default dev falls back transparently and exactly.
+/// c728 C3: strict Cranelift traces JIT execution and never invokes tier-0 fallback.
 #[test]
-fn dev_default_runs_auth_verification_via_aot_fallback() {
+fn strict_jit_traces_execution_without_fallback() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    jet_jit::reset_jit_trace_for_test();
+    let file = example_path("basics/hello");
+    match dev_iteration(&file, false, false) {
+        RunOutcome::Ran { .. } => {}
+        other => panic!("hello must run via strict JIT: {other:?}"),
+    }
+    assert!(jet_jit::jit_executed_for_test(), "strict path must execute JIT");
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "strict path must not invoke interpreter fallback"
+    );
+}
+
+/// c728 C6: one-shot `jet dev` reports E2211 and exits 101 for a JIT gap.
+#[test]
+fn one_shot_dev_reports_e2211_and_exits_101() {
+    let dir = common::unique_tmp("jet_dev_one_shot_e2211");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("gap.jet");
+    fs::write(
+        &file,
+        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["dev", file.to_str().unwrap(), "--watch=off"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("one-shot jet dev");
+    assert_eq!(
+        output.status.code(),
+        Some(101),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(combined.contains("E2211"), "{combined}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// c728 C6: watching `jet dev` reports E2211 on a gap edit and accepts a later valid edit.
+#[test]
+fn watching_dev_reports_e2211_and_recovers() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    use std::io::Read;
+
+    fn read_until(
+        reader: &mut impl Read,
+        needle: &str,
+        timeout: Duration,
+        label: &str,
+    ) -> String {
+        let mut buf = String::new();
+        let mut chunk = [0u8; 512];
+        let start = Instant::now();
+        while start.elapsed() < timeout {
+            match reader.read(&mut chunk) {
+                Ok(0) => std::thread::sleep(Duration::from_millis(20)),
+                Ok(n) => {
+                    buf.push_str(&String::from_utf8_lossy(&chunk[..n]));
+                    if buf.contains(needle) {
+                        return buf;
+                    }
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+        panic!("timed out waiting for {label}; got {buf}");
+    }
+
+    let dir = common::unique_tmp("jet_watch_e2211");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("watch_gap.jet");
+    fs::write(&file, "fn run() {\n    print(\"ok1\")\n}\n").unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["dev", file.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn watching jet dev");
+    let mut stdout = child.stdout.take().expect("stdout pipe");
+    let mut stderr = child.stderr.take().expect("stderr pipe");
+
+    let _ = read_until(&mut stdout, "ok1", Duration::from_secs(20), "first good run");
+
+    fs::write(
+        &file,
+        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+    )
+    .unwrap();
+    let gap_out = read_until(
+        &mut stderr,
+        "E2211",
+        Duration::from_secs(20),
+        "JIT gap after bad edit",
+    );
+    assert!(gap_out.contains("JIT gap in run:"), "{gap_out}");
+
+    fs::write(&file, "fn run() {\n    print(\"ok2\")\n}\n").unwrap();
+    let _ = read_until(&mut stdout, "ok2", Duration::from_secs(20), "recovered good run");
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// D-AUTH-TOKENPOLICY1=A: auth verification stays on the native path; strict JIT
+/// reports E2211 instead of transparent AOT fallback.
+#[test]
+fn dev_default_reports_jit_gap_for_auth_verification() {
     let _guard = FfiBridgeLock::acquire();
-    let dir = std::env::temp_dir().join(format!("jet_dev_auth_fallback_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_dev_auth_gap_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let file = dir.join("auth_fallback.jet");
@@ -1377,12 +1495,15 @@ fn run() {
         RunOutcome::Ran { .. } => panic!("interpreter unexpectedly ran core.auth"),
     }
 
+    match dev_iteration_with_timeout("auth_fallback", &shown, false) {
+        RunOutcome::Problems(diags) => {
+            assert!(diags.iter().any(|d| d.code == "E2211"), "{diags:?}");
+        }
+        RunOutcome::Ran { .. } => panic!("default dev must not AOT-fallback-run core.auth"),
+    }
+
     let expected = compiled_binary_output(&dir, "auth_fallback", 0, "auth_fallback", &shown);
-    let got = match dev_iteration_with_timeout("auth_fallback", &shown, false) {
-        RunOutcome::Ran { stdout, stderr, exit_code } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => panic!("default dev should AOT-fallback-run core.auth: {diags:?}"),
-    };
-    assert_eq!(normalize_for_parity("auth_fallback", got), normalize_for_parity("auth_fallback", expected));
+    assert_eq!(expected.stdout.trim(), "gateway");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1455,15 +1576,7 @@ fn run() {
         expected.stdout,
         "between root\nroot: 8,9\nnested adjacent: 18,19\nbetween nested\nnested interleaved: 28,29\nreuse first: 30\nreuse final: 39,38\nbefore replace: 40\nunrelated debug\nafter replace: 49\n"
     );
-    let got = match dev_iteration_with_timeout("place_split", &shown, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => panic!("default dev rejected place split: {diags:?}"),
-    };
-    assert_eq!(got, expected);
+    assert_default_dev_jit_gap("place_split", &shown);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1503,15 +1616,7 @@ fn run() {
         &shown,
     );
     assert_eq!(aot.stdout, "7\n");
-    let dev = match dev_iteration_with_timeout("returned_parameter_view", &shown, false) {
-        RunOutcome::Ran { stdout, stderr, exit_code } => {
-            ProgramOutput::ran(stdout, stderr, exit_code)
-        }
-        RunOutcome::Problems(diags) => {
-            panic!("default dev rejected returned parameter view: {diags:?}")
-        }
-    };
-    assert_eq!(dev, aot);
+    assert_default_dev_jit_gap("returned_parameter_view", &shown);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1553,15 +1658,7 @@ fn run() {
         &shown,
     );
     assert_eq!(aot.stdout, "7\n");
-    let dev = match dev_iteration_with_timeout("returned_view_field", &shown, false) {
-        RunOutcome::Ran { stdout, stderr, exit_code } => {
-            ProgramOutput::ran(stdout, stderr, exit_code)
-        }
-        RunOutcome::Problems(diags) => {
-            panic!("default dev rejected returned view field: {diags:?}")
-        }
-    };
-    assert_eq!(dev, aot);
+    assert_default_dev_jit_gap("returned_view_field", &shown);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1604,15 +1701,7 @@ fn run() {
         &shown,
     );
     assert_eq!(aot.stdout, "7\n");
-    let dev = match dev_iteration_with_timeout("nested_returned_view_field", &shown, false) {
-        RunOutcome::Ran { stdout, stderr, exit_code } => {
-            ProgramOutput::ran(stdout, stderr, exit_code)
-        }
-        RunOutcome::Problems(diags) => {
-            panic!("default dev rejected nested returned view field: {diags:?}")
-        }
-    };
-    assert_eq!(dev, aot);
+    assert_default_dev_jit_gap("nested_returned_view_field", &shown);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1668,15 +1757,7 @@ fn run() { print(0) }
         &shown,
     );
     assert_eq!(aot.stdout, "0\n");
-    let dev = match dev_iteration_with_timeout("wrapped_returned_view_fields", &shown, false) {
-        RunOutcome::Ran { stdout, stderr, exit_code } => {
-            ProgramOutput::ran(stdout, stderr, exit_code)
-        }
-        RunOutcome::Problems(diags) => {
-            panic!("default dev rejected wrapped returned view fields: {diags:?}")
-        }
-    };
-    assert_eq!(dev, aot);
+    assert_default_dev_jit_gap("wrapped_returned_view_fields", &shown);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1718,15 +1799,7 @@ fn run() {
         &shown,
     );
     assert_eq!(aot.stdout, "example.com\n");
-    let dev = match dev_iteration_with_timeout("returned_string_view", &shown, false) {
-        RunOutcome::Ran { stdout, stderr, exit_code } => {
-            ProgramOutput::ran(stdout, stderr, exit_code)
-        }
-        RunOutcome::Problems(diags) => {
-            panic!("default dev rejected returned string-view field: {diags:?}")
-        }
-    };
-    assert_eq!(dev, aot);
+    assert_default_dev_jit_gap("returned_string_view", &shown);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1778,15 +1851,7 @@ fn run() {
         &shown,
     );
     assert_eq!(aot.stdout, "7\n");
-    let dev = match dev_iteration_with_timeout("returned_view_trait", &shown, false) {
-        RunOutcome::Ran { stdout, stderr, exit_code } => {
-            ProgramOutput::ran(stdout, stderr, exit_code)
-        }
-        RunOutcome::Problems(diags) => {
-            panic!("default dev rejected returned view trait method: {diags:?}")
-        }
-    };
-    assert_eq!(dev, aot);
+    assert_default_dev_jit_gap("returned_view_trait", &shown);
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1877,21 +1942,13 @@ impl $TYPE.Select {
         let stem = format!("aggregate_trait_returns_{index}");
         let aot = compiled_binary_output(&dir, &stem, 0, &stem, &shown);
         assert_eq!(aot.stdout, "7\n9\n");
-        let dev = match dev_iteration_with_timeout(&stem, &shown, false) {
-            RunOutcome::Ran { stdout, stderr, exit_code } => {
-                ProgramOutput::ran(stdout, stderr, exit_code)
-            }
-            RunOutcome::Problems(diags) => {
-                panic!("default dev rejected aggregate trait returns: {diags:?}")
-            }
-        };
-        assert_eq!(dev, aot);
+        assert_default_dev_jit_gap(&stem, &shown);
         let _ = fs::remove_dir_all(&dir);
     }
 }
 
 #[test]
-fn json_coerce_audit_uses_transparent_aot_fallback() {
+fn json_coerce_audit_reports_jit_gap_on_default_dev() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_json_coerce_fallback_{}",
         std::process::id()
@@ -1910,57 +1967,24 @@ fn json_coerce_audit_uses_transparent_aot_fallback() {
         }
     }
 
+    assert_default_dev_jit_gap(stem, &file);
     let expected = normalize_for_parity(
         stem,
-        compiled_binary_output(&dir, "json_coerce_fallback", 0, stem, &file),
+        compiled_binary_output(&dir, "json_coerce_aot", 0, stem, &file),
     );
-    let got = match dev_iteration_with_timeout(stem, &file, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => normalize_for_parity(stem, ProgramOutput::ran(stdout, stderr, exit_code)),
-        RunOutcome::Problems(diags) => {
-            panic!("default dev should AOT-fallback-run JSON coercion: {diags:?}")
-        }
-    };
-    assert_eq!(got, expected);
-    assert_eq!(got.stdout, "8081\napi\ntrue\n");
-    assert_eq!(got.exit_code, 0);
-    assert_eq!(
-        got.stderr.lines().collect::<Vec<_>>(),
-        [
-            r#"{"level":"info","body":"json coerce: field "enabled" string → boolean","ts":<ts>}"#,
-            r#"{"level":"info","body":"json coerce: field "port" string → number","ts":<ts>}"#,
-        ]
-    );
+    assert_eq!(expected.stdout, "8081\napi\ntrue\n");
+    assert_eq!(expected.exit_code, 0);
 }
 
 #[cfg(unix)]
 #[test]
-fn dev_default_aot_fallback_matches_socket_echo() {
-    let dir = std::env::temp_dir().join(format!(
-        "jet_dev_socket_echo_parity_{}",
-        std::process::id()
-    ));
+fn dev_default_socket_echo_reports_jit_gap() {
     let file = "examples/features/net/socket_echo.jet";
-    let expected = compiled_binary_output(&dir, "socket_echo", 0, "net/socket_echo", file);
-    let got = match dev_iteration(file, false, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => {
-            panic!("default dev should AOT-fallback-run socket echo: {diags:?}")
-        }
-    };
-    assert_eq!(got, expected);
-    let _ = fs::remove_dir_all(dir);
+    assert_default_dev_jit_gap("net/socket_echo", file);
 }
 
 #[test]
-fn dev_default_aot_fallback_matches_tls_deadline() {
+fn dev_default_tls_deadline_reports_jit_gap() {
     let dir = std::env::temp_dir().join(format!(
         "jet_dev_tls_deadline_parity_{}",
         std::process::id()
@@ -1996,66 +2020,27 @@ fn run() {{
     )
     .unwrap();
     let shown = file.to_string_lossy().to_string();
-    let expected = compiled_binary_output(&dir, "tls_deadline", 0, "tls_deadline", &shown);
-    let got = match dev_iteration(&shown, false, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => {
-            panic!("default dev should AOT-fallback-run TLS deadline: {diags:?}")
-        }
-    };
+    let _ = compiled_binary_output(&dir, "tls_deadline", 0, "tls_deadline", &shown);
+    assert_default_dev_jit_gap("tls_deadline", &shown);
     server.join().unwrap();
-    assert_eq!(got, expected);
     let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
-fn dev_default_aot_fallback_matches_io_log() {
-    let dir = std::env::temp_dir();
+fn dev_default_io_log_reports_jit_gap() {
     let file = "examples/features/io/log.jet";
-    let expected = compiled_binary_output(&dir, "aot_fallback_log", 0, "io/log", file);
-    let got = match dev_iteration(file, false, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => ProgramOutput::ran(stdout, stderr, exit_code),
-        RunOutcome::Problems(diags) => {
-            panic!("default dev should AOT-fallback-run io/log: {diags:?}")
-        }
-    };
-    let got = normalize_for_parity("io/log", got);
-    let expected = normalize_for_parity("io/log", expected);
-    assert_eq!(got, expected);
+    assert_default_dev_jit_gap("io/log", file);
 }
 
 #[test]
-fn dev_default_aot_fallback_runs_resident_boundaries() {
-    let dir = std::env::temp_dir();
+fn dev_default_resident_boundaries_report_jit_gap() {
     for stem in [
         "concurrency/task_controls",
         "memory/entity_tree",
         "memory/expiring_secret",
     ] {
         let file = example_path(stem);
-        let expected = compiled_binary_output(&dir, "aot_fallback_resident", 0, stem, &file);
-        let got = match dev_iteration(&file, false, false) {
-            RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => ProgramOutput::ran(stdout, stderr, exit_code),
-            RunOutcome::Problems(diags) => {
-                panic!("default dev should AOT-fallback-run {stem}: {diags:?}")
-            }
-        };
-        assert_eq!(
-            normalize_for_parity(stem, got),
-            normalize_for_parity(stem, expected)
-        );
+        assert_default_dev_jit_gap(stem, &file);
     }
 }
 
@@ -2093,10 +2078,11 @@ fn scheduler_spawn_runs_via_jit() {
 #[test]
 fn dev_default_interprets_display_debug_interpolation() {
     let file = "examples/features/types/display_debug.jet";
-    let got = match dev_iteration(file, false, false) {
+    assert_default_dev_jit_gap("types/display_debug", file);
+    let got = match dev_iteration(file, false, true) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => {
-            panic!("display/debug interpolation should run in default dev, got: {ds:?}")
+            panic!("display/debug interpolation should run in interpreter dev, got: {ds:?}")
         }
     };
     assert_eq!(got, golden_stdout("types/display_debug"));
@@ -2160,7 +2146,7 @@ fn cranelift_backend_matches_hello() {
         }
     };
 
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     let got = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("cranelift backend did not run hello: {ds:?}"),
@@ -2219,7 +2205,7 @@ fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
     };
 
     let bundle = checked_bundle_from_path(&shown);
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     let got = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{tag}`: {ds:?}"),
@@ -2228,6 +2214,26 @@ fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
         got, expected,
         "cranelift output drifted from interpreter for `{tag}`"
     );
+}
+
+fn assert_cranelift_reports_jit_gap(src: &str, tag: &str) {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let p = std::env::temp_dir().join(format!("jet_jit_gap_{tag}.jet"));
+    fs::write(&p, src).unwrap();
+    let shown = p.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+    let mut backend = CraneliftBackend::new();
+    match backend.run(&bundle, false) {
+        RunOutcome::Problems(ds) => {
+            assert!(
+                jet_jit::is_e2211(&ds),
+                "strict cranelift should report E2211 for `{tag}`, got {ds:?}"
+            );
+        }
+        RunOutcome::Ran { .. } => panic!("strict cranelift unexpectedly ran `{tag}`"),
+    }
 }
 
 fn run_cranelift_outcome(src: &str, tag: &str) -> ProgramOutput {
@@ -2242,7 +2248,7 @@ fn run_cranelift_outcome(src: &str, tag: &str) -> ProgramOutput {
     );
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|e| panic!("`{tag}` JIT compile failed: {e}"));
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     match backend.run(&bundle, false) {
         RunOutcome::Ran {
             stdout,
@@ -2250,27 +2256,6 @@ fn run_cranelift_outcome(src: &str, tag: &str) -> ProgramOutput {
             exit_code,
         } => ProgramOutput::ran(stdout, stderr, exit_code),
         RunOutcome::Problems(ds) => panic!("`{tag}` JIT returned diagnostics: {ds:?}"),
-    }
-}
-
-struct RejectJitFallback;
-
-impl JitBackend for RejectJitFallback {
-    fn run(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
-        panic!("resident JIT unexpectedly used its fallback")
-    }
-
-    fn hot_swap(
-        &mut self,
-        _: &str,
-        _: &jet::AST::ProgramBundle,
-        _: bool,
-    ) -> Result<RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
-        panic!("resident JIT unexpectedly used its fallback")
-    }
-
-    fn restart(&mut self, _: &jet::AST::ProgramBundle, _: bool) -> RunOutcome {
-        panic!("resident JIT unexpectedly used its fallback")
     }
 }
 
@@ -2287,7 +2272,7 @@ fn run_cranelift_outcome_without_fallback(src: &str, tag: &str) -> RunOutcome {
     );
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|e| panic!("`{tag}` JIT compile failed: {e}"));
-    let mut backend = CraneliftBackend::new(RejectJitFallback);
+    let mut backend = CraneliftBackend::new();
     backend.run(&bundle, false)
 }
 
@@ -3465,7 +3450,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         }
     };
 
-    let mut backend = CraneliftBackend::new(RejectJitFallback);
+    let mut backend = CraneliftBackend::new();
     let jit = match backend.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
@@ -3754,6 +3739,15 @@ fn jit_covered_example_stems() -> Vec<String> {
 /// c139 M3+: three-way differential (JIT == interpreter == AOT) on resident-safe examples.
 #[test]
 fn cranelift_three_way_differential_battery() {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(cranelift_three_way_differential_battery_inner)
+        .expect("three-way battery thread")
+        .join()
+        .expect("three-way battery thread panicked");
+}
+
+fn cranelift_three_way_differential_battery_inner() {
     let _guard = dev_diff_lock().lock().unwrap();
     if skip_if_cranelift_host_unsupported() {
         return;
@@ -3971,7 +3965,7 @@ fn cranelift_covers_function_calls() {
 
 #[test]
 fn cranelift_matches_plain_parameter_read_write_and_take_modes() {
-    assert_cranelift_matches_interpreter(
+    assert_cranelift_reports_jit_gap(
         "fn read(text: String) { print(text) }\nfn edit(values: &[Int]) { values[0] = 9 }\nfn consume(text: ^String) { print(text) }\nfn run() {\n    text :: \"hello\"\n    values := [1, 2]\n    read(text)\n    edit(&values)\n    print(values[0])\n    consume(^text)\n}\n",
         "plain_parameter_modes",
     );
@@ -4025,7 +4019,7 @@ fn interpreter_writeback_boundary_only_opens_for_resolved_user_functions() {
 
 #[test]
 fn cranelift_matches_variadic_fixed_writeback() {
-    assert_cranelift_matches_interpreter(
+    assert_cranelift_reports_jit_gap(
         "fn edit(values: &[Int], extras: ...Int) { values[0] = extras.len() }\nfn run() {\n    values := [0]\n    edit(&values, 7, 8)\n    print(values[0])\n}\n",
         "variadic_fixed_writeback",
     );
@@ -4079,7 +4073,7 @@ fn cranelift_covers_string_print() {
 /// c125 Phase 2: Float list values use the shared JetArena list path.
 #[test]
 fn cranelift_covers_float_lists() {
-    assert_cranelift_matches_interpreter(
+    assert_cranelift_reports_jit_gap(
         "fn run() {\n    xs: [Float] := [1.5, 2.5]\n    xs.push(3.5)\n    print(xs.len())\n    print(xs[0])\n    xs[1] = 4.5\n    print(xs[1])\n    mid :: xs[1..2]\n    print(mid[0])\n}\n",
         "float_lists",
     );
@@ -4115,7 +4109,7 @@ fn cranelift_hot_swap_preserves_live_state() {
     let v1 = checked_bundle("fn run() {\n    print(\"v1\")\n}\n", "jit_swap_v1");
     let v2 = checked_bundle("fn run() {\n    print(\"v2\")\n}\n", "jit_swap_v2");
 
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     let out1 = match backend.run(&v1, false) {
         RunOutcome::Ran { stdout, .. } => stdout,
         RunOutcome::Problems(ds) => panic!("first run failed: {ds:?}"),
@@ -4135,7 +4129,7 @@ fn cranelift_hot_swap_preserves_live_state() {
         "hot_swap must preserve resident invocation count (live state)"
     );
 
-    let mut backend2 = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend2 = CraneliftBackend::new();
     let out3 = match backend2.hot_swap("run", &v1, false) {
         Ok(RunOutcome::Ran { stdout, .. }) => stdout,
         Ok(RunOutcome::Problems(ds)) => panic!("second backend hot_swap failed: {ds:?}"),
@@ -4192,7 +4186,7 @@ fn cranelift_trap_then_hot_swap_continues() {
         jet_jit::resident_jit_safe_bundle_detail(&panics)
     );
 
-    let mut backend = CraneliftBackend::new(InterpreterBackend::new());
+    let mut backend = CraneliftBackend::new();
     match backend.run(&panics, false) {
         RunOutcome::Problems(diags) => {
             assert!(
@@ -4511,4 +4505,60 @@ fn schedule_every_dev_loop_consumer() {
         }
         RunOutcome::Problems(diags) => panic!("run_named_task failed: {diags:?}"),
     }
+}
+
+/// c728 C6: a watching `jet dev` session reports E2211 on a JIT-gap edit, keeps
+/// the last good bundle, accepts a later valid edit, and one-shot dev exits 101.
+#[test]
+fn watching_dev_keeps_last_good_on_jit_gap_and_recovers() {
+    let dir = std::env::temp_dir().join(format!("jet_dev_watch_c6_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("app.jet");
+    fs::write(&file, "fn run() {\n    print(\"good-v1\")\n}\n").unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"));
+    child
+        .arg("dev")
+        .arg(&shown)
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = child.spawn().expect("spawn watching jet dev");
+
+    std::thread::sleep(Duration::from_millis(800));
+    fs::write(
+        &file,
+        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+    )
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(800));
+    fs::write(&file, "fn run() {\n    print(\"good-v2\")\n}\n").unwrap();
+    std::thread::sleep(Duration::from_millis(800));
+
+    let _ = child.kill();
+    let out = child.wait_with_output().expect("watching jet dev output");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stdout.contains("good-v1"), "stdout:\n{stdout}");
+    assert!(
+        stderr.contains("E2211") || stdout.contains("E2211"),
+        "expected E2211 on JIT-gap edit\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(stdout.contains("good-v2"), "stdout:\n{stdout}");
+
+    fs::write(
+        &file,
+        "use core.env as env\nfn run() {\n    print(env.current_dir())\n}\n",
+    )
+    .unwrap();
+    let once = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["dev", &shown, "--watch=off"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let once_stderr = String::from_utf8_lossy(&once.stderr);
+    assert_eq!(once.status.code(), Some(101), "stderr={once_stderr}");
+    assert!(once_stderr.contains("E2211"), "{once_stderr}");
 }

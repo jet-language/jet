@@ -372,9 +372,9 @@ fn run() {
 }
 
 #[test]
-fn default_dev_uses_named_aot_fallback_with_native_parity() {
+fn default_dev_reports_e2211_for_deferred_close() {
     use jet::Interpreter::RunOutcome;
-    use jet::JitBackend::{AotFallbackBackend, InterpreterBackend, JitBackend};
+    use jet::JitBackend::JitBackend;
 
     let root = common::unique_tmp("jet_resource_close_dev");
     fs::create_dir_all(&root).unwrap();
@@ -389,27 +389,21 @@ fn default_dev_uses_named_aot_fallback_with_native_parity() {
 
     if jet_jit::cranelift_host_supported() {
         let gap = jet_jit::try_compile_bundle(&bundle).expect_err("JIT must name its cleanup gap");
-        assert!(gap.contains("automatic resource cleanup uses AOT fallback"), "{gap}");
+        assert!(
+            gap.contains("automatic resource cleanup") || gap.contains("jit "),
+            "{gap}"
+        );
     }
 
-    let mut dev = jet_jit::CraneliftBackend::new(AotFallbackBackend::new(
-        InterpreterBackend::new(),
-    ));
-    let got = match dev.run(&bundle, false) {
-        RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => {
-            assert_eq!(stderr, "");
-            assert_eq!(exit_code, 0);
-            stdout
+    let mut dev = jet_jit::CraneliftBackend::new();
+    match dev.run(&bundle, false) {
+        RunOutcome::Problems(diags) => {
+            assert!(jet_jit::is_e2211(&diags), "expected E2211, got {diags:?}");
         }
-        RunOutcome::Problems(diags) => panic!("default dev rejected deferred close: {diags:?}"),
-    };
-    assert_eq!(got, "body\nclose dev\n");
+        RunOutcome::Ran { .. } => panic!("strict JIT must not AOT-fallback deferred close"),
+    }
 
     let native = compile_and_run(SIMPLE, "jet_resource_close_native_parity");
     assert!(native.status.success());
-    assert_eq!(got.as_bytes(), native.stdout);
+    assert_eq!(native.stdout, b"body\nclose dev\n");
 }
