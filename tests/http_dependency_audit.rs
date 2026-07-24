@@ -110,8 +110,9 @@ fn http_prelude_sources_do_not_import_forbidden_http_crates() {
 fn unsupported_target_variant_is_mapped_from_bridge_and_server_bind() {
     let bridge = read("crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs");
     assert!(
-        bridge.contains("JetHttpBridgeError::UnsupportedTarget => JetHttpError::UnsupportedTarget"),
-        "client bridge must map UnsupportedTarget"
+        bridge.contains("JetHttpBridgeError::UnsupportedTarget => JetHttpError::UnsupportedTarget")
+            && bridge.contains("JetHttpOperation::ClientConnect"),
+        "client bridge must map UnsupportedTarget to ClientConnect"
     );
     assert!(
         bridge.contains("unsupported-target:server-bind"),

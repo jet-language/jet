@@ -2838,6 +2838,42 @@ impl<'a> Checker<'a> {
                     self.expect_url_arg("request", 1, &mut args[1]);
                     return Some(Type::Named("HttpRequest".to_string()));
                 }
+                // D-WS1=B: WebSocket entry points.
+                ("core.ws", "connect") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("connect", 1, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg("connect", 0, &Type::String, &mut args[0]);
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("WsConn".to_string())),
+                        err: Box::new(Type::Named("WsError".to_string())),
+                    });
+                }
+                ("core.ws", "upgrade") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("upgrade", 1, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg(
+                        "upgrade",
+                        0,
+                        &Type::Named("HttpRequest".to_string()),
+                        &mut args[0],
+                    );
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("WsConn".to_string())),
+                        err: Box::new(Type::Named("WsError".to_string())),
+                    });
+                }
                 ("core.http.server", "mux") => {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);

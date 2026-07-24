@@ -716,6 +716,8 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "compress",
             "access_log",
         ],
+        // D-WS1=B: WebSocket lives in core.ws, not core.http.
+        "core.ws" => &["connect", "upgrade"],
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.
         // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
@@ -759,5 +761,6 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
             | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HttpError" | "Client" | "Proxy")
         | ("core.http.middleware", "CorsPolicy" | "CompressEncoding")
+        | ("core.ws", "WsConn" | "WsMessage" | "WsError")
     )
 }

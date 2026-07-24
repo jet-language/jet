@@ -106,6 +106,13 @@ fn jet_observe_registry() -> Option<&'static std::sync::Arc<JetObserveRegistry>>
 }
 fn jet_observe_task_update(_state: &'static str, _wait: &str, _deadline_ms: Option<i64>) {}
 
+struct LogField {
+    key: String,
+    value: String,
+}
+
+fn jet_log_emit(_level: &str, _msg: &str, _fields: &[LogField]) {}
+
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpMessage.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
