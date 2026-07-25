@@ -25,7 +25,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end, step } => {
+                    ForKind::Range { start, end, step, exclusive: _ } => {
                         walk_expr_for_const_refs(start, const_names, taken);
                         walk_expr_for_const_refs(end, const_names, taken);
                         if let Some(step) = step {
@@ -455,7 +455,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         }
         Stmt::For { kind, body, .. } => {
             let coll = match kind {
-                ForKind::Range { start, end, step } => {
+                ForKind::Range { start, end, step, exclusive: _ } => {
                     expr_refs_name(start, name)
                         || expr_refs_name(end, name)
                         || step.as_ref().is_some_and(|s| expr_refs_name(s, name))
@@ -786,7 +786,7 @@ pub(crate) fn stmt_collect_captures(
             ..
         } => {
             match kind {
-                ForKind::Range { start, end, step } => {
+                ForKind::Range { start, end, step, exclusive: _ } => {
                     expr_collect_captures(start, bound, read, mut_cap);
                     expr_collect_captures(end, bound, read, mut_cap);
                     if let Some(step) = step {

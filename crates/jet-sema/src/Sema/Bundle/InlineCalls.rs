@@ -50,7 +50,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end, step } => {
+                    ForKind::Range { start, end, step, exclusive: _ } => {
                         rewrite_inline_calls_expr(start, siblings, modname);
                         rewrite_inline_calls_expr(end, siblings, modname);
                         if let Some(step) = step {

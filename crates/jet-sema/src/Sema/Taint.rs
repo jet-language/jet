@@ -531,7 +531,7 @@ impl<'a> TaintCtx<'a> {
                 ..
             } => {
                 let (coll_tainted, coll_cred) = match kind {
-                    ForKind::Range { start, end, step } => {
+                    ForKind::Range { start, end, step, exclusive: _ } => {
                         self.check_expr(start);
                         self.check_expr(end);
                         if let Some(s) = step {

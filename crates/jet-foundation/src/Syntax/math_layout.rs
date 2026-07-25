@@ -223,6 +223,11 @@ pub const KW_ELSE: &str = "else";
 /// S22 (ratified): inclusive range between two `Int` ends — `1..10`.
 pub const OP_RANGE: &str = "..";
 
+/// D-RANGE-EXCL1=C (ratified): exclusive / half-open range — `0..<n` runs
+/// `0` through `n - 1` and is empty when the start is not less than the end.
+/// Inclusive `..` (S22) is unchanged.
+pub const OP_RANGE_EXCLUSIVE: &str = "..<";
+
 /// D-LOOP-HEADER2: retired loop-header spelling. It is an ordinary identifier;
 /// retained only so the range-arm porting diagnostic can recognize it.
 pub const RETIRED_LOOP_STEP: &str = "step";

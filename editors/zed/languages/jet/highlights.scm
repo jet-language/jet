@@ -131,7 +131,7 @@
 ; builtin: check input print
 ; marker.rule: Abi Add Bench Bindgen Caps Cli Codable CodableAsBase Comparable Context DebugOnly Decode Default DenyUnknownFields Doc Encode Every Extern FFI Flag Flatten Grant Html Impure Inline InlineAlways Invariant Layout Live Local Max Meta Min Mul MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Pure Reactive Redact Region Rename RenameAll Replayable Sanitizer Shared Shield SingleUse Skip Sql State Summarize Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow inline static
 ; sigil: # & ... :: := ^ ~
-; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
+; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. ..< .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS
 
 ; Config / manifest keys (pkg.jet, env.jet)

@@ -234,6 +234,17 @@ Only loop headers use visible semicolons, and formatters wrap them only after on
 
 **S22 / S72 — Ranges**: `1..10` is **inclusive**. Source-loop stride is the
 optional third clause (`loop i; 0..10; 2`); `step` has no loop role.
+**D-RANGE-EXCL1=C**: `0..<n` is half-open (stops before `n`, empty when
+`a >= b`). Prefer `loop i, item; xs` or `loop i; xs.indexes` for index loops;
+the compiler teaches when inclusive `0..xs.len()` indexes the same `xs`.
+D-ITER1's pipeline adapter is `indexed()` (renamed from `enumerate`).
+
+**D-RANGE-EXCL1=C — Exclusive range + index idioms**: half-open `a..<b` runs
+`a` through `b-1` and is empty when `a >= b`. Inclusive `..` (S22) is unchanged.
+Sequence two-binding `loop i, item; xs` yields index then item; one binding stays
+item-only. `xs.indexes` yields every valid `Int` index. An inclusive loop ending
+at `xs.len()` that indexes that same `xs` is E0364 (teach two-binding, `indexes`,
+then `0..<xs.len()`). D-ITER1's pipeline adapter is `indexed()` (same named tuple).
 
 **S23 — Loop control** *(D-LOOP-CONTROLWORD1=B, D-LOOP-CONTINUE2=A,
 D-LOOPLABEL3=A)*: `break` and contextual `next`. A named loop uses declaration
@@ -719,6 +730,9 @@ value; bare `[]` keeps working wherever context already supplies the type.
 **S64 — Map shorthand & entry iteration**: `[K: V]` is the canonical map-type
 spelling. One-binding map iteration yields `.key`/`.value` entries;
 two-binding `loop name, amount; fruits` also supported.
+**D-RANGE-EXCL1=C** extends two-binding to sequences: `loop i, item; xs` yields
+index then item; one-binding stays item-only. `xs.indexes()` yields every valid
+`Int` index.
 
 **S39 — Indexing**: `xs[i]` / `m[k]` stop with a friendly report on
 OOB/missing key; `xs.get(i) -> (T?)` safe access; `m[k] = v` inserts.
@@ -729,13 +743,15 @@ loops.
 
 **D-ITER1 / D-ITERTOOLS1=A — Iterator adapters**: `map`, `filter`, `each`,
 `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`,
-`chunks`, `windows`, `enumerate`, `zip`, `unzip`, `take_while`, `skip_while`,
+`chunks`, `windows`, `indexed`, `indexes`, `zip`, `unzip`, `take_while`, `skip_while`,
 `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`,
 `min_by`, `max_by`, `group_by`, `count_by`, `partition`, `flatten`, and
 `intersperse` use one iterator model. Adapters return lazy `Iter<T>` views;
 materialize with `to_list`, `collect`, or terminal reducers. String `.split`
 returns the same `Iter<String>`. Unconsumed chains are `#MustUse` (E0419);
 driving a consumed `Iter` twice is use-after-move (E0121).
+`indexed()` (D-RANGE-EXCL1=C amend of D-ITER1) yields `(idx: Int, item: T)`;
+there is no public `enumerate` adapter.
 
 **D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
 `SortedSet<T>`, ring-buffer `Deque<T>`, `PriorityQueue<T>`, `Lru<K,V>`,

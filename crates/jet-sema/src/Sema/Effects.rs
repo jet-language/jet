@@ -1346,7 +1346,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         Stmt::While { cond, body, .. } => expr_handle_escape(cond, handle).or_else(|| block(body)),
         Stmt::For { kind, body, .. } => {
             let coll = match kind {
-                ForKind::Range { start, end, step } => expr_handle_escape(start, handle)
+                ForKind::Range { start, end, step, exclusive: _ } => expr_handle_escape(start, handle)
                     .or_else(|| expr_handle_escape(end, handle))
                     .or_else(|| step.as_ref().and_then(|s| expr_handle_escape(s, handle))),
                 ForKind::In { collection, step } => expr_handle_escape(collection, handle)

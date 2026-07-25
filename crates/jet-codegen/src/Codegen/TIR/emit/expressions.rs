@@ -1002,10 +1002,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Dedup => format!("jet_iter_dedup({as_iter})"),
                 TBuiltinOp::Chunks => format!("jet_iter_chunks({as_iter}, {})", a(0)),
                 TBuiltinOp::Windows => format!("jet_iter_windows({as_iter}, {})", a(0)),
-                TBuiltinOp::Enumerate { tuple_struct } => format!(
+                TBuiltinOp::Indexed { tuple_struct } => format!(
                     "jet_iter_enumerate({as_iter}, |i, x| {} {{ user_idx: i, user_item: x }})",
                     tuple_struct
                 ),
+                TBuiltinOp::Indexes => format!("jet_iter_indexes(({recv}).len() as i64)"),
                 TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
                     format!("({recv}).to_list()")
                 }

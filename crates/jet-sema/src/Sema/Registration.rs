@@ -513,7 +513,7 @@ fn scan_stmt_for_variadic_uses(
             kind, body, span, ..
         } => {
             match kind {
-                crate::AST::ForKind::Range { start, end, step } => {
+                crate::AST::ForKind::Range { start, end, step, exclusive: _ } => {
                     expr_uses(start, name, other);
                     expr_uses(end, name, other);
                     if let Some(s) = step {

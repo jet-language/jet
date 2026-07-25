@@ -1217,6 +1217,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::LambdaArrow
         | TokKind::Question
         | TokKind::DotDot => Some((st::OPERATOR, 0)),
+        | TokKind::DotDotLt => Some((st::OPERATOR, 0)),
 
         TokKind::Amp if token_text(src, tok) == crate::Syntax::SIGIL_WRITE => {
             Some((st::OWNERSHIP, sm::WRITE_BORROW))

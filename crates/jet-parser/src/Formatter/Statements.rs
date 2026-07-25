@@ -116,11 +116,11 @@ impl<'a> Fmt<'a> {
                     self.write(v2);
                 }
                 let clause_width = match kind {
-                    ForKind::Range { start, end, step } => {
+                    ForKind::Range { start, end, step, exclusive } => {
                         start.span().end - start.span().start
                             + end.span().end - end.span().start
                             + step.as_ref().map_or(0, |step| step.span().end - step.span().start + 2)
-                            + 5
+                            + if *exclusive { 6 } else { 5 }
                     }
                     ForKind::In { collection, step } => {
                         collection.span().end - collection.span().start
@@ -135,9 +135,9 @@ impl<'a> Fmt<'a> {
                 };
                 self.loop_clause_separator(first_clause_start, wrap);
                 match kind {
-                    ForKind::Range { start, end, step } => {
+                    ForKind::Range { start, end, step, exclusive } => {
                         self.fmt_expr(start, Prec::OrFallback);
-                        self.write("..");
+                        self.write(if *exclusive { "..<" } else { ".." });
                         self.fmt_expr(end, Prec::OrFallback);
                         if let Some(step) = step {
                             self.loop_clause_separator(step.span().start, wrap);

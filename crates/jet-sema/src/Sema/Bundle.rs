@@ -281,7 +281,7 @@ fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
         }
         Stmt::For { kind, body, .. } => {
             let iterable = match kind {
-                ForKind::Range { start, end, step } => {
+                ForKind::Range { start, end, step, exclusive: _ } => {
                     expr_has_comptime_evaluation(start)
                         || expr_has_comptime_evaluation(end)
                         || step.as_ref().is_some_and(expr_has_comptime_evaluation)

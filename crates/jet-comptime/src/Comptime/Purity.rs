@@ -163,7 +163,7 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         }
         Stmt::For { kind, body, .. } => {
             match kind {
-                crate::AST::ForKind::Range { start, end, step } => {
+                crate::AST::ForKind::Range { start, end, step, exclusive: _ } => {
                     f(start);
                     f(end);
                     if let Some(step) = step {

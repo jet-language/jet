@@ -654,6 +654,11 @@ where
             .map(move |(i, x)| f(i as i64, x)),
     ))
 }
+/// D-RANGE-EXCL1=C: every valid Int index for a sequence of length `n`.
+fn jet_iter_indexes(n: i64) -> JetIter<i64> {
+    let n = n.max(0);
+    JetIter(Box::new((0..n).map(|i| i)))
+}
 fn jet_iter_zip<A: 'static, B: 'static, O: 'static, F: 'static>(
     a: JetIter<A>,
     b: JetIter<B>,

@@ -743,7 +743,7 @@ fn project_stmt(
                 g.local_types.insert(var2.clone(), iter_ty.to_string());
             }
             match kind {
-                AST::ForKind::Range { start, end, step } => {
+                AST::ForKind::Range { start, end, step, exclusive: _ } => {
                     let start_pin = add_pin(g, &node_id, "range_start", "input", "Int", "", false);
                     connect_expr_to_input(g, index, src, start, ordinal * 10, "range_start", &node_id, &start_pin, x - 220, y);
                     let end_pin = add_pin(g, &node_id, "range_end", "input", "Int", "", false);

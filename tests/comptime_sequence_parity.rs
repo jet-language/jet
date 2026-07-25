@@ -50,7 +50,7 @@ fn repl_list_and_fixed_list_sequence_methods_are_exact() {
             "[1, 2, 3, 4, 5].chunks(2)",
             "[1, 2, 3, 4].count_by((n: Int) => \"{n % 2}\")",
             "[1, 1, 2, 2, 1].dedup()",
-            "[4, 5].enumerate()",
+            "[4, 5].indexed()",
             "[\"1\", \"bad\", \"2\"].filter_map((s: String) => Int.parse(s))",
             "[7, 8].first()",
             "[1, 2, 3].flat_map((n: Int) => [n, n * 10])",

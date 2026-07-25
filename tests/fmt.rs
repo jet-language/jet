@@ -800,6 +800,11 @@ fn fmt_preserves_single_line_loops_and_fn() {
 
     let for_src = "fn run() {\n    loop i; 0..3 { print(\"{i}\") }\n}\n";
     assert_fmt_stable(for_src, "single-line for/loop");
+    let excl_src = "fn run() {\n    loop i; 0..<3 { print(\"{i}\") }\n}\n";
+    assert_fmt_stable(excl_src, "exclusive range loop");
+    let two_bind = "fn run() {\n    loop i, x; xs { print(\"{i}\") }\n}\n";
+    assert_fmt_stable(two_bind, "list two-binding loop");
+
 
     let fn_src = "fn one() -> Int { return 1 }\n";
     assert_fmt_stable(fn_src, "single-line fn body");

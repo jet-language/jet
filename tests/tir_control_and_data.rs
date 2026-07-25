@@ -260,6 +260,32 @@ fn run() {
     assert_eq!(stdout, "15\n0\n2\n4\n6\n8\n10\n");
 }
 
+/// D-RANGE-EXCL1=C: half-open `..<` excludes the end and is empty when start >= end.
+#[test]
+fn range_loops_exclusive() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    total := 0
+    loop n; 0..<5 {
+        total = (total + n)
+    }
+    print(total)
+    empty := 0
+    loop n; 3..<3 {
+        empty = (empty + 1)
+    }
+    print(empty)
+}
+";
+    let (code, stdout) = build_and_run("tir_ranges_excl", src);
+    assert_eq!(code, 0);
+    // 0+1+2+3+4 = 10; empty exclusive range runs 0 times.
+    assert_eq!(stdout, "10\n0\n");
+}
+
 /// Labeled loops: `outer.next()` and `outer.break()` driving a nested
 /// range loop. The `'jet_<name>:` labels are resolved at lowering.
 #[test]
