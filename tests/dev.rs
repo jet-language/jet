@@ -493,6 +493,20 @@ fn normalize_for_parity(stem: &str, mut out: ProgramOutput) -> ProgramOutput {
     if stem == "ui/ui_native_linux" {
         out.stderr = normalize_gtk_loader_path(&out.stderr);
     }
+    // AOT prints `?` propagation trails on uncaught Err; the golden and the
+    // interpreter keep stdout-only. Strip the trail so parity compares the
+    // program result, not the reporting envelope.
+    if stem == "errors/typed_error_families" {
+        out.stderr = out
+            .stderr
+            .lines()
+            .filter(|line| !line.starts_with("error propagated from:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !out.stderr.is_empty() && !out.stderr.ends_with('\n') {
+            out.stderr.push('\n');
+        }
+    }
     out
 }
 

@@ -12,9 +12,8 @@ fn run() {
     // base64 round-trip
     b :: b64.encode(original)
     print(b)
-    // Edition 2027: trailing allowances default false; pass them explicitly here
-    // so single-file (newest stable) typechecks without optional-arg sugar yet.
-    back2 :: b64.decode(b, false, false) ?? panic("bad base64")
+    // Edition 2027: base64.decode takes the encoded text only.
+    back2 :: b64.decode(b) ?? panic("bad base64")
     print(back2.len() == 5)
     // decode failure path: bad hex returns err
     result :: hex.decode("xyz!")
