@@ -258,7 +258,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         (
             "empty-float-sum",
             "fn empty_sum() -> Float {\n\
-                 empty :: [Float].{ []\n\ }
+                 empty :: [Float].{}\n\
                  return empty.sum()\n\
              }",
             "empty_sum()",
@@ -266,7 +266,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         (
             "empty-float-product",
             "fn empty_product() -> Float {\n\
-                 empty :: [Float].{ []\n\ }
+                 empty :: [Float].{}\n\
                  return empty.product()\n\
              }",
             "empty_product()",
@@ -306,7 +306,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         (
             "empty-f32-sum",
             "fn empty_f32_sum() -> F32 {\n\
-                 empty :: [F32].{ []\n\ }
+                 empty :: [F32].{}\n\
                  return empty.sum()\n\
              }",
             "empty_f32_sum()",
@@ -314,7 +314,7 @@ fn sequence_return_shapes_match_rustc_backed_aot() {
         (
             "empty-f32-product",
             "fn empty_f32_product() -> F32 {\n\
-                 empty :: [F32].{ []\n\ }
+                 empty :: [F32].{}\n\
                  return empty.product()\n\
              }",
             "empty_f32_product()",

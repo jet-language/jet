@@ -212,7 +212,7 @@ fn run() {{
     root :: "{}"
     stale :: path.join(root, ".jet_tmp_{{os.pid()}}_0")
     fs.write(stale, "stale") ?? panic("stale setup failed")
-    bytes :: [U8].{ 110, 101, 119 }
+    bytes :: [U8].{{ 110, 101, 119 }}
     fs.write_atomic("{}", bytes) ?? panic("replacement failed")
     fs.write_atomic("{}", bytes) ?? panic("expected replacement failure")
 }}
@@ -260,14 +260,14 @@ fn concurrent_atomic_writers_leave_one_whole_payload() {
 use core.files as fs
 
 fn write_a() -> Int {{
-    bytes :: [U8].{ {} }
+    bytes :: [U8].{{ {} }}
     loop _; 1..25 {{
         fs.write_atomic("{}", bytes) ?? panic("writer a failed")
     }}
     return 1
 }}
 fn write_b() -> Int {{
-    bytes :: [U8].{ {} }
+    bytes :: [U8].{{ {} }}
     loop _; 1..25 {{
         fs.write_atomic("{}", bytes) ?? panic("writer b failed")
     }}

@@ -164,15 +164,15 @@ fn parallel_collection_adapters_use_stable_bounded_chunks() {
          fn add_item(acc: Int, n: Int) -> Int {{ return acc + n }}\n\
          fn merge_decimal(left: Int, right: Int) -> Int {{ return left * 10000 + right }}\n\
          fn run() {{\n\
-             values :: [Int].{ [{values}]\n\ }
+             values :: [Int].{{ {values} }}\n\
              offset :: 1\n\
              mapped :: values.para_map((n: Int) => n * 2 + offset)\n\
              named :: values.para_map(double)\n\
              kept :: values.para_filter((n: Int) => n % 32 == 0)\n\
              split :: values.para_partition((n: Int) => n % 32 == 0)\n\
-             fixed :: [Int#4].{ [1, 2, 3, 4]\n\ }
+             fixed :: [Int#4].{{ 1, 2, 3, 4 }}\n\
              fixed_split :: fixed.para_partition((n: Int) => n % 2 == 0)\n\
-             empty :: [Int].{ []\n\ }
+             empty :: [Int].{{}}\n\
              // Internal tree-shape probe: intentionally non-associative; public code must use an identity and associative merge.\n\
              folded :: values.para_fold(\n\
                  () => 1,\n\
@@ -229,7 +229,7 @@ fn parallel_collection_adapters_report_lowest_input_failure() {
             "ignored :: values.para_fold(() => 0, step, (left: Int, right: Int) => left + right)",
         ),
     ] {
-        let src = format!("{callback}\nfn run() {{\n    values :: [Int].{ {values} }\n    {call}\n}}\n");
+        let src = format!("{callback}\nfn run() {{\n    values :: [Int].{{ {values} }}\n    {call}\n}}\n");
         let (code, stdout, stderr) = build_and_run_full_with_cfg(
             "jet_para_failure",
             &format!("para_{method}_failure"),
@@ -269,7 +269,7 @@ fn parallel_collection_adapters_select_across_runtime_failure_carriers() {
              return n\n\
          }}\n\
          fn run() {{\n\
-             values :: [Int].{ [{values}]\n\ }
+             values :: [Int].{{ {values} }}\n\
              ignored :: values.para_map(callback)\n\
          }}\n"
     );
