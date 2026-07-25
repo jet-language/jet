@@ -2447,7 +2447,7 @@ fn lsp_semantic_tokens_returns_data() {
     if !jet.exists() {
         return;
     }
-    let source = "fn run() {\n    x: Int :: 1\n}\n";
+    let source = "fn run() {\n    x :: 1\n}\n";
     let uri = "file:///tmp/lsp_semtok_test.jet";
 
     run_transcript(

@@ -35,7 +35,7 @@ fn consume(s: ^String) {
 }
 
 fn run() {
-msg: String :: "hello"
+msg :: "hello"
     consume(msg)
 }
 "#;
@@ -59,7 +59,7 @@ fn bump(c: Counter) {
     c.n = c.n + 1
 }
 fn run() {
-    c: Counter :: Counter.{ n: 0 }
+    c :: Counter.{ n: 0 }
     bump(c)
 }
 "#;
@@ -149,7 +149,7 @@ fn touch(n: &Int) {
 }
 
 fn run() {
-    x: Int := 1
+    x := 1
     touch(x)
 }
 "#;
@@ -165,7 +165,7 @@ fn consume(item: ^NoClone) {
 }
 
 fn run() {
-msg: String :: "hi"
+msg :: "hi"
     consume(msg)
 }
 "#;
@@ -230,7 +230,7 @@ fn both(a: &Int, b: Int) {
 }
 
 fn run() {
-    x: Int := 1
+    x := 1
     both(&x, x)
 }
 "#;
@@ -249,7 +249,7 @@ fn consume(s: ^String) {
 }
 
 fn run() {
-msg: String :: "hello"
+msg :: "hello"
     consume(msg)
     print(msg)
 }
@@ -276,7 +276,7 @@ fn consume(s: ^String) {
 }
 
 fn run() {
-msg: String :: "hello"
+msg :: "hello"
     consume(msg)
 }
 "#;
@@ -296,7 +296,7 @@ msg: String :: "hello"
 fn deref_outside_unsafe_is_error() {
     let src = r#"
 fn run() {
-x: Int :: 1
+x :: 1
     print(*x)
 }
 "#;
@@ -320,7 +320,7 @@ fn consume(s: ^String) {
 fn maybe(b: Bool) -> Bool { return b }
 
 fn run() {
-msg: String :: "hello"
+msg :: "hello"
     if maybe(true) {
         consume(msg)
     }
@@ -352,7 +352,7 @@ fn consume(s: ^String) {
 fn maybe(b: Bool) -> Bool { return b }
 
 fn run() {
-msg: String :: "hello"
+msg :: "hello"
     if maybe(true) {
         consume(msg)
     }

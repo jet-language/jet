@@ -9,7 +9,7 @@ fn run() {
     print(has_digits)
     // find: the first matched substring (an optional — `None` if no match).
     first :: re.find("\\d+", text) ?? panic("bad pattern")
-    if first == Val(n) {
+    if first == .Val(n) {
         print(n)
     }
     // find_all: every match, left to right.
@@ -17,7 +17,7 @@ fn run() {
     print(nums.len())
     // match + capture groups: group(0) is the whole match, group(n) the n-th group.
     m :: re.match("(\\d+) shipped", text) ?? panic("bad pattern")
-    if m == Val(mat) {
+    if m == .Val(mat) {
         whole :: mat.group(0) ?? "none"
         first_group :: mat.group(1) ?? "none"
         print(whole)
@@ -29,19 +29,17 @@ fn run() {
     // split on whitespace runs.
     words :: re.split("\\s+", text) ?? panic("bad pattern")
     print(words.len())
-
     // compile once, reuse with typed flags and named groups.
     flags :: re.flags(true, true, false)
     rx :: re.compile_with("^(?<word>[a-z]+)", flags) ?? panic("bad pattern")
     matches :: rx.matches("Ada\nlovelace")
     print(matches.len())
     first_named :: rx.match("Ada\nlovelace")
-    if first_named == Val(mat) {
+    if first_named == .Val(mat) {
         print(mat.name("word") ?? "none")
         print(mat.start())
         print(mat.end())
     }
-
     // callback replacement and split limit.
     word :: re.compile("\\w+") ?? panic("bad word")
     print(word.replace_all_with("a b", (m: Match) => "hit"))

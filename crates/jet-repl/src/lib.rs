@@ -570,7 +570,7 @@ pub struct Session {
     /// empty collections and absent/error variants never collapse in `:type`.
     pub binding_types: HashMap<String, crate::AST::Type>,
     /// Names bound with `:=` (mutable). Everything else in `scope` was bound
-    /// with `::`. Drives the `name: Type := value` / `:: value` line shape.
+    /// with `::`. Drives the bare `name := value` / `name :: value` line shape (D-BIND-BARE1).
     pub mutable_names: HashSet<String>,
     /// Whether the teaching note for `print` (D-REPL-PRELOAD) has been shown.
     pub shown_preload_note: bool,
@@ -3246,12 +3246,12 @@ mod tests {
     }
 
     #[test]
-    fn typed_binding_is_preserved_as_an_exact_statement() {
-        let kind = classify("s: String :: \"\"", 1).expect("classify");
+    fn bare_binding_is_preserved_as_an_exact_statement() {
+        let kind = classify("s :: \"\"", 1).expect("classify");
         let InputKind::Stmts(stmts, _, check_src) = kind else {
             panic!("expected statement input");
         };
-        assert_eq!(check_src, "s: String :: \"\";");
+        assert_eq!(check_src, "s :: \"\";");
         assert!(matches!(stmts.as_slice(), [Stmt::Val(_)]));
     }
 

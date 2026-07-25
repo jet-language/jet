@@ -2,7 +2,7 @@
 use core.compress.zstd as zs
 
 fn run() {
-    original: [U8] :: [72, 101, 108, 108, 111]  // ASCII "Hello"
+    original :: [U8].{ 72, 101, 108, 108, 111 } // ASCII "Hello"
     compressed :: zs.compress(original)
     // A zstd frame carries a magic number + header; expect at least a few bytes.
     print((compressed.len() > 0))
@@ -11,7 +11,7 @@ fn run() {
     print((restored.len() == original.len()))
     print((restored == original))
     // Decompress failure path: corrupt input returns err.
-    bad: [U8] :: [1, 2, 3, 4, 5]
+    bad :: [U8].{ 1, 2, 3, 4, 5 }
     result :: zs.decompress(bad)
     if result == {
         Ok(_) -> { print(false) }

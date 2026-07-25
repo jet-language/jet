@@ -17,13 +17,15 @@ fn write_catalog(path: String) {
 fn run() {
     path :: "encoding_cbor_stream_out.cbor"
     write_catalog(path)
-
     input :: files.open(path) ?? panic("open")
     reader :: cbor.reader(^input) ?? panic("reader")
     count := 0
     loop count < 5 {
         maybe :: reader.next() ?? panic("next")
-        if maybe == None { print("eof"); break }
+        if maybe == .None {
+            print("eof")
+            break
+        }
         print("event")
         count++
     }

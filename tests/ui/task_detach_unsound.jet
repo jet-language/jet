@@ -1,4 +1,5 @@
 use core.tasks
+
 fn forward(greet: fn()) {
     // E1102 fires twice: `greet` is captured without `take`, and the task's
     // result is itself the same un-sendable closure.
@@ -6,6 +7,9 @@ fn forward(greet: fn()) {
     t :: tasks.spawn(() => greet)
     t.detach()
 }
+
 fn run() {
-    forward(() => { print(0) })
+    forward(() => {
+        print(0)
+    })
 }

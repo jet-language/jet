@@ -125,71 +125,7 @@ fn reserve() {{
 
     let dynamic = source(12, "stride").replace(
         "#Policy(arena_bounded(12)) fn run() {",
-        "#Policy(arena_bounded(12)) fn run() {\n    stride := 2",
-    );
-    let (diagnostics, facts) = check("jet_stride_arena_dynamic", &dynamic);
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
-    assert!(matches!(
-        facts.memory_projections.get(&run_12),
-        Some(jet::Sema::MemoryProjection::OpenWorld { reason, .. })
-            if reason.contains("loop iteration count")
-    ));
-    assert!(facts.solved["run"].contains("Io"));
-}
-
-#[test]
-fn unbounded_dynamic_trait_call_under_ceiling_is_e0743() {
-    let source = r#"
-trait Shape { fn area(self) -> Int; }
-fn clean(shape: Shape) --[]-> Int { return shape.area(); }
-fn run() {}
-"#;
-    assert_eq!(
-        codes(source)
-            .into_iter()
-            .filter(|code| code == "E0743")
-            .collect::<Vec<_>>(),
-        vec!["E0743"]
-    );
-}
-
-#[test]
-fn inline_module_calls_flow_into_explicit_purity() {
-    let source = r#"
-module inner {
-    pub fn dirty() { print("dirty"); }
-}
-fn clean() --[]-> { inner.dirty(); }
-fn run() {}
-"#;
-    assert!(codes(source).iter().any(|code| code == "E3401"));
-}
-
-#[test]
-fn inline_module_functions_enforce_declared_effect_bounds() {
-    let source = r#"
-module inner {
-    pub fn bounded() --[Net]-> { print("dirty"); }
-}
-fn run() {}
-"#;
-    assert!(codes(source).iter().any(|code| code == "E0740"));
-}
-
-/// I3 / D-EFF1: effect annotations (`#(…)`, `#Pure`, trait-method bounds) are a
-/// compile-time proof only — they must leave NO trace in generated Rust. The
-/// annotated program and its annotation-stripped twin generate byte-identical
-/// Rust.
-#[test]
-fn effect_annotations_are_erased() {
-    let annotated = r#"
-trait Shape { fn area(self) --[]-> Int; }
-struct Square { side: Int }
-impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
-fn sq(n: Int) --[]-> Int { return n * n; }
-fn load(p: String) --[Io]-> { print(p); }
-fn invoke(n: Int) --[Io]-> { load("{sq(n)}"); }
-fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
+        "#Policy(arena_bounded(12)) fn run() {\n    stride :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
 "#;
     let plain = r#"
 trait Shape { fn area(self) -> Int; }
@@ -206,9 +142,7 @@ fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
         a, b,
         "effect annotations must leave no trace in generated Rust (I3)"
     );
-}
-
-/// I3: a `#Caps(…)` region lowers to a plain lexical block — the generated Rust
+} /// I3: a `#Caps(…)` region lowers to a plain lexical block — the generated Rust
 /// carries no effect machinery (no `Caps`, no `#(`, no effect runtime), and the
 /// body runs unchanged.
 #[test]
@@ -904,8 +838,8 @@ fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
     return Ok(amount);
 }
 fn run() {
-    a: Int := 100
-    b: Int := 0
+    a := 100
+    b := 0
     n :: transfer(&a, &b, 40) ?? (-1)
     print("{n}")
 }

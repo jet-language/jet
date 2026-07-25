@@ -40,7 +40,6 @@ fn run() {
     p :: json.decode_traced<Point>(p_raw) ?? panic("bad point")
     print("point: ({p.value.x}, {p.value.y})")
     print("point migrated: {p.migration.migrated}")
-
     // Fresh data — already the current shape, nothing to migrate.
     fresh_raw :: "{{\"id\": 7, \"display_name\": \"Betty\", \"verified\": true}}"
     fresh :: json.decode_traced<UserRecord>(fresh_raw) ?? panic("bad fresh record")
@@ -49,7 +48,6 @@ fn run() {
     } else {
         print("record {fresh.value.id} arrived fresh, no migration applied")
     }
-
     // An old v1 record — decoded through the migration chain.
     old_raw :: "{{\"id\": 3, \"name\": \"Ada\"}}"
     r :: json.decode_traced<UserRecord>(old_raw) ?? panic("bad old record")
@@ -64,7 +62,6 @@ fn run() {
     loop step; r.migration.steps {
         print("  {step}")
     }
-
     // Plain decode walks the same chain silently.
     quiet :: json.decode<UserRecord>(old_raw) ?? panic("bad quiet record")
     print("plain decode upgraded too: {quiet.display_name}")

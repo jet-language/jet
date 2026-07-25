@@ -1865,7 +1865,7 @@ fn public_client_tls_custom_only_trust() {
     let empty_src = r#"
 use core.tls as tls
 fn run() {
-    empty: [U8] :: []
+    empty :: [U8].{}
     if tls.RootCertificates.from_pem(empty) == {
         Ok(_) -> print("empty-ok")
         Err(_) -> print("empty-fail")

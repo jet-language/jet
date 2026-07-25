@@ -286,7 +286,7 @@ use core.auth as auth
 
 fn run() {
     token :: #Tainted(Credential) "a.b.c"
-    key: [U8] :: [0, 1, 2]
+    key :: [U8].{ 0, 1, 2 }
     _ := auth.verify_jwt(token, key: key, audience: "gateway")
     print(token)
 }

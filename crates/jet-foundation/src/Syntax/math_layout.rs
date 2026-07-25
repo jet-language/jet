@@ -514,10 +514,10 @@ pub const FOREIGN_READ: &str = "read";
 pub const FOREIGN_WRITE: &str = "write";
 pub const FOREIGN_OWNED: &str = "owned";
 
-/// S34 (legacy M4): old fallible type constructor, kept only for diagnostics.
+/// S34 (ratified M4): old fallible type constructor, kept only for diagnostics.
 pub const TYPE_RESULT: &str = "Result";
 
-/// S34 / D-SHAPE3b: Result variants are `Ok` / `Err`, including `.Ok` / `.Err`
+/// S34 / D-SHAPE3b (ratified): Result variants are `Ok` / `Err`, including `.Ok` / `.Err`
 /// when the expected result type is known.
 pub const LIT_OK: &str = "Ok";
 pub const LIT_ERR: &str = "Err";

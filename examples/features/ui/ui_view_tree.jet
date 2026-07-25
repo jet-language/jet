@@ -28,7 +28,7 @@ fn repaint(old: [UiNode], updated: [UiNode]) -> Int {
 }
 
 fn run() {
-    initial: [UiNode] := [ui.text("a"), ui.text("b")]
+    initial := [UiNode].{ui.text("a"), ui.text("b")}
     leaves := reactive.signal(initial)
     backend := ui.tui_backend()
     render_backend := ~backend
@@ -38,12 +38,10 @@ fn run() {
         render_backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
         render_backend.paint(tree)
     })
-
-    empty: [UiNode] := []
+    empty := [UiNode].{}
     before := leaves.get()
     print("initial repaints: {repaint(empty, before)}")
     print("renders: {backend.render_count()}")
-
     leaves.set([ui.text("a"), ui.text("zz")])
     after := leaves.get()
     print("update repaints: {repaint(before, after)}")

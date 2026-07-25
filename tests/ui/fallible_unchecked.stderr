@@ -1,7 +1,7 @@
-Error [E0113]: `bad` promises to return Int (a whole number), but this returns Int ? E
-  --> tests/ui/fallible_unchecked.jet:6:12
+Error [E0404]: `Ok(...)` only fits where a fallible result is expected
+  --> tests/ui/fallible_unchecked.jet:6:10
     |
-  6 |     return x
-    |            ^
- Why: the value handed back must match the type after `->`
- Fix: use Int (a whole number) here
+  6 |     x :: Ok(1)
+    |          ^^^^
+ Why: `Ok` builds the success side of a `T ? E` result
+ Fix: use it in a `T ? E` return type, a `T ? E` binding annotation, or a call that expects one

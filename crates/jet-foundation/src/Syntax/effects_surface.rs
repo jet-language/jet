@@ -299,7 +299,7 @@ pub const FOREIGN_LOCK: &str = "lock";
 /// D-VERDICT-732-1: applied-rule prefix — `#Marker` / `#[a, b]`.
 pub const ATTR_PREFIX: &str = "#";
 
-/// S82 / D-VERDICT-732-1: multi-attribute list delimiters after `#`.
+/// S82 / D-VERDICT-732-1 (ratified): multi-attribute list delimiters after `#`.
 pub const ATTR_LIST_OPEN: &str = "[";
 pub const ATTR_LIST_CLOSE: &str = "]";
 

@@ -181,7 +181,7 @@ fn run() {
     fine :: 42millimeter
     total :: coarse + fine
     takes_millimeter(3meter)
-    binding: Millimeter :: 4meter
+    binding :: Millimeter.{ 4meter }
     print("{(total.raw())} {(binding.raw())}")
 }
 "#;
@@ -417,7 +417,7 @@ fn run() {
     let negative_digits = r#"
 #UnitFamily(Length, base: meter) { meter half(scale: 1/2) }
 fn run() -> Void ? {
-    digits: Int :: -1
+    digits :: -1
     Meter.from_half_rounded(1half, .NearestEven, digits: digits)?
 }
 "#;

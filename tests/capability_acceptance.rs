@@ -171,7 +171,7 @@ use core.encoding.json as json
 #[Codable]
 struct Point { x: Int }
 fn run() {
-    p: Point := .{ x: 7 }
+    p := Point.{ x: 7 }
     print(json.to_string(p))
 }
 "#;
@@ -564,7 +564,7 @@ fn pick(xs: [String#4], i: Index4) -> String {
 fn run() {
     dirty :: #Tainted "x"
     safe := clean(dirty)
-    words: [String#4] :: ["a", "b", "c", "d"]
+    words :: [String#4].{ "a", "b", "c", "d" }
     print(pick(words, Index4.from_int(1)))
     print(absish(3))
     print(add(1, 2))

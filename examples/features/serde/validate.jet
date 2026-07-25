@@ -2,7 +2,6 @@
 // declares rules beside the fields it checks — the struct stays the one
 // schema (I8). Every failing `check` accumulates into `[FieldError]` instead
 // of stopping at the first one, so a form can show every problem at once.
-
 struct Signup {
     email: String
     password: String
@@ -16,20 +15,21 @@ struct Signup {
 
 fn report(label: String, signup: Signup) {
     if Signup.validate(signup) == {
-        Ok(v) -> {
+        .Ok(v) -> {
             print("{label}: ok ({v.email})")
         }
-        Err(errs) -> {
+        .Err(errs) -> {
             print("{label}: {errs.len()} problem(s)")
             loop e; errs {
                 print("  {e.path}: {e.reason}")
             }
         }
+
     }
 }
 
 fn run() {
-    report("bad", Signup.{ email: "", password: "short" })
-    report("same", Signup.{ email: "a@b.com", password: "a@b.com" })
-    report("good", Signup.{ email: "a@b.com", password: "supersecretpw" })
+    report("bad", Signup.{email: "", password: "short"})
+    report("same", Signup.{email: "a@b.com", password: "a@b.com"})
+    report("good", Signup.{email: "a@b.com", password: "supersecretpw"})
 }

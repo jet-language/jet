@@ -333,13 +333,13 @@ renumbered, and no new `W` code may be allocated.
 | E0417 | parse | conflicting `pub` and `priv` on one item (D-VISDEFAULT2) |
 | E0418 | parse | teaching: `#PublicFile` → `#PubFile` (D-VISDEFAULT2) |
 | E0419 | sema  | `#MustUse` result ignored as a bare statement (D-MUSTUSE1) |
-| E0420 | sema  | `:= uninit` binding read before it is given a value (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
-| E0421 | parse | `:= uninit` binding needs a type annotation (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
+| E0420 | sema  | `Type.{ uninit }` binding read before it is given a value (D-UNINIT-SENTINEL2) |
+| E0421 | parse | bare `:= uninit` needs a typed-literal head `Type.{ uninit }` (D-UNINIT-SENTINEL2) |
 | E0422 | parse | *retired by D-UNINIT-SENTINEL1* (was: `#Uninit` binding cannot have an initializer — structurally inapplicable now that `uninit` is the initializer) |
-| E0423 | sema  | `:= uninit` binding's type is not plain data (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
-| E0424 | sema  | `:= uninit` used without `use core.mem` (D-UNINIT1, reworded D-UNINIT-SENTINEL1) |
+| E0423 | sema  | `Type.{ uninit }` binding's type is not plain data (D-UNINIT1, reworded) |
+| E0424 | sema  | `Type.{ uninit }` used without `use core.mem` (D-UNINIT1, reworded) |
 | E0425 | sema  | *reserved — rustc unresolved-name code; never a Jet diagnostic (I2)* |
-| E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name: Type := uninit` (D-UNINIT-SENTINEL1) |
+| E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name := Type.{ uninit }` (D-UNINIT-SENTINEL2) |
 | E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
 | E0428 | parse | duplicate `#NoPrelude` marker in one file (D-PRELUDEX1) |
 | E0429 | sema  | ambient `print`/`input` used under `#NoPrelude` (D-PRELUDEX1) |
@@ -1138,27 +1138,27 @@ span is embedded in the message (Jet file + line + function name).
 | E3003 | `deadline exceeded while waiting in {wait_kind}`. | A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed. | Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope. |
 | E3005 | `@{Pre\|Post} contract failed: {msg}` — with file:line. | A `#Pre` (argument claim, checked at entry) or `#Post` (`result` claim, checked before return) condition evaluated false at runtime. `{msg}` is the clause's own message string. Checked in every build (not a debug/release split). | Fix the caller (a failed `#Pre` means an argument violated the function's stated contract) or the function body (a failed `#Post` means it broke its own promise about the result). |
 
-## Uninitialized binding diagnostics (D-UNINIT1, spelling moved by D-UNINIT-SENTINEL1)
+## Uninitialized binding diagnostics (D-UNINIT-SENTINEL2)
 
-`name: Type := uninit` opts out of automatic zero-fill for a single binding. It
-is gated by `use core.mem` (E0424) and restricted to plain-data types (E0423).
+`name := Type.{ uninit }` opts out of automatic zero-fill for a single binding.
+It is gated by `use core.mem` (E0424) and restricted to plain-data types (E0423).
 The compiler proves, by forward dataflow, that every read follows a write on
 all control-flow paths (E0420). Codegen lowers to
 `MaybeUninit::uninit().assume_init()`.
 
-This is the same engine D-UNINIT1 shipped (ratified 2026-06-21); D-UNINIT-SENTINEL1
-(ratified 2026-07-02) only moved the surface syntax off the `#Uninit name: Type`
-marker onto the `uninit` contextual keyword. The old marker is now a hard parse
-error (E0426) pointing at the new spelling — see D-UNINIT-SENTINEL1's fixture,
+D-BIND-BARE1 retired typed bindings, so the D-UNINIT-SENTINEL1 spelling
+`name: Type := uninit` is gone. D-UNINIT-SENTINEL2 puts `uninit` inside the
+value's typed-literal head. The old `#Uninit name: Type` marker remains a hard
+parse error (E0426) pointing at the new spelling —
 `tests/ui/uninit_marker_retired.jet`.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared `:= uninit`, so it holds no value until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
-| E0421 | `` `uninit` needs a type annotation ``. | An uninitialized binding has no value to infer its type from, so the type must be written. | Write `` `{name}: <Type> := uninit` ``, e.g. `` `buffer: [4096]U8 := uninit` ``. |
+| E0421 | `` `uninit` needs a typed-literal head ``. | An uninitialized binding has no value to infer its type from, so the type must head the literal. | Write `` `{name} := <Type>.{ uninit }` ``, e.g. `` `buffer := [U8#4096].{ uninit }` ``. |
 | E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
 | E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
-| E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the initializer, not the declaration — it now reads `` `name: Type := uninit` ``. | Write `` `{name}: <Type> := uninit` ``. |
+| E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the value — it now reads `` `name := Type.{ uninit }` ``. | Write `` `{name} := <Type>.{ uninit }` ``. |
 | E0428 | only one `#NoPrelude` marker is allowed per file. | A file may opt out of the ambient prelude at most once. | Remove the duplicate `#NoPrelude` marker. |
 | E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables the curated prelude auto-imports (`print` / `input`) ``. | Write `use core.io as io` and call `io.{name}(…)`, or remove `#NoPrelude`. |
 | E0430 | `` `#Shield` takes no arguments ``. | A shield region protects whatever runs inside it; there is nothing to configure (D-SHIELDNAME1). | Write `#Shield { … }`. |

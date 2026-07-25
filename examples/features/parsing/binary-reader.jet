@@ -6,7 +6,7 @@
 fn run() {
     // header/count/payload wire shape: a little-endian u32 magic, a
     // little-endian u16 item count, then that many raw bytes.
-    packet: [U8] :: [0x2a, 0x00, 0x00, 0x00, 0x03, 0x00, 0x10, 0x20, 0x30]
+    packet :: [U8].{0x2a, 0x00, 0x00, 0x00, 0x03, 0x00, 0x10, 0x20, 0x30}
     // magic = 42
     // count = 3
     // payload
@@ -18,24 +18,23 @@ fn run() {
     print("magic={magic} count={count} payload_len={payload.len()}")
     print("remaining={r.remaining()} is_at_end={r.is_at_end()}")
     // A bounds miss is an ordinary error value — `?`-composable, never a panic.
-    short: [U8] :: [0x01]
+    short :: [U8].{0x01}
     r2 :: Reader.over(short)
     if r2.read_u32_le() == {
-        Ok(v) -> {
+        .Ok(v) -> {
             print("unexpected ok: {v}")
         }
-        Err(e) -> {
+        .Err(e) -> {
             print("expected error: {e}")
         }
 
     }
-
     // D-BINPAT1 (card #506 follow-up): `take_pattern(b"…")` — the byte-mode
     // sibling of `Cursor.take_pattern`, reusing the D-BINPAT1 pattern engine
     // (`try_bin_match_pattern`'s `{name:U<width>}` holes) in CONSUME mode:
     // it advances the reader past the matched prefix instead of requiring
     // the whole remaining bytes to match, so more reads can follow.
-    header: [U8] :: [0x45, 0x00, 0x00, 0x28, 0xDE, 0xAD, 0xBE, 0xEF]
+    header :: [U8].{0x45, 0x00, 0x00, 0x28, 0xDE, 0xAD, 0xBE, 0xEF}
     r3 :: Reader.over(header)
     parsed :: r3.take_pattern(b"{version:U4}{ihl:U4}{tos:U8}{len:U16be}") ?? panic("bad header")
     print("IPv{parsed.version}, header {parsed.ihl} words, tos {parsed.tos}, len {parsed.len}")

@@ -1,23 +1,23 @@
 Error [E1302]: `option` expects 3 arguments (name, help, metavar), got 2
-  --> tests/ui/args_spec_bad_option_arity.jet:4:25
+  --> tests/ui/args_spec_bad_option_arity.jet:5:25
     |
-  4 |     spec :: args.spec().option("output", "write to FILE")
+  5 |     spec :: args.spec().option("output", "write to FILE")
     |                         ^^^^^^
  Why: `ArgsSpec.option(name, help, metavar)` registers a value option like `--output FILE`
  Fix: pass three strings: the option name, a help description, and a metavar like `FILE`
 
-Error [E0108]: argument 1 to `.parse()` should be String (text), not [String]
-  --> tests/ui/args_spec_bad_option_arity.jet:5:29
+Error [E0311]: `parse` isn't a method on this value
+  --> tests/ui/args_spec_bad_option_arity.jet:6:20
     |
-  5 |     parsed :: spec.parse(io.args()) ?? panic("parse failed")
-    |                             ^^^^
- Why: built-in methods need arguments of the right type
- Fix: put the value in text with interpolation: "{x}"
+  6 |     parsed :: spec.parse(io.args()) ?? panic("parse failed")
+    |                    ^^^^^
+ Why: only struct and enum values have instance methods
+ Fix: check the spelling of `parse`
 
 Error [E0311]: `option` isn't a method on this value
-  --> tests/ui/args_spec_bad_option_arity.jet:6:18
+  --> tests/ui/args_spec_bad_option_arity.jet:7:18
     |
-  6 |     print(parsed.option("output") ?? "none")
+  7 |     print(parsed.option("output") ?? "none")
     |                  ^^^^^^
  Why: only struct and enum values have instance methods
  Fix: check the spelling of `option`

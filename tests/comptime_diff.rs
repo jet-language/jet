@@ -80,18 +80,18 @@ fn apply_f32(transform: fn(F32) -> F32, value: F32) -> F32 {
 }
 
 fn f32_value_flow() -> String {
-    literal: F32 :: 16777217.0
-    one: F32 :: 1.0
-    two: F32 :: 2.0
-    three: F32 :: 3.0
-    threshold: F32 :: 16777215.0
-    immutable: F32 :: literal + one
-    mutable: F32 := literal
+    literal :: F32.{ 16777217.0 }
+    one :: F32.{ 1.0 }
+    two :: F32.{ 2.0 }
+    three :: F32.{ 3.0 }
+    threshold :: F32.{ 16777215.0 }
+    immutable :: F32.{ literal + one }
+    mutable := F32.{ literal }
     mutable += one
     mutable -= two
     mutable *= three
     mutable /= two
-    transform: fn(F32) -> F32 :: (value: F32) => value + one
+    transform :: fn(F32) -> F32.{ (value: F32) => value + one }
     same :: pass_f32(literal)
     wide :: Float.from_f32(literal)
     narrowed :: F32.from_float(wide) ?? one
@@ -100,10 +100,10 @@ fn f32_value_flow() -> String {
     option_right :: [[[same].get(0)]]
     result_left :: [[F32.from_float(wide)]]
     result_right :: [[F32.from_float(Float.from_f32(same))]]
-    negative: F32 :: -literal
-    difference: F32 :: literal - one
-    product: F32 :: literal * two
-    quotient: F32 :: literal / two
+    negative :: F32.{ -literal }
+    difference :: F32.{ literal - one }
+    product :: F32.{ literal * two }
+    quotient :: F32.{ literal / two }
     return "{literal}|{immutable}|{mutable}|{negative}|{difference}|{product}|{quotient}|{literal == same}|{literal > threshold}|{nested[0]["values"]}|{option_left == option_right}|{result_left == result_right}"
 }
 
@@ -292,14 +292,14 @@ fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
     let src = r#"use core.compress.gzip as gzip
 
 fn codec_probe() -> String {
-    bytes: [U8] :: [72, 101, 108, 108, 111]
-    gz: [U8] :: gzip.decompress(gzip.compress(bytes)) ?? []
-    golden: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? []
-    bad_size: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [255]
-    h: U8 :: 72
-    lower_h: U8 :: 104
-    o: U8 :: 111
-    max: U8 :: 255
+    bytes :: [U8].{ 72, 101, 108, 108, 111 }
+    gz :: [U8].{ gzip.decompress(gzip.compress(bytes)) ?? [] }
+    golden :: [U8].{ gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [] }
+    bad_size :: [U8].{ gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [255] }
+    h :: U8.{ 72 }
+    lower_h :: U8.{ 104 }
+    o :: U8.{ 111 }
+    max :: U8.{ 255 }
     return "{gz.len() == 5}|{gz[0] == h}|{golden.len() == 5}|{golden[0] == lower_h}|{golden[4] == o}|{bad_size[0] == max}"
 }
 
@@ -327,7 +327,7 @@ comptime encoded = zstd.compress(bytes)
 comptime expected = zstd.decompress(encoded) ?? []
 
 fn run() {
-    restored: [U8] :: zstd.decompress(encoded) ?? []
+    restored :: [U8].{ zstd.decompress(encoded) ?? [] }
     print("{expected}")
     print("{restored}")
 }
@@ -346,7 +346,7 @@ fn zstd_72_mib_advertised_window_matches_resident_and_aot() {
 comptime expected = zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [255]
 
 fn run() {
-    actual: [U8] :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [255]
+    actual :: [U8].{ zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [255] }
     print("{expected}")
     print("{actual}")
 }
@@ -764,13 +764,13 @@ comptime expected_bytes = show_bytes([130, 1, 2])
 comptime expected_alloc = show_alloc([130, 1, 2])
 
 fn run() {
-    malformed_wire: [U8] := [255]
-    truncated_wire: [U8] := [129]
-    noncanonical_wire: [U8] := [24, 1]
-    unsupported_wire: [U8] := [192, 1]
-    mismatch_wire: [U8] := [129, 97, 120]
-    depth_wire: [U8] := [129, 129, 1]
-    items_wire: [U8] := [130, 1, 2]
+    malformed_wire := [U8].{ 255 }
+    truncated_wire := [U8].{ 129 }
+    noncanonical_wire := [U8].{ 24, 1 }
+    unsupported_wire := [U8].{ 192, 1 }
+    mismatch_wire := [U8].{ 129, 97, 120 }
+    depth_wire := [U8].{ 129, 129, 1 }
+    items_wire := [U8].{ 130, 1, 2 }
     actual_malformed := show(malformed_wire)
     actual_truncated := show(truncated_wire)
     actual_noncanonical := show_strict(noncanonical_wire)
@@ -791,7 +791,7 @@ fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
         r#"
 fn build() -> [Int] {
-    xs: [Int] := []
+    xs := [Int].{}
     loop i; 1..5; 2 {
         if i == 3 { next }
         xs.push(i * 10)

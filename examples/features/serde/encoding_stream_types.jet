@@ -2,36 +2,27 @@
 use core.encoding as encoding
 
 fn keep_error(v: ^encoding.EncodingError) -> encoding.EncodingError { return v }
+
 fn keep_event(v: ^encoding.DataEvent) -> encoding.DataEvent { return v }
+
 fn keep_format(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat { return v }
+
 fn keep_kind(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind { return v }
 
 fn run() {
     limits := encoding.EncodingLimits.safe()
     print("{limits.buffer_bytes}:{limits.max_depth}:{limits.max_item_bytes}:{limits.max_expansion_depth}:{limits.max_expansion_bytes}")
-    if limits.max_total_bytes == None { print(true) } else { print(false) }
+    if limits.max_total_bytes == .None { print(true) } else { print(false) }
     print(keep_format(^encoding.EncodingFormat.JSON) == encoding.EncodingFormat.JSON)
     print(keep_kind(^encoding.EncodingErrorKind.Limit) == encoding.EncodingErrorKind.Limit)
-
-    cause := encoding.EncodingCause.{ kind: "io", os_code: None, message: "nope" }
+    cause := encoding.EncodingCause.{kind: "io", os_code: None, message: "nope"}
     print(cause.kind)
     print(cause.message)
-
-    err := encoding.EncodingError.{
-        format: encoding.EncodingFormat.JSON,
-        kind: encoding.EncodingErrorKind.Limit,
-        byte_offset: 0,
-        line: None,
-        column: None,
-        path: "",
-        reason: "buffer_bytes 1 is outside 4096..16777216",
-        cause: None,
-    }
+    err := encoding.EncodingError.{format: encoding.EncodingFormat.JSON, kind: encoding.EncodingErrorKind.Limit, byte_offset: 0, line: None, column: None, path: "", reason: "buffer_bytes 1 is outside 4096..16777216", cause: None}
     kept := keep_error(^err)
     print("{kept}")
     print(kept.format == encoding.EncodingFormat.JSON)
     print(kept.kind == encoding.EncodingErrorKind.Limit)
-
     event := encoding.DataEvent.Null
     _ := keep_event(^event)
     print(true)

@@ -397,24 +397,14 @@ pub(crate) fn compute_completions(
         }
         for (label, detail, insert) in [
             (
-                "bind immut (inferred)",
+                "bind immut",
                 "name :: value",
                 "${1:name} :: ${2:value}",
             ),
             (
-                "bind mut (inferred)",
+                "bind mut",
                 "name := value",
                 "${1:name} := ${2:value}",
-            ),
-            (
-                "bind immut (explicit)",
-                "name: Type :: value",
-                "${1:name}: ${2:Type} :: ${3:value}",
-            ),
-            (
-                "bind mut (explicit)",
-                "name: Type := value",
-                "${1:name}: ${2:Type} := ${3:value}",
             ),
         ] {
             if seen.insert(format!("bind:{}", label)) {

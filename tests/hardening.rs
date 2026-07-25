@@ -97,7 +97,7 @@ fn maybe() -> (Int?) {
 }
 
 fn run() {
-    m: [String: Int] := []
+    m := [String: Int].{}
     m["k"] = 7
     x :: maybe() ?? m["k"]
     print(x)
@@ -222,7 +222,7 @@ fn if_pattern_binding_moves_subject() {
     expect_error(
         r#"
 fn run() {
-o: String? :: Val("hi")
+o :: Val("hi")
     if o == Val(n) {
         print(n)
     }

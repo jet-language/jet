@@ -5,3 +5,11 @@ Error [E0102]: `Arena` has no method `free`
     |           ^^^^
  Why: allocator terminal release uses the same nominal `Close` protocol as every resource
  Fix: write `close(^allocator)`; use `allocator.reset()` only when reusing its backing storage
+
+Error [E0102]: `Arena` has no method `free`
+  --> tests/ui/mem_allocator_free_retired.jet:5:11
+    |
+  5 |     arena.free()
+    |           ^^^^
+ Why: check the method name on this type
+ Fix: define it inside `struct Arena` or `impl Arena`

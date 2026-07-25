@@ -8,41 +8,41 @@
 // 64-bit defaults, so they interchange freely with `Int`/`Float`.
 fn run() {
     // A literal takes the width of its binding, checked to fit at compile time.
-    red: U8 :: 255
-    channel: I32 :: 100000
-    depth: I8 :: -120
+    red :: U8.{255}
+    channel :: I32.{100000}
+    depth :: I8.{-120}
     print(red)
     print(channel)
     print(depth)
     // `I64` is the same type as `Int`, so they combine without conversion.
-    total: Int :: 9000000000
+    total :: 9000000000
     print(total + 1)
     // Arithmetic stays within one width and keeps that width.
-    half: U8 :: 100
+    half :: U8.{100}
     print(half + half)
     // A list expected at a fixed width elaborates every element to it — this is
     // what binary/byte APIs work in.
-    bytes: [U8] :: [104, 105, 33]
+    bytes :: [U8].{104, 105, 33}
     print(bytes)
     // Width conversions are destination-owned methods (D-SHAPE-CONVERT1). Widening is infallible;
     // narrowing is fallible (`?`/`??`) because a value might not fit.
-    wide: Int :: Int.from_u8(red)
+    wide :: Int.from_u8(red)
     print(wide)
-    clamped: U8 :: U8.from_i32(channel) ?? 255
+    clamped :: U8.from_i32(channel) ?? 255
     print(clamped)
     // Numeric surface (D-NUMOPS1): per-type bounds, bit queries, float consts.
     print(U8.MAX)
     print(I32.MIN)
-    flags: U8 :: 13
+    flags :: U8.{13}
     print(flags.count_ones())
     print(Float.INFINITY.is_infinite())
     // Bit operators (D-NUMOPS1). `&`/`^` and compound `|=` keep the operand
     // width; a shift's count may be any integer (it's a bit-count, not a value
     // of the same width), and an over-width count traps cleanly.
-    mask: U8 :: 12
-    bits: U8 :: 10
+    mask :: U8.{12}
+    bits :: U8.{10}
     print(mask & bits)
-    combined: U8 := mask
+    combined := U8.{mask}
     combined |= bits
     print(combined)
     print(mask ^ bits)
@@ -55,10 +55,10 @@ fn run() {
     print(Float.EPSILON.is_finite())
     // Overflow is checked by default — `200 + 100` as a U8 would trap. Opt a
     // single op out at the use site: wrap, saturate, or get a checked `T?`.
-    hi: U8 :: 200
-    lo: U8 :: 100
+    hi :: U8.{200}
+    lo :: U8.{100}
     print(wrapping(hi + lo))
     print(saturating(hi + lo))
-    fallback: U8 :: 0
+    fallback :: U8.{0}
     print(checked(hi + lo) ?? fallback)
 }

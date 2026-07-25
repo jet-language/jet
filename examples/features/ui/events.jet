@@ -3,48 +3,53 @@ use core.event as event
 
 fn show_publish(outcome: HookOutcome<Int, String>) {
     if outcome == {
-        Continue(value) -> print("publish {value}")
-        Cancel -> print("publish cancelled")
-        Fail(error) -> print("publish failed {error}")
+        .Continue(value) -> {
+            print("publish {value}")
+        }
+        Cancel -> {
+            print("publish cancelled")
+        }
+        .Fail(error) -> {
+            print("publish failed {error}")
+        }
+
     }
 }
 
 fn run() {
     scope :: event.scope()
     clicked :: event.new<Int>()
-
-    sub :: clicked.on(scope, (n) => { print("clicked {n}") })
-    clicked.once(scope, (n) => { print("once {n}") })
-
+    sub :: clicked.on(scope, (n) => {
+        print("clicked {n}")
+    })
+    clicked.once(scope, (n) => {
+        print("once {n}")
+    })
     first :: clicked.emit(1)
     print(first.summary())
-
     second :: clicked.emit(2)
     print(second.summary())
     print("active {scope.active_count()}")
-
     sub.unsubscribe()
     third :: clicked.emit(3)
     print(third.summary())
     print("active {scope.active_count()}")
-
     before_save :: event.hook<Int, String>("allow")
     before_save.on_priority(scope, 10, (n) => "seen {n}")
     print(before_save.run(5, "fallback"))
-
     async_scope :: event.scope()
-    queued :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
-    queued.on(async_scope, (n: Int) => { print("async {n}") })
+    queued :: event.async_result<Int, String>(AsyncPolicy.{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
+    queued.on(async_scope, (n: Int) => {
+        print("async {n}")
+    })
     async_report :: queued.emit_async(7).join()
     print("async delivered={async_report.state() == .Delivered} handlers={async_report.delivered_handlers()}")
     queued.close()
-
     decision_scope :: event.scope()
     before_publish :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
     before_publish.on_priority(decision_scope, 10, (n: Int) => HookDecision.Transform(n + 1))
     before_publish.on(decision_scope, (n: Int) => HookDecision.Continue)
     show_publish(before_publish.run(7))
-
     scope.cancel()
     print("after cancel {scope.active_count()}")
 }

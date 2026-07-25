@@ -9,7 +9,6 @@ fn run() {
     listener :: net.tcp_listen_addr(typed) ?? panic("tcp bind")
     local :: net.listener_local_socket_addr(listener) ?? panic("tcp local addr")
     print("tcp-listen:{net.socket_host(local)}")
-
     (ready_tx, ready_rx) :: tasks.channel<String>()
     tcp_task :: tasks.spawn(take(listener, ready_tx) () => {
         ready_tx.send(net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("tcp local addr")))
@@ -17,7 +16,6 @@ fn run() {
         msg :: stream.read_text(8192) ?? panic("tcp read")
         stream.write_all("tcp:{msg}".bytes()) ?? panic("tcp write")
     })
-
     addr :: ready_rx.receive() ?? panic("tcp addr")
     client :: net.tcp_connect(addr) ?? panic("tcp connect")
     net.set_timeout(&client, 1000) ?? panic("tcp timeout")
@@ -26,7 +24,6 @@ fn run() {
     client.close() ?? panic("tcp close")
     client.close() ?? panic("tcp close idempotent")
     tcp_task.join()
-
     udp_server :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
     udp_addr :: net.udp_local_addr(udp_server) ?? panic("udp local addr")
     udp_client :: net.udp_bind("127.0.0.1:0") ?? panic("udp client")
@@ -34,7 +31,6 @@ fn run() {
     _sent :: net.udp_send_bytes_to(udp_client, "pong".bytes(), udp_addr) ?? panic("udp send")
     packet :: net.udp_receive(udp_server, 128) ?? panic("udp recv")
     print("udp:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
-
     path :: "/tmp/jet-socket-echo-{time.now()}.sock"
     unix_listener :: net.unix_listen(path) ?? panic("unix bind")
     (unix_tx, unix_rx) :: tasks.channel<String>()

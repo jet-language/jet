@@ -21,7 +21,6 @@ fn lifecycle_surface() --[Secret]-> {
     loaded :: vault.load(&stored) ?? return
     state :: vault.status(&stored) ?? return
     versions :: vault.versions<crypto.SigningKey>("staged") ?? return
-
     rotate_plan :: vault.prepare_rotate<crypto.SigningKey>("staged") ?? return
     rotate_write :: vault.authorize_write(&rotate_plan, "scheduled rotation") ?? return
     rotation :: vault.commit_rotate(^rotate_write, ^rotate_plan) ?? return
@@ -35,10 +34,7 @@ fn lifecycle_surface() --[Secret]-> {
 
 fn expert_import_surface() --[Secret]-> {
     #Unsafe("restore audited raw signing-key material") {
-        bytes: [U8] :: [
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
-        ]
+        bytes :: [U8].{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
         plan :: vault_expert.prepare_import_signing("restored", ^bytes) ?? return
         write :: vault.authorize_write(&plan, "restore audited signer") ?? return
         _ :: vault_expert.commit_import_signing(^write, ^plan) ?? return
@@ -47,7 +43,7 @@ fn expert_import_surface() --[Secret]-> {
 
 fn run() --[Secret, Io]-> {
     current :: vault.current<crypto.SigningKey>("release") ?? panic("vault unavailable")
-    if current == Val(key_ref) {
+    if current == .Val(key_ref) {
         print("current release key: {key_ref}")
     } else {
         print("no release key configured")

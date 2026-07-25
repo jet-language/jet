@@ -14,13 +14,15 @@ fn write_catalog(path: String) {
 fn run() {
     path :: "encoding_jsonl_stream_out.jsonl"
     write_catalog(path)
-
     input :: files.open(path) ?? panic("open")
     reader :: jsonl.reader(^input) ?? panic("reader")
     count := 0
     loop count < 3 {
         maybe :: reader.next() ?? panic("next")
-        if maybe == None { print("eof"); break }
+        if maybe == .None {
+            print("eof")
+            break
+        }
         print("record")
         count++
     }

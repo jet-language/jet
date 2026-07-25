@@ -18,19 +18,18 @@ fn handle(id: Int, config: Shared<AppConfig>) -> String {
 }
 
 fn run() {
-    config :: Shared.new(AppConfig.{ name: "jet-server", hits: 0 })
-
+    config :: Shared.new(AppConfig.{name: "jet-server", hits: 0})
     // Every spawned task captures `config` with no `take` — a `Shared<T>` is
     // meant to be handed to as many concurrent tasks as needed.
     t1 :: tasks.spawn(() => handle(1, config))
     t2 :: tasks.spawn(() => handle(2, config))
     t3 :: tasks.spawn(() => handle(3, config))
-
     print(t1.wait())
     print(t2.wait())
     print(t3.wait())
-
-    config.edit(c => { c.hits += 1 })
+    config.edit(c => {
+        c.hits += 1
+    })
     total :: config.read(c => c.hits)
     print("hits={total}")
 }

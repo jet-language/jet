@@ -95,12 +95,12 @@ fn archive(name: ^String) -> String {
     return name
 }
 fn run() {
-    score: Int := 41
+    score := 41
     bump(&score)
     print(score)
-greeting: String :: \"hello\"
+greeting :: \"hello\"
     show(greeting)
-saved: String :: archive(^\"vault\")
+saved :: archive(^\"vault\")
     print(saved)
 }
 ";
@@ -179,32 +179,32 @@ fn sized_integers() {
     }
     let src = "\
 fn run() {
-red: U8 :: 255
-channel: I32 :: 100000
-depth: I8 :: -120
+red :: U8.{ 255 }
+channel :: I32.{ 100000 }
+depth :: I8.{ -120 }
     print(red)
     print(channel)
     print(depth)
-total: I64 :: 9000000000
+total :: I64.{ 9000000000 }
     print(total + 1)
-half: U8 :: 100
+half :: U8.{ 100 }
     print(half + half)
-bytes: [U8] :: [104, 105, 33]
+bytes :: [U8].{ 104, 105, 33 }
     print(bytes)
-wide: I64 :: Int.from_u8(red)
+wide :: I64.{ Int.from_u8(red) }
     print(wide)
-clamped: U8 :: U8.from_i32(channel) ?? 255
+clamped :: U8.from_i32(channel) ?? 255
     print(clamped)
     print(U8.MAX)
     print(I32.MIN)
-flags: U8 :: 13
+flags :: U8.{ 13 }
     print(flags.count_ones())
     print(Float.INFINITY.is_infinite())
-hi: U8 :: 200
-lo: U8 :: 100
+hi :: U8.{ 200 }
+lo :: U8.{ 100 }
     print(wrapping(hi + lo))
     print(saturating(hi + lo))
-fallback: U8 :: 0
+fallback :: U8.{ 0 }
     print(checked(hi + lo) ?? fallback)
 }
 ";

@@ -7,16 +7,7 @@ fn run() {
     attachment :: email.attachment("hello.txt", "text/plain", [104, 105]) ?? panic("invalid attachment")
     message :: email.message(from, [to], [], "Welcome ☕", "Hello", "<b>Hello</b>", [attachment]) ?? panic("invalid message")
     password :: crypto.Secret.from_text("example-only")
-    config := email.SmtpConfig.{
-        host: "localhost",
-        port: 465,
-        security: .Tls,
-        auth: .Password.{ username: "mailer", password: password },
-        recipient_policy: .RequireAll,
-        trust: .System,
-        limits: email.Limits.safe(),
-        dkim: None,
-    }
+    config := email.SmtpConfig.{host: "localhost", port: 465, security: .Tls, auth: .Password.{username: "mailer", password: password}, recipient_policy: .RequireAll, trust: .System, limits: email.Limits.safe(), dkim: None}
     mailer := email.smtp(config) ?? panic("invalid SMTP configuration")
     bytes :: email.serialize(message) ?? panic("cannot serialize")
     print(bytes.len() > 0)

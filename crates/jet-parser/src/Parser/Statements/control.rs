@@ -40,6 +40,44 @@ impl<'a> Parser<'a> {
         self.toks.get(i).map(|t| &t.kind)
     }
 
+    /// D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching error
+    /// E0426 points at `name := Type.{ uninit }`.
+    fn retired_uninit_marker(&mut self) -> Result<Stmt, Diagnostic> {
+        let hash_span = self.peek().span;
+        self.bump(); // `#`
+        let marker = self.bump(); // `Uninit`
+        let mut end = marker.span.end;
+        let mut name_hint = String::new();
+        if let TokKind::Ident(n) = &self.peek().kind {
+            name_hint = n.clone();
+            end = self.peek().span.end;
+        }
+        let fix = if name_hint.is_empty() {
+            format!(
+                "write `name {} Type.{{ {} }}`",
+                Syntax::SIGIL_BIND_MUT,
+                Syntax::KW_UNINIT
+            )
+        } else {
+            format!(
+                "write `{name_hint} {} <Type>.{{ {} }}`",
+                Syntax::SIGIL_BIND_MUT,
+                Syntax::KW_UNINIT
+            )
+        };
+        Err(Diagnostic::error(
+            "E0426",
+            format!("`#{}` is retired", Syntax::ATTR_UNINIT),
+            format!(
+                "uninitialized storage is a fact about the value — it now reads `name {} Type.{{ {} }}`",
+                Syntax::SIGIL_BIND_MUT,
+                Syntax::KW_UNINIT
+            ),
+            fix,
+            Some(Span::new(hash_span.start, end)),
+        ))
+    }
+
     pub(in super::super) fn parse_meta_attr(&mut self) -> Result<MetaAttr, Diagnostic> {
         let start = self.peek().span;
         self.expect(TokKind::Hash, "expected `#`")?;
@@ -621,10 +659,10 @@ impl<'a> Parser<'a> {
             let body = self.block_stmts();
             Ok(Stmt::Loop { body, span, label })
         } else if matches!(self.peek().kind, TokKind::Ident(_))
-            && matches!(self.peek2().kind, TokKind::ColonEq | TokKind::Colon)
+            && matches!(self.peek2().kind, TokKind::ColonEq)
         {
-            // D-LOOP-HEADER2=A: state loop. Only a plain mutable name binding
-            // may initialize state; sigil_binding owns the optional type grammar.
+            // D-LOOP-HEADER2=A / D-BIND-BARE1: state loop. Only a plain mutable
+            // bare binding may initialize state (`name := value`).
             let init = self.sigil_binding()?;
             if !init.mutable || init.pattern.is_some() || init.name.is_empty() {
                 return Err(Diagnostic::error(
@@ -632,7 +670,7 @@ impl<'a> Parser<'a> {
                     "loop state needs one mutable name binding".to_string(),
                     "state changes between loop turns, so its header starts with `name := value`"
                         .to_string(),
-                    "write `loop name[: Type] := value; condition { ... }`".to_string(),
+                    "write `loop name := value; condition { ... }`".to_string(),
                     Some(init.name_span),
                 ));
             }
@@ -1259,8 +1297,8 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            // D-BIND1: a sigil binding `name (: type)? (:: | :=) expr` — no
-            // leading keyword. Detected before the general Ident statement path.
+            // D-BIND-BARE1: a sigil binding `name (:: | :=) expr` — no leading
+            // keyword. Detected before the general Ident statement path.
             _ if self.looks_like_sigil_binding() => {
                 let binding = self.sigil_binding()?;
                 self.finish_stmt()?;
@@ -1297,6 +1335,13 @@ impl<'a> Parser<'a> {
                     && matches!(self.peek3().kind, TokKind::LBrace | TokKind::LParen) =>
             {
                 return self.scope_member_stmt();
+            }
+            // D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching
+            // error E0426 points at `name := Type.{ uninit }`.
+            TokKind::Hash
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNINIT) =>
+            {
+                return self.retired_uninit_marker();
             }
             TokKind::Hash
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),

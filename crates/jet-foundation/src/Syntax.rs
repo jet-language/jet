@@ -13,6 +13,9 @@
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
 //
+// D-BIND-BARE1=A adds no token: bindings are always bare `name :: value` /
+// `name := value`; types ride values (`Type.{ … }`) or live on signatures
+// and fields. Retires `name: Type ::` / `name: Type :=`.
 // D-SHAPE-CLI1 reuses the existing `fn run` / `#Cli` surface: a resolved
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
 // stays valid. D-CLI-POS1=A adds field marker `Flag` (`CONTRACT_FLAG`): required

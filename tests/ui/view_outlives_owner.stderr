@@ -5,3 +5,11 @@ Error [E2305]: this view points into `incidents`, which this function owns
     |                     ^^^^^^
  Why: `incidents` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
  Fix: return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it
+
+Error [E2305]: this view points into `incidents`, which this function owns
+  --> tests/ui/view_outlives_owner.jet:3:21
+    |
+  3 |     return incidents[0..2]
+    |                     ^^^^^^
+ Why: `incidents` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
+ Fix: return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it

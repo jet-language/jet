@@ -1,15 +1,15 @@
 Error [E2702]: crypto API misuse
-  --> tests/ui/crypto_expert_nonce_length.jet:8:13
+  --> tests/ui/crypto_expert_nonce_length.jet:6:142
     |
-  8 |             [0],
-    |             ^^^
+  6 |         x :: expert.xchacha20poly1305_open([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0], [1, 2, 3], [])
+    |                                                                                                                                              ^^^
  Why: XChaCha20-Poly1305 nonce has 1 byte; this operation requires exactly 24
  Fix: pass a 24-byte nonce, or use core.crypto.seal so Jet generates it
 
 Error [E2702]: crypto API misuse
-  --> tests/ui/crypto_expert_nonce_length.jet:14:13
+  --> tests/ui/crypto_expert_nonce_length.jet:7:134
     |
- 14 |             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  7 |         y :: expert.aes256gcm_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 2, 3], [])
+    |                                                                                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: AES-256-GCM nonce has 24 bytes; this operation requires exactly 12
  Fix: pass a 12-byte nonce, or use core.crypto.seal so Jet generates it

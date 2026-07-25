@@ -11,13 +11,10 @@ fn run() {
         print(ch.receive() ?? panic("channel closed"))
         print(ch.receive() ?? panic("channel closed"))
         blocked.join()
-
         timeout :: g.select().after(0, -1).wait()
         print(timeout)
-
         once :: tasks.after(0, 7)
         print(once.receive() ?? panic("timer closed"))
-
         ticks :: tasks.interval(1)
         print(ticks.receive() ?? panic("interval closed"))
         print(ticks.receive() ?? panic("interval closed"))

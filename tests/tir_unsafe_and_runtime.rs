@@ -26,7 +26,7 @@ fn read_reg(addr: Int) -> Int {
     return mem.volatile_read(p)
 }
 fn run() {
-cell: Int :: 1337
+cell :: 1337
     addr :: mem.address_of(cell)
     #Unsafe(\"addr is the address of `cell`, a live Int on this stack frame\") {
         p :: mem.Ptr<Int>.from_addr(addr)
@@ -55,7 +55,7 @@ fn read_reg(addr: Int) -> Int {
     return mem.volatile_read(p)
 }
 fn run() {
-cell: Int :: 1337
+cell :: 1337
     addr :: mem.address_of(cell)
     #Unsafe(\"safe: cell is live\") {
         seen :: read_reg(addr)
@@ -203,9 +203,9 @@ fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
     return dup
 }
 fn run() {
-p: Pair<Int> :: make_pair(1, 2)
+p :: Pair<Int>.{ make_pair(1, 2) }
     print(p.first)
-    st: Stack<Int> := empty_stack()
+    st := Stack<Int>.{ empty_stack() }
     st = push(st, 42)
     print(st.items[0])
 }
@@ -516,7 +516,7 @@ fn run() {
     })
     t1.join()
     t2.join()
-    results: [Int] := []
+    results := [Int].{}
     results.push(ch.receive() ?? panic(\"channel closed\"))
     results.push(ch.receive() ?? panic(\"channel closed\"))
     results.sort()
@@ -603,7 +603,7 @@ fn describe(x: Int?) -> String {
     return \"?\"
 }
 fn first_even(xs: [Int]) -> Int {
-    out: [Int] := []
+    out := [Int].{}
     i := 0
     loop i < xs.len() {
         if xs.get(i) == Val(v) {
@@ -614,7 +614,7 @@ fn first_even(xs: [Int]) -> Int {
     return out.len()
 }
 fn run() {
-    nothing: Int? :: None
+    nothing ::  None 
     print(describe(Val(7)))
     print(describe(nothing))
     print(first_even([1, 2, 3]))

@@ -26,7 +26,7 @@ module cache<K, capacity: Int> {
     }
 
     pub fn key_of(k: K) -> String {
-        value: K := k
+        value := K.{ k }
         return "key"
     }
 
@@ -41,6 +41,7 @@ module cache<K, capacity: Int> {
 
 // Forward alias chain: declaration order does not affect resolution.
 module forward_cache = int_cache
+
 module int_cache = cache<Int, 32>
 
 enum Mode {
@@ -61,11 +62,16 @@ module tier_zero<flag: Bool, count: Int, letter: Char, label: String, mode: Mode
 
 module values = tier_zero<true, 7, 'J', "jet", Mode.Fast>
 
-trait Token {}
+trait Token {
+}
 
-struct GoodToken {}
+struct GoodToken {
 
-impl GoodToken.Token {}
+}
+
+impl GoodToken.Token {
+
+}
 
 // The annotation decides the kind: `Item` is a type slot because `Token` is a
 // trait, while `count` is an `Int` value slot. Their spelling follows that kind.
@@ -83,7 +89,7 @@ module fixed_buffer<T, capacity: Int> {
     }
 
     pub fn echo(values: [T#capacity]) -> [T#capacity] {
-        result: [T#capacity] := ~values
+        result := [T#capacity].{ ~values }
         return result
     }
 }
@@ -129,13 +135,14 @@ fn run() {
     if s == {
         .Value(v) -> { print(v) }
         .Empty -> { print(0) }
+
     }
     values.show()
     print(kinds.count())
-    input: [Int#3] := [1, 2, 3]
-    fixed: [Int#3] := three_ints.echo(input)
-    buffer :: M5Three4IntsBuffer.{ items: fixed }
+    input := [Int#3].{1, 2, 3}
+    fixed := [Int#3].{three_ints.echo(input)}
+    buffer :: M5Three4IntsBuffer.{items: fixed}
     print(buffer.items[2])
-    wrapped :: M3Int4LawsWrapped.{ value: 91 }
+    wrapped :: M3Int4LawsWrapped.{value: 91}
     print(wrapped.reveal())
 }

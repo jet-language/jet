@@ -777,19 +777,9 @@ impl<'a> Fmt<'a> {
             } else {
                 Syntax::SIGIL_BIND_IMMUT
             });
-        } else if let Some(ty) = &b.ty {
-            // D-BIND4: explicit-type form.
-            // Immutable: `name: Type :: expr`. Mutable: `name: Type := expr`.
-            self.write(&b.name);
-            self.write(": ");
-            self.fmt_type(ty);
-            self.write(" ");
-            self.write(if b.mutable {
-                Syntax::SIGIL_BIND_MUT
-            } else {
-                Syntax::SIGIL_BIND_IMMUT
-            });
         } else {
+            // D-BIND-BARE1: bindings are always bare (`name :: …` / `name := …`).
+            // Types ride the value (`Type.{ … }`), never the binding name.
             self.write(&b.name);
             self.write(" ");
             self.write(if b.mutable {
@@ -799,11 +789,16 @@ impl<'a> Fmt<'a> {
             });
         }
         self.write(" ");
-        // D-UNINIT-SENTINEL1: `b.init` is a harmless never-evaluated placeholder
-        // for a `:= uninit` binding — print the `uninit` keyword literally
-        // instead of formatting the placeholder expression.
+        // D-UNINIT-SENTINEL2: print `Type.{ uninit }` from the binding's type.
         if b.uninit {
-            self.write(Syntax::KW_UNINIT);
+            if let Some(ty) = &b.ty {
+                self.fmt_type(ty);
+                self.write(".{ ");
+                self.write(Syntax::KW_UNINIT);
+                self.write(" }");
+            } else {
+                self.write(Syntax::KW_UNINIT);
+            }
         } else {
             self.fmt_expr(&b.init, Prec::OrFallback);
         }

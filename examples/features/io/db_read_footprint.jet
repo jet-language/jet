@@ -11,7 +11,7 @@ use core.db as db
 // adds no effect — only the `conn.query_one` read does.
 fn person_count(conn: DbConnection) --[Db.Read]-> Int {
     row_opt :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count failed")
-    if row_opt == Val(row) {
+    if row_opt == .Val(row) {
         n_val :: row.get("n") ?? panic("missing n")
         return n_val.int() ?? 0
     }

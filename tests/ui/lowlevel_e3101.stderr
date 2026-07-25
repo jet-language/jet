@@ -1,15 +1,23 @@
 Error [E0208]: taking a raw pointer requires `#Unsafe`
-  --> tests/ui/lowlevel_e3101.jet:3:12
+  --> tests/ui/lowlevel_e3101.jet:4:10
     |
-  3 | p: *Int :: *value
-    |            ^^^^^^
+  4 |     p :: *Int.{*value}
+    |          ^^^^^^^^^^^^^
+ Why: `*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region
+ Fix: wrap this in `#Unsafe("why this is safe") { … }` — to dereference a pointer use postfix `p.*`
+
+Error [E0208]: taking a raw pointer requires `#Unsafe`
+  --> tests/ui/lowlevel_e3101.jet:4:16
+    |
+  4 |     p :: *Int.{*value}
+    |                ^^^^^^
  Why: `*x` takes a raw pointer to `x`; that is a raw memory operation, only valid inside a `#Unsafe { … }` region
  Fix: wrap this in `#Unsafe("why this is safe") { … }` — to dereference a pointer use postfix `p.*`
 
 Error [E0208]: reading through a raw pointer requires `#Unsafe`
-  --> tests/ui/lowlevel_e3101.jet:4:12
+  --> tests/ui/lowlevel_e3101.jet:5:12
     |
-  4 |     return p.*
+  5 |     return p.*
     |            ^^^
  Why: `p.*` dereferences a raw pointer; that is a raw memory access, only valid inside a `#Unsafe { … }` region
  Fix: wrap this in `#Unsafe("why this is safe") { … }`

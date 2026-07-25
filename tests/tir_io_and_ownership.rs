@@ -76,7 +76,7 @@ fn qualified_io_input_or_return() {
     let src = "\
 use core.io as io
 fn collect() -> [String] {
-    out: [String] := []
+    out := [String].{}
     loop true {
         line :: io.input(\"> \") ?? return ~out
         if line == \"\" {
@@ -169,7 +169,7 @@ struct Score {
     derive Comparable
 }
 fn run() {
-shapes: [Shape] :: [Circle.{radius: 1.0}, Square.{side: 2.0}]
+shapes :: [Shape].{ Circle.{radius: 1.0}, Square.{side: 2.0} }
     shapes.each((s) => {
         print_area(s)
     })
@@ -198,8 +198,8 @@ struct Ledger {
     }
 }
 fn run() {
-    data: [Int] :: [1, 2, 3]
-    ledger: Ledger := Ledger.{ rows: [] }
+    data :: [Int].{ 1, 2, 3 }
+    ledger := Ledger.{ rows: [] }
     ledger.put_back(data)
     print(ledger.rows[0])
     print(ledger.rows[1])
@@ -250,7 +250,7 @@ struct Counter {
     }
 }
 fn run() {
-    c: Counter := Counter.{ n: 0 }
+    c := Counter.{ n: 0 }
     c.bump()
     c.add(10)
     print(c.n)
@@ -277,7 +277,7 @@ struct Counter {
     }
 }
 fn run() {
-    c: Counter := Counter.{ n: 9 }
+    c := Counter.{ n: 9 }
     c.reset()
     print(c.n)
 }
@@ -308,7 +308,7 @@ impl Counter.Bumpable {
     }
 }
 fn run() {
-    c: Counter := Counter.{ n: 0 }
+    c := Counter.{ n: 0 }
     c.bump()
     c.bump()
     print(c.n)
@@ -457,9 +457,9 @@ fn read_measure(value: Measure) -> Int { return 2 }
 fn read_string(value: String) -> Int { return value.len() }
 
 fn run() {
-    callbacks: Holder<fn(Int) -> Int> :: Holder<fn(Int) -> Int>.{reader: read_callback}
-    measures: Holder<Measure> :: Holder<Measure>.{reader: read_measure}
-    strings: Holder<String> :: Holder<String>.{reader: read_string}
+    callbacks :: Holder<fn(Int) -> Int>.{reader: read_callback}
+    measures :: Holder<Measure>.{reader: read_measure}
+    strings :: Holder<String>.{reader: read_string}
     print(callbacks.inspect())
     print(measures.inspect())
     copied :: strings.copy_tagged(#Tainted "copy")

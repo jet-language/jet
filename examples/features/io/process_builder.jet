@@ -6,12 +6,10 @@ fn run() {
     result :: process.cmd(["echo", "process-api"]).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(1024).run() ?? panic("process failed")
     print(result.success)
     print(result.output.trim())
-
     spec1 :: process.cmd(["echo", "pipeline-api"])
     spec2 :: process.cmd(["cat"])
     piped :: process.pipeline([spec1, spec2]) ?? panic("pipeline failed")
     print(piped.output.trim())
-
     child :: process.cmd(["echo", "spawn-api"]).stdout(.Stream).spawn() ?? panic("spawn failed")
     loop line; child.stdout.lines() {
         print(line.trim())

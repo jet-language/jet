@@ -66,11 +66,18 @@ fn run_jet(label: &str, src: &str) -> (i32, String, String) {
         )
     });
     let user = common::strip_vetted_prelude_modules(&output.rust);
+    if label == "pool_generation" {
+        let _ = std::fs::write("/tmp/781-pool-user.rs", &user);
+        eprintln!("DUMP_POOL_USER bytes={} unsafe={}", user.len(), user.lines().filter(|l| l.contains("unsafe")).count());
+    }
     let unsafe_lines = user
         .lines()
         .filter(|line| {
             line.contains("unsafe")
-                && !(src.contains(":= uninit") && line.contains("MaybeUninit"))
+                && !(
+                    (src.contains(":= uninit") || src.contains(".{ uninit }") || src.contains(".{uninit}"))
+                        && line.contains("MaybeUninit")
+                )
         })
         .collect::<Vec<_>>();
     assert!(
@@ -248,7 +255,7 @@ fn run() {
     let over_src = r#"
 use core.mem
 fn run() {
-    bytes: [U8#128] := uninit
+    bytes := [U8#128].{ uninit }
     fixed :: mem.Fixed.over(&bytes)
     value :: fixed.alloc(9)
     print(value)
@@ -330,7 +337,7 @@ fn fixed_over_exclusively_borrows_one_inline_byte_array() {
         r#"
 use core.mem
 fn run() {
-    bytes: [U8#8] := uninit
+    bytes := [U8#8].{ uninit }
     fixed :: mem.Fixed.over(&bytes)
     bytes[0] = 1
     close(^fixed)

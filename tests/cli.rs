@@ -60,7 +60,7 @@ fn spawn_with_retry(cmd: &mut Command) -> Child {
 #[test]
 fn inspect_unsafe_reports_policy_provenance_and_operations() {
     let dir = isolated_cwd("inspect_unsafe");
-    fs::write(dir.join("main.jet"), "use core.mem\nfn run() {\n value: Int :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer: *Int :: *value\n  assert no_alias\n  print(pointer.*)\n  assert valid_ptr, aligned\n }\n}\n").unwrap();
+    fs::write(dir.join("main.jet"), "use core.mem\nfn run() {\n value :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer :: *Int.{ *value }\n  assert no_alias\n  print(pointer.*)\n  assert valid_ptr, aligned\n }\n}\n").unwrap();
     let output = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -2866,7 +2866,7 @@ end Geodesy;
 use type Interfaces.C.double;
 use type Interfaces.C.long_long;
 package body Geodesy is
-   Calls_Count : Interfaces.C.long_long := 0;
+   Calls_Count := Interfaces.C.long_long.{ 0 };
    function Double_Lat (Lat : Latitude) return Interfaces.C.double is
    begin
       Calls_Count := Calls_Count + 1;
