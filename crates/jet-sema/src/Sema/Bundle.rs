@@ -82,6 +82,16 @@ fn mark_failed_pending_functions(
     }
 }
 
+fn dedupe_unknown_names(diagnostics: &mut Vec<Diagnostic>) {
+    let mut seen = HashSet::new();
+    diagnostics.retain(|diagnostic| {
+        diagnostic.code != "E0107"
+            || diagnostic
+                .span
+                .is_none_or(|span| seen.insert((span.start, span.end)))
+    });
+}
+
 #[derive(Default)]
 pub struct IncrementalSemaCache {
     environment: Vec<u8>,
@@ -1912,7 +1922,7 @@ fn check_bundle_opts_for_output_inner(
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
         let mut local_summaries = HashMap::new();
         let mut local_pending_diagnostics = Vec::new();
-        diags.extend(check_module_bodies(
+        let mut module_diags = check_module_bodies(
             module,
             idx,
             &states,
@@ -1925,7 +1935,9 @@ fn check_bundle_opts_for_output_inner(
             &mut reference_anchors,
             &mut local_pending_diagnostics,
             incremental.as_deref_mut(),
-        ));
+        );
+        dedupe_unknown_names(&mut module_diags);
+        diags.extend(module_diags);
         for pending in &mut local_pending_diagnostics {
             pending.function_key = format!("{}::{}", module.alias, pending.function_key);
         }
@@ -2217,6 +2229,42 @@ fn check_bundle_opts_for_output_inner(
 mod structure_tests {
     use super::*;
 
+    #[test]
+    fn duplicate_unknown_name_at_one_span_is_reported_once() {
+        let span = Span::new(4, 8);
+        let unknown = || {
+            Diagnostic::error(
+                "E0107",
+                "nothing named `x` exists here".to_string(),
+                "a name must be declared before it is used".to_string(),
+                "declare it first".to_string(),
+                Some(span),
+            )
+        };
+        let mut diagnostics = vec![unknown(), unknown()];
+        dedupe_unknown_names(&mut diagnostics);
+        assert_eq!(diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn same_unknown_name_span_in_two_modules_is_preserved() {
+        let unknown = || {
+            Diagnostic::error(
+                "E0107",
+                "nothing named `x` exists here".to_string(),
+                "a name must be declared before it is used".to_string(),
+                "declare it first".to_string(),
+                Some(Span::new(4, 8)),
+            )
+        };
+        let mut first_module = vec![unknown(), unknown()];
+        let mut second_module = vec![unknown(), unknown()];
+        dedupe_unknown_names(&mut first_module);
+        dedupe_unknown_names(&mut second_module);
+        let diagnostics = [first_module, second_module].concat();
+        assert_eq!(diagnostics.len(), 2);
+    }
+
     fn incremental_bundle(source: &str) -> ProgramBundle {
         let (tokens, lexer_diagnostics) = crate::Lexer::lex(source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
@@ -2335,7 +2383,7 @@ mod structure_tests {
             "super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);",
             "register_type_methods(&module.items, &mut st.registry, &mut diags);",
             "register_impl_methods(&module.items, &mut st.registry, &mut diags);",
-            "diags.extend(check_module_bodies(",
+            "let mut module_diags = check_module_bodies(",
             "collect_used_core(bundle, &states)",
             "apply_helper_layer_inference(bundle, &states, &usage_spans, &mut diags);",
         ];

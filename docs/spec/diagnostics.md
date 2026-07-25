@@ -99,7 +99,7 @@ renumbered, and no new `W` code may be allocated.
 |-------|-------|------------------------------------------|
 | E0001 | jet   | character/escape/lone brace means nothing here |
 | E0002 | jet   | unterminated text literal, interpolation, or block comment |
-| E0003 | parse | expected X, found Y                       |
+| E0003 | parse | expected X, found Y; teaches `continue` → `next`, `??` fallback values, and named multi-value enum payloads |
 | E0004 | parse | *retired in M1* (was: parameters staged)  |
 | E0005 | parse | *retired in M1* (was: variables staged)   |
 | E0006 | parse | *retired in M4* (was: `?` staged)         |

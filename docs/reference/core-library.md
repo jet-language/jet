@@ -445,7 +445,7 @@ Client surface:
 | `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` / `.dns_timeout(ms)` / `.tls_timeout(ms)` / `.write_timeout(ms)` / `.first_byte_timeout(ms)` | `HttpClientReq` | Set nonnegative global/per-phase deadlines; request overrides beat `Client.timeouts`; negative milliseconds fail before transport; an ambient `#Context(deadline: …)` remaining budget is converted to an absolute Instant at send entry and upper-bounds the request total |
 | `req.proxy(url)` | `HttpClientReq` | Use an explicit proxy; malformed URLs, refused tunnels, and rejected proxy authentication return stable Jet errors; env proxies are honored by default |
 | `Client.new().proxy(policy)` | `HttpClient` | Typed client proxy policy: `.FromEnvironment` (default), `.None` (ignore env), or `.Url(proxy)` |
-| `Client.new().tls(config)` | `HttpClient` | Apply a `core.tls.ClientConfig`; `CustomOnly` trust is live-proven on HTTPS send; identity and version bounds are carried when set (not separately live-proven here) |
+| `Client.new().tls(config)` | `HttpClient` | Apply a `core.tls.ClientConfig`; `CustomOnly` trust, mTLS client identity, and inclusive `.Tls12`/`.Tls13` version bounds are live-proven on HTTPS send (`http_client_law`) |
 | `Client.new().cookies(.Memory)` | `HttpClient` | Opt into one clone-shared, bounded RFC6265bis memory jar; shortcuts stay stateless |
 | `Client.new().redirects(.Follow.{ max:, same_origin_credentials: })` | `HttpClient` | Typed redirect policy (D-HTTP-CLIENT2); default unset is Follow(max:10, same_origin_credentials:true). Cross-origin always strips Authorization / Proxy-Authorization / Cookie; `same_origin_credentials: false` also strips them on same-origin hops |
 | `Client.new().allow_http_downgrade(true)` | `HttpClient` | Opt in to following HTTPS→HTTP redirects; denied by default (D-HTTP-CLIENT2) |
@@ -483,7 +483,7 @@ Card 301 audit state:
 |------|-------|
 | HTTPS client / server TLS | Shipped: client default HTTPS, server `tls:` named option |
 | Typed URL input | Shipped: client calls accept `Url` or `String` |
-| Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above including per-request dns/tls/write/first_byte overrides; Client exposes typed `.cookies(.Memory)`, `.proxy(HttpProxy)`, `.tls(TlsClientConfig)`, `.redirects(.Follow.{ max:, same_origin_credentials: })`, `.allow_http_downgrade(Bool)`, and `.retries(.Safe/.Idempotent/.None)` (default Safe); ambient `#Context(deadline:)` upper-bounds send totals; live RFC6265bis cookie scope/bounds, CustomOnly HTTPS trust, HTTPS→HTTP deny/opt-in, same-origin credential strip on Follow, request `.first_byte_timeout` overriding Client phase budgets, and stale-pool write-before-bytes Io retry (reuse-proven) / POST no-retry / `.retries(.None)` / `.retries(.Idempotent)` opt-in proven |
+| Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above including per-request dns/tls/write/first_byte overrides; Client exposes typed `.cookies(.Memory)`, `.proxy(HttpProxy)`, `.tls(TlsClientConfig)`, `.redirects(.Follow.{ max:, same_origin_credentials: })`, `.allow_http_downgrade(Bool)`, and `.retries(.Safe/.Idempotent/.None)` (default Safe); ambient `#Context(deadline:)` upper-bounds send totals; live RFC6265bis cookie scope/bounds, CustomOnly HTTPS trust, mTLS client identity, inclusive TLS 1.2/1.3 version bounds, HTTPS→HTTP deny/opt-in, same-origin credential strip on Follow, request `.first_byte_timeout` overriding Client phase budgets, and stale-pool write-before-bytes Io retry (reuse-proven) / POST no-retry / `.retries(.None)` / `.retries(.Idempotent)` opt-in proven |
 | Router params and wildcard routes | Shipped: `:name` params plus final `*` wildcard (`param("wildcard")`) |
 | SSE, static files, Range, access log, request body limits | Shipped: server helpers above |
 | Middleware engine | Partial: the one Handler wrapper chain is declaration-order outermost-first, supports request/response mutation and short-circuiting, and runs routed responses plus automatic 400/404/405 and redacted 500 recovery responses through the same boundary. Each composed layer is total: handler errors/panics and middleware factory/runtime errors/panics become bounded responses that reached outer wrappers can observe. An outer short-circuit does not run inner middleware. The boundary is shared by plaintext pipelines and TLS-backed HTTP/1.1 or HTTP/2. The real Jet AOT example is executable; the dev/JIT status remains listed in `tests/jit_gaps.txt`. |
@@ -507,7 +507,22 @@ Card 301 audit state:
 | Transparent Content-Encoding decoding | Partial across both facets: the native client advertises and decodes gzip by default, hides decoded Content-Encoding/Length while retaining `raw_content_encoding()`, supports `.raw_encoding()`, and fails closed on unsupported encodings (exact `http_client_law`). Plaintext and TLS HTTP/1.x server requests decode native gzip after transfer framing, remove the stale Content-Encoding/Length view, reject unsupported coding with 415 and malformed gzip with 400, and cap encoded plus decoded bodies at the server limit with 413. HTTP/2 request decoding and response compression middleware remain open. |
 | Graceful shutdown | Shipped for HTTP/1.x and HTTP/2 over cleartext or TLS: `Server.bind`/`serve`/`shutdown(grace)` stop accepts, send HTTP/2 GOAWAY with the accepted last-stream id, drain active work until grace, cancel stragglers, refuse new streams/requests (including TLS keep-alive reuse), and return bounded report counts |
 | Pooling and HTTP/2 | Shipped across both facets: shared native `Client` pools HTTP/1.1 keepalive after drained bodies and multiplexed HTTP/2 sessions (ALPN plus explicit h2c); concurrent streams open without holding the connection mutex across HEADERS waits, with exact `http_client_law` interop coverage for reuse, hostile HPACK, and TLS ALPN. Native HTTP/2 server serving runs over cleartext preface and rustls ALPN with flow control and graceful GOAWAY drain. |
-| WebSocket | Ratified as standalone `core.ws` (D-WS1=B); implementation and interoperability proof remain open |
+| WebSocket | Shipped as standalone `core.ws` (D-WS1=B): `ws.connect(url)` and `ws.upgrade(req)` share one RFC6455 codec with 1 MiB message bounds, masked client frames, ping/pong, close, and ambient-deadline cancellation. Live client↔server echo, hostile handshake rejection, and oversized-frame refusal are covered by `tests/ws_law.rs`. `wss://` TLS upgrade remains open behind the existing TLS bridge. |
+
+### `core.ws` — WebSocket client and server
+
+`core.ws` is the standalone WebSocket home (D-WS1=B). It imports HTTP request
+types for server upgrade and does not hide WebSocket APIs under `core.http`.
+
+| Function / method | Type | Notes |
+|-------------------|------|-------|
+| `ws.connect(url)` | `WsConn ? WsError` | Cleartext `ws://` dial and RFC6455 handshake |
+| `ws.upgrade(req)` | `WsConn ? WsError` | Server upgrade from an HTTP request during mux dispatch |
+| `conn.send_text(text)` / `.send_bytes(bytes)` | `() ? WsError` | Data frames; client frames are masked |
+| `conn.recv()` | `WsMessage ? WsError` | Text, binary, or close; respects ambient deadlines |
+| `conn.close(code, reason)` | `() ? WsError` | Sends a close frame and shuts down the socket |
+
+Example: `examples/features/net/ws_echo.jet`.
 
 Examples: `examples/features/net/http_rest_service.jet` and
 `examples/features/net/http_server_trailers.jet`.
@@ -550,6 +565,7 @@ fn run() {
 | `password_verify(password, stored)` | `Bool ? CryptoError` | Verify a nominal `Secret` against a validated `PasswordHash` |
 | `expert.argon2id(password, salt, memory_kib, iterations, lanes, output_len)` | `Secret ? CryptoError` | Audited deterministic Argon2id with the ratified hard bounds; compiler-known violations are E2702 |
 | `constant_time_equal(a, b)` | `Bool` | Constant-time comparison of nominal `Secret` values |
+| `constant_time_equal_bytes(a, b)` | `Bool` | Constant-time comparison of two byte lists |
 
 Card 302 audit state:
 

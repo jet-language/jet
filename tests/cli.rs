@@ -3551,7 +3551,7 @@ fn check_reports_soft_public_lints_without_failing() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(stderr.matches("[L0601]").count(), 1, "{stderr}");
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains("has no problems"),
+        !String::from_utf8_lossy(&output.stdout).contains("has no problems"),
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );

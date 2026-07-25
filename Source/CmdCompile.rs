@@ -197,7 +197,7 @@ pub(crate) fn run_compile_cmd(
         }
         if mode.json && lints.is_empty() {
             println!("{}", jet::render_all_json(file, &src, &[]).trim_end());
-        } else if !mode.json {
+        } else if !mode.json && lints.is_empty() {
             println!("ok: `{}` has no problems", file);
         }
         return;
