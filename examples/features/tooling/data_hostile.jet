@@ -1,0 +1,112 @@
+// #709 / #237 C4: hostile typed-data corpus — typed DataError or safe behavior.
+use core.data as data
+use core.files as files
+
+#Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+#Codable
+struct Owner {
+    team: String
+    owner: String
+}
+
+#Codable
+struct Event {
+    service: String
+    latency_ms: Float
+}
+
+fn no_float() -> (Float?) {
+    return None
+}
+
+fn run() {
+    // Empty analytics → typed Empty errors.
+    empty_mean := data.mean([Float].{})
+    if empty_mean == {
+        Ok(_) -> print("empty_mean: ok")
+        Err(error) -> print("empty_mean: {error}")
+    }
+    empty_q := data.quantile([Float].{}, 0.5)
+    if empty_q == {
+        Ok(_) -> print("empty_quantile: ok")
+        Err(error) -> print("empty_quantile: {error}")
+    }
+
+    // All-missing series: typed optionals, not a second sentinel.
+    missing :: data.series([Val(1.0), no_float(), no_float(), Val(4.0), no_float()])
+    print("missing_count: {data.missing_count(missing)}")
+
+    // Duplicate-key join keeps SQL multiplicity (2 Core×2 owners + 1 Tools = 5).
+    tickets :: data.csv<Ticket>("team,minutes\nCore,4.0\nCore,8.0\nTools,5.0") ?? panic("tickets")
+    owners :: data.csv<Owner>("team,owner\nCore,Ada\nCore,Lin\nTools,Grace") ?? panic("owners")
+    joined :: data.inner_join(tickets, owners, (t) => t.team, (o) => o.team) ?? panic("join")
+    print("dup_join_count: {data.count(joined)}")
+
+    // Delimiter-like pivot keys stay distinct row/column fields (no "|" collision).
+    pivots :: data.pivot_sum(tickets, (t) => if t.team == "Core" { "a|b" } else { "a" }, (t) => if t.team == "Core" { "c" } else { "b|c" }, (t) => t.minutes) ?? panic("pivot")
+    print("pivot_cells: {data.count(pivots)}")
+    loop cell; pivots {
+        print("pivot: row={cell.row_key} col={cell.column_key} sum={cell.sum}")
+    }
+
+    // Equal-key sort ties keep input order (stable).
+    tied :: [
+        Ticket.{ team: "same", minutes: 3.0 },
+        Ticket.{ team: "same", minutes: 1.0 },
+        Ticket.{ team: "same", minutes: 2.0 },
+    ]
+    sorted :: data.sort_by(tied, (t) => t.team) ?? panic("sort")
+    print("tie_order: {sorted[0].minutes},{sorted[1].minutes},{sorted[2].minutes}")
+
+    // Extreme / non-finite numerics fail closed.
+    nan_mean := data.mean([1.0, Float.NAN, 3.0])
+    if nan_mean == {
+        Ok(_) -> print("nan_mean: ok")
+        Err(error) -> print("nan_mean: {error}")
+    }
+    inf_sum := data.sum([1.0, Float.INFINITY])
+    if inf_sum == {
+        Ok(_) -> print("inf_sum: ok")
+        Err(error) -> print("inf_sum: {error}")
+    }
+
+    // Invalid quantile domain and rolling width.
+    bad_q := data.quantile([1.0, 2.0, 3.0], 1.5)
+    if bad_q == {
+        Ok(_) -> print("bad_quantile: ok")
+        Err(error) -> print("bad_quantile: {error}")
+    }
+    bad_w := data.rolling_mean([1.0, 2.0, 3.0], 0)
+    if bad_w == {
+        Ok(_) -> print("bad_window: ok")
+        Err(error) -> print("bad_window: {error}")
+    }
+
+    // Hostile plot labels are SVG-escaped; negative counts reject.
+    hostile_rows :: [
+        Ticket.{ team: "<script>&\"x", minutes: 4.0 },
+        Ticket.{ team: "<script>&\"x", minutes: 4.0 },
+    ]
+    hostile_groups :: data.group_count(hostile_rows, (t) => t.team) ?? panic("hostile_groups")
+    svg :: data.bar_svg(hostile_groups) ?? panic("svg")
+    escaped :: svg.contains("&lt;script&gt;") && svg.contains("&amp;") && svg.contains("&quot;")
+    print("hostile_svg_escaped: {escaped}")
+
+    // Large / limit: tightened max_groups fails as typed Limit.
+    path :: "/tmp/jet_data_hostile_events.csv"
+    files.write(path, "service,latency_ms\napi,10.0\napi,20.0\ndb,5.0\napi,30.0\n") ?? panic("write")
+    input :: files.open(path) ?? panic("open")
+    limits := data.DataLimits.safe()
+    limits.max_groups = 1
+    reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
+    groups := data.group_mean(reader, (e) => e.service, (e) => e.latency_ms)
+    if groups == {
+        Ok(_) -> print("large_limit: ok")
+        Err(error) -> print("large_limit: {error}")
+    }
+}
