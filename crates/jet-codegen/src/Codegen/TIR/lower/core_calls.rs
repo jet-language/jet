@@ -1,7 +1,7 @@
 use crate::AST::{Expr, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::core_closure_call_return_ty;
-use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::lower_lambda_expecting_value;
 use crate::Codegen::TIR::lambda_body_ty;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
@@ -89,17 +89,21 @@ pub(crate) fn lower_core_closure_call(
                 Type::List(inner) => (**inner).clone(),
                 _ => Type::Int,
             };
-            let rows_s = emit_tir_expr(&rows, cx);
-            let pred = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
-            let helper = if method == "filter" {
-                "jet_data_filter"
-            } else {
-                "jet_data_sort_by"
-            };
-            let code = format!("{}{}(&({}), {})", cx.root_prefix, helper, rows_s, pred);
+            let pred = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
             return Some(TExpr {
                 ty: Type::List(Box::new(row_ty)),
-                kind: TExprKind::ConstInline(code),
+                kind: TExprKind::CoreCall {
+                    module: module.to_string(),
+                    method: method.to_string(),
+                    args: vec![
+                        rows,
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(pred)),
+                        },
+                    ],
+                    widen_to_vec: vec![false, false],
+                },
             });
         }
         ("core.data", "group_count") => {
@@ -108,15 +112,21 @@ pub(crate) fn lower_core_closure_call(
                 Type::List(inner) => (**inner).clone(),
                 _ => Type::Int,
             };
-            let rows_s = emit_tir_expr(&rows, cx);
-            let key = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty]);
-            let code = format!(
-                "{}jet_data_group_count(&({}), {})",
-                cx.root_prefix, rows_s, key
-            );
+            let key = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty]);
             return Some(TExpr {
                 ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
-                kind: TExprKind::ConstInline(code),
+                kind: TExprKind::CoreCall {
+                    module: module.to_string(),
+                    method: method.to_string(),
+                    args: vec![
+                        rows,
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(key)),
+                        },
+                    ],
+                    widen_to_vec: vec![false, false],
+                },
             });
         }
         ("core.data", "group_sum" | "group_mean") => {
@@ -125,21 +135,26 @@ pub(crate) fn lower_core_closure_call(
                 Type::List(inner) => (**inner).clone(),
                 _ => Type::Int,
             };
-            let rows_s = emit_tir_expr(&rows, cx);
-            let key = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
-            let value = render_lambda_str_expecting_value(lam_at(2)?, cx, env, &[row_ty]);
-            let helper = if method == "group_sum" {
-                "jet_data_group_sum"
-            } else {
-                "jet_data_group_mean"
-            };
-            let code = format!(
-                "{}{}(&({}), {}, {})",
-                cx.root_prefix, helper, rows_s, key, value
-            );
+            let key = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
+            let value = lower_lambda_expecting_value(lam_at(2)?, cx, env, &[row_ty]);
             return Some(TExpr {
                 ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
-                kind: TExprKind::ConstInline(code),
+                kind: TExprKind::CoreCall {
+                    module: module.to_string(),
+                    method: method.to_string(),
+                    args: vec![
+                        rows,
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(key)),
+                        },
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(value)),
+                        },
+                    ],
+                    widen_to_vec: vec![false, false, false],
+                },
             });
         }
         ("core.data", "inner_join" | "left_join") => {
@@ -153,19 +168,8 @@ pub(crate) fn lower_core_closure_call(
                 Type::List(inner) => (**inner).clone(),
                 _ => Type::Int,
             };
-            let left_s = emit_tir_expr(&left, cx);
-            let right_s = emit_tir_expr(&right, cx);
-            let left_key = render_lambda_str_expecting_value(lam_at(2)?, cx, env, &[left_ty.clone()]);
-            let right_key = render_lambda_str_expecting_value(lam_at(3)?, cx, env, &[right_ty.clone()]);
-            let helper = if method == "inner_join" {
-                "jet_data_inner_join"
-            } else {
-                "jet_data_left_join"
-            };
-            let code = format!(
-                "{}{}(&({}), &({}), {}, {})",
-                cx.root_prefix, helper, left_s, right_s, left_key, right_key
-            );
+            let left_key = lower_lambda_expecting_value(lam_at(2)?, cx, env, &[left_ty.clone()]);
+            let right_key = lower_lambda_expecting_value(lam_at(3)?, cx, env, &[right_ty.clone()]);
             let joined_right = if method == "left_join" {
                 Type::Option(Box::new(right_ty))
             } else {
@@ -176,7 +180,23 @@ pub(crate) fn lower_core_closure_call(
                     name: "DataJoin".to_string(),
                     args: vec![left_ty, joined_right],
                 })),
-                kind: TExprKind::ConstInline(code),
+                kind: TExprKind::CoreCall {
+                    module: module.to_string(),
+                    method: method.to_string(),
+                    args: vec![
+                        left,
+                        right,
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(left_key)),
+                        },
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(right_key)),
+                        },
+                    ],
+                    widen_to_vec: vec![false, false, false, false],
+                },
             });
         }
         ("core.data", "pivot_sum") => {
@@ -185,17 +205,31 @@ pub(crate) fn lower_core_closure_call(
                 Type::List(inner) => (**inner).clone(),
                 _ => Type::Int,
             };
-            let rows_s = emit_tir_expr(&rows, cx);
-            let row_key = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
-            let col_key = render_lambda_str_expecting_value(lam_at(2)?, cx, env, &[row_ty.clone()]);
-            let value = render_lambda_str_expecting_value(lam_at(3)?, cx, env, &[row_ty]);
-            let code = format!(
-                "{}jet_data_pivot_sum(&({}), {}, {}, {})",
-                cx.root_prefix, rows_s, row_key, col_key, value
-            );
+            let row_key = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
+            let col_key = lower_lambda_expecting_value(lam_at(2)?, cx, env, &[row_ty.clone()]);
+            let value = lower_lambda_expecting_value(lam_at(3)?, cx, env, &[row_ty]);
             return Some(TExpr {
                 ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
-                kind: TExprKind::ConstInline(code),
+                kind: TExprKind::CoreCall {
+                    module: module.to_string(),
+                    method: method.to_string(),
+                    args: vec![
+                        rows,
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(row_key)),
+                        },
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(col_key)),
+                        },
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(value)),
+                        },
+                    ],
+                    widen_to_vec: vec![false, false, false, false],
+                },
             });
         }
         ("core.data", "lazy_filter" | "lazy_sort_by") => {
@@ -206,20 +240,24 @@ pub(crate) fn lower_core_closure_call(
                 }
                 _ => Type::Int,
             };
-            let frame_s = emit_tir_expr(&frame, cx);
-            let closure = render_lambda_str_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
-            let helper = if method == "lazy_filter" {
-                "jet_data_lazy_filter"
-            } else {
-                "jet_data_lazy_sort_by"
-            };
-            let code = format!("{}{}(&({}), {})", cx.root_prefix, helper, frame_s, closure);
+            let closure = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
             return Some(TExpr {
                 ty: Type::Apply {
                     name: "LazyFrame".to_string(),
                     args: vec![row_ty],
                 },
-                kind: TExprKind::ConstInline(code),
+                kind: TExprKind::CoreCall {
+                    module: module.to_string(),
+                    method: method.to_string(),
+                    args: vec![
+                        frame,
+                        TExpr {
+                            ty: Type::Named("Unit".to_string()),
+                            kind: TExprKind::Lambda(Box::new(closure)),
+                        },
+                    ],
+                    widen_to_vec: vec![false, false],
+                },
             });
         }
         // D-REACT1=B: the `derived` closure's body type is the `Derived<T>` element.

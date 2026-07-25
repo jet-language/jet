@@ -23,10 +23,14 @@ use crate::Codegen::TIR::lower::tracked_float_origin;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TLetTy;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIndexFieldAssign;
+use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
+use crate::Codegen::TIR::lower::lower_comptime_scalar;
 use crate::Codegen::TIR::unit_type;
 use crate::Syntax;
 use std::collections::HashMap;
@@ -41,12 +45,12 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
                 out.push(TStmt::LineMarker(view.candidate.line));
             }
             let candidate = view.candidate;
-            let place = if candidate.single {
-                format!("(*{})", mangle(&candidate.name))
+            let slot = if candidate.single {
+                TLocal::user(&candidate.name).through_ref()
             } else {
-                mangle(&candidate.name)
+                TLocal::user(&candidate.name)
             };
-            env.bind(&candidate.name, place, candidate.ty.clone());
+            env.bind(&candidate.name, slot, candidate.ty.clone());
             out.push(TStmt::SplitViews {
                 owner: view
                     .initialize
@@ -336,17 +340,25 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     unreachable!("matched index assignment")
                 };
                 *lowered_index = Box::new(Expr::Ident(source_name.clone(), *span));
-                env.bind(&source_name, rust_name.clone(), Some(lowered.ty.clone()));
+                env.bind(
+                    &source_name,
+                    TLocal::generated(&rust_name),
+                    Some(lowered.ty.clone()),
+                );
                 Some((rust_name, lowered))
             } else {
                 None
             };
             let saved = env.locals.get(name).cloned();
             env.gc_locals.remove(name);
-            env.bind(name, "(*__jet_value)".to_string(), saved.as_ref().and_then(|(_, ty)| ty.clone()));
+            env.bind(
+                name,
+                TLocal::generated("__jet_value").through_ref(),
+                saved.as_ref().and_then(|(_, ty)| ty.clone()),
+            );
             let stmt = lower_stmt(&lowered_source, cx, env);
-            if let Some((place, ty)) = saved {
-                env.bind(name, place, ty);
+            if let Some((slot, ty)) = saved {
+                env.bind(name, slot, ty);
             }
             env.mark_gc(name);
             if let Some((temp, _)) = &index_temp {
@@ -388,8 +400,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             for f in fields {
                 let field_rust = mangle(&f.name).to_string();
                 let local_rust = mangle(f.local_name()).to_string();
-                binds.push((local_rust.clone(), field_rust));
-                env.bind(f.local_name(), local_rust, field_tys.get(&f.name).cloned());
+                binds.push((local_rust, field_rust));
+                env.bind(
+                    f.local_name(),
+                    TLocal::user(f.local_name()),
+                    field_tys.get(&f.name).cloned(),
+                );
             }
             return TStmt::StructDestructure {
                 tmp,
@@ -418,8 +434,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             for (e, (fname, fty)) in elems.iter().zip(canonical.iter()) {
                 let elem_rust = mangle(&e.name).to_string();
                 let field_rust = mangle(fname).to_string();
-                binds.push((elem_rust.clone(), field_rust));
-                env.bind(&e.name, elem_rust, Some(fty.clone()));
+                binds.push((elem_rust, field_rust));
+                env.bind(&e.name, TLocal::user(&e.name), Some(fty.clone()));
             }
             return TStmt::TupleDestructure {
                 tmp,
@@ -449,9 +465,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
             let mut elem_names = Vec::new();
             for e in elems {
-                let m = mangle(&e.name).to_string();
-                elem_names.push(m.clone());
-                env.bind(&e.name, m, elem_ty.clone());
+                elem_names.push(mangle(&e.name));
+                env.bind(&e.name, TLocal::user(&e.name), elem_ty.clone());
             }
             return TStmt::ListDestructure {
                 tmp,
@@ -477,19 +492,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let ty =
                     b.ty.as_ref()
                         .expect("E0421 ensures a `:= uninit` binding has a type");
-                let rust_ty = cx.rust_type(ty);
-                let init_str = format!(
-                    "unsafe {{ std::mem::MaybeUninit::<{}>::uninit().assume_init() }}",
-                    rust_ty
-                );
-                env.bind(&b.name, mangle(&b.name), b.ty.clone());
+                env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let mut",
-                    ty_clause: format!(": {}", rust_ty),
+                    let_ty: crate::Codegen::TIR::let_ty_for_opt(Some(ty), cx, false, false, false),
                     init: TExpr {
                         ty: ty.clone(),
-                        kind: TExprKind::ConstInline(init_str),
+                        kind: TExprKind::Uninit,
                     },
                     track_origin: None,
                 gc_promotion: None,
@@ -503,11 +513,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // empty `ty_clause`, and a deref'd slot place `(*<x>)`.
             if b.arena_view {
                 let init = lower_expr(&b.init, cx, env);
-                env.bind(&b.name, format!("(*{})", mangle(&b.name)), b.ty.clone());
+                env.bind(&b.name, TLocal::user(&b.name).through_ref(), b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
-                    ty_clause: String::new(),
+                    let_ty: TLetTy::Inferred,
                     init,
                     track_origin: None,
                 gc_promotion: None,
@@ -520,16 +530,16 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             if let Expr::Place(inner, _, _) = &b.init {
                 let range = matches!(inner.as_ref(), Expr::Slice { .. });
                 let init = lower_expr(&b.init, cx, env);
-                let place = if range {
-                    mangle(&b.name)
+                let slot = if range {
+                    TLocal::user(&b.name)
                 } else {
-                    format!("(*{})", mangle(&b.name))
+                    TLocal::user(&b.name).through_ref()
                 };
-                env.bind(&b.name, place, b.ty.clone());
+                env.bind(&b.name, slot, b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
-                    ty_clause: String::new(),
+                    let_ty: TLetTy::Inferred,
                     init,
                     track_origin: None,
                 gc_promotion: None,
@@ -546,12 +556,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // `resolve_builtin_op`'s owned default.
             if b.string_view {
                 let init = lower_string_view_init(&b.init, cx, env);
-                env.bind(&b.name, mangle(&b.name), Some(Type::String));
+                env.bind(&b.name, TLocal::user(&b.name), Some(Type::String));
                 env.mark_string_view(&b.name);
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
-                    ty_clause: ": &str".to_string(),
+                    let_ty: TLetTy::StrView,
                     init,
                     track_origin: None,
                 gc_promotion: None,
@@ -566,32 +576,21 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
             // facts are pre-resolved (I3): no inference here.
             if b.is_comptime {
-                let serialized =
-                    b.ct.as_ref()
-                        .map(|v| v.serialize())
-                        .unwrap_or_else(|| "Default::default()".to_string());
-                // Mirror `emit_let`'s type clause exactly (a Fn type via `rust_fn_trait`,
-                // others via `rust_type`). A comptime value is never fn-typed, but match
-                // the AST shape verbatim for total byte-parity.
-                let ty_clause =
-                    b.ty.as_ref()
-                        .map(|t| {
-                            if let Type::Fn { params, ret, .. } = t {
-                                format!(": {}", cx.rust_fn_trait(params, ret.as_deref(), false))
-                            } else {
-                                format!(": {}", cx.rust_type(t))
-                            }
-                        })
-                        .unwrap_or_default();
+                let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
                 let init = TExpr {
                     ty: b.ty.clone().unwrap_or(Type::Int),
-                    kind: TExprKind::ConstInline(serialized),
+                    kind: lower_comptime_scalar(b.ct.as_ref()).unwrap_or_else(|| {
+                        b.ct
+                            .as_ref()
+                            .map(|v| TExprKind::CtLit(v.clone()))
+                            .unwrap_or(TExprKind::DefaultLit)
+                    }),
                 };
-                env.bind(&b.name, mangle(&b.name), b.ty.clone());
+                env.bind(&b.name, TLocal::user(&b.name), b.ty.clone());
                 return TStmt::Let {
                     name: b.name.clone(),
                     kw: "let",
-                    ty_clause,
+                    let_ty,
                     init,
                     track_origin: None,
                 gc_promotion: None,
@@ -692,34 +691,25 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // The type annotation clause, rendered exactly as `emit_let`: a Fn type via
             // `rust_fn_trait(params, ret, mut_fn)`, others via `rust_type`. Empty for an
             // inferred binding.
-            let mut ty_clause =
-                b.ty.as_ref()
-                    .map(|t| {
-                        if let Type::Fn { params, ret, .. } = t {
-                            format!(": {}", cx.rust_fn_trait(params, ret.as_deref(), mut_fn))
-                        } else {
-                            format!(": {}", cx.rust_type(t))
-                        }
-                    })
-                .unwrap_or_default();
-            if is_resource && b.ty.is_some() {
-                ty_clause = format!(": JetResource<{}>", cx.rust_type(&ty));
-            }
-            if b.gc_promotion.is_some() || b.gc_transferred {
-                ty_clause = format!(": jet_gc::AutomaticRoot<{}>", cx.rust_type(&ty));
-            }
+            let let_ty = crate::Codegen::TIR::let_ty_for_opt(
+                b.ty.as_ref(),
+                cx,
+                mut_fn,
+                is_resource,
+                b.gc_promotion.is_some() || b.gc_transferred,
+            );
             let track_origin = tracked_float_origin(b, &ty, cx);
             let binding_name = if is_resource {
                 format!("__jet_resource_{}_{}", b.name, b.name_span.start)
             } else {
                 b.name.clone()
             };
-            let place = if is_resource {
-                format!("(*{})", mangle(&binding_name))
+            let slot = if is_resource {
+                TLocal::user(&binding_name).through_ref()
             } else {
-                mangle(&binding_name)
+                TLocal::user(&binding_name)
             };
-            env.bind(&b.name, place, Some(ty));
+            env.bind(&b.name, slot, Some(ty));
             if b.gc_promotion.is_some() || b.gc_transferred {
                 env.mark_gc(&b.name);
             }
@@ -729,7 +719,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             TStmt::Let {
                 name: binding_name,
                 kw,
-                ty_clause,
+                let_ty,
                 init,
                 track_origin,
                 gc_promotion: b.gc_promotion.clone(),
@@ -748,7 +738,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     false
                 };
                 TStmt::Assign {
-                    place: env.place_of(name),
+                    place: TPlace::Local(env.local_of(name)),
                     op: *op,
                     value: lower_expr(value, cx, env),
                     clone_value,
@@ -790,14 +780,18 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // List/Map dispatch, since Pool needs its own helper + panic text.
                 if matches!(kind, IndexKind::Pool) {
                     let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
-                    let b = emit_tir_expr(&base_t, cx);
-                    let i = emit_tir_expr(&index_t, cx);
+                    let elem_ty = value_t.ty.clone();
                     return TStmt::Assign {
-                        place: format!(
-                            "(*{root}jet_std::jet_pool_get_mut(&mut ({b}), {i}, {file:?}, {line}))",
-                            root = cx.root_prefix,
-                            file = cx.file,
-                        ),
+                        place: TPlace::Expr(Box::new(TExpr {
+                            ty: elem_ty,
+                            kind: TExprKind::PoolSlot {
+                                pool: Box::new(base_t),
+                                id: Box::new(index_t),
+                                mutable: true,
+                                field: None,
+                                line,
+                            },
+                        })),
                         op: *op,
                         value: value_t,
                         clone_value: false,
@@ -856,7 +850,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                                 index: lower_expr(index, cx, env),
                                 is_map,
                                 index_proven,
-                                field_rust: mangle(field),
+                                field: field.to_string(),
                                 field_ty,
                                 op: *op,
                                 value: lower_expr(value, cx, env),
@@ -912,14 +906,21 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     let line = crate::Diagnostics::span_line_col(&cx.src, idx_span.start).0;
                     let pool_t = lower_expr(pool_expr, cx, env);
                     let id_t = lower_expr(id_expr, cx, env);
-                    let p = emit_tir_expr(&pool_t, cx);
-                    let i = emit_tir_expr(&id_t, cx);
-                    let place = format!(
-                        "(*{root}jet_std::jet_pool_get_mut(&mut ({p}), {i}, {file:?}, {line})).{field_rust}",
-                        root = cx.root_prefix,
-                        file = cx.file,
-                        field_rust = mangle(field),
-                    );
+                    let elem_ty = match &pool_t.ty {
+                        Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+                        _ => Type::Int,
+                    };
+                    let field_ty = struct_field_type(cx, &elem_ty, field).unwrap_or(Type::Int);
+                    let place = TPlace::Expr(Box::new(TExpr {
+                        ty: field_ty,
+                        kind: TExprKind::PoolSlot {
+                            pool: Box::new(pool_t),
+                            id: Box::new(id_t),
+                            mutable: true,
+                            field: Some(field.to_string()),
+                            line,
+                        },
+                    }));
                     let clone_value = if let Expr::Ident(vname, _) = value {
                         env.is_borrowed(vname) && env.ty_of(vname).is_some_and(|t| !t.is_scalar())
                     } else {
@@ -933,7 +934,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     };
                 }
                 let field_expr = Expr::Field(base.clone(), field.clone(), *span);
-                let place = emit_tir_expr(&lower_expr(&field_expr, cx, env), cx);
+                let place = TPlace::Expr(Box::new(lower_expr(&field_expr, cx, env)));
                 // c150: mirror the lower_enum_arg clone predicate — a borrowed non-scalar
                 // ident on the RHS would move out of a shared reference (E0507, I2).
                 let clone_value = if let Expr::Ident(vname, _) = value {
@@ -952,7 +953,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Return(Some(Expr::Ident(name, _)), _) if env.gc_return && env.is_gc(name) => {
             TStmt::Return(Some(TExpr {
                 ty: env.ty_of(name).unwrap_or(Type::Int),
-                kind: TExprKind::Local(env.place_of(name)),
+                kind: TExprKind::Local(env.local_of(name)),
             }))
         }
         Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_owned_expr(e, cx, env))),
@@ -966,10 +967,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let v = lower_expr(e, cx, env);
             TStmt::ExprStmt(TExpr {
                 ty: unit_type(),
-                kind: TExprKind::ConstInline(format!(
-                    "let _ = __jet_yield_tx.send({});",
-                    emit_tir_expr(&v, cx)
-                )),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::YieldSend {
+                    value: Box::new(v),
+                })),
             })
         }
         // D-IGNORERET2=A: `.drop("reason")` — lower only the receiver (for side effects).
@@ -1030,11 +1030,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let init_val = lower_expr(&init.init, cx, env);
             let init_ty = init.ty.clone();
             let mut scoped = clone_env(env);
-            scoped.bind(&init.name, mangle(&init.name), init_ty);
+            scoped.bind(&init.name, TLocal::user(&init.name), init_ty);
             let init_stmt = Box::new(TStmt::Let {
                 name: init.name.clone(),
                 kw: "let mut",
-                ty_clause: String::new(),
+                let_ty: TLetTy::Inferred,
                 init: init_val,
                 track_origin: None,
                 gc_promotion: None,
@@ -1067,7 +1067,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // The loop var is an `Int` local for the body's scope only. Panic
                 // context inside the body sees it; a panic after the loop does not.
                 let mut branch = clone_env(env);
-                branch.bind(var, mangle(var), Some(Type::Int));
+                branch.bind(var, TLocal::user(var), Some(Type::Int));
                 let lowered_body = lower_stmts(body, cx, &mut branch);
                 TStmt::Range {
                     label: label_name(label),
@@ -1087,7 +1087,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // `emit_for_in` branch (`chars`/`lines`/the `.iter().cloned()` default),
                 // resolving the receiver/collection string off the SAME node shape the
                 // AST path reads. `method_kind == None` is the plain `.iter()` form.
-                let (collection_str, method_kind) = lower_forin_collection(collection, cx, env);
+                let (iter_source, method_kind) = lower_forin_collection(collection, cx, env);
                 // Infer the element type from the lowered collection so the loop
                 // variable binds with its concrete type. This lets `core_struct_field_rust_name`
                 // emit plain field names (not `user_<field>`) for core types like DirEntry.
@@ -1130,9 +1130,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     }
                 }
                 let mut branch = clone_env(env);
-                branch
-                    .locals
-                    .insert(var.clone(), (mangle(var), coll_elem_ty.clone()));
+                branch.bind(var, TLocal::user(var), coll_elem_ty.clone());
                 if let Some((v2, _)) = var2 {
                     // Two-binding map form: v2 gets the value type.
                     let v2_ty = match &lowered_coll.ty {
@@ -1140,9 +1138,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         _ => None,
                     };
                     if let Type::Map { key, .. } = &lowered_coll.ty {
-                        branch.locals.insert(var.clone(), (mangle(var), Some((**key).clone())));
+                        branch.bind(var, TLocal::user(var), Some((**key).clone()));
                     }
-                    branch.locals.insert(v2.clone(), (mangle(v2), v2_ty));
+                    branch.bind(v2, TLocal::user(v2), v2_ty);
                 }
                 // D-SOA1: a single-binding loop over a columnar list iterates the
                 // gathered AoS view (`iter_aos`), not `Vec::iter` (which the columns
@@ -1157,7 +1155,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     label: label_name(label),
                     var: var.clone(),
                     var2: var2.as_ref().map(|(n, _)| n.clone()),
-                    collection_str,
+                    source: iter_source,
                     collection: lowered_coll,
                     step: step.as_ref().map(|step| lower_expr(step, cx, env)),
                     method_kind,
@@ -1262,15 +1260,15 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // desugared `name.h(box, anchor)` calls inside resolve to it, exactly
         // like an ordinary `name :: jet_layout::Handle::new(…)` binding would.
         Stmt::Layout { name, body, .. } => {
-            let place = mangle(name);
+            let handle = TLocal::user(name);
             env.bind(
                 name,
-                place.clone(),
+                handle.clone(),
                 Some(Type::Named(Syntax::LAYOUT_HANDLE_TYPE.to_string())),
             );
             let lowered_body = lower_stmts(body, cx, env);
             TStmt::Layout {
-                rust_place: place,
+                handle,
                 label: name.clone(),
                 body: lowered_body,
             }
@@ -1356,13 +1354,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         Stmt::Transact { name, body, .. } => {
             let mut scoped = clone_env(env);
             let handle = name.as_ref().map(|name| {
-                let h = mangle(name);
+                let slot = TLocal::user(name);
                 scoped.bind(
                     name,
-                    h.clone(),
+                    slot.clone(),
                     Some(Type::Named(Syntax::TXN_HANDLE_TYPE.to_string())),
                 );
-                h
+                slot
             });
             // D-TXN-ROLLBACK layer 1 (auto-snapshot): collect the root local names
             // assigned anywhere in the block (recursing into nested control flow, but
@@ -1370,25 +1368,18 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // own rollback scope / are deferred). Snapshot only roots ALREADY in scope
             // at block entry (params / outer locals): a local declared inside the block
             // needs no snapshot, since rollback discards it when the block scope ends.
-            // Each becomes `&mut <place>` so the prelude can clone+restore it.
             let mut roots: Vec<String> = Vec::new();
             collect_txn_mut_roots(body, &mut roots);
-            let snapshots: Vec<(String, Option<String>)> = roots
+            let snapshots: Vec<(TLocal, Option<Type>)> = roots
                 .iter()
                 .filter(|r| env.locals.contains_key(*r))
                 .map(|r| {
-                    let place_ref = format!("&mut {}", env.place_of(r));
                     // D-TXN-ROLLBACK layer 2: if the root type implements Rollback,
                     // use snapshot_custom instead of the clone-based snapshot path.
-                    let rollback_ty = env.ty_of(r).and_then(|ty| {
-                        if let crate::AST::Type::Named(n) = ty {
-                            if cx.rollback_types.contains(&n) {
-                                return Some(format!("user_{n}"));
-                            }
-                        }
-                        None
+                    let rollback_ty = env.ty_of(r).filter(|ty| {
+                        matches!(ty, Type::Named(n) if cx.rollback_types.contains(n))
                     });
-                    (place_ref, rollback_ty)
+                    (env.local_of(r), rollback_ty)
                 })
                 .collect();
             // D-STM1=A (card #506): lower the body with `in_stm_transact` raised so a

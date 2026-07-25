@@ -384,6 +384,7 @@ pub(crate) fn resolve_numeric_conversion_op(
                 })
             } else {
                 Some(TNumericOp::TryFrom {
+                    host_kind: numeric_host_kind(dsigned, dbits)?,
                     dst_rust: dst_rust.to_string(),
                     dst_spelling: target_name.to_string(),
                 })
@@ -392,6 +393,7 @@ pub(crate) fn resolve_numeric_conversion_op(
         None => {
             let (lo, hi) = crate::AST::int_range(dsigned, dbits);
             Some(TNumericOp::FloatToInt {
+                host_kind: numeric_host_kind(dsigned, dbits)?,
                 dst_rust: dst_rust.to_string(),
                 dst_spelling: target_name.to_string(),
                 lower: format!("{lo}.0"),
@@ -399,6 +401,20 @@ pub(crate) fn resolve_numeric_conversion_op(
             })
         }
     }
+}
+
+fn numeric_host_kind(signed: bool, bits: u8) -> Option<i64> {
+    Some(match (signed, bits) {
+        (true, 8) => 0,
+        (true, 16) => 1,
+        (true, 32) => 2,
+        (true, 64) => 3,
+        (false, 8) => 4,
+        (false, 16) => 5,
+        (false, 32) => 6,
+        (false, 64) => 7,
+        _ => return None,
+    })
 }
 
 fn numeric_rust_type_tir(name: &str) -> Option<(&'static str, Option<(bool, u8)>)> {

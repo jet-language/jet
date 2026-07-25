@@ -438,16 +438,19 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   build-time steps (S56 user derives, comptime). (D-CTCODEGEN1=A, ratified
   2026-06-25; pairs with D-METADERIVE1=A, which makes a user derive's output a
   source fragment for exactly this reason.)
-- **R12 — Two consumers, one executable IR.** Every executable TIR variant is
-  owned by two consumers: the Rust emitter for AOT binaries and the dev/JIT
-  lowerer for `jet dev`. The Rust emitter and the JIT lowerer must both handle
-  executable TIR exhaustively, wildcard-free, either by real lowering or by a
-  named internal unsupported reason that falls through transparently to the
-  next dev tier. A feature PR is incomplete unless its example/golden proves
-  the AOT path and `tests/dev.rs::dev_default_matches_compiled_binary` proves
-  default `jet dev` has the same stdout, stderr, exit code, diagnostics,
-  panics, and side effects. Native JIT coverage is a performance tier; semantic
-  parity is mandatory.
+- **R12 — One semantic core, every engine an exhaustive consumer.** TIR is the
+  single structured IR after sema. Every executable variant carries semantic
+  facts (places, types, patterns, method identities) — never pre-rendered Rust
+  source text. Rust spelling lives only in the AOT emit layer. Every engine
+  (Rust emitter, Cranelift JIT, and the canonical interpreter) must consume that
+  IR exhaustively: either real lowering or a named unsupported reason that falls
+  through to the next tier. The interpreter is the reference semantics for
+  `jet run`/`jet dev` parity. A feature PR is incomplete unless its
+  example/golden proves the AOT path and
+  `tests/dev.rs::dev_default_matches_compiled_binary` proves default `jet dev`
+  has the same stdout, stderr, exit code, diagnostics, panics, and side effects.
+  Native JIT coverage is a performance tier; semantic parity is mandatory.
+  (D-ONECORE1=A, ratified 2026-07-24.)
 
 ## Exit codes (stable contract)
 

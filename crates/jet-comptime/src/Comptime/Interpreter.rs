@@ -1776,7 +1776,10 @@ impl<'a> Interp<'a> {
                         args,
                         ..
                     } => {
-                        if vname != variant {
+                        // D-TAG1: group arms cover leaf dotted paths — `.Fire`
+                        // matches `Fire.Burn` / `Fire.Scald` the same way AOT
+                        // nested enums match a parent discriminant.
+                        if vname != variant && !vname.starts_with(&format!("{variant}.")) {
                             return Ok(false);
                         }
                         for (slot, (_, arg_val)) in bindings.iter().zip(args.iter()) {

@@ -880,6 +880,12 @@ pub(crate) fn emit_tir_core_call(
         ("core.data", "lazy") => format!("{}(&({}))", helper("jet_data_lazy"), arg(0)),
         ("core.data", "collect") => format!("{}(&({}))", helper("jet_data_collect"), arg(0)),
         ("core.data", "plan") => format!("{}(&({}))", helper("jet_data_plan"), arg(0)),
+        ("core.data", "filter") => {
+            format!("{}(&({}), {})", helper("jet_data_filter"), arg(0), arg(1))
+        }
+        ("core.data", "sort_by") => {
+            format!("{}(&({}), {})", helper("jet_data_sort_by"), arg(0), arg(1))
+        }
         ("core.data", "lazy_filter") => {
             format!("{}(&({}), {})", helper("jet_data_lazy_filter"), arg(0), arg(1))
         }

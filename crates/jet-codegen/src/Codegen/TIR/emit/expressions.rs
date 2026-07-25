@@ -6,9 +6,14 @@ use crate::Codegen::TIR::emit::collect_select_arms;
 use crate::Codegen::TIR::emit::emit_http_bridge_error;
 use crate::Codegen::TIR::emit::emit_http_response_from_bridge;
 use crate::Codegen::TIR::emit::emit_math_swizzle_read;
+use crate::Codegen::TIR::emit::emit_field_rust;
+use crate::Codegen::TIR::emit::emit_require_stop;
 use crate::Codegen::TIR::emit_tir_call_args;
 use crate::Codegen::TIR::emit_tir_core_call;
+use crate::Codegen::TIR::emit_static_owner;
 use crate::Codegen::TIR::emit_tir_orfallback_rhs;
+use crate::Codegen::TIR::emit_tir_pattern;
+use crate::Codegen::TIR::emit_tir_place;
 use crate::Codegen::TIR::emit_tir_str;
 use crate::Codegen::TIR::emit_tir_value_block;
 use crate::Codegen::TIR::TIfCond;
@@ -25,9 +30,306 @@ use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::TModuleCallForm;
+use crate::Codegen::TIR::TStructExtra;
 use crate::Codegen::TIR::TNumericOp;
+use crate::Codegen::TIR::THostArg;
+use crate::Codegen::TIR::THostCall;
+use crate::Codegen::TIR::TOptionProbe;
+use crate::Codegen::TIR::TTypedTextForm;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::tuple_join;
+
+pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) -> String {
+    match call {
+        THostCall::Helper { helper, args } => {
+            let arg_str = args
+                .iter()
+                .enumerate()
+                .map(|(i, a)| match a {
+                    THostArg::Expr(e) => {
+                        let s = emit_tir_expr(e, cx);
+                        // D-ERRCTX1: jet_context(recv, || msg)
+                        if helper.ends_with("jet_context") && i == 1 {
+                            format!("|| {s}")
+                        } else {
+                            s
+                        }
+                    }
+                    THostArg::Borrow(e) => format!("&({})", emit_tir_expr(e, cx)),
+                    THostArg::Lambda(lam) => {
+                        let move_kw = if lam.is_move { "move " } else { "" };
+                        format!("{}|{}| {}", move_kw, lam.params.join(", "), lam.body)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{helper}({arg_str})")
+        }
+        THostCall::Method { recv, method, args } => {
+            let arg_str = args
+                .iter()
+                .map(|a| emit_tir_expr(a, cx))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({}).{method}({arg_str})", emit_tir_expr(recv, cx))
+        }
+        THostCall::FixedListIndex { base, index } => format!(
+            "(({b})[({i}).0 as usize].clone())",
+            b = emit_tir_expr(base, cx),
+            i = emit_tir_expr(index, cx),
+        ),
+        THostCall::TypedText { kind, arg } => {
+            let a = emit_tir_expr(arg, cx);
+            match kind {
+                TTypedTextForm::SqlRaw => format!("(({a}).clone(), Vec::new())"),
+                TTypedTextForm::HtmlRaw => format!("({a}).clone()"),
+                TTypedTextForm::ShRaw => format!(
+                    "({a}).split_whitespace().map(|word| word.to_string()).collect::<Vec<String>>()"
+                ),
+                TTypedTextForm::SqlTemplate => format!("({a}).0.clone()"),
+                TTypedTextForm::SqlParams => format!("({a}).1.clone()"),
+                TTypedTextForm::HtmlText => format!("({a}).clone()"),
+            }
+        }
+        THostCall::FnName(name) => cx.mangle_name(name),
+        THostCall::GcEdit {
+            root,
+            method_span_start,
+            edges,
+            edit,
+            index_temp,
+            kind,
+        } => {
+            use crate::Codegen::TIR::TGcEditKind;
+            let edit_s = emit_tir_expr(edit, cx);
+            let edge_list = edges.join(", ");
+            let index = index_temp
+                .as_ref()
+                .map(|(temp, _)| temp.as_str())
+                .unwrap_or("0");
+            let mut emitted = match kind {
+                TGcEditKind::Clear => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_clearing_edges(|__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::Pop => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_pop(\"collection\", |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::RemoveIndex => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_remove(\"collection\", {index} as usize, |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::InsertIndex => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_insert(\"collection\", {index} as usize, &[{edge_list}], |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::Prepend => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_prepend(\"collection\", &[{edge_list}], |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::Additive => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot_additive(\"collection\", &[{edge_list}], |__jet_value| {edit_s}))"
+                ),
+                TGcEditKind::Plain => {
+                    format!("jet_gc::runtime_or_exit({root}.edit(|__jet_value| {edit_s}))")
+                }
+                TGcEditKind::EdgeSlot => format!(
+                    "jet_gc::runtime_or_exit({root}.edit_edge_slot(\"method:{method_span_start}\", &[{edge_list}], |__jet_value| {edit_s}))"
+                ),
+            };
+            if let Some((temp, value)) = index_temp {
+                emitted = format!(
+                    "{{ let {temp} = {}; {emitted} }}",
+                    emit_tir_expr(value, cx)
+                );
+            }
+            emitted
+        }
+        THostCall::GcRead { root } => {
+            format!("jet_gc::runtime_or_exit({root}.read(|__jet_value| __jet_value.clone()))")
+        }
+        THostCall::OptionProbe { inner, kind } => {
+            let inner_s = emit_tir_expr(inner, cx);
+            match kind {
+                TOptionProbe::IsSome => format!("({inner_s}).is_some()"),
+                TOptionProbe::Unwrap => format!("({inner_s}).unwrap()"),
+                TOptionProbe::Field(field) => {
+                    let field_rust = recv_ty
+                        .map(|ty| emit_field_rust(cx, ty, field))
+                        .unwrap_or_else(|| mangle(field));
+                    format!("({inner_s}).{field_rust}")
+                }
+            }
+        }
+        THostCall::StrMatchScan { parts, probe } => {
+            let (closure, _) =
+                str_match_scan_closure_ex(parts, cx, "_jet_switch_subject.as_str()", true);
+            match probe {
+                crate::Codegen::TIR::TMatchProbe::IsSome => format!("({closure}).is_some()"),
+                crate::Codegen::TIR::TMatchProbe::Unwrap => format!("({closure}).unwrap()"),
+            }
+        }
+        THostCall::BinMatchScan { parts, probe } => {
+            let (closure, _) =
+                bin_match_scan_closure_ex(parts, cx, "(_jet_switch_subject).as_slice()", true);
+            match probe {
+                crate::Codegen::TIR::TMatchProbe::IsSome => format!("({closure}).is_some()"),
+                crate::Codegen::TIR::TMatchProbe::Unwrap => format!("({closure}).unwrap()"),
+            }
+        }
+        THostCall::TupleIndex { base, index } => {
+            format!("({}).{index}", emit_tir_expr(base, cx))
+        }
+        THostCall::SwitchSubjectField { field } => {
+            let field_rust = recv_ty
+                .map(|ty| emit_field_rust(cx, ty, field))
+                .unwrap_or_else(|| mangle(field));
+            format!("((*_jet_switch_subject).{field_rust})")
+        }
+        THostCall::YieldSend { value } => {
+            format!(
+                "let _ = __jet_yield_tx.send({});",
+                emit_tir_expr(value, cx)
+            )
+        }
+        THostCall::TypedTextInterp { kind, literals, holes } => {
+            use crate::Codegen::TIR::TTypedTextInterpKind;
+            use crate::Codegen::escape_rust_str;
+            match kind {
+                TTypedTextInterpKind::Sql => {
+                    let template = literals.join("?");
+                    let hole_s = holes
+                        .iter()
+                        .map(|h| format!("({}).jet_show()", emit_tir_expr(h, cx)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!(
+                        "({}.to_string(), vec![{hole_s}])",
+                        escape_rust_str(&template)
+                    )
+                }
+                TTypedTextInterpKind::Sh => {
+                    let mut argv = Vec::new();
+                    for (i, lit) in literals.iter().enumerate() {
+                        for word in lit.split_whitespace() {
+                            argv.push(format!("{}.to_string()", escape_rust_str(word)));
+                        }
+                        if let Some(hole) = holes.get(i) {
+                            argv.push(format!("({}).jet_show()", emit_tir_expr(hole, cx)));
+                        }
+                    }
+                    format!("vec![{}]", argv.join(", "))
+                }
+                TTypedTextInterpKind::Html => {
+                    let mut fmt_str = String::new();
+                    let mut fmt_args = Vec::new();
+                    for (i, lit) in literals.iter().enumerate() {
+                        fmt_str.push_str(&lit.replace('{', "{{").replace('}', "}}"));
+                        if let Some(h) = holes.get(i) {
+                            fmt_str.push_str("{}");
+                            fmt_args.push(format!(
+                                "{}jet_html_escape(&({}))",
+                                cx.root_prefix,
+                                emit_tir_expr(h, cx)
+                            ));
+                        }
+                    }
+                    if fmt_args.is_empty() {
+                        format!("{}.to_string()", escape_rust_str(&fmt_str))
+                    } else {
+                        format!(
+                            "format!({}, {})",
+                            escape_rust_str(&fmt_str),
+                            fmt_args.join(", ")
+                        )
+                    }
+                }
+            }
+        }
+        THostCall::ExpectSnapshot { value, snap_path } => {
+            format!(
+                "jet_expect(format!(\"{{}}\", ({}).jet_show())).snapshot({snap_path:?})?",
+                emit_tir_expr(value, cx)
+            )
+        }
+        THostCall::EnvSet { name, value, loc } => {
+            use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
+            use crate::Codegen::escape_rust_str;
+            let name_s = emit_tir_expr(name, cx);
+            let value_s = emit_tir_expr(value, cx);
+            let locals = crate::Codegen::TIR::emit_panic_locals(loc, cx);
+            format!(
+                "{{ let __jet_env_name = ({name_s}); let __jet_env_value = ({value_s}); if let Err(__jet_env_error) = {root}jet_std_env_set(&__jet_env_name, &__jet_env_value) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name}, {src_line}, {col}, {caret}, &format!(\"core.env.set: {{}}\", __jet_env_error.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                root = cx.root_prefix,
+                cleanup = RESOURCE_CLEANUP_MARKER,
+                file = escape_rust_str(&loc.file),
+                line = loc.line,
+                fn_name = escape_rust_str(&loc.fn_name),
+                src_line = escape_rust_str(loc.src_line.trim_end()),
+                col = loc.col,
+                caret = loc.caret,
+            )
+        }
+        THostCall::NumericBounds { ty, member } => {
+            format!("{}::{member}", cx.rust_type(ty))
+        }
+        THostCall::ExpiringSecretNew {
+            value,
+            duration,
+            clock,
+            elem,
+        } => {
+            format!(
+                "{{ let __jet_expiring_value = {}; \
+                 let __jet_expiring_ttl = &({}); \
+                 let __jet_expiring_clock = &({}); \
+                 let __jet_expiring_observer = __jet_expiring_clock.observer(); \
+                 {}JetExpiringSecret::<{}>::new(\
+                     __jet_expiring_value, __jet_expiring_ttl.ms, \
+                     move || __jet_expiring_observer.now()) }}",
+                emit_tir_expr(value, cx),
+                emit_tir_expr(duration, cx),
+                emit_tir_expr(clock, cx),
+                cx.root_prefix,
+                cx.rust_type(elem)
+            )
+        }
+        THostCall::ExpiringValueNew {
+            value,
+            duration,
+            clock,
+        } => {
+            format!(
+                "{}jet_expiring_new({}, {}jet_duration_ms_value(&({})), {}jet_clock_now(&({})))",
+                cx.root_prefix,
+                emit_tir_expr(value, cx),
+                cx.root_prefix,
+                emit_tir_expr(duration, cx),
+                cx.root_prefix,
+                emit_tir_expr(clock, cx)
+            )
+        }
+        THostCall::CCallback {
+            symbol,
+            lambda,
+            ret,
+        } => {
+            let ret = ret
+                .as_ref()
+                .map(|ty| format!(" -> {}", cx.rust_type(ty)))
+                .unwrap_or_default();
+            let body = if lambda.body.starts_with('{') {
+                lambda.body.clone()
+            } else {
+                format!("{{ {} }}", lambda.body)
+            };
+            format!(
+                "{{ extern \"C\" fn {}({}){} {} {} }}",
+                symbol,
+                lambda.params.join(", "),
+                ret,
+                body,
+                symbol
+            )
+        }
+    }
+}
 
 fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx) -> String {
     if let TIfCond::And { left, right } = cond {
@@ -41,9 +343,9 @@ fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx)
             then_block,
             else_block
         ),
-        TIfCond::IfLet { pat_str, subj } => format!(
+        TIfCond::IfLet { pattern, subj } => format!(
             "if let {} = {} {} else {}",
-            pat_str,
+            emit_tir_pattern(pattern, cx),
             emit_tir_expr(subj, cx),
             then_block,
             else_block
@@ -54,10 +356,10 @@ fn emit_tir_if_expr(cond: &TIfCond, then_block: &str, else_block: &str, cx: &Cx)
             then_block,
             else_block
         ),
-        TIfCond::Matches { pat_str, subj } => format!(
+        TIfCond::Matches { pattern, subj } => format!(
             "if matches!(&({}), {}) {} else {}",
             emit_tir_expr(subj, cx),
-            pat_str,
+            emit_tir_pattern(pattern, cx),
             then_block,
             else_block
         ),
@@ -89,6 +391,7 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
         TNumericOp::TryFrom {
             dst_rust,
             dst_spelling,
+            ..
         } => format!(
             "<{dst_rust}>::try_from(({recv}) as i128).map_err(|_| \
              \"value doesn't fit in {dst_spelling}\".to_string())"
@@ -98,6 +401,7 @@ fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
             dst_spelling,
             lower,
             upper_exclusive,
+            ..
         } => format!(
             "{{ let __jet_value = ({recv}); if __jet_value.is_finite() && \
              __jet_value >= ({lower} as _) && __jet_value < ({upper_exclusive} as _) {{ \
@@ -131,13 +435,33 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::BoolLit(b) => b.to_string(),
         TExprKind::CharLit(c) => format!("{:?}", c),
         TExprKind::StrLit(parts) => emit_tir_str(parts, cx),
-        TExprKind::Local(place) => place.clone(),
+        TExprKind::Local(slot) => slot.rust_place(),
         // D-TAG1: binding-free enum variant/group pattern test.
-        TExprKind::PatternMatches { subj, pat_str } => {
-            format!("matches!(&({}), {})", emit_tir_expr(subj, cx), pat_str)
+        TExprKind::PatternMatches { subj, pattern } => {
+            format!(
+                "matches!(&({}), {})",
+                emit_tir_expr(subj, cx),
+                emit_tir_pattern(pattern, cx)
+            )
         }
-        // c109 Phase 24: a comptime const inlined verbatim (the pre-rendered value).
-        TExprKind::ConstInline(val) => val.clone(),
+        TExprKind::Unit => "()".to_string(),
+        TExprKind::DefaultLit => "Default::default()".to_string(),
+        TExprKind::Uninit => format!(
+            "unsafe {{ std::mem::MaybeUninit::<{}>::uninit().assume_init() }}",
+            cx.rust_type(&e.ty)
+        ),
+        TExprKind::CtLit(value) => value.serialize(),
+        TExprKind::HostCall(call) => emit_host_call(call, None, cx),
+        // A declared const's Rust static name, resolved from its Jet name here so
+        // the TIR node carries only the name.
+        TExprKind::ConstRef(name) => cx
+            .consts
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| mangle(name).to_uppercase()),
+        TExprKind::DataEntriesToMap(entries) => {
+            format!("{}.into_iter().collect()", entries.rust_place())
+        }
         TExprKind::Print(arg) => {
             // Parallel `jet test` runs each test on its own thread (per-test
             // isolation, D-TESTKIT1 gap #3); a bare `println!` from inside a test
@@ -182,14 +506,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 Some(p) => format!("{}(Some(&({})))", helper, emit_tir_expr(p, cx)),
             }
         }
-        // c109 Phase 26: a `require`/`require_eq`/`panic` rich-report builtin. The whole
-        // `{ … }` block emit string was rendered at lowering (byte-for-byte the AST
-        // helper); emit reads it verbatim. As a statement-position call it is wrapped
-        // `{ … };` by `TStmt::ExprStmt`, matching the AST `Stmt::Expr` `{ … };`.
-        TExprKind::RequireStop { rendered, .. } => rendered.replace(
-            crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER,
-            "",
-        ),
+        TExprKind::RequireStop { kind, loc, .. } => emit_require_stop(kind, loc, cx),
         TExprKind::Call { name, args } => {
             let arg_str = emit_tir_call_args(args, cx);
             format!("{}({})", cx.mangle_name(name), arg_str)
@@ -338,10 +655,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // lowering — emit only formats.
         TExprKind::MethodCall {
             recv,
-            method_rust,
+            method,
             args,
             operator_line,
         } => {
+            let method_rust = method.rust();
             let arg_str = emit_tir_call_args(args, cx);
             if let Some(line) = operator_line {
                 let trait_name = match method_rust.as_str() {
@@ -361,12 +679,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         // c109 Phase 27: a call through a fn-typed struct field. Mirrors the AST
         // `emit_method_call` fn-field branch: `(({recv}).{field})({args})`.
-        TExprKind::FnFieldCall {
-            recv,
-            field_rust,
-            args,
-        } => {
+        TExprKind::FnFieldCall { recv, field, args } => {
             let arg_str = emit_tir_call_args(args, cx);
+            let field_rust = emit_field_rust(cx, &recv.ty, field);
             format!(
                 "(({}).{})({})",
                 emit_tir_expr(recv, cx),
@@ -377,18 +692,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 7: a static method call. Mirrors the AST type-name dispatch:
         // `user_<Type>::user_<method>(args)`. All facts resolved at lowering.
         TExprKind::StaticCall {
-            type_prefix,
+            owner,
             owner_type,
-            method_rust,
+            method,
             args,
         } => {
             let arg_str = emit_tir_call_args(args, cx);
             let owner = match owner_type {
                 Some(ty @ Type::Apply { .. }) => format!("<{}>", cx.rust_type(ty)),
                 Some(ty) => cx.rust_type(ty),
-                None => type_prefix.clone(),
+                None => emit_static_owner(owner, cx),
             };
-            format!("{}::{}({})", owner, method_rust, arg_str)
+            format!("{}::{}({})", owner, method.rust(), arg_str)
         }
         // c109 Phase 9: a built-in collection/string method. The Map-vs-List-vs-String
         // branch was resolved into `op` at lowering; emit only formats, reproducing
@@ -816,6 +1131,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 crate::AST::IncDecOp::Inc => "+",
                 crate::AST::IncDecOp::Dec => "-",
             };
+            let place = emit_tir_place(place, cx);
             if *postfix {
                 format!("{{ let __jet_old = {place}; {place} {delta}= 1; __jet_old }}")
             } else {
@@ -825,62 +1141,112 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 3: `user_S { f: v, … }`. The Rust head and mangled field
         // names were resolved at lowering; values format like any other node.
         TExprKind::StructLit {
-            rust_type,
             fields,
             extra,
             as_trait,
         } => {
+            // Value-position generic heads need turbofish (`Foo::<T> {…}`);
+            // `cx.rust_type` spells type-position `Foo<T>` and rustc rejects it.
+            let rust_type = match &e.ty {
+                Type::Apply { name, args } if !args.is_empty() => {
+                    let head = match cx.foreign_types.get(name) {
+                        Some(rust_mod) => {
+                            format!("{}{}::{}", cx.root_prefix, rust_mod, user_type_rust(name))
+                        }
+                        None => {
+                            if let Some((alias, leaf)) = name.split_once('.') {
+                                cx.import_mods.get(alias).map_or_else(
+                                    || user_type_rust(name),
+                                    |rust_mod| {
+                                        format!(
+                                            "{}{}::{}",
+                                            cx.root_prefix,
+                                            rust_mod,
+                                            user_type_rust(leaf)
+                                        )
+                                    },
+                                )
+                            } else {
+                                user_type_rust(name)
+                            }
+                        }
+                    };
+                    format!(
+                        "{}::<{}>",
+                        head,
+                        args.iter()
+                            .map(|a| cx.rust_type(a))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }
+                _ => cx.rust_type(&e.ty),
+            };
+            let plain_fields = matches!(
+                &e.ty,
+                Type::Named(n) if crate::Codegen::net_handle_rust_type(n).is_some()
+                    || matches!(
+                        n.as_str(),
+                        "TextWidth"
+                            | "AsyncPolicy"
+                            | "DecodeError"
+                            | "FieldError"
+                            | "CBOROptions"
+                            | "CBORError"
+                            | "XMLLimits"
+                            | "XMLParseOptions"
+                            | "XMLRenderOptions"
+                            | "XMLCanonical"
+                            | "XMLError"
+                    )
+            );
             let mut parts = fields
                 .iter()
-                .map(|(field_rust, v, boxed)| {
+                .map(|(field, v, boxed)| {
+                    let field_rust = if plain_fields {
+                        field.clone()
+                    } else {
+                        emit_field_rust(cx, &e.ty, field)
+                    };
                     let value = emit_tir_expr(v, cx);
-                    // c109: a boxed (self-referential) field is wrapped `Box::new(…)`,
-                    // exactly as `emit_struct_lit`. The `boxed` flag is total (resolved
-                    // at lowering from `cx.boxed_edges`).
                     let value = if *boxed {
-                        format!("Box::new({})", value)
+                        format!("Box::new({value})")
                     } else {
                         value
                     };
-                    format!("{}: {}", field_rust, value)
+                    format!("{field_rust}: {value}")
                 })
                 .collect::<Vec<_>>();
-            // c109 Phase 17: a prelude struct's injected field (HttpRequest's `params`),
-            // appended verbatim after the user fields, exactly as `emit_struct_lit` does.
-            if let Some(extra) = extra {
-                parts.push(extra.clone());
+            if let Some(TStructExtra::HttpRequestParams) = extra {
+                parts.push("params: std::collections::BTreeMap::new()".to_string());
+                parts.push("route_template: None".to_string());
             }
-            let lit = format!("{} {{ {} }}", rust_type, parts.join(", "));
-            // c109 Phase 30: a trait-object coercion wraps the whole literal, byte-for-byte
-            // `emit_struct_lit`'s `as_trait` branch (Source/Codegen/Expression.rs ~L342).
+            let lit = format!("{rust_type} {{ {} }}", parts.join(", "));
             match as_trait {
-                Some(trait_rust) => format!("Box::new({lit}) as Box<dyn {trait_rust}>"),
+                Some(trait_name) => {
+                    let trait_rust = crate::Generics::user_trait_rust(trait_name);
+                    format!("Box::new({lit}) as Box<dyn {trait_rust}>")
+                }
                 None => lit,
             }
         }
         // c109 Phase 3: `(recv).field`. Mirrors the AST `Expr::Field` emit form
         // exactly (no deref, no clone — owning reads were rewritten to a `.clone()`
         // MethodCall in sema and excluded from the subset).
-        TExprKind::Field {
-            recv,
-            field_rust,
-            boxed,
-        } => {
-            let read = format!("({}).{}", emit_tir_expr(recv, cx), field_rust);
+        TExprKind::Field { recv, field, boxed } => {
+            let field_rust = emit_field_rust(cx, &recv.ty, field);
+            let read = format!("({}).{field_rust}", emit_tir_expr(recv, cx));
             if *boxed {
-                format!("(*{})", read)
+                format!("(*{read})")
             } else {
                 read
             }
         }
-        // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` — `(({addr}) as usize as *mut {T})`,
-        // byte-for-byte `emit_expr`'s `PtrFromAddr` arm. The cast is safe Rust (no
-        // `unsafe`); `elem_rust` was resolved at lowering.
-        TExprKind::PtrFromAddr { elem_rust, addr } => {
+        TExprKind::PtrFromAddr { elem, addr } => {
             format!(
                 "(({}) as usize as *mut {})",
                 emit_tir_expr(addr, cx),
-                elem_rust
+                cx.rust_type(elem)
             )
         }
         // D-CAP9: postfix `p.*` deref → Rust `(*(p))`. The `unsafe` is supplied by
@@ -903,8 +1269,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 4/16: an enum literal. Prefix + payload were resolved at lowering;
         // emit applies each arg's resolved `clone`/`boxed` wrappers (mirroring
         // `emit_boxed_enum_arg`: `(…).clone()` first, then `Box::new(…)`).
-        TExprKind::EnumLit { prefix, payload } => match payload {
-            TEnumPayload::Unit => prefix.clone(),
+        TExprKind::EnumLit {
+            enum_type,
+            variant,
+            payload,
+        } => {
+            let prefix = crate::Codegen::TIR::tir_enum_lit_prefix(cx, enum_type, variant);
+            match payload {
+            TEnumPayload::Unit => prefix,
             TEnumPayload::Positional(vals) => {
                 let pos = vals
                     .iter()
@@ -921,6 +1293,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     .join(", ");
                 format!("{} {{ {} }}", prefix, parts)
             }
+        }
         },
         // c109 Phase 24: a JSON construction — `{root}jet_std::Json::<Variant>(<arg>)`.
         // Reproduces `emit_core_json_lit` (Expression.rs): the arg is wrapped in
@@ -1111,6 +1484,38 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("jet_index_vec(&({}), {}, {:?}, {})", b, i, cx.file, line)
             }
         }
+        // D-MEM1 S6: `pool[id]` / `pool[id].field` — generation-checked get or
+        // get_mut place. Mutable writes and mutating receivers use get_mut.
+        TExprKind::PoolSlot {
+            pool,
+            id,
+            mutable,
+            field,
+            line,
+        } => {
+            let p = emit_tir_expr(pool, cx);
+            let i = emit_tir_expr(id, cx);
+            let base = if *mutable {
+                format!(
+                    "(*{root}jet_std::jet_pool_get_mut(&mut ({p}), {i}, {file:?}, {line}))",
+                    root = cx.root_prefix,
+                    file = cx.file,
+                )
+            } else {
+                format!(
+                    "{root}jet_std::jet_pool_get(&({p}), {i}, {file:?}, {line})",
+                    root = cx.root_prefix,
+                    file = cx.file,
+                )
+            };
+            match field {
+                Some(field) => {
+                    let field_rust = emit_field_rust(cx, &pool.ty, field);
+                    format!("{base}.{field_rust}")
+                }
+                None => base,
+            }
+        }
         TExprKind::IndexHook {
             type_name,
             base,
@@ -1237,15 +1642,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // the total `flatten` fact (flatten → `and_then`, else → `map`).
         TExprKind::OptField {
             base,
-            member_rust,
+            member,
             flatten,
         } => {
             let combinator = if *flatten { "and_then" } else { "map" };
+            let member_rust = emit_field_rust(cx, &base.ty, member);
             format!(
-                "({}).clone().{}(|__optv| __optv.{})",
+                "({}).clone().{combinator}(|__optv| __optv.{member_rust})",
                 emit_tir_expr(base, cx),
-                combinator,
-                member_rust
             )
         }
         // c109 Phase 11: a lambda/closure literal. All decisions (prep/move/box) were

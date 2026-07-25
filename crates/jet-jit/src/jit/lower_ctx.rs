@@ -5,10 +5,10 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
     self, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, THandleOp,
-    TIfCond, TJitSpawnLambda, TModuleCallForm, TOrFallback, TStmt, TStrPart,
-    TNumericOp,
+    TIfCond, TJitSpawnLambda, TLocal, TMethodRef, TModuleCallForm, TOrFallback, TPlace, TStaticOwner,
+    TStmt, TStrPart, TNumericOp,
 };
-use jet_foundation::AST::{BinOp, IncDecOp, Type, UnOp};
+use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, Type, UnOp};
 use std::collections::HashMap;
 
 use super::runtime_host::HostFns;
@@ -17,20 +17,6 @@ use super::safety::{
     jit_list_iter_elem_type, jit_value_type, record_type_key, user_type_name,
 };
 use super::types_meta::{clif_ty, init_clif_ty, JitMeta};
-
-fn numeric_int_kind(rust: &str) -> Option<i64> {
-    Some(match rust {
-        "i8" => 0,
-        "i16" => 1,
-        "i32" => 2,
-        "i64" => 3,
-        "u8" => 4,
-        "u16" => 5,
-        "u32" => 6,
-        "u64" => 7,
-        _ => return None,
-    })
-}
 use super::JitRuntime;
 
 #[derive(Clone)]
@@ -383,11 +369,11 @@ impl LowerCtx<'_, '_> {
                 place, op, value, ..
             } => {
                 if op.is_none() {
-                    if let Some((base, field)) = simple_record_field_place(place)
-                    {
+                    if let Some((base, field)) = structured_record_field_place(place) {
+                        let key = Self::local_key(base);
                         if let (Some(var), Some(base_ty)) = (
-                            self.vars.get(base).copied(),
-                            self.var_tys.get(base).cloned(),
+                            self.vars.get(&key).copied(),
+                            self.var_tys.get(&key).cloned(),
                         ) {
                             let type_name = record_type_key(&base_ty)
                                 .ok_or_else(|| format!("jit field assign recv type: {base_ty:?}"))?;
@@ -420,11 +406,24 @@ impl LowerCtx<'_, '_> {
                         }
                     }
                 }
+                let local = place.as_local().ok_or("jit assign to non-local place")?;
+                let key = Self::local_key(local);
                 let var = self
                     .vars
-                    .get(place)
+                    .get(&key)
                     .copied()
-                    .ok_or_else(|| format!("jit assign to unknown place `{place}`"))?;
+                    .ok_or_else(|| format!("jit assign to unknown place `{}`", local.name))?;
+                // D-MUTSELF1: `(*self) = New{…}` must write through the receiver
+                // handle, not replace the local SSA pointer (AOT: `(*self) = …`).
+                if local.deref && op.is_none() {
+                    let dst = self.b.use_var(var);
+                    let src = self.lower_expr(value)?;
+                    let assign = self
+                        .module
+                        .declare_func_in_func(self.host.struct_assign, self.b.func);
+                    self.b.ins().call(assign, &[dst, src]);
+                    return Ok(());
+                }
                 let val = if let Some(op) = op {
                     let current = self.b.use_var(var);
                     let rhs = self.lower_expr(value)?;
@@ -464,18 +463,18 @@ impl LowerCtx<'_, '_> {
                 })?;
                 let field_index = self
                     .meta
-                    .struct_field_index(&type_name, &assign.field_rust)
+                    .struct_field_index(&type_name, &assign.field)
                     .ok_or_else(|| {
                         format!(
                             "jit field `{}` on `{type_name}`",
-                            assign.field_rust
+                            assign.field
                         )
                     })?;
                 let value = if let Some(op) = assign.op {
                     let current = self.lower_record_field(
                         handle,
                         &type_name,
-                        &assign.field_rust,
+                        &assign.field,
                         &assign.field_ty,
                     )?;
                     self.apply_binop_to_var(current, op, rhs, &assign.field_ty)?
@@ -812,11 +811,18 @@ impl LowerCtx<'_, '_> {
             TStmt::ForIn {
                 label,
                 var,
-                collection_str,
+                source,
+                collection,
                 step,
+                method_kind,
                 body,
                 ..
             } => {
+                // The streaming/`.chars()` iteration forms need host iterators the
+                // JIT does not model; fall back to the AOT tier for them.
+                if method_kind.is_some() {
+                    return Err("jit for-in method-call collection unsupported".to_string());
+                }
                 let stride = match step {
                     Some(step) => {
                         let stride = self.lower_expr(step)?;
@@ -831,19 +837,15 @@ impl LowerCtx<'_, '_> {
                     }
                     None => self.b.ins().iconst(types::I64, 1),
                 };
-                let coll_place = collection_str.trim().to_string();
-                let coll_ty = self
-                    .var_tys
-                    .get(&coll_place)
-                    .ok_or_else(|| format!("jit for-in unknown collection `{coll_place}`"))?;
-                let elem_ty = jit_list_iter_elem_type(coll_ty).ok_or_else(|| {
-                    format!("jit for-in collection type unsupported: {coll_ty:?}")
+                let elem_ty = jit_list_iter_elem_type(&collection.ty).ok_or_else(|| {
+                    format!(
+                        "jit for-in collection type unsupported: {:?}",
+                        collection.ty
+                    )
                 })?;
-                let coll_var = self
-                    .vars
-                    .get(&coll_place)
-                    .copied()
-                    .ok_or_else(|| format!("jit for-in unknown collection `{coll_place}`"))?;
+                // The collection value is computed once, before the loop header, so it
+                // dominates both the header and the body.
+                let coll = self.lower_expr(source)?;
                 let header = self.b.create_block();
                 let body_block = self.b.create_block();
                 let step_block = self.b.create_block();
@@ -855,7 +857,6 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(header);
                 let idx = self.b.use_var(idx_var);
-                let coll = self.b.use_var(coll_var);
                 let len_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.list_len, self.b.func);
@@ -917,11 +918,14 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::EnumMatch {
                 scrutinee,
+                clone_subject: _,
                 arms,
                 else_body,
                 fallthrough,
             } => {
-                let subj = self.scrutinee_value(scrutinee)?;
+                // Ownership clone is a Rust spelling fact; the JIT already owns the
+                // value in a register, so the structured scrutinee is enough.
+                let subj = self.lower_expr(scrutinee)?;
                 let merge = self.b.create_block();
                 let mut tail = self.b.create_block();
                 self.b.ins().jump(tail, &[]);
@@ -935,10 +939,19 @@ impl LowerCtx<'_, '_> {
                 for arm in arms {
                     self.b.switch_to_block(tail);
                     self.b.seal_block(tail);
+                    let variant = arm
+                        .pattern
+                        .variant()
+                        .ok_or("jit enum arm is not a variant pattern")?;
+                    let enum_name = arm
+                        .pattern
+                        .enum_type
+                        .as_deref()
+                        .ok_or_else(|| format!("jit enum pattern missing type for `{variant}`"))?;
                     let disc = self
                         .meta
-                        .enum_variant_disc(&arm.pattern)
-                        .ok_or_else(|| format!("jit enum pattern `{}`", arm.pattern))?;
+                        .enum_variant_index(enum_name, variant)
+                        .ok_or_else(|| format!("jit enum `{enum_name}::{variant}`"))?;
                     let then_block = self.b.create_block();
                     let next = self.b.create_block();
                     let disc_const = self.b.ins().iconst(types::I64, disc);
@@ -948,15 +961,15 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().brif(eq, then_block, &[], next, &[]);
                     self.b.switch_to_block(then_block);
                     self.b.seal_block(then_block);
-                    if let Some(open) = arm.pattern.find('(') {
-                        if let Some(close) = arm.pattern[open + 1..].find(')') {
-                            let binding = arm.pattern[open + 1..open + 1 + close].trim();
-                            if !binding.is_empty() && !binding.chars().any(|ch| matches!(ch, '|' | ',' | '{')) {
+                    if let Pattern::Variant { bindings, .. } = &arm.pattern.pattern {
+                        if bindings.len() == 1 {
+                            if let PatSlot::Bind { name, .. } = &bindings[0] {
                                 let payload = self.b.ins().sshr_imm(subj, 8);
                                 let var = self.fresh_var(types::I64);
                                 self.b.def_var(var, payload);
-                                self.vars.insert(binding.to_string(), var);
-                                self.var_tys.insert(binding.to_string(), Type::Int);
+                                let key = TIR::local_place(name);
+                                self.vars.insert(key.clone(), var);
+                                self.var_tys.insert(key, Type::Int);
                             }
                         }
                     }
@@ -1189,75 +1202,45 @@ impl LowerCtx<'_, '_> {
         Ok(buf_id)
     }
 
-    /// Place strings arrive from two lowering paths that disagree on prefix
-    /// convention: a plain `Let`/`Assign` name (raw Jet name, `local_place`
-    /// mangles it here) vs. a `TIR`-lowering-time name already carrying the
-    /// `user_` Rust-mangle prefix (destructure binds — see the
-    /// `TStmt::TupleDestructure` comment in `lower_stmt`). Both must resolve
-    /// to the same `self.vars` key or a valid local silently misses its slot.
-    fn normalize_place(&self, place: &str) -> Result<String, String> {
-        let place = place.trim();
-        if let Some(inner) = place.strip_prefix("(*").and_then(|s| s.strip_suffix(')')) {
-            return self.normalize_place(inner);
-        }
-        if self.vars.contains_key(place) {
-            return Ok(place.to_string());
-        }
-        if let Some(name) = place.strip_prefix("user_") {
-            return Ok(TIR::local_place(name));
-        }
-        Ok(place.to_string())
+    /// Variable-map key for a local slot. User bindings live under their mangled
+    /// Rust spelling (`user_x`); generated temps keep their reserved names.
+    fn local_key(local: &TLocal) -> String {
+        local.rust_name()
     }
 
-    fn load_place(&mut self, place: &str) -> Result<Value, String> {
-        let key = self.normalize_place(place)?;
+    fn load_local(&mut self, local: &TLocal) -> Result<Value, String> {
+        let key = Self::local_key(local);
         let var = self
             .vars
             .get(&key)
             .copied()
-            .ok_or_else(|| format!("jit unknown place `{place}`"))?;
+            .ok_or_else(|| format!("jit unknown local `{}`", local.name))?;
         Ok(self.b.use_var(var))
     }
 
-    fn scrutinee_value(&mut self, s: &str) -> Result<Value, String> {
-        let trimmed = s.trim();
-        if let Some(stripped) = trimmed.strip_suffix(".clone()") {
-            let inner = stripped
-                .trim()
-                .trim_start_matches('(')
-                .trim_end_matches(')');
-            return self.load_place(inner);
-        }
-        self.load_place(trimmed)
-    }
-
     /// `TExprKind::MethodCall`'s `func_ids` lookup key: JIT compiles user
-    /// methods into plain functions named `Type::method`, so both this and
-    /// `static_method_key` must reproduce the AOT emitter's exact naming
-    /// convention or `func_ids.get(&key)` misses (an internal lookup failure,
-    /// not a user-facing error — surfaces here as "missing method").
-    fn method_key(&self, recv_ty: &Type, method_rust: &str) -> Option<String> {
+    /// methods into plain functions named `Type::method`. The method's Jet
+    /// name is already on `TMethodRef` — no Rust mangle stripping.
+    fn method_key(&self, recv_ty: &Type, method: &TMethodRef) -> Option<String> {
         let base = user_type_name(recv_ty)?;
-        let method = method_rust.strip_prefix("user_").unwrap_or(method_rust);
         if matches!(recv_ty, Type::Apply { .. }) {
-            let concrete = format!("{}::{method}", recv_ty.name());
+            let concrete = format!("{}::{}", recv_ty.name(), method.name);
             if self.func_ids.contains_key(&concrete) {
                 return Some(concrete);
             }
         }
-        Some(format!("{base}::{method}"))
+        Some(format!("{}::{}", base, method.name))
     }
 
-    fn static_method_key(
-        type_prefix: &str,
-        owner_type: Option<&Type>,
-        method_rust: &str,
-    ) -> Option<String> {
-        let type_name = type_prefix.strip_prefix("user_")?;
-        let method = method_rust.strip_prefix("user_").unwrap_or(method_rust);
+    fn static_method_key(owner: &TStaticOwner, owner_type: Option<&Type>, method: &TMethodRef) -> Option<String> {
+        let type_name = match owner {
+            TStaticOwner::User(name) => name.as_str(),
+            TStaticOwner::Prelude { .. } => return None,
+        };
         Some(format!(
-            "{}::{method}",
-            owner_type.map_or_else(|| type_name.to_string(), Type::name)
+            "{}::{}",
+            owner_type.map_or_else(|| type_name.to_string(), Type::name),
+            method.name
         ))
     }
 
@@ -1309,13 +1292,13 @@ impl LowerCtx<'_, '_> {
         &mut self,
         handle: Value,
         type_name: &str,
-        field_rust: &str,
+        field: &str,
         fallback_ty: &Type,
     ) -> Result<Value, String> {
         let idx = self
             .meta
-            .struct_field_index(type_name, field_rust)
-            .ok_or_else(|| format!("jit field `{field_rust}` on `{type_name}`"))?
+            .struct_field_index(type_name, field)
+            .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?
             as i64;
         let idx_val = self.b.ins().iconst(types::I64, idx);
         // TIR has already substituted any generic owner arguments. The
@@ -1415,15 +1398,7 @@ impl LowerCtx<'_, '_> {
             TExprKind::BoolLit(v) => Ok(self.b.ins().iconst(types::I8, if *v { 1 } else { 0 })),
             TExprKind::CharLit(v) => Ok(self.b.ins().iconst(types::I32, *v as i64)),
             TExprKind::StrLit(parts) => self.lower_string_lit(parts),
-            TExprKind::Local(place) => {
-                let key = self.normalize_place(place)?;
-                let var = self
-                    .vars
-                    .get(&key)
-                    .copied()
-                    .ok_or_else(|| format!("jit unknown local `{place}`"))?;
-                Ok(self.b.use_var(var))
-            }
+            TExprKind::Local(local) => self.load_local(local),
             TExprKind::Borrow { .. } => Err("jit place borrow unsupported".to_string()),
             TExprKind::Unary { op, operand } => {
                 let inner = self.lower_expr(operand)?;
@@ -1704,7 +1679,7 @@ impl LowerCtx<'_, '_> {
                         TOrFallback::ContinueLabel(name) => {
                             self.emit_loop_fallback(Some(name), "continue", true)?;
                         }
-                        TOrFallback::Return(_) | TOrFallback::Panic(_) => {
+                        TOrFallback::Return(_) | TOrFallback::Panic { .. } => {
                             return Err("jit option fallback unsupported".to_string());
                         }
                     }
@@ -1728,7 +1703,7 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(fail_block);
                 self.b.seal_block(fail_block);
                 match fallback {
-                    TOrFallback::Panic(_) => {
+                    TOrFallback::Panic { .. } => {
                         let line = self.b.ins().iconst(types::I32, 1);
                         let host_ref = self
                             .module
@@ -1805,36 +1780,21 @@ impl LowerCtx<'_, '_> {
             TExprKind::StructLit { fields, .. } => self.lower_struct_lit(fields),
             TExprKind::TupleLit { fields, .. } => self.lower_tuple_lit(fields),
             TExprKind::Field {
-                recv, field_rust, ..
+                recv, field, ..
             } => {
-                if let Some(method_rust) = field_rust.strip_suffix("()") {
-                    let key = self.method_key(&recv.ty, method_rust)
-                        .ok_or_else(|| format!("jit computed field on {:?}", recv.ty))?;
-                    let func_id = self
-                        .func_ids
-                        .get(&key)
-                        .copied()
-                        .ok_or_else(|| format!("jit missing computed field `{key}`"))?;
-                    let receiver = self.lower_expr(recv)?;
-                    let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                    let call = self.b.ins().call(func_ref, &[receiver]);
-                    let result = self.b.inst_results(call)[0];
-                    self.emit_trap_check()?;
-                    return Ok(result);
-                }
                 let handle = self.lower_expr(recv)?;
                 let type_name = record_type_key(&recv.ty)
                     .or_else(|| self.method_struct.clone())
                     .ok_or("jit field recv type")?;
-                self.lower_record_field(handle, &type_name, field_rust, &expr.ty)
+                self.lower_record_field(handle, &type_name, field, &expr.ty)
             }
             TExprKind::MethodCall {
                 recv,
-                method_rust,
+                method,
                 args,
                 ..
             } => {
-                let key = self.method_key(&recv.ty, method_rust)
+                let key = self.method_key(&recv.ty, method)
                     .ok_or_else(|| format!("jit method on {:?}", recv.ty))?;
                 let func_id = self
                     .func_ids
@@ -1852,13 +1812,16 @@ impl LowerCtx<'_, '_> {
                 Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
             }
             TExprKind::StaticCall {
-                type_prefix,
+                owner,
                 owner_type,
-                method_rust,
+                method,
                 args,
             } => {
-                let key = Self::static_method_key(type_prefix, owner_type.as_ref(), method_rust)
-                    .ok_or_else(|| format!("jit static `{type_prefix}::{method_rust}`"))?;
+                let key = Self::static_method_key(owner, owner_type.as_ref(), method)
+                    .ok_or_else(|| format!("jit static `{}::{}`", match owner {
+                        TStaticOwner::User(name) => name.as_str(),
+                        TStaticOwner::Prelude { path, .. } => path.as_str(),
+                    }, method.name))?;
                 let func_id = self
                     .func_ids
                     .get(&key)
@@ -1873,17 +1836,23 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
             }
-            TExprKind::EnumLit { prefix, payload } => match payload {
+            TExprKind::EnumLit {
+                enum_type,
+                variant,
+                payload,
+            } => match payload {
                 TEnumPayload::Unit => {
                     let disc = self
                         .meta
-                        .enum_variant_disc(prefix)
-                        .ok_or_else(|| format!("jit enum lit `{prefix}`"))?;
+                        .enum_variant_index(enum_type, variant)
+                        .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     Ok(self.b.ins().iconst(types::I64, disc))
                 }
                 TEnumPayload::Positional(values) if values.len() == 1 && matches!(values[0].value.ty, Type::Int) => {
-                    let disc = self.meta.enum_variant_disc(prefix)
-                        .ok_or_else(|| format!("jit enum lit `{prefix}`"))?;
+                    let disc = self
+                        .meta
+                        .enum_variant_index(enum_type, variant)
+                        .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     let payload = self.lower_expr(&values[0].value)?;
                     let shifted = self.b.ins().ishl_imm(payload, 8);
                     let disc = self.b.ins().iconst(types::I64, disc);
@@ -1899,10 +1868,17 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iadd(v, one))
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
-            TExprKind::ConstInline(code) => self.meta.int_constant(code)
-                .or_else(|| self.meta.has_generic_instances().then(|| code.strip_suffix("i64").and_then(|value| value.parse().ok())).flatten())
-                .map(|value| self.b.ins().iconst(types::I64, value))
-                .ok_or_else(|| "jit const inline unsupported".to_string()),
+            TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
+            TExprKind::CtLit(jet_foundation::AST::CtValue::Int(v)) => {
+                Ok(self.b.ins().iconst(types::I64, *v))
+            }
+            TExprKind::CtLit(_)
+            | TExprKind::HostCall(_)
+            | TExprKind::DefaultLit
+            | TExprKind::Uninit => Err("jit host/default/uninit/ct-lit unsupported".to_string()),
+            TExprKind::ConstRef(_) => Err("jit const ref unsupported".to_string()),
+            TExprKind::DataEntriesToMap(_) => Err("jit data-entries-to-map unsupported".to_string()),
+            TExprKind::PoolSlot { .. } => Err("jit pool slot unsupported".to_string()),
             TExprKind::RangeCheckedCtor { .. } => {
                 Err("jit range-checked ctor unsupported".to_string())
             }
@@ -2362,20 +2338,16 @@ impl LowerCtx<'_, '_> {
                 }
                 Ok(converted)
             }
-            TNumericOp::TryFrom { dst_rust, .. } => {
-                let kind = numeric_int_kind(dst_rust)
-                    .ok_or_else(|| format!("jit integer destination unsupported: {dst_rust}"))?;
+            TNumericOp::TryFrom { host_kind, .. } => {
                 let unsigned = i64::from(matches!(recv.ty, Type::IntN { signed: false, .. }));
                 let unsigned = self.b.ins().iconst(types::I64, unsigned);
-                let kind = self.b.ins().iconst(types::I64, kind);
+                let kind = self.b.ins().iconst(types::I64, *host_kind);
                 let host = self.module.declare_func_in_func(self.host.numeric_try_i64, self.b.func);
                 let call = self.b.ins().call(host, &[value, unsigned, kind]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TNumericOp::FloatToInt { dst_rust, .. } => {
-                let kind = numeric_int_kind(dst_rust)
-                    .ok_or_else(|| format!("jit integer destination unsupported: {dst_rust}"))?;
-                let kind = self.b.ins().iconst(types::I64, kind);
+            TNumericOp::FloatToInt { host_kind, .. } => {
+                let kind = self.b.ins().iconst(types::I64, *host_kind);
                 let host = self.module.declare_func_in_func(self.host.numeric_float_to_int, self.b.func);
                 let call = self.b.ins().call(host, &[value, kind]);
                 Ok(self.b.inst_results(call)[0])
@@ -2422,9 +2394,9 @@ impl LowerCtx<'_, '_> {
             return Ok(self.b.inst_results(call)[0]);
         }
         let source = match &inner.kind {
-            TExprKind::Local(place) => format!("local {place}"),
-            TExprKind::Field { field_rust, .. } => format!("field {field_rust}"),
-            TExprKind::MethodCall { method_rust, .. } => format!("method {method_rust}"),
+            TExprKind::Local(local) => format!("local {}", local.name),
+            TExprKind::Field { field, .. } => format!("field {field}"),
+            TExprKind::MethodCall { method, .. } => format!("method {}", method.name),
             _ => "other expression".to_string(),
         };
         Err(format!("jit clone unsupported type: {:?}, {source}", inner.ty))
@@ -2446,7 +2418,7 @@ impl LowerCtx<'_, '_> {
         for cap in &lam.captures {
             let mut val = self.lower_expr(&TExpr {
                 ty: cap.ty.clone(),
-                kind: TExprKind::Local(TIR::local_place(&cap.name)),
+                kind: TExprKind::Local(TLocal::user(&cap.name)),
             })?;
             if cap.clone_at_spawn {
                 let host_ref = self
@@ -2931,7 +2903,7 @@ impl LowerCtx<'_, '_> {
         self.b.append_block_param(merge, types::I8);
         for (i, op) in ops.iter().enumerate() {
             let cmp = if hooks[i] {
-                let key = self.method_key(&operands[i].ty, "compare")
+                let key = self.method_key(&operands[i].ty, &TMethodRef::inherent("compare"))
                     .ok_or_else(|| format!("jit compare hook on {:?}", operands[i].ty))?;
                 let func_id = self
                     .func_ids
@@ -3004,19 +2976,22 @@ impl LowerCtx<'_, '_> {
     fn lower_incdec(
         &mut self,
         op: IncDecOp,
-        place: &str,
+        place: &TPlace,
         postfix: bool,
         ty: &Type,
     ) -> Result<Value, String> {
         if !matches!(ty, Type::Int) {
             return Err("jit increment/decrement unsupported type".to_string());
         }
-        let key = self.normalize_place(place)?;
+        let local = place
+            .as_local()
+            .ok_or("jit increment/decrement non-local place")?;
+        let key = Self::local_key(local);
         let var = self
             .vars
             .get(&key)
             .copied()
-            .ok_or_else(|| format!("jit increment/decrement unknown local `{place}`"))?;
+            .ok_or_else(|| format!("jit increment/decrement unknown local `{}`", local.name))?;
         let old = self.b.use_var(var);
         let delta = match op {
             IncDecOp::Inc => self.b.ins().iconst(types::I64, 1),
@@ -3239,15 +3214,20 @@ impl LowerCtx<'_, '_> {
     }
 }
 
-fn simple_record_field_place(place: &str) -> Option<(&str, &str)> {
-    let (base, field) = place.strip_prefix('(')?.split_once(").")?;
-    let base = base
-        .strip_prefix("(*")
-        .and_then(|base| base.strip_suffix(')'))
-        .unwrap_or(base);
-    (base.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-        && field
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_'))
-    .then_some((base, field))
+fn structured_record_field_place(place: &TPlace) -> Option<(&TLocal, &str)> {
+    let TPlace::Expr(expr) = place else {
+        return None;
+    };
+    let TExprKind::Field {
+        recv,
+        field,
+        boxed: false,
+    } = &expr.kind
+    else {
+        return None;
+    };
+    let TExprKind::Local(local) = &recv.kind else {
+        return None;
+    };
+    Some((local, field.as_str()))
 }

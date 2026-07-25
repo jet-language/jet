@@ -12,6 +12,7 @@ use crate::Codegen::TIR::resolve_self_ty;
 use crate::Codegen::TIR::SerdeCodec;
 use crate::Codegen::TIR::TFunc;
 use crate::Codegen::TIR::TFuncKind;
+use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::{TExpr, TExprKind, TStmt};
 use crate::Codegen::TIR::TWebParamReconstruction;
 use crate::Syntax;
@@ -31,31 +32,29 @@ fn line_at_byte_offset(src: &str, offset: usize) -> usize {
 
 fn bind_resource_param(
     source_name: &str,
-    rust_name: &str,
     ty: &Type,
     convention: AccessConvention,
     cx: &Cx,
     env: &mut LowerEnv,
     guards: &mut Vec<TStmt>,
-    ordinary_place: String,
+    ordinary_slot: TLocal,
 ) {
     let resource = matches!(convention, AccessConvention::Move)
         && matches!(ty, Type::Named(name) | Type::Apply { name, .. } if cx.close_types.contains(name));
     if !resource {
-        env.bind(source_name, ordinary_place, Some(ty.clone()));
+        env.bind(source_name, ordinary_slot, Some(ty.clone()));
         return;
     }
     let guard_name = format!("__jet_resource_param_{source_name}");
-    let guard_rust = mangle(&guard_name);
     guards.push(TStmt::Let {
-        name: guard_name,
+        name: guard_name.clone(),
         kw: "let mut",
-        ty_clause: format!(": JetResource<{}>", cx.rust_type(ty)),
+        let_ty: crate::Codegen::TIR::TLetTy::resource(ty.clone()),
         init: TExpr {
             ty: ty.clone(),
             kind: TExprKind::ResourceNew(Box::new(TExpr {
                 ty: ty.clone(),
-                kind: TExprKind::Local(rust_name.to_string()),
+                kind: TExprKind::Local(TLocal::user(source_name)),
             })),
         },
         track_origin: None,
@@ -64,7 +63,7 @@ fn bind_resource_param(
     });
     env.bind(
         source_name,
-        format!("(*{guard_rust})"),
+        TLocal::user(&guard_name).through_ref(),
         Some(ty.clone()),
     );
     env.mark_resource(source_name);
@@ -140,11 +139,11 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
                                 )
                             })
                             .collect();
-                        env.bind(&p.name, rust_name.clone(), Some(param_ty.clone()));
+                        env.bind(&p.name, TLocal::user(&p.name), Some(param_ty.clone()));
                         params.push((rust_name.clone(), param_ty.clone(), p.convention));
                         web_param_reconstructions.push(TWebParamReconstruction {
-                            local_rust: rust_name,
-                            rust_type: cx.mangle_name(type_name),
+                            local: TLocal::user(&p.name),
+                            ty: Type::Named(type_name.to_string()),
                             fields: flat_fields,
                         });
                         continue;
@@ -154,10 +153,9 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         }
         let mut slot_param = p.clone();
         slot_param.ty = param_ty.clone();
-        let place = param_place_generic(&rust_name, &slot_param, &f.type_params);
+        let place = param_place_generic(&p.name, &slot_param, &f.type_params);
         bind_resource_param(
             &p.name,
-            &rust_name,
             &param_ty,
             p.convention,
             cx,
@@ -207,7 +205,6 @@ pub(crate) fn render_contract_cond(
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
     for p in &f.params {
-        let rust_name = cx.mangle_name(&p.name);
         let param_ty = if p.variadic {
             Type::List(Box::new(p.ty.clone()))
         } else {
@@ -215,11 +212,11 @@ pub(crate) fn render_contract_cond(
         };
         let mut slot_param = p.clone();
         slot_param.ty = param_ty.clone();
-        let place = param_place_generic(&rust_name, &slot_param, &f.type_params);
+        let place = param_place_generic(&p.name, &slot_param, &f.type_params);
         env.bind(&p.name, place, Some(param_ty));
     }
     if let Some((rust_name, ty)) = result_binding {
-        env.bind("result", rust_name.to_string(), Some(ty.clone()));
+        env.bind("result", TLocal::generated(rust_name), Some(ty.clone()));
     }
     emit_tir_expr(&lower_expr(cond, cx, &mut env), cx)
 }
@@ -250,8 +247,7 @@ pub(crate) fn emit_tir_property_test_body(
 ) {
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
     for p in params {
-        let rust_name = mangle(&p.name);
-        env.bind(&p.name, rust_name, Some(p.ty.clone()));
+        env.bind(&p.name, TLocal::user(&p.name), Some(p.ty.clone()));
     }
     let tbody = lower_stmts(body, cx, &mut env);
     emit_tir_stmts(&tbody, cx, out, 1);
@@ -268,7 +264,7 @@ pub(crate) fn emit_tir_error_conv_body(body: &[Stmt], from_ty: &str, cx: &Cx, ou
     let mut env = LowerEnv::new(cx.current_fn.borrow().clone());
     env.bind(
         Syntax::KW_SELF,
-        "user_self".to_string(),
+        TLocal::user(Syntax::KW_SELF),
         Some(Type::Named(from_ty.to_string())),
     );
     let tbody = lower_stmts(body, cx, &mut env);
@@ -302,11 +298,11 @@ pub(crate) fn render_generics(
 /// Generic parameters preserve their declared access convention exactly like
 /// concrete parameters; `&stream: T` therefore dereferences its Rust `&mut T`.
 pub(crate) fn param_place_generic(
-    rust_name: &str,
+    name: &str,
     p: &Param,
     _type_params: &[crate::AST::TypeParam],
-) -> String {
-    param_place(rust_name, p)
+) -> TLocal {
+    param_place(name, p)
 }
 
 /// c109 Phase 7: lower an inherent method (instance or static) of `type_name` to a
@@ -350,9 +346,9 @@ pub(crate) fn lower_method_for_owner(
             // `self.field = v` → `((*self)).field = v`, whole-`self` `self = New{}` →
             // `(*self) = New{}` (D-MUTSELF1). `self`/`take self` carry no deref.
             let place = if matches!(p.convention, AccessConvention::Write) {
-                "(*self)".to_string()
+                TLocal::generated("self").through_ref()
             } else {
-                "self".to_string()
+                TLocal::generated("self")
             };
             env.bind(Syntax::KW_SELF, place, Some(owner_ty.clone()));
             if matches!(p.convention, AccessConvention::Read) {
@@ -363,12 +359,11 @@ pub(crate) fn lower_method_for_owner(
             continue;
         }
         let rust_name = mangle(&p.name);
-        let place = param_place(&rust_name, p);
+        let place = param_place(&p.name, p);
         // A `Self`-typed param resolves to the owning type for totality.
         let pty = resolve_self_ty(&p.ty, type_name);
         bind_resource_param(
             &p.name,
-            &rust_name,
             &pty,
             p.convention,
             cx,
@@ -450,9 +445,9 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
             // (NOT `None` like `emit_method`). D-MUTSELF1: a `mut self` receiver is
             // `&mut self`, so its place DEREFS (`(*self)`); `self`/`take self` do not.
             let place = if matches!(p.convention, AccessConvention::Write) {
-                "(*self)".to_string()
+                TLocal::generated("self").through_ref()
             } else {
-                "self".to_string()
+                TLocal::generated("self")
             };
             env.bind(
                 Syntax::KW_SELF,
@@ -469,14 +464,13 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         // and re-bound to an owned clone at the function head, so the body sees an owned
         // `Data` local — its place is the bare name, NOT `param_place`'s non-scalar deref.
         let place = if serde == Some(SerdeCodec::Decode) {
-            rust_name.clone()
+            TLocal::user(&p.name)
         } else {
-            param_place(&rust_name, p)
+            param_place(&p.name, p)
         };
         let pty = resolve_self_ty(&p.ty, type_name);
         bind_resource_param(
             &p.name,
-            &rust_name,
             &pty,
             p.convention,
             cx,
@@ -614,7 +608,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
 /// The Rust place a parameter reads as, mirroring `emit_func`'s `deref` logic:
 /// a `Read` parameter of non-scalar type (String/Char) is a `&T` and must be
 /// dereferenced; `Mutate` is `&mut T` (deref'd); `Move`/scalar-`Read` is by value.
-pub(crate) fn param_place(rust_name: &str, p: &Param) -> String {
+pub(crate) fn param_place(name: &str, p: &Param) -> TLocal {
     let deref = match p.convention {
         AccessConvention::Read if p.ty.is_scalar() => {
             false
@@ -623,9 +617,10 @@ pub(crate) fn param_place(rust_name: &str, p: &Param) -> String {
         AccessConvention::Write => true,
         AccessConvention::Move => false,
     };
+    let slot = TLocal::user(name);
     if deref {
-        format!("(*{})", rust_name)
+        slot.through_ref()
     } else {
-        rust_name.to_string()
+        slot
     }
 }

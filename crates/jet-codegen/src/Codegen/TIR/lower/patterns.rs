@@ -1,14 +1,10 @@
 use crate::AST::{BinOp, Expr, PatSlot, Pattern, Stmt, SwitchArm, Type, VariantPayload};
 use crate::Codegen::Cx;
-use crate::Codegen::emit_match_pattern;
-use crate::Codegen::mangle;
 use crate::Codegen::mangle_variant;
 use crate::Codegen::TIR::arm_fallible_pattern;
 use crate::Codegen::TIR::arm_head_range;
 use crate::Codegen::TIR::arm_variant_pattern;
 use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::core_struct_field_rust_name;
-use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::expr_ast_jet_ty;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::LowerEnv;
@@ -21,8 +17,9 @@ use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::TMatchArm;
+use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TPattern;
 use crate::Codegen::TIR::TStmt;
-use crate::Codegen::TIR::tuple_join;
 use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::variant_pattern_enum;
 use crate::Codegen::variant_binding_types;
@@ -134,11 +131,22 @@ pub(super) fn lower_reader_take_pattern(
 /// D-PARSESTR1: the bool test for a str-match arm head — whether the scan
 /// closure succeeds. Always refutable (E0148 requires an `else` whenever this
 /// pattern appears in an if-table with no fallback).
-pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
-    let (closure, _) = str_match_scan_closure(pattern, cx);
+pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, _cx: &Cx) -> TExpr {
+    let Pattern::StrMatch { parts, .. } = pattern else {
+        return TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
+                parts: Vec::new(),
+                probe: crate::Codegen::TIR::TMatchProbe::IsSome,
+            })),
+        };
+    };
     TExpr {
         ty: Type::Bool,
-        kind: TExprKind::ConstInline(format!("({}).is_some()", closure)),
+        kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
+            parts: parts.clone(),
+            probe: crate::Codegen::TIR::TMatchProbe::IsSome,
+        })),
     }
 }
 
@@ -148,53 +156,55 @@ pub(super) fn str_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
 /// independently re-derived rather than shared), binds the whole result tuple
 /// to one temp, then projects each hole out of it by field index.
 pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
-    let (closure, holes) = str_match_scan_closure(pattern, cx);
+    let (_, holes) = str_match_scan_closure(pattern, cx);
     if holes.is_empty() {
         return Vec::new();
     }
-    let tuple_ty_str = tuple_join(
-        &holes
-            .iter()
-            .map(|(_, t)| cx.rust_type(t))
-            .collect::<Vec<_>>(),
-    );
-    // `TStmt::Let` always mangles its `name` at emission (Codegen/TIR/emit.rs),
-    // so the tuple temp's REFERENCED name must go through the same `mangle`.
+    let parts = match pattern {
+        Pattern::StrMatch { parts, .. } => parts.clone(),
+        _ => Vec::new(),
+    };
     let tuple_local = "__jet_sm_tuple";
-    let tuple_rust = mangle(tuple_local);
+    let tuple_ty = Type::Tuple(
+        holes
+            .iter()
+            .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+            .collect(),
+    );
     let mut out = vec![TStmt::Let {
         name: tuple_local.to_string(),
         kw: "let",
-        ty_clause: format!(": ({})", tuple_ty_str),
+        let_ty: crate::Codegen::TIR::let_ty_tuple(holes.iter().map(|(_, t)| t.clone()).collect()),
         init: TExpr {
-            ty: Type::Bool,
-            kind: TExprKind::ConstInline(format!("({}).unwrap()", closure)),
+            ty: tuple_ty.clone(),
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::StrMatchScan {
+                parts,
+                probe: crate::Codegen::TIR::TMatchProbe::Unwrap,
+            })),
         },
         track_origin: None,
-                gc_promotion: None,
-                gc_transferred: false,
+        gc_promotion: None,
+        gc_transferred: false,
     }];
-    let single = holes.len() == 1;
     for (i, (name, ty)) in holes.iter().enumerate() {
-        let local_rust = mangle(name);
-        env.bind(name, local_rust, Some(ty.clone()));
-        let project = if single {
-            // A one-element Rust tuple is `(x,)`; its sole field is still `.0`.
-            format!("{}.0", tuple_rust)
-        } else {
-            format!("{}.{}", tuple_rust, i)
-        };
+        env.bind(name, TLocal::user(name), Some(ty.clone()));
         out.push(TStmt::Let {
             name: name.clone(),
             kw: "let",
-            ty_clause: format!(": {}", cx.rust_type(ty)),
+            let_ty: crate::Codegen::TIR::TLetTy::plain(ty.clone()),
             init: TExpr {
                 ty: ty.clone(),
-                kind: TExprKind::ConstInline(project),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TupleIndex {
+                    base: Box::new(TExpr {
+                        ty: tuple_ty.clone(),
+                        kind: TExprKind::Local(TLocal::user(tuple_local)),
+                    }),
+                    index: i,
+                })),
             },
             track_origin: None,
-                gc_promotion: None,
-                gc_transferred: false,
+            gc_promotion: None,
+            gc_transferred: false,
         });
     }
     out
@@ -202,11 +212,17 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
 
 /// D-BINPAT1 (card #506): the bool test for a binary-pattern arm head —
 /// whether the bit-scan closure succeeds. Always refutable (E0148).
-pub(super) fn bin_match_pattern_cond_expr(pattern: &Pattern, cx: &Cx) -> TExpr {
-    let (closure, _) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
+pub(super) fn bin_match_pattern_cond_expr(pattern: &Pattern, _cx: &Cx) -> TExpr {
+    let parts = match pattern {
+        Pattern::BinMatch { parts, .. } => parts.clone(),
+        _ => Vec::new(),
+    };
     TExpr {
         ty: Type::Bool,
-        kind: TExprKind::ConstInline(format!("({}).is_some()", closure)),
+        kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::BinMatchScan {
+            parts,
+            probe: crate::Codegen::TIR::TMatchProbe::IsSome,
+        })),
     }
 }
 
@@ -218,50 +234,55 @@ pub(super) fn lower_bin_match_pattern_bindings(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> Vec<TStmt> {
-    let (closure, holes) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
+    let (_, holes) = crate::Codegen::TIR::lower::bin_match_scan_closure(pattern, cx);
     if holes.is_empty() {
         return Vec::new();
     }
-    let tuple_ty_str = tuple_join(
-        &holes
-            .iter()
-            .map(|(_, t)| cx.rust_type(t))
-            .collect::<Vec<_>>(),
-    );
+    let parts = match pattern {
+        Pattern::BinMatch { parts, .. } => parts.clone(),
+        _ => Vec::new(),
+    };
     let tuple_local = "__jet_bm_tuple";
-    let tuple_rust = mangle(tuple_local);
+    let tuple_ty = Type::Tuple(
+        holes
+            .iter()
+            .map(|(n, t)| (n.clone(), Box::new(t.clone())))
+            .collect(),
+    );
     let mut out = vec![TStmt::Let {
         name: tuple_local.to_string(),
         kw: "let",
-        ty_clause: format!(": ({})", tuple_ty_str),
+        let_ty: crate::Codegen::TIR::let_ty_tuple(holes.iter().map(|(_, t)| t.clone()).collect()),
         init: TExpr {
-            ty: Type::Bool,
-            kind: TExprKind::ConstInline(format!("({}).unwrap()", closure)),
+            ty: tuple_ty.clone(),
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::BinMatchScan {
+                parts,
+                probe: crate::Codegen::TIR::TMatchProbe::Unwrap,
+            })),
         },
         track_origin: None,
-                gc_promotion: None,
-                gc_transferred: false,
+        gc_promotion: None,
+        gc_transferred: false,
     }];
-    let single = holes.len() == 1;
     for (i, (name, ty)) in holes.iter().enumerate() {
-        let local_rust = mangle(name);
-        env.bind(name, local_rust, Some(ty.clone()));
-        let project = if single {
-            format!("{}.0", tuple_rust)
-        } else {
-            format!("{}.{}", tuple_rust, i)
-        };
+        env.bind(name, TLocal::user(name), Some(ty.clone()));
         out.push(TStmt::Let {
             name: name.clone(),
             kw: "let",
-            ty_clause: format!(": {}", cx.rust_type(ty)),
+            let_ty: crate::Codegen::TIR::TLetTy::plain(ty.clone()),
             init: TExpr {
                 ty: ty.clone(),
-                kind: TExprKind::ConstInline(project),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TupleIndex {
+                    base: Box::new(TExpr {
+                        ty: tuple_ty.clone(),
+                        kind: TExprKind::Local(TLocal::user(tuple_local)),
+                    }),
+                    index: i,
+                })),
             },
             track_origin: None,
-                gc_promotion: None,
-                gc_transferred: false,
+            gc_promotion: None,
+            gc_transferred: false,
         });
     }
     out
@@ -277,12 +298,6 @@ pub(super) fn struct_pattern_field_type(cx: &Cx, subject_ty: &Type, field: &str)
             .map(|(_, t)| t.clone()),
         _ => struct_field_type(cx, subject_ty, field),
     }
-}
-
-pub(super) fn struct_pattern_subject_field_expr(cx: &Cx, subject_ty: &Type, field: &str) -> String {
-    let field_rust =
-        core_struct_field_rust_name(cx, subject_ty, field).unwrap_or_else(|| mangle(field));
-    format!("((*_jet_switch_subject).{})", field_rust)
 }
 
 pub(super) fn bool_and_chain(mut tests: Vec<TExpr>) -> TExpr {
@@ -329,24 +344,30 @@ pub(crate) fn lower_fallible_match(
     // subject in-subset is never a deref'd slot (it is a fn-call value or an owned
     // local), so the scrutinee is the plain emitted form — matching the AST path,
     // whose `subj` clone branch only fires for a deref'd `Ident`.
-    let scrutinee = match subject {
+    let (scrutinee, clone_subject) = match subject {
         Expr::Ident(name, _) if env.is_borrowed(name) => {
-            format!("({}).clone()", env.rust_name_of(name))
+            let mut by_value = env.local_of(name);
+            by_value.deref = false;
+            (
+                TExpr {
+                    ty: subject_ty.clone(),
+                    kind: TExprKind::Local(by_value),
+                },
+                true,
+            )
         }
-        _ => emit_tir_expr(&subject_t, cx),
+        _ => (subject_t, false),
     };
     let mut tarms = Vec::new();
     for arm in arms {
         let pattern =
             arm_fallible_pattern(cx, &arm.cond, subject).expect("gate proved fallible arm");
-        let pat = tir_fallible_pattern(&pattern);
         // An arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
         let mut body_env = fork_panic(env);
         tir_add_fallible_binding(&pattern, &mut body_env, &subject_ty);
         let body = lower_stmts(&arm.body, cx, &mut body_env);
         tarms.push(TMatchArm {
-            pattern: pat,
-            guard: None,
+            pattern: TPattern::binding(pattern),
             body,
         });
     }
@@ -360,21 +381,10 @@ pub(crate) fn lower_fallible_match(
     let fallthrough = else_body.is_none();
     TStmt::EnumMatch {
         scrutinee,
+        clone_subject,
         arms: tarms,
         else_body: else_lowered,
         fallthrough,
-    }
-}
-
-/// c109 Phase 8: the Rust match pattern for a fallible/optional pattern, mirroring
-/// `emit_match_pattern`'s Ok/Err/Present/Absent arms (Statement.rs).
-pub(crate) fn tir_fallible_pattern(pattern: &Pattern) -> String {
-    match pattern {
-        Pattern::Ok { binding, .. } => format!("Ok({})", mangle(binding)),
-        Pattern::Err { binding, .. } => format!("Err({})", mangle(binding)),
-        Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
-        Pattern::Absent(_) => "None".to_string(),
-        _ => unreachable!("non-fallible pattern in fallible match (gate)"),
     }
 }
 
@@ -402,7 +412,7 @@ pub(crate) fn tir_add_fallible_binding(pattern: &Pattern, env: &mut LowerEnv, su
         // `null` (Absent) binds nothing.
         _ => return,
     };
-    env.bind(&binding, mangle(&binding), ty);
+    env.bind(&binding, TLocal::user(&binding), ty);
 }
 
 pub(crate) fn lower_enum_match(
@@ -413,14 +423,24 @@ pub(crate) fn lower_enum_match(
     env: &mut LowerEnv,
 ) -> TStmt {
     // The match owns the value. Mirror `emit_pattern_match_switch`: a by-reference
-    // subject (a deref'd enum param) is cloned as `({rust_name}).clone()` — the
-    // borrow itself is cloned, NOT the deref'd place. Any other subject emits its
-    // plain form.
-    let scrutinee = match subject {
+    // subject (a deref'd enum param) is cloned — the borrow itself is cloned, NOT
+    // the deref'd place, so the scrutinee carries the slot *without* its deref and
+    // the clone is recorded as a fact.
+    let (scrutinee, clone_subject) = match subject {
         Expr::Ident(name, _) if env.is_borrowed(name) => {
-            format!("({}).clone()", env.rust_name_of(name))
+            let slot = env.local_of(name);
+            let ty = env.ty_of(name).unwrap_or(Type::Int);
+            let mut by_value = slot.clone();
+            by_value.deref = false;
+            (
+                TExpr {
+                    ty,
+                    kind: TExprKind::Local(by_value),
+                },
+                true,
+            )
         }
-        _ => emit_tir_expr(&lower_expr(subject, cx, env), cx),
+        _ => (lower_expr(subject, cx, env), false),
     };
     // Resolve the owning enum once — drives the Rust variant prefix in patterns.
     let enum_type = arms.iter().find_map(|a| {
@@ -431,16 +451,13 @@ pub(crate) fn lower_enum_match(
     let mut tarms = Vec::new();
     for arm in arms {
         let pattern = arm_variant_pattern(cx, &arm.cond, subject).expect("gate proved variant arm");
-        let pat = tir_match_pattern(cx, &pattern, enum_type.as_deref());
-        let guard = tir_range_guard(&pattern);
         // The arm body sees the variant's payload bindings, typed from the layout. The
         // arm body is a CLONED env in `emit_pattern_match_switch` (no leak) — fork.
         let mut body_env = fork_panic(env);
         tir_add_pattern_bindings(cx, &pattern, &mut body_env, subject_ty.as_ref());
         let body = lower_stmts(&arm.body, cx, &mut body_env);
         tarms.push(TMatchArm {
-            pattern: pat,
-            guard,
+            pattern: TPattern::arm(pattern, enum_type.clone()),
             body,
         });
     }
@@ -454,6 +471,7 @@ pub(crate) fn lower_enum_match(
     let fallthrough = else_body.is_none();
     TStmt::EnumMatch {
         scrutinee,
+        clone_subject,
         arms: tarms,
         else_body: else_lowered,
         fallthrough,
@@ -467,9 +485,7 @@ pub(crate) fn lower_range_switch(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TStmt {
-    // The subject's emitted string — used for the borrow binding and each range
-    // condition, exactly as `emit_mixed_switch` re-emits the subject.
-    let subject_str = emit_tir_expr(&lower_expr(subject, cx, env), cx);
+    let subject_expr = lower_expr(subject, cx, env);
     let mut tarms = Vec::new();
     for arm in arms {
         let (lo, hi) = arm_head_range(cx, &arm.cond, subject).expect("gate proved range arm");
@@ -485,21 +501,10 @@ pub(crate) fn lower_range_switch(
         lower_stmts(body, cx, &mut branch)
     };
     TStmt::RangeSwitch {
-        subject_str,
+        subject: subject_expr,
         arms: tarms,
         else_body: else_lowered,
     }
-}
-
-/// TIR-local reproduction of codegen's `emit_match_pattern` for the enum-match (shape
-/// A) case the subset covers. c109 Phase 24: this now DELEGATES to the AST
-/// `emit_match_pattern` (made `pub(crate)`), which is PURE formatting (it takes only
-/// `cx` + the pattern + the resolved enum type — no env, no inference), so reusing it is
-/// byte-parity-safe and automatically handles the FOREIGN-enum (`{root}{mod}::user_<T>::
-/// user_<V>`) and JSON (`{root}jet_std::Json::<Variant>`, non-mangled) variant prefixes
-/// the subset now admits — the same reuse Phase 22 made for `emit_if_let_pattern`.
-pub(crate) fn tir_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&str>) -> String {
-    emit_match_pattern(cx, pattern, enum_type)
 }
 
 /// TIR-local reproduction of codegen's `emit_range_guard` (Statement.rs): a payload
@@ -564,7 +569,7 @@ pub(crate) fn tir_add_pattern_bindings(
                         .as_ref()
                         .and_then(|ts| ts.get(i).cloned())
                         .unwrap_or(Type::Int);
-                    env.bind(name, mangle(name), Some(ty));
+                    env.bind(name, TLocal::user(name), Some(ty));
                 }
             }
         }

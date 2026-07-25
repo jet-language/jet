@@ -151,22 +151,21 @@ impl<'a> JitMeta<'a> {
         self.distinct_bases.get(name)
     }
 
-    pub(crate) fn struct_field_index(&self, type_name: &str, field_rust: &str) -> Option<usize> {
-        self.struct_fields
-            .get(type_name)?
+    pub(crate) fn struct_field_index(&self, type_name: &str, field: &str) -> Option<usize> {
+        let fields = self.struct_fields.get(type_name)?;
+        let mangled = format!("user_{field}");
+        fields
             .iter()
-            .position(|f| f == field_rust)
+            .position(|f| f == field || f == &mangled || f.strip_prefix("user_") == Some(field))
     }
 
-    pub(crate) fn enum_variant_disc(&self, prefix: &str) -> Option<i64> {
-        let (enum_part, variant) = prefix.rsplit_once("::")?;
-        let enum_name = enum_part.strip_prefix("user_").unwrap_or(enum_part);
+    /// Discriminant index from structured enum + variant Jet names.
+    pub(crate) fn enum_variant_index(&self, enum_name: &str, variant: &str) -> Option<i64> {
         let variants = self.enum_variants.get(enum_name)?;
-        let variant = variant.split_once('(').map_or(variant, |(head, _)| head);
-        let variant_key = variant.strip_prefix("user_").unwrap_or(variant);
+        let mangled = format!("user_{variant}");
         variants
             .iter()
-            .position(|v| v == variant || v.strip_prefix("user_").unwrap_or(v) == variant_key)
+            .position(|v| v == variant || v == &mangled || v.strip_prefix("user_") == Some(variant))
             .map(|i| i as i64)
     }
 

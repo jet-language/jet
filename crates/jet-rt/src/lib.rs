@@ -294,6 +294,22 @@ impl JetArena {
         self.record_set(record, index, JetVal::String(value))
     }
 
+    /// Whole-record write-through for `(*self) = …` / D-MUTSELF1 (keeps the
+    /// caller's handle identity; replaces field slots from `src`).
+    pub fn record_assign_from(&mut self, dst: i64, src: i64) -> Option<()> {
+        let src_fields = match self.values.get(src as usize)? {
+            JetVal::Record(fields) => fields.clone(),
+            _ => return None,
+        };
+        match self.values.get_mut(dst as usize)? {
+            JetVal::Record(dst_fields) => {
+                *dst_fields = src_fields;
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
     pub fn record_get_int(&self, record: i64, index: i64) -> Option<i64> {
         match self.record_get(record, index) {
             Some(JetVal::Int(value)) => Some(*value),

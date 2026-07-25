@@ -1,7 +1,5 @@
 use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, PatSlot, Pattern, Stmt, StructPatField, SwitchArm, Type};
 use crate::Codegen::Cx;
-use crate::Codegen::emit_if_let_pattern;
-use crate::Codegen::emit_match_pattern;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_json_variant;
 use crate::Codegen::is_key_variant;
@@ -13,7 +11,6 @@ use crate::Codegen::TIR::arm_bin_match_pattern;
 use crate::Codegen::TIR::arm_str_match_pattern;
 use crate::Codegen::TIR::arm_struct_pattern;
 use crate::Codegen::TIR::clone_env;
-use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::lower::bool_and_chain;
 use crate::Codegen::TIR::lower_enum_match;
@@ -27,13 +24,15 @@ use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::lower::str_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::bin_match_pattern_cond_expr;
 use crate::Codegen::TIR::lower::struct_pattern_field_type;
-use crate::Codegen::TIR::lower::struct_pattern_subject_field_expr;
 use crate::Codegen::TIR::static_call_type_name_unchecked;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::tir_recv_jet_ty;
+use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TPattern;
+use crate::Codegen::TIR::TPatternPosition;
 use crate::Codegen::TIR::TStmt;
 use crate::Codegen::variant_binding_types;
 use crate::Diagnostics::Span;
@@ -86,18 +85,22 @@ pub(crate) fn label_name(label: &Option<(String, Span)>) -> Option<String> {
 /// (incl. a non-special method call routed to `.iter().cloned()`) it is the whole
 /// collection. The FileReader-vs-stdin `lines` split mirrors the AST's
 /// `expr_jet_ty(receiver)` / inline-`io.stdin()` test exactly.
+/// The iteration source a `loop x; <coll>` pulls from, plus the method-call
+/// iteration form. For a `.chars()`/`.lines()` form the source is the method
+/// RECEIVER; otherwise it is the whole collection. Both are structured `TExpr`s —
+/// the Rust spelling happens in emit.
 pub(crate) fn lower_forin_collection(
     collection: &Expr,
     cx: &Cx,
     env: &mut LowerEnv,
-) -> (String, Option<TForInMethod>) {
+) -> (TExpr, Option<TForInMethod>) {
     if let Expr::MethodCall {
         receiver, method, ..
     } = collection
     {
         match method.as_str() {
             "chars" => {
-                let recv = emit_tir_expr(&lower_expr(receiver, cx, env), cx);
+                let recv = lower_expr(receiver, cx, env);
                 return (recv, Some(TForInMethod::Chars));
             }
             "lines" => {
@@ -106,7 +109,7 @@ pub(crate) fn lower_forin_collection(
                 // FileReader case, then a `StdinHandle` type OR an inline `io.stdin()`
                 // receiver for the stdin case. Checked in the SAME order as
                 // `emit_for_in` (FileReader first).
-                let recv = emit_tir_expr(&lower_expr(receiver, cx, env), cx);
+                let recv = lower_expr(receiver, cx, env);
                 if matches!(tir_recv_jet_ty(receiver, env), Some(Type::Named(n)) if n == "FileReader")
                 {
                     return (recv, Some(TForInMethod::LinesFile));
@@ -131,19 +134,16 @@ pub(crate) fn lower_forin_collection(
                 // A `.lines()` on neither (unreachable in valid Jet — sema E2502
                 // restricts `.lines()` to a FileReader/StdinHandle loop position) would
                 // fall to the AST `else` default; reproduce that for totality.
-                let coll = emit_tir_expr(&lower_expr(collection, cx, env), cx);
-                (coll, None)
+                (lower_expr(collection, cx, env), None)
             }
             _ => {
-                // The `.iter().cloned()` default: emit the WHOLE method call as the
+                // The `.iter().cloned()` default: the WHOLE method call is the
                 // collection value (e.g. a `.split(…)` builtin returning a `[String]`).
-                let coll = emit_tir_expr(&lower_expr(collection, cx, env), cx);
-                (coll, None)
+                (lower_expr(collection, cx, env), None)
             }
         }
     } else {
-        let coll = emit_tir_expr(&lower_expr(collection, cx, env), cx);
-        (coll, None)
+        (lower_expr(collection, cx, env), None)
     }
 }
 
@@ -193,22 +193,28 @@ pub(super) fn lower_binding_free_variant_pattern_test(
                         .iter()
                         .any(|(candidate, _)| candidate == variant)
                 })
-                .then_some(resolved)
+                .then(|| resolved.to_string())
         }
         _ => None,
     };
-    let enum_type = subject_enum.or_else(|| cx.variant_owner.get(variant).map(String::as_str));
-    let pat_str = match enum_type {
+    let enum_type = subject_enum.or_else(|| cx.variant_owner.get(variant).cloned());
+    // A variant known to the resolved enum layout compares against the bare
+    // variant path; anything else tests as a match-arm head.
+    let position = match &enum_type {
         Some(type_name) if cx.enum_variants.get(type_name).is_some_and(|variants| {
             variants.iter().any(|(candidate, _)| candidate == variant)
-        }) => crate::Codegen::TIR::tir_enum_lit_prefix(cx, type_name, variant),
-        _ => emit_match_pattern(cx, pattern, enum_type),
+        }) => TPatternPosition::VariantPath,
+        _ => TPatternPosition::Arm,
     };
     TExpr {
         ty: Type::Bool,
         kind: TExprKind::PatternMatches {
             subj: Box::new(subj),
-            pat_str,
+            pattern: TPattern {
+                pattern: pattern.clone(),
+                enum_type,
+                position,
+            },
         },
     }
 }
@@ -255,7 +261,7 @@ fn lower_if_let_subject(subject: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 
 #[cfg(test)]
 mod borrowed_pattern_tests {
-    use super::{pattern_subject_is_borrowed, Expr, LowerEnv, Span};
+    use super::{pattern_subject_is_borrowed, Expr, LowerEnv, Span, TLocal};
 
     fn nested_self() -> Expr {
         Expr::Field(
@@ -272,7 +278,7 @@ mod borrowed_pattern_tests {
     #[test]
     fn nested_read_self_pattern_subject_retains_borrow_provenance() {
         let mut env = LowerEnv::new("encode".to_string());
-        env.bind("self", "self".to_string(), None);
+        env.bind("self", TLocal::generated("self"), None);
         env.mark_borrowed("self");
         assert!(pattern_subject_is_borrowed(&nested_self(), &env));
     }
@@ -280,12 +286,12 @@ mod borrowed_pattern_tests {
     #[test]
     fn nested_take_self_pattern_subject_stays_owned() {
         let mut env = LowerEnv::new("consume".to_string());
-        env.bind("self", "self".to_string(), None);
+        env.bind("self", TLocal::generated("self"), None);
         assert!(!pattern_subject_is_borrowed(&nested_self(), &env));
     }
 }
 
-type IfBinding = (String, String, Option<Type>);
+type IfBinding = (String, TLocal, Option<Type>);
 
 fn flatten_and<'a>(cond: &'a Expr, terms: &mut Vec<&'a Expr>) {
     if let Expr::Binary(BinOp::And, left, right, _) = cond {
@@ -374,11 +380,9 @@ fn lower_if_cond_atom(
                 let subj = lower_if_let_subject(subject, cx, env);
                 let ty = crate::Sema::core_json_pattern_types(variant)
                     .and_then(|ts| ts.into_iter().next());
-                let place = mangle(name);
+                let place = TLocal::user(name);
                 if variant == "Object" {
                     let obj_tmp = format!("__jet_obj{}", pat_span.start);
-                    let pat_str =
-                        format!("{}jet_std::DataTree::Object({})", cx.root_prefix, obj_tmp);
                     let map_ty = ty.clone().unwrap_or(Type::Map {
                         key: Box::new(Type::String),
                         key_span: None,
@@ -387,27 +391,33 @@ fn lower_if_cond_atom(
                     let prefix = TStmt::Let {
                         name: name.clone(),
                         kw: "let",
-                        ty_clause: format!(": {}", cx.rust_type(&map_ty)),
+                        let_ty: crate::Codegen::TIR::TLetTy::plain(map_ty.clone()),
                         init: TExpr {
                             ty: map_ty.clone(),
-                            kind: TExprKind::ConstInline(format!(
-                                "{}.into_iter().collect()",
-                                obj_tmp
-                            )),
+                            kind: TExprKind::DataEntriesToMap(TLocal::generated(&obj_tmp)),
                         },
                         track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
                     };
                     return (
-                        TIfCond::IfLet { pat_str, subj },
+                        TIfCond::IfLet {
+                            pattern: TPattern {
+                                pattern: pattern.clone(),
+                                enum_type: None,
+                                position: TPatternPosition::DataEntries { temp: obj_tmp },
+                            },
+                            subj,
+                        },
                         Some((name.clone(), place, Some(map_ty))),
                         vec![prefix],
                     );
                 }
-                let pat_str = emit_if_let_pattern(cx, pattern);
                 return (
-                    TIfCond::IfLet { pat_str, subj },
+                    TIfCond::IfLet {
+                        pattern: TPattern::binding(pattern.clone()),
+                        subj,
+                    },
                     Some((name.clone(), place, ty)),
                     Vec::new(),
                 );
@@ -420,12 +430,13 @@ fn lower_if_cond_atom(
         if !is_json_variant(variant) {
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
                 let subj = lower_if_let_subject(subject, cx, env);
-                let pat_str = emit_if_let_pattern(cx, pattern);
                 let ty = variant_binding_types(cx, variant).and_then(|ts| ts.into_iter().next());
-                let place = mangle(name);
                 return (
-                    TIfCond::IfLet { pat_str, subj },
-                    Some((name.clone(), place, ty)),
+                    TIfCond::IfLet {
+                        pattern: TPattern::binding(pattern.clone()),
+                        subj,
+                    },
+                    Some((name.clone(), TLocal::user(name), ty)),
                     Vec::new(),
                 );
             }
@@ -434,8 +445,14 @@ fn lower_if_cond_atom(
             // renders the slot as `_` (`emit_if_let_pattern`), byte-for-byte the AST.
             if let Some(PatSlot::Wildcard) = bindings.first() {
                 let subj = lower_if_let_subject(subject, cx, env);
-                let pat_str = emit_if_let_pattern(cx, pattern);
-                return (TIfCond::IfLet { pat_str, subj }, None, Vec::new());
+                return (
+                    TIfCond::IfLet {
+                        pattern: TPattern::binding(pattern.clone()),
+                        subj,
+                    },
+                    None,
+                    Vec::new(),
+                );
             }
         }
     }
@@ -448,7 +465,6 @@ fn lower_if_cond_atom(
             Pattern::Present { .. } | Pattern::Ok { .. } | Pattern::Err { .. }
         ) {
             let subj = lower_if_let_subject(subject, cx, env);
-            let pat_str = emit_if_let_pattern(cx, pattern);
             // The bound name + its inner type, off the subject's resolved Option/Result
             // (totality — never re-inferred). Mirrors `add_pattern_bindings`.
             let binding = match pattern {
@@ -476,9 +492,12 @@ fn lower_if_cond_atom(
                 _ => unreachable!("checked above"),
             };
             let (name, ty) = binding;
-            let place = mangle(&name);
+            let place = TLocal::user(&name);
             return (
-                TIfCond::IfLet { pat_str, subj },
+                TIfCond::IfLet {
+                    pattern: TPattern::binding(pattern.clone()),
+                    subj,
+                },
                 Some((name, place, ty)),
                 Vec::new(),
             );
@@ -496,8 +515,14 @@ fn lower_if_cond_atom(
                 }
                 _ => None,
             };
-            let pat_str = emit_match_pattern(cx, pattern, enum_type);
-            return (TIfCond::Matches { pat_str, subj }, None, Vec::new());
+            return (
+                TIfCond::Matches {
+                    pattern: TPattern::arm(pattern.clone(), enum_type.map(str::to_string)),
+                    subj,
+                },
+                None,
+                Vec::new(),
+            );
         }
     }
     (TIfCond::Plain(lower_expr(cond, cx, env)), None, Vec::new())
@@ -677,7 +702,6 @@ pub(crate) fn lower_mixed_switch(
 ) -> TStmt {
     let subject_expr = lower_expr(subject, cx, env);
     let subject_ty = subject_expr.ty.clone();
-    let subject_str = emit_tir_expr(&subject_expr, cx);
     let mut tarms = Vec::new();
     for arm in arms {
         let struct_pat = arm_struct_pattern(cx, &arm.cond, subject);
@@ -713,7 +737,7 @@ pub(crate) fn lower_mixed_switch(
         lower_stmts(body, cx, &mut branch)
     });
     TStmt::MixedSwitch {
-        subject_str,
+        subject: subject_expr,
         arms: tarms,
         else_body: else_lowered,
     }
@@ -736,9 +760,9 @@ fn struct_pattern_cond_expr(
             let fty = struct_pattern_field_type(cx, subject_ty, field).unwrap_or(Type::Int);
             let lhs = TExpr {
                 ty: fty.clone(),
-                kind: TExprKind::ConstInline(struct_pattern_subject_field_expr(
-                    cx, subject_ty, field,
-                )),
+                kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::SwitchSubjectField {
+                    field: field.clone(),
+                })),
             };
             let rhs = lower_expr(value, cx, env);
             tests.push(TExpr {
@@ -773,18 +797,21 @@ fn lower_struct_pattern_bindings(
             continue;
         };
         let fty = struct_pattern_field_type(cx, subject_ty, field).unwrap_or(Type::Int);
-        let local_rust = mangle(local);
-        env.bind(local, local_rust.clone(), Some(fty.clone()));
+        env.bind(local, TLocal::user(local), Some(fty.clone()));
         out.push(TStmt::Let {
             name: local.clone(),
             kw: "let",
-            ty_clause: format!(": {}", cx.rust_type(&fty)),
+            let_ty: crate::Codegen::TIR::TLetTy::plain(fty.clone()),
             init: TExpr {
-                ty: fty,
-                kind: TExprKind::ConstInline(format!(
-                    "{}.clone()",
-                    struct_pattern_subject_field_expr(cx, subject_ty, field)
-                )),
+                ty: fty.clone(),
+                kind: TExprKind::Clone(Box::new(TExpr {
+                    ty: fty,
+                    kind: TExprKind::HostCall(Box::new(
+                        crate::Codegen::TIR::THostCall::SwitchSubjectField {
+                            field: field.clone(),
+                        },
+                    )),
+                })),
             },
             track_origin: None,
                 gc_promotion: None,

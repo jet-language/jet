@@ -2,7 +2,7 @@
 
 use super::{
     build_cx_items, bundle_extern_funcs, populate_cx_from_bundle, register_foreign_enum_variants,
-    update_cloneability_with_foreign_types, mangle, Cx, TIR,
+    update_cloneability_with_foreign_types, mangle, user_type_rust, Cx, TIR,
 };
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
@@ -333,10 +333,13 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::Print(operand) => {
             web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
         }
-        TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
+        TIR::TExprKind::Field { recv, field, boxed: false } => {
             let TIR::TExprKind::Local(local) = &recv.kind else { return false };
             reconstructions.iter().any(|r| {
-                r.local_rust == *local && r.fields.iter().any(|(field, _, _)| field == field_rust)
+                r.local.rust_name() == local.rust_name()
+                    && r.fields
+                        .iter()
+                        .any(|(fname, _, _)| web_recon_field_matches(fname, field))
             })
         }
         TIR::TExprKind::Index {
@@ -426,7 +429,8 @@ fn web_js_handle_method_supported(op: &TIR::THandleOp, argc: usize) -> bool {
 fn web_expr_supported(expr: &TIR::TExpr) -> bool {
     use TIR::TExprKind as E;
     match &expr.kind {
-        E::IntLit(..) | E::FloatLit(_) | E::BoolLit(_) | E::CharLit(_) | E::Local(_) | E::ConstInline(_) => true,
+        E::IntLit(..) | E::FloatLit(_) | E::BoolLit(_) | E::CharLit(_) | E::Local(_)
+        | E::Unit | E::DefaultLit | E::CtLit(_) => true,
         E::StrLit(parts) => parts.iter().all(|p| match p { TIR::TStrPart::Lit(_) => true, TIR::TStrPart::Interp(e, _) => web_expr_supported(e) }),
         E::Binary { lhs, rhs, .. } => web_expr_supported(lhs) && web_expr_supported(rhs),
         E::Unary { operand, .. } | E::Clone(operand) | E::MaterializeView(operand) | E::DistinctRaw(operand) | E::Print(operand) => web_expr_supported(operand),
@@ -806,7 +810,7 @@ fn flattened_web_params(tir: &TIR::TFunc) -> Vec<(String, Type)> {
         if let Some(reconstruction) = tir
             .web_param_reconstructions
             .iter()
-            .find(|r| r.local_rust == *name)
+            .find(|r| r.local.rust_name() == *name)
         {
             out.extend(
                 reconstruction
@@ -819,6 +823,17 @@ fn flattened_web_params(tir: &TIR::TFunc) -> Vec<(String, Type)> {
         }
     }
     out
+}
+
+fn web_recon_rust_type(ty: &Type) -> String {
+    match ty {
+        Type::Named(name) => user_type_rust(name),
+        _ => mangle("AnonWebParam"),
+    }
+}
+
+fn web_recon_field_matches(fname: &str, field: &str) -> bool {
+    fname == field || fname == mangle(field) || field == mangle(fname)
 }
 
 fn js_abi_call_args(
@@ -1133,10 +1148,11 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     let mut emitted_structs = std::collections::HashSet::new();
     for f in &wasm_funcs {
         for reconstruction in &f.tir.web_param_reconstructions {
-            if !emitted_structs.insert(reconstruction.rust_type.clone()) {
+            let rust_type = web_recon_rust_type(&reconstruction.ty);
+            if !emitted_structs.insert(rust_type.clone()) {
                 continue;
             }
-            out.push_str(&format!("struct {} {{\n", reconstruction.rust_type));
+            out.push_str(&format!("struct {} {{\n", rust_type));
             for (field, _, ty) in &reconstruction.fields {
                 let rust_ty = wasm_ty(ty).ok_or_else(|| web_emit_error(f))?;
                 out.push_str(&format!("    {field}: {rust_ty},\n"));
@@ -1216,7 +1232,9 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
                 .join(", ");
             out.push_str(&format!(
                 "    let {} = {} {{ {} }};\n",
-                reconstruction.local_rust, reconstruction.rust_type, fields
+                reconstruction.local.rust_name(),
+                web_recon_rust_type(&reconstruction.ty),
+                fields
             ));
         }
         let args = f
@@ -1269,8 +1287,8 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
                 .tir
                 .web_param_reconstructions
                 .iter()
-                .find(|r| r.local_rust == *name)
-                .map(|r| r.rust_type.clone())
+                .find(|r| r.local.rust_name() == *name)
+                .map(|r| web_recon_rust_type(&r.ty))
                 .or_else(|| wasm_param_rust_ty(ty, *conv).map(str::to_string));
             rust_ty.map(|t| format!("{name}: {t}"))
         })
@@ -1405,7 +1423,7 @@ fn emit_wasm_body(
             TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?)),
             TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?)),
             TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {} = {};\n", mangle(name), wasm_emit_expr(init, funcs, file_prefix, reconstructions)?)),
-            TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{place} {}= {};\n", op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value, funcs, file_prefix, reconstructions)?)),
+            TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{} {}= {};\n", wasm_tir_place(place)?, op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value, funcs, file_prefix, reconstructions)?)),
             TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
                 out.push_str(&format!("{pad}if {} {{\n", wasm_emit_expr(cond, funcs, file_prefix, reconstructions)?));
                 emit_wasm_body(then_body, out, indent + 1, funcs, file_prefix, reconstructions)?;
@@ -1495,7 +1513,7 @@ fn wasm_emit_expr(
             // Owned String — export returns and Jet String locals need String, not &str.
             format!("{}.to_string()", json_quote(&value))
         }
-        TIR::TExprKind::Local(name) => name.clone(),
+        TIR::TExprKind::Local(local) => local.rust_place(),
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
             "({} {} {})",
             wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?,
@@ -1512,14 +1530,17 @@ fn wasm_emit_expr(
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
         TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?),
-        TIR::TExprKind::Field { recv, field_rust, boxed: false } => {
+        TIR::TExprKind::Field { recv, field, boxed: false } => {
             let TIR::TExprKind::Local(local) = &recv.kind else { return Err(()) };
             if !reconstructions.iter().any(|r| {
-                r.local_rust == *local && r.fields.iter().any(|(field, _, _)| field == field_rust)
+                r.local.rust_name() == local.rust_name()
+                    && r.fields
+                        .iter()
+                        .any(|(fname, _, _)| web_recon_field_matches(fname, field))
             }) {
                 return Err(());
             }
-            format!("({}).{}", wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?, field_rust)
+            format!("({}).{}", wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?, web_name(field))
         }
         TIR::TExprKind::Index {
             base,
@@ -1902,6 +1923,24 @@ fn web_place(name: &str) -> String {
     }
     web_name(name).to_string()
 }
+
+fn web_local(local: &TIR::TLocal) -> String {
+    web_place(&local.rust_place())
+}
+
+fn web_tir_place(place: &TIR::TPlace) -> Result<String, ()> {
+    match place {
+        TIR::TPlace::Local(local) => Ok(web_local(local)),
+        TIR::TPlace::Expr(_) => Err(()),
+    }
+}
+
+fn wasm_tir_place(place: &TIR::TPlace) -> Result<String, ()> {
+    match place {
+        TIR::TPlace::Local(local) => Ok(local.rust_place()),
+        TIR::TPlace::Expr(_) => Err(()),
+    }
+}
 fn emit_tir_js_body(
     body: &[TIR::TStmt],
     out: &mut String,
@@ -1922,7 +1961,7 @@ fn emit_tir_js_body(
             TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let {} = {};\n", web_name(name), tir_js_expr(init, funcs, file_prefix)?)),
             TIR::TStmt::Assign { place, op, value, .. } => {
                 let assign = op.as_ref().map(|o| format!("{}=", binop(o))).unwrap_or_else(|| "=".to_string());
-                out.push_str(&format!("{pad}{} {assign} {};\n", web_name(place), tir_js_expr(value, funcs, file_prefix)?));
+                out.push_str(&format!("{pad}{} {assign} {};\n", web_tir_place(place)?, tir_js_expr(value, funcs, file_prefix)?));
             }
             TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", tir_js_expr(expr, funcs, file_prefix)?)),
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
@@ -1999,13 +2038,16 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::BoolLit(b) => b.to_string(),
         E::CharLit(c) => json_quote(&c.to_string()),
         E::StrLit(parts) => tir_js_string(parts, funcs, file_prefix)?,
-        E::Local(name) => web_place(name),
-        E::ConstInline(value) => value.clone(),
+        E::Local(local) => web_local(local),
+        E::Unit => "()".to_string(),
+        E::DefaultLit => "undefined".to_string(),
+        E::CtLit(value) => value.serialize(),
+        E::Uninit | E::HostCall(_) => return Err(()),
         E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op), tir_js_expr(rhs, funcs, file_prefix)?),
         E::Unary { op, operand } => format!("({}{})", unop(op), tir_js_expr(operand, funcs, file_prefix)?),
         E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
-        E::Field { recv, field_rust, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field_rust)),
+        E::Field { recv, field, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field)),
         E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
         E::ListLit(elements) => format!("[{}]", elements.iter().map(|element| tir_js_expr(element, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", ")),
         E::MapLit(entries) => format!(
@@ -2043,7 +2085,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             else { format!("{key}({args})") }
         }
         E::Print(value) => format!("jetDom.print({})", tir_js_expr(value, funcs, file_prefix)?),
-        E::MethodCall { recv, method_rust, args, .. } => format!("{}.{}({})", tir_js_expr(recv, funcs, file_prefix)?, web_name(method_rust), tir_call_args(args, funcs, file_prefix)?),
+        E::MethodCall { recv, method, args, .. } => format!("{}.{}({})", tir_js_expr(recv, funcs, file_prefix)?, web_name(&method.rust()), tir_call_args(args, funcs, file_prefix)?),
         E::CoreCall { module, method, args, .. } => tir_core_call(module, method, args, funcs, file_prefix)?,
         E::HandleMethod { recv, op, args } => {
             if !web_js_handle_method_supported(op, args.len()) {

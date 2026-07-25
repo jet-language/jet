@@ -1,9 +1,88 @@
+use crate::AST::Type;
 use crate::Codegen::Cx;
+use crate::Codegen::escape_rust_str;
+use crate::Codegen::mangle;
+use crate::Codegen::TIR::core_struct_field_rust_name;
 use crate::Codegen::TIR::emit_tir_expr;
+use crate::Codegen::TIR::RESOURCE_CLEANUP_MARKER;
 use crate::Codegen::TIR::TCallArg;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
+use crate::Codegen::TIR::TLetTy;
+use crate::Codegen::TIR::TLetWrapper;
+use crate::Codegen::TIR::TPanicLoc;
+use crate::Codegen::TIR::TPattern;
+use crate::Codegen::TIR::TPatternPosition;
+use crate::Codegen::TIR::TPlace;
+use crate::Codegen::TIR::TPreludeArg;
+use crate::Codegen::TIR::TRequireKind;
+use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::TStrPart;
+
+/// The Rust pattern a `TPattern` spells. The position decides which of codegen's
+/// three pattern shapes applies; the pattern and its owning enum are the only
+/// other facts, both already resolved at lowering.
+pub(crate) fn emit_tir_pattern(pattern: &TPattern, cx: &Cx) -> String {
+    match &pattern.position {
+        TPatternPosition::Binding => {
+            crate::Codegen::emit_if_let_pattern(cx, &pattern.pattern)
+        }
+        TPatternPosition::Arm => crate::Codegen::emit_match_pattern(
+            cx,
+            &pattern.pattern,
+            pattern.enum_type.as_deref(),
+        ),
+        // A variant of a resolved enum layout compares against the bare variant
+        // path (no payload slots) — `tir_enum_lit_prefix` owns that spelling.
+        TPatternPosition::VariantPath => {
+            let owner = pattern.enum_type.as_deref().unwrap_or_default();
+            let variant = pattern.variant().unwrap_or_default();
+            crate::Codegen::TIR::tir_enum_lit_prefix(cx, owner, variant)
+        }
+        // D-ENC-DYN1: `DataTree::Object` binds its ordered entry vector to a temp;
+        // the body's prefix `let` collects it into the user-visible map.
+        TPatternPosition::DataEntries { temp } => {
+            format!("{}jet_std::DataTree::Object({})", cx.root_prefix, temp)
+        }
+    }
+}
+
+/// The Rust place an assignment/increment writes. A local slot spells itself; a
+/// structured place expression emits like any other node.
+pub(crate) fn emit_tir_place(place: &TPlace, cx: &Cx) -> String {
+    match place {
+        TPlace::Local(slot) => slot.rust_place(),
+        TPlace::Expr(expr) => emit_tir_expr(expr, cx),
+    }
+}
+
+/// The Rust type head a static call qualifies with. A user type resolves through
+/// `cx.type_prefix`; a prelude/host owner spells its resolved symbol path plus
+/// any generic arguments.
+pub(crate) fn emit_static_owner(owner: &TStaticOwner, cx: &Cx) -> String {
+    match owner {
+        TStaticOwner::User(type_name) => cx.type_prefix(type_name),
+        TStaticOwner::Prelude {
+            rooted,
+            path,
+            generics,
+        } => {
+            let root = if *rooted { cx.root_prefix.as_str() } else { "" };
+            if generics.is_empty() {
+                return format!("{root}{path}");
+            }
+            let args = generics
+                .iter()
+                .map(|arg| match arg {
+                    TPreludeArg::Jet(ty) => cx.rust_type(ty),
+                    TPreludeArg::HostUsize => "usize".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{root}{path}::<{args}>")
+        }
+    }
+}
 
 /// c109 Phase 6: format call/method arguments, reproducing `emit_call_args`
 /// (Source/Codegen/Expression.rs) byte-for-byte. The clone wrapper (`.clone()` or
@@ -37,7 +116,7 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
                 if !fc.already_boxed {
                     s = format!("Box::new({})", s);
                 }
-                s = format!("{} as {}", s, fc.fn_type_rust);
+                s = format!("{} as {}", s, cx.rust_type(&fc.ty));
             }
             if a.borrow {
                 s = format!("&({})", s);
@@ -194,4 +273,150 @@ pub(super) fn emit_math_swizzle_assign_stmt(base: &str, type_name: &str, lanes: 
         })
         .collect();
     format!("{{ let __jet_v = {value}; {}; }}", writes.join("; "))
+}
+
+pub(crate) fn emit_let_ty_clause(let_ty: &TLetTy, cx: &Cx) -> String {
+    match let_ty {
+        TLetTy::Inferred => String::new(),
+        TLetTy::StrView => ": &str".to_string(),
+        TLetTy::Tuple(types) => {
+            let inner = types
+                .iter()
+                .map(|t| cx.rust_type(t))
+                .collect::<Vec<_>>()
+                .join(", ");
+            // Rust `(T)` is grouping, not a 1-tuple — need the trailing comma.
+            if types.len() == 1 {
+                format!(": ({inner},)")
+            } else {
+                format!(": ({inner})")
+            }
+        }
+        TLetTy::Annotated { ty, mut_fn, wrapper } => {
+            let base = if let Type::Fn { params, ret, .. } = ty {
+                cx.rust_fn_trait(params, ret.as_deref(), *mut_fn)
+            } else {
+                cx.rust_type(ty)
+            };
+            let annotated = match wrapper {
+                TLetWrapper::None => base,
+                TLetWrapper::Resource => format!("JetResource<{base}>"),
+                TLetWrapper::AutomaticRoot => format!("jet_gc::AutomaticRoot<{base}>"),
+            };
+            format!(": {annotated}")
+        }
+    }
+}
+
+pub(crate) fn emit_field_rust(cx: &Cx, recv_ty: &Type, field: &str) -> String {
+    core_struct_field_rust_name(cx, recv_ty, field).unwrap_or_else(|| mangle(field))
+}
+
+pub(crate) fn emit_panic_message_expr(msg: &TExpr, cx: &Cx) -> String {
+    match &msg.kind {
+        TExprKind::StrLit(_) => emit_tir_expr(msg, cx),
+        _ => format!("({}).jet_show()", emit_tir_expr(msg, cx)),
+    }
+}
+
+pub(crate) fn emit_panic_locals(loc: &TPanicLoc, _cx: &Cx) -> String {
+    if loc.locals.is_empty() {
+        return "String::new()".to_string();
+    }
+    let fmt_str = loc
+        .locals
+        .iter()
+        .map(|(n, _)| format!("{n} = {{}}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let args = loc
+        .locals
+        .iter()
+        .map(|(_, place)| {
+            let rust_name = place.rust_name();
+            if place.deref {
+                format!("(*{rust_name}).jet_show()")
+            } else {
+                format!("({rust_name}).jet_show()")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("format!(\"{fmt_str}\", {args})")
+}
+
+fn emit_panic_rich_stmt(cond: &str, msg: &str, loc: &TPanicLoc, cx: &Cx) -> String {
+    format!(
+        "{{ if !({cond}) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+        cleanup = RESOURCE_CLEANUP_MARKER,
+        file = escape_rust_str(&loc.file),
+        line = loc.line,
+        fn_name_esc = escape_rust_str(&loc.fn_name),
+        src_line_esc = escape_rust_str(&loc.src_line),
+        col = loc.col,
+        caret = loc.caret,
+        msg = msg,
+        locals = emit_panic_locals(loc, cx),
+    )
+}
+
+pub(crate) fn emit_require_stop(
+    kind: &TRequireKind,
+    loc: &TPanicLoc,
+    cx: &Cx,
+) -> String {
+    match kind {
+        TRequireKind::Require { cond, msg } => {
+            let cond_s = emit_tir_expr(cond, cx);
+            if cx.test_mode {
+                let msg_s = match msg {
+                    Some(m) => emit_panic_message_expr(m, cx),
+                    None => "\"condition failed\".to_string()".to_string(),
+                };
+                return format!("{{ if !({cond_s}) {{ return Err({msg_s}); }} }}");
+            }
+            let msg_s = match msg {
+                Some(m) => emit_panic_message_expr(m, cx),
+                None => "\"condition failed\".to_string()".to_string(),
+            };
+            emit_panic_rich_stmt(&cond_s, &msg_s, loc, cx)
+        }
+        TRequireKind::RequireEq { left, right } => {
+            let left_s = emit_tir_expr(left, cx);
+            let right_s = emit_tir_expr(right, cx);
+            if cx.test_mode {
+                return format!(
+                    "{{ let _jet_left = ({left_s}); let _jet_right = ({right_s}); if !(_jet_left == _jet_right) {{ return Err(format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show())); }} }}"
+                );
+            }
+            format!(
+                "{{ let _jet_left = ({left_s}); let _jet_right = ({right_s}); if !(_jet_left == _jet_right) {{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show()), &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }} }}",
+                cleanup = RESOURCE_CLEANUP_MARKER,
+                file = escape_rust_str(&loc.file),
+                line = loc.line,
+                fn_name_esc = escape_rust_str(&loc.fn_name),
+                src_line_esc = escape_rust_str(&loc.src_line),
+                col = loc.col,
+                caret = loc.caret,
+                locals = emit_panic_locals(loc, cx),
+            )
+        }
+        TRequireKind::Panic { msg } => {
+            let msg_s = emit_panic_message_expr(msg, cx);
+            if cx.test_mode {
+                return format!("{{ return Err({msg_s}); }}");
+            }
+            format!(
+                "{{ {cleanup} jet_panic_rich({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &{msg_s}, &if cfg!(debug_assertions) {{ {locals} }} else {{ String::new() }}); }}",
+                cleanup = RESOURCE_CLEANUP_MARKER,
+                file = escape_rust_str(&loc.file),
+                line = loc.line,
+                fn_name_esc = escape_rust_str(&loc.fn_name),
+                src_line_esc = escape_rust_str(&loc.src_line),
+                col = loc.col,
+                caret = loc.caret,
+                locals = emit_panic_locals(loc, cx),
+            )
+        }
+    }
 }
