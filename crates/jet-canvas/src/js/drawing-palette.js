@@ -176,7 +176,11 @@
     drawPinLabel(pin, labelX, y + 4 * view.zoom, labelAlign);
   }
 
-  function editablePinKind(pin) {
+  function editablePinKind(graph, pin) {
+    const node = graph && pin && (graph.nodes || []).find((candidate) => candidate.node_id === pin.node_id);
+    const editor = nodeDescriptor(node) && nodeDescriptor(node).default_editor || "";
+    if (!["inline_expr", "inline_value", "function_pins", "pattern_arm", "fallback"].includes(editor)) return "";
+    window.__jetCanvasDefaultEditorFacts = true;
     const t = String(pin && pin.type || "");
     if (t === "Bool") return "bool";
     if (["Int", "I64", "U64", "Float", "F32", "F64"].includes(t)) return "number";
@@ -228,7 +232,7 @@
   }
 
   function drawPinDefaultEditor(graph, pin, x, y, recordHit, maxWorldW = 96) {
-    const kind = editablePinKind(pin);
+    const kind = editablePinKind(graph, pin);
     if (!kind || pin.direction !== "input" || connectedPinIds.has(pin.pin_id)) return 0;
     const expr = inlineDefaultForPin(graph, pin);
     const source = defaultEditorValue(expr);

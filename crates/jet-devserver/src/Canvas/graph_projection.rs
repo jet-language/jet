@@ -333,10 +333,11 @@ fn project_func(
         ..GraphBuilder::default()
     };
     let entry_id = format!("{graph_id}:entry");
+    let entry_descriptor = node_catalog::descriptor_for_id("entry");
     g.nodes.push(NodeRec {
         id: entry_id.clone(),
-        kind: "entry".to_string(),
-        archetype: "entry".to_string(),
+        kind: entry_descriptor.kind.to_string(),
+        archetype: entry_descriptor.archetype.to_string(),
         title: f.name.clone(),
         span: f.name_span.into(),
         x: 40,
@@ -473,7 +474,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "binding",
-                "function_exec",
                 &b.name,
                 b.name_span.into(),
                 x,
@@ -510,8 +510,7 @@ fn project_stmt(
             add_node(
                 g,
                 &node_id,
-                "assign",
-                "function_exec",
+                "assignment",
                 &title,
                 target.span().into(),
                 x,
@@ -547,7 +546,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "return",
-                "control",
                 "return",
                 (*span).into(),
                 x,
@@ -584,7 +582,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "branch",
-                "control",
                 title,
                 ifs.cond.span().into(),
                 x,
@@ -642,7 +639,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "loop",
-                "control",
                 "loop",
                 (*span).into(),
                 x,
@@ -659,7 +655,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "loop",
-                "control",
                 "loop",
                 (*span).into(),
                 x,
@@ -682,7 +677,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "loop",
-                "control",
                 "counted loop",
                 (*span).into(),
                 x,
@@ -723,7 +717,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "loop",
-                "control",
                 &format!("loop {var}"),
                 (*span).into(),
                 x,
@@ -782,8 +775,7 @@ fn project_stmt(
             add_node(
                 g,
                 &node_id,
-                "function",
-                "control",
+                "dispatch",
                 if subjectless { "if guards" } else { "if ==" },
                 (*span).into(),
                 x,
@@ -851,7 +843,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "flow",
-                "control",
                 &title,
                 (*span).into(),
                 x,
@@ -954,7 +945,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "branch",
-                "control",
                 "comptime if",
                 (*span).into(),
                 x,
@@ -993,7 +983,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "yield",
-                "function_exec",
                 "yield",
                 (*span).into(),
                 x,
@@ -1028,7 +1017,6 @@ fn project_stmt(
                 g,
                 &node_id,
                 "scope_member",
-                "function_exec",
                 &format!(".{name}"),
                 (*span).into(),
                 x,
@@ -1210,7 +1198,6 @@ fn project_value_node(
             g,
             &node_id,
             "variable_get",
-            "value",
             name,
             (*span).into(),
             x,
@@ -1222,14 +1209,14 @@ fn project_value_node(
         g.getter_pins.insert(name.clone(), pin.clone());
         return Some(pin);
     }
-    let (kind, title, badges) = match expr {
+    let (title, badges) = match expr {
         Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _)
         | Expr::Bool(_, _)
         | Expr::Str(_, _)
         | Expr::Char(_, _)
         | Expr::Absent(_)
-        | Expr::Todo { .. } => ("constant", snippet(src, expr.span()), vec!["const"]),
+        | Expr::Todo { .. } => (snippet(src, expr.span()), vec!["const"]),
         _ => return None,
     };
     let span: SourceSpan = expr.span().into();
@@ -1240,8 +1227,7 @@ fn project_value_node(
     add_node(
         g,
         &node_id,
-        kind,
-        "value",
+        "constant",
         &title,
         span,
         x,
@@ -1287,7 +1273,6 @@ fn project_expr_node(
             add_node(
                 g,
                 &node_id,
-                "function",
                 archetype,
                 &c.name,
                 c.name_span.into(),
@@ -1341,7 +1326,6 @@ fn project_expr_node(
         } => {
             let node_id = format!("{}:expr:{ordinal}:method:{method}", g.graph_id);
             let variant_like = starts_uppercase(method);
-            let kind = if variant_like { "variant" } else { "function" };
             let archetype = if variant_like {
                 "function_pure"
             } else if exec_context || call_has_effects(index, method) {
@@ -1357,8 +1341,7 @@ fn project_expr_node(
             add_node(
                 g,
                 &node_id,
-                kind,
-                archetype,
+                if variant_like { "variant" } else { archetype },
                 &title,
                 (*method_span).into(),
                 x,
@@ -1424,7 +1407,6 @@ fn project_expr_node(
                 g,
                 &node_id,
                 "fallible",
-                "control",
                 "?",
                 (*span).into(),
                 x,
@@ -1454,8 +1436,7 @@ fn project_expr_node(
             add_node(
                 g,
                 &node_id,
-                "expr",
-                "function_pure",
+                "expression",
                 "list",
                 (*span).into(),
                 x,
@@ -1508,7 +1489,6 @@ fn project_expr_node(
             add_node(
                 g,
                 &node_id,
-                "function",
                 "function_pure",
                 "fanout",
                 (*span).into(),
@@ -1572,8 +1552,7 @@ fn project_expr_node(
             add_node(
                 g,
                 &node_id,
-                "expr",
-                "function_pure",
+                "expression",
                 title,
                 expr.span().into(),
                 x,

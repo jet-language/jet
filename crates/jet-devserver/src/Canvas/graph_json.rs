@@ -15,8 +15,7 @@ pub(super) mod node_catalog;
 pub(super) fn add_node(
     g: &mut GraphBuilder,
     id: &str,
-    kind: &str,
-    archetype: &str,
+    descriptor_id: &str,
     title: &str,
     span: SourceSpan,
     x: i32,
@@ -24,10 +23,11 @@ pub(super) fn add_node(
     badges: Vec<&str>,
     affordances: Vec<&str>,
 ) {
+    let descriptor = node_catalog::descriptor_for_id(descriptor_id);
     g.nodes.push(NodeRec {
         id: id.to_string(),
-        kind: kind.to_string(),
-        archetype: archetype.to_string(),
+        kind: descriptor.kind.to_string(),
+        archetype: descriptor.archetype.to_string(),
         title: title.to_string(),
         span,
         x,

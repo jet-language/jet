@@ -120,11 +120,6 @@
   let developerMode = false;
   const layoutScale = { x: 1.08, y: 1.08 };
   const palette = [
-    { title: "Print", detail: "Call print(\"canvas\")", op: "insert_print", node_descriptor_id: "function_exec" },
-    { title: "Branch", detail: "Insert if/else rails", op: "insert_branch", node_descriptor_id: "branch" },
-    { title: "Switch", detail: "Insert match branches", op: "insert_switch", node_descriptor_id: "dispatch" },
-    { title: "Loop", detail: "Insert loop rail", op: "insert_loop", node_descriptor_id: "loop" },
-    { title: "Fallible", detail: "Insert ? rail", op: "insert_fallible_rail", node_descriptor_id: "fallible" },
     { title: "Comment", detail: "Add comment box", op: "comment" }
   ];
   let actionEntries = [];
@@ -140,20 +135,10 @@
     return nodeDescriptorById(node && node.node_descriptor_id);
   }
   function nodeDescriptorForAction(action) {
-    if (!action) return null;
-    const direct = nodeDescriptorById(action.node_descriptor_id);
-    if (direct) return direct;
-    const op = action.op || action.insert_op || "";
-    const transaction = op === "insert_print" ? "insert_call" : op;
-    const archetype = action.pure ? "function_pure" : "function_exec";
-    const candidates = latestDoc && (latestDoc.node_descriptors || []).filter((descriptor) => descriptor.transaction === transaction) || [];
-    return candidates.find((descriptor) => descriptor.archetype === archetype) || candidates[0] || null;
+    return nodeDescriptorById(action && action.node_descriptor_id);
   }
   function withNodeDescriptor(action) {
-    const descriptor = nodeDescriptorForAction(action);
-    return descriptor && !action.node_descriptor_id
-      ? Object.assign({}, action, { node_descriptor_id: descriptor.id })
-      : action;
+    return action;
   }
   window.__jetCanvasTest = window.__jetCanvasTest || {};
   const UI_FONT = '"Inter", "Segoe UI", Roboto, system-ui, sans-serif';

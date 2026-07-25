@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use super::super::validation_json::json_str;
 
-pub(super) struct NodeDescriptor {
-    pub(super) id: &'static str,
-    pub(super) kind: &'static str,
-    pub(super) archetype: &'static str,
+pub(in crate::Canvas) struct NodeDescriptor {
+    pub(in crate::Canvas) id: &'static str,
+    pub(in crate::Canvas) kind: &'static str,
+    pub(in crate::Canvas) archetype: &'static str,
     projected: bool,
     presentation: PresentationFacts,
     palette: PaletteFacts,
@@ -78,7 +78,7 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         projected: true,
         presentation: presentation(
             "Entry",
-            "▶",
+            "ƒ",
             "Starts this function.",
             "archetype",
             "archetype",
@@ -134,7 +134,7 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "control",
         projected: true,
         presentation: presentation(
-            "Return",
+            "Control",
             "⏎",
             "Returns a value from this function.",
             "#7dd3a6",
@@ -153,7 +153,7 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "control",
         projected: true,
         presentation: presentation(
-            "Branch",
+            "Control",
             "◇",
             "Chooses which path runs next.",
             "archetype",
@@ -172,8 +172,8 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "control",
         projected: true,
         presentation: presentation(
-            "Switch",
-            "⇉",
+            "Control",
+            "◇",
             "Chooses a path by matching a value.",
             "archetype",
             "archetype",
@@ -191,7 +191,7 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "control",
         projected: true,
         presentation: presentation(
-            "Loop",
+            "Control",
             "↻",
             "Repeats work.",
             "archetype",
@@ -210,7 +210,7 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "control",
         projected: true,
         presentation: presentation(
-            "Flow",
+            "Control",
             "◇",
             "Changes loop control flow.",
             "archetype",
@@ -229,8 +229,8 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "function_exec",
         projected: true,
         presentation: presentation(
-            "Yield",
-            "⇢",
+            "Function",
+            "ƒ",
             "Yields a stream value.",
             "archetype",
             "archetype",
@@ -248,7 +248,7 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "function_exec",
         projected: true,
         presentation: presentation(
-            "Scope member",
+            "Function",
             "ƒ",
             "Runs a member of this scope.",
             "archetype",
@@ -276,8 +276,8 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
             "value",
             "capsule",
         ),
-        palette: palette(true, true, "Variables", 84, &["get", "read", "variable"]),
-        transaction: Some("edit_inline_expr"),
+        palette: palette(true, false, "Variables", 84, &["get", "read", "variable"]),
+        transaction: None,
         default_editor: "inline_expr",
     },
     NodeDescriptor {
@@ -343,8 +343,8 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "function_pure",
         projected: true,
         presentation: presentation(
-            "Variant",
-            "◆",
+            "Pure function",
+            "ƒ",
             "Creates an enum variant.",
             "archetype",
             "archetype",
@@ -362,8 +362,8 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "control",
         projected: true,
         presentation: presentation(
-            "Fallible",
-            "?",
+            "Control",
+            "◇",
             "Routes a fallible result.",
             "archetype",
             "archetype",
@@ -387,7 +387,7 @@ pub(super) static NODE_DESCRIPTORS: &[NodeDescriptor] = &[
         archetype: "function_pure",
         projected: true,
         presentation: presentation(
-            "Expression",
+            "Pure function",
             "ƒ",
             "Computes a value.",
             "archetype",
@@ -408,6 +408,37 @@ pub(super) fn descriptor_for(kind: &str, archetype: &str) -> &'static NodeDescri
         .iter()
         .find(|descriptor| descriptor.kind == kind && descriptor.archetype == archetype)
         .unwrap_or_else(|| panic!("missing Canvas node descriptor for {kind}/{archetype}"))
+}
+
+pub(in crate::Canvas) fn descriptor_for_id(id: &str) -> &'static NodeDescriptor {
+    validate_catalog().unwrap_or_else(|message| panic!("invalid Canvas node catalog: {message}"));
+    NODE_DESCRIPTORS
+        .iter()
+        .find(|descriptor| descriptor.id == id)
+        .unwrap_or_else(|| panic!("missing Canvas node descriptor `{id}`"))
+}
+
+pub(in crate::Canvas) fn insert_descriptor_id(transaction: &str, pure: bool) -> &'static str {
+    let descriptor = if transaction == "insert_call" {
+        descriptor_for_id(if pure {
+            "function_pure"
+        } else {
+            "function_exec"
+        })
+    } else {
+        NODE_DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.transaction == Some(transaction))
+            .unwrap_or_else(|| {
+                panic!("missing Canvas node descriptor transaction `{transaction}`")
+            })
+    };
+    assert!(
+        descriptor.palette.insertable,
+        "Canvas action descriptor `{}` is not insertable",
+        descriptor.id
+    );
+    descriptor.id
 }
 
 pub(in crate::Canvas) fn catalog_json() -> String {

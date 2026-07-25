@@ -606,6 +606,38 @@ async function currentGraphDoc(ctx, title) {
   return { doc, graph: graphByTitle(doc, title) };
 }
 
+async function expectConsumedDescriptor(ctx, id, expected = {}) {
+  const state = await ctx.state();
+  const descriptor = (state.nodeDescriptors || []).find((candidate) => candidate.id === id);
+  if (!descriptor) throw new Error(`served descriptor missing: ${id}\n${JSON.stringify(state.nodeDescriptors || [])}`);
+  const consumed = (state.descriptorConsumption || []).find((entry) => entry.node_descriptor_id === id);
+  if (!consumed) throw new Error(`descriptor not consumed by rendered graph: ${id}\n${JSON.stringify(state.descriptorConsumption || [])}`);
+  if (expected.transaction !== undefined && descriptor.transaction !== expected.transaction) {
+    throw new Error(`descriptor ${id} transaction ${JSON.stringify(descriptor.transaction)} != ${JSON.stringify(expected.transaction)}`);
+  }
+  if (expected.glyph !== undefined && consumed.presentation_glyph !== expected.glyph) {
+    throw new Error(`descriptor ${id} consumed glyph ${JSON.stringify(consumed.presentation_glyph)} != ${JSON.stringify(expected.glyph)}`);
+  }
+  if (expected.defaultEditor !== undefined && consumed.default_editor !== expected.defaultEditor) {
+    throw new Error(`descriptor ${id} consumed editor ${JSON.stringify(consumed.default_editor)} != ${JSON.stringify(expected.defaultEditor)}`);
+  }
+  return { descriptor, consumed };
+}
+
+async function expectPaletteDescriptor(ctx, title, id, transaction) {
+  const state = await ctx.state();
+  const actions = await ctx.driver.evaluate("window.__jetCanvasTest.actionEntries()");
+  const action = (actions || []).find((entry) => String(entry.title || "").includes(title));
+  if (!action) throw new Error(`palette action missing: ${title}\n${JSON.stringify(actions || [])}`);
+  if (action.node_descriptor_id !== id) {
+    throw new Error(`palette action ${title} descriptor ${JSON.stringify(action.node_descriptor_id)} != ${JSON.stringify(id)}`);
+  }
+  const descriptor = (state.nodeDescriptors || []).find((candidate) => candidate.id === id);
+  if (!descriptor || !descriptor.palette || !descriptor.palette.insertable || descriptor.transaction !== transaction) {
+    throw new Error(`palette action ${title} did not consume insertable served facts: ${JSON.stringify({ action, descriptor })}`);
+  }
+}
+
 async function failScratchLimit(ctx) {
   await ctx.openCanvas();
   await ctx.switchGraph("scratch");
@@ -626,6 +658,12 @@ export const scenarios = {
   "open-and-render": async (ctx) => {
     await ctx.openCanvas();
     await ctx.expectNodeCount(3);
+    await expectConsumedDescriptor(ctx, "entry", { glyph: "ƒ", defaultEditor: "function_signature" });
+    const state = await ctx.state();
+    if (!(state.descriptorConsumption || []).every((entry) => entry.node_descriptor_id && entry.presentation_label && entry.presentation_glyph && entry.hover && entry.default_editor)) {
+      throw new Error(`rendered nodes did not consume complete served descriptor facts: ${JSON.stringify(state.descriptorConsumption || [])}`);
+    }
+    if (!state.defaultEditorFactsConsumed) throw new Error("pin editor selection did not consume descriptor default_editor facts");
     const pixels = await ctx.nonblankPixels();
     if (pixels < 100) throw new Error(`canvas looked blank: ${pixels} colored pixels`);
     await ctx.screenshot("rendered");
@@ -717,6 +755,7 @@ export const scenarios = {
     await ctx.expectMenu("Search actions");
     await ctx.type("abs");
     await ctx.expectMenu("abs");
+    await expectPaletteDescriptor(ctx, "abs", "function_pure", "insert_call");
     await ctx.pickEntry("abs");
     await ctx.expectSourceContains("use core.math as math");
     await ctx.expectSourceContains("math.abs");
@@ -734,6 +773,7 @@ export const scenarios = {
     let scratch = graphByTitle(graphDoc, "scratch");
     await uiEdit(ctx, { schema_version: 1, op: "insert_branch", revision: graphDoc.revision, graph_id: scratch.graph_id }, "flow branch insert");
     await ctx.expectSourceContains("if true");
+    await expectConsumedDescriptor(ctx, "branch", { transaction: "insert_branch", glyph: "◇", defaultEditor: "inline_expr" });
 
     graphDoc = await ctx.graph();
     scratch = graphByTitle(graphDoc, "scratch");
@@ -754,6 +794,7 @@ export const scenarios = {
     await ctx.openPinActionMenu("limit", "limit");
     await ctx.type("abs");
     await ctx.expectMenu("abs");
+    await expectPaletteDescriptor(ctx, "abs", "function_pure", "insert_call");
     await ctx.pickEntry("abs");
     await ctx.expectSourceContains("math.abs(limit)");
   },
@@ -895,6 +936,7 @@ fn run() {
 }
 `);
     await ctx.openCanvas();
+    await expectConsumedDescriptor(ctx, "dispatch", { transaction: "insert_switch", glyph: "◇", defaultEditor: "pattern_arm" });
     let before = await ctx.source();
     await ctx.driver.evaluate(`window.prompt = () => "== B(n)"`);
     let pos = await ctx.node("if ==");

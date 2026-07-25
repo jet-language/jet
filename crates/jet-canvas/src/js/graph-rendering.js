@@ -257,9 +257,9 @@
     return width;
   }
 
-  function pinEditorWidth(pin) {
+  function pinEditorWidth(graph, pin) {
     if (!pin || pin.direction !== "input" || isExecPin(pin)) return 0;
-    const kind = editablePinKind(pin);
+    const kind = editablePinKind(graph, pin);
     if (!kind) return 0;
     return kind === "bool" ? 24 : kind === "enum" ? 88 : 76;
   }
@@ -268,7 +268,7 @@
     const label = visiblePinLabelInGraph(graph, node, pin);
     const labelW = label ? measureTextPx(`11px ${UI_FONT}`, label) : 0;
     const chipW = !isExecPin(pin) && pin.direction === "output" ? Math.min(96, measureTextPx(`10px ${MONO_FONT}`, pin.type || "Value") + 16) : 0;
-    const editorW = pinEditorWidth(pin);
+    const editorW = pinEditorWidth(graph, pin);
     const patternW = pin.pattern_source ? Math.min(128, measureTextPx(`10px ${MONO_FONT}`, pin.pattern_source) + 16) : 0;
     return PIN_DIAMETER / 2 + NODE_GRID + Math.max(labelW, patternW) + (chipW || editorW ? NODE_GRID + Math.max(chipW, editorW) : 0);
   }
@@ -907,6 +907,7 @@
           node_id: node.node_id,
           node_descriptor_id: node.node_descriptor_id,
           presentation_label: descriptor && descriptor.presentation.label || "",
+          presentation_glyph: descriptor && descriptor.presentation.glyph || "",
           hover: descriptor && descriptor.presentation.hover || "",
           default_editor: descriptor && descriptor.default_editor || ""
         };
@@ -914,6 +915,7 @@
       problems: activeDiagnostics().map((entry) => ({ code: entry.code, what: entry.what, severity: entry.severity, rendered: diagnosticFullText(entry), source_span: entry.source_span })),
       diagnosticsByNode: hitMap.diagnostics,
       nodeCount: graph.nodes.length,
+      defaultEditorFactsConsumed: !!window.__jetCanvasDefaultEditorFacts,
       undoDepth: undoStack.length,
       redoDepth: redoStack.length,
       undoLimit: UNDO_DEPTH,

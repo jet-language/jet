@@ -1,6 +1,7 @@
 //! D-BPE-* Canvas prototype tests: source-backed graph, formatter round-trip,
 //! and initial write transactions.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -432,8 +433,7 @@ fn json_field(haystack: &str, field: &str) -> String {
     rest[..rest.find('"').expect("json field terminator")].to_string()
 }
 
-fn json_object_containing<'a>(haystack: &'a str, marker: &str) -> &'a str {
-    let marker_at = haystack.find(marker).unwrap_or_else(|| panic!("missing `{marker}`"));
+fn json_object_containing_at(haystack: &str, marker_at: usize) -> &str {
     let start = haystack[..marker_at]
         .rfind('{')
         .expect("JSON object start before marker");
@@ -463,7 +463,18 @@ fn json_object_containing<'a>(haystack: &'a str, marker: &str) -> &'a str {
             _ => {}
         }
     }
-    panic!("unterminated JSON object containing `{marker}`")
+    panic!("unterminated JSON object at {marker_at}")
+}
+
+fn json_objects_containing<'a>(haystack: &'a str, marker: &str) -> Vec<&'a str> {
+    let mut objects = Vec::new();
+    let mut offset = 0usize;
+    while let Some(found) = haystack[offset..].find(marker) {
+        let marker_at = offset + found;
+        objects.push(json_object_containing_at(haystack, marker_at));
+        offset = marker_at + marker.len();
+    }
+    objects
 }
 
 fn source_span_near(haystack: &str, marker: &str) -> (usize, usize) {
@@ -565,101 +576,85 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
         .map(|offset| catalog_start + offset + 1)
         .expect("node descriptor catalog end");
     let catalog = &json[catalog_start..catalog_end];
-    let expected = [
-        ("entry", "entry", "entry", None),
-        ("binding", "binding", "function_exec", None),
-        ("assignment", "assign", "function_exec", None),
-        ("return", "return", "control", None),
-        ("branch", "branch", "control", Some("insert_branch")),
-        ("dispatch", "function", "control", Some("insert_switch")),
-        ("loop", "loop", "control", Some("insert_loop")),
-        ("flow", "flow", "control", None),
-        ("yield", "yield", "function_exec", None),
-        ("scope_member", "scope_member", "function_exec", None),
-        (
-            "variable_get",
-            "variable_get",
-            "value",
-            Some("edit_inline_expr"),
-        ),
-        ("constant", "constant", "value", None),
-        (
-            "function_exec",
-            "function",
-            "function_exec",
-            Some("insert_call"),
-        ),
-        (
-            "function_pure",
-            "function",
-            "function_pure",
-            Some("insert_call"),
-        ),
-        ("variant", "variant", "function_pure", None),
-        (
-            "fallible",
-            "fallible",
-            "control",
-            Some("insert_fallible_rail"),
-        ),
-        ("expression", "expr", "function_pure", None),
-    ];
-
-    assert_eq!(
-        count_occurrences(catalog, "\"id\":"),
-        expected.len(),
-        "missing, duplicate, orphaned, or non-exported descriptor: {catalog}"
-    );
-    for (id, kind, archetype, transaction) in expected {
-        assert_eq!(
-            count_occurrences(catalog, &format!("\"id\":\"{id}\"")),
-            1,
-            "descriptor id must be stable and unique: {catalog}"
-        );
-        let descriptor =
-            json_object_containing(catalog, &format!("\"id\":\"{id}\""));
+    let descriptors = json_objects_containing(catalog, "\"id\":\"");
+    assert!(!descriptors.is_empty(), "descriptor catalog is empty: {catalog}");
+    let mut catalog_ids = HashSet::new();
+    for descriptor in &descriptors {
+        let id = json_field(descriptor, "id");
         assert!(
-            descriptor.contains(&format!("\"kind\":\"{kind}\""))
-                && descriptor.contains(&format!("\"archetype\":\"{archetype}\""))
-                && descriptor.contains("\"projected\":true")
+            catalog_ids.insert(id.clone()),
+            "duplicate descriptor id `{id}`: {catalog}"
+        );
+        assert!(
+            descriptor.contains("\"kind\":\"")
+                && descriptor.contains("\"archetype\":\"")
                 && descriptor.contains("\"presentation\":{")
                 && descriptor.contains("\"palette\":{")
                 && descriptor.contains("\"default_editor\":"),
             "descriptor facts incomplete for {id}: {descriptor}"
         );
-        match transaction {
-            Some(op) => {
-                assert!(
-                    descriptor.contains("\"visible\":true")
-                        && descriptor.contains("\"insertable\":true")
-                        && descriptor.contains(&format!("\"transaction\":\"{op}\"")),
-                    "insertable descriptor transaction mismatch for {id}: {descriptor}"
-                );
-            }
-            None => {
-                assert!(
-                    descriptor.contains("\"insertable\":false")
-                        && descriptor.contains("\"transaction\":null"),
-                    "projected-only descriptor became insertable for {id}: {descriptor}"
-                );
-            }
-        }
+        let projected = descriptor.contains("\"projected\":true");
+        let insertable = descriptor.contains("\"insertable\":true");
+        assert!(projected || insertable, "orphaned descriptor `{id}`: {descriptor}");
+        assert_eq!(
+            insertable,
+            !descriptor.contains("\"transaction\":null"),
+            "insertable/transaction mismatch for `{id}`: {descriptor}"
+        );
     }
 
-    let mut descriptor_ids = Vec::new();
-    let mut rest = json.as_str();
-    let marker = "\"node_descriptor_id\":\"";
-    while let Some(offset) = rest.find(marker) {
-        rest = &rest[offset + marker.len()..];
-        let end = rest.find('"').expect("node descriptor id terminator");
-        descriptor_ids.push(&rest[..end]);
-        rest = &rest[end + 1..];
-    }
-    assert!(!descriptor_ids.is_empty(), "projection must stamp descriptors");
-    for id in descriptor_ids {
+    let projected_nodes = json_objects_containing(&json[catalog_end..], "\"node_descriptor_id\":\"");
+    assert!(!projected_nodes.is_empty(), "projection must stamp descriptors");
+    for node in projected_nodes {
+        let id = json_field(node, "node_descriptor_id");
         assert!(
-            catalog.contains(&format!("\"id\":\"{id}\"")),
+            catalog_ids.contains(&id),
             "projected node references missing descriptor `{id}`"
+        );
+    }
+
+    let src = fs::read_to_string(&path).unwrap();
+    let actions_request = format!(
+        "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{}\"}}",
+        jet::Canvas::source_revision(&src)
+    );
+    let actions =
+        jet::Canvas::query_json_for_file(&path, &actions_request).expect("Canvas actions");
+    let action_objects = json_objects_containing(&actions, "\"node_descriptor_id\":\"");
+    assert!(!action_objects.is_empty(), "insertable actions need descriptors: {actions}");
+
+    for action in &action_objects {
+        let id = json_field(action, "node_descriptor_id");
+        let descriptor = descriptors
+            .iter()
+            .find(|descriptor| json_field(descriptor, "id") == id)
+            .unwrap_or_else(|| panic!("action references missing descriptor `{id}`: {action}"));
+        assert!(
+            descriptor.contains("\"insertable\":true"),
+            "action exports non-insertable descriptor `{id}`: {action}"
+        );
+        let transaction = json_field(descriptor, "transaction");
+        let action_transaction = if action.contains("\"insert_op\":\"") {
+            json_field(action, "insert_op")
+        } else {
+            json_field(action, "op")
+        };
+        assert_eq!(
+            action_transaction, transaction,
+            "action/descriptor transaction mismatch for `{id}`: {action}"
+        );
+    }
+
+    for descriptor in descriptors {
+        if !descriptor.contains("\"insertable\":true") {
+            continue;
+        }
+        let id = json_field(descriptor, "id");
+        assert!(
+            action_objects
+                .iter()
+                .any(|action| json_field(action, "node_descriptor_id") == id),
+            "insertable descriptor `{id}` has no real served action export: {actions}"
         );
     }
 }
@@ -1486,6 +1481,8 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"op\":\"actions\"",
         "\"actions_schema_version\":1",
         "\"kind\":\"canvas.action\"",
+        "\"node_descriptor_id\":\"function_pure\"",
+        "\"node_descriptor_id\":\"function_exec\"",
         "\"engine\":\"checked-tir+jit\"",
         "\"writes\":\"source_transaction_only\"",
         "\"authority\":[\"canvas.source_edit:single_file\"]",
@@ -1518,6 +1515,9 @@ fn canvas_actions_project_palette_entries_and_preview_jit_backed_source_transact
         "\"pure\"",
         "\"source\":\"docs/reference/core-library.md\"",
         "\"kind\":\"canvas.command\"",
+        "\"kind\":\"canvas.structural\"",
+        "\"action_id\":\"canvas.structural:branch\"",
+        "\"op\":\"insert_branch\"",
         "\"op\":\"command_authority\"",
         "\"engine\":\"jet-cli\"",
         "\"action_id\":\"canvas.command:run\"",
@@ -3042,11 +3042,17 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(js.contains("descriptor.palette.insertable"), "{js}");
     assert!(js.contains("descriptor.palette.rank"), "{js}");
     assert!(js.contains("descriptor.presentation.hover"), "{js}");
+    assert!(js.contains("nodeDescriptor(node).default_editor"), "{js}");
+    assert!(js.contains("editablePinKind(graph, pin)"), "{js}");
     assert!(js.contains("nodeDescriptors: latestDoc.node_descriptors"), "{js}");
     assert!(js.contains("descriptorConsumption: graph.nodes.map"), "{js}");
     assert!(
         !js.contains("[\"insert_branch\", \"insert_switch\", \"insert_loop\", \"insert_fallible_rail\"]"),
         "parallel insertion-kind tables must not return: {js}"
+    );
+    assert!(
+        !js.contains(".filter((descriptor) => descriptor.transaction === transaction)"),
+        "browser must not infer action descriptors from transaction/purity: {js}"
     );
     assert!(js.contains("toolbarSearch.addEventListener"), "{js}");
     assert!(js.contains("Add connected node"), "{js}");
