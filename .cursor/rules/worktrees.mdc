@@ -1,0 +1,29 @@
+---
+description: Jet worktrees must stay inside the main clone — no sibling jet-* folders
+alwaysApply: true
+---
+
+# Worktree layout (mandatory)
+
+The only top-level Jet checkout is the main clone (e.g. `…/Github/jet`).
+
+**Forbidden**
+
+- Creating or leaving sibling directories next to the clone: `jet-bd-*`, `jet-*`, agent-id
+  directories, parallel clones, or symlinks that recreate that mess
+- `git worktree add` with a path outside the main clone
+- Treating a worktree’s `plugins/tower/.tower/` as the real board
+
+**Required**
+
+- Worktree paths only under:
+  - `<repo>/.claude/worktrees/<short-name>` (preferred)
+  - `<repo>/.agent-worktrees/<short-name>` (allowed)
+- Create: `git worktree add .claude/worktrees/<short-name> -b <branch>`
+- If a tool already created an outside path: immediately
+  `git worktree move <bad-path> .claude/worktrees/<short-name>` and continue only there
+- Finish: integrate, `git worktree remove`, delete temp branch
+- Tower: read/write only the main checkout board via `node plugins/tower/tower.mjs`
+
+Authority: `AGENTS.md` § Ownership and worktrees. Layout check:
+`scripts/agent/check-worktree-layout.sh`.
