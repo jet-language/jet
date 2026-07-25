@@ -18,6 +18,10 @@ pub struct WebArtifacts {
     pub js_app: String,
     /// Source Map v3 for `js_app`, ready for publication as `app.js.map`.
     pub js_source_map: String,
+    /// Stable Jet source names (project-relative `/` paths) matching the JS map.
+    pub source_names: Vec<String>,
+    /// Exact Jet source bytes parallel to `source_names` (`sourcesContent`).
+    pub source_contents: Vec<String>,
     pub dom_runtime: String,
     /// D-DOMGEN1=A (Phase 7 extension): a minimal host page that loads
     /// `app.js` as an ES module and runs `jet_main()` — so `jet build --target
@@ -52,6 +56,8 @@ struct FuncWeb {
     name: String,
     key: String,
     source_path: String,
+    /// Project-relative source name used in Source Map `sources` (never a host path).
+    source_name: String,
     source_marker: String,
     file_prefix: Option<String>,
     bucket: WebBucket,
@@ -81,9 +87,9 @@ pub fn emit_web(
     _link: Option<&FfiLink>,
 ) -> WebEmitResult<WebArtifacts> {
     let source_marker = js_source_marker(bundle);
-    let funcs = collect_web_funcs(bundle, &source_marker);
-    let wasm_rust = emit_wasm_rust(bundle, &funcs)?;
     let sources = js_sources(bundle);
+    let funcs = collect_web_funcs(bundle, &source_marker, &sources);
+    let wasm_rust = emit_wasm_rust(bundle, &funcs)?;
     let (js_app, js_source_map, handlers) =
         emit_js_app(bundle, &funcs, &sources, &source_marker)?;
     let manifest_json = emit_manifest(bundle, &funcs, &handlers, &js_source_map);
@@ -92,6 +98,8 @@ pub fn emit_web(
         wasm_rust,
         js_app,
         js_source_map,
+        source_names: sources.iter().map(|s| s.name.clone()).collect(),
+        source_contents: sources.iter().map(|s| s.content.clone()).collect(),
         dom_runtime: DOM_RUNTIME.to_string(),
         index_html: emit_index_html(),
         explicit_html_path: bundle.modules[bundle.entry].html_path.clone(),
@@ -99,6 +107,118 @@ pub fn emit_web(
             &jet_foundation::CliSchema::executable_schema(bundle),
         ),
     })
+}
+
+/// Join rustc Wasm DWARF line rows through `// jet:line` markers to a Source Map v3
+/// whose generated column is the Wasm file byte offset (line always 0).
+pub fn build_wasm_jet_source_map(
+    wasm: &[u8],
+    rust_src: &str,
+    source_names: &[String],
+    source_contents: &[String],
+) -> Result<String, String> {
+    let code_off = jet_foundation::WasmDebug::code_section_payload_offset(wasm)
+        .map_err(|e| format!("wasm code section: {e:?}"))?
+        .ok_or_else(|| "wasm module has no Code section".to_string())?;
+    let dwarf = jet_foundation::WasmDebug::parse_debug_line(wasm)
+        .map_err(|e| format!("wasm .debug_line: {e:?}"))?;
+    let rust_to_jet = rust_marker_table(rust_src);
+    let name_index: std::collections::HashMap<&str, usize> = source_names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| (name.as_str(), i))
+        .collect();
+
+    let mut mappings = Vec::new();
+    let mut last_offset = None;
+    for row in &dwarf {
+        if !row.is_stmt || row.end_sequence || row.line == 0 {
+            continue;
+        }
+        // Only rows that land in our generated guest Rust.
+        if !row.file.ends_with("app_wasm.rs") && !row.file.contains("app_wasm.rs") {
+            // rustc may record just the basename or a staging path.
+            let base = std::path::Path::new(&row.file)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(row.file.as_str());
+            if base != "app_wasm.rs" {
+                continue;
+            }
+        }
+        let Some((source_name, jet_line)) = rust_to_jet.jet_for_rust_line(row.line as usize) else {
+            continue;
+        };
+        let Some(&source) = name_index.get(source_name.as_str()) else {
+            continue;
+        };
+        let file_offset = code_off
+            .checked_add(row.address as usize)
+            .ok_or_else(|| "wasm mapping offset overflow".to_string())?;
+        if last_offset == Some(file_offset) {
+            continue;
+        }
+        last_offset = Some(file_offset);
+        mappings.push(JsMapping {
+            generated_line: 0,
+            generated_column: file_offset,
+            source,
+            original_line: jet_line.saturating_sub(1),
+        });
+    }
+    mappings.sort_by_key(|m| (m.generated_line, m.generated_column, m.source, m.original_line));
+    let encoded = encode_source_mappings(&mappings);
+    let names = source_names
+        .iter()
+        .map(|n| json_quote(n))
+        .collect::<Vec<_>>()
+        .join(",");
+    let contents = source_contents
+        .iter()
+        .map(|c| json_quote(c))
+        .collect::<Vec<_>>()
+        .join(",");
+    Ok(format!(
+        "{{\"version\":3,\"file\":\"app.wasm\",\"sources\":[{names}],\"sourcesContent\":[{contents}],\"names\":[],\"mappings\":{}}}\n",
+        json_quote(&encoded)
+    ))
+}
+
+struct RustMarkerTable {
+    /// rust line -> (source_name, jet line)
+    rows: std::collections::BTreeMap<usize, (String, usize)>,
+}
+
+impl RustMarkerTable {
+    fn jet_for_rust_line(&self, rust_line: usize) -> Option<(String, usize)> {
+        self.rows
+            .range(..=rust_line)
+            .next_back()
+            .map(|(_, v)| v.clone())
+    }
+}
+
+fn rust_marker_table(rust_src: &str) -> RustMarkerTable {
+    let mut rows = std::collections::BTreeMap::new();
+    let mut pending_source: Option<String> = None;
+    let mut pending_line: Option<usize> = None;
+    for (i, line) in rust_src.lines().enumerate() {
+        let rust_line = i + 1;
+        let trim = line.trim_start();
+        if let Some(name) = trim.strip_prefix("// jet:source-map source=") {
+            pending_source = Some(name.trim().to_string());
+            continue;
+        }
+        if let Some(n) = trim.strip_prefix("// jet:line ") {
+            pending_line = n.trim().parse().ok();
+            continue;
+        }
+        if let (Some(source), Some(jet_line)) = (pending_source.as_ref(), pending_line.take()) {
+            rows.entry(rust_line)
+                .or_insert_with(|| (source.clone(), jet_line));
+        }
+    }
+    RustMarkerTable { rows }
 }
 
 /// D-WEBTIR1=A: every executable web body must pass through the same checked
@@ -484,7 +604,11 @@ fn emit_index_html() -> String {
         .to_string()
 }
 
-fn collect_web_funcs(bundle: &ProgramBundle, source_marker: &str) -> Vec<FuncWeb> {
+fn collect_web_funcs(
+    bundle: &ProgramBundle,
+    source_marker: &str,
+    sources: &[JsSource],
+) -> Vec<FuncWeb> {
     let mut out = Vec::new();
     let extern_funcs = bundle_extern_funcs(bundle);
     for (i, module) in bundle.modules.iter().enumerate() {
@@ -499,9 +623,15 @@ fn collect_web_funcs(bundle: &ProgramBundle, source_marker: &str) -> Vec<FuncWeb
         populate_cx_from_bundle(&mut cx, bundle, i);
         register_foreign_enum_variants(&mut cx, bundle, i);
         update_cloneability_with_foreign_types(&mut cx, &module.items);
+        let source_name = sources
+            .iter()
+            .find(|source| source.display == module.display)
+            .map(|source| source.name.clone())
+            .unwrap_or_else(|| "source.jet".to_string());
         collect_module_funcs(
             &module.items,
             &module.display,
+            &source_name,
             source_marker,
             module.web_target_ceiling,
             None,
@@ -518,6 +648,7 @@ fn collect_web_funcs(bundle: &ProgramBundle, source_marker: &str) -> Vec<FuncWeb
 fn collect_module_funcs(
     items: &[Item],
     source_path: &str,
+    source_name: &str,
     source_marker: &str,
     file_ceiling: Option<WebBucket>,
     module_ceiling: Option<WebBucket>,
@@ -542,6 +673,7 @@ fn collect_module_funcs(
                     name: f.name.clone(),
                     key,
                     source_path: source_path.to_string(),
+                    source_name: source_name.to_string(),
                     source_marker: source_marker.to_string(),
                     file_prefix: file_prefix.map(str::to_string),
                     bucket,
@@ -562,6 +694,7 @@ fn collect_module_funcs(
                     collect_module_funcs(
                         body,
                         source_path,
+                        source_name,
                         source_marker,
                         file_ceiling,
                         mod_ceiling,
@@ -579,15 +712,28 @@ fn collect_module_funcs(
 }
 
 fn js_source_marker(bundle: &ProgramBundle) -> String {
-    let mut marker = "//# __jet_source_map".to_string();
-    while bundle
-        .modules
-        .iter()
-        .any(|module| module.source.contains(&marker))
-    {
-        marker.push('_');
+    source_marker_for_texts(bundle.modules.iter().map(|module| module.source.as_str()))
+}
+
+/// Pick a marker prefix absent from every source text. One linear scan per
+/// source records the longest underscore run after the base; the result uses
+/// one more underscore. O(total bytes) and allocation bounded by max run + base.
+fn source_marker_for_texts<'a>(texts: impl Iterator<Item = &'a str>) -> String {
+    const BASE: &str = "//# __jet_source_map";
+    let mut max_run = None;
+    for source in texts {
+        for (at, _) in source.match_indices(BASE) {
+            let run = source[at + BASE.len()..]
+                .chars()
+                .take_while(|&c| c == '_')
+                .count();
+            max_run = Some(max_run.map_or(run, |best: usize| best.max(run)));
+        }
     }
-    marker
+    match max_run {
+        None => BASE.to_string(),
+        Some(run) => format!("{BASE}{}", "_".repeat(run + 1)),
+    }
 }
 
 fn js_sources(bundle: &ProgramBundle) -> Vec<JsSource> {
@@ -1300,6 +1446,7 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
         out.push_str(&format!(" -> {} ", wasm_ty(ret).ok_or_else(|| web_emit_error(f))?));
     }
     out.push_str("{\n");
+    out.push_str(&format!("    // jet:source-map source={}\n", f.source_name));
     emit_wasm_body(
         &f.tir.body,
         out,
@@ -1487,7 +1634,9 @@ fn emit_wasm_body(
                 out.push_str(&format!("{pad}}}\n"));
             }
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
-            TIR::TStmt::LineMarker(_) => {}
+            TIR::TStmt::LineMarker(line) => {
+                out.push_str(&format!("{pad}// jet:line {line}\n"));
+            }
             _ => return Err(()),
         }
     }
@@ -2352,5 +2501,21 @@ mod source_map_tests {
         let mut negative = String::new();
         encode_base64_vlq(-123, &mut negative);
         assert_eq!(negative, "3H");
+    }
+
+    #[test]
+    fn source_marker_selection_is_bounded_against_underscore_runs() {
+        let underscores = "_".repeat(65_536);
+        let hostile = format!("print(\"//# __jet_source_map{underscores}\")\n");
+        let marker = source_marker_for_texts(std::iter::once(hostile.as_str()));
+        assert_eq!(marker.len(), "//# __jet_source_map".len() + 65_537);
+        assert!(
+            !hostile.contains(&marker),
+            "selected marker must not occur in hostile source"
+        );
+        assert_eq!(
+            source_marker_for_texts(std::iter::once("fn run() {}")),
+            "//# __jet_source_map"
+        );
     }
 }

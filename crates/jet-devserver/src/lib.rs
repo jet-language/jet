@@ -93,7 +93,7 @@ pub fn static_path(root: &Path, path: &str) -> Result<PathBuf, ()> {
     Ok(root.join(if path == "/" { "index.html" } else { path.trim_start_matches('/') }))
 }
 
-pub fn content_type_for(path: &Path) -> &'static str { match path.extension().and_then(|e| e.to_str()) { Some("html") => "text/html; charset=utf-8", Some("js") => "application/javascript; charset=utf-8", Some("wasm") => "application/wasm", Some("json") => "application/json; charset=utf-8", Some("css") => "text/css; charset=utf-8", _ => "application/octet-stream" } }
+pub fn content_type_for(path: &Path) -> &'static str { match path.extension().and_then(|e| e.to_str()) { Some("html") => "text/html; charset=utf-8", Some("js") => "application/javascript; charset=utf-8", Some("wasm") => "application/wasm", Some("json") | Some("map") => "application/json; charset=utf-8", Some("css") => "text/css; charset=utf-8", _ => "application/octet-stream" } }
 
 pub struct CanvasAsset { pub status: &'static str, pub content_type: &'static str, pub body: String }
 

@@ -2260,7 +2260,7 @@ fn rebuild_dev_web(
     };
 
     let staging = PathBuf::from("build").join(".jet-dev-staging");
-    if let Err(message) = write_web_artifacts(file, web, verbose, &staging) {
+    if let Err(message) = write_web_artifacts(file, web, verbose, &staging, true) {
         eprintln!("{message}");
         host.mark_error("ICE".to_string(), message, is_rebuild);
         return false;
@@ -2284,7 +2284,9 @@ pub(crate) struct WebBuildPaths {
     pub(crate) manifest: PathBuf,
     pub(crate) dom: PathBuf,
     pub(crate) js: PathBuf,
+    pub(crate) js_map: Option<PathBuf>,
     pub(crate) wasm: PathBuf,
+    pub(crate) wasm_map: Option<PathBuf>,
     pub(crate) html: PathBuf,
 }
 
@@ -2310,6 +2312,7 @@ pub(crate) fn write_web_artifacts(
     web: &jet::Codegen::WebArtifacts,
     verbose: bool,
     out_dir: &Path,
+    emit_maps: bool,
 ) -> Result<WebBuildPaths, String> {
     let step = |msg: String| {
         if verbose {
@@ -2328,8 +2331,10 @@ pub(crate) fn write_web_artifacts(
     let manifest_path = out_dir.join("web.manifest.json");
     let dom_path = out_dir.join("jet_dom_runtime.js");
     let js_path = out_dir.join("app.js");
+    let js_map_path = out_dir.join("app.js.map");
     let wasm_rs_path = out_dir.join("app_wasm.rs");
     let wasm_path = out_dir.join("app.wasm");
+    let wasm_map_path = out_dir.join("app.wasm.map");
     let html_path = out_dir.join("index.html");
     // D-HTMLPAIR1 (ratified 2026-07-01, c134): precedence for the served HTML source —
     // (1) an explicit `#Html("path.html")` marker, relative to the source
@@ -2354,16 +2359,40 @@ pub(crate) fn write_web_artifacts(
         fs::read_to_string(&sibling_html).unwrap_or_else(|_| web.index_html.clone())
     };
 
-    fs::write(&manifest_path, &web.manifest_json)
+    let manifest_json = if emit_maps {
+        web.manifest_json.clone()
+    } else {
+        strip_manifest_source_map(&web.manifest_json)
+    };
+    let mut js_app = web.js_app.clone();
+    if emit_maps {
+        if !js_app.ends_with('\n') {
+            js_app.push('\n');
+        }
+        js_app.push_str("//# sourceMappingURL=app.js.map\n");
+    }
+
+    fs::write(&manifest_path, &manifest_json)
         .map_err(|e| format!("error: couldn't write {}: {}", manifest_path.display(), e))?;
     fs::write(&dom_path, &web.dom_runtime)
         .map_err(|e| format!("error: couldn't write {}: {}", dom_path.display(), e))?;
-    fs::write(&js_path, &web.js_app)
+    fs::write(&js_path, &js_app)
         .map_err(|e| format!("error: couldn't write {}: {}", js_path.display(), e))?;
     fs::write(&wasm_rs_path, &web.wasm_rust)
         .map_err(|e| format!("error: couldn't write {}: {}", wasm_rs_path.display(), e))?;
     fs::write(&html_path, &html_contents)
         .map_err(|e| format!("error: couldn't write {}: {}", html_path.display(), e))?;
+
+    let mut js_map_written = None;
+    if emit_maps {
+        fs::write(&js_map_path, &web.js_source_map)
+            .map_err(|e| format!("error: couldn't write {}: {}", js_map_path.display(), e))?;
+        js_map_written = Some(js_map_path.clone());
+        step(format!("js map     -> {}", js_map_path.display()));
+    } else {
+        let _ = fs::remove_file(&js_map_path);
+        let _ = fs::remove_file(&wasm_map_path);
+    }
 
     step(format!("web manifest -> {}", manifest_path.display()));
     step(format!("dom shim    -> {}", dom_path.display()));
@@ -2376,19 +2405,27 @@ pub(crate) fn write_web_artifacts(
         wasm_path.display()
     ));
 
-    let rustc = Command::new("rustc")
-        .args([
-            "--edition",
-            "2021",
-            "--target",
-            "wasm32-unknown-unknown",
-            "--crate-type",
-            "cdylib",
-            "-O",
-            wasm_rs_path.to_str().unwrap(),
-            "-o",
-            wasm_path.to_str().unwrap(),
-        ])
+    let mut rustc = Command::new("rustc");
+    rustc.args([
+        "--edition",
+        "2021",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--crate-type",
+        "cdylib",
+    ]);
+    if emit_maps {
+        // Exact Jet statement lines need rustc's Wasm line table.
+        rustc.args(["-C", "opt-level=0", "-C", "debuginfo=2"]);
+    } else {
+        rustc.arg("-O");
+    }
+    rustc.args([
+        wasm_rs_path.to_str().unwrap(),
+        "-o",
+        wasm_path.to_str().unwrap(),
+    ]);
+    let rustc = rustc
         .output()
         .map_err(|e| format!("error: couldn't run rustc for wasm: {}", e))?;
 
@@ -2403,6 +2440,24 @@ pub(crate) fn write_web_artifacts(
         .map_err(|e| format!("error: couldn't read {}: {}", wasm_path.display(), e))?;
     jet_foundation::CliSchema::embed_wasm_record(&mut wasm, &web.command_record)
         .map_err(|e| format!("error: couldn't embed JetCommandSchema metadata: {e}"))?;
+
+    let mut wasm_map_written = None;
+    if emit_maps {
+        let wasm_map = jet::Codegen::build_wasm_jet_source_map(
+            &wasm,
+            &web.wasm_rust,
+            &web.source_names,
+            &web.source_contents,
+        )
+        .map_err(|e| format!("error: couldn't build app.wasm.map: {e}"))?;
+        fs::write(&wasm_map_path, &wasm_map)
+            .map_err(|e| format!("error: couldn't write {}: {}", wasm_map_path.display(), e))?;
+        jet_foundation::WasmDebug::embed_source_mapping_url(&mut wasm, "app.wasm.map")
+            .map_err(|e| format!("error: couldn't embed wasm sourceMappingURL: {e:?}"))?;
+        wasm_map_written = Some(wasm_map_path.clone());
+        step(format!("wasm map   -> {}", wasm_map_path.display()));
+    }
+
     fs::write(&wasm_path, wasm)
         .map_err(|e| format!("error: couldn't write {}: {}", wasm_path.display(), e))?;
 
@@ -2410,9 +2465,30 @@ pub(crate) fn write_web_artifacts(
         manifest: manifest_path,
         dom: dom_path,
         js: js_path,
+        js_map: js_map_written,
         wasm: wasm_path,
+        wasm_map: wasm_map_written,
         html: html_path,
     })
+}
+
+fn strip_manifest_source_map(manifest: &str) -> String {
+    let mut out = String::with_capacity(manifest.len());
+    for line in manifest.lines() {
+        if line.trim_start().starts_with("\"sourceMap\":") {
+            continue;
+        }
+        // Drop a trailing comma left on the previous field when sourceMap was last-but-one.
+        out.push_str(line);
+        out.push('\n');
+    }
+    // Repair ",\n  \"partitions\"" style when sourceMap line removed mid-object:
+    // the previous non-empty line may end with a comma already; if we removed
+    // sourceMap, the prior line (traceMap) still has its comma — fine.
+    // If sourceMap was alone after a non-comma line, JSON stays valid because
+    // emit_manifest always puts sourceMap before partitions with commas on each
+    // field line except the structural closers.
+    out
 }
 
 /// Where `write_plugin_artifacts` put the final `.wasm` Component (and the
@@ -2620,7 +2696,8 @@ pub(crate) fn build(
             eprintln!("error: internal compiler error: missing web codegen output");
             exit(ExitCodes::ICE);
         });
-        let paths = match write_web_artifacts(file, web, verbose, Path::new("build")) {
+        let emit_maps = !matches!(profile, BuildProfile::Release);
+        let paths = match write_web_artifacts(file, web, verbose, Path::new("build"), emit_maps) {
             Ok(p) => p,
             Err(msg) => {
                 eprintln!("{}", msg);
@@ -2629,11 +2706,10 @@ pub(crate) fn build(
         };
         let _ = rust_code;
         let _ = bin;
-        let _ = profile;
         let _ = ffi;
         let _ = clinks;
         if !mode.json {
-            eprintln!(
+            let mut note = format!(
                 "note: `--target=web` wrote `{}`, `{}`, `{}`, `{}`, `{}`",
                 paths.manifest.display(),
                 paths.dom.display(),
@@ -2641,6 +2717,13 @@ pub(crate) fn build(
                 paths.wasm.display(),
                 paths.html.display(),
             );
+            if let Some(js_map) = &paths.js_map {
+                note.push_str(&format!(", `{}`", js_map.display()));
+            }
+            if let Some(wasm_map) = &paths.wasm_map {
+                note.push_str(&format!(", `{}`", wasm_map.display()));
+            }
+            eprintln!("{note}");
         }
         return;
     }

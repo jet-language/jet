@@ -795,6 +795,107 @@ fn js_source_map_uses_line_markers_and_hides_host_paths() {
 }
 
 #[test]
+fn web_build_publishes_maps_and_release_omits_them() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping web map publication test (need rustc)");
+        return;
+    }
+    let src = "#Target(Web)\n#Target(Js)\nfn run() {\n    print(\"hi\")\n}\n";
+    let dir = std::env::temp_dir().join(format!("jet_web_maps_pub_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("main.jet"), src).unwrap();
+
+    let jet = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
+
+    let default_out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "--target=web", "main.jet"])
+        .output()
+        .expect("jet build --target=web");
+    assert!(
+        default_out.status.success(),
+        "default web build failed:\n{}",
+        String::from_utf8_lossy(&default_out.stderr)
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(js.contains("//# sourceMappingURL=app.js.map"), "missing js map URL:\n{js}");
+    let js_map = fs::read_to_string(dir.join("build/app.js.map")).unwrap();
+    assert!(js_map.contains("\"version\":3"), "{js_map}");
+    assert!(js_map.contains("\"sourcesContent\":["), "{js_map}");
+    assert!(!js_map.contains("/home/"), "host path leaked into js map");
+    let wasm_map = fs::read_to_string(dir.join("build/app.wasm.map")).unwrap();
+    assert!(wasm_map.contains("\"file\":\"app.wasm\""), "{wasm_map}");
+    assert!(wasm_map.contains("\"sourcesContent\":["), "{wasm_map}");
+    let wasm = fs::read(dir.join("build/app.wasm")).unwrap();
+    assert!(
+        wasm.windows(b"sourceMappingURL".len())
+            .any(|w| w == b"sourceMappingURL"),
+        "wasm missing sourceMappingURL custom section"
+    );
+    assert!(
+        wasm.windows(b"app.wasm.map".len())
+            .any(|w| w == b"app.wasm.map"),
+        "wasm missing relative map URL"
+    );
+
+    let release_out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "--target=web", "--profile=release", "main.jet"])
+        .output()
+        .expect("jet build --target=web --profile=release");
+    assert!(
+        release_out.status.success(),
+        "release web build failed:\n{}",
+        String::from_utf8_lossy(&release_out.stderr)
+    );
+    let release_js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        !release_js.contains("sourceMappingURL="),
+        "release app.js must not reference maps"
+    );
+    assert!(!dir.join("build/app.js.map").is_file(), "release must not write app.js.map");
+    assert!(!dir.join("build/app.wasm.map").is_file(), "release must not write app.wasm.map");
+    let release_manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
+    assert!(
+        !release_manifest.contains("\"sourceMap\""),
+        "release manifest must omit sourceMap"
+    );
+    let release_wasm = fs::read(dir.join("build/app.wasm")).unwrap();
+    assert!(
+        !release_wasm
+            .windows(b"sourceMappingURL".len())
+            .any(|w| w == b"sourceMappingURL"),
+        "release wasm must not embed sourceMappingURL"
+    );
+
+    // Wasm-export body must produce non-empty app.wasm.map mappings.
+    let wasm_src = "#Target(Web)\n#WasmExport\nfn add(a: Int, b: Int) -> Int { return a + b }\nfn run() {}\n";
+    fs::write(dir.join("wasm.jet"), wasm_src).unwrap();
+    let wasm_out = Command::new(&jet)
+        .current_dir(&dir)
+        .args(["build", "--target=web", "wasm.jet"])
+        .output()
+        .expect("jet build wasm export");
+    assert!(
+        wasm_out.status.success(),
+        "wasm export build failed:\n{}",
+        String::from_utf8_lossy(&wasm_out.stderr)
+    );
+    let wasm_map2 = fs::read_to_string(dir.join("build/app.wasm.map")).unwrap();
+    let mappings_field = wasm_map2
+        .split("\"mappings\":")
+        .nth(1)
+        .and_then(|rest| rest.split(',').next())
+        .unwrap_or("");
+    assert!(
+        mappings_field.contains('"') && mappings_field.len() > 3,
+        "wasm export map must carry mappings:\n{wasm_map2}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn web_body_outside_tir_is_diagnostic() {
     let src = include_str!("ui/web_tir_unsupported.jet");
     let diags = jet::compile_web_with_path(src, "tests/ui/web_tir_unsupported.jet")
