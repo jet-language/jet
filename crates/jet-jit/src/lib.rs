@@ -12,6 +12,7 @@
 #![allow(non_snake_case)]
 
 mod Archive;
+mod Args;
 mod Collections;
 mod Compress;
 mod Concurrency;
@@ -22,7 +23,9 @@ mod Fmt;
 mod Numeric;
 mod Process;
 mod Random;
+mod Sketch;
 mod Solver;
+mod Text;
 
 /// Canonical XML pull engine — EncodingStream refers to `crate::jet_xml_pull`.
 pub mod jet_xml_pull {

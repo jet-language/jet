@@ -34,16 +34,39 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
             | THandleOp::RngWeightedPick
             | THandleOp::RngPick
             | THandleOp::RngShuffle => return Ok(types::I64),
+            THandleOp::SketchMethod { method, .. } if method == "quantile" => {
+                return Ok(types::F64);
+            }
+            THandleOp::SketchMethod { method, .. }
+                if method == "add" || method == "count" || method == "sample" =>
+            {
+                return Ok(types::I64);
+            }
             _ => {}
         }
     }
-    if let TExprKind::CoreCall { module, method, .. } = &init.kind {
+    if let TExprKind::CoreCall { module, method, args, .. } = &init.kind {
         if module == "core.random" {
             match method.as_str() {
                 "float_range" | "normal" | "exponential" => return Ok(types::F64),
                 "bool" => return Ok(types::I8),
                 "bytes" | "sample" | "rng" | "weighted_pick" => return Ok(types::I64),
                 "seed" => return Ok(types::I8),
+                _ => {}
+            }
+        }
+        if module == "core.text" {
+            match method.as_str() {
+                "caseless_eq" | "is_alphabetic" | "is_numeric" | "starts_any" => {
+                    return Ok(types::I8);
+                }
+                "byte_count" | "scalar_count" | "display_width" | "graphemes" | "words"
+                | "sentences" | "char_indices" | "lower" | "upper" | "nfc" | "nfkc" | "nfd"
+                | "nfkd" | "pad_start" | "center" | "trim" => {
+                    // Int / String / List / Result handles all use I64 ABI.
+                    let _ = args;
+                    return Ok(types::I64);
+                }
                 _ => {}
             }
         }
@@ -424,6 +447,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         // D-MIGRATE3=A.
         "MigrationStatus" => &["migrated", "from", "steps"],
         "DecodeResult" => &["value", "migration"],
+        "TextWidth" => &["ambiguous", "controls"],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)

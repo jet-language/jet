@@ -9,7 +9,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use super::resident::resident_teardown;
 use super::{
     Archive, Collections, Compress, Concurrency, CoreHost, Encoding, Fmt, JitResultValue, Numeric,
-    Process, Random, Solver, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
@@ -69,6 +69,11 @@ pub(crate) struct JitRuntime {
     pub(crate) process_specs: Vec<Process::JitProcessSpec>,
     /// `ProcessChild` handles — 1-based indices (#729 process spawn).
     pub(crate) process_children: Vec<Process::JitProcessChild>,
+    /// `core.sketch` handles (#729).
+    pub(crate) sketches: Vec<crate::Sketch::SketchSlot>,
+    /// `core.args` ArgsSpec / ParsedArgs handles (#729).
+    pub(crate) args_specs: Vec<crate::Args::ArgsSpec>,
+    pub(crate) args_parsed: Vec<crate::Args::ParsedArgs>,
     /// Encoding stream file / codec handles (#729 encoding_*_stream).
     pub(crate) file_readers: Vec<crate::enc_stream::FileReaderSlot>,
     pub(crate) file_writers: Vec<crate::enc_stream::FileWriterSlot>,
@@ -1013,6 +1018,9 @@ pub(crate) struct HostFns {
     pub(crate) num: Numeric::NumericHostFns,
     pub(crate) solver: Solver::SolverHostFns,
     pub(crate) random: Random::RandomHostFns,
+    pub(crate) text: crate::Text::TextHostFns,
+    pub(crate) sketch: crate::Sketch::SketchHostFns,
+    pub(crate) args: crate::Args::ArgsHostFns,
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -1146,6 +1154,9 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     Numeric::register_numeric_symbols(&mut builder);
     Solver::register_solver_symbols(&mut builder);
     Random::register_random_symbols(&mut builder);
+    crate::Text::register_text_symbols(&mut builder);
+    crate::Sketch::register_sketch_symbols(&mut builder);
+    crate::Args::register_args_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
@@ -1159,6 +1170,9 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let num = Numeric::declare_numeric_host_fns(&mut module)?;
     let solver = Solver::declare_solver_host_fns(&mut module)?;
     let random = Random::declare_random_host_fns(&mut module)?;
+    let text = crate::Text::declare_text_host_fns(&mut module)?;
+    let sketch = crate::Sketch::declare_sketch_host_fns(&mut module)?;
+    let args = crate::Args::declare_args_host_fns(&mut module)?;
     let host = declare_host_fns(
         &mut module,
         coll,
@@ -1173,6 +1187,9 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         num,
         solver,
         random,
+        text,
+        sketch,
+        args,
     )?;
     Ok((module, host))
 }
@@ -1191,6 +1208,9 @@ fn declare_host_fns(
     num: Numeric::NumericHostFns,
     solver: Solver::SolverHostFns,
     random: Random::RandomHostFns,
+    text: crate::Text::TextHostFns,
+    sketch: crate::Sketch::SketchHostFns,
+    args: crate::Args::ArgsHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -1460,5 +1480,8 @@ fn declare_host_fns(
         num,
         solver,
         random,
+        text,
+        sketch,
+        args,
     })
 }

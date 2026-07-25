@@ -27,6 +27,9 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         clocks: Vec::new(),
         process_specs: Vec::new(),
         process_children: Vec::new(),
+        sketches: Vec::new(),
+        args_specs: Vec::new(),
+        args_parsed: Vec::new(),
         file_readers: Vec::new(),
         file_writers: Vec::new(),
         json_readers: Vec::new(),
@@ -99,8 +102,11 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.results.clear();
     rt.solvers.clear();
     rt.rngs.clear();
+    rt.sketches.clear();
     rt.process_specs.clear();
     rt.process_children.clear();
+    rt.args_specs.clear();
+    rt.args_parsed.clear();
     rt.file_readers.clear();
     rt.file_writers.clear();
     rt.json_readers.clear();

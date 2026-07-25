@@ -313,12 +313,42 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             ..
         } => {
             if module == "core.text" {
-                return matches!(args.as_slice(), [arg]
-                    if matches!(
-                        method.as_str(),
-                        "lower" | "upper" | "trim" | "scalar_count" | "byte_count"
-                    ) && matches!(&arg.ty, Type::String)
-                        && resident_safe_expr(arg, callees));
+                return match method.as_str() {
+                    "lower" | "upper" | "trim" | "scalar_count" | "byte_count" | "graphemes"
+                    | "words" | "sentences" | "nfc" | "nfkc" | "nfd" | "nfkd"
+                    | "display_width" | "is_alphabetic" | "is_numeric" | "char_indices"
+                        if args.len() == 1 =>
+                    {
+                        matches!(&args[0].ty, Type::String) && resident_safe_expr(&args[0], callees)
+                    }
+                    "display_width" if args.len() == 2 => {
+                        matches!(&args[0].ty, Type::String)
+                            && matches!(&args[1].ty, Type::Named(n) if n == "TextWidth")
+                            && resident_safe_expr(&args[0], callees)
+                            && resident_safe_expr(&args[1], callees)
+                    }
+                    "caseless_eq" | "starts_any" if args.len() == 2 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    "pad_start" | "center" if args.len() == 3 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    _ => false,
+                };
+            }
+            if module.starts_with("core.sketch.") {
+                return match (module.as_str(), method.as_str(), args.len()) {
+                    ("core.sketch.hll" | "core.sketch.tdigest" | "core.sketch.cms", "new", 0) => {
+                        true
+                    }
+                    ("core.sketch.reservoir", "new", 1) => {
+                        resident_safe_expr(&args[0], callees)
+                    }
+                    _ => false,
+                };
+            }
+            if module == "core.args" && method == "spec" {
+                return args.is_empty();
             }
             if module == "core.text.unicode" {
                 return matches!(args.as_slice(), [arg]
@@ -1567,6 +1597,49 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::ProcessChildMethod { method } => {
             method == "wait" && args.is_empty()
         }
+        THandleOp::ArgsSpecFlag
+        | THandleOp::ArgsSpecPositional
+            if args.len() == 2 =>
+        {
+            true
+        }
+        THandleOp::ArgsSpecFlagShort
+        | THandleOp::ArgsSpecOption
+        | THandleOp::ArgsSpecOptionInt
+        | THandleOp::ArgsSpecRepeat
+        | THandleOp::ArgsSpecSubcommand
+            if args.len() == 3 =>
+        {
+            true
+        }
+        THandleOp::ArgsSpecOptionDefault | THandleOp::ArgsSpecOptionChoice if args.len() == 4 => {
+            true
+        }
+        THandleOp::ArgsSpecVersion | THandleOp::ArgsSpecCompletion | THandleOp::ArgsSpecParse
+            if args.len() == 1 =>
+        {
+            true
+        }
+        THandleOp::ArgsSpecHelp if args.is_empty() => true,
+        THandleOp::ParsedArgsFlag
+        | THandleOp::ParsedArgsOption
+        | THandleOp::ParsedArgsOptionInt
+        | THandleOp::ParsedArgsOptionFloat
+        | THandleOp::ParsedArgsOptions
+        | THandleOp::ParsedArgsPositional
+            if args.len() == 1 =>
+        {
+            true
+        }
+        THandleOp::ParsedArgsSubcommand if args.is_empty() => true,
+        THandleOp::SketchMethod { sketch, method } => match method.as_str() {
+            "add" => args.len() == 1,
+            "count" if sketch == "HyperLogLog" => args.is_empty(),
+            "count" if sketch == "CountMinSketch" => args.len() == 1,
+            "quantile" => args.len() == 1,
+            "sample" => args.is_empty(),
+            _ => false,
+        },
         THandleOp::DataTreeField
         | THandleOp::JsonField
         | THandleOp::DataTreeAt
