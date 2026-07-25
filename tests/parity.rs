@@ -63,7 +63,8 @@ const EXTRACTOR_ARTIFACTS: &[(&str, &str)] = &[
 /// while these rows were still open (card #721 / #392 criterion 3).
 /// Closed by #722: crypto.expert AEAD/sign/argon2id and encoding.xml projection
 /// ports. View/ViewMut.join closed here (string JoinSep; same List join semantics).
-/// Separately, D-ITERTOOLS1 discovery currently lists Iter.* rows as PurePending
+/// D-ITERTOOLS1 Iter.* rows are Covered via sequence/Iter dispatch (list-shaped
+/// TirBridge + AOT JetIter fusion).
 /// until inventory closeout — not #722 crypto/xml gaps.
 const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[];
 
@@ -1137,10 +1138,25 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                     Some((Class::Boundary, reason))
                 } else if owner == "BuildContext" && ct_build_context.contains(&entry.method) {
                     Some((Class::Covered, "interpreter-owned build context dispatch"))
-                } else if matches!(entry.owner.as_str(), "List" | "FixedList")
+                } else if matches!(entry.owner.as_str(), "List" | "FixedList" | "Iter")
                     && sequence_methods.contains(&entry.method)
                 {
                     Some((Class::Covered, "comptime sequence dispatch"))
+                } else if entry.owner == "Iter"
+                    && matches!(
+                        entry.method.as_str(),
+                        "to_list"
+                            | "collect"
+                            | "len"
+                            | "is_empty"
+                            | "join"
+                            | "map"
+                            | "filter"
+                            | "each"
+                            | "find"
+                    )
+                {
+                    Some((Class::Covered, "comptime Iter dispatch"))
                 } else if matches!(entry.owner.as_str(), "View" | "ViewMut")
                     && view_methods.contains(entry.method.as_str())
                 {
@@ -1675,8 +1691,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    // #722 closed View/ViewMut.join. Remaining PurePending: Iter.* discovery rows.
-    assert_eq!((records.len(), covered, pending, boundaries), (1_248, 861, 40, 347));
+    // #722 closed View/ViewMut.join. Iter.* covered via sequence dispatch (list-shaped TirBridge + AOT JetIter).
+    // #722/#743: View.join + Iter.* covered. Zero PurePending effect-free backlog.
+    assert_eq!((records.len(), covered, pending, boundaries), (1_248, 901, 0, 347));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1684,7 +1701,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        10025236603832194028,
+        12183271370701440103,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
