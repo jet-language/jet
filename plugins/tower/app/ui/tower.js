@@ -1,4 +1,6 @@
 import { boardEpochs, cardMatches, sortCards, ownerVerifyQueue, openAcceptanceBallot } from './board-state.js';
+import { renderMarkdown, splitBlocks } from './markdown.js';
+import { buildDigestTimeline } from './digest.js';
 
 // Tower client. Vanilla JS, no framework, no build.
 // Two views: Now (everything blocked on the owner) and Board (epochs →
@@ -247,8 +249,12 @@ function jumpTo(it) {
 const VIEWS = [
   { id: 'now', name: 'Now', count: () => duties().length, alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
-  { id: 'scratch', name: 'Scratch', count: () => scratchCache?.notes?.length || 0 },
+  { id: 'docs', name: 'Docs', count: () => docsFileCount() },
 ];
+function docsFileCount() {
+  if (!docsCache) return 0;
+  return (docsCache.sections || []).reduce((n, s) => n + (s.files?.length || 0), 0) + (docsCache.scratch ? 1 : 0);
+}
 function renderChrome() {
   document.title = `Tower · ${S.meta.project || 'project'}`;
   $('#project-name').textContent = S.meta.project || '';
@@ -323,34 +329,43 @@ function viewNow() {
 
 // ---- while-you-were-away digest -------------------------------------------
 let digestInit = false;
+let digestShowAll = false;
 function digestBlock() {
   const cursor = S.meta.digestCursor;
   if (!cursor) {
-    // first run ever: set the cursor quietly so tomorrow's digest starts here
     if (!digestInit) { digestInit = true; api('digest/seen', {}).catch(() => {}); }
     return null;
   }
-  const evs = S.events.filter(e => e.at > cursor && e.by !== 'owner');
-  if (evs.length < 3) return null;
-  const count = (a) => evs.filter(e => e.action === a).length;
-  const doneCards = [...new Set(S.events.filter(e => e.at > cursor && e.action === 'card.update')
-    .map(e => S.cards.find(c => c.id === e.ref)).filter(c => c && c.phase === 'done').map(c => '#' + c.num))];
-  const bits = [];
-  if (doneCards.length) bits.push(`<b>${doneCards.length}</b> done (${doneCards.slice(0, 6).join(' ')})`);
-  const adv = count('card.update');
-  if (adv) bits.push(`<b>${adv}</b> card update${adv > 1 ? 's' : ''}`);
-  const nd = count('decision.add');
-  if (nd) bits.push(`<b>${nd}</b> new ballot${nd > 1 ? 's' : ''}`);
-  const qa = count('question.answer');
-  if (qa) bits.push(`<b>${qa}</b> question${qa > 1 ? 's' : ''} answered`);
-  const who = [...new Set(evs.map(e => e.by).filter(b => b && b !== 'agent' && b !== 'tower'))];
-  const since = new Date(cursor).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
-  const node = el(`<div class="digest">
-      <div class="digest__h">Since ${esc(since)}${who.length ? ` · ${who.map(esc).join(', ')}` : ''}</div>
-      <div class="digest__b">${bits.join(' · ') || evs.length + ' events'}</div>
-      <button class="btn btn--sm" data-seen>Caught up</button>
+  const { items } = buildDigestTimeline({
+    cursor,
+    events: S.events || [],
+    cards: S.cards || [],
+    decisions: S.decisions || [],
+  });
+  if (!items.length) return null;
+  const since = new Date(cursor).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const shown = digestShowAll ? items : items.slice(0, 20);
+  const rows = shown.map(it => {
+    const t = new Date(it.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return `<div class="digest__row digest__row--${esc(it.kind)}"><time>${esc(t)}</time><span>${esc(it.text)}</span></div>`;
+  }).join('');
+  const more = !digestShowAll && items.length > 20
+    ? `<button class="btn btn--ghost btn--sm" data-more>Show all ${items.length}</button>` : '';
+  const node = el(`<div class="digest digest--timeline">
+      <div class="digest__head">
+        <div class="digest__h">Since ${esc(since)}</div>
+        <span class="digest__count">${items.length} update${items.length === 1 ? '' : 's'}</span>
+        <button class="btn btn--sm" data-seen>Dismiss</button>
+      </div>
+      <div class="digest__list">${rows}</div>
+      ${more}
     </div>`);
-  $('[data-seen]', node).addEventListener('click', () => api('digest/seen', {}));
+  $('[data-seen]', node).addEventListener('click', async () => {
+    digestShowAll = false;
+    try { await api('digest/seen', {}); }
+    catch { /* toast already shown */ }
+  });
+  $('[data-more]', node)?.addEventListener('click', () => { digestShowAll = true; render(); });
   return node;
 }
 
@@ -578,9 +593,9 @@ function viewBoard() {
       <input id="radar-filter" aria-label="Filter cards" placeholder="Filter by # or title…" value="${esc(radarFilterText)}">
       <select id="radar-workflow" aria-label="Filter by workflow">
         <option value="all">All work</option>
-        <option value="0" ${radarWorkflow === '0' ? 'selected' : ''}>Verify only</option>
-        <option value="1" ${radarWorkflow === '1' ? 'selected' : ''}>Ready / unblocked</option>
-        <option value="2" ${radarWorkflow === '2' ? 'selected' : ''}>Build / plan</option>
+        <option value="0" ${radarWorkflow === '0' ? 'selected' : ''}>In progress</option>
+        <option value="1" ${radarWorkflow === '1' ? 'selected' : ''}>Ready</option>
+        <option value="2" ${radarWorkflow === '2' ? 'selected' : ''}>Plan</option>
         <option value="3" ${radarWorkflow === '3' ? 'selected' : ''}>Blocked</option>
       </select>
       <select id="radar-priority" aria-label="Filter by priority">
@@ -1076,185 +1091,232 @@ async function recordBatch() {
   renderFocus();
 }
 
-// ---- Scratch pad (file notes + docs preview; not board state) --------------------
-let scratchCache = null;   // { notes, docs }
-let scratchSel = null;     // { kind:'note'|'doc', id|path }
-let scratchDirty = false;
+// ---- Docs tab (durable docs/*.md + pinned scratchpad) ---------------------------
+let docsCache = null;   // { scratch, sections }
+let docsSel = null;     // { kind:'scratch'|'doc', path? }
+let docsDirty = false;
+let docsMode = 'compose'; // 'compose' | 'source'
+let docsOpen = {};      // section id → bool (default true for named except other; spec defaults collapsed)
+let docsDraft = null;   // { key, body } preserved across mode toggles
+const docsKey = (sel) => sel?.kind === 'scratch' ? 'scratch' : (sel?.path || '');
 
-const scratchGet = async (qs = '') => {
-  const r = await fetch('/api/scratch' + qs);
-  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.message || 'scratch fetch failed'); }
+const docsGet = async (qs = '') => {
+  const r = await fetch('/api/docs' + qs);
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.message || 'docs fetch failed'); }
   return r.json();
 };
-const scratchPost = async (route, payload) => {
-  const r = await fetch('/api/scratch/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
+const docsPost = async (route, payload) => {
+  const r = await fetch('/api/docs/' + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.ok === false) { toast(j.message || `scratch ${route} failed`, true); throw new Error(j.message || route); }
+  if (!r.ok || j.ok === false) { toast(j.message || `docs ${route} failed`, true); throw new Error(j.message || route); }
   return j.result;
 };
 
-function mdRich(s) {
-  const parts = String(s ?? '').replace(/\r\n/g, '\n').split(/```/);
-  let out = '';
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 1) {
-      const nl = parts[i].indexOf('\n');
-      const code = nl < 0 ? parts[i] : parts[i].slice(nl + 1);
-      out += codeBlock(code.replace(/\n$/, ''));
-      continue;
-    }
-    out += parts[i].split(/\n{2,}/).map(block => {
-      const lines = block.split('\n');
-      if (/^#{1,3}\s/.test(lines[0])) {
-        return lines.map(l => {
-          const m = /^(#{1,3})\s+(.*)$/.exec(l);
-          if (!m) return `<p>${esc(l)}</p>`;
-          const tag = `h${m[1].length + 2}`;
-          return `<${tag} class="scratch__h">${esc(m[2])}</${tag}>`;
-        }).join('');
-      }
-      if (lines.every(l => /^[-*]\s/.test(l) || !l.trim())) {
-        return `<ul class="scratch__ul">${lines.filter(l => l.trim()).map(l => `<li>${esc(l.replace(/^[-*]\s+/, ''))}</li>`).join('')}</ul>`;
-      }
-      return `<p>${esc(block).replace(/\n/g, '<br>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')}</p>`;
-    }).join('');
-  }
-  return out;
+async function loadDocsIndex() {
+  docsCache = await docsGet();
+  if (VIEW === 'docs') renderChrome();
 }
 
-async function loadScratchIndex() {
-  scratchCache = await scratchGet();
-  if (VIEW === 'scratch') renderChrome();
-}
-
-async function viewScratch() {
+async function viewDocs() {
   const v = $('#view');
-  if (!scratchCache) {
-    v.innerHTML = `<div class="viewhead"><h1 class="h1">Scratch</h1><span class="viewhead__sub">loading…</span></div>`;
-    try { await loadScratchIndex(); } catch (e) { v.innerHTML = `<div class="empty"><div>Scratch load failed: ${esc(e.message)}</div></div>`; return; }
+  if (!docsCache) {
+    v.innerHTML = `<div class="viewhead"><h1 class="h1">Docs</h1><span class="viewhead__sub">loading…</span></div>`;
+    try { await loadDocsIndex(); } catch (e) { v.innerHTML = `<div class="empty"><div>Docs load failed: ${esc(e.message)}</div></div>`; return; }
   }
-  const notes = scratchCache.notes || [];
-  const docs = scratchCache.docs || [];
-  v.innerHTML = `<div class="viewhead"><h1 class="h1">Scratch</h1>
-      <span class="viewhead__sub">notes + docs preview — not tracked tasks</span>
-      <div class="viewhead__actions">
-        <button class="btn btn--red" id="scratch-new">New note</button>
-      </div></div>
-    <div class="scratch">
-      <aside class="scratch__side">
-        <div class="scratch__label">Notes</div>
-        <div id="scratch-notes"></div>
-        <div class="scratch__label">Docs preview</div>
-        <div id="scratch-docs" class="scratch__docs"></div>
-      </aside>
-      <section class="scratch__main" id="scratch-main"><div class="empty"><div class="empty__glyph">✎</div><div>Pick a note or preview a doc.</div></div></section>
+  const sections = docsCache.sections || [];
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">Docs</h1>
+      <span class="viewhead__sub">scratchpad + durable markdown under docs/</span>
+    </div>
+    <div class="docs">
+      <aside class="docs__side" id="docs-side"></aside>
+      <section class="docs__main" id="docs-main"><div class="empty"><div class="empty__glyph">✎</div><div>Pick a file to edit.</div></div></section>
     </div>`;
 
-  const notesEl = $('#scratch-notes');
-  for (const n of notes) {
-    const b = el(`<button class="scratch__item${scratchSel?.kind === 'note' && scratchSel.id === n.id ? ' on' : ''}" type="button">
-      <b>${esc(n.title)}</b><span>${esc(n.id)}</span></button>`);
-    b.addEventListener('click', () => openScratchNote(n.id));
-    notesEl.appendChild(b);
-  }
-  if (!notes.length) notesEl.appendChild(el(`<div class="scratch__empty">No notes yet.</div>`));
+  const side = $('#docs-side');
+  // Scratchpad always first
+  const sc = docsCache.scratch;
+  const scBtn = el(`<button class="docs__item docs__item--scratch${docsSel?.kind === 'scratch' ? ' on' : ''}" type="button">
+      <b>${esc(sc?.title || 'Owner scratch')}</b><span>scratchpad</span></button>`);
+  scBtn.addEventListener('click', () => openDocsFile({ kind: 'scratch' }));
+  side.appendChild(el(`<div class="docs__label">Scratchpad</div>`));
+  side.appendChild(scBtn);
 
-  const docsEl = $('#scratch-docs');
-  let lastRoot = '';
-  for (const d of docs) {
-    const root = d.path.split('/').slice(0, 2).join('/');
-    if (root !== lastRoot) {
-      docsEl.appendChild(el(`<div class="scratch__root">${esc(root)}</div>`));
-      lastRoot = root;
+  for (const sec of sections) {
+    if (sec.id === 'other' && !sec.files.length) continue;
+    const open = docsOpen[sec.id] ?? (sec.id !== 'other' && sec.id !== 'spec');
+    const head = el(`<button class="docs__sec" type="button" aria-expanded="${open}">
+      <span class="docs__chev">${open ? '▾' : '▸'}</span>
+      <span>${esc(sec.label)}</span>
+      <span class="docs__sec-n">${sec.files.length}</span>
+      ${sec.id !== 'other' ? `<span class="docs__sec-add" data-add="${esc(sec.id)}" title="New file">+</span>` : ''}
+    </button>`);
+    head.addEventListener('click', (ev) => {
+      if (ev.target.closest('[data-add]')) return;
+      docsOpen[sec.id] = !open;
+      viewDocs();
+    });
+    $('[data-add]', head)?.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const title = prompt(`New ${sec.label.slice(0, -1).toLowerCase()} title`);
+      if (!title) return;
+      const n = await docsPost('add', { section: sec.id, title, body: `# ${title}\n\n` });
+      await loadDocsIndex();
+      docsSel = { kind: 'doc', path: n.path };
+      await viewDocs();
+      await openDocsFile(docsSel);
+    });
+    side.appendChild(head);
+    if (!open) continue;
+    const wrap = el('<div class="docs__files"></div>');
+    if (!sec.files.length) wrap.appendChild(el(`<div class="docs__empty">Empty</div>`));
+    for (const f of sec.files) {
+      const b = el(`<button class="docs__item${docsSel?.kind === 'doc' && docsSel.path === f.path ? ' on' : ''}" type="button">
+        <b>${esc(f.title)}</b><span>${esc(f.path.replace(/^docs\//, ''))}</span></button>`);
+      b.addEventListener('click', () => openDocsFile({ kind: 'doc', path: f.path }));
+      wrap.appendChild(b);
     }
-    const b = el(`<button class="scratch__item scratch__item--doc${scratchSel?.kind === 'doc' && scratchSel.path === d.path ? ' on' : ''}" type="button">
-      <b>${esc(d.title)}</b><span>${esc(d.path)}</span></button>`);
-    b.addEventListener('click', () => openScratchDoc(d.path));
-    docsEl.appendChild(b);
+    side.appendChild(wrap);
   }
-  if (!docs.length) docsEl.appendChild(el(`<div class="scratch__empty">No previewable docs.</div>`));
 
-  $('#scratch-new').addEventListener('click', async () => {
-    const title = prompt('Note title');
-    if (!title) return;
-    const n = await scratchPost('add', { title, body: '' });
-    await loadScratchIndex();
-    scratchSel = { kind: 'note', id: n.id };
-    await viewScratch();
-    await openScratchNote(n.id);
-  });
-
-  if (scratchSel?.kind === 'note') await openScratchNote(scratchSel.id);
-  else if (scratchSel?.kind === 'doc') await openScratchDoc(scratchSel.path);
+  if (docsSel?.kind === 'scratch') await openDocsFile(docsSel);
+  else if (docsSel?.kind === 'doc') await openDocsFile(docsSel);
+  else await openDocsFile({ kind: 'scratch' });
 }
 
-async function openScratchNote(id) {
-  scratchSel = { kind: 'note', id };
-  scratchDirty = false;
+async function openDocsFile(sel, { keepDraft = false } = {}) {
+  docsSel = sel;
   let n;
-  try { n = await scratchGet('?id=' + encodeURIComponent(id)); }
-  catch (e) { toast(e.message, true); return; }
-  const main = $('#scratch-main');
-  if (!main) return;
-  for (const b of document.querySelectorAll('.scratch__item')) {
-    b.classList.toggle('on', b.querySelector('span')?.textContent === id);
+  try {
+    n = sel.kind === 'scratch'
+      ? await docsGet('?scratch=1')
+      : await docsGet('?path=' + encodeURIComponent(sel.path));
+  } catch (e) { toast(e.message, true); return; }
+  if (keepDraft && docsDraft && docsDraft.key === docsKey(sel)) {
+    n = { ...n, body: docsDraft.body };
+  } else {
+    docsDirty = false;
+    docsDraft = null;
   }
-  main.innerHTML = `<div class="scratch__toolbar">
-      <input class="scratch__title" id="scratch-title" value="${esc(n.title)}">
-      <span class="scratch__meta">${esc(n.id)} · ${esc((n.updated || '').slice(0, 19).replace('T', ' '))}</span>
-      <button class="btn btn--sm" id="scratch-preview-toggle">Preview</button>
-      <button class="btn btn--sm btn--red" id="scratch-save" disabled>Save</button>
-      <button class="btn btn--sm btn--danger" id="scratch-del">Delete</button>
+  const main = $('#docs-main');
+  if (!main) return;
+
+  const pathLabel = sel.kind === 'scratch' ? 'scratchpad' : n.path;
+  const canDelete = sel.kind === 'doc';
+  const canArchive = canDelete && !String(sel.path || '').startsWith('docs/spec/') && !String(sel.path || '').startsWith('docs/archive/');
+  main.innerHTML = `<div class="docs__toolbar">
+      <div class="docs__title">${esc(n.title)}</div>
+      <span class="docs__meta">${esc(pathLabel)} · ${esc((n.updated || '').slice(0, 19).replace('T', ' '))}</span>
+      <button class="btn btn--sm" id="docs-mode">${docsMode === 'compose' ? 'Source' : 'Compose'}</button>
+      <button class="btn btn--sm btn--red" id="docs-save" ${docsDirty ? '' : 'disabled'}>Save</button>
+      ${canArchive ? '<button class="btn btn--sm" id="docs-arch" title="Move to docs/archive/ (hidden from this UI)">Archive</button>' : ''}
+      ${canDelete ? '<button class="btn btn--sm btn--danger" id="docs-del">Delete</button>' : ''}
     </div>
-    <textarea class="scratch__edit" id="scratch-body" spellcheck="true"></textarea>
-    <div class="scratch__preview prose" id="scratch-prev" hidden></div>`;
-  const body = $('#scratch-body');
+    <textarea class="docs__edit" id="docs-body" spellcheck="true" ${docsMode === 'compose' ? 'hidden' : ''}></textarea>
+    <div class="docs__compose prose" id="docs-compose" ${docsMode === 'source' ? 'hidden' : ''}></div>`;
+
+  const body = $('#docs-body');
   body.value = n.body;
-  const title = $('#scratch-title');
-  const save = $('#scratch-save');
-  const mark = () => { scratchDirty = true; save.disabled = false; };
+  const save = $('#docs-save');
+  const mark = () => {
+    docsDirty = true;
+    save.disabled = false;
+    docsDraft = { key: docsKey(sel), body: body.value };
+  };
+
+  const renderCompose = () => {
+    const compose = $('#docs-compose');
+    if (!compose) return;
+    const blocks = splitBlocks(body.value);
+    compose.innerHTML = '';
+    blocks.forEach((block, idx) => {
+      const node = el(`<div class="docs__block" data-i="${idx}">${renderMarkdown(block) || '<p class="md__p md__empty">∅</p>'}</div>`);
+      node.addEventListener('click', () => editBlock(idx));
+      compose.appendChild(node);
+    });
+    if (!blocks.length || (blocks.length === 1 && !blocks[0].trim())) {
+      compose.innerHTML = '';
+      const empty = el(`<div class="docs__block docs__block--empty">Click to start writing…</div>`);
+      empty.addEventListener('click', () => {
+        docsDraft = { key: docsKey(sel), body: body.value };
+        docsMode = 'source';
+        openDocsFile(docsSel, { keepDraft: true });
+      });
+      compose.appendChild(empty);
+    }
+  };
+
+  const editBlock = (idx) => {
+    const compose = $('#docs-compose');
+    const blocks = splitBlocks(body.value);
+    const cur = blocks[idx] ?? '';
+    const ta = el(`<textarea class="docs__block-edit" spellcheck="true"></textarea>`);
+    ta.value = cur;
+    const target = compose.querySelector(`[data-i="${idx}"]`);
+    if (!target) return;
+    target.replaceWith(ta);
+    ta.focus();
+    ta.style.height = Math.max(48, ta.scrollHeight) + 'px';
+    ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; mark(); });
+    const commit = () => {
+      blocks[idx] = ta.value;
+      body.value = blocks.join('\n\n');
+      mark();
+      renderCompose();
+    };
+    ta.addEventListener('blur', commit);
+    ta.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') { ev.preventDefault(); ta.blur(); }
+    });
+  };
+
   body.addEventListener('input', mark);
-  title.addEventListener('input', mark);
-  $('#scratch-preview-toggle').addEventListener('click', () => {
-    const prev = $('#scratch-prev');
-    if (prev.hidden) { prev.innerHTML = mdRich(body.value); prev.hidden = false; body.hidden = true; }
-    else { prev.hidden = true; body.hidden = false; }
+  if (docsMode === 'compose') renderCompose();
+
+  $('#docs-mode').addEventListener('click', () => {
+    docsDraft = { key: docsKey(sel), body: body.value };
+    docsMode = docsMode === 'compose' ? 'source' : 'compose';
+    openDocsFile(docsSel, { keepDraft: true });
   });
-  save.addEventListener('click', async () => {
-    await scratchPost('update', { id, title: title.value.trim() || id, body: body.value });
-    scratchDirty = false; save.disabled = true; toast('saved');
-    await loadScratchIndex();
+
+  const doSave = async () => {
+    if (sel.kind === 'scratch') {
+      await docsPost('update', { scratch: true, title: n.title, body: body.value });
+    } else {
+      await docsPost('update', { path: sel.path, body: body.value });
+    }
+    docsDirty = false;
+    docsDraft = null;
+    save.disabled = true;
+    toast('saved');
+    await loadDocsIndex();
+  };
+  save.addEventListener('click', doSave);
+  body.addEventListener('keydown', (ev) => {
+    if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 's') { ev.preventDefault(); doSave(); }
   });
-  $('#scratch-del').addEventListener('click', async () => {
-    if (!confirm(`Delete note "${n.title}"?`)) return;
-    await scratchPost('delete', { id });
-    scratchSel = null;
-    await loadScratchIndex();
-    viewScratch();
+
+  $('#docs-del')?.addEventListener('click', async () => {
+    if (!confirm(`Delete ${sel.path} from the project?`)) return;
+    await docsPost('delete', { path: sel.path });
+    docsSel = { kind: 'scratch' };
+    docsDraft = null;
+    await loadDocsIndex();
+    viewDocs();
     toast('deleted');
   });
-}
-
-async function openScratchDoc(path) {
-  scratchSel = { kind: 'doc', path };
-  scratchDirty = false;
-  let n;
-  try { n = await scratchGet('?path=' + encodeURIComponent(path)); }
-  catch (e) { toast(e.message, true); return; }
-  const main = $('#scratch-main');
-  if (!main) return;
-  for (const b of document.querySelectorAll('.scratch__item')) {
-    b.classList.toggle('on', b.querySelector('span')?.textContent === path);
-  }
-  main.innerHTML = `<div class="scratch__toolbar">
-      <div class="scratch__title scratch__title--ro">${esc(n.title)}</div>
-      <span class="scratch__meta">${esc(n.path)} · read-only</span>
-    </div>
-    <div class="scratch__preview prose scratch__preview--doc">${mdRich(n.body)}</div>`;
+  $('#docs-arch')?.addEventListener('click', async () => {
+    if (!confirm(`Archive ${sel.path} to docs/archive/? It will leave this Docs list.`)) return;
+    await docsPost('archive', { path: sel.path });
+    docsSel = { kind: 'scratch' };
+    docsDraft = null;
+    await loadDocsIndex();
+    viewDocs();
+    toast('archived');
+  });
 }
 
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, board: viewBoard, scratch: viewScratch };
+const RENDER = { now: viewNow, board: viewBoard, docs: viewDocs };
 function render() {
   if (!S) return;
   renderBeacon();
@@ -1293,7 +1355,7 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); return nowMove(-1); }
     if (e.key === 'Enter' && nowSel >= 0) { e.preventDefault(); return nowActivate(); }
   }
-  const i = ['1', '2'].indexOf(e.key);
+  const i = ['1', '2', '3'].indexOf(e.key);
   if (i >= 0) go(VIEWS[i].id);
 });
 
@@ -1342,7 +1404,11 @@ function openPalette() {
   paint(); input.focus();
 }
 $('#scrim').addEventListener('click', closeDetail);
-window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (RENDER[h]) { VIEW = h; render(); } });
+window.addEventListener('hashchange', () => {
+  let h = location.hash.slice(1);
+  if (h === 'scratch') h = 'docs';
+  if (RENDER[h]) { VIEW = h; render(); }
+});
 
 // live updates: SSE stream (fallback: slow poll)
 connectStream();
@@ -1352,9 +1418,15 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { re
 // PWA: service worker (offline shell only — web push removed)
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
-if (RENDER[location.hash.slice(1)]) VIEW = location.hash.slice(1);
+{
+  let h = location.hash.slice(1);
+  if (h === 'scratch') h = 'docs';
+  if (RENDER[h]) VIEW = h;
+}
 // top-level await: the window load event waits for the first full render
 await refresh();
+// Docs tab count needs the index before the owner opens Docs
+loadDocsIndex().then(() => { if (S) renderChrome(); }).catch(() => {});
 // deep links: ?focus=<decisionId> opens focus mode, ?open=<cardId|#n> a card
 const qs = new URLSearchParams(location.search);
 if (qs.get('focus') && S) focusAll(qs.get('focus'));

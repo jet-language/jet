@@ -1,10 +1,11 @@
 const DEFAULT_PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
 
+// Default board sort: in-progress first, then ready, then plan, then blocked.
 export const workflowRank = (card) => {
   const lane = card.lane?.lane;
-  if (lane === 'verify') return 0;
+  if (lane === 'building' || lane === 'verify') return 0;
   if (lane === 'implement') return 1;
-  if (lane === 'building' || lane === 'plan') return 2;
+  if (lane === 'plan') return 2;
   if (lane === 'blocked' || lane === 'decide') return 3;
   if (lane === 'done') return 4;
   return 5;

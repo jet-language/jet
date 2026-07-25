@@ -7,12 +7,12 @@ owner asks. Extra tests run only when they are the job.
 
 | Kind | Where |
 | --- | --- |
-| Audit / research / cleanup reports | `plugins/tower/.tower/scratch/` via `tower scratch` |
+| Audit / research / cleanup reports | `docs/audits/` or `docs/research/` via `tower docs add` |
 | Board work | Tower CLI (`plugins/tower/.tower/`) |
 | Ratified language law | `docs/spec/` |
 | Skill procedures | `.agents/skills/` |
 
-Scratch id: `<skill>-YYYY-MM-DD`. Never overwrite another day's note.
+File id: `<skill>-YYYY-MM-DD`. Never overwrite another day's note.
 
 ## Catalog
 

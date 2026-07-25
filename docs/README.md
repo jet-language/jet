@@ -12,11 +12,18 @@ One home per kind of document. Start here.
 | Read embedded / freestanding builds | [reference/embedded.md](reference/embedded.md) |
 | Read the versioning / release policy | [reference/versioning.md](reference/versioning.md) |
 | Know the authoritative rules | [spec/](spec/) — see below |
-| See durable plans | [plans/](plans/) |
+| See durable plans (incl. sidequests in the Docs tab) | [plans/](plans/) |
 | See live work, decisions, and blockers | [AGENTS.md](../AGENTS.md) → Tower |
 | Review unexplored proposals | [proposals/](proposals/) |
-| Find superseded research / old audits | [archive/](archive/) |
+| Find superseded research / old audits | [archive/](archive/) (hidden in Tower Docs UI) |
+| Thin the docs tree (archive vs delete choices) | [plans/docs-cleanup-sweep.md](plans/docs-cleanup-sweep.md) |
 | Re-run improvement / competitive checks | [`.agents/skills/`](../.agents/skills/) |
+
+## Tower Docs tab
+
+Collapsible sections: Spec, Proposals, Plans (+ sidequests), Research, Audits,
+References. Archive and ballots never list or count. Prefer **Archive** for
+finished research; **Delete** only when a skill regenerates the same report.
 
 ## spec/ — the authoritative surface
 

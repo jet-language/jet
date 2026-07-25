@@ -49,7 +49,8 @@ tower next --burndown        # burndown: active epoch's epoch-track cards
                               # D-TWR-OPS1)
 tower next --ready-across-epochs  # every unblocked card board-wide —
                               # the parallel-safe set (D-TWR-OPS2)
-tower scratch list|show|…    # owner markdown notes + docs preview
+tower docs list|show|add|update|archive|delete   # durable docs/*.md + scratchpad
+                              # (archive → docs/archive/, hidden from Docs UI)
 tower lint [--json] [--docs] # durability sweeper over the live board (+
                               # docs/ballots/*.md scan with --docs); exit 1
                               # on any finding, 0 clean

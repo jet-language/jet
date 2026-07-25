@@ -6,15 +6,26 @@ Tower owns live status, claims, decisions, and blockers.
 
 ## Where plans live
 
+- [`docs-cleanup-sweep.md`](docs-cleanup-sweep.md) — **active** proposal to thin
+  Docs UI content (archive vs delete). No moves until the owner marks that table.
+- [`compiler-speed.md`](compiler-speed.md) — two-lens law and self-hosted speed bets.
 - [`epoch-3/`](epoch-3/) — compiler and language program plans.
 - [`epoch-4/`](epoch-4/) — jetpack package-manager and environment substrate.
 - [`epoch-5/`](epoch-5/) and [`epoch-6/`](epoch-6/) — later ratified arcs.
 - [`epoch-7/`](epoch-7/) — jetos and Studio plans, including frozen work.
-- [`../sidequests/`](../sidequests/) — reviewed cross-epoch work. Delete a
-  sidequest plan after its behavior moves into the spec, examples, and tests.
+- [`../sidequests/`](../sidequests/) — reviewed cross-epoch work. In the Tower
+  Docs tab these files list under **Plans**. Delete or archive a sidequest plan
+  after its behavior moves into the spec, examples, and tests.
 
 The live queue is not duplicated here. Start it using the canonical command in
 [`AGENTS.md`](../../AGENTS.md).
+
+## Docs tab sections (Tower)
+
+Scratchpad, then Spec (collapsed by default), Proposals, Plans (includes
+sidequests), Research, Audits, References. `docs/archive/` and `docs/ballots/`
+do not appear. Use **Archive** to retire a file into `docs/archive/`; use
+**Delete** to remove it. Spec files cannot be archived from the UI.
 
 ## Implementing-agent protocol
 

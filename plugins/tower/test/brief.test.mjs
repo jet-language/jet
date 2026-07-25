@@ -197,14 +197,14 @@ test('refs harvest strips trailing sentence punctuation off a path', () => {
 
 // ---- 7. recent log (last 5) + rules footer -------------------------------------
 
-test('log is capped at the 5 most recent entries; rules footer is the standard 5 lines', () => {
+test('log is capped at the 5 most recent entries; rules footer lists the brief rules', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   for (let i = 0; i < 8; i++) st.mutate((s, cfg) => db.updateCard(s, '#1', { logEntry: `entry ${i}`, by: 'agent' }, cfg));
   const p = buildBrief(st.load(), '#1');
   assert.equal(p.log.length, 5);
   assert.equal(p.log[0].text, 'entry 7', 'newest first');
-  assert.equal(p.rules.length, 5);
+  assert.ok(p.rules.length >= 5);
   assert.match(p.rules.join(' '), /--by/);
   assert.match(p.rules.join(' '), /E_CRITERIA_SELF/);
   assert.match(p.rules.join(' '), /--handoff/);

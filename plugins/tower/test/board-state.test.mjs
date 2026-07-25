@@ -6,7 +6,7 @@ const card = (num, lane, phase = lane, extra = {}) => ({
   num, title: `Card ${num}`, phase, priority: 'P1', lane: { lane, label: lane }, ...extra,
 });
 
-test('workflow order is verify, ready, build/plan, blocked, closed', () => {
+test('workflow order is in-progress, ready, plan, blocked, closed', () => {
   const cards = [
     card(5, 'done'),
     card(4, 'blocked', 'planning'),
@@ -15,8 +15,8 @@ test('workflow order is verify, ready, build/plan, blocked, closed', () => {
     card(1, 'verify'),
     card(6, 'building'),
   ];
-  assert.deepEqual(sortCards(cards).map(c => c.num), [1, 2, 3, 6, 4, 5]);
-  assert.deepEqual(cards.map(workflowRank), [4, 3, 2, 1, 0, 2]);
+  assert.deepEqual(sortCards(cards).map(c => c.num), [1, 6, 2, 3, 4, 5]);
+  assert.deepEqual(cards.map(workflowRank), [4, 3, 2, 1, 0, 0]);
 });
 
 test('closed cards are opt-in and filters compose', () => {
@@ -27,6 +27,9 @@ test('closed cards are opt-in and filters compose', () => {
 
   const ready = card(10, 'implement', 'ready', { title: 'Ready parser', priority: 'P0' });
   assert.equal(cardMatches(ready, { workflow: '1', priority: 'P0', text: '#10' }), true);
+
+  const building = card(12, 'building', 'building');
+  assert.equal(cardMatches(building, { workflow: '0' }), true);
 
   const frozen = card(11, 'frozen', 'frozen');
   assert.equal(workflowRank(frozen), 5);

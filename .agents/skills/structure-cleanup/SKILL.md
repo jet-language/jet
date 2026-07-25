@@ -14,5 +14,5 @@ changes — if behavior must change, stop and use ordinary implementation plus
 Name owned paths. Record baseline commands with `scripts/agent/jet-env`. Prefer
 deletion and existing modules. Stage only owned paths.
 
-When the owner wants a written report, use one Tower scratch note; otherwise
+When the owner wants a written report, use `tower docs add --section audits …`; otherwise
 report in chat and land the cleanup.

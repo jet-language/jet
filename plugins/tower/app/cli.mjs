@@ -13,7 +13,7 @@ import { findDataDir, readJSON, writeJSON, historyFile } from './paths.mjs';
 import { ConfigError, DEFAULTS } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
-import * as scratch from './scratch.mjs';
+import * as docs from './docs.mjs';
 import { applyRepairManifest } from './repair.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
@@ -198,7 +198,7 @@ function cmdCard(store, { pos, flags }) {
         refs: flags.refs ? String(flags.refs).split(',').map(x => x.trim()).filter(Boolean) : p.refs,
         workOrder: flags.workOrder ?? p.workOrder, by,
       }, cfg));
-      return out(flags, `added card #${result.num} (${result.id})`, result);
+      return out(flags, `added card #${result.num}`, result);
     }
     case 'update': {
       const p = readPayload(flags) || {};
@@ -250,7 +250,7 @@ function cmdCard(store, { pos, flags }) {
     }
     case 'delete': {
       const { result } = store.mutate((s) => db.deleteCard(s, ref, { by }));
-      return out(flags, `deleted card ${result.id}`, result);
+      return out(flags, `deleted card #${result.num}`, result);
     }
     default: throw new TowerError('E_USAGE', `unknown card verb "${verb}" — list/show/add/update/claim/release/delete/criteria`);
   }
@@ -287,7 +287,7 @@ function cmdDecision(store, { pos, flags }) {
       if (flags.card !== undefined) payload.cardId = flags.card;
       if (flags.draft !== undefined) payload.draft = flags.draft === true || flags.draft === 'true';
       const { result } = store.mutate((s) => db.addDecision(s, payload));
-      return out(flags, `added decision ${result.id} on card ${result.cardId}${result.draft ? ' (draft)' : ''}`, result);
+      return out(flags, `added decision ${result.id} on card #${result.cardNum}${result.draft ? ' (draft)' : ''}`, result);
     }
     case 'update': {
       const p = readPayload(flags) || {};
@@ -334,7 +334,7 @@ function cmdQuestion(store, { pos, flags }) {
     }
     case 'ask': {
       const { result } = store.mutate((s) => db.addQuestion(s, { cardId: id, text: flags.text, by: flags.by || 'owner', kind: flags.kind, decisionId: flags.decision }));
-      return out(flags, `asked ${result.id} on card ${result.cardId}`, result);
+      return out(flags, `asked ${result.id} on card #${result.cardNum}`, result);
     }
     case 'answer': {
       const { result } = store.mutate((s) => db.answerQuestion(s, id, flags.text, flags.by));
@@ -365,7 +365,7 @@ function cmdIdea(store, { pos, flags }) {
     }
     case 'promote': {
       const { result } = store.mutate((s, cfg) => db.promoteIdea(s, id, { title: flags.title, body: flags.body, kind: flags.kind, track: flags.track, priority: flags.priority, by: flags.by }, cfg));
-      return out(flags, `promoted → card #${result.num} (${result.id})`, result);
+      return out(flags, `promoted → card #${result.num}`, result);
     }
     case 'delete': {
       const { result } = store.mutate((s) => db.deleteIdea(s, id, flags.by));
@@ -469,55 +469,68 @@ function cmdLint(store, { flags }) {
   process.exitCode = findings.length ? 1 : 0;
 }
 
-function cmdScratch(store, { pos, flags }) {
+function cmdDocs(store, { pos, flags }) {
   const dir = store.dataDir;
-  scratch.migrateOwnerScratch(dir);
-  const [verb, id] = pos;
+  docs.migrateOwnerScratch(dir);
+  docs.migrateScratchReports(dir);
+  const [verb, ref] = pos;
   switch (verb) {
     case 'list': {
-      const notes = scratch.listScratch(dir);
-      if (flags.json) return out(flags, null, notes);
-      if (!notes.length) return console.log('(no scratch notes — tower scratch add --title "...")');
-      for (const n of notes) console.log(`${n.id.padEnd(24)} ${n.updated.slice(0, 10)}  ${n.title}`);
+      const index = docs.listDocs(dir);
+      if (flags.json) return out(flags, null, index);
+      console.log(`scratchpad  ${index.scratch.updated.slice(0, 10)}  ${index.scratch.title}`);
+      for (const sec of index.sections) {
+        if (!sec.files.length) continue;
+        console.log(`\n${sec.label}:`);
+        for (const f of sec.files) console.log(`  ${f.path.padEnd(52)} ${f.updated.slice(0, 10)}  ${f.title}`);
+      }
       return;
     }
     case 'show': {
-      if (!id) throw new TowerError('E_USAGE', 'scratch show needs an id');
-      const n = scratch.showScratch(dir, id);
+      const path = ref || flags.path;
+      if (!path && !flags.scratch) throw new TowerError('E_USAGE', 'docs show needs a path or --scratch');
+      const n = flags.scratch ? docs.showScratchPad(dir) : docs.showDoc(dir, path);
       return out(flags, n.body, n);
     }
     case 'add': {
       const body = flags.file ? readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8') : (flags.body || '');
-      const n = scratch.addScratch(dir, { title: flags.title, body, id: flags.id });
-      return out(flags, `added scratch ${n.id}`, n);
+      if (!flags.section && !flags.path) throw new TowerError('E_USAGE', 'docs add needs --section spec|audits|research|plans|proposals|references or --path');
+      const n = docs.addDoc(dir, {
+        section: flags.section,
+        title: flags.title,
+        body,
+        path: flags.path,
+        id: flags.id,
+      });
+      return out(flags, `added ${n.path}`, n);
     }
     case 'update': {
-      if (!id) throw new TowerError('E_USAGE', 'scratch update needs an id');
+      const path = ref || flags.path;
       const patch = {};
       if (flags.title !== undefined) patch.title = flags.title;
       if (flags.file) patch.body = readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8');
       else if (flags.body !== undefined) patch.body = flags.body;
-      const n = scratch.updateScratch(dir, id, patch);
-      return out(flags, `updated scratch ${n.id}`, n);
+      if (flags.scratch) {
+        const n = docs.updateScratchPad(dir, patch);
+        return out(flags, `updated scratchpad`, n);
+      }
+      if (!path) throw new TowerError('E_USAGE', 'docs update needs a path or --scratch');
+      const n = docs.updateDoc(dir, path, patch);
+      return out(flags, `updated ${n.path}`, n);
+    }
+    case 'archive': {
+      const path = ref || flags.path;
+      if (!path) throw new TowerError('E_USAGE', 'docs archive needs a path');
+      const r = docs.archiveDoc(dir, path);
+      return out(flags, `archived ${r.from} → ${r.path}`, r);
     }
     case 'delete': {
-      if (!id) throw new TowerError('E_USAGE', 'scratch delete needs an id');
-      const r = scratch.deleteScratch(dir, id);
-      return out(flags, `deleted scratch ${id}`, r);
+      const path = ref || flags.path;
+      if (!path) throw new TowerError('E_USAGE', 'docs delete needs a path');
+      const r = docs.deleteDoc(dir, path);
+      return out(flags, `deleted ${path}`, r);
     }
-    case 'preview': {
-      const path = id || flags.path;
-      if (!path) throw new TowerError('E_USAGE', 'scratch preview needs a docs path');
-      const n = scratch.previewDoc(dir, path);
-      return out(flags, n.body, n);
-    }
-    case 'docs': {
-      const docs = scratch.listPreviewTree(dir);
-      if (flags.json) return out(flags, null, docs);
-      for (const d of docs) console.log(`${d.path}`);
-      return;
-    }
-    default: throw new TowerError('E_USAGE', `unknown scratch verb "${verb}" — list/show/add/update/delete/preview/docs`);
+    default: throw new TowerError('E_USAGE', `unknown docs verb "${verb}" — list/show/add/update/archive/delete`);
   }
 }
 
@@ -560,7 +573,10 @@ function renderBrief(p, t) {
   if (c.plan) { L.push('', heading('PLAN'), c.plan); }
   if (p.blockers.length) {
     L.push('', heading('BLOCKED BY'));
-    for (const b of p.blockers) L.push(`  ${(b.done ? t.success : t.error)(b.done ? '✓' : '✗')} ${b.id} ${t.dim(`(${b.kind})`)} ${b.title || ''}${b.kind === 'card' ? ` ${t.dim(`[${b.phase}]`)}` : b.kind === 'decision' ? ` ${t.dim(`[${b.status}]`)}` : ''}`);
+    for (const b of p.blockers) {
+      const ref = b.kind === 'card' && b.num != null ? `#${b.num}` : b.id;
+      L.push(`  ${(b.done ? t.success : t.error)(b.done ? '✓' : '✗')} ${ref} ${t.dim(`(${b.kind})`)} ${b.title || ''}${b.kind === 'card' ? ` ${t.dim(`[${b.phase}]`)}` : b.kind === 'decision' ? ` ${t.dim(`[${b.status}]`)}` : ''}`);
+    }
   }
   const items = p.criteria.items;
   if (items.length) {
@@ -673,7 +689,11 @@ function cmdEvents(store, { flags }) {
   const s = store.load();
   const es = s.events.slice(0, Number(flags.limit || 30));
   if (flags.json) return out(flags, null, es);
-  for (const e of es) console.log(`${e.at}  ${String(e.by || '').padEnd(10)} ${e.action.padEnd(16)} ${e.ref || ''}  ${e.note || ''}`);
+  const cardRef = (ref) => {
+    const c = s.cards.find(x => x.id === ref);
+    return c ? `#${c.num}` : ref || '';
+  };
+  for (const e of es) console.log(`${e.at}  ${String(e.by || '').padEnd(10)} ${e.action.padEnd(16)} ${cardRef(e.ref)}  ${e.note || ''}`);
   if (!es.length) console.log('(no events yet)');
 }
 
@@ -777,9 +797,14 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             decision id still listed in
                                             docs/ballots/*.md; exit 1 on any
                                             finding, 0 clean
-  tower scratch  list|show|add|update|delete|preview
-                                            owner scratch notes (…/.tower/scratch/)
-                                            + read-only preview of docs/*.md
+  tower docs     list|show|add|update|archive|delete
+                                            durable markdown under docs/ + pinned
+                                            scratchpad (.tower/scratch/owner-scratch.md)
+                                            — add: --section spec|audits|research|plans|
+                                            proposals|references [--title] [--file -]
+                                            — archive moves to docs/archive/ (hidden
+                                            from Docs UI); delete removes the file
+                                            — update/show scratchpad: --scratch
   tower brief [ref] [--agent me] [--json] [--no-claim]
               [--color=auto|always|never]
                                             one-shot work packet: card, blockers,
@@ -877,7 +902,7 @@ export async function run(argv) {
       case 'next':      return cmdNext(store, sub);
       case 'brief':     return cmdBrief(store, sub);
       case 'lint':      return cmdLint(store, sub);
-      case 'scratch':   return cmdScratch(store, sub);
+      case 'docs':      return cmdDocs(store, sub);
       case 'verdict':   return cmdVerdict(store, sub);
       case 'archive':   return cmdArchive(store, sub);
       case 'repair':    return cmdRepair(store, sub);

@@ -1,9 +1,15 @@
 ---
 title: Owner scratch
 ---
-https://matklad.github.io/2020/10/15/study-of-std-io-error.html
+Conformance
 
-Have agent review/cross-check to ensure default best practices for error handling. 
+- Card #560 must enforce the atomic language-shape laws across compiler,
+formatter, tools, examples, and docs. Its scope includes D-SHAPE-PIPE1=C.
+- Card #560 must make each inferred fact inspectable and pinnable without a
+second source form.
+Package graph
 
-Also have agent review https://www.youtube.com/watch?v=s5S2Ed5T-dc
-As excellent video about best practices and use of result type -> This is definitely something I want to ensure we support in jet. (Also to prioritize it as default convention). Also have the agent review this video: https://www.youtube.com/watch?v=Klq-sNxuP2g
+- Card #532 must close only after #610, #653, #654, #587, and #609 implement
+and independently verify the ratified one-Package-graph law.
+- Card #560 must then verify that the compiler and every tool expose the same
+graph facts.

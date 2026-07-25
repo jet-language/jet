@@ -155,7 +155,9 @@ test('blockedBy gates the lane until blocker closes', () => {
     db.addCard(s, { title: 'B', phase: 'ready', blockedBy: [a.id] }, cfg);
   });
   let s = st.load();
-  assert.equal(db.laneOf(db.findCard(s, '#2'), s.decisions, s.cards).lane, 'blocked');
+  const lane = db.laneOf(db.findCard(s, '#2'), s.decisions, s.cards);
+  assert.equal(lane.lane, 'blocked');
+  assert.equal(lane.label, 'Blocked by #1');
   st.mutate((s2, cfg) => db.updateCard(s2, '#1', { phase: 'done' }, cfg));
   s = st.load();
   assert.equal(db.laneOf(db.findCard(s, '#2'), s.decisions, s.cards).lane, 'implement');

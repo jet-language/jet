@@ -9,7 +9,7 @@ description: >-
 # Verify a change in the Jet repo
 
 Use this skill to **close a code change**. Do not run it after an audit or
-research scratch note “to be safe.”
+research docs note “to be safe.”
 
 Model and review policy follow `AGENTS.md` and the owner's current instruction.
 

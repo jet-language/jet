@@ -13,13 +13,13 @@ sema, tests, and examples. Status keys: `shipped`, `partial`, `gap`, `gated`,
 
 ## Output
 
-Write one Tower scratch note via the Tower CLI (never hand-edit board JSON):
+Write one markdown report under `docs/audits/` via the Tower CLI (never hand-edit board JSON):
 
 ```
-node plugins/tower/tower.mjs scratch add --id <skill>-YYYY-MM-DD --title "…" --file -
+node plugins/tower/tower.mjs docs add --section audits --id <skill>-YYYY-MM-DD --title "…" --file -
 ```
 
-Or `scratch update` for the same id only when the owner asks to revise that run.
+Or `docs update docs/audits/<skill>-YYYY-MM-DD.md --file -` for the same day only when the owner asks to revise that run.
 Never overwrite a different day's note. Do not write reports under `docs/plans/`.
 
 Follow `AGENTS.md`. Pick this skill alone — do not chain other audit/research

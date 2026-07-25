@@ -65,7 +65,7 @@ Load the smallest slice. Never hand-edit `plugins/tower/.tower/*.json`.
 ## Writing rules
 
 - **simple** for every user-visible string: plans, ballot prose, card bodies,
-  log lines the owner reads, scratch notes meant for humans.
+  log lines the owner reads, docs notes meant for humans.
 - **caveman** for agent-to-agent status chatter only.
 - **ponytail** when editing skill/docs structure for clarity — still no
   product implementation.

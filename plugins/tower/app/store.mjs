@@ -321,7 +321,15 @@ export function laneOf(card, decisions, cards) {
     if (d) return d.status !== 'ratified';
     return false; // dangling ref — don't block on it
   });
-  if (blockers.length) return { lane: 'blocked', who: null, label: `Blocked by ${blockers.join(', ')}`, blockers };
+  if (blockers.length) {
+    const labels = blockers.map(id => {
+      const str = String(id);
+      const b = cards.find(c => c.id === str) || cards.find(c => c.num === Number(str.replace(/^#/, '')));
+      if (b) return `#${b.num}`;
+      return str; // decision id or unresolved — keep as written
+    });
+    return { lane: 'blocked', who: null, label: `Blocked by ${labels.join(', ')}`, blockers };
+  }
   if (card.phase === 'deciding') return card.plan
     ? { lane: 'implement', who: 'agent', label: 'Ready to implement' }
     : { lane: 'plan', who: 'agent', label: 'Build a plan + raise decisions' };
@@ -742,7 +750,7 @@ export function deleteCard(s, ref, p = {}) {
   s.questions = s.questions.filter(q => q.cardId !== c.id);
   for (const x of s.cards) x.blockedBy = (x.blockedBy || []).filter(id => id !== c.id);
   logEvent(s, { by: p.by, action: 'card.delete', ref: c.id, note: c.title });
-  return { ok: true, id: c.id };
+  return { ok: true, id: c.id, num: c.num };
 }
 
 // Owner-only gate used by ratify (D-TWRGUARD1=C #458). An agent may act "on
@@ -889,7 +897,7 @@ export function addDecision(s, p) {
     checkInstructions: p.checkInstructions || null, draft, status: 'open', created: now() };
   s.decisions.push(d);
   logEvent(s, { by: p.by, action: 'decision.add', ref: d.id, note: draft ? `${d.title} (draft)` : d.title });
-  return d;
+  return { ...d, cardNum: card.num };
 }
 
 const SYNTAX_RATIFY_CHORES = ['Syntax.rs entry updated', 'syntax-decisions.md log entry', 'jet devtools grammars regenerated', 'snapshots re-blessed'];
@@ -1033,7 +1041,7 @@ export function addQuestion(s, p) {
     text: String(p.text).trim(), status: 'open', answer: '', created: now() };
   s.questions.push(q);
   logEvent(s, { by: p.by || 'owner', action: 'question.add', ref: q.id });
-  return q;
+  return { ...q, cardNum: card.num };
 }
 export function answerQuestion(s, id, answer, by) {
   const q = s.questions.find(x => x.id === id) || fail('E_NOT_FOUND', `no question ${id}`);

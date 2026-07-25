@@ -17,7 +17,7 @@ import * as db from './store.mjs';
 import { TowerError } from './store.mjs';
 import { lint } from './lint.mjs';
 import { computeVersion } from './version.mjs';
-import * as scratch from './scratch.mjs';
+import * as docs from './docs.mjs';
 
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
@@ -245,25 +245,31 @@ export function serve(store, port = 7878, open = false) {
         const limit = Number(q.get('limit') || (scope === 'ready-across' ? 50 : 5));
         return send(res, 200, db.nextCards(store.load(), { epoch: q.get('epoch') || undefined, track: q.get('track') || undefined, agent: q.get('agent') || undefined, limit, scope }));
       }
-      // Scratch pad — file-backed notes + read-only docs preview (not board state).
-      if (req.method === 'GET' && url.pathname === '/api/scratch') {
-        scratch.migrateOwnerScratch(store.dataDir);
+      // Docs — durable markdown under docs/ + pinned scratchpad.
+      if (req.method === 'GET' && url.pathname === '/api/docs') {
+        docs.migrateOwnerScratch(store.dataDir);
+        docs.migrateScratchReports(store.dataDir);
         const q = url.searchParams;
-        if (q.get('id')) return send(res, 200, scratch.showScratch(store.dataDir, q.get('id')));
-        if (q.get('path')) return send(res, 200, scratch.previewDoc(store.dataDir, q.get('path')));
-        return send(res, 200, { notes: scratch.listScratch(store.dataDir), docs: scratch.listPreviewTree(store.dataDir) });
+        if (q.get('scratch') === '1') return send(res, 200, docs.showScratchPad(store.dataDir));
+        if (q.get('path')) return send(res, 200, docs.showDoc(store.dataDir, q.get('path')));
+        return send(res, 200, docs.listDocs(store.dataDir));
       }
-      if (req.method === 'POST' && url.pathname === '/api/scratch/add') {
+      if (req.method === 'POST' && url.pathname === '/api/docs/add') {
         const p = await jsonBody(req);
-        return send(res, 200, { ok: true, result: scratch.addScratch(store.dataDir, p) });
+        return send(res, 200, { ok: true, result: docs.addDoc(store.dataDir, p) });
       }
-      if (req.method === 'POST' && url.pathname === '/api/scratch/update') {
+      if (req.method === 'POST' && url.pathname === '/api/docs/update') {
         const p = await jsonBody(req);
-        return send(res, 200, { ok: true, result: scratch.updateScratch(store.dataDir, p.id, p) });
+        if (p.scratch) return send(res, 200, { ok: true, result: docs.updateScratchPad(store.dataDir, p) });
+        return send(res, 200, { ok: true, result: docs.updateDoc(store.dataDir, p.path, p) });
       }
-      if (req.method === 'POST' && url.pathname === '/api/scratch/delete') {
+      if (req.method === 'POST' && url.pathname === '/api/docs/delete') {
         const p = await jsonBody(req);
-        return send(res, 200, { ok: true, result: scratch.deleteScratch(store.dataDir, p.id) });
+        return send(res, 200, { ok: true, result: docs.deleteDoc(store.dataDir, p.path) });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/docs/archive') {
+        const p = await jsonBody(req);
+        return send(res, 200, { ok: true, result: docs.archiveDoc(store.dataDir, p.path) });
       }
       // #457 — durability sweeper, same rules as `tower lint`.
       if (req.method === 'GET' && url.pathname === '/api/lint') {
