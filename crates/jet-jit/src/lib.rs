@@ -17,11 +17,17 @@ mod Compress;
 mod Concurrency;
 mod CoreHost;
 mod Encoding;
+mod enc_stream;
 mod Fmt;
 mod Numeric;
 mod Process;
 mod Random;
 mod Solver;
+
+/// Canonical XML pull engine — EncodingStream refers to `crate::jet_xml_pull`.
+pub mod jet_xml_pull {
+    pub use jet_foundation::XmlPull::*;
+}
 
 // I6: Cranelift crates live here, not in the compiler `jet` crate (`Source/`).
 // The root package depends on jet-jit; jet-jit depends on cranelift-*.

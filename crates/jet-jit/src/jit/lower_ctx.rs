@@ -1735,6 +1735,7 @@ impl LowerCtx<'_, '_> {
                     }
                     TIfCond::IsNone { subj } => {
                         // Option ABI: 0 = None, else bits+1. `x == .None` → IsNone.
+                        // Mirror Plain `if`: skip merge jumps after break/return.
                         let packed = self.lower_expr(subj)?;
                         let zero = self.b.ins().iconst(types::I64, 0);
                         let is_none = self.b.ins().icmp(IntCC::Equal, packed, zero);
@@ -1746,20 +1747,28 @@ impl LowerCtx<'_, '_> {
                             .brif(is_none, then_block, &[], else_block, &[]);
                         self.b.switch_to_block(then_block);
                         self.b.seal_block(then_block);
-                        for s in then_body {
-                            self.lower_stmt(s)?;
+                        self.lower_stmts_scoped(then_body)?;
+                        let then_reaches_merge = !self.dead;
+                        if then_reaches_merge {
+                            self.b.ins().jump(merge_block, &[]);
                         }
-                        self.b.ins().jump(merge_block, &[]);
                         self.b.switch_to_block(else_block);
                         self.b.seal_block(else_block);
+                        self.dead = false;
                         if let Some(body) = else_body {
-                            for s in body {
-                                self.lower_stmt(s)?;
-                            }
+                            self.lower_stmts(body)?;
                         }
-                        self.b.ins().jump(merge_block, &[]);
-                        self.b.switch_to_block(merge_block);
-                        self.b.seal_block(merge_block);
+                        let else_reaches_merge = !self.dead;
+                        if else_reaches_merge {
+                            self.b.ins().jump(merge_block, &[]);
+                        }
+                        if then_reaches_merge || else_reaches_merge {
+                            self.b.switch_to_block(merge_block);
+                            self.b.seal_block(merge_block);
+                            self.dead = false;
+                        } else {
+                            self.dead = true;
+                        }
                         return Ok(());
                     }
                     TIfCond::Matches { .. } => {
@@ -3592,6 +3601,12 @@ impl LowerCtx<'_, '_> {
                 }
                 if module == "core.files" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "create" if args.len() == 1 => {
+                            (self.host.stream.fs_create, vec![self.lower_expr(&args[0])?])
+                        }
+                        "open" if args.len() == 1 => {
+                            (self.host.stream.fs_open, vec![self.lower_expr(&args[0])?])
+                        }
                         "exists" if args.len() == 1 => {
                             (self.host.core.fs_exists, vec![self.lower_expr(&args[0])?])
                         }
@@ -3735,6 +3750,24 @@ impl LowerCtx<'_, '_> {
                             self.host.encoding.csv_to_string,
                             vec![self.lower_expr(&args[0])?],
                         ),
+                        "writer" if args.len() == 1 || args.len() == 2 => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = if args.len() == 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (self.host.stream.csv_writer, vec![file, limits])
+                        }
+                        "reader" if args.len() == 1 || args.len() == 2 => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = if args.len() == 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (self.host.stream.csv_reader, vec![file, limits])
+                        }
                         _ => return Err("jit core call unsupported".to_string()),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
@@ -3801,6 +3834,29 @@ impl LowerCtx<'_, '_> {
                             self.host.encoding.json_events,
                             vec![self.lower_expr(&args[0])?],
                         ),
+                        "writer" if (2..=3).contains(&args.len()) => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = self.lower_expr(&args[1])?;
+                            let canon = if args.len() == 3 {
+                                let b = self.lower_expr(&args[2])?;
+                                self.b.ins().uextend(types::I64, b)
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (
+                                self.host.stream.json_writer,
+                                vec![file, limits, canon],
+                            )
+                        }
+                        "reader" if args.len() == 1 || args.len() == 2 => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = if args.len() == 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (self.host.stream.json_reader, vec![file, limits])
+                        }
                         _ => {
                             return Err(format!(
                                 "jit core call unsupported: core.encoding.json.{method}"
@@ -3841,6 +3897,24 @@ impl LowerCtx<'_, '_> {
                             self.host.encoding.jsonl_to_string,
                             vec![self.lower_expr(&args[0])?],
                         ),
+                        "writer" if args.len() == 1 || args.len() == 2 => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = if args.len() == 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (self.host.stream.jsonl_writer, vec![file, limits])
+                        }
+                        "reader" if args.len() == 1 || args.len() == 2 => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = if args.len() == 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (self.host.stream.jsonl_reader, vec![file, limits])
+                        }
                         _ => {
                             return Err(format!(
                                 "jit core call unsupported: core.encoding.jsonl.{method}"
@@ -3964,6 +4038,24 @@ impl LowerCtx<'_, '_> {
                             self.host.encoding.xml_to_bytes,
                             vec![self.lower_expr(&args[0])?],
                         ),
+                        "writer" if args.len() == 1 || args.len() == 2 => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = if args.len() == 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (self.host.stream.xml_writer, vec![file, limits])
+                        }
+                        "reader" if args.len() == 1 || args.len() == 2 => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = if args.len() == 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (self.host.stream.xml_reader, vec![file, limits])
+                        }
                         _ => {
                             return Err(format!(
                                 "jit core call unsupported: core.encoding.xml.{method}"
@@ -4011,6 +4103,24 @@ impl LowerCtx<'_, '_> {
                         ),
                         "parse" if args.len() == 1 && bytes_arg && datatree_ok => {
                             (self.host.encoding.cbor_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        "writer" if args.len() == 1 || args.len() == 2 => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = if args.len() == 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (self.host.stream.cbor_writer, vec![file, limits])
+                        }
+                        "reader" if args.len() == 1 || args.len() == 2 => {
+                            let file = self.lower_expr(&args[0])?;
+                            let limits = if args.len() == 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (self.host.stream.cbor_reader, vec![file, limits])
                         }
                         _ => {
                             return Err(format!(
@@ -6210,33 +6320,150 @@ impl LowerCtx<'_, '_> {
             THandleOp::FileWriterWriteLine => Err("jit handle method unsupported".to_string()),
             THandleOp::FileWriterFlush => Err("jit handle method unsupported".to_string()),
             THandleOp::JSONReaderNext => {
-                Err("jit JSON streaming falls back to the AOT executable TIR path".to_string())
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.json_reader_next, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::JSONWriterWrite
-            | THandleOp::JSONWriterFlush
-            | THandleOp::JSONWriterFinish => {
-                Err("jit JSON streaming falls back to the AOT executable TIR path".to_string())
+            THandleOp::JSONWriterWrite => {
+                let ev = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.json_writer_write, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, ev]);
+                Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::JSONLReaderNext
-            | THandleOp::JSONLWriterWrite
-            | THandleOp::JSONLWriterFlush
-            | THandleOp::JSONLWriterFinish => {
-                Err("jit JSONL streaming falls back to the AOT executable TIR path".to_string())
+            THandleOp::JSONWriterFlush => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.json_writer_flush, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::CSVReaderNext
-            | THandleOp::DataStreamNext
-            | THandleOp::CSVWriterWrite
-            | THandleOp::CSVWriterFlush
-            | THandleOp::CSVWriterFinish => {
-                Err("jit CSV/data streaming falls back to the AOT executable TIR path".to_string())
+            THandleOp::JSONWriterFinish => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.json_writer_finish, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::XMLReaderNext
-            | THandleOp::XMLWriterWrite
-            | THandleOp::XMLWriterFlush
-            | THandleOp::XMLWriterFinish => {
-                Err("jit XML streaming falls back to the AOT executable TIR path".to_string())
+            THandleOp::JSONLReaderNext => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.jsonl_reader_next, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::CBORReaderNext | THandleOp::CBORWriterWrite | THandleOp::CBORWriterFlush | THandleOp::CBORWriterFinish => Err("jit CBOR streaming falls back to the AOT executable TIR path".to_string()),
+            THandleOp::JSONLWriterWrite => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.jsonl_writer_write, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::JSONLWriterFlush => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.jsonl_writer_flush, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::JSONLWriterFinish => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.jsonl_writer_finish, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CSVReaderNext | THandleOp::DataStreamNext => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.csv_reader_next, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CSVWriterWrite => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.csv_writer_write, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CSVWriterFlush => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.csv_writer_flush, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CSVWriterFinish => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.csv_writer_finish, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::XMLReaderNext => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.xml_reader_next, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::XMLWriterWrite => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.xml_writer_write, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::XMLWriterFlush => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.xml_writer_flush, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::XMLWriterFinish => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.xml_writer_finish, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CBORReaderNext => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.cbor_reader_next, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CBORWriterWrite => {
+                let ev = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.cbor_writer_write, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, ev]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CBORWriterFlush => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.cbor_writer_flush, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CBORWriterFinish => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.stream.cbor_writer_finish, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::StdinReadLine => Err("jit handle method unsupported".to_string()),
             THandleOp::StdoutWrite => Err("jit handle method unsupported".to_string()),
             THandleOp::StdoutWriteLine => Err("jit handle method unsupported".to_string()),

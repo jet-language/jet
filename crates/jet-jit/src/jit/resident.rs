@@ -27,6 +27,18 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         clocks: Vec::new(),
         process_specs: Vec::new(),
         process_children: Vec::new(),
+        file_readers: Vec::new(),
+        file_writers: Vec::new(),
+        json_readers: Vec::new(),
+        json_writers: Vec::new(),
+        jsonl_readers: Vec::new(),
+        jsonl_writers: Vec::new(),
+        csv_readers: Vec::new(),
+        csv_writers: Vec::new(),
+        xml_readers: Vec::new(),
+        xml_writers: Vec::new(),
+        cbor_readers: Vec::new(),
+        cbor_writers: Vec::new(),
         trapped: None,
         deadline_exceeded: None,
     }
@@ -89,6 +101,18 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.rngs.clear();
     rt.process_specs.clear();
     rt.process_children.clear();
+    rt.file_readers.clear();
+    rt.file_writers.clear();
+    rt.json_readers.clear();
+    rt.json_writers.clear();
+    rt.jsonl_readers.clear();
+    rt.jsonl_writers.clear();
+    rt.csv_readers.clear();
+    rt.csv_writers.clear();
+    rt.xml_readers.clear();
+    rt.xml_writers.clear();
+    rt.cbor_readers.clear();
+    rt.cbor_writers.clear();
 }
 
 pub(crate) fn resident_teardown() {

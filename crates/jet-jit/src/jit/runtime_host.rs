@@ -29,10 +29,17 @@ pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, St
             resident_teardown();
             Err(err)
         }
-        Err(_) => {
+        Err(payload) => {
             resident_teardown();
+            let detail = if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = payload.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else {
+                "unknown panic payload".into()
+            };
             Err(format!(
-                "jit {context} panicked before returning an unsupported reason"
+                "jit {context} panicked before returning an unsupported reason: {detail}"
             ))
         }
     }
@@ -62,6 +69,19 @@ pub(crate) struct JitRuntime {
     pub(crate) process_specs: Vec<Process::JitProcessSpec>,
     /// `ProcessChild` handles — 1-based indices (#729 process spawn).
     pub(crate) process_children: Vec<Process::JitProcessChild>,
+    /// Encoding stream file / codec handles (#729 encoding_*_stream).
+    pub(crate) file_readers: Vec<crate::enc_stream::FileReaderSlot>,
+    pub(crate) file_writers: Vec<crate::enc_stream::FileWriterSlot>,
+    pub(crate) json_readers: Vec<crate::enc_stream::JsonReaderSlot>,
+    pub(crate) json_writers: Vec<crate::enc_stream::JsonWriterSlot>,
+    pub(crate) jsonl_readers: Vec<crate::enc_stream::JsonlReaderSlot>,
+    pub(crate) jsonl_writers: Vec<crate::enc_stream::JsonlWriterSlot>,
+    pub(crate) csv_readers: Vec<crate::enc_stream::CsvReaderSlot>,
+    pub(crate) csv_writers: Vec<crate::enc_stream::CsvWriterSlot>,
+    pub(crate) xml_readers: Vec<crate::enc_stream::XmlReaderSlot>,
+    pub(crate) xml_writers: Vec<crate::enc_stream::XmlWriterSlot>,
+    pub(crate) cbor_readers: Vec<crate::enc_stream::CborReaderSlot>,
+    pub(crate) cbor_writers: Vec<crate::enc_stream::CborWriterSlot>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -952,6 +972,7 @@ pub(crate) struct HostFns {
     pub(crate) conc: Concurrency::ConcurrencyHostFns,
     pub(crate) core: CoreHost::CoreHostFns,
     pub(crate) encoding: Encoding::EncodingHostFns,
+    pub(crate) stream: crate::enc_stream::StreamHostFns,
     pub(crate) fmt: Fmt::FmtHostFns,
     pub(crate) compress: Compress::CompressHostFns,
     pub(crate) archive: Archive::ArchiveHostFns,
@@ -1081,6 +1102,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     Concurrency::register_concurrency_symbols(&mut builder);
     CoreHost::register_core_host_symbols(&mut builder);
     Encoding::register_encoding_symbols(&mut builder);
+    crate::enc_stream::register_stream_symbols(&mut builder);
     Fmt::register_fmt_symbols(&mut builder);
     Compress::register_compress_symbols(&mut builder);
     Archive::register_archive_symbols(&mut builder);
@@ -1093,6 +1115,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
     let core = CoreHost::declare_core_host_fns(&mut module)?;
     let encoding = Encoding::declare_encoding_host_fns(&mut module)?;
+    let stream = crate::enc_stream::declare_stream_host_fns(&mut module)?;
     let fmt = Fmt::declare_fmt_host_fns(&mut module)?;
     let compress = Compress::declare_compress_host_fns(&mut module)?;
     let archive = Archive::declare_archive_host_fns(&mut module)?;
@@ -1106,6 +1129,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         conc,
         core,
         encoding,
+        stream,
         fmt,
         compress,
         archive,
@@ -1123,6 +1147,7 @@ fn declare_host_fns(
     conc: Concurrency::ConcurrencyHostFns,
     core: CoreHost::CoreHostFns,
     encoding: Encoding::EncodingHostFns,
+    stream: crate::enc_stream::StreamHostFns,
     fmt: Fmt::FmtHostFns,
     compress: Compress::CompressHostFns,
     archive: Archive::ArchiveHostFns,
@@ -1385,6 +1410,7 @@ fn declare_host_fns(
         conc,
         core,
         encoding,
+        stream,
         fmt,
         compress,
         archive,

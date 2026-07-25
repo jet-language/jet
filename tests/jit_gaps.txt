@@ -117,8 +117,13 @@ covered:
   serde/encoding
   serde/encoding_base
   serde/encoding_breadth
+  serde/encoding_cbor_stream
+  serde/encoding_csv_stream
+  serde/encoding_json_stream
+  serde/encoding_jsonl_stream
   serde/encoding_stream_types
   serde/encoding_xml_projection
+  serde/encoding_xml_stream
   serde/hand_codec
   serde/json_coerce
   serde/json_typed
@@ -243,7 +248,7 @@ gaps:
   io/path: run: jit handle method unsupported
   io/scope_guard: with_guards: jit scope guard closure unsupported
   io/stdin_filter: run: jit for-in method-call collection unsupported
-  io/stream: count_lines: jit core call unsupported
+  io/stream: count_lines: jit for-in method-call collection unsupported
   io/terminal: describe_key: jit if-let pattern unsupported
   io/terminal_parity: run: jit host/default/uninit/ct-lit unsupported
   io/watcher: run: jit core call unsupported: core.event.scope
@@ -299,11 +304,6 @@ gaps:
   reflection/reflect-value: run: jit core call unsupported: core.reflect.of
   safety/sh_typed_text: run: jit host/default/uninit/ct-lit unsupported
   safety/typed_sql: run_query: jit host/default/uninit/ct-lit unsupported
-  serde/encoding_cbor_stream: write_catalog: jit core call unsupported
-  serde/encoding_csv_stream: write_catalog: jit core call unsupported
-  serde/encoding_json_stream: write_catalog: jit core call unsupported
-  serde/encoding_jsonl_stream: write_catalog: jit core call unsupported
-  serde/encoding_xml_stream: write_catalog: jit core call unsupported
   serde/serde_generic: run: jit SerdeEncode unsupported: Apply { name: "Wrap", args: [Int] }
   streams/generators: count: jit host/default/uninit/ct-lit unsupported
   syntax/trailing_block: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }
@@ -322,7 +322,7 @@ gaps:
   tooling/data_json: run: jit core call unsupported: core.data.json
   tooling/data_pipeline: must_stay_deferred: jit require/panic stop unsupported
   tooling/data_schema: run: jit core call unsupported: core.data.csv
-  tooling/data_stream_bounds: run: jit core call unsupported
+  tooling/data_stream_bounds: run: jit static `jet_std::DataLimits::safe`
   tooling/debug_native: run: jit core call unsupported
   tooling/fuzz_demo: reverse: jit builtin method unsupported
   tooling/panic_report: summarize: jit require/panic stop unsupported

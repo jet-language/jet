@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 
 /// Canonical `jet_std` JSON/DataTree runtime — types stubbed, algorithm via include!
-mod json_rt {
+pub(crate) mod json_rt {
     #[derive(Clone, Debug, PartialEq)]
     pub struct JsonError {
         pub line: i64,
@@ -194,7 +194,7 @@ fn alloc_dt_record(disc: i64, payload: i64) -> i64 {
     })
 }
 
-fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
+pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
     match tree {
         json_rt::DataTree::Null => alloc_dt_record(DT_NULL, 0),
         json_rt::DataTree::Bool(b) => alloc_dt_record(DT_BOOL, i64::from(*b)),
@@ -238,7 +238,7 @@ fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
     }
 }
 
-fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
+pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
     let (disc, payload, text, child_handles, object_pairs, float_val) =
         Concurrency::with_runtime_mut(|rt| {
             let disc = rt.heap.record_get_int(handle, 0)?;
@@ -304,7 +304,7 @@ fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
     }
 }
 
-fn clone_heap_string(id: i64) -> String {
+pub(crate) fn clone_heap_string(id: i64) -> String {
     Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
 }
 
@@ -329,14 +329,14 @@ fn alloc_byte_list(bytes: &[u8]) -> i64 {
     })
 }
 
-fn result_ok_bits(bits: u64) -> i64 {
+pub(crate) fn result_ok_bits(bits: u64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.results.push(super::JitResultValue { ok: true, bits });
         rt.results.len() as i64
     })
 }
 
-fn result_err_msg(msg: &str) -> i64 {
+pub(crate) fn result_err_msg(msg: &str) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let sid = rt.heap.alloc_string(msg.to_string());
         rt.results.push(super::JitResultValue {

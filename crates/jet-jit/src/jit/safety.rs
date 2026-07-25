@@ -157,7 +157,18 @@ pub(crate) fn jit_list_task_int_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_optional_scalar_type(ty: &Type) -> bool {
-    matches!(ty, Type::Option(inner) if jit_scalar_type(inner))
+    // Packed Option ABI (`0` = None, else bits+1): scalars and named enums
+    // (DataEvent / CSV row Option, etc.). Nested Option stays out to avoid
+    // recursive jit_value_type → compound loops.
+    matches!(
+        ty,
+        Type::Option(inner)
+            if jit_scalar_type(inner)
+                || matches!(
+                    inner.as_ref(),
+                    Type::Named(_) | Type::String | Type::Tuple(_) | Type::List(_)
+                )
+    )
 }
 
 pub(crate) fn user_type_name(ty: &Type) -> Option<&str> {
@@ -507,6 +518,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::DistinctCtor { arg, base, .. } => {
             jit_value_type(base) && resident_safe_expr(arg, callees)
         }
+        // Moved file/codec handles (`output :: files.create(...)`, `^output` take).
+        TExprKind::ResourceNew(inner) => resident_safe_expr(inner, callees),
+        TExprKind::ResourceTake(_) => jit_value_type(&expr.ty),
+        TExprKind::Close(_) => true,
         _ if !jit_value_type(&expr.ty) => false,
         TExprKind::IntLit(_, _)
         | TExprKind::FloatLit(_)
@@ -985,7 +1000,11 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     (result_ok || option_ok || datatree_ok) && resident_safe_expr(subj, callees)
                 }
                 TIfCond::Matches { .. } => false,
-                TIfCond::And { .. } | TIfCond::IsNone { .. } => false,
+                TIfCond::And { .. } => false,
+                // `if maybe == .None` — Option ABI already lowered in lower_ctx.
+                TIfCond::IsNone { subj } => {
+                    matches!(&subj.ty, Type::Option(_)) && resident_safe_expr(subj, callees)
+                }
             };
             cond_ok
                 && then_body.iter().all(|s| resident_safe_stmt(s, callees))
@@ -1547,6 +1566,27 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::JsonFloat => args.is_empty(),
         THandleOp::SerdeEncode => args.is_empty(),
         THandleOp::DataTreeDecode(_) => args.is_empty(),
+        THandleOp::JSONReaderNext
+        | THandleOp::JSONLReaderNext
+        | THandleOp::CSVReaderNext
+        | THandleOp::DataStreamNext
+        | THandleOp::XMLReaderNext
+        | THandleOp::CBORReaderNext
+        | THandleOp::JSONWriterFlush
+        | THandleOp::JSONWriterFinish
+        | THandleOp::JSONLWriterFlush
+        | THandleOp::JSONLWriterFinish
+        | THandleOp::CSVWriterFlush
+        | THandleOp::CSVWriterFinish
+        | THandleOp::XMLWriterFlush
+        | THandleOp::XMLWriterFinish
+        | THandleOp::CBORWriterFlush
+        | THandleOp::CBORWriterFinish => args.is_empty(),
+        THandleOp::JSONWriterWrite
+        | THandleOp::JSONLWriterWrite
+        | THandleOp::CSVWriterWrite
+        | THandleOp::XMLWriterWrite
+        | THandleOp::CBORWriterWrite => args.len() == 1,
         _ => false,
     }
 }
