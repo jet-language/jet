@@ -103,6 +103,32 @@ impl JetArena {
         self.values.clear();
     }
 
+    /// Indices of `String` values allocated during JIT lowering (baked into code as handles).
+    pub fn string_slots(&self) -> Vec<(usize, String)> {
+        self.values
+            .iter()
+            .enumerate()
+            .filter_map(|(i, value)| match value {
+                JetVal::String(text) => Some((i, text.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Restore compile-time string handles so cached machine code sees the same ids.
+    pub fn install_string_slots(&mut self, slots: &[(usize, String)]) {
+        if slots.is_empty() {
+            return;
+        }
+        let max = slots.iter().map(|(i, _)| *i).max().unwrap_or(0);
+        while self.values.len() <= max {
+            self.values.push(JetVal::Int(0));
+        }
+        for (i, text) in slots {
+            self.values[*i] = JetVal::String(text.clone());
+        }
+    }
+
     pub fn alloc_int_list(&mut self, values: Vec<i64>) -> i64 {
         let id = self.values.len() as i64;
         self.values

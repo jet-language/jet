@@ -120,6 +120,17 @@ fn lower_spawn_function(
     module
         .define_function(func_id, &mut ctx)
         .map_err(|e| e.to_string())?;
+    // Spawn bodies are named jet_jit_spawn_body_N at declare time; recover via FuncId scan.
+    let export = (0..64)
+        .find_map(|i| {
+            let name = format!("jet_jit_spawn_body_{i}");
+            match module.get_name(&name) {
+                Some(cranelift_module::FuncOrDataId::Func(id)) if id == func_id => Some(name),
+                _ => None,
+            }
+        })
+        .unwrap_or_else(|| "jet_jit_spawn_body".to_string());
+    super::tier_cache::note_defined(&export, &ctx);
     module.clear_context(&mut ctx);
     Ok(())
 }
@@ -229,6 +240,15 @@ fn lower_function(
     module
         .define_function(func_id, &mut ctx)
         .map_err(|e| e.to_string())?;
+    let export_name = if matches!(
+        module.get_name("jet_jit_main"),
+        Some(cranelift_module::FuncOrDataId::Func(id)) if id == func_id
+    ) {
+        "jet_jit_main".to_string()
+    } else {
+        super::types_meta::jit_fn_name(&tir.name)
+    };
+    super::tier_cache::note_defined(&export_name, &ctx);
     module.clear_context(&mut ctx);
     Ok(())
 }
@@ -253,6 +273,9 @@ pub(crate) fn compile_program_tiered(
     existing_main: Option<FuncId>,
     deopt_index: &HashMap<String, i64>,
 ) -> Result<FuncId, String> {
+    if !deopt_index.is_empty() {
+        super::tier_cache::abort_capture();
+    }
     runtime.source_file = program.source_file.clone();
     let meta = JitMeta::from_program(program);
 

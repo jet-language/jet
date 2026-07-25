@@ -311,8 +311,10 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
 /// Cranelift tier-1 backend wraps the interpreter; when true (`--interpret`),
 /// tier-0 interpreter only.
 fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    crate::RunCache::note_parse();
     match crate::Loader::load_entry_with_overlay(file, None, false) {
         Ok(mut bundle) => {
+            crate::RunCache::note_check();
             let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
             let errors: Vec<Diagnostic> = diags
                 .into_iter()
@@ -334,16 +336,40 @@ pub fn run_jit_once(file: &str) -> RunOutcome {
 
 /// D-LENS-RUN1: strict Cranelift run with the same argv shape AOT would see.
 pub fn run_jit_once_with_args(file: &str, program_args: &[&str]) -> RunOutcome {
+    run_jit_once_with_args_opts(file, program_args, false)
+}
+
+/// Like [`run_jit_once_with_args`], with `json` suppressing the jet-dev signpost.
+pub fn run_jit_once_with_args_opts(
+    file: &str,
+    program_args: &[&str],
+    json: bool,
+) -> RunOutcome {
+    crate::RunCache::reset_phases();
+    let started = std::time::Instant::now();
+    let entry = std::path::Path::new(file);
+    if let Some(outcome) = crate::RunCache::try_warm_run(entry, program_args) {
+        return outcome;
+    }
     match checked_bundle(file) {
         Ok(bundle) => {
+            crate::RunCache::note_lower();
+            crate::RunCache::note_codegen();
             let mut args = Vec::with_capacity(program_args.len() + 1);
             args.push(file.to_string());
             args.extend(program_args.iter().map(|arg| (*arg).to_string()));
-            jet_jit::with_program_args(&args, || {
+            let outcome = jet_jit::with_program_args(&args, || {
                 use crate::JitBackend::JitBackend;
                 let mut backend = jet_jit::CraneliftBackend::new();
                 backend.run(&bundle, false)
-            })
+            });
+            if matches!(outcome, RunOutcome::Ran { .. }) {
+                crate::RunCache::store_after_miss(entry, program_args);
+            }
+            if !json {
+                crate::RunCache::maybe_signpost(started, crate::RunCache::stderr_is_tty());
+            }
+            outcome
         }
         Err(diags) => RunOutcome::Problems(diags),
     }

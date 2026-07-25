@@ -88,3 +88,45 @@ better incrementality, not from skipping optimization the owner asked for.
 Card #666 (interim + instrumentation + ballots). Epoch e9 (Bootstrapping)
 cards carry the self-hosted architecture bets; the e9 readiness wave folds
 this plan's self-hosted section into its cards.
+
+## Script-speed warm reuse (#741)
+
+After D-ONECORE1 / D-LENS-RUN2 (#778) and WatchService (#439), default
+`jet run` is tiered. Warm reuse sits at that tier boundary — not on the AOT
+`BuildCache` path, and not as a second runner or daemon.
+
+- **Key:** entry + WatchService watched paths (content + mtime/len) + cheap
+  compiler identity + program args. Config: `JET_RUN_CACHE_DIR` or
+  `~/.cache/jet/run`.
+- **Hit (tier-1 native):** reload captured Cranelift machine code
+  (`module.bin`) and invoke. Skip load, parse, check, TIR lower, and codegen.
+  Trace: `JET_RUN_TRACE=1` prints `[run-cache] hit|store`.
+- **Miss / interp deopt:** ordinary tiered path; store a module only when a
+  full native capture exists. Whole-program interpreter runs stay correct; they
+  do not invent a parallel cache.
+- **Signpost:** one stderr `jet dev` tip after a slow cold compile (≥200 ms),
+  TTY-only, suppressed by `NO_COLOR` / JSON, once per process.
+- **Budgets:** fixtures and method live under
+  `tests/fixtures/script_speed/`. Provisional CI sanity: warm no-op under
+  100 ms. Peer-parity threshold awaits `D-SCRIPT-BUDGET1`.
+
+## Script-speed warm reuse (#741)
+
+Default `jet run` stays on the JIT lens (D-LENS-RUN1 / D-LENS-RUN2). After
+#778 tiered run and #439 WatchService, unchanged scripts reuse a **tier-1
+module cache** at the boundary — not AOT `BuildCache`, not a second runner or
+daemon.
+
+- **Key:** source + WatchService dependency digests/stamps + compiler-build
+  identity + argv/config. Hit loads `module.bin` via Cranelift
+  `define_function_bytes` and skips load/parse/check/TIR lowering/codegen.
+- **Trace:** `JET_RUN_TRACE=1` prints store/hit; in-process phase counters
+  prove warm parse/check/lower/codegen/link = 0.
+- **Signpost:** one stderr tip pointing at `jet dev` when a cold path is slow
+  (≥200ms), TTY-only, suppressed by `NO_COLOR` / JSON mode.
+- **Budget methodology (CI):** cold/warm medians and p90 over ≥5 samples for
+  matched no-op, file, and JSON-text fixtures vs Bash/Python/Node; record
+  `os`, `arch`, `cpus`, and hostname. Provisional gate: warm Jet no-op median
+  `< 100ms` in-process. Absolute peer-parity ceiling awaits D-SCRIPT-BUDGET1.
+  Subprocess Jet remains blocked on HostCall interp coverage (E0956); peers
+  are still measured.

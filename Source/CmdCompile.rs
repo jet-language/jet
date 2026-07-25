@@ -247,7 +247,8 @@ pub(crate) fn run_compile_cmd(
             .iter()
             .map(|arg| arg.as_str())
             .collect::<Vec<_>>();
-        let outcome = jet::Interpreter::run_jit_once_with_args(file, &args);
+        let outcome =
+            jet::Interpreter::run_jit_once_with_args_opts(file, &args, mode.json);
         match outcome {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
