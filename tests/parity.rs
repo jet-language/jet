@@ -8,9 +8,10 @@
 //! A pair present in AOT but absent from comptime means `use core.x as a;
 //! a.f(...)` type-checks and compiles for `jet build`, but hits E0956 in
 //! `jet dev`/the REPL/a `comptime` binding — an R12 parity bug (silent
-//! AOT-only builtin). New builtins must add themselves to comptime's
-//! dispatch (or, for a genuinely-impossible-at-comptime effect, to
-//! `KNOWN_OPEN_GAPS` below with a one-line reason) or this test fails.
+//! AOT-only builtin). New effect-free builtins must add themselves to
+//! comptime's dispatch (or to `KNOWN_OPEN_GAPS` as PurePending). Genuine
+//! ambient/native effects are named in `core_boundary` — never listed as
+//! PurePending gaps.
 //!
 //! Effectful modules (`core.files`/`core.env`/`core.io`/`core.exec`/
 //! `core.net`/`core.tls`/`core.process`) are explicit effect boundaries:
@@ -50,162 +51,36 @@ const EXTRACTOR_ARTIFACTS: &[(&str, &str)] = &[
     ("core.encoding.yaml", "to_string_pretty"),
 ];
 
-/// Known, currently-open comptime gaps: real AOT `(module, method)` pairs
-/// with no comptime dispatch yet, each with why it isn't in this card's
-/// slice. Every entry here is a to-do, not a shrug — remove a line the same
-/// PR that closes the gap. Anything AOT supports that ISN'T listed here and
-/// isn't dispatched by comptime fails this test.
+/// Known, currently-open *pure* comptime gaps: real AOT `(module, method)`
+/// pairs with no comptime dispatch yet that are effect-free and therefore
+/// eligible for a future pure port. Every entry here is a to-do — remove a
+/// line the same PR that closes the gap.
+///
+/// Ambient / native / security *boundaries* do **not** live here. They are
+/// classified by `core_boundary` (exact per-call for mixed modules). Listing a
+/// boundary row here used to false-green: `classify_inventory` preferred the
+/// broad module boundary and the asserted pure-pending count stayed zero
+/// while these rows were still open (card #721 / #392 criterion 3).
 const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
-    // core.auth verifies signatures and reads the system clock. The dev interpreter
-    // names that native boundary and default dev transparently uses the AOT path.
-    ("core.auth", "verify_jwt"),
-    ("core.auth", "verify_paseto"),
-    // core.text: full Unicode Standard normalization/segmentation (NFC/NFD/
-    // NFKC/NFKD compose+decompose tables, grapheme/word/sentence boundary
-    // algorithms) is a large, separate undertaking even though AOT's own
-    // versions (`jet_text_*` in Text.rs) are themselves hand-rolled
-    // approximations, not full UAX-compliant tables — porting the
-    // approximation was in scope (done, see `TextLite.rs`) but the
-    // underlying algorithm gap versus true Unicode isn't this card's job to
-    // fix on either tier. (Card #392 ported everything else in core.text.)
-    // core.time ambient calls read wall or monotonic clocks. Packet B ports
-    // the deterministic constructors/parsers; these remain named boundaries.
-    ("core.time", "now"),
-    ("core.time", "now_utc"),
-    ("core.time", "today"),
-    ("core.time", "local_time"),
-    ("core.time", "instant"),
-    ("core.time", "sleep"),
-    ("core.time", "start"),
-    // Everything below is PRE-EXISTING debt this card's audit surfaced, not
-    // new: entire modules that comptime has never dispatched at all (no
-    // `apply_core_call` arm for the module exists, so every call in the
-    // module already hit E0956 before this card). Card #392's slice was
-    // "BigInt, then audit" — the audit's job is making this backlog visible
-    // and CI-enforced (this test), not closing a dozen unrelated stdlib
-    // surfaces in one pass. Each group below is its own future card.
-    //
-    // core.data: fixed-signature stats (sum/mean/min/max/median/variance/
-    // stddev/quantile/rolling_mean/describe/status) and plot rendering
-    // (bar_text/bar_svg) are PORTED (card #392 pass 3, `DataLite.rs`). The
-    // generic call-site-typed table/lazy-pipeline half (D-DATA-SURFACE1) —
-    // table/rows/series/values/schema/missing_count/csv/json/count/lazy/lazy_filter/
-    // lazy_sort_by/collect/plan/filter/sort_by/group_count/group_sum/
-    // group_mean — is PORTED too (card #392 pass 5, `DataPipeline.rs`):
-    // `Table<T>`/`Series<T>`/`LazyFrame<T>` are plain `CtValue::Struct`
-    // wrappers over already-dynamically-typed rows, with closures applied
-    // through the same `call_closure` path `list.map`/`.filter` use.
-    // `inner_join`/`left_join` and Packet B's `pivot_sum` route through the
-    // interpreter because their closure arguments need live `Interp` access.
-    //
-    // core.crypto.expert / core.crypto.random: security-sensitive — needs a
-    // careful, independently-reviewed port (AEAD ciphers, CSPRNG), not a
-    // quick approximation that could silently diverge from the audited AOT
-    // implementation.
+    // core.crypto.expert AEAD / KDF / sign: deterministic given inputs, but
+    // security-sensitive — needs a careful, independently-reviewed port, not
+    // a quick approximation that could silently diverge from audited AOT.
+    // (ed25519_verify_strict / hkdf_sha256 / x25519 / *_bytes are already
+    // Covered via CorePureParity; open_v1 / migrate_v1 are named boundaries.)
     ("core.crypto.expert", "aes256gcm_open"),
     ("core.crypto.expert", "aes256gcm_seal"),
     ("core.crypto.expert", "argon2id"),
     ("core.crypto.expert", "ed25519_sign"),
     ("core.crypto.expert", "xchacha20poly1305_open"),
     ("core.crypto.expert", "xchacha20poly1305_seal"),
-    ("core.crypto.random", "bytes"),
-    // core.encoding.*: card #392 pass 4 ported csv/toml/yaml/xml/cbor/jsonl
-    // parse+to_string (or encode/decode) plus json.canonical/events verbatim
-    // into comptime (`EncodingLite.rs`, dispatched from `Methods.rs`,
-    // rustc-verified in `tests/comptime_diff.rs`). base32 and base64's
-    // URL-safe variant were already done (byte-for-byte ports —
-    // `base32_encode`/`base32_decode` and the `encode_url`/`decode_url` arms
-    // in Methods.rs).
-    //
-    // `decode_traced<T>` is PORTED too (card #392 pass 5, `TypedDecode.rs`):
-    // typed `Decode` dispatch at comptime — resolves the target user type via
-    // `self.structs`, walks its fields (honoring `#[Rename]`/`RenameAll`/
-    // `Default`/`Flatten`/`DenyUnknownFields`), and — for a
-    // `#PublishedSchema` type with `migration { }` blocks — walks the runtime
-    // migration chain the same way `Codegen/Items.rs::emit_migration_chain_walker`
-    // does (shape detection by wire-key set, newest match first, calling the
-    // sema-lowered `__migrate_conv_*`/`__migrate_add_*` synthetic functions
-    // through the ordinary `call_func` path). `json`/`csv`/`toml`/`yaml` all
-    // share the one `typed_decode_top` walker. (The `fixed_sigs.rs`
-    // alternation's paren-balance-parser artifact — `("core.encoding.json",
-    // "core.encoding.csv")` and its toml/yaml siblings — used to need an
-    // explicit entry here too, but `Methods.rs`'s new dispatch guard uses the
-    // identical `("core.encoding.json" | … , "decode" | "decode_traced")`
-    // alternation shape, so the same artifact pairs now appear on both sides
-    // of the diff and aren't `newly_missing` — no entry needed.)
-    //
-    // core.os: host/process facts (hostname, arch, pid, cpu_count, …) — real
-    // ambient reads of the host, arguably belongs behind the same `#Impure`
-    // gate as `core.env`/`core.process` rather than E0956; needs the same
-    // effect-boundary design work as `core.time`'s split above.
-    ("core.os", "arch"),
-    ("core.os", "cpu_count"),
-    ("core.os", "executable"),
-    ("core.os", "family"),
-    ("core.os", "hostname"),
-    ("core.os", "name"),
-    ("core.os", "on_interrupt"),
-    ("core.os", "pid"),
-    ("core.os", "set_current_dir"),
-    ("core.os", "temp_dir"),
-    ("core.os", "username"),
-    // core.raylib / core.ui / core.term: native windowing/rendering/terminal
-    // backends — genuine ambient effects tied to a real display/terminal,
-    // likely belongs in the E3410 Tier-2 gate family rather than "port the
-    // pure logic", but that's a call for whoever designs the gate split.
-    ("core.raylib", "begin_drawing"),
-    ("core.raylib", "clear_background"),
-    ("core.raylib", "close_window"),
-    ("core.raylib", "draw_rectangle"),
-    ("core.raylib", "draw_text"),
-    ("core.raylib", "end_drawing"),
-    ("core.raylib", "key_down"),
-    ("core.raylib", "set_target_fps"),
-    ("core.raylib", "window_open"),
-    ("core.raylib", "window_ready"),
-    ("core.raylib", "window_should_close"),
-    ("core.ui", "gtk_backend"),
-    ("core.ui", "null_backend"),
-    ("core.ui", "tui_backend"),
-    ("core.term", "read_key"),
-    ("core.web", "on"),
-    ("core.web", "value"),
-    ("core.web.storage.local", "clear"),
-    ("core.web.storage.local", "get"),
-    ("core.web.storage.local", "remove"),
-    ("core.web.storage.local", "set"),
-    // core.tasks / core.watcher / core.web.devserver: async runtime primitives
-    // (channels, timers, file/port watchers, a live dev-server handle) — all
-    // inherently tied to the running process's event loop; may never make
-    // sense as pure comptime values rather than a genuine effect.
-    ("core.tasks", "after"),
-    ("core.tasks", "channel"),
-    ("core.tasks", "interval"),
-    ("core.watcher", "files"),
-    ("core.watcher", "port"),
-    ("core.watcher", "process_pid"),
-    ("core.watcher", "set"),
-    ("core.web.devserver", "app"),
-    ("core.web.devserver", "for_app"),
-    // Misc ambient/runtime surfaces — named boundaries (see core_boundary).
-    // core.math.decimal PORTED (card #392 C4) — see CtDecimal + CorePureParity.
-    // core.testing fixture/snap/golden/corpus/temp_dir: filesystem effects —
-    // named boundaries (fake_rng/fake_clock already Covered).
-    // core.sketch.* PORTED (card #392 C4) — see CorePureParity sketch helpers.
-    // core.url: PORTED (card #392 pass 3) — see `UrlLite.rs` + `Methods.rs`'s
-    // `("core.url", ...)` arms, ported verbatim from `JetUrl`/`jet_url_*`
-    // (`UrlMime.rs` + `MathRandomTime.rs`).
-    // core.uuid: EFFECT BOUNDARY, not a porting gap. `v4`/`v7` need genuine
-    // ambient entropy (`jet_uuid_fill_random` reads `/dev/urandom`, POSIX,
-    // falling back to a wall-clock-nanosecond seed — `EncodingCodecs.rs`) and
-    // `v7` additionally needs the ambient wall clock for its timestamp bits —
-    // both non-deterministic, unlike `core.random`'s explicitly-seeded stream.
-    // A "pure" comptime UUID would either fake randomness (silently diverging
-    // from AOT, R12 risk) or read the real host (a build-time effect with no
-    // `#Impure` gate defined for it yet) — genuinely impossible to do purely,
-    // not merely unported.
-    ("core.uuid", "v4"),
-    ("core.uuid", "v7"),
+    // core.encoding.xml tree projection / typed decode: parse+to_string+
+    // canonical are Covered; these pure DataTree helpers are still AOT-only.
+    ("core.encoding.xml", "attribute"),
+    ("core.encoding.xml", "content"),
+    ("core.encoding.xml", "decode"),
+    ("core.encoding.xml", "decode_bytes"),
+    ("core.encoding.xml", "expanded_name"),
+    ("core.encoding.xml", "root"),
 ];
 
 /// Calls with a production-compiled foundation that must remain private until
@@ -940,7 +815,48 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     if EFFECT_GATED_MODULES.contains(&module) {
         return Some("named comptime effect gate");
     }
-    if matches!(module, "core.os" | "core.raylib" | "core.ui" | "core.term" | "core.web" | "core.web.storage.local" | "core.web.storage.session" | "core.tasks" | "core.watcher" | "core.web.devserver" | "core.uuid") {
+    // Wholly ambient modules — every discovered call is a named boundary.
+    if matches!(
+        module,
+        "core.os"
+            | "core.term"
+            | "core.web"
+            | "core.web.storage.local"
+            | "core.web.storage.session"
+            | "core.tasks"
+            | "core.watcher"
+            | "core.web.devserver"
+            | "core.uuid"
+    ) {
+        return Some("named ambient/native boundary");
+    }
+    // Mixed modules: exact per-call boundaries only. Pure constructors /
+    // verify helpers that comptime already ports must not be swallowed here
+    // (and PurePending gaps must win over any residual broad match).
+    if module == "core.ui"
+        && matches!(
+            method,
+            "null_backend" | "tui_backend" | "gtk_backend" | "reactive_render"
+        )
+    {
+        return Some("named ambient/native boundary");
+    }
+    if module == "core.raylib"
+        && matches!(
+            method,
+            "begin_drawing"
+                | "clear_background"
+                | "close_window"
+                | "draw_rectangle"
+                | "draw_text"
+                | "end_drawing"
+                | "key_down"
+                | "set_target_fps"
+                | "window_open"
+                | "window_ready"
+                | "window_should_close"
+        )
+    {
         return Some("named ambient/native boundary");
     }
     if module == "core.testing"
@@ -951,21 +867,37 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     if matches!((module, method), ("core.args", "spec") | ("core.game", "run")) {
         return Some("named ambient runtime boundary");
     }
-    if matches!(module, "core.event" | "core.http.client" | "core.http.server" | "core.mem" | "core.scope") {
+    if matches!(
+        module,
+        "core.event"
+            | "core.http.client"
+            | "core.http.server"
+            | "core.http.middleware"
+            | "core.ws"
+            | "core.mem"
+            | "core.scope"
+    ) {
         return Some("named runtime/native boundary");
     }
     if (module.starts_with("core.encoding.") && matches!(method, "reader" | "writer"))
         || (module == "core.email" && matches!(method, "smtp" | "smtp_from_env"))
+        || (module == "core.data" && matches!(method, "csv_reader" | "json_reader"))
     {
         return Some("named I/O handle boundary");
     }
     if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "local_time" | "instant" | "sleep" | "start") {
         return Some("named clock boundary");
     }
-    if matches!(
-        module,
-        "core.auth" | "core.crypto.expert" | "core.crypto.random" | "core.vault" | "core.vault.expert"
-    ) {
+    if module == "core.auth" && matches!(method, "verify_jwt" | "verify_paseto") {
+        return Some("named native/security boundary");
+    }
+    if module == "core.crypto.random" && method == "bytes" {
+        return Some("named native/security boundary");
+    }
+    if module == "core.crypto.expert" && matches!(method, "open_v1" | "migrate_v1") {
+        return Some("named native/security boundary");
+    }
+    if matches!(module, "core.vault" | "core.vault.expert") {
         return Some("named native/security boundary");
     }
     if (module == "core.time.date" && method == "today")
@@ -1116,8 +1048,8 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
     );
     let mut ct_statics = ct_static_methods(source_between(
         &builtin_dispatch_src,
-        "pub(super) fn apply_static_type_method(",
-        Some("pub(super) fn apply_mutating("),
+        "pub fn apply_static_type_method(",
+        Some("pub fn apply_mutating("),
     ));
     ct_statics.extend(guarded_static_methods(&dispatch_tree));
     let ct_build_context = ct_build_context_methods();
@@ -1163,10 +1095,12 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                     Some((Class::PurePending, "explicit partial pure port"))
                 } else if ct_core.contains(&pair) {
                     Some((Class::Covered, "comptime core dispatch"))
+                } else if gaps.contains(&(entry.owner.as_str(), entry.method.as_str())) {
+                    // PurePending before boundary so broad/exact ambient matches
+                    // cannot hide deterministic effect-free backlog rows.
+                    Some((Class::PurePending, "explicit pure port backlog"))
                 } else if let Some(reason) = core_boundary(&entry.owner, &entry.method) {
                     Some((Class::Boundary, reason))
-                } else if gaps.contains(&(entry.owner.as_str(), entry.method.as_str())) {
-                    Some((Class::PurePending, "explicit pure port backlog"))
                 } else {
                     None
                 }
@@ -1308,7 +1242,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (498, 151, 486, 49));
+    assert_eq!((fixed, direct_static, value, bespoke), (512, 151, 488, 57));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1573,9 +1507,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     }
     assert_eq!(record(&records, Surface::Value, "Instant", "elapsed_millis").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Value, "Task", "detach").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::Bespoke, "core.data", "inner_join").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Bespoke, "core.data", "left_join").class, Class::Covered);
-    assert_eq!(record(&records, Surface::Bespoke, "core.data", "pivot_sum").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Fixed, "core.data", "inner_join").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Fixed, "core.data", "left_join").class, Class::Covered);
+    assert_eq!(record(&records, Surface::Fixed, "core.data", "pivot_sum").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.data", "schema").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.data", "json").class, Class::Covered);
     assert_eq!(
@@ -1654,14 +1588,91 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Fixed, "core.vault.expert", "prepare_import_signing").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Fixed, "core.vault.expert", "commit_import_x25519").class, Class::Boundary);
 
+    // Exact per-call inventory: ported pure rows stay Covered; open pure gaps
+    // stay PurePending; ambient backends stay Boundary (#721 / #392 C3).
+    for method in [
+        "point",
+        "size",
+        "rect",
+        "constraint",
+        "node",
+        "text",
+        "button",
+        "box",
+        "key_event",
+        "resize_event",
+        "node_role",
+        "node_color",
+        "aria_role_button",
+        "aria_role_text_input",
+        "aria_role_label",
+        "aria_role_container",
+    ] {
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.ui", method).class,
+            Class::Covered,
+            "core.ui.{method}"
+        );
+    }
+    for method in ["null_backend", "tui_backend", "gtk_backend"] {
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.ui", method).class,
+            Class::Boundary,
+            "core.ui.{method}"
+        );
+    }
+    assert_eq!(
+        record(&records, Surface::Bespoke, "core.ui", "reactive_render").class,
+        Class::Boundary
+    );
+    assert_eq!(record(&records, Surface::Fixed, "core.raylib", "color").class, Class::Covered);
+    for method in [
+        "ed25519_verify_strict",
+        "hkdf_sha256",
+        "x25519",
+        "secret_bytes",
+        "signing_key_bytes",
+        "x25519_secret_bytes",
+        "shared_secret_bytes",
+    ] {
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.crypto.expert", method).class,
+            Class::Covered,
+            "core.crypto.expert.{method}"
+        );
+    }
+    for &(module, method) in KNOWN_OPEN_GAPS {
+        assert_eq!(
+            record(&records, Surface::Fixed, module, method).class,
+            Class::PurePending,
+            "{module}.{method} must remain PurePending (not swallowed by a module boundary)"
+        );
+    }
+    assert_eq!(
+        record(&records, Surface::Fixed, "core.crypto.random", "bytes").class,
+        Class::Boundary
+    );
+
     let rendered = render_inventory(&records);
     let mut reversed = records.clone();
     reversed.reverse();
     assert_eq!(render_inventory(&reversed), rendered, "inventory rendering must be order-stable");
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
+    for record in records.iter().filter(|record| record.class == Class::PurePending) {
+        eprintln!(
+            "PURE_PENDING {} {}.{}",
+            record.entry.surface.name(),
+            record.entry.owner,
+            record.entry.method
+        );
+    }
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    assert_eq!((records.len(), covered, pending, boundaries), (1_184, 841, 0, 343));
+    // Honest pending count includes the twelve explicit KNOWN_OPEN_GAPS rows
+    // (six crypto.expert + six encoding.xml) plus any remaining value/static
+    // pure ports. Prior false-green asserted pending=0 while crypto rows sat
+    // under a broad Boundary match.
+    assert_eq!((records.len(), covered, pending, boundaries), (1_208, 843, 14, 351));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1669,7 +1680,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        7692187946673691483,
+        13224497936691574135,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
