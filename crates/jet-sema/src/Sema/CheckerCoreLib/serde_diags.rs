@@ -126,6 +126,34 @@ pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
     )
 }
 
+/// E2415 (D-UNIONTYPE1=A): two Codable union members share a primary wire shape,
+/// so decode cannot pick a unique member without declaration-order guessing.
+pub(crate) fn e2415(union_ty: &str, a: &str, b: &str, shape: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2415",
+        format!("union `{union_ty}` can't be decoded — `{a}` and `{b}` share wire shape `{shape}`"),
+        "anonymous-union decode picks a member by wire shape; two members with the same shape would force an arbitrary order".to_string(),
+        "use a named enum with an explicit tag, or change the members so each has a distinct wire shape".to_string(),
+        Some(span),
+    )
+}
+
+/// Primary DataTree kind a type encodes as (for union decode dispatch).
+pub(crate) fn union_wire_shape(ty: &Type) -> Option<&'static str> {
+    match ty {
+        Type::Int | Type::IntN { .. } => Some("Int"),
+        Type::Float | Type::Float32 => Some("Float"),
+        Type::Bool => Some("Bool"),
+        Type::String | Type::Char => Some("Text"),
+        Type::Named(n) if n == "Decimal" => Some("Text"),
+        Type::List(_) | Type::FixedList { .. } => Some("Array"),
+        Type::Map { .. } | Type::Named(_) | Type::Apply { .. } | Type::Tuple(_) => Some("Object"),
+        Type::Option(inner) => union_wire_shape(inner),
+        Type::Union(_) | Type::Shared(_) | Type::Result { .. } | Type::Fn { .. }
+        | Type::TraitObject(_) | Type::Tagged { .. } => None,
+    }
+}
+
 /// E2407: `#[Rename(...)]` needs a single string-literal wire key.
 pub(crate) fn e2407(span: Span) -> Diagnostic {
     Diagnostic::error(
@@ -223,6 +251,7 @@ pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
                 is_encodable_ty(t, reg)
             })
         }
+        Type::Union(members) => members.iter().all(|m| is_encodable_ty(m, reg)),
         _ => false,
     }
 }
@@ -247,6 +276,7 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
                 is_decodable_ty(t, reg)
             })
         }
+        Type::Union(members) => members.iter().all(|m| is_decodable_ty(m, reg)),
         _ => false,
     }
 }
@@ -398,6 +428,31 @@ pub(crate) fn validate_serde_items(
                 }
                 if dec && !is_decodable_ty(&f.ty, reg) {
                     out.push(e2411(&f.ty.show(), false, f.name_span));
+                }
+                // D-UNIONTYPE1=A: reject Codable union fields with ambiguous wire shapes.
+                if dec {
+                    if let Type::Union(members) = &f.ty {
+                        let mut seen: Vec<(&str, &Type)> = Vec::new();
+                        for m in members {
+                            let Some(shape) = union_wire_shape(m) else {
+                                out.push(e2411(&f.ty.show(), false, f.name_span));
+                                continue;
+                            };
+                            if let Some((prev_shape, prev_ty)) =
+                                seen.iter().find(|(s, _)| *s == shape)
+                            {
+                                out.push(e2415(
+                                    &f.ty.show(),
+                                    &prev_ty.show(),
+                                    &m.show(),
+                                    prev_shape,
+                                    f.name_span,
+                                ));
+                            } else {
+                                seen.push((shape, m));
+                            }
+                        }
+                    }
                 }
             }
         }

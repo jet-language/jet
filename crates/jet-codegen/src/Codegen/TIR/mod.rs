@@ -2640,6 +2640,8 @@ pub enum TTryConvert {
     /// Declared `impl Source -> Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);
     /// holds the mangled Rust conversion-function name.
     Typed(String),
+    /// D-UNIONTYPE1=A: wrap the error into a compiler-generated union enum.
+    WidenUnion { enum_name: String, tag: String },
 }
 
 /// c109 Phase 8: the resolved right-hand side of a `??` fallback (`AST::OrFallback`).
@@ -3429,6 +3431,9 @@ pub struct TCallArg {
     /// D-FIXARR1: a `[T#N]` argument passed to a `[T]` (Vec) slot is widened by
     /// copying into a growable list. When true, emit wraps with `.to_vec()`.
     pub widen_to_vec: bool,
+    /// D-UNIONTYPE1=A: a member value passed where a union is expected. When
+    /// `Some(union)`, emit wraps as `user_<UnionEnum>::<MemberTag>(value)`.
+    pub widen_to_union: Option<Type>,
 }
 
 /// c109 Phase 13: the resolved Fn-typed-argument coercion (`emit_call_args`).

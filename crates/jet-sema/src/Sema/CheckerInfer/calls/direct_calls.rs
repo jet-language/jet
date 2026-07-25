@@ -1152,8 +1152,13 @@ impl<'a> Checker<'a> {
                     // will emit .to_vec() on the argument.
                     let fixed_widens = matches!((&param_ty, &arg_ty),
                         (Type::List(pe), Type::FixedList { elem: ae, .. }) if pe == ae);
+                    let union_widens = matches!(
+                        &param_ty,
+                        Type::Union(members) if members.iter().any(|m| m == &arg_ty)
+                    );
                     let compatible = arg_ty == param_ty
                         || fixed_widens
+                        || union_widens
                         || reads_expiring_secret_loan
                         || (matches!(&param_ty, Type::Fn { .. })
                             && matches!(&arg_ty, Type::Fn { .. })

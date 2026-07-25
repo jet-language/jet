@@ -314,6 +314,15 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     if is_covered_foreign_value_ty(ty, cx) {
         return true;
     }
+    // D-UNIONTYPE1=A: anonymous unions are structural enum sugar (`Int | String` →
+    // `user___JetUnion_Int_String`). A union field is covered when every member is;
+    // codegen emits the generated enum + Encode/Decode, and field reads/writes are
+    // ordinary places (member→union widen injects at binding/arg/return/field sites).
+    // Checked before `is_covered_enum_ty` so we do not recurse through Named-only
+    // enum coverage for a non-Named `Type::Union`.
+    if let Type::Union(members) = ty {
+        return !members.is_empty() && members.iter().all(|m| field_ty_covered(m, cx, seen));
+    }
     // c109 Phase 24: a covered ENUM field (`note_type: NoteType` on a `Note` struct). An
     // enum field renders to `user_<Enum>` and a field read is a plain place / sema-cloned
     // `.clone()` (the Phase-3/6 owning-field rewrite) — byte-identical, no new decision.

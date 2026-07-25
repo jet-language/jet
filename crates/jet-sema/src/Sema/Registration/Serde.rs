@@ -570,5 +570,10 @@ fn serde_type_source(ty: &Type) -> String {
         Type::Tuple(fields) => format!("({})", fields.iter().map(|(n,t)| format!("{}: {}", n, serde_type_source(t))).collect::<Vec<_>>().join(", ")),
         Type::TraitObject(names) => format!("dyn {}", names.join(" + ")),
         Type::Fn { .. } => "fn()".to_string(),
+        Type::Union(members) => members
+            .iter()
+            .map(serde_type_source)
+            .collect::<Vec<_>>()
+            .join(" | "),
     }
 }

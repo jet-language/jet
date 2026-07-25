@@ -1379,7 +1379,19 @@ impl EvalCtx<'_> {
     ) -> Result<CtValue, Diagnostic> {
         let mut argv = Vec::with_capacity(args.len());
         for a in args {
-            argv.push(self.eval_expr(&a.value, scope)?);
+            let mut v = self.eval_expr(&a.value, scope)?;
+            // D-UNIONTYPE1=A: member → union inject at the call boundary (mirrors emit).
+            if let Some(Type::Union(members)) = &a.widen_to_union {
+                let tag = crate::AST::union_member_tag(&a.value.ty);
+                if members.iter().any(|m| m == &a.value.ty) {
+                    v = CtValue::Enum {
+                        type_name: crate::AST::union_enum_name(members),
+                        variant: tag,
+                        args: vec![(None, v)],
+                    };
+                }
+            }
+            argv.push(v);
             // Try/`?` may set pending_return mid-arg; abort the call (don't print Unit).
             if self.pending_return.is_some() {
                 return Ok(CtValue::Unit);

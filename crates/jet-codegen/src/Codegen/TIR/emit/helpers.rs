@@ -109,6 +109,13 @@ pub(crate) fn emit_tir_call_args(args: &[TCallArg], cx: &Cx) -> String {
             if a.widen_to_vec {
                 s = format!("({}).to_vec()", s);
             }
+            // D-UNIONTYPE1=A: wrap a member value into the compiler-generated enum.
+            if let Some(Type::Union(members)) = &a.widen_to_union {
+                let enum_name = crate::AST::union_enum_name(members);
+                let tag = crate::AST::union_member_tag(&a.value.ty);
+                // Bare member-type tags — matches `emit_anonymous_unions` / match arms.
+                s = format!("user_{enum_name}::{tag}({s})");
+            }
             // c109 Phase 13: the Fn-typed Box-coercion, applied AFTER the clone wrapper
             // and BEFORE the borrow wrapper — exactly `emit_call_args`' order. `Box::new`
             // is added only when the value isn't already boxed (resolved at lowering).

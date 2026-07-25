@@ -632,11 +632,23 @@ pub(crate) fn switch_in_subset(
         let subj_enum = arms.iter().find_map(|a| {
             arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
         });
-        let Some(enum_name) = subj_enum else {
+        // D-UNIONTYPE1=A: union matches use member-type arm heads. Those tags are
+        // not in `variant_owner` (they collide with DataTree/etc.), so the owning
+        // enum is resolved later from the subject's Jet type in `lower_enum_match`.
+        let union_shaped = subj_enum.is_none()
+            && arms.iter().all(|a| {
+                matches!(
+                    arm_variant_pattern(cx, &a.cond, subject),
+                    Some(Pattern::Variant { bindings, .. }) if bindings.len() == 1
+                )
+            });
+        if subj_enum.is_none() && !union_shaped {
             return false;
-        };
-        if enum_name != "HookOutcome" && !enum_is_covered(&enum_name, cx) {
-            return false;
+        }
+        if let Some(enum_name) = &subj_enum {
+            if enum_name != "HookOutcome" && !enum_is_covered(enum_name, cx) {
+                return false;
+            }
         }
         for a in arms {
             let pat = arm_variant_pattern(cx, &a.cond, subject).expect("checked above");

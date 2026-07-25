@@ -3044,6 +3044,7 @@ pub(crate) fn lower_method_call(
                         arc_clone: false,
                         fn_coerce: None,
                         widen_to_vec: false,
+                        widen_to_union: None,
                     }],
                 },
             };
@@ -3176,6 +3177,7 @@ pub(crate) fn lower_method_call(
                         arc_clone: false,
                         fn_coerce: None,
                         widen_to_vec: false,
+                        widen_to_union: None,
                     }],
                 },
             };

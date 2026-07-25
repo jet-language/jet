@@ -443,11 +443,14 @@ pub(crate) fn lower_enum_match(
         _ => (lower_expr(subject, cx, env), false),
     };
     // Resolve the owning enum once — drives the Rust variant prefix in patterns.
-    let enum_type = arms.iter().find_map(|a| {
-        arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
-    });
-    // The subject's resolved Jet type carries the variant binding payload types.
+    // D-UNIONTYPE1=A: anonymous unions lower to a generated enum named by members.
     let subject_ty = expr_ast_jet_ty(subject, env);
+    let enum_type = match &subject_ty {
+        Some(Type::Union(members)) => Some(crate::AST::union_enum_name(members)),
+        _ => arms.iter().find_map(|a| {
+            arm_variant_pattern(cx, &a.cond, subject).and_then(|p| variant_pattern_enum(cx, &p))
+        }),
+    };
     let mut tarms = Vec::new();
     for arm in arms {
         let pattern = arm_variant_pattern(cx, &arm.cond, subject).expect("gate proved variant arm");
@@ -559,7 +562,18 @@ pub(crate) fn tir_add_pattern_bindings(
                     if matches!(name.as_str(), "HookOutcome" | "HookDecision") => args.get(1).cloned(),
                 _ => None,
             };
-            let tys = hook_payload.map(|ty| vec![ty]).or_else(|| variant_payload_types(cx, variant));
+            // D-UNIONTYPE1=A: union arm binds the matching member type.
+            let union_payload = match subject_ty {
+                Some(Type::Union(members)) => members
+                    .iter()
+                    .find(|m| crate::AST::union_member_tag(m) == *variant)
+                    .map(|m| vec![m.clone()]),
+                _ => None,
+            };
+            let tys = hook_payload
+                .map(|ty| vec![ty])
+                .or(union_payload)
+                .or_else(|| variant_payload_types(cx, variant));
             for (i, slot) in bindings.iter().enumerate() {
                 if let PatSlot::Bind { name, .. } = slot {
                     // Payload types are scalar/Char (the enum is covered), so the
@@ -597,6 +611,10 @@ pub(crate) fn variant_payload_types(cx: &Cx, variant: &str) -> Option<Vec<Type>>
 /// FOREIGN (imported) enum → `{root}{mod}::user_<T>::user_<V>`, a local enum →
 /// `user_<T>::user_<V>`. Keyed on the ENUM name in `cx.foreign_types`, byte-for-byte.
 pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> String {
+    // D-UNIONTYPE1=A: compiler-generated union enums use bare member-type tags.
+    if type_name.starts_with("__JetUnion_") {
+        return format!("user_{type_name}::{variant}");
+    }
     // D-TERM1 (ratified 2026-06-22): `Key` is a prelude enum; its Rust name is `JetKey`.
     // Variant names are not mangled (Char, Enter, …).
     if type_name == crate::Syntax::TYPE_KEY {

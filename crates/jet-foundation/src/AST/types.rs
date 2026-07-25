@@ -229,6 +229,11 @@ pub enum Type {
         marker: String,
         inner: Box<Type>,
     },
+    /// D-UNIONTYPE1=A: closed structural sum `A | B | …`. Canonical form is
+    /// flattened, duplicate-free, and sorted by member `name()` spelling so
+    /// identity is order-insensitive. Desugars to one compiler-generated enum
+    /// whose arms are named by the member types.
+    Union(Vec<Type>),
 }
 
 /// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
@@ -307,6 +312,7 @@ impl PartialEq for Type {
             }
             (Tagged { marker, .. }, _) | (_, Tagged { marker, .. })
                 if marker == CORE_CRYPTO_NOMINAL_MARKER => false,
+            (Union(a), Union(b)) => a == b,
             _ => false,
         }
     }
@@ -362,6 +368,65 @@ pub fn canonicalize_tuple_fields<T>(mut fields: Vec<(String, T)>) -> Vec<(String
     fields
 }
 
+/// D-UNIONTYPE1=A: flatten nested unions, drop exact duplicates, sort by
+/// canonical source spelling. A single surviving member collapses to that
+/// member (so `Int | Int` is just `Int`).
+pub fn canonicalize_union(members: Vec<Type>) -> Type {
+    let mut flat: Vec<Type> = Vec::new();
+    fn push_flat(out: &mut Vec<Type>, ty: Type) {
+        match ty {
+            Type::Union(inner) => {
+                for m in inner {
+                    push_flat(out, m);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    for m in members {
+        push_flat(&mut flat, m);
+    }
+    let mut unique: Vec<Type> = Vec::new();
+    for m in flat {
+        if !unique.iter().any(|u| u == &m) {
+            unique.push(m);
+        }
+    }
+    unique.sort_by(|a, b| a.name().cmp(&b.name()));
+    match unique.len() {
+        0 => Type::Named("Void".to_string()),
+        1 => unique.pop().unwrap(),
+        _ => Type::Union(unique),
+    }
+}
+
+/// D-UNIONTYPE1=A: stable arm / Rust-variant tag for one union member.
+/// Builtins and named types keep their source spelling; compound types are
+/// sanitized so the generated enum stays a valid identifier.
+pub fn union_member_tag(ty: &Type) -> String {
+    let raw = ty.name();
+    if raw.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !raw.is_empty() {
+        return raw;
+    }
+    let mut out = String::with_capacity(raw.len() + 4);
+    out.push_str("M_");
+    for c in raw.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+    }
+    out
+}
+
+/// D-UNIONTYPE1=A: deterministic compiler-generated enum name for a canonical
+/// union. Same members ⇒ same name regardless of source order.
+pub fn union_enum_name(members: &[Type]) -> String {
+    let tags: Vec<String> = members.iter().map(union_member_tag).collect();
+    format!("__JetUnion_{}", tags.join("_"))
+}
+
 fn effect_names(row: &[(String, Span)]) -> String {
     row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")
 }
@@ -406,6 +471,9 @@ impl Type {
                 marker: marker.clone(),
                 inner: Box::new(inner.map_named_types(map)),
             },
+            Type::Union(members) => canonicalize_union(
+                members.iter().map(|m| m.map_named_types(map)).collect(),
+            ),
             other => other.clone(),
         }
     }
@@ -505,6 +573,11 @@ impl Type {
                 inner.show()
             }
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.show()),
+            Type::Union(members) => members
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
+                .join(" | "),
         }
     }
 
@@ -576,6 +649,11 @@ impl Type {
                 inner.name()
             }
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.name()),
+            Type::Union(members) => members
+                .iter()
+                .map(|m| m.name())
+                .collect::<Vec<_>>()
+                .join(" | "),
         }
     }
 
@@ -642,6 +720,22 @@ impl Type {
         }
     }
 
+    /// D-UNIONTYPE1=A: members of a canonical union, if any.
+    pub fn unwrap_union(&self) -> Option<&[Type]> {
+        match self {
+            Type::Union(members) => Some(members.as_slice()),
+            _ => None,
+        }
+    }
+
+    /// D-UNIONTYPE1=A: true when `member` is exactly one arm of this union.
+    pub fn union_contains(&self, member: &Type) -> bool {
+        match self {
+            Type::Union(members) => members.iter().any(|m| m == member),
+            _ => false,
+        }
+    }
+
     pub fn is_fallible(&self) -> bool {
         matches!(self, Type::Option(_) | Type::Result { .. })
     }
@@ -656,6 +750,21 @@ mod tests {
             marker: CORE_CRYPTO_NOMINAL_MARKER.to_string(),
             inner: Box::new(Type::Named("Secret".to_string())),
         }
+    }
+
+    #[test]
+    fn canonicalize_union_flattens_dedupes_and_sorts() {
+        use super::canonicalize_union;
+        let u = canonicalize_union(vec![
+            Type::String,
+            Type::Union(vec![Type::Int, Type::String]),
+            Type::Int,
+        ]);
+        assert_eq!(u, Type::Union(vec![Type::Int, Type::String]));
+        let collapsed = canonicalize_union(vec![Type::Int, Type::Int]);
+        assert_eq!(collapsed, Type::Int);
+        let flipped = canonicalize_union(vec![Type::String, Type::Int]);
+        assert_eq!(flipped, Type::Union(vec![Type::Int, Type::String]));
     }
 
     #[test]

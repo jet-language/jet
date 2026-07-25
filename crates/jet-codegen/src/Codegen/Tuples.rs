@@ -76,6 +76,11 @@ fn collect_tuple_shapes_from_type(ty: &Type, out: &mut CollectedTypeShapes) {
                 collect_tuple_shapes_from_type(a, out);
             }
         }
+        Type::Union(members) => {
+            for m in members {
+                collect_tuple_shapes_from_type(m, out);
+            }
+        }
         _ => {}
     }
 }

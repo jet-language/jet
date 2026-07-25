@@ -606,6 +606,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     init.ty = fl.clone();
                 }
             }
+            // D-UNIONTYPE1=A: member → union inject at the binding boundary.
+            if let Some(want) = &b.ty {
+                init = crate::Codegen::TIR::maybe_widen_expr_to_union(init, want);
+            }
             // D-SOA1: an EMPTY list literal `[]` for a declared columnar `[S]` lowers
             // with an Int placeholder element type (no element to infer from), so it
             // came through as a plain `ListLit([])`/`vec![]`. Rewrite it to the
@@ -962,7 +966,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 kind: TExprKind::Local(env.local_of(name)),
             }))
         }
-        Stmt::Return(Some(e), _) => TStmt::Return(Some(lower_owned_expr(e, cx, env))),
+        Stmt::Return(Some(e), _) => {
+            let mut value = lower_owned_expr(e, cx, env);
+            if let Some(want) = &env.ret_ty {
+                value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+            }
+            TStmt::Return(Some(value))
+        }
         Stmt::Return(None, _) => TStmt::Return(None),
         // D-STREAMYIELD1: `yield e` inside a generator's spawned thread — send on
         // the channel the wrapping `Stream<T>` body opened (see `emit_generator_body`),

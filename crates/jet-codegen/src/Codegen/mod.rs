@@ -1199,6 +1199,7 @@ pub fn emit(prog: &Program, src: &str, file: &str) -> String {
     let cx = build_cx(prog, src, file);
     let tuple_shapes = collect_tuple_shapes(&prog.items);
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
+    emit_anonymous_unions(&cx, &prog.items, &mut out);
 
     emit_synthetic_display_trait(&mut out);
     emit_synthetic_operator_traits(&mut out);
@@ -1616,6 +1617,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     cx.test_mode = true;
     let tuple_shapes = collect_tuple_shapes(&prog.items);
     emit_tuple_structs(&cx, &tuple_shapes, &mut out);
+    emit_anonymous_unions(&cx, &prog.items, &mut out);
 
     emit_synthetic_display_trait(&mut out);
     emit_synthetic_operator_traits(&mut out);

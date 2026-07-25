@@ -104,6 +104,7 @@ pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
 fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
+    env.ret_ty = f.return_type.clone();
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
@@ -335,6 +336,7 @@ pub(crate) fn lower_method_for_owner(
 ) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
+    env.ret_ty = f.return_type.clone();
     env.self_owner = Some(type_name.to_string());
     let mut params = Vec::new();
     let mut resource_param_guards = Vec::new();
@@ -436,6 +438,7 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
     };
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
+    env.ret_ty = f.return_type.clone();
     env.self_owner = Some(type_name.to_string());
     let mut params = Vec::new();
     let mut resource_param_guards = Vec::new();

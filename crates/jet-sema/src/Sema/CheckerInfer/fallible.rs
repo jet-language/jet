@@ -12,7 +12,9 @@ impl<'a> Checker<'a> {
         let payload = self.infer(inner)?;
         if let Some(expected) = self.expected_type.clone() {
             if let Some((ok_ty, err_ty)) = expected.unwrap_result() {
-                if payload != *ok_ty {
+                let ok_payload = payload == *ok_ty
+                    || matches!(ok_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
+                if !ok_payload {
                     self.diags.push(Diagnostic::error(
                         "E0108",
                         format!(
@@ -50,7 +52,10 @@ impl<'a> Checker<'a> {
         let payload = self.infer(inner)?;
         if let Some(expected) = self.expected_type.clone() {
             if let Some((ok_ty, err_ty)) = expected.unwrap_result() {
-                if payload != *err_ty && !(is_default_error(err_ty) && payload == Type::String) {
+                let ok_payload = payload == *err_ty
+                    || (is_default_error(err_ty) && payload == Type::String)
+                    || matches!(err_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
+                if !ok_payload {
                     self.diags.push(Diagnostic::error(
                         "E0108",
                         format!(
@@ -109,6 +114,19 @@ impl<'a> Checker<'a> {
                             || (is_default_error(ret_err)
                                 && matches!(err.as_ref(), Type::String)) =>
                     {
+                        Some((*ok).clone())
+                    }
+                    // D-UNIONTYPE1=A: member error widens into the return's union.
+                    Type::Result { err: ret_err, .. }
+                        if ret_err.union_contains(err.as_ref()) =>
+                    {
+                        let members = ret_err
+                            .unwrap_union()
+                            .expect("union_contains implies Union");
+                        *convert = TryConvert::WidenUnion {
+                            enum_name: crate::AST::union_enum_name(members),
+                            tag: crate::AST::union_member_tag(&err),
+                        };
                         Some((*ok).clone())
                     }
                     Type::Result { err: ret_err, .. } => {

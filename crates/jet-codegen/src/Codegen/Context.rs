@@ -908,6 +908,9 @@ impl Cx {
                 len: *len,
                 len_symbol: None,
             },
+            Type::Union(members) => crate::AST::canonicalize_union(
+                members.iter().map(|m| self.expand_type_aliases(m)).collect(),
+            ),
             other => other.clone(),
         }
     }
@@ -1639,6 +1642,10 @@ impl Cx {
             Type::FixedList { elem, len, .. } => format!("[{}; {}]", self.rust_type(elem), len),
             // D-QUAL4=A: tagged types are transparent to codegen.
             Type::Tagged { inner, .. } => self.rust_type(inner),
+            // D-UNIONTYPE1=A: closed structural sum → one compiler-generated enum.
+            Type::Union(members) => {
+                format!("user_{}", crate::AST::union_enum_name(members))
+            }
         }
     }
 
@@ -2955,6 +2962,9 @@ fn field_type_cloneable(ty: &Type, types: &HashSet<String>, param_names: &HashSe
         Type::TraitObject(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_cloneable(elem, types, param_names),
         Type::Tagged { inner, .. } => field_type_cloneable(inner, types, param_names),
+        Type::Union(members) => members
+            .iter()
+            .all(|m| field_type_cloneable(m, types, param_names)),
     }
 }
 
@@ -3020,6 +3030,9 @@ pub(crate) fn field_type_comparable(
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_comparable(elem, types, param_names),
         Type::Tagged { inner, .. } => field_type_comparable(inner, types, param_names),
+        Type::Union(members) => members
+            .iter()
+            .all(|m| field_type_comparable(m, types, param_names)),
     }
 }
 
@@ -3076,6 +3089,9 @@ pub(crate) fn field_type_hashable(
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => field_type_hashable(elem, types, param_names),
         Type::Tagged { inner, .. } => field_type_hashable(inner, types, param_names),
+        Type::Union(members) => members
+            .iter()
+            .all(|m| field_type_hashable(m, types, param_names)),
     }
 }
 

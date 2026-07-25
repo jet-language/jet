@@ -26,6 +26,9 @@ pub(crate) struct LowerEnv {
     /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
     /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
     pub(super) fn_name: String,
+    /// D-UNIONTYPE1=A: enclosing function return type, for member→union inject
+    /// at `return` / `Ok` / `Err` / `?` boundaries.
+    pub(super) ret_ty: Option<Type>,
     /// D-FIELDPOL1: the owning struct name when lowering an inherent/trait
     /// method (`None` for a free function). `self`'s own env type is
     /// deliberately `None` (see `bind` above), so a `self.field` read can't
@@ -56,6 +59,7 @@ impl LowerEnv {
         LowerEnv {
             locals: HashMap::new(),
             fn_name,
+            ret_ty: None,
             self_owner: None,
             string_view_locals: HashSet::new(),
             borrowed_locals: HashSet::new(),
