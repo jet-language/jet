@@ -12,7 +12,7 @@ use super::graph_helpers::{
 use super::graph_json::{
     add_arm_pin, add_execution_overlay, add_inline, add_node, add_pin, add_region,
     add_source_comment_regions, add_wire, add_wire_with_span, graph_to_json, meta_attr_json,
-    set_pin_append, set_pin_source_span,
+    node_catalog, set_pin_append, set_pin_source_span,
 };
 use super::schema_api::{
     GRAPH_SCHEMA_VERSION, GraphBuilder, GraphEditAnchor, InlineExpr, NodeQueryRef, NodeRec,
@@ -49,12 +49,13 @@ pub(super) fn project_checked(
     let fmt = jet_driver::Formatter::format_source(src).unwrap_or_else(|_| src.to_string());
     let blueprint = canvas_blueprint_facts_json(src, bundle, &index, runtime_events);
     let json = format!(
-        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"blueprint\":{}}}}}",
+        "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{},\"source_id\":{},\"revision\":{},\"fmt_fingerprint\":{},\"source_text\":{},\"node_descriptors\":{},\"graphs\":[{}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\"],\"blueprint\":{}}}}}",
         GRAPH_SCHEMA_VERSION,
         json_str(&path.display().to_string()),
         json_str(&source_revision(src)),
         json_str(&source_revision(&fmt)),
         json_str(src),
+        node_catalog::catalog_json(),
         graph_json.join(","),
         index.schema_version(),
         blueprint

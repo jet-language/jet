@@ -301,7 +301,7 @@ Blueprint earned maintainability by separating four layers plus an editor shell.
 | UE5 layer | What it does | Canvas equivalent | Verdict |
 |---|---|---|---|
 | `EdGraph` / `EdGraphNode` / `EdGraphPin` | Persistent graph data model (serialized objects; nodes own pins, pins own links) | **Jet source AST/HIR** projected by `graph_projection.rs`. No persistent graph object | Advantage + cost. No drift, no binary asset — but there is nowhere to hang node-local state, so staged/positioned nodes live only in JS view state, off to the side |
-| `K2Node` subclasses (`K2Node_CallFunction`, `K2Node_VariableGet`, `K2Node_IfThenElse`, `K2Node_Switch`…) | Semantic per-node behavior: pins, tooltip, menu category, expansion to lower graph | **Split across two files with no registry**: archetype/kind decided in `graph_projection.rs`; style/glyph/hover/label decided by a parallel `if (node.kind === …)` chain in `graph-rendering.js`; palette metadata in `query_actions.rs` | Weakest layer. No single node descriptor. Adding a kind = editing 4+ if-chains that must agree |
+| `K2Node` subclasses (`K2Node_CallFunction`, `K2Node_VariableGet`, `K2Node_IfThenElse`, `K2Node_Switch`…) | Semantic per-node behavior: pins, tooltip, menu category, expansion to lower graph | `node_catalog.rs` now owns stable identity, archetype, presentation, palette, transaction, and default-editor facts. The graph protocol serves this table and stamps each node with `node_descriptor_id`. | The first registry slice is complete. Projection rules and edit arms still stay in their current modules. |
 | `SGraphEditor` / `SGraphNode` / `SGraphPin` (Slate widgets) | Rendering + interaction as per-node widget objects | `graph-rendering.js` immediate-mode 2D + `input-events.js`. No per-node widget; hit-testing rebuilt each frame into a hit map | Works for render; interaction logic is a flat event handler, hard to extend to marquee/drag/rewire uniformly |
 | `FKismetCompilerContext` | Compiles graph → bytecode | **The Jet front end itself** | Clean advantage — no separate compiler, no stale-compile class of bugs |
 | `BlueprintActionDatabase` + `UBlueprintNodeSpawner` | Palette/context-menu action registry with ranking | `query_actions.rs` `actions` op | Present but leaky: #389 shows foreign-symbol phantoms and wrong ranking. No spawner abstraction, ranking is ad hoc |
@@ -324,7 +324,7 @@ the only semantic truth; everything below is projection + interaction.
 principle. One addition: emit a stable `node_descriptor_id` per node so the
 render layer never re-derives style from `kind` string matching.
 
-### Seam 2 — Semantic node layer (build the missing registry)
+### Seam 2 — Semantic node layer (registry built)
 
 New: `crates/jet-devserver/src/Canvas/node_catalog.rs` — one descriptor table, the single source
 of truth for every node kind:
@@ -343,13 +343,13 @@ NodeDescriptor {
 }
 ```
 
-Generate a JSON descriptor table served to the browser (e.g. `/canvas/node-catalog`
-or embedded), so `graph-rendering.js` reads `descriptor.glyph/header/hover`
-instead of its `if (node.kind === "branch")` ladder, and `drawing-palette.js`
-reads `descriptor.palette` instead of ad-hoc ranking. This kills #389's class of
-bug: the catalog is the only place a node can enter a menu, and a
-catalog-vs-real-exports cross-check test (already requested in #389) becomes a
-one-liner.
+The graph protocol now embeds the JSON descriptor table. `graph-rendering.js`
+uses its presentation and hover facts. `drawing-palette.js` uses its visibility,
+ranking, category, glyph, color, and insertion facts. The transaction path checks
+the descriptor before it creates a source transaction.
+
+`tests/canvas.rs` checks the full descriptor set. It rejects missing, duplicate,
+orphaned, non-exported, non-insertable, and transaction-mismatched entries.
 
 ### Seam 3 — Rendering + interaction
 
@@ -379,12 +379,12 @@ no dead controls, which is exactly #377's exit criterion.
 
 ### Migration steps (no big-bang rewrite — the postmortem warns against a 5th)
 
-1. Introduce `node_catalog.rs` and the descriptor JSON without changing behavior;
+1. **Complete (#492).** Introduce `node_catalog.rs` and the descriptor JSON without changing behavior;
    have `graph_projection.rs` stamp `node_descriptor_id`. Prove via existing
    `tests/canvas.rs` snapshots (unchanged output).
-2. Point `graph-rendering.js` style/glyph/hover lookups at the descriptor table;
+2. **Complete (#492).** Point `graph-rendering.js` style/glyph/hover lookups at the descriptor table;
    delete the parallel if-chains. Existing gesture scenarios must stay green.
-3. Route `drawing-palette.js` ranking through `descriptor.palette`; land the
+3. **Complete (#492).** Route `drawing-palette.js` ranking through `descriptor.palette`; land the
    catalog-vs-exports cross-check test; close #389.
 4. Extract `interaction.js` FSM from `input-events.js` + `graph-rendering.js`;
    add gesture scenarios for node-drag reposition, marquee, and **data-pin

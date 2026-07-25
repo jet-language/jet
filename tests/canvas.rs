@@ -432,6 +432,40 @@ fn json_field(haystack: &str, field: &str) -> String {
     rest[..rest.find('"').expect("json field terminator")].to_string()
 }
 
+fn json_object_containing<'a>(haystack: &'a str, marker: &str) -> &'a str {
+    let marker_at = haystack.find(marker).unwrap_or_else(|| panic!("missing `{marker}`"));
+    let start = haystack[..marker_at]
+        .rfind('{')
+        .expect("JSON object start before marker");
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (offset, ch) in haystack[start..].char_indices() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &haystack[start..start + offset + 1];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated JSON object containing `{marker}`")
+}
+
 fn source_span_near(haystack: &str, marker: &str) -> (usize, usize) {
     let pos = haystack.find(marker).expect("marker near source span");
     let rest = &haystack[pos..];
@@ -475,6 +509,8 @@ fn canvas_graph_json_is_stable_and_typed() {
 
     assert!(json.contains("\"protocol\":\"jet.canvas.graph\""));
     assert!(json.contains("\"schema_version\":1"));
+    assert!(json.contains("\"node_descriptors\":["));
+    assert!(json.contains("\"node_descriptor_id\":\"branch\""));
     assert!(json.contains("\"source_id\""));
     assert!(json.contains("\"fmt_fingerprint\":\"sha256-"));
     assert!(json.contains("\"graph_id\":\"fn:"));
@@ -515,6 +551,117 @@ fn canvas_graph_json_is_stable_and_typed() {
         json, again,
         "Canvas layout/projection must be deterministic"
     );
+}
+
+#[test]
+fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
+    let path = write_fixture("node_descriptor_catalog", CANVAS_COVERAGE_FIXTURE);
+    let json = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
+    let catalog_start = json
+        .find("\"node_descriptors\":[")
+        .expect("node descriptor catalog");
+    let catalog_end = json[catalog_start..]
+        .find("],\"graphs\":[")
+        .map(|offset| catalog_start + offset + 1)
+        .expect("node descriptor catalog end");
+    let catalog = &json[catalog_start..catalog_end];
+    let expected = [
+        ("entry", "entry", "entry", None),
+        ("binding", "binding", "function_exec", None),
+        ("assignment", "assign", "function_exec", None),
+        ("return", "return", "control", None),
+        ("branch", "branch", "control", Some("insert_branch")),
+        ("dispatch", "function", "control", Some("insert_switch")),
+        ("loop", "loop", "control", Some("insert_loop")),
+        ("flow", "flow", "control", None),
+        ("yield", "yield", "function_exec", None),
+        ("scope_member", "scope_member", "function_exec", None),
+        (
+            "variable_get",
+            "variable_get",
+            "value",
+            Some("edit_inline_expr"),
+        ),
+        ("constant", "constant", "value", None),
+        (
+            "function_exec",
+            "function",
+            "function_exec",
+            Some("insert_call"),
+        ),
+        (
+            "function_pure",
+            "function",
+            "function_pure",
+            Some("insert_call"),
+        ),
+        ("variant", "variant", "function_pure", None),
+        (
+            "fallible",
+            "fallible",
+            "control",
+            Some("insert_fallible_rail"),
+        ),
+        ("expression", "expr", "function_pure", None),
+    ];
+
+    assert_eq!(
+        count_occurrences(catalog, "\"id\":"),
+        expected.len(),
+        "missing, duplicate, orphaned, or non-exported descriptor: {catalog}"
+    );
+    for (id, kind, archetype, transaction) in expected {
+        assert_eq!(
+            count_occurrences(catalog, &format!("\"id\":\"{id}\"")),
+            1,
+            "descriptor id must be stable and unique: {catalog}"
+        );
+        let descriptor =
+            json_object_containing(catalog, &format!("\"id\":\"{id}\""));
+        assert!(
+            descriptor.contains(&format!("\"kind\":\"{kind}\""))
+                && descriptor.contains(&format!("\"archetype\":\"{archetype}\""))
+                && descriptor.contains("\"projected\":true")
+                && descriptor.contains("\"presentation\":{")
+                && descriptor.contains("\"palette\":{")
+                && descriptor.contains("\"default_editor\":"),
+            "descriptor facts incomplete for {id}: {descriptor}"
+        );
+        match transaction {
+            Some(op) => {
+                assert!(
+                    descriptor.contains("\"visible\":true")
+                        && descriptor.contains("\"insertable\":true")
+                        && descriptor.contains(&format!("\"transaction\":\"{op}\"")),
+                    "insertable descriptor transaction mismatch for {id}: {descriptor}"
+                );
+            }
+            None => {
+                assert!(
+                    descriptor.contains("\"insertable\":false")
+                        && descriptor.contains("\"transaction\":null"),
+                    "projected-only descriptor became insertable for {id}: {descriptor}"
+                );
+            }
+        }
+    }
+
+    let mut descriptor_ids = Vec::new();
+    let mut rest = json.as_str();
+    let marker = "\"node_descriptor_id\":\"";
+    while let Some(offset) = rest.find(marker) {
+        rest = &rest[offset + marker.len()..];
+        let end = rest.find('"').expect("node descriptor id terminator");
+        descriptor_ids.push(&rest[..end]);
+        rest = &rest[end + 1..];
+    }
+    assert!(!descriptor_ids.is_empty(), "projection must stamp descriptors");
+    for id in descriptor_ids {
+        assert!(
+            catalog.contains(&format!("\"id\":\"{id}\"")),
+            "projected node references missing descriptor `{id}`"
+        );
+    }
 }
 
 #[test]
@@ -755,7 +902,7 @@ fn canvas_projection_dedupes_variable_getters_with_fanout() {
     );
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
     assert_eq!(
-        count_occurrences(&graph, "\"kind\":\"variable_get\""),
+        count_occurrences(&graph, "\"node_descriptor_id\":\"variable_get\""),
         1,
         "{graph}"
     );
@@ -2891,6 +3038,16 @@ fn canvas_editor_shell_matches_round3_contract() {
     assert!(!js.contains("fnMeta.pure ? \"#Pure \""), "{js}");
     assert!(js.contains("data-project-file"), "{js}");
     assert!(js.contains("function actionInsertsNode"), "{js}");
+    assert!(js.contains("function nodeDescriptorForAction"), "{js}");
+    assert!(js.contains("descriptor.palette.insertable"), "{js}");
+    assert!(js.contains("descriptor.palette.rank"), "{js}");
+    assert!(js.contains("descriptor.presentation.hover"), "{js}");
+    assert!(js.contains("nodeDescriptors: latestDoc.node_descriptors"), "{js}");
+    assert!(js.contains("descriptorConsumption: graph.nodes.map"), "{js}");
+    assert!(
+        !js.contains("[\"insert_branch\", \"insert_switch\", \"insert_loop\", \"insert_fallible_rail\"]"),
+        "parallel insertion-kind tables must not return: {js}"
+    );
     assert!(js.contains("toolbarSearch.addEventListener"), "{js}");
     assert!(js.contains("Add connected node"), "{js}");
     assert!(js.contains("Canvas actions"), "{js}");

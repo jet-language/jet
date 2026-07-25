@@ -264,6 +264,7 @@
         detail: name + " : " + type,
         group: "Variables",
         kind: "variable_get",
+        node_descriptor_id: "variable_get",
         type,
         ret: type,
         variable: name,
@@ -281,6 +282,7 @@
         detail: name + " : " + type,
         group: "Variables",
         kind: "variable_set",
+        node_descriptor_id: "assignment",
         type,
         ret: type,
         variable: name,
@@ -448,7 +450,7 @@
     ];
     actions.push(...variableActionsForGraph(graph));
     for (const item of palette.concat(actionEntries)) {
-      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, available: item.available, denied_reason: item.denied_reason, unavailable_reason_code: item.unavailable_reason_code, run: () => runPalette(item) });
+      actions.push({ title: item.title, detail: item.detail || "", group: item.group || (item.op === "preview_canvas_action" ? "Project" : "Execution"), kind: item.kind, node_descriptor_id: item.node_descriptor_id, module_path: item.module_path, signature: item.signature, summary: item.summary, pure: item.pure, pins: item.pins, ret: item.ret, type: item.type, op: item.op, action_id: item.action_id, callee: item.callee, insert_callee: item.insert_callee, args: item.args, available: item.available, denied_reason: item.denied_reason, unavailable_reason_code: item.unavailable_reason_code, run: () => runPalette(item) });
     }
     return actions;
   }
@@ -465,6 +467,7 @@
         detail: item.detail,
         group: "Core",
         kind: item.kind,
+        node_descriptor_id: item.node_descriptor_id,
         module_path: item.module_path,
         signature: item.signature,
         pure: item.pure,

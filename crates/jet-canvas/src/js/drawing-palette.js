@@ -286,11 +286,8 @@
   }
 
   function actionInsertsNode(entry) {
-    const op = entry && (entry.op || entry.insert_op || "");
-    if (entry && (entry.kind === "project_function" || entry.kind === "canvas.core_catalog")) return true;
-    if (["insert_print", "insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(op)) return true;
-    if (entry && (entry.kind === "variable_get" || entry.kind === "variable_set")) return true;
-    return false;
+    const descriptor = nodeDescriptorForAction(entry);
+    return !!(descriptor && descriptor.palette.insertable);
   }
 
   function graphIsFallible(graph) {
@@ -326,10 +323,8 @@
   }
 
   function actionAcceptsExec(entry) {
-    const op = entry.op || entry.insert_op || "";
-    if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(op)) return true;
-    if (entry.pure) return false;
-    return entry.kind === "canvas.action" || entry.kind === "canvas.core_catalog" || entry.kind === "project_function" || op === "insert_call" || op === "insert_print";
+    const descriptor = nodeDescriptorForAction(entry);
+    return !!(descriptor && descriptor.archetype !== "value" && descriptor.archetype !== "function_pure");
   }
 
   function actionProducesExec(entry) {
@@ -374,35 +369,37 @@
 
   function actionFuzzyScore(action, query) {
     if (!query) return 0;
+    const descriptor = nodeDescriptorForAction(action);
     return Math.max(...[action.title, action.detail, action.group, action.kind, action.signature, action.summary, action.module_path, action.callee, action.ret, action.type]
+      .concat(descriptor && descriptor.palette.rank_terms || [])
       .map((value) => fuzzyScoreText(value, query)));
   }
   window.__jetCanvasFuzzyScore = fuzzyScoreText;
 
   function paletteCategoryForAction(action) {
+    const descriptor = nodeDescriptorForAction(action);
+    if (descriptor && descriptor.palette.category) return descriptor.palette.category;
     const group = String(action.group || "").toLowerCase();
-    if (group.includes("flow") || group.includes("execution") || ["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(action.op)) return "Execution";
-    if (action.kind === "variable_get" || action.kind === "variable_set" || group.includes("variable") || group.includes("binding") || action.op === "promote_to_binding") return "Variables";
+    if (group.includes("flow") || group.includes("execution")) return "Execution";
+    if (group.includes("variable") || group.includes("binding") || action.op === "promote_to_binding") return "Variables";
     if (action.kind === "canvas.core_catalog" || group.includes("core")) return "Core";
     if (action.kind === "project_function" || group.includes("project") || action.kind === "canvas.action") return "Project";
     return "Execution";
   }
 
   function paletteActionGlyph(action) {
-    if (action.kind === "variable_get" || action.kind === "variable_set") return action.type || action.ret || "•";
-    if (action.kind === "canvas.core_catalog" || action.kind === "project_function" || action.kind === "canvas.action") return action.pure ? "ƒ" : "ƒ";
-    if (action.op === "insert_branch") return "◇";
-    if (action.op === "insert_loop") return "↻";
-    if (action.op === "insert_return" || String(action.title || "").toLowerCase().includes("return")) return "⏎";
-    if (action.op === "insert_switch") return "⇉";
+    const descriptor = nodeDescriptorForAction(action);
+    if (descriptor && descriptor.presentation.accent === "type") return action.type || action.ret || descriptor.presentation.glyph;
+    if (descriptor) return descriptor.presentation.glyph;
     if (paletteCategoryForAction(action) === "Execution") return "◇";
     return "•";
   }
 
   function paletteActionColor(action) {
-    if (action.kind === "variable_get" || action.kind === "variable_set") return colorForType(action.type || action.ret || "unknown");
-    if (action.kind === "canvas.core_catalog" || action.kind === "project_function" || action.kind === "canvas.action") return action.pure ? NODE_ARCHETYPE_STYLES.function_pure.accent : NODE_ARCHETYPE_STYLES.function_exec.accent;
-    if (action.op === "insert_branch" || action.op === "insert_switch" || action.op === "insert_loop") return "#f2f4f8";
+    const descriptor = nodeDescriptorForAction(action);
+    if (descriptor && descriptor.presentation.accent === "type") return colorForType(action.type || action.ret || "unknown");
+    if (descriptor && descriptor.presentation.accent !== "archetype") return descriptor.presentation.accent;
+    if (descriptor) return (NODE_ARCHETYPE_STYLES[descriptor.archetype] || NODE_ARCHETYPE_STYLES.value).accent;
     return colorForType(action.ret || action.type || "unknown");
   }
 
@@ -418,6 +415,10 @@
     const query = contextMenuState.query || "";
     const matches = contextMenuState.actions
       .map((action) => Object.assign({ __score: actionFuzzyScore(action, query) }, action))
+      .filter((action) => {
+        const descriptor = nodeDescriptorForAction(action);
+        return !descriptor || descriptor.palette.visible;
+      })
       .filter((action) => action.__score > -Infinity)
       .sort((a, b) => b.__score - a.__score || rankAction(b) - rankAction(a) || String(a.module_path || "").localeCompare(String(b.module_path || "")) || String(a.title).localeCompare(String(b.title)));
     const context = contextMenuState.pin ? `${contextMenuState.pin.name}: ${contextMenuState.pin.type}` : `All nodes · ${matches.length}/${contextMenuState.actions.length}`;
@@ -539,6 +540,7 @@
       detail: entry.detail,
       group: paletteCategoryForAction(entry),
       kind: entry.kind,
+      node_descriptor_id: entry.node_descriptor_id,
       module_path: entry.module_path,
       signature: entry.signature,
       summary: entry.summary,

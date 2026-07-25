@@ -83,11 +83,13 @@
   }
 
   function transactionForPaletteInsert(item, pin, graphPoint) {
+    const descriptor = nodeDescriptorForAction(item);
+    if (!descriptor || descriptor.transaction !== "insert_call") return null;
     const callee = item.insert_callee || item.callee || (item.op === "insert_print" ? "print" : null);
     if (!callee) return null;
     const target = wireTargetForAction(item, pin);
     const graph = currentGraph(latestDoc);
-    const body = { schema_version: 1, op: "insert_call", revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: wiredArgsForAction(item, pin) };
+    const body = { schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId, callee, args: wiredArgsForAction(item, pin) };
     const ret = actionReturnType(item) || item.ret || "Void";
     if ((!pin || isExecPin(pin)) && ret && ret !== "Void") body.bind = "canvas_value";
     if (pin && target) {
@@ -111,6 +113,7 @@
     if (!availability.available) return showToast(availability.reason);
     const pin = pinContext || (contextMenuState && contextMenuState.pin) || null;
     const graphPoint = contextMenuState && contextMenuState.graphPoint || null;
+    const descriptor = nodeDescriptorForAction(item);
     if (!pin && actionInsertsNode(item) && item.op !== "preview_canvas_action") {
       if (item.op === "insert_call" && !item.insert_callee && !item.callee) {
         const callee = window.prompt("Call function", "print");
@@ -137,8 +140,8 @@
     } else if (item.op === "insert_call") {
       const callee = item.insert_callee || item.callee || window.prompt("Call function", "print");
       if (callee) postTransaction(transactionForPaletteInsert(Object.assign({}, item.insert_callee || item.callee ? item : { args: ["\"canvas\""] }, { callee }), pin, graphPoint));
-    } else if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(item.op)) {
-      postTransaction({ schema_version: 1, op: item.op, revision: latestDoc.revision, graph_id: selectedGraphId });
+    } else if (descriptor && descriptor.transaction && descriptor.transaction !== "insert_call" && descriptor.transaction !== "edit_inline_expr") {
+      postTransaction({ schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId });
     } else if (item.op === "comment") {
       const graph = currentGraph(latestDoc);
       const node = graph && (graph.nodes.find((n) => n.node_id === selectedNodeId) || graph.nodes[0]);
@@ -293,7 +296,7 @@
       .then((r) => r.json())
       .then((doc) => {
         if (!doc || !doc.actions) return;
-        const projectFunctions = (doc.project_functions || []).map((fn) => ({
+        const projectFunctions = (doc.project_functions || []).map((fn) => withNodeDescriptor({
           title: fn.name || fn.callee,
           detail: (fn.module_path || "project") + " · " + (fn.signature || fn.callee || ""),
           kind: "project_function",
@@ -312,7 +315,7 @@
           unavailable_reason_code: fn.unavailable_reason_code || "",
           args: fn.default_args || []
         }));
-        const canvasActions = doc.actions.map((action) => ({
+        const canvasActions = doc.actions.map((action) => withNodeDescriptor({
           title: action.title || action.callee,
           detail: action.kind === "canvas.core_catalog" ? ((action.module_path || "core") + " · " + (action.signature || action.callee || "") + " · read-only") : (action.command ? ((action.kind || "canvas.command") + " · " + (action.command || []).join(" ") + " · " + (action.writes || "none")) : ((action.kind || "canvas.action") + " · " + (action.engine || "checked-tir+jit") + " · " + (action.callee || "") + "(" + (action.pins || []).filter((p) => p.direction === "input").map((p) => p.type || "Value").join(", ") + ") -> " + (action.ret || "Void"))),
           kind: action.kind || "canvas.action",
@@ -348,7 +351,7 @@
       const id = entry.action_id || entry.kind + ":" + entry.title + ":" + entry.module_path;
       if (seen.has(id)) continue;
       seen.add(id);
-      actionEntries.push(entry);
+      actionEntries.push(withNodeDescriptor(entry));
     }
   }
 
@@ -363,7 +366,7 @@
         for (const module of doc.modules || []) {
           for (const member of module.members || []) {
             const callee = String(module.path || "core") + "." + member.name;
-            entries.push({
+            entries.push(withNodeDescriptor({
               title: member.name + " · " + (module.path || "core"),
               detail: (module.path || "core") + " · " + (member.signature || member.name),
               group: "Core",
@@ -383,7 +386,7 @@
               ret: actionReturnType(member) || "Value",
               args: member.default_args || ["1"],
               default_args: member.default_args || ["1"]
-            });
+            }));
           }
         }
         mergeActionEntries(entries);

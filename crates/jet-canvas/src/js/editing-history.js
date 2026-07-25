@@ -92,7 +92,8 @@
     const id = action.action_id || action.callee || action.title;
     const favorite = favoriteSet().has(id) ? 100000 : 0;
     const used = editorState.actionUse[id] || 0;
-    return favorite + used;
+    const descriptor = nodeDescriptorForAction(action);
+    return favorite + used + (descriptor && descriptor.palette.rank || 0);
   }
 
   function graphCommentBoxes(graph) {
@@ -152,13 +153,6 @@
     return graphCommentBoxes(graph).filter((box) => selectedNodeIds.has(box.comment_id));
   }
 
-  function actionArchetype(action) {
-    if (action.kind === "variable_get" || action.kind === "variable_set") return "value";
-    if (action.pure) return "function_pure";
-    if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(action.op)) return "control";
-    return "function_exec";
-  }
-
   function stagedPinsForAction(id, action) {
     const pins = (action.pins || []).map((pin, i) => Object.assign({}, pin, {
       pin_id: `${id}:pin:${pin.direction || "input"}:${pin.name || i}`,
@@ -169,7 +163,8 @@
       source_span: null
     }));
     if (pins.length) return pins;
-    if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(action.op)) {
+    const descriptor = nodeDescriptorForAction(action);
+    if (descriptor && descriptor.archetype === "control") {
       return [
         { pin_id: id + ":pin:input:exec", node_id: id, direction: "input", name: "exec", type: "exec", source_span: null },
         { pin_id: id + ":pin:output:then", node_id: id, direction: "output", name: "then", type: "exec", source_span: null }
@@ -190,11 +185,14 @@
     const title = opts.title || action.title || action.insert_callee || action.callee || "node";
     const x = Number.isFinite(graphPoint && graphPoint.x) ? graphPoint.x : viewportCenterGraphPoint().x;
     const y = Number.isFinite(graphPoint && graphPoint.y) ? graphPoint.y : viewportCenterGraphPoint().y;
+    const descriptor = nodeDescriptorForAction(action);
+    if (!descriptor || !descriptor.palette.insertable) return null;
     const node = {
       node_id: id,
       graph_id: graph.graph_id,
-      kind: action.kind || action.op || "staged",
-      archetype: actionArchetype(action),
+      node_descriptor_id: descriptor.id,
+      kind: descriptor.kind,
+      archetype: descriptor.archetype,
       title,
       source_span: null,
       layout: { x: x / layoutScale.x, y: y / layoutScale.y },
@@ -207,6 +205,7 @@
         group: action.group || "",
         kind: action.kind || "",
         op: action.op || action.insert_op || "",
+        node_descriptor_id: descriptor.id,
         module_path: action.module_path || "",
         signature: action.signature || "",
         pure: !!action.pure,
@@ -398,10 +397,11 @@
       showToast(connectionPlan(graph, fromPin, toPin).label);
       return true;
     }
-    if (["insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail"].includes(staged.action && staged.action.op)) {
+    const descriptor = nodeDescriptorForAction(staged.action);
+    if (descriptor && descriptor.transaction && descriptor.transaction !== "insert_call" && descriptor.transaction !== "edit_inline_expr") {
       pendingInsertPlacement = { graph_id: selectedGraphId, title: staged.title, x: nodeX(staged), y: nodeY(staged) };
       removeStagedNode(staged.node_id);
-      postTransaction({ schema_version: 1, op: staged.action.op, revision: latestDoc.revision, graph_id: selectedGraphId });
+      postTransaction({ schema_version: 1, op: descriptor.transaction, revision: latestDoc.revision, graph_id: selectedGraphId });
       window.__jetCanvasStagedMaterialization = "direct-staged-to-real";
       return true;
     }

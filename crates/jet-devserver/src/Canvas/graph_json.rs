@@ -9,6 +9,9 @@ use super::graph_helpers::{line_start, snippet};
 use super::schema_api::{GraphBuilder, InlineRec, NodeRec, PinRec, WireRec};
 use super::validation_json::{attr_bounds, attr_span, attr_string, json_str, json_strs, span_json};
 
+#[path = "node_catalog.rs"]
+pub(super) mod node_catalog;
+
 pub(super) fn add_node(
     g: &mut GraphBuilder,
     id: &str,
@@ -727,14 +730,16 @@ fn push_rail(kinds: &mut Vec<String>, kind: &str) {
 }
 
 fn node_json(n: &NodeRec) -> String {
+    let descriptor = node_catalog::descriptor_for(&n.kind, &n.archetype);
     let meta = n
         .meta_json
         .as_ref()
         .cloned()
         .unwrap_or_else(|| "null".to_string());
     format!(
-        "{{\"node_id\":{},\"kind\":{},\"archetype\":{},\"title\":{},\"source_span\":{},\"layout\":{{\"x\":{},\"y\":{}}},\"badges\":[{}],\"edit_affordances\":[{}],\"meta\":{}}}",
+        "{{\"node_id\":{},\"node_descriptor_id\":{},\"kind\":{},\"archetype\":{},\"title\":{},\"source_span\":{},\"layout\":{{\"x\":{},\"y\":{}}},\"badges\":[{}],\"edit_affordances\":[{}],\"meta\":{}}}",
         json_str(&n.id),
+        json_str(descriptor.id),
         json_str(&n.kind),
         json_str(&n.archetype),
         json_str(&n.title),

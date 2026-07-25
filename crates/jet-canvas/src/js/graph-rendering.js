@@ -39,7 +39,7 @@
     const positions = new Map();
     for (const r of sortedRanks) {
       const col = columns.get(r).slice().sort((a, b) => {
-        const family = (node) => node.node_id === graph.entry_node ? -2 : node.kind === "variable_get" || node.kind === "constant" ? -1 : node.kind === "return" ? 2 : node.kind === "branch" || node.archetype === "control" ? 1 : 0;
+        const family = (node) => ({ entry: -2, value: -1, control: 1, exit: 2 }[nodeDescriptor(node) && nodeDescriptor(node).presentation.layout_family] || 0);
         return family(a) - family(b) || rawNodeY(a) - rawNodeY(b) || rawNodeX(a) - rawNodeX(b);
       });
       let y = 70;
@@ -202,31 +202,20 @@
   }
 
   function nodeStyle(node, graph) {
-    const archetype = node.archetype || (node.kind === "entry" ? "entry" : node.kind === "variable_get" || node.kind === "constant" ? "value" : "function_exec");
+    const descriptor = nodeDescriptor(node);
+    const facts = descriptor && descriptor.presentation || {};
+    const archetype = facts.style_archetype || descriptor && descriptor.archetype || node.archetype || "value";
     const style = Object.assign({ fill: "rgba(29,33,41,.96)" }, NODE_ARCHETYPE_STYLES[archetype] || NODE_ARCHETYPE_STYLES.value);
-    if (node.kind === "constant") {
-      const out = pinsForNode(graph, node, "output", false)[0];
-      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown"), header: colorForType(out && out.type || "unknown"), label: "Literal", glyph: "•", subtitle: "" });
-    }
-    if (node.kind === "variable_get") {
-      const out = pinsForNode(graph, node, "output", false)[0];
-      return Object.assign({}, style, { accent: colorForType(out && out.type || "unknown"), header: colorForType(out && out.type || "unknown"), label: "Value", glyph: "•", subtitle: "" });
-    }
-    if (node.kind === "binding" || node.kind === "assign") {
-      const dataPin = pinsForNode(graph, node, "output", false)[0] || pinsForNode(graph, node, "input", false)[0] || {};
-      const typeColor = colorForType(dataPin.type || "unknown");
-      return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { label: "Set variable", subtitle: "", glyph: "•", accent: typeColor, header: "#2c333d", header2: "#151a21" });
-    }
-    if (node.kind === "branch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "◇", subtitle: "" });
-    if (node.kind === "dispatch") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "⇉", subtitle: "" });
-    if (node.kind === "loop") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "↻", subtitle: "" });
-    if (node.kind === "return") return Object.assign({}, NODE_ARCHETYPE_STYLES.control, { glyph: "⏎", subtitle: "", accent: "#7dd3a6" });
-    return style;
+    const dataPin = pinsForNode(graph, node, "output", false)[0] || pinsForNode(graph, node, "input", false)[0] || {};
+    const typeColor = colorForType(dataPin.type || "unknown");
+    const accent = facts.accent === "type" ? typeColor : facts.accent === "archetype" || !facts.accent ? style.accent : facts.accent;
+    const header = facts.header === "type" ? typeColor : facts.header === "archetype" || !facts.header ? style.header : facts.header;
+    return Object.assign({}, style, { accent, header, label: facts.label || node.kind || "Node", glyph: facts.glyph || "ƒ", subtitle: "" });
   }
 
   function nodeSubtitle(node, graph) {
-    if (!node || node.archetype === "entry" || node.archetype === "control" || isGetterCapsule(node)) return "";
-    if (["branch", "return", "loop", "dispatch", "flow", "yield"].includes(node.kind || "")) return "";
+    const family = nodeDescriptor(node) && nodeDescriptor(node).presentation.layout_family;
+    if (!node || family === "entry" || family === "control" || family === "exit" || isGetterCapsule(node)) return "";
     const modulePath = node.module_path || node.module || "";
     return modulePath && modulePath !== "builtin" ? modulePath : "";
   }
@@ -236,16 +225,9 @@
   }
 
   function nodeDescription(node, graph) {
+    const hover = nodeDescriptor(node) && nodeDescriptor(node).presentation.hover;
+    if (hover) return hover;
     if (!node) return "";
-    if (node.kind === "entry") return "Starts this function.";
-    if (node.kind === "return") return "Returns a value from this function.";
-    if (node.kind === "branch") return "Chooses which path runs next.";
-    if (node.kind === "dispatch") return "Chooses a path by matching a value.";
-    if (node.kind === "loop") return "Repeats work.";
-    if (node.kind === "binding") return "Creates a local variable.";
-    if (node.kind === "assign") return "Changes a variable.";
-    if (node.kind === "variable_get") return "Reads a variable.";
-    if (node.kind === "constant") return "Uses a fixed value.";
     const modulePath = node.module_path || node.module || "";
     return modulePath && modulePath !== "builtin" ? "Function from " + modulePath + "." : "Calls a function.";
   }
@@ -255,7 +237,7 @@
   }
 
   function isGetterCapsule(node) {
-    return node && (node.kind === "variable_get" || node.kind === "constant");
+    return nodeDescriptor(node) && nodeDescriptor(node).presentation.shape === "capsule";
   }
 
   function isOperatorNode(node) {
@@ -601,7 +583,7 @@
     ctx.lineWidth = active ? 2.2 : selected ? 1.5 : 1;
     ctx.stroke();
     drawStagedOverlay(node, x, y, w, h);
-    if (node.kind === "binding" || node.kind === "assign") {
+    if (nodeDescriptor(node) && nodeDescriptor(node).presentation.accent === "type" && !isGetterCapsule(node)) {
       ctx.fillStyle = style.accent;
       ctx.fillRect(x, y + 7 * view.zoom, Math.max(3, 3 * view.zoom), h - 14 * view.zoom);
       window.__jetCanvasBindingTypeAccent = true;
@@ -899,6 +881,7 @@
     }));
     window.__jetCanvasStagedRegistry = (editorState.stagedNodes || []).map((node) => ({
       node_id: node.node_id,
+      node_descriptor_id: node.node_descriptor_id,
       title: node.title,
       kind: node.kind,
       graph_id: node.graph_id,
@@ -917,6 +900,17 @@
       view: { x: view.x, y: view.y, zoom: view.zoom },
       sourceText: doc.source_text || "",
       doc: latestDoc,
+      nodeDescriptors: latestDoc.node_descriptors || [],
+      descriptorConsumption: graph.nodes.map((node) => {
+        const descriptor = nodeDescriptor(node);
+        return {
+          node_id: node.node_id,
+          node_descriptor_id: node.node_descriptor_id,
+          presentation_label: descriptor && descriptor.presentation.label || "",
+          hover: descriptor && descriptor.presentation.hover || "",
+          default_editor: descriptor && descriptor.default_editor || ""
+        };
+      }),
       problems: activeDiagnostics().map((entry) => ({ code: entry.code, what: entry.what, severity: entry.severity, rendered: diagnosticFullText(entry), source_span: entry.source_span })),
       diagnosticsByNode: hitMap.diagnostics,
       nodeCount: graph.nodes.length,
@@ -940,6 +934,7 @@
           detail: entry.detail || "",
           group: entry.group || "",
           kind: entry.kind || "",
+          node_descriptor_id: entry.node_descriptor_id || "",
           module_path: entry.module_path || "",
           signature: entry.signature || "",
           summary: entry.summary || "",
@@ -973,6 +968,7 @@
           detail: entry.detail,
           group: paletteCategoryForAction(entry),
           kind: entry.kind,
+          node_descriptor_id: entry.node_descriptor_id,
           module_path: entry.module_path,
           signature: entry.signature,
           summary: entry.summary,
