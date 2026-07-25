@@ -83,7 +83,6 @@ pub(crate) fn emit_http_bridge_error(ffi: &str, error: &str) -> String {
          {ffi}::JetHttpBridgeError::Io => JetHttpError::Io {{ operation: \"transport\".to_string() }}, \
          {ffi}::JetHttpBridgeError::ResourceUnavailable => JetHttpError::ResourceUnavailable {{ resource: \"transport\".to_string() }}, \
          {ffi}::JetHttpBridgeError::Cancelled => JetHttpError::Cancelled, \
-         {ffi}::JetHttpBridgeError::UnsupportedTarget => JetHttpError::UnsupportedTarget {{ operation: JetHttpOperation::ClientConnect }}, \
          {ffi}::JetHttpBridgeError::Internal => JetHttpError::Internal {{ incident_id: \"http-transport\".to_string() }} }}"
     )
 }
@@ -125,10 +124,6 @@ pub(crate) fn emit_tir_core_call(
         }
     };
     let helper = |name: &str| format!("{}{}", cx.root_prefix, name);
-    let edition_at_least = |baseline: &str| {
-        let year = |edition: &str| edition.parse::<u16>().unwrap_or(2026);
-        year(&cx.package_edition) >= year(baseline)
-    };
     let regex_fn = |name: &str| {
         let crate_name = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
         format!("{}::{}", crate_name, name)
@@ -806,21 +801,7 @@ pub(crate) fn emit_tir_core_call(
             }
         }
         ("core.encoding.json", "canonical") => {
-            if edition_at_least("2027") {
-                let limits = if args.len() > 1 {
-                    arg(1)
-                } else {
-                    format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix)
-                };
-                format!(
-                    "{}(&({}), &{})",
-                    helper("jet_enc_json_canonical"),
-                    arg(0),
-                    limits
-                )
-            } else {
-                format!("{}(&({}))", helper("jet_std_json_render_canonical"), arg(0))
-            }
+            format!("{}(&({}))", helper("jet_std_json_render_canonical"), arg(0))
         }
         ("core.encoding.json", "events") => {
             format!("{}(&({}))", helper("jet_std_json_events"), arg(0))
@@ -1084,6 +1065,72 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.xml", "canonical") => {
             format!("{}(&({}), &({}))", helper("jet_std_xml_canonical"), arg(0), arg(1))
         }
+        ("core.encoding.xml", "root") => {
+            format!("{}(&({}))", helper("jet_std_xml_root"), arg(0))
+        }
+        ("core.encoding.xml", "expanded_name") => {
+            let fields = match ret_ty {
+                Type::Result { ok, .. } => match ok.as_ref() {
+                    Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
+                    _ => Vec::new(),
+                },
+                Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
+                _ => Vec::new(),
+            };
+            let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            format!(
+                "{helper}(&({arg})).map(|(__jet_raw, __jet_prefix, __jet_local, __jet_uri)| {struct_name} {{ {raw}: __jet_raw, {prefix}: __jet_prefix, {local}: __jet_local, {uri}: __jet_uri }})",
+                helper = helper("jet_std_xml_expanded_name"),
+                arg = arg(0),
+                struct_name = struct_name,
+                raw = mangle("raw"),
+                prefix = mangle("prefix"),
+                local = mangle("local"),
+                uri = mangle("namespace_uri"),
+            )
+        }
+        ("core.encoding.xml", "attribute") => {
+            format!("{}(&({}), &({}))", helper("jet_std_xml_attribute"), arg(0), arg(1))
+        }
+        ("core.encoding.xml", "content") => {
+            format!("{}(&({}))", helper("jet_std_xml_content"), arg(0))
+        }
+        ("core.encoding.xml", "decode") => {
+            let options = if args.len() > 1 {
+                arg(1)
+            } else {
+                format!("{}jet_std::XMLParseOptions::safe()", cx.root_prefix)
+            };
+            let target = match ret_ty {
+                Type::Result { ok, .. } => cx.rust_type(ok),
+                other => cx.rust_type(other),
+            };
+            format!(
+                "{}::<{}>(&({}), {})",
+                helper("jet_enc_xml_decode"),
+                target,
+                arg(0),
+                options
+            )
+        }
+        ("core.encoding.xml", "decode_bytes") => {
+            let options = if args.len() > 1 {
+                arg(1)
+            } else {
+                format!("{}jet_std::XMLParseOptions::safe()", cx.root_prefix)
+            };
+            let target = match ret_ty {
+                Type::Result { ok, .. } => cx.rust_type(ok),
+                other => cx.rust_type(other),
+            };
+            format!(
+                "{}::<{}>(&({}), {})",
+                helper("jet_enc_xml_decode_bytes"),
+                target,
+                arg(0),
+                options
+            )
+        }
         ("core.encoding.cbor", "parse") => {
             let options = if args.len() > 1 { arg(1) } else { format!("{}jet_std::CBOROptions::safe()", cx.root_prefix) };
             format!("{}(&({}), {})", helper("jet_enc_cbor_parse"), arg(0), options)
@@ -1093,9 +1140,6 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.encoding.cbor", "to_bytes_canonical") => {
             format!("{}(&({}))", helper("jet_enc_cbor_to_bytes_canonical"), arg(0))
-        }
-        ("core.encoding.cbor", "encode") => {
-            format!("{}(&({}))", helper("jet_enc_cbor_encode"), arg(0))
         }
         ("core.encoding.cbor", "reader") => {
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
@@ -1145,39 +1189,13 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.encoding.cbor", "decode") => {
             let options = if args.len() > 1 { arg(1) } else { format!("{}jet_std::CBOROptions::safe()", cx.root_prefix) };
-            match ret_ty {
-                Type::Result { ok, err, .. }
-                    if matches!(err.as_ref(), Type::Named(name) if name == "String") =>
-                {
-                    format!("{}(&({}))", helper("jet_enc_cbor_decode_legacy"), arg(0))
-                }
-                Type::Result { ok, .. }
-                    if matches!(ok.as_ref(), Type::Named(name) if name == "DataTree")
-                        && edition_at_least("2027") =>
-                {
-                    format!("{}(&({}), {})", helper("jet_enc_cbor_parse"), arg(0), options)
-                }
-                Type::Result { ok, .. } => {
-                    let target = cx.rust_type(ok);
-                    format!(
-                        "{}::<{}>(&({}), {})",
-                        helper("jet_enc_cbor_decode"),
-                        target,
-                        arg(0),
-                        options
-                    )
-                }
-                other => {
-                    let target = cx.rust_type(other);
-                    format!(
-                        "{}::<{}>(&({}), {})",
-                        helper("jet_enc_cbor_decode"),
-                        target,
-                        arg(0),
-                        options
-                    )
-                }
-            }
+            // CBOR decodes one whole Codable value. Unlike CSV, a list return is
+            // the target itself, not a row wrapper whose element type is T.
+            let target = match ret_ty {
+                Type::Result { ok, .. } => cx.rust_type(ok),
+                other => cx.rust_type(other),
+            };
+            format!("{}::<{}>(&({}), {})", helper("jet_enc_cbor_decode"), target, arg(0), options)
         }
         // D-UUIDENC1=A: hex and base64 encode/decode.
         ("core.encoding.hex", "encode") => {
@@ -1190,57 +1208,19 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", helper("jet_std_b64_encode"), arg(0))
         }
         ("core.encoding.base64", "decode") => {
-            if edition_at_least("2027") {
-                let allow_ws = if args.len() > 1 { arg(1) } else { "false".to_string() };
-                let allow_pad = if args.len() > 2 { arg(2) } else { "false".to_string() };
-                format!(
-                    "{}(&({}), {}, {})",
-                    helper("jet_std_b64_decode_opts"),
-                    arg(0),
-                    allow_ws,
-                    allow_pad
-                )
-            } else {
-                format!("{}(&({}))", helper("jet_std_b64_decode"), arg(0))
-            }
+            format!("{}(&({}))", helper("jet_std_b64_decode"), arg(0))
         }
         ("core.encoding.base64", "encode_url") => {
             format!("{}(&({}))", helper("jet_std_b64url_encode"), arg(0))
         }
         ("core.encoding.base64", "decode_url") => {
-            if edition_at_least("2027") {
-                let allow_ws = if args.len() > 1 { arg(1) } else { "false".to_string() };
-                let allow_pad = if args.len() > 2 { arg(2) } else { "false".to_string() };
-                format!(
-                    "{}(&({}), {}, {})",
-                    helper("jet_std_b64url_decode_opts"),
-                    arg(0),
-                    allow_ws,
-                    allow_pad
-                )
-            } else {
-                format!("{}(&({}))", helper("jet_std_b64url_decode"), arg(0))
-            }
+            format!("{}(&({}))", helper("jet_std_b64url_decode"), arg(0))
         }
         ("core.encoding.base32", "encode") => {
             format!("{}(&({}))", helper("jet_std_base32_encode"), arg(0))
         }
         ("core.encoding.base32", "decode") => {
-            if edition_at_least("2027") {
-                let allow_ws = if args.len() > 1 { arg(1) } else { "false".to_string() };
-                let allow_pad = if args.len() > 2 { arg(2) } else { "false".to_string() };
-                let allow_lower = if args.len() > 3 { arg(3) } else { "false".to_string() };
-                format!(
-                    "{}(&({}), {}, {}, {})",
-                    helper("jet_std_base32_decode_opts"),
-                    arg(0),
-                    allow_ws,
-                    allow_pad,
-                    allow_lower
-                )
-            } else {
-                format!("{}(&({}))", helper("jet_std_base32_decode"), arg(0))
-            }
+            format!("{}(&({}))", helper("jet_std_base32_decode"), arg(0))
         }
         // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
         ("core.uuid", "v4") => format!("{}()", helper("jet_std_uuid_v4")),
@@ -2559,13 +2539,13 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "bind") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
-                "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| if e == \"unsupported-target:server-bind\" {{ JetHttpError::UnsupportedTarget {{ operation: JetHttpOperation::ServerBind }} }} else {{ JetHttpError::Io {{ operation: e }} }})",
+                "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
                 arg(0),
                 arg(1),
                 arg(2)
             )
         }
-        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|e| if e == \"unsupported-target:server-bind\" {{ JetHttpError::UnsupportedTarget {{ operation: JetHttpOperation::ServerBind }} }} else {{ JetHttpError::Io {{ operation: e }} }})", arg(0), arg(1)),
+        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHttpError::Io {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
         ("core.http.server", "serve") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
@@ -2606,37 +2586,6 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.http.server", "request_id") => {
             format!("jet_http_srv_install_request_id(&({}))", arg(0))
-        }
-        ("core.http.server", "mux_handler") => {
-            format!("jet_http_mux_as_handler({})", arg(0))
-        }
-        ("core.http.server", "static_files") => {
-            format!("jet_http_srv_static_files_handler(({}).clone())", arg(0))
-        }
-        ("core.http.middleware", "timeout") => {
-            format!("jet_http_mw_timeout(&({}), ({}))", arg(0), arg(1))
-        }
-        ("core.http.middleware", "body_limit") => {
-            format!("jet_http_mw_body_limit({}, ({}))", arg(0), arg(1))
-        }
-        ("core.http.middleware", "cors_policy") => {
-            format!("jet_http_cors_policy(&({}))", arg(0))
-        }
-        ("core.http.middleware", "cors") => {
-            format!("jet_http_mw_cors(&({}), ({}))", arg(0), arg(1))
-        }
-        ("core.http.middleware", "compress") => {
-            format!("jet_http_mw_compress(({}), ({}))", arg(0), arg(1))
-        }
-        ("core.http.middleware", "access_log") => {
-            format!("jet_http_mw_access_log(({}))", arg(0))
-        }
-        // D-WS1=B: WebSocket client/server entry points.
-        ("core.ws", "connect") => {
-            format!("{}jet_ws_connect(&({}))", cx.root_prefix, arg(0))
-        }
-        ("core.ws", "upgrade") => {
-            format!("{}jet_ws_upgrade(&({}))", cx.root_prefix, arg(0))
         }
         // D-TIMEDEPTH1=A: civil-time constructors.
         ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),

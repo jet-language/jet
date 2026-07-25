@@ -77,6 +77,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
                 "to_string" | "to_string_pretty" | "decode" | "decode_traced",
             )
             | ("core.encoding.cbor", "parse" | "decode" | "to_bytes" | "to_bytes_canonical")
+            | ("core.encoding.xml", "decode" | "decode_bytes" | "expanded_name")
             // D-REACT1=B: the reactive producers return `Signal<T>`/`Derived<T>` whose
             // element type is inferred from the initial value / closure return — not in
             // `core_fixed_sig`, so codegen reads it from resolved_ret (I3).
@@ -476,20 +477,7 @@ pub fn core_fixed_sig(
         ("core.encoding.json", "to_string" | "to_string_pretty") => {
             Some((vec![(read, json)], Some(Type::String)))
         }
-        ("core.encoding.json", "canonical") => {
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    vec![
-                        (read, json.clone()),
-                        (read, Type::Named("EncodingLimits".to_string())),
-                    ],
-                    Some(result_ty(Type::String, encoding_error_ty())),
-                ))
-            } else {
-                Some((vec![(read, json.clone())], Some(Type::String)))
-            }
-        }
-        ("core.encoding.json", "events") => {
+        ("core.encoding.json", "canonical" | "events") => {
             Some((vec![(read, json.clone())], Some(Type::String)))
         }
         ("core.encoding.json", "reader") => Some((
@@ -634,6 +622,26 @@ pub fn core_fixed_sig(
         ("core.encoding.xml", "canonical") => Some((
             vec![(read, json.clone()), (read, Type::Named("XMLCanonical".to_string()))],
             Some(result_ty(Type::String, Type::Named("XMLError".to_string()))),
+        )),
+        // D-ENCXML-PROJECTION1=A: focused helpers. `decode`/`decode_bytes`/`expanded_name`
+        // return types come from core_call (turbofish / named tuple).
+        ("core.encoding.xml", "root") => Some((
+            vec![(read, json.clone())],
+            Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
+        )),
+        ("core.encoding.xml", "attribute") => Some((
+            vec![(read, json.clone()), (read, Type::String)],
+            Some(result_ty(
+                Type::Option(Box::new(Type::String)),
+                Type::Named("XMLError".to_string()),
+            )),
+        )),
+        ("core.encoding.xml", "content") => Some((
+            vec![(read, json.clone())],
+            Some(result_ty(
+                Type::List(Box::new(json.clone())),
+                Type::Named("XMLError".to_string()),
+            )),
         )),
         ("core.encoding.xml", "reader") => Some((
             vec![
@@ -1857,64 +1865,24 @@ pub fn core_fixed_sig(
         ("core.encoding.base64", "encode") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.base64", "decode") => {
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    vec![
-                        (read, Type::String),
-                        (read, Type::Bool),
-                        (read, Type::Bool),
-                    ],
-                    Some(result_ty(list_u8.clone(), Type::String)),
-                ))
-            } else {
-                Some((
-                    vec![(read, Type::String)],
-                    Some(result_ty(list_u8.clone(), Type::String)),
-                ))
-            }
-        }
+        ("core.encoding.base64", "decode") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
         ("core.encoding.base64", "encode_url") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.base64", "decode_url") => {
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    vec![
-                        (read, Type::String),
-                        (read, Type::Bool),
-                        (read, Type::Bool),
-                    ],
-                    Some(result_ty(list_u8.clone(), Type::String)),
-                ))
-            } else {
-                Some((
-                    vec![(read, Type::String)],
-                    Some(result_ty(list_u8.clone(), Type::String)),
-                ))
-            }
-        }
+        ("core.encoding.base64", "decode_url") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
         ("core.encoding.base32", "encode") => {
             Some((vec![(read, list_u8.clone())], Some(Type::String)))
         }
-        ("core.encoding.base32", "decode") => {
-            if super::super::Edition::edition_at_least("2027") {
-                Some((
-                    vec![
-                        (read, Type::String),
-                        (read, Type::Bool),
-                        (read, Type::Bool),
-                        (read, Type::Bool),
-                    ],
-                    Some(result_ty(list_u8.clone(), Type::String)),
-                ))
-            } else {
-                Some((
-                    vec![(read, Type::String)],
-                    Some(result_ty(list_u8.clone(), Type::String)),
-                ))
-            }
-        }
+        ("core.encoding.base32", "decode") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::String)),
+        )),
         // D-UUIDENC1=A: UUID v4 (system CSPRNG) and v7 (injectable Clock).
         // `v4()` reads /dev/urandom; `v7(clock)` extracts the timestamp from the
         // injected Clock so tests can produce a deterministic UUID.

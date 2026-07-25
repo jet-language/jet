@@ -184,7 +184,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.encoding.xml" => &[
             "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding",
             "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy",
-            "parse", "parse_with", "parse_bytes", "to_string", "to_bytes", "canonical", "reader", "writer", "XMLReader", "XMLWriter",
+            "parse", "parse_with", "parse_bytes", "to_string", "to_bytes", "canonical",
+            "decode", "decode_bytes", "root", "expanded_name", "attribute", "content",
+            "reader", "writer", "XMLReader", "XMLWriter",
         ],
         "core.encoding.cbor" => &[
             "CBOROptions", "CBORError", "CBORErrorKind", "CBORReader", "CBORWriter",
@@ -695,7 +697,6 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.http.server" => &[
             "bind",
             "mux",
-            "mux_handler",
             "serve",
             "serve_once",
             "serve_once_listener",
@@ -704,20 +705,9 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
             "sse",
             "static_file",
             "static_file_range",
-            "static_files",
             "access_log",
             "request_id",
         ],
-        "core.http.middleware" => &[
-            "timeout",
-            "body_limit",
-            "cors",
-            "cors_policy",
-            "compress",
-            "access_log",
-        ],
-        // D-WS1=B: WebSocket lives in core.ws, not core.http.
-        "core.ws" => &["connect", "upgrade"],
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.
         // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
@@ -736,11 +726,7 @@ pub(crate) fn core_module_items(module: &str) -> Vec<String> {
         "core.auth" => &["verify_jwt", "verify_paseto"],
         _ => &[],
     };
-    let mut out: Vec<String> = items.iter().map(|s| s.to_string()).collect();
-    if module == "core.encoding.cbor" && !super::super::Edition::edition_at_least("2028") {
-        out.push("encode".to_string());
-    }
-    out
+    items.iter().map(|s| s.to_string()).collect()
 }
 
 /// Ratified nominal types exported by a Core module. Separate from callable
@@ -760,7 +746,5 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         | ("jet.http" | "core.http.client" | "core.http.server",
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
             | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HttpError" | "Client" | "Proxy")
-        | ("core.http.middleware", "CorsPolicy" | "CompressEncoding")
-        | ("core.ws", "WsConn" | "WsMessage" | "WsError")
     )
 }

@@ -334,23 +334,3 @@ legacy_id: [U8] := base32.decode(text, allow_lowercase: true, allow_missing_padd
 // `jet fix --edition 2027` preserves named relaxations, then audits forms no allowance can preserve.
 bytes: [U8] := base32.decode(text, allow_whitespace: true, allow_missing_padding: true, allow_lowercase: true)?
 ```
-
-## Shipped status (edition 2026 vs 2027)
-
-Ratified law above is the target contract. Shipped behavior in this repository is pinned by examples, corpora, and tests as follows.
-
-| Surface | Edition 2026 (compatibility) | Edition 2027+ (strict / migrated) |
-|---|---|---|
-| `json.canonical` | Infallible prototype bytes (legacy) | Fallible RFC 8785 JCS (`?` required) |
-| `cbor.encode` / DataTree `cbor.decode` | Live names and `String` errors | Deprecated `cbor.encode` emits **L2001**; use `cbor.to_bytes` / `cbor.parse` |
-| `cbor.encode` | Still callable in 2027 with lint | Removed in edition 2028 (**E2002**) |
-| `base64` / `base32` decode | 2026 compatibility union (whitespace, padding, case) | Strict RFC 4648 default; named `allow_*` flags only |
-| Stream readers/writers | Shared `EncodingLimits`, `EncodingError`, codec-native handles | Same law; runtime failures are typed `EncodingError` values |
-| XML | Tagged `DataTree` whole + stream events; dual limits | Same; C14N via `xml.canonical` only |
-
-Corpora under `tests/fixtures/encoding/` carry `MANIFEST.tsv` rows (URL, license, SHA-256). `tests/encoding_corpus.rs` verifies every manifest before use. Local hostile oracles (for example the 40-case CBOR whole-value corpus in `tests/corelib.rs`) are labeled `local` and are not independent RFC corpora.
-
-Examples: whole-value breadth in `encoding_breadth.jet` and `encoding_base.jet`; expert base allowances in `encoding_base_expert/` (edition 2027); streaming lifecycle in `encoding_{json,jsonl,csv,xml,cbor}_stream.jet` and shared types in `encoding_stream_types.jet`. Every example has a checked golden under `examples/features/expected/serde/`.
-
-Static migration diagnostics: **L2001** / **E2002** for `cbor.encode` are registered in `docs/spec/diagnostics.md`, snapshotted in `tests/ui/cbor_encode_deprecated/` and `tests/ui/cbor_encode_removed/`, and exercised in `tests/encoding_edition.rs`. Runtime parse/decode failures remain typed Core values, not compiler diagnostics.
-
