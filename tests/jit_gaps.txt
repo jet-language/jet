@@ -27,6 +27,7 @@ covered:
   basics/numbers
   basics/range_step
   basics/switch
+  basics/tuples
   basics/values
   collections/filter_map
   collections/iter_adapters
@@ -96,19 +97,28 @@ covered:
   tooling/tests
   types/affine_unit_types
   types/associated_types
+  types/capability_bundles
   types/computed_field
   types/dimensional_quantities
+  types/distinct_types
   types/dot_construction
+  types/enum_dot
+  types/enum_dot_patterns
   types/enums
   types/external_methods
   types/inferred_new
+  types/range_types
   types/structs
   types/tags_and_traits
   types/typestate
+  types/unit_family
+  types/unit_literals
   web/app_hello
   web/web_compute
   web/web_wasm_for_in
   web/web_wasm_list
+  web/web_wasm_list_string
+  web/web_wasm_map
   web/web_wasm_range
   web/web_wasm_string
   web/web_wasm_string_param
@@ -119,7 +129,6 @@ gaps:
   basics/first_hour: run: jit core call unsupported
   basics/pattern_matching: describe_conn: jit unknown local `id`
   basics/printable: run: jit string interp type unsupported: Named("Greeting")
-  basics/tuples: run: jit clone unsupported type: Tuple([("x", Int), ("y", Int)]), local p
   basics/variadics_spread: join: jit list spread unsupported
   cli/positionals: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
@@ -318,11 +327,7 @@ gaps:
   tooling/provenance_track: run: jit numeric origin unsupported
   tooling/testing_helpers: run: jit core call unsupported
   tooling/todo_hole: not_yet: jit todo expression unsupported
-  types/capability_bundles: run: jit binary op unsupported
   types/display_debug: run: jit string interp type unsupported: Named("User")
-  types/distinct_types: run: jit binary op unsupported
-  types/enum_dot: area: jit enum payload type unsupported: Float (Some(types::F64))
-  types/enum_dot_patterns: area: jit enum payload type unsupported: Float (Some(types::F64))
   types/generic_types: run: jit call to unknown function `make_pair`
   types/measurement: run: jit core call unsupported
   types/no_any_alternatives: run: jit call to unknown function `echo`
@@ -330,7 +335,6 @@ gaps:
   types/option_combinators: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "has an invalid controlling type f64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: true, 4: true, 5: true, 6: true, 7: true }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "arg 1 (v7) has type i64, expected f64" }, VerifierError { location: inst9, context: Some("return v8"), message: "result 0 has type f64, must match function signature of i64" }])
   types/optional_result_variants: run: jit enum arm is not a variant pattern
   types/patchable: run: jit missing method `Employee::apply`
-  types/range_types: run: jit binary op unsupported
   types/recursive_enum: run: jit print type unsupported
   types/refinements: pick: jit host/default/uninit/ct-lit unsupported
   types/renderable-varargs-multi: run: jit call to unknown function `announce__va1`
@@ -338,8 +342,6 @@ gaps:
   types/traits: print_area: jit missing method `Shape::name`
   types/type_alias: run: jit result ?? operand is not Result
   types/typed_literal_head: run: jit string interp type unsupported: IntN { signed: false, bits: 8 }
-  types/unit_family: run: jit binary op unsupported
-  types/unit_literals: run: jit binary op unsupported
   types/value_tag_type: jit param type unsupported: Tagged { marker: "Raw", inner: Int }
   ui/events: show_publish: jit enum `HookOutcome::Continue`
   ui/layout_basic: run: jit layout block unsupported
@@ -360,5 +362,3 @@ gaps:
   web/web_app: dev: jit core call unsupported
   web/web_hello: run: jit core call unsupported
   web/web_wasm_callback: init: jit core call unsupported
-  web/web_wasm_list_string: echo_strs: jit clone unsupported type: List(String), local xs
-  web/web_wasm_map: echo_scores: jit clone unsupported type: Map { key: String, key_span: Some(Span { start: 202, end: 208 }), value: Int }, local scores

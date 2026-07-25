@@ -14,8 +14,8 @@ use std::collections::HashMap;
 use super::runtime_host::HostFns;
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
-    jit_list_int_type, jit_list_iter_elem_type, jit_list_of_int_list_type, jit_result_list_elem,
-    jit_value_type, record_type_key, user_type_name,
+    jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type, jit_map_string_type,
+    jit_result_list_elem, jit_tuple_type, jit_value_type, record_type_key, user_type_name,
 };
 use super::types_meta::{clif_ty, init_clif_ty, JitMeta};
 use super::JitRuntime;
@@ -179,23 +179,43 @@ impl LowerCtx<'_, '_> {
         payload: Value,
         payload_ty: &Type,
     ) -> Result<Value, String> {
-        let disc = self.b.ins().iconst(types::I64, disc);
+        let disc_v = self.b.ins().iconst(types::I64, disc);
         match self.meta.clif_ty(payload_ty) {
             Some(types::I64) => {
                 let shifted = self.b.ins().ishl_imm(payload, 8);
-                Ok(self.b.ins().bor(shifted, disc))
+                Ok(self.b.ins().bor(shifted, disc_v))
             }
             // F64 payloads cannot share one i64 with the disc byte: `shl 8`
-            // drops the sign/exponent byte and corrupts the float.
+            // drops the sign/exponent byte and corrupts the float. Heap-box
+            // instead: record [disc:i64, payload:f64], return the handle.
+            Some(types::F64) => {
+                let n = self.b.ins().iconst(types::I64, 2);
+                let new_ref = self
+                    .module
+                    .declare_func_in_func(self.host.struct_new, self.b.func);
+                let call = self.b.ins().call(new_ref, &[n]);
+                let handle = self.b.inst_results(call)[0];
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let one = self.b.ins().iconst(types::I64, 1);
+                let set_i = self
+                    .module
+                    .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                self.b.ins().call(set_i, &[handle, zero, disc_v]);
+                let set_f = self
+                    .module
+                    .declare_func_in_func(self.host.struct_set_f64, self.b.func);
+                self.b.ins().call(set_f, &[handle, one, payload]);
+                Ok(handle)
+            }
             Some(types::I8) => {
                 let widened = self.b.ins().uextend(types::I64, payload);
                 let shifted = self.b.ins().ishl_imm(widened, 8);
-                Ok(self.b.ins().bor(shifted, disc))
+                Ok(self.b.ins().bor(shifted, disc_v))
             }
             Some(types::I32) => {
                 let widened = self.b.ins().sextend(types::I64, payload);
                 let shifted = self.b.ins().ishl_imm(widened, 8);
-                Ok(self.b.ins().bor(shifted, disc))
+                Ok(self.b.ins().bor(shifted, disc_v))
             }
             other => Err(format!(
                 "jit enum payload type unsupported: {payload_ty:?} ({other:?})"
@@ -204,15 +224,62 @@ impl LowerCtx<'_, '_> {
     }
 
     fn unpack_enum_scalar(&mut self, packed: Value, payload_ty: &Type) -> Result<Value, String> {
-        let raw = self.b.ins().sshr_imm(packed, 8);
         match self.meta.clif_ty(payload_ty) {
-            Some(types::I64) => Ok(raw),
-            Some(types::I8) => Ok(self.b.ins().ireduce(types::I8, raw)),
-            Some(types::I32) => Ok(self.b.ins().ireduce(types::I32, raw)),
+            Some(types::F64) => {
+                let one = self.b.ins().iconst(types::I64, 1);
+                let get_f = self
+                    .module
+                    .declare_func_in_func(self.host.struct_get_f64, self.b.func);
+                let call = self.b.ins().call(get_f, &[packed, one]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            Some(types::I64) => {
+                let raw = self.b.ins().sshr_imm(packed, 8);
+                Ok(raw)
+            }
+            Some(types::I8) => {
+                let raw = self.b.ins().sshr_imm(packed, 8);
+                Ok(self.b.ins().ireduce(types::I8, raw))
+            }
+            Some(types::I32) => {
+                let raw = self.b.ins().sshr_imm(packed, 8);
+                Ok(self.b.ins().ireduce(types::I32, raw))
+            }
             other => Err(format!(
                 "jit enum payload type unsupported: {payload_ty:?} ({other:?})"
             )),
         }
+    }
+
+    /// True when this enum match uses heap-boxed F64 payloads (not packed i64).
+    fn enum_match_uses_f64_heap(&self, arms: &[TIR::TMatchArm]) -> bool {
+        arms.iter().any(|arm| {
+            let Some(variant) = arm.pattern.variant() else {
+                return false;
+            };
+            let Some(enum_name) = arm.pattern.enum_type.as_deref() else {
+                return false;
+            };
+            self.meta
+                .enum_variant_payload_types(enum_name, variant)
+                .and_then(|tys| tys.first())
+                .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32))
+        })
+    }
+
+    /// Erase `#Numeric` / unit-family distinct wrappers to Int/Float for arith,
+    /// print, and string interp — values already live as the base ABI.
+    fn erase_distinct_ty(&self, ty: &Type) -> Type {
+        let mut ty = ty
+            .quantity_parts()
+            .map_or_else(|| ty.clone(), |(base, _)| base.clone());
+        while let Type::Named(name) = &ty {
+            match self.meta.distinct_base(name) {
+                Some(base) => ty = base.clone(),
+                None => break,
+            }
+        }
+        ty
     }
 
     fn lower_try(&mut self, inner: &TExpr, convert: &TIR::TTryConvert) -> Result<Value, String> {
@@ -1128,6 +1195,7 @@ impl LowerCtx<'_, '_> {
                 // Ownership clone is a Rust spelling fact; the JIT already owns the
                 // value in a register, so the structured scrutinee is enough.
                 let subj = self.lower_expr(scrutinee)?;
+                let f64_heap = self.enum_match_uses_f64_heap(arms);
                 let merge = self.b.create_block();
                 let mut tail = self.b.create_block();
                 self.b.ins().jump(tail, &[]);
@@ -1157,8 +1225,17 @@ impl LowerCtx<'_, '_> {
                     let then_block = self.b.create_block();
                     let next = self.b.create_block();
                     let disc_const = self.b.ins().iconst(types::I64, disc);
-                    let mask = self.b.ins().iconst(types::I64, 0xff);
-                    let actual_disc = self.b.ins().band(subj, mask);
+                    let actual_disc = if f64_heap {
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        let get_i = self
+                            .module
+                            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+                        let call = self.b.ins().call(get_i, &[subj, zero]);
+                        self.b.inst_results(call)[0]
+                    } else {
+                        let mask = self.b.ins().iconst(types::I64, 0xff);
+                        self.b.ins().band(subj, mask)
+                    };
                     let eq = self.bool_from_icmp(IntCC::Equal, actual_disc, disc_const);
                     self.b.ins().brif(eq, then_block, &[], next, &[]);
                     self.b.switch_to_block(then_block);
@@ -1330,7 +1407,8 @@ impl LowerCtx<'_, '_> {
         rhs: Value,
         rhs_ty: &Type,
     ) -> Result<Value, String> {
-        Ok(match (op, rhs_ty) {
+        let rhs_ty = self.erase_distinct_ty(rhs_ty);
+        Ok(match (op, &rhs_ty) {
             (BinOp::Add, Type::Int) => self.b.ins().iadd(current, rhs),
             (BinOp::Sub, Type::Int) => self.b.ins().isub(current, rhs),
             (BinOp::Mul, Type::Int) => self.b.ins().imul(current, rhs),
@@ -1396,7 +1474,8 @@ impl LowerCtx<'_, '_> {
                 }
                 TStrPart::Interp(e, _) => {
                     let val = self.lower_expr(e)?;
-                    let host_id = match &e.ty {
+                    let push_ty = self.erase_distinct_ty(&e.ty);
+                    let host_id = match &push_ty {
                         Type::Int => self.host.str_push_i64,
                         Type::Float => self.host.str_push_f64,
                         Type::Bool => self.host.str_push_bool,
@@ -1407,10 +1486,7 @@ impl LowerCtx<'_, '_> {
                         }
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    match &e.ty {
-                        Type::Float => self.b.ins().call(host_ref, &[buf_id, val]),
-                        _ => self.b.ins().call(host_ref, &[buf_id, val]),
-                    };
+                    self.b.ins().call(host_ref, &[buf_id, val]);
                 }
             }
         }
@@ -2862,17 +2938,30 @@ impl LowerCtx<'_, '_> {
         ) {
             return self.lower_expr(inner);
         }
+        // Distinct numeric wrappers share the base ABI — clone is a no-op copy.
+        if matches!(self.erase_distinct_ty(&inner.ty), Type::Int | Type::Float) {
+            return self.lower_expr(inner);
+        }
         if inner.ty == Type::String {
             let val = self.lower_expr(inner)?;
             let host_ref = self.module.declare_func_in_func(self.host.str_clone, self.b.func);
             let call = self.b.ins().call(host_ref, &[val]);
             return Ok(self.b.inst_results(call)[0]);
         }
-        if jit_list_int_type(&inner.ty) || jit_list_float_type(&inner.ty) {
+        if jit_list_native_type(&inner.ty) {
             let val = self.lower_expr(inner)?;
             let host_ref = self.module.declare_func_in_func(self.host.coll.list_clone, self.b.func);
             let call = self.b.ins().call(host_ref, &[val]);
             return Ok(self.b.inst_results(call)[0]);
+        }
+        if jit_map_string_type(&inner.ty) {
+            let val = self.lower_expr(inner)?;
+            let host_ref = self.module.declare_func_in_func(self.host.coll.map_clone, self.b.func);
+            let call = self.b.ins().call(host_ref, &[val]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if jit_tuple_type(&inner.ty) {
+            return self.lower_clone_tuple(inner);
         }
         if matches!(&inner.ty, Type::Apply { name, .. } if name == "Sender") {
             let val = self.lower_expr(inner)?;
@@ -2889,6 +2978,50 @@ impl LowerCtx<'_, '_> {
             _ => "other expression".to_string(),
         };
         Err(format!("jit clone unsupported type: {:?}, {source}", inner.ty))
+    }
+
+    fn lower_clone_tuple(&mut self, inner: &TExpr) -> Result<Value, String> {
+        let Type::Tuple(fields) = &inner.ty else {
+            return Err("jit tuple clone needs tuple type".to_string());
+        };
+        let src = self.lower_expr(inner)?;
+        let n = self.b.ins().iconst(types::I64, fields.len() as i64);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let call = self.b.ins().call(new_ref, &[n]);
+        let dst = self.b.inst_results(call)[0];
+        for (i, (_, field_ty)) in fields.iter().enumerate() {
+            let idx = self.b.ins().iconst(types::I64, i as i64);
+            match field_ty.as_ref() {
+                Type::Int => {
+                    let get = self
+                        .module
+                        .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+                    let gcall = self.b.ins().call(get, &[src, idx]);
+                    let val = self.b.inst_results(gcall)[0];
+                    let set = self
+                        .module
+                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                    self.b.ins().call(set, &[dst, idx, val]);
+                }
+                Type::Float => {
+                    let get = self
+                        .module
+                        .declare_func_in_func(self.host.struct_get_f64, self.b.func);
+                    let gcall = self.b.ins().call(get, &[src, idx]);
+                    let val = self.b.inst_results(gcall)[0];
+                    let set = self
+                        .module
+                        .declare_func_in_func(self.host.struct_set_f64, self.b.func);
+                    self.b.ins().call(set, &[dst, idx, val]);
+                }
+                other => {
+                    return Err(format!("jit tuple clone field unsupported: {other:?}"));
+                }
+            }
+        }
+        Ok(dst)
     }
 
     fn lower_spawn(&mut self) -> Result<Value, String> {
@@ -3499,7 +3632,7 @@ impl LowerCtx<'_, '_> {
 
     fn expr_arith_type(&self, expr: &TExpr) -> Type {
         if let Some(t) = self.expr_field_type(expr) {
-            return t;
+            return self.erase_distinct_ty(&t);
         }
         if let TExprKind::Binary { lhs, rhs, .. } = &expr.kind {
             let lt = self.expr_arith_type(lhs);
@@ -3511,9 +3644,7 @@ impl LowerCtx<'_, '_> {
                 return Type::Int;
             }
         }
-        expr.ty
-            .quantity_parts()
-            .map_or_else(|| expr.ty.clone(), |(base, _)| base.clone())
+        self.erase_distinct_ty(&expr.ty)
     }
 
     /// `TExprKind::Binary` (`op != And/Or`, those short-circuit separately in
@@ -3682,12 +3813,9 @@ impl LowerCtx<'_, '_> {
             }
             _ => {
                 let val = self.lower_expr(inner)?;
-                let print_ty = inner
-                    .ty
-                    .quantity_parts()
-                    .map_or(&inner.ty, |(base, _)| base);
+                let print_ty = self.erase_distinct_ty(&inner.ty);
                 // List / materialized Iter — same jet_show `[a, b, c]` AOT uses.
-                if let Some(elem) = jit_list_iter_elem_type(print_ty) {
+                if let Some(elem) = jit_list_iter_elem_type(&print_ty) {
                     let string_elems = matches!(elem, Type::String);
                     let flag = self
                         .b
@@ -3700,7 +3828,7 @@ impl LowerCtx<'_, '_> {
                     return Ok(());
                 }
                 // `T?` — packed `0` / `value+1`; show matches AOT Option jet_show.
-                if let Type::Option(inner) = print_ty {
+                if let Type::Option(inner) = &print_ty {
                     if matches!(inner.as_ref(), Type::Int | Type::String) {
                         let string_elems = matches!(inner.as_ref(), Type::String);
                         let flag = self
@@ -3714,7 +3842,7 @@ impl LowerCtx<'_, '_> {
                         return Ok(());
                     }
                 }
-                let host_id = match print_ty {
+                let host_id = match &print_ty {
                     Type::Int => self.host.print_i64,
                     Type::String => self.host.print_str,
                     Type::Float => self.host.print_f64,

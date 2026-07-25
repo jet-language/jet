@@ -632,7 +632,7 @@ fn resident_safe_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>)
     match payload {
         TEnumPayload::Unit => true,
         TEnumPayload::Positional(vals) => vals.len() == 1
-            && matches!(vals[0].value.ty, Type::Int)
+            && matches!(vals[0].value.ty, Type::Int | Type::Float | Type::Float32)
             && resident_safe_expr(&vals[0].value, callees),
         TEnumPayload::Named(fields) => fields
             .iter()

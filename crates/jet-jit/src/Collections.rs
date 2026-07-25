@@ -149,6 +149,30 @@ extern "C" fn jet_jit_map_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_map())
 }
 
+extern "C" fn jet_jit_map_clone(map: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt
+            .heap
+            .map_len(map)
+            .expect("jit map clone: bad handle");
+        let out = rt.heap.alloc_empty_map();
+        for i in 0..len {
+            let key = rt
+                .heap
+                .map_key_at(map, i)
+                .expect("jit map clone: key");
+            let value = rt
+                .heap
+                .map_value_at(map, i)
+                .expect("jit map clone: value");
+            rt.heap
+                .map_insert(out, key, value)
+                .expect("jit map clone: insert");
+        }
+        out
+    })
+}
+
 extern "C" fn jet_jit_map_insert(map: i64, key: i64, value: i64) {
     Concurrency::with_runtime_mut(|rt| {
         rt.heap
@@ -415,6 +439,7 @@ pub(crate) struct CollectionsHostFns {
     pub list_join_str: cranelift_module::FuncId,
     pub loop_stride_check: cranelift_module::FuncId,
     pub map_new: cranelift_module::FuncId,
+    pub map_clone: cranelift_module::FuncId,
     pub map_insert: cranelift_module::FuncId,
     pub map_get: cranelift_module::FuncId,
     pub map_get_opt: cranelift_module::FuncId,
@@ -449,6 +474,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_join_str", jet_jit_list_join_str as *const u8);
     builder.symbol("jet_jit_loop_stride_check", jet_jit_loop_stride_check as *const u8);
     builder.symbol("jet_jit_map_new", jet_jit_map_new as *const u8);
+    builder.symbol("jet_jit_map_clone", jet_jit_map_clone as *const u8);
     builder.symbol("jet_jit_map_insert", jet_jit_map_insert as *const u8);
     builder.symbol("jet_jit_map_get", jet_jit_map_get as *const u8);
     builder.symbol("jet_jit_map_get_opt", jet_jit_map_get_opt as *const u8);
@@ -539,6 +565,7 @@ pub(crate) fn declare_collections_host_fns(
         list_join_str: import("jet_jit_list_join_str", &sig_join)?,
         loop_stride_check: import("jet_jit_loop_stride_check", &sig_len)?,
         map_new: import("jet_jit_map_new", &sig_new)?,
+        map_clone: import("jet_jit_map_clone", &sig_len)?,
         map_insert: import("jet_jit_map_insert", &sig_map_insert)?,
         map_get: import("jet_jit_map_get", &sig_map_get)?,
         map_get_opt: import("jet_jit_map_get_opt", &sig_map_get_opt)?,
