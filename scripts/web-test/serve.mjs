@@ -21,6 +21,7 @@ const MIME = {
   ".mjs": "text/javascript; charset=utf-8",
   ".wasm": "application/wasm",
   ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
 };
 
 function safePath(urlPath) {

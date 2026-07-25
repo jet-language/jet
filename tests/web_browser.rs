@@ -259,3 +259,46 @@ fn web_browser_aot_acceptance_proves_dom_reactive_wasm_bundle_and_maps() {
     );
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn web_browser_source_map_cdp_jet_breakpoint() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping web source-map CDP (need rustc)");
+        return;
+    }
+    let Some((chromium, node)) = web_tools() else {
+        eprintln!("note: skipping web source-map CDP (need chromium + node)");
+        return;
+    };
+
+    let root = std::env::temp_dir().join(format!("jet_web_sourcemap_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).unwrap();
+    prepare_acceptance_root(&root);
+
+    let port = unused_local_port();
+    let _server = StaticServer::start(&node, &root, port);
+    let output = Command::new(&node)
+        .current_dir(repo_root())
+        .env("CHROMIUM", &chromium)
+        .arg("scripts/web-test/sourcemap.mjs")
+        .arg("--port")
+        .arg(port.to_string())
+        .arg("--prefix")
+        .arg("/click")
+        .arg("--wasm-prefix")
+        .arg("/compute")
+        .output()
+        .expect("run web source-map CDP");
+    assert!(
+        output.status.success(),
+        "web source-map CDP failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("PASS web source-map CDP"),
+        "source-map CDP did not report completion"
+    );
+    let _ = fs::remove_dir_all(&root);
+}

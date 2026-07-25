@@ -48,10 +48,12 @@ async function assertBundle(prefix) {
   assert(map.version === 3, `${prefix} source map version`);
   assert(typeof map.mappings === "string" && map.mappings.length > 0, `${prefix} source map mappings`);
   assert(Array.isArray(map.sources) && map.sources.length > 0, `${prefix} source map sources`);
-  for (const file of ["app.js", "jet_dom_runtime.js", "app.wasm"]) {
+  for (const file of ["app.js", "jet_dom_runtime.js", "app.wasm", "app.js.map", "app.wasm.map"]) {
     const body = await fetchText(`${prefix}/${file}`);
     assert(body.length > 0, `${prefix}/${file} empty`);
   }
+  const js = await fetchText(`${prefix}/app.js`);
+  assert(js.includes("sourceMappingURL=app.js.map"), `${prefix} app.js sourceMappingURL`);
 }
 
 async function domBox(driver) {

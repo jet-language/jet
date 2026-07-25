@@ -733,6 +733,7 @@ pub fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
         "app.wasm",
         "index.html",
     ];
+    const MAP_FILES: [&str; 2] = ["app.js.map", "app.wasm.map"];
     fs::create_dir_all(out_dir)?;
     for name in FILES {
         let src = staging.join(name);
@@ -743,6 +744,16 @@ pub fn stage_and_swap(staging: &Path, out_dir: &Path) -> std::io::Result<()> {
         // missing file — a handful of retries with a short backoff clears it
         // without masking a genuine bug (which would fail every retry too).
         rename_with_retry(&src, &dst)?;
+    }
+    for name in MAP_FILES {
+        let src = staging.join(name);
+        let dst = out_dir.join(name);
+        if src.exists() {
+            rename_with_retry(&src, &dst)?;
+        } else if dst.exists() {
+            // Release (or map-less) rebuild: drop stale maps with the swap.
+            let _ = fs::remove_file(&dst);
+        }
     }
     Ok(())
 }
