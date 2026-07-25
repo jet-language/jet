@@ -2656,7 +2656,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[value, op]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TNumericOp::BitCount(name) => {
+            TNumericOp::BitCount { method: name, .. } => {
                 let op = match name.as_str() {
                     "count_ones" => 0,
                     "count_zeros" => 1,

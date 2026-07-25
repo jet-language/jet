@@ -1897,7 +1897,7 @@ fn rebuild_funcs(session: &mut Session) {
 // ── value display (D-REPL16=B) ─────────────────────────────────────────────
 
 pub(crate) fn display_value(v: &CtValue) -> String {
-    let val_str = v.jet_show();
+    let val_str = crate::Comptime::display_core_pure_value(v).unwrap_or_else(|| v.jet_show());
     let ty = type_name(v);
     if matches!(v, CtValue::Str(_)) {
         format!("\"{}\" : {}", val_str, ty)

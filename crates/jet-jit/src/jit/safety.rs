@@ -297,8 +297,13 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && match op {
                     TNumericOp::Predicate(name) => matches!(&recv.ty, Type::Float)
                         && matches!(name.as_str(), "is_nan" | "is_infinite" | "is_finite"),
-                    TNumericOp::BitCount(name) => matches!(&recv.ty, Type::Int)
-                        && matches!(name.as_str(), "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"),
+                    TNumericOp::BitCount { method: name, width } => {
+                        (*width == 64 && matches!(&recv.ty, Type::Int))
+                            && matches!(
+                                name.as_str(),
+                                "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
+                            )
+                    }
                     TNumericOp::ToShow => matches!(&recv.ty, Type::Int | Type::Float),
                     TNumericOp::CastAs { dst_rust } => {
                         recv.ty.is_numeric()
