@@ -337,6 +337,73 @@ extern "C" fn jet_jit_str_replace(id: i64, from_id: i64, to_id: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_str_lines(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let list = rt.heap.alloc_empty_list();
+        for line in text.lines() {
+            let sid = rt.heap.alloc_string(line.to_string());
+            rt.heap
+                .list_push_int(list, sid)
+                .expect("jit str lines: bad list handle");
+        }
+        list
+    })
+}
+
+extern "C" fn jet_jit_str_split(id: i64, sep_id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
+        let list = rt.heap.alloc_empty_list();
+        for part in text.split(&sep) {
+            let sid = rt.heap.alloc_string(part.to_string());
+            rt.heap
+                .list_push_int(list, sid)
+                .expect("jit str split: bad list handle");
+        }
+        list
+    })
+}
+
+extern "C" fn jet_jit_str_chars(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let list = rt.heap.alloc_empty_list();
+        for ch in text.chars() {
+            rt.heap
+                .list_push_int(list, ch as i64)
+                .expect("jit str chars: bad list handle");
+        }
+        list
+    })
+}
+
+extern "C" fn jet_jit_str_after(id: i64, sep_id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
+        rt.heap
+            .alloc_string(jet_rt::string_after(&text, &sep))
+    })
+}
+
+extern "C" fn jet_jit_str_before(id: i64, sep_id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
+        rt.heap
+            .alloc_string(jet_rt::string_before(&text, &sep))
+    })
+}
+
+extern "C" fn jet_jit_trap_panic(_unused: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.set_trap("panic");
+        0
+    })
+}
+
 extern "C" fn jet_jit_parse_i64(id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
@@ -780,6 +847,11 @@ pub(crate) struct HostFns {
     pub(crate) str_to_upper: FuncId,
     pub(crate) str_to_lower: FuncId,
     pub(crate) str_replace: FuncId,
+    pub(crate) str_lines: FuncId,
+    pub(crate) str_split: FuncId,
+    pub(crate) str_chars: FuncId,
+    pub(crate) str_after: FuncId,
+    pub(crate) str_before: FuncId,
     pub(crate) parse_i64: FuncId,
     pub(crate) parse_f64: FuncId,
     pub(crate) numeric_try_i64: FuncId,
@@ -813,6 +885,7 @@ pub(crate) struct HostFns {
     pub(crate) result_get_f64: FuncId,
     pub(crate) result_get_i8: FuncId,
     pub(crate) result_get_i32: FuncId,
+    pub(crate) trap_panic: FuncId,
     pub(crate) duration_from_int: FuncId,
     pub(crate) duration_from_float: FuncId,
     pub(crate) duration_in: FuncId,
@@ -853,6 +926,12 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_to_upper", jet_jit_str_to_upper as *const u8);
     builder.symbol("jet_jit_str_to_lower", jet_jit_str_to_lower as *const u8);
     builder.symbol("jet_jit_str_replace", jet_jit_str_replace as *const u8);
+    builder.symbol("jet_jit_str_lines", jet_jit_str_lines as *const u8);
+    builder.symbol("jet_jit_str_split", jet_jit_str_split as *const u8);
+    builder.symbol("jet_jit_str_chars", jet_jit_str_chars as *const u8);
+    builder.symbol("jet_jit_str_after", jet_jit_str_after as *const u8);
+    builder.symbol("jet_jit_str_before", jet_jit_str_before as *const u8);
+    builder.symbol("jet_jit_trap_panic", jet_jit_trap_panic as *const u8);
     builder.symbol("jet_jit_parse_i64", jet_jit_parse_i64 as *const u8);
     builder.symbol("jet_jit_parse_f64", jet_jit_parse_f64 as *const u8);
     builder.symbol("jet_jit_numeric_try_i64", jet_jit_numeric_try_i64 as *const u8);
@@ -995,6 +1074,10 @@ fn declare_host_fns(
     sig_str_replace.params.push(AbiParam::new(types::I64));
     sig_str_replace.params.push(AbiParam::new(types::I64));
     sig_str_replace.returns.push(AbiParam::new(types::I64));
+    let mut sig_str_binary_i64 = Signature::new(cc);
+    sig_str_binary_i64.params.push(AbiParam::new(types::I64));
+    sig_str_binary_i64.params.push(AbiParam::new(types::I64));
+    sig_str_binary_i64.returns.push(AbiParam::new(types::I64));
     let mut sig_f64_i64 = Signature::new(cc);
     sig_f64_i64.params.push(AbiParam::new(types::F64));
     sig_f64_i64.returns.push(AbiParam::new(types::I64));
@@ -1142,6 +1225,11 @@ fn declare_host_fns(
         str_to_upper: import("jet_jit_str_to_upper", &sig_str_unary_i64)?,
         str_to_lower: import("jet_jit_str_to_lower", &sig_str_unary_i64)?,
         str_replace: import("jet_jit_str_replace", &sig_str_replace)?,
+        str_lines: import("jet_jit_str_lines", &sig_str_unary_i64)?,
+        str_split: import("jet_jit_str_split", &sig_str_binary_i64)?,
+        str_chars: import("jet_jit_str_chars", &sig_str_unary_i64)?,
+        str_after: import("jet_jit_str_after", &sig_str_binary_i64)?,
+        str_before: import("jet_jit_str_before", &sig_str_binary_i64)?,
         parse_i64: import("jet_jit_parse_i64", &sig_str_unary_i64)?,
         parse_f64: import("jet_jit_parse_f64", &sig_str_unary_i64)?,
         numeric_try_i64: import("jet_jit_numeric_try_i64", &sig_i64_i64_i64_i64)?,
@@ -1175,6 +1263,7 @@ fn declare_host_fns(
         result_get_f64: import("jet_jit_result_get_f64", &sig_result_query_f64)?,
         result_get_i8: import("jet_jit_result_get_i8", &sig_result_query_i8)?,
         result_get_i32: import("jet_jit_result_get_i32", &sig_result_query_i32)?,
+        trap_panic: import("jet_jit_trap_panic", &sig_i64)?,
         duration_from_int: import("jet_jit_duration_from_int", &sig_duration_int)?,
         duration_from_float: import("jet_jit_duration_from_float", &sig_duration_float)?,
         duration_in: import("jet_jit_duration_in", &sig_duration_int)?,

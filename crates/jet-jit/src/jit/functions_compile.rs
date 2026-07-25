@@ -137,7 +137,7 @@ fn lower_function(
     runtime: &mut JitRuntime,
 ) -> Result<(), String> {
     let mut ctx = module.make_context();
-    ctx.func.signature = func_signature(module, tir)?;
+    ctx.func.signature = func_signature(module, tir, meta)?;
     let mut fbcx = FunctionBuilderContext::new();
     let mut vars = HashMap::new();
     let mut var_tys = HashMap::new();
@@ -177,7 +177,7 @@ fn lower_function(
             dead: false,
             next_var: 0,
             method_struct,
-            ret_clif: tir.ret.as_ref().and_then(clif_ty),
+            ret_clif: tir.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
             shield_depth: 0,
         };
         if func_has_receiver(tir) {
@@ -190,7 +190,7 @@ fn lower_function(
             param_idx = 1;
         }
         for (i, (name, ty, _)) in tir.params.iter().enumerate() {
-            let clif = clif_ty(ty).ok_or("jit param clif type")?;
+            let clif = meta.clif_ty(ty).ok_or("jit param clif type")?;
             let var = lctx.fresh_var(clif);
             lctx.b.def_var(var, param_vals[param_idx + i]);
             lctx.vars.insert(name.clone(), var);
@@ -256,7 +256,7 @@ pub(crate) fn compile_program(
 
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     for f in &program.funcs {
-        let sig = func_signature(module, f)?;
+        let sig = func_signature(module, f, &meta)?;
         let id = if f.name == program.entry {
             match existing_main {
                 Some(id) => id,

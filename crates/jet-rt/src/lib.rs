@@ -1,5 +1,7 @@
 #![deny(warnings)]
 
+use std::collections::BTreeMap;
+
 /// Compiler/runtime-only traced heap. Jet source reaches this through codegen.
 #[doc(hidden)]
 pub mod __gc;
@@ -32,6 +34,20 @@ pub fn string_replace(s: &str, from: &str, to: &str) -> String {
     s.replace(from, to)
 }
 
+pub fn string_after(s: &str, sep: &str) -> String {
+    match s.find(sep) {
+        Some(i) => s[i + sep.len()..].to_string(),
+        None => s.to_string(),
+    }
+}
+
+pub fn string_before(s: &str, sep: &str) -> String {
+    match s.find(sep) {
+        Some(i) => s[..i].to_string(),
+        None => s.to_string(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum JetVal {
     Int(i64),
@@ -40,6 +56,8 @@ pub enum JetVal {
     Char(char),
     String(String),
     List(Vec<JetVal>),
+    /// String-keyed map; values are packed i64 (ints or heap handles).
+    Map(BTreeMap<String, i64>),
     Record(Vec<JetVal>),
     // D-BIGINT1: JIT-tier `BigInt` handle. Reuses `CtBigInt` (jet-foundation)
     // limb-for-limb so a JIT-computed BigInt prints byte-identical to the AOT
@@ -96,6 +114,59 @@ impl JetArena {
         let id = self.values.len() as i64;
         self.values.push(JetVal::List(Vec::new()));
         id
+    }
+
+    pub fn alloc_empty_map(&mut self) -> i64 {
+        let id = self.values.len() as i64;
+        self.values.push(JetVal::Map(BTreeMap::new()));
+        id
+    }
+
+    pub fn map_insert(&mut self, map: i64, key_id: i64, value: i64) -> Option<()> {
+        let key = self.clone_string(key_id)?;
+        match self.values.get_mut(map as usize) {
+            Some(JetVal::Map(entries)) => {
+                entries.insert(key, value);
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn map_get(&self, map: i64, key_id: i64) -> Option<i64> {
+        let key = self.get_string(key_id)?;
+        match self.values.get(map as usize) {
+            Some(JetVal::Map(entries)) => entries.get(key).copied(),
+            _ => None,
+        }
+    }
+
+    pub fn map_len(&self, map: i64) -> Option<i64> {
+        match self.values.get(map as usize) {
+            Some(JetVal::Map(entries)) => Some(entries.len() as i64),
+            _ => None,
+        }
+    }
+
+    pub fn map_key_at(&mut self, map: i64, index: i64) -> Option<i64> {
+        if index < 0 {
+            return None;
+        }
+        let key = match self.values.get(map as usize) {
+            Some(JetVal::Map(entries)) => entries.keys().nth(index as usize)?.clone(),
+            _ => return None,
+        };
+        Some(self.alloc_string(key))
+    }
+
+    pub fn map_value_at(&self, map: i64, index: i64) -> Option<i64> {
+        if index < 0 {
+            return None;
+        }
+        match self.values.get(map as usize) {
+            Some(JetVal::Map(entries)) => entries.values().nth(index as usize).copied(),
+            _ => None,
+        }
     }
 
     pub fn list_push_int(&mut self, list: i64, value: i64) -> Option<()> {
@@ -430,6 +501,10 @@ mod tests {
         assert_eq!(string_to_upper("\u{A7CF}"), "\u{A7CF}");
         assert_eq!(string_trim("\u{2003}jet\u{2003}"), "jet");
         assert_eq!(string_replace("one two one", "one", "1"), "1 two 1");
+        assert_eq!(string_after("nate@jet.dev", "@"), "jet.dev");
+        assert_eq!(string_before("nate@jet.dev", "@"), "nate");
+        assert_eq!(string_after("no-at-sign", "@"), "no-at-sign");
+        assert_eq!(string_before("no-at-sign", "@"), "no-at-sign");
     }
 
     #[test]
