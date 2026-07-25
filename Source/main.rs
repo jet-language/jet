@@ -20,6 +20,7 @@ mod CmdCodemod;
 mod CmdBudget;
 mod CmdCompile;
 mod CmdDevTools;
+mod CmdNotebook;
 mod CmdDossier;
 mod CmdExpand;
 mod CmdGc;
@@ -1661,6 +1662,11 @@ fn main() {
                 .map(str::to_string)
                 .collect();
             run_repl(project.as_deref(), &allow, &deny, mode.color);
+            return;
+        }
+        "notebook" => {
+            // D-NOTEBOOK-SURFACE1=D: shared REPL session + .jetnb / Jupyter.
+            CmdNotebook::run_notebook(&raw);
             return;
         }
         // Teaching error: E0043 `jet install` -> `jet fetch`

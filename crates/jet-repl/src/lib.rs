@@ -55,6 +55,7 @@ use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt, StructDef};
 pub mod Docs;
 mod History;
 mod Interactive;
+pub mod Notebook;
 pub mod Render;
 pub mod RerunPlan;
 // `Terminal` lives in this seam's shared `Term` module; root Help/dev callers
@@ -92,7 +93,7 @@ pub(crate) trait EffectPrompt {
     fn choose(&mut self, request: &crate::Comptime::ReplEffectRequest, reused: bool) -> PromptChoice;
 }
 
-struct ReplPolicy {
+pub(crate) struct ReplPolicy {
     flags: ReplFlags,
     root: std::path::PathBuf,
     root_dir: std::io::Result<std::fs::File>,
@@ -101,7 +102,7 @@ struct ReplPolicy {
 }
 
 impl ReplPolicy {
-    fn new(flags: ReplFlags, root: &Path) -> Self {
+    pub(crate) fn new(flags: ReplFlags, root: &Path) -> Self {
         Self {
             flags,
             root: root.to_path_buf(),
@@ -111,7 +112,10 @@ impl ReplPolicy {
         }
     }
 
-    fn authorizer<'a>(&'a mut self, prompt: Option<&'a mut dyn EffectPrompt>) -> ReplAuthorization<'a> {
+    pub(crate) fn authorizer<'a>(
+        &'a mut self,
+        prompt: Option<&'a mut dyn EffectPrompt>,
+    ) -> ReplAuthorization<'a> {
         ReplAuthorization { policy: self, prompt }
     }
 }
@@ -602,7 +606,7 @@ pub struct Session {
     history: History::History,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ReplTurn {
     pub id: usize,
     pub input: String,
@@ -626,7 +630,7 @@ pub struct ReplTurn {
     pub pending_unfold: Option<String>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReplTurnStatus {
     Ok,
     Error,

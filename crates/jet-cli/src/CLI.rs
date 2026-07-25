@@ -299,6 +299,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: false,
     },
     CommandSpec {
+        name: "notebook",
+        summary: "Open a Jet notebook (.jetnb) or Jupyter adapter",
+        headline: false,
+    },
+    CommandSpec {
         name: "import",
         summary: "Convert supported source code into editable Jet",
         headline: false,
@@ -666,6 +671,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "audit"
             | "sbom"
             | "repl"
+            | "notebook"
             | "report"
             | "schema"
             | "semindex"
