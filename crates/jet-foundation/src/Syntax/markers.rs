@@ -51,6 +51,10 @@ pub const CONTRACT_PATCHABLE: &str = "Patchable"; // D-PATCH1
 /// D-CLIFLAG1: field-level doc marker for CLI-derived help text — `#Doc`.
 /// Same status as `CONTRACT_CLI`: registered here, feature built elsewhere.
 pub const CONTRACT_DOC: &str = "Doc"; // D-CLIFLAG1
+/// D-CLI-POS1=A: field-level opt-out from positional filling on a `#[Cli]`
+/// required value field — `#[Flag]`. Without it, required scalars fill from
+/// bare argv in declaration order; with it, only `--field` is accepted.
+pub const CONTRACT_FLAG: &str = "Flag"; // D-CLI-POS1
 
 /// D-CABI-PLATFORM1=A: per-function native calling-convention marker for C
 /// declarations. C remains the implicit default; alternate ABIs never inherit.
@@ -104,9 +108,10 @@ pub const APPLIED_RULES: &[&str] = &[
     CONTRACT_INLINE_ALWAYS,
     CONTRACT_BUNDLE_PRINTABLE,
     CONTRACT_BUNDLE_CODABLE_AS_BASE,
-    // D-CLIFLAG1 / D-SHAPE-CLI1 — typed entry CLI contract
+    // D-CLIFLAG1 / D-SHAPE-CLI1 / D-CLI-POS1 — typed entry CLI contract
     CONTRACT_CLI,
     CONTRACT_DOC,
+    CONTRACT_FLAG,
     // D-PATCH1 (card #181)
     CONTRACT_PATCHABLE,
     // Applied rules formerly spelled with `#`.

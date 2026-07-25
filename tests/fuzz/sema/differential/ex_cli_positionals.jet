@@ -1,0 +1,37 @@
+// D-CLI-POS1=A: required value fields fill from bare argv in declaration
+// order. Optional / defaulted / Bool fields stay flag-only. Every field still
+// accepts `--field`; named wins when both forms appear. `#[Flag]` opts a
+// required field out of positional filling.
+//
+// Run:  jet run examples/features/cli/positionals.jet -- buy-milk --due fri
+//       jet run examples/features/cli/positionals.jet -- --text buy-milk
+//       jet run examples/features/cli/positionals.jet -- --help
+#Cli
+struct AddArgs {
+    #[Doc("todo text")] text: String
+    #[Doc("optional due date"), Default("")] due: String
+}
+
+#Cli
+struct LoginArgs {
+    #[Doc("secret token — flag-only on purpose"), Flag] token: String
+}
+
+enum Cmd {
+    Add(AddArgs)
+    Login(LoginArgs)
+}
+
+fn run(cmd: Cmd) {
+    if cmd == {
+        .Add(a) -> {
+            print("add")
+            print(a.text)
+            print(a.due)
+        }
+        .Login(a) -> {
+            print("login")
+            print(a.token)
+        }
+    }
+}

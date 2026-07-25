@@ -6,7 +6,9 @@ use crate::AST::{CtValue, Expr, Item, Marker, ProgramBundle, StrPart, StructDef,
 use crate::Syntax;
 
 const RECORD_MAGIC: &[u8; 8] = b"JETCMD\0\0";
-pub const RECORD_VERSION: u16 = 1;
+/// D-CLI-POS1=A bumps the record so positional eligibility/order is part of
+/// the checked command surface (help, completions, dossier, publish diff).
+pub const RECORD_VERSION: u16 = 2;
 pub const ELF_SECTION: &str = ".jet_command";
 pub const PE_SECTION: &str = ".jetcmd";
 pub const MACH_SECTION: &str = "__jetcmd";
@@ -71,6 +73,10 @@ pub struct CliInputSchema {
     pub help: String,
     pub metavar: Option<String>,
     pub shape: CliInputShape,
+    /// D-CLI-POS1=A: `Some(order)` when this required value also fills from a
+    /// bare argv slot (declaration order among positional fields). `None` for
+    /// Bool flags, optional/defaulted values, and `#[Flag]` opt-outs.
+    pub positional: Option<u16>,
 }
 
 impl CliInputSchema {
@@ -370,6 +376,14 @@ fn encode_input(payload: &mut Vec<u8>, input: &CliInputSchema) {
             }
         }
     }
+    // D-CLI-POS1 / RECORD_VERSION 2: optional positional order after shape.
+    match input.positional {
+        None => payload.push(0),
+        Some(order) => {
+            payload.push(1);
+            put_u32(payload, order as u32);
+        }
+    }
 }
 
 fn decode_input(cursor: &mut Cursor<'_>) -> Result<CliInputSchema, MetadataError> {
@@ -397,7 +411,18 @@ fn decode_input(cursor: &mut Cursor<'_>) -> Result<CliInputSchema, MetadataError
             }
             _ => return Err(MetadataError::Malformed("unknown input shape")),
         };
-    Ok(CliInputSchema { field, flag, help, metavar, shape })
+        let positional = match cursor.byte()? {
+            0 => None,
+            1 => {
+                let order = cursor.u32()?;
+                if order > u16::MAX as u32 {
+                    return Err(MetadataError::Malformed("positional order out of range"));
+                }
+                Some(order as u16)
+            }
+            _ => return Err(MetadataError::Malformed("invalid positional bit")),
+        };
+    Ok(CliInputSchema { field, flag, help, metavar, shape, positional })
 }
 
 fn put_u32(out: &mut Vec<u8>, value: u32) { out.extend_from_slice(&value.to_le_bytes()); }
@@ -672,6 +697,16 @@ impl CliCommandSchema {
     /// Candidates legal before any subcommand is selected.
     pub fn completion_words(&self) -> Vec<String> {
         let mut words = vec!["--help".to_string()];
+        // Positionals first (D-CLI-POS1 help/completion order), then flags.
+        let mut positionals: Vec<&CliInputSchema> = self
+            .inputs
+            .iter()
+            .filter(|input| input.positional.is_some())
+            .collect();
+        positionals.sort_by_key(|input| input.positional.unwrap());
+        for input in positionals {
+            words.push(input.flag.clone());
+        }
         words.extend(self.inputs.iter().map(|input| format!("--{}", input.flag)));
         for command in &self.commands {
             words.push(command.name.clone());
@@ -689,6 +724,7 @@ pub fn command_schema(structure: &StructDef) -> Option<CliCommandSchema> {
         return None;
     }
 
+    let mut positional_order: u16 = 0;
     let inputs = structure
         .fields
         .iter()
@@ -699,6 +735,7 @@ pub fn command_schema(structure: &StructDef) -> Option<CliCommandSchema> {
                 .and_then(marker_string)
                 .unwrap_or_else(|| format!("value for --{flag}"));
             let metavar = flag.replace('-', "_").to_uppercase();
+            let flag_only = marker(&field.serde_markers, Syntax::CONTRACT_FLAG).is_some();
             let shape = match &field.ty {
                 Type::Bool => CliInputShape::Flag,
                 Type::Option(inner) => CliInputShape::Value {
@@ -714,12 +751,27 @@ pub fn command_schema(structure: &StructDef) -> Option<CliCommandSchema> {
                     default: field_default(&field.serde_markers),
                 },
             };
+            // D-CLI-POS1=A: required value fields (no Default) fill positionally
+            // unless #[Flag] opts them out. Bool / optional / defaulted stay flags.
+            let positional = match &shape {
+                CliInputShape::Value {
+                    optional: false,
+                    default: None,
+                    ..
+                } if !flag_only => {
+                    let order = positional_order;
+                    positional_order = positional_order.saturating_add(1);
+                    Some(order)
+                }
+                _ => None,
+            };
             CliInputSchema {
                 field: field.name.clone(),
                 flag,
                 help,
                 metavar: (!matches!(shape, CliInputShape::Flag)).then_some(metavar),
                 shape,
+                positional,
             }
         })
         .collect();
@@ -781,6 +833,7 @@ mod tests {
                     optional: false,
                     default: None,
                 },
+                positional: Some(0),
             }],
             commands: Vec::new(),
         }
@@ -920,8 +973,8 @@ mod tests {
         assert_eq!(read_executable(&nested_fat_mach(&record)), Err(MetadataError::Malformed("nested universal Mach-O slice")));
 
         let mut unsupported = record.clone();
-        unsupported[8..10].copy_from_slice(&2u16.to_le_bytes());
-        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(2)));
+        unsupported[8..10].copy_from_slice(&3u16.to_le_bytes());
+        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(3)));
         let mut corrupt = record;
         *corrupt.last_mut().unwrap() ^= 1;
         assert_eq!(decode_record(&corrupt), Err(MetadataError::Malformed("digest mismatch")));

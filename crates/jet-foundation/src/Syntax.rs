@@ -15,7 +15,9 @@
 //
 // D-SHAPE-CLI1 reuses the existing `fn run` / `#Cli` surface: a resolved
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
-// stays valid. D-SHAPE6 adds no Jet source token; grouped tool commands remain
+// stays valid. D-CLI-POS1=A adds field marker `Flag` (`CONTRACT_FLAG`): required
+// value fields fill positionally by declaration order; `#[Flag]` keeps a field
+// flag-only. D-SHAPE6 adds no Jet source token; grouped tool commands remain
 // owned by the single registry in crates/jet-cli/src/CLI.rs.
 // D-ECO-DECL1=A adds no spelling: ecosystem entries reuse ordinary named
 // fields and D-DOTCTOR1 `Type.{ ... }` construction. D-ECO-ROOTNAME1 still

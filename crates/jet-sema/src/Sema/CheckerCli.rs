@@ -8,6 +8,10 @@
 //! `Codegen/Items.rs::emit_struct_cli` can emit unconditionally (I3: sema
 //! decides, codegen never re-derives "is this field supported").
 //!
+//! D-CLI-POS1=A: required value fields also fill from bare argv in declaration
+//! order unless `#[Flag]` opts them out. Bool / optional / defaulted stay
+//! flag-only; every field still accepts `--field`, and named input wins.
+//!
 //! Also validates `enum Cmd { Variant(Payload) … }` subcommand parameters
 //! (E1307) and the `fn run` entry-parameter shape (E1308, invoked from
 //! `Bundle.rs`'s entry-point check next to the existing `run` checks).
@@ -44,6 +48,13 @@ fn has_default_marker(f: &Field) -> bool {
         .any(|m| m.name == Syntax::ATTR_DEFAULT)
 }
 
+/// D-CLI-POS1=A: does `f` carry `#[Flag]` (opt out of positional filling)?
+fn has_flag_marker(f: &Field) -> bool {
+    f.serde_markers
+        .iter()
+        .any(|m| m.name == Syntax::CONTRACT_FLAG)
+}
+
 /// D-CLIFLAG1: classify one `#[Cli]` struct field for `core.args` codegen.
 /// `None` means the field's type has no flag mapping (E1305).
 pub(crate) enum CliFieldKind {
@@ -54,8 +65,9 @@ pub(crate) enum CliFieldKind {
     /// A supported scalar field with `#[Default(expr)]` -> optional `.option(...)`,
     /// default = the marker's expression.
     DefaultedOption,
-    /// A supported scalar field, no `Option`/`Default` -> required `.option(...)`;
-    /// absent at runtime is a `core.args`-style parse error (no new diagnostic code).
+    /// A supported scalar field, no `Option`/`Default` -> required value; absent
+    /// at runtime is a `core.args`-style parse error (no new diagnostic code).
+    /// D-CLI-POS1=A: also fills from a bare positional unless `#[Flag]`.
     RequiredOption,
 }
 
@@ -82,9 +94,9 @@ fn e1305(field_name: &str, ty_show: &str, span: Span) -> Diagnostic {
             "field `{}` has no CLI flag mapping ({})",
             field_name, ty_show
         ),
-        "a `#[Cli]` field becomes one `--flag`; only `Int`, `Float`, `Bool`, `String`, `Path`, \
-         and `T?` of those have a defined flag shape (nested `#[Cli]` structs and other \
-         collection/closure types don't)."
+        "a `#[Cli]` field becomes one `--flag` (and a positional when required); only `Int`, \
+         `Float`, `Bool`, `String`, `Path`, and `T?` of those have a defined shape (nested \
+         `#[Cli]` structs and other collection/closure types don't)."
             .to_string(),
         "change the field to a supported type, or drop it from the `#[Cli]` struct".to_string(),
         Some(span),
@@ -101,6 +113,23 @@ fn e1306(flag: &str, span: Span) -> Diagnostic {
          CLI gets one automatically)."
             .to_string(),
         "rename one of the fields".to_string(),
+        Some(span),
+    )
+}
+
+/// E1309: `#[Flag]` on a field that is already flag-only (D-CLI-POS1=A).
+fn e1309(field_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1309",
+        format!(
+            "`#[Flag]` on `{}` has nothing to opt out of",
+            field_name
+        ),
+        "`#[Flag]` keeps a required value field flag-only. Bool fields, optional fields \
+         (`T?`), and fields with `#[Default(...)]` already stay flag-only."
+            .to_string(),
+        "remove `#[Flag]`, or make the field a required scalar without `#[Default]`"
+            .to_string(),
         Some(span),
     )
 }
@@ -139,10 +168,9 @@ pub(crate) fn e1308(span: Option<Span>) -> Diagnostic {
     )
 }
 
-/// D-CLIFLAG1: validate every `#[Cli]`-derived struct in `items` (E1305/E1306).
-/// Mirrors `validate_serde_items`'s shape (same call site in `Bundle.rs`, same
-/// "runs after the trait registry is built" timing) but for the CLI-derive
-/// plane instead of the wire-serde plane.
+/// D-CLIFLAG1 / D-CLI-POS1: validate every `#[Cli]`-derived struct in `items`
+/// (E1305/E1306/E1309). Mirrors `validate_serde_items`'s shape (same call site
+/// in `Bundle.rs`) but for the CLI-derive plane instead of the wire-serde plane.
 pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for item in items {
@@ -155,9 +183,19 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
             std::collections::HashMap::new();
         seen_flags.insert("help".to_string(), s.name_span);
         for f in &s.fields {
-            if classify_cli_field(f).is_none() {
+            let kind = classify_cli_field(f);
+            if kind.is_none() {
                 out.push(e1305(&f.name, &f.ty.show(), f.name_span));
                 continue;
+            }
+            if has_flag_marker(f) && !matches!(kind, Some(CliFieldKind::RequiredOption)) {
+                let span = f
+                    .serde_markers
+                    .iter()
+                    .find(|m| m.name == Syntax::CONTRACT_FLAG)
+                    .map(|m| m.name_span)
+                    .unwrap_or(f.name_span);
+                out.push(e1309(&f.name, span));
             }
             let flag = cli_flag_name(&f.name);
             if let Some(_prev) = seen_flags.insert(flag.clone(), f.name_span) {

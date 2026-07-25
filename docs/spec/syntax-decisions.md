@@ -112,6 +112,18 @@ existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
+**D-CLI-POS1=A — positional by default, `#[Flag]` to opt out** *(ratified
+2026-07-23, card #748)*: on a `#[Cli]` struct, required value fields fill from
+bare argv in declaration order. Boolean flags and optional/defaulted fields stay
+flag-only. Every field still accepts its named `--field` spelling; when both the
+named form and a bare value appear for the same field, the named value wins.
+`#[Flag]` on a required value field removes it from positional filling (expert
+opt-out for secrets and similar). `#[Flag]` on a Bool / optional / defaulted
+field is E1309. Declaration order of required value fields is
+part of the command interface; the always-available named spelling keeps scripts
+stable across reorders. Help lists positionals before flags. Marker constant:
+`CONTRACT_FLAG` (`Flag`).
+
 **D-SHAPE-CLI1=A — entry type owns command inputs** *(ratified 2026-07-14,
 card #541)*: when present, the resolved parameter type of `fn run(args: T)` is
 the single source for shell input names, types, defaults, parsing, help,

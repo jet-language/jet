@@ -118,9 +118,10 @@ fn command_json(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
         return "null".to_string();
     };
     let input_json = |input: &jet_foundation::CliSchema::CliInputSchema| {
-            let shape = match input.shape {
-                jet_foundation::CliSchema::CliInputShape::Flag => "flag",
-                jet_foundation::CliSchema::CliInputShape::Value { .. } => "option",
+            let shape = match (&input.shape, input.positional) {
+                (jet_foundation::CliSchema::CliInputShape::Flag, _) => "flag",
+                (jet_foundation::CliSchema::CliInputShape::Value { .. }, Some(_)) => "positional",
+                (jet_foundation::CliSchema::CliInputShape::Value { .. }, None) => "option",
             };
             let default = input
                 .default_display()
@@ -131,8 +132,12 @@ fn command_json(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
                 .as_deref()
                 .map(json_string)
                 .unwrap_or_else(|| "null".to_string());
+            let positional = input
+                .positional
+                .map(|order| order.to_string())
+                .unwrap_or_else(|| "null".to_string());
             format!(
-                "{{\"field\":{},\"flag\":{},\"shape\":{},\"value_type\":{},\"required\":{},\"default\":{},\"metavar\":{},\"help\":{}}}",
+                "{{\"field\":{},\"flag\":{},\"shape\":{},\"value_type\":{},\"required\":{},\"default\":{},\"metavar\":{},\"positional\":{},\"help\":{}}}",
                 json_string(&input.field),
                 json_string(&format!("--{}", input.flag)),
                 json_string(shape),
@@ -140,6 +145,7 @@ fn command_json(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
                 input.required(),
                 default,
                 metavar,
+                positional,
                 json_string(&input.help),
             )
     };
@@ -177,9 +183,12 @@ fn command_text(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
             .default_display()
             .map(|value| format!(", default {value}"))
             .unwrap_or_default();
+        let form = match input.positional {
+            Some(order) => format!("positional#{order} / --{}", input.flag),
+            None => format!("--{}", input.flag),
+        };
         out.push_str(&format!(
-            "  --{}: {} ({status}{default}) — {}\n",
-            input.flag,
+            "  {form}: {} ({status}{default}) — {}\n",
             input.value_kind().as_str(),
             input.help,
         ));
@@ -187,7 +196,15 @@ fn command_text(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
     for subcommand in &command.commands {
         out.push_str(&format!("  command {}\n", subcommand.name));
         for input in &subcommand.inputs {
-            out.push_str(&format!("    --{}: {} — {}\n", input.flag, input.value_kind().as_str(), input.help));
+            let form = match input.positional {
+                Some(order) => format!("positional#{order} / --{}", input.flag),
+                None => format!("--{}", input.flag),
+            };
+            out.push_str(&format!(
+                "    {form}: {} — {}\n",
+                input.value_kind().as_str(),
+                input.help
+            ));
         }
     }
     out.push_str(&format!(
