@@ -1059,28 +1059,6 @@ fn copy_nix_closure_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 pub(super) fn copy_runtime_file_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
-    let bytes = fs::read(src)?;
-    if let Ok(text) = std::str::from_utf8(&bytes) {
-        if has_foreign_os_bytes(text.as_bytes()) && text.contains("nix-snowflake") {
-            let sanitized = text
-                .lines()
-                .map(|line| {
-                    if line.trim_start().starts_with("logo=") {
-                        "logo='/run/current-system/share/icons/hicolor/scalable/apps/jetos-logo.svg'"
-                    } else {
-                        line
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            fs::write(dst, format!("{sanitized}\n"))?;
-            return Ok(());
-        }
-    }
-    if let Some(sanitized) = sanitize_runtime_branding_bytes(&bytes) {
-        fs::write(dst, sanitized)?;
-        return Ok(());
-    }
     copy_file_replace(src, dst)
 }
 
@@ -1149,58 +1127,6 @@ pub(super) fn relative_path(from: &Path, to: &Path) -> std::io::Result<PathBuf> 
     Ok(path)
 }
 
-pub(super) fn sanitize_runtime_branding_file(path: &Path) -> std::io::Result<()> {
-    if fs::symlink_metadata(path)
-        .map(|meta| meta.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        return Ok(());
-    }
-    let bytes = fs::read(path)?;
-    if let Some(sanitized) = sanitize_runtime_branding_bytes(&bytes) {
-        fs::write(path, sanitized)?;
-    }
-    Ok(())
-}
-
-pub(super) fn sanitize_runtime_branding_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut out = bytes.to_vec();
-    let mut changed = false;
-    for (from, to) in [
-        (b"NixOS".as_slice(), b"JetOS".as_slice()),
-        (b"NIXOS".as_slice(), b"JETOS".as_slice()),
-        (b"nixos.org".as_slice(), b"jetos.dev".as_slice()),
-        (b"nixos".as_slice(), b"jetos".as_slice()),
-    ] {
-        changed |= replace_bytes_in_place(&mut out, from, to);
-    }
-    changed.then_some(out)
-}
-
-fn replace_bytes_in_place(bytes: &mut [u8], from: &[u8], to: &[u8]) -> bool {
-    if from.len() != to.len() || from.is_empty() {
-        return false;
-    }
-    let mut changed = false;
-    let mut idx = 0;
-    while idx + from.len() <= bytes.len() {
-        if &bytes[idx..idx + from.len()] == from {
-            bytes[idx..idx + to.len()].copy_from_slice(to);
-            changed = true;
-            idx += from.len();
-        } else {
-            idx += 1;
-        }
-    }
-    changed
-}
-
-fn has_foreign_os_bytes(bytes: &[u8]) -> bool {
-    bytes
-        .windows(5)
-        .any(|window| window == [b'n', b'i', b'x', b'o', b's'])
-}
-
 fn skip_runtime_payload(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|part| part.to_str()) else {
         return false;
@@ -1249,7 +1175,6 @@ fn write_jetos_toolchain(
                 ),
             )
         })?;
-        sanitize_runtime_branding_file(&dst)?;
         make_executable(&dst).map_err(|e| {
             std::io::Error::new(
                 e.kind(),

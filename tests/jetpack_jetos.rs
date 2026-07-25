@@ -3009,13 +3009,7 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
 
 
 #[test]
-fn os_vm_run_real_tier_requires_nixpkgs_pin() {
-    // E1291 (D-JOS-NIXBACKEND1=C): the hidden real-tier NixOS backend
-    // refuses to generate when it can't map every declaration — here
-    // there is no `sources:` entry that resolves to a nixpkgs pin, so
-    // `map_system_to_nixos` reports it as unmapped instead of silently
-    // dropping it. `jet os vm run` hits this before any tool/media check
-    // because a fresh disk always routes through `cmd_vm_run_or_build`.
+fn os_vm_run_never_reaches_nixos_migration_backend() {
     let proj = Scratch::new("os-vm-real-no-nixpkgs-pin");
     let root = Scratch::new("os-vm-real-no-nixpkgs-pin-root");
     fs::write(
@@ -3034,7 +3028,8 @@ fn os_vm_run_real_tier_requires_nixpkgs_pin() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_jetos_stderr_snapshot("real_tier_no_nixpkgs_pin", &stderr);
+    assert!(!stderr.contains("E1291"), "product VM path reached NixOS backend: {stderr}");
+    assert!(!root.join("systems/backend").exists());
 }
 
 
@@ -3096,7 +3091,7 @@ fn os_vm_run_requires_proved_installed_disk() {
 
 
 #[test]
-fn os_vm_prove_real_tier_rejects_fake_toolchain() {
+fn os_vm_prove_real_tier_is_retired_to_explicit_migration() {
     let root = Scratch::new("os-vm-real-root");
     let tools = Scratch::new("os-vm-real-tools");
     write_fake_vm_tools(&tools.path, true);
@@ -3121,15 +3116,78 @@ fn os_vm_prove_real_tier_rejects_fake_toolchain() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_jetos_stderr_snapshot_normalized(
-        "vm_real_fake_tools",
-        &stderr,
-        &[(tools.path.to_str().unwrap(), "<tools>")],
+    assert!(stderr.contains("`--real` is not a jetos VM option"), "{stderr}");
+    assert!(
+        stderr.contains("jet os migrate compare-nixos <host> --out <dir>"),
+        "{stderr}"
     );
     assert!(
         !root.join("systems/vm-proofs").exists(),
-        "real tier must fail before writing replacement proof with fake tools"
+        "retired product path must not write comparison proof"
     );
+}
+
+#[test]
+fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
+    let root = Scratch::new("os-migrate-nixos-root");
+    let out_dir = root.join("published");
+    let out = jetpack()
+        .args([
+            "os",
+            "migrate",
+            "compare-nixos",
+            "halcyon",
+            "--out",
+            out_dir.to_str().unwrap(),
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(config_example_dir())
+        .env("JETPACK_ROOT", &root.path)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "stdout: {}\nstderr: {stderr}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(stderr.contains("NixOS comparison needs online migration tools"), "{stderr}");
+    assert!(
+        stderr.contains("jet os migrate compare-nixos <host> --out <dir>"),
+        "{stderr}"
+    );
+    assert!(
+        !out_dir.exists(),
+        "comparison artifacts must not publish before guest proof"
+    );
+}
+
+#[test]
+fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
+    let vm = fs::read_to_string("crates/jetpack/src/JetOS/vm_commands.rs").unwrap();
+    let generation = fs::read_to_string("crates/jetpack/src/JetOS/generation.rs").unwrap();
+    let backend = fs::read_to_string("crates/jetpack/src/JetOS/nixos_backend.rs").unwrap();
+    let files = fs::read_to_string("crates/jetpack/src/JetOS/generation_files.rs").unwrap();
+    let syntax =
+        fs::read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs").unwrap();
+    assert!(!vm.contains("nixos_backend"), "{vm}");
+    assert!(!generation.contains("nixos_backend"), "{generation}");
+    assert!(!backend.contains("distroName = \"jetos\""), "{backend}");
+    assert!(syntax.contains("pub const OS_VERB_MIGRATE: &str = \"migrate\";"));
+    assert!(syntax.contains(
+        "pub const OS_MIGRATION_COMPARE_NIXOS: &str = \"compare-nixos\";"
+    ));
+    assert!(syntax.contains("pub const OS_MIGRATION_FLAG_OUT: &str = \"--out\";"));
+    assert!(syntax.contains("OS_VERB_MIGRATE,"));
+    for pattern in [
+        "sanitize_runtime_branding",
+        "replace_bytes_in_place",
+        "b\"NixOS\".as_slice(), b\"JetOS\"",
+    ] {
+        assert!(!files.contains(pattern), "rebranding rewrite remains: {pattern}");
+    }
 }
 
 

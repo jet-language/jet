@@ -1,4 +1,3 @@
-use super::generation_files::sanitize_runtime_branding_file;
 use super::identity::{jetos_release_label, render_jetos_os_release, write_jetos_identity_assets};
 use super::options_rendering::{
     boot_profile, collect_names, option_value, package_path_or_literal, parse_list_items,
@@ -134,7 +133,6 @@ pub(super) fn write_boot_facts(
     )?;
     if kernel_path.is_file() {
         copy_file_replace(&kernel_path, &boot_dir.join("kernel"))?;
-        sanitize_runtime_branding_file(&boot_dir.join("kernel"))?;
     } else {
         fs::write(
             boot_dir.join("kernel"),
@@ -144,7 +142,6 @@ pub(super) fn write_boot_facts(
     match initrd_path {
         Some(path) if path.is_file() => {
             copy_file_replace(&path, &boot_dir.join("initrd"))?;
-            sanitize_runtime_branding_file(&boot_dir.join("initrd"))?;
         }
         Some(path) => fs::write(
             boot_dir.join("initrd"),

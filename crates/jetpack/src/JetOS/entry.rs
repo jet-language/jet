@@ -1,6 +1,6 @@
 use super::commands::{
-    cmd_build, cmd_check, cmd_generations, cmd_image, cmd_init, cmd_lift, cmd_plan, cmd_proof,
-    cmd_rollback,
+    cmd_build, cmd_check, cmd_generations, cmd_image, cmd_init, cmd_lift, cmd_migrate, cmd_plan,
+    cmd_proof, cmd_rollback,
 };
 use super::generation::build_generation;
 use super::generations_activation::{
@@ -29,6 +29,7 @@ pub fn main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsFlags)
         Some(v) if v == Syntax::OS_VERB_INIT => cmd_init(theme, args, flags),
         Some(v) if v == Syntax::OS_VERB_LIFT => cmd_lift(theme, args, flags),
         Some(v) if v == Syntax::OS_VERB_IMPORT => cmd_import(theme, args, flags),
+        Some(v) if v == Syntax::OS_VERB_MIGRATE => cmd_migrate(theme, args, flags),
         Some(v) if v == Syntax::OS_VERB_IMAGE => cmd_image(theme, args, flags),
         Some(v) if v == Syntax::OS_VERB_VM => cmd_vm(theme, args, flags),
         Some("help" | "--help" | "-h") => {

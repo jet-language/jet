@@ -6,8 +6,7 @@ use super::generations_activation::{
     append_generation, generation_ledger_timestamp, now_secs,
 };
 use super::kernel_bootstrap::{run_kernel_bootstrap_builder, validate_boot_payloads};
-use super::nixos_backend::is_nixpkgs_source;
-use super::options_rendering::{boot_profile, option_value};
+use super::options_rendering::boot_profile;
 use super::store_realize::{
     desktop_default_required_packages, first_party_package_ref, jetos_runtime_package_ref,
     realize_ref, try_realize_ref,
@@ -64,47 +63,15 @@ pub(super) fn build_generation(
     // packages already named explicitly are not counted twice.
     let explicit_names: std::collections::BTreeSet<&str> =
         system.packages.iter().map(|p| p.name.as_str()).collect();
-    let explicit_total = system
-        .packages
-        .iter()
-        .filter(|pkg| {
-            !(flags.real_tier
-                && plan
-                    .table
-                    .declarations()
-                    .into_iter()
-                    .find(|(name, _, _)| name == &pkg.source)
-                    .map(|(_, _, via)| via == RefSpec::ProviderKind::Nix)
-                    .unwrap_or(pkg.source == "nixpkgs"))
-        })
-        .count();
+    let explicit_total = system.packages.len();
     let boot_for_progress = boot_profile(system);
     let implicit_systemd = boot_for_progress.init == "/sbin/init"
-        && !flags.real_tier
         && !explicit_names.contains(SYSTEMD_INIT_PACKAGE);
-    let implicit_desktop = if flags.real_tier {
-        0
-    } else {
-        desktop_default_required_packages(system)
-            .iter()
-            .filter(|name| !explicit_names.contains(*name))
-            .count()
-    };
-    let progress_kernel_defaulted =
-        option_value(system, &["boot.kernel", "kernel.package"]).is_none();
-    let progress_cachyos_source = plan
-        .table
-        .declarations()
-        .into_iter()
-        .any(|(_, upstream, _)| {
-            upstream
-                .strip_prefix("github:")
-                .and_then(|rest| rest.split('/').nth(1))
-                .map(|repo| repo.eq_ignore_ascii_case("nix-cachyos-kernel"))
-                .unwrap_or(false)
-        });
+    let implicit_desktop = desktop_default_required_packages(system)
+        .iter()
+        .filter(|name| !explicit_names.contains(*name))
+        .count();
     let implicit_cachyos = boot_for_progress.kernel == "CachyOS"
-        && !(flags.real_tier && (progress_kernel_defaulted || progress_cachyos_source))
         && !explicit_names.contains(CACHYOS_KERNEL_PACKAGE);
     let progress_total = explicit_total
         + usize::from(implicit_cachyos)
@@ -126,13 +93,6 @@ pub(super) fn build_generation(
                 return None;
             }
         };
-        // Real tier: the hidden system backend realizes the whole nixpkgs
-        // closure inside the disk build, so per-package realization here
-        // would only duplicate the work against the registry instead of the
-        // declared pin. First-party (path) packages still realize.
-        if flags.real_tier && is_nixpkgs_source(&spec.source, &plan.table) {
-            continue;
-        }
         progress_step += 1;
         let entry = match realize_ref(
             theme,
@@ -149,28 +109,7 @@ pub(super) fn build_generation(
         realized.push(entry);
     }
     let boot = boot_profile(system);
-    // In the real tier the hidden system backend realizes the kernel from the
-    // pinned package set, so a *defaulted* kernel needs no first-party
-    // package here. An explicit `boot.kernel` still goes through the backend
-    // mapping, which rejects unsupported kernels loudly (E1291).
-    let kernel_defaulted =
-        option_value(system, &["boot.kernel", "kernel.package"]).is_none();
-    // An explicit `.CachyOS` is satisfied in the real tier by a declared
-    // `nix-cachyos-kernel` flake source — the hidden backend realizes the
-    // kernel from that overlay, and rejects the option loudly otherwise.
-    let cachyos_source_declared = plan
-        .table
-        .declarations()
-        .into_iter()
-        .any(|(_, upstream, _)| {
-            upstream
-                .strip_prefix("github:")
-                .and_then(|rest| rest.split('/').nth(1))
-                .map(|repo| repo.eq_ignore_ascii_case("nix-cachyos-kernel"))
-                .unwrap_or(false)
-        });
     if boot.kernel == "CachyOS"
-        && !(flags.real_tier && (kernel_defaulted || cachyos_source_declared))
         && !realized
             .iter()
             .any(|entry| entry.name == CACHYOS_KERNEL_PACKAGE)
@@ -215,7 +154,6 @@ pub(super) fn build_generation(
         realized.push(entry);
     }
     if boot.init == "/sbin/init"
-        && !flags.real_tier
         && !realized
             .iter()
             .any(|entry| entry.name == SYSTEMD_INIT_PACKAGE)
@@ -261,15 +199,38 @@ pub(super) fn build_generation(
         };
         realized.push(entry);
     }
-    // Real tier: the hidden NixOS backend realizes display-manager/session
-    // packages from nixpkgs via mapped desktop options. Skip first-party
-    // GNOME scaffolding here (same rule as the CachyOS kernel skip above).
-    if !flags.real_tier {
-        for package in desktop_default_required_packages(system) {
-            if realized.iter().any(|entry| entry.name == *package) {
-                continue;
+    for package in desktop_default_required_packages(system) {
+        if realized.iter().any(|entry| entry.name == *package) {
+            continue;
+        }
+        let Some(raw) = jetos_runtime_package_ref(&plan.table, package, flags.offline) else {
+            theme.error_coded(
+                "E1288",
+                "jetos GNOME desktop package is missing",
+                "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
+                "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
+            );
+            return None;
+        };
+        let spec = match RefSpec::classify_in(&raw, &plan.table) {
+            Ok(spec) => spec,
+            Err(err) => {
+                crate::Output::ref_error(theme, &err);
+                return None;
             }
-            let Some(raw) = jetos_runtime_package_ref(&plan.table, package, flags.offline) else {
+        };
+        progress_step += 1;
+        let entry = match try_realize_ref(
+            theme,
+            &roots,
+            flags,
+            &plan.table,
+            &spec,
+            name_w.max(package.len()),
+            Some((&mut live, progress_step - 1, progress_total)),
+        ) {
+            Ok(entry) => entry,
+            Err(_) => {
                 theme.error_coded(
                     "E1288",
                     "jetos GNOME desktop package is missing",
@@ -277,37 +238,9 @@ pub(super) fn build_generation(
                     "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
                 );
                 return None;
-            };
-            let spec = match RefSpec::classify_in(&raw, &plan.table) {
-                Ok(spec) => spec,
-                Err(err) => {
-                    crate::Output::ref_error(theme, &err);
-                    return None;
-                }
-            };
-            progress_step += 1;
-            let entry = match try_realize_ref(
-                theme,
-                &roots,
-                flags,
-                &plan.table,
-                &spec,
-                name_w.max(package.len()),
-                Some((&mut live, progress_step - 1, progress_total)),
-            ) {
-                Ok(entry) => entry,
-                Err(_) => {
-                    theme.error_coded(
-                        "E1288",
-                        "jetos GNOME desktop package is missing",
-                        "D-JOS-DESKTOP1=A: the default jetos desktop profile needs first-party GNOME session packages in the system closure.",
-                        "declare first-party packages for gdm, gnome-session, and gnome-shell, or select a ratified non-GNOME desktop profile.",
-                    );
-                    return None;
-                }
-            };
-            realized.push(entry);
-        }
+            }
+        };
+        realized.push(entry);
     }
     if !run_kernel_bootstrap_builder(theme, &boot, &mut realized, !flags.offline, &dir) {
         return None;
