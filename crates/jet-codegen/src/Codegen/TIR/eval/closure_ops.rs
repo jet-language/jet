@@ -6,7 +6,7 @@ use crate::Comptime::Builtins::{as_bool, cmp};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
 
-use super::{unsupported, EvalCtx, Flow};
+use super::{materialize_view_mut_window, unsupported, EvalCtx, Flow};
 
 impl EvalCtx<'_> {
     pub(super) fn eval_closure_method(
@@ -16,7 +16,19 @@ impl EvalCtx<'_> {
         args: &[TExpr],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let recv_v = self.eval_expr(recv, scope)?;
+        let mut recv_v = self.eval_expr(recv, scope)?;
+        // ViewMut place-window → inclusive List for read-only map/fold.
+        if let CtValue::Struct {
+            type_name,
+            fields,
+        } = &recv_v
+        {
+            if type_name == "__JetViewMut"
+                && matches!(op, TClosureOp::ViewMap | TClosureOp::ViewFold)
+            {
+                recv_v = materialize_view_mut_window(fields, scope, self.span())?;
+            }
+        }
         let mut call1 = |this: &mut Self, item: CtValue| -> Result<CtValue, Diagnostic> {
             let f = args
                 .first()
@@ -69,8 +81,22 @@ impl EvalCtx<'_> {
                 Ok(CtValue::None(crate::AST::Type::Named("Any".into())))
             }
             TClosureOp::Any | TClosureOp::BagAny => {
-                let CtValue::List(items) = recv_v else {
-                    return Err(unsupported("any receiver", self.span()));
+                let items = match recv_v {
+                    CtValue::List(items) => items,
+                    CtValue::Struct { type_name, fields }
+                        if type_name == "Bag" || type_name.ends_with("Bag") =>
+                    {
+                        fields
+                            .into_iter()
+                            .find_map(|(name, value)| match (name.as_str(), value) {
+                                ("items", CtValue::List(items)) => Some(items),
+                                _ => None,
+                            })
+                            .unwrap_or_default()
+                    }
+                    _ => {
+                        return Err(unsupported("any receiver", self.span()));
+                    }
                 };
                 for item in items {
                     if as_bool(&call1(self, item)?, self.span())? {
@@ -277,7 +303,79 @@ impl EvalCtx<'_> {
                 }
                 Ok(CtValue::Map(out))
             }
-            _ => Err(unsupported("closure method variant", self.span())),
+            TClosureOp::EachMap => {
+                let CtValue::Map(entries) = recv_v else {
+                    return Err(unsupported("map each receiver", self.span()));
+                };
+                let f = args
+                    .first()
+                    .ok_or_else(|| unsupported("map each arg", self.span()))?;
+                for (key, value) in entries {
+                    let _ = self.apply_callable(
+                        f,
+                        vec![key.to_value(), value],
+                        scope,
+                    )?;
+                }
+                Ok(CtValue::Unit)
+            }
+            TClosureOp::Partition { .. } | TClosureOp::ParaPartition { .. } => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("partition receiver", self.span()));
+                };
+                let mut trues = Vec::new();
+                let mut falses = Vec::new();
+                for item in items {
+                    if as_bool(&call1(self, item.clone())?, self.span())? {
+                        trues.push(item);
+                    } else {
+                        falses.push(item);
+                    }
+                }
+                // AOT emits a 2-field tuple/struct with `false_` then `true_`
+                // (see INLINE_HOF_EXPECTED: split.false_ / split.true_).
+                Ok(CtValue::Struct {
+                    type_name: "Partition".to_string(),
+                    fields: vec![
+                        ("false_".to_string(), CtValue::List(falses)),
+                        ("true_".to_string(), CtValue::List(trues)),
+                    ],
+                })
+            }
+            TClosureOp::Scan => {
+                if args.len() < 2 {
+                    return Err(unsupported("scan arity", self.span()));
+                }
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("scan receiver", self.span()));
+                };
+                let mut acc = self.eval_expr(&args[0], scope)?;
+                let f = &args[1];
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    acc = self.apply_callable(f, vec![acc, item], scope)?;
+                    out.push(acc.clone());
+                }
+                Ok(CtValue::List(out))
+            }
+            TClosureOp::GroupBy => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("group_by receiver", self.span()));
+                };
+                let mut out: std::collections::BTreeMap<crate::AST::CtKey, Vec<CtValue>> =
+                    std::collections::BTreeMap::new();
+                for item in items {
+                    let key_v = call1(self, item.clone())?;
+                    let key = crate::AST::CtKey::from_value(key_v)
+                        .ok_or_else(|| unsupported("this group_by key type", self.span()))?;
+                    out.entry(key).or_default().push(item);
+                }
+                Ok(CtValue::Map(
+                    out.into_iter()
+                        .map(|(k, vs)| (k, CtValue::List(vs)))
+                        .collect(),
+                ))
+            }
         }
     }
 
@@ -322,25 +420,40 @@ impl EvalCtx<'_> {
         &mut self,
         lam: &TLambda,
         argv: Vec<CtValue>,
-        outer: &HashMap<String, CtValue>,
+        outer: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let mut child = outer.clone();
+        let param_names: std::collections::HashSet<String> =
+            lam.source_params.iter().cloned().collect();
         for (i, name) in lam.source_params.iter().enumerate() {
             child.insert(
                 name.clone(),
                 argv.get(i).cloned().unwrap_or(CtValue::Unit),
             );
         }
-        match &lam.executable {
-            TLambdaBody::Expr(e) => self.eval_expr(e, &mut child),
+        let result = match &lam.executable {
+            TLambdaBody::Expr(e) => self.eval_expr(e, &mut child)?,
             TLambdaBody::Block(stmts) => match self.exec_stmts(stmts, &mut child)? {
-                Flow::Return(v) => Ok(v),
-                Flow::Normal => Ok(CtValue::Unit),
-                other => Err(unsupported(
-                    &format!("control flow {other:?} escaping lambda"),
-                    self.span(),
-                )),
+                Flow::Return(v) => v,
+                Flow::Normal => CtValue::Unit,
+                other => {
+                    return Err(unsupported(
+                        &format!("control flow {other:?} escaping lambda"),
+                        self.span(),
+                    ));
+                }
             },
+        };
+        // FnMut capture write-back: mutations to outer locals (Set.add, Map.add, …)
+        // must be visible after the lambda returns (#777 pure-parity HOF).
+        for (k, v) in child {
+            if param_names.contains(&k) {
+                continue;
+            }
+            if outer.contains_key(&k) {
+                outer.insert(k, v);
+            }
         }
+        Ok(result)
     }
 }

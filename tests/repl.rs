@@ -701,6 +701,21 @@ fn repl_net_style_values_exact_transcript() {
 }
 
 #[test]
+fn repl_crypto_expert_ports_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/crypto_expert_ports.txt"));
+}
+
+#[test]
+fn repl_crypto_expert_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/crypto_expert.txt"));
+}
+
+#[test]
+fn repl_encoding_xml_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/encoding_xml.txt"));
+}
+
+#[test]
 fn repl_net_runtime_call_still_requires_authority() {
     let out = run_transcript(
         &["use core.net as net", "net.tcp_connect(\"127.0.0.1:1\")"],

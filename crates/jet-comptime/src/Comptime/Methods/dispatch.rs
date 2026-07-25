@@ -77,7 +77,7 @@ fn unique_values(items: Vec<CtValue>) -> Vec<CtValue> {
     unique
 }
 
-fn is_pure_tier2_call(module: &str, method: &str) -> bool {
+pub(crate) fn is_pure_tier2_call(module: &str, method: &str) -> bool {
     matches!((module, method),
         ("core.io", "style_force")
         | ("core.net", "ip_addr" | "ip_to_string" | "ip_is_ipv4")
@@ -104,7 +104,7 @@ fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>
     }
 }
 
-fn apply_seeded_rng_method(
+pub fn apply_seeded_rng_method(
     state: &mut u64,
     method: &str,
     args: &mut [CtValue],

@@ -1,4 +1,7 @@
-use crate::AST::{AccessConvention, BinOp, EnumLitArg, Expr, IndexKind, OrFallback, StrPart, TryConvert, Type};
+use crate::AST::{
+    AccessConvention, BinOp, EnumLitArg, Expr, IndexKind, OrFallback, StrPart, TryConvert, Type,
+    TypedLitBody,
+};
 use crate::Codegen::Cx;
 use crate::Codegen::emit_named_fn_value;
 use crate::Codegen::escape_rust_str;
@@ -188,6 +191,58 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     let out = lower_expr_inner(e, cx, env);
     DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
     out
+}
+
+fn expr_tag(e: &Expr) -> &'static str {
+    match e {
+        Expr::Str(..) => "Str",
+        Expr::StrMatchLit(..) => "StrMatchLit",
+        Expr::BinMatchLit(..) => "BinMatchLit",
+        Expr::Int(..) => "Int",
+        Expr::Float(..) => "Float",
+        Expr::Bool(..) => "Bool",
+        Expr::Char(..) => "Char",
+        Expr::ListLit(..) => "ListLit",
+        Expr::Spread(..) => "Spread",
+        Expr::MapLit(..) => "MapLit",
+        Expr::Index { .. } => "Index",
+        Expr::Slice { .. } => "Slice",
+        Expr::Ident(..) => "Ident",
+        Expr::Call(..) => "Call",
+        Expr::Unary(..) => "Unary",
+        Expr::Binary(..) => "Binary",
+        Expr::CompareChain { .. } => "CompareChain",
+        Expr::UnitLit { .. } => "UnitLit",
+        Expr::Deref(..) => "Deref",
+        Expr::RawOf(..) => "RawOf",
+        Expr::Copy(..) => "Copy",
+        Expr::Place(..) => "Place",
+        Expr::Field(..) => "Field",
+        Expr::OptField { .. } => "OptField",
+        Expr::MethodCall { .. } => "MethodCall",
+        Expr::If { .. } => "If",
+        Expr::StructLit { .. } => "StructLit",
+        Expr::EnumLit { .. } => "EnumLit",
+        Expr::Tainted(..) => "Tainted",
+        Expr::Present(..) => "Present",
+        Expr::Absent(_) => "Absent",
+        Expr::Todo { .. } => "Todo",
+        Expr::ReduceMarker(..) => "ReduceMarker",
+        Expr::Ok(..) => "Ok",
+        Expr::Err(..) => "Err",
+        Expr::Try(..) => "Try",
+        Expr::OrFallback { .. } => "OrFallback",
+        Expr::TupleLit(..) => "TupleLit",
+        Expr::Lambda(..) => "Lambda",
+        Expr::FanOut { .. } => "FanOut",
+        Expr::PtrFromAddr { .. } => "PtrFromAddr",
+        Expr::TypedLit { .. } => "TypedLit",
+        Expr::Paren(..) => "Paren",
+        Expr::PatternTest { .. } => "PatternTest",
+        Expr::ComptimeSplice { .. } => "ComptimeSplice",
+        Expr::CallValue { .. } => "CallValue",
+        Expr::IncDec { .. } => "IncDec",
+    }
 }
 
 fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
@@ -750,6 +805,20 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 return TExpr {
                     ty: unit_type(),
                     kind: TExprKind::Drop(Box::new(arg)),
+                };
+            }
+            // D-TOOL4: `expect(x)` builds a snapshot harness holder. At TirBridge
+            // comptime the holder is the value itself — `consume(expect(x))` only
+            // needs the binding to exist; `.snapshot()` is a separate HostCall.
+            if call.name == Syntax::BUILTIN_EXPECT
+                && !cx.sigs.contains_key(&call.name)
+                && !env.locals.contains_key(&call.name)
+                && call.args.len() == 1
+            {
+                let arg = lower_expr(&call.args[0].expr, cx, env);
+                return TExpr {
+                    ty: arg.ty.clone(),
+                    kind: TExprKind::Clone(Box::new(arg)),
                 };
             }
             // c109 Phase 26: the rich-runtime-report builtins (S36) — render the whole
@@ -1478,7 +1547,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
                 if env.ty_of(enum_name).is_none()
-                    && cx.variant_owner.get(member).map(String::as_str) == Some(enum_name.as_str())
+                    && (cx.variant_owner.get(member).map(String::as_str) == Some(enum_name.as_str())
+                        // Fragment eval (#722): REPL/comptime often lacks `variant_owner`
+                        // on empty_cx; an unbound PascalCase type.Variant is a unit enum lit.
+                        // Skip numeric bounds (`F32.MAX`) — those are HostCall::NumericBounds.
+                        || (super::is_eval_fragment()
+                            && enum_name
+                                .chars()
+                                .next()
+                                .is_some_and(|c| c.is_ascii_uppercase())
+                            && crate::AST::numeric_type_from_name(enum_name).is_none()
+                            && !is_numeric_bounds_const(member)))
                 {
                     // c109 Phase 24: a FOREIGN enum's unit literal (`NoteType.User` in
                     // search.jet) qualifies with the module path, exactly as `emit_expr`'s
@@ -2269,14 +2348,111 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
-        // Residual TypedLit after incomplete elaboration: refuse with Todo so
-        // interpreter/deopt returns E0956 instead of aborting (I2 / #778).
-        Expr::TypedLit { .. } => TExpr {
-            ty: Type::Int,
-            kind: TExprKind::Todo {
-                line: 0,
-                expected_type: "typed literal not elaborated".into(),
-            },
+        // Comptime/TirBridge can evaluate function bodies before sema elaborates
+        // `Type.{ … }` (eval_comptime_items runs early). Mirror elaborate_typed_lit.
+        Expr::TypedLit { head, body, span } => {
+            let Some(head) = head.clone() else {
+                return TExpr {
+                    ty: Type::Int,
+                    kind: TExprKind::Todo {
+                        line: 0,
+                        expected_type: "inferred typed literal without head".into(),
+                    },
+                };
+            };
+            let rewritten = match (head.clone(), body.clone()) {
+                (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
+                    Expr::ListLit(Vec::new(), *span)
+                }
+                (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(elems)) => {
+                    Expr::ListLit(elems, *span)
+                }
+                (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Value(inner)) => {
+                    Expr::ListLit(vec![*inner], *span)
+                }
+                (Type::Map { .. }, TypedLitBody::Empty) => Expr::MapLit(Vec::new(), *span),
+                (Type::Map { .. }, TypedLitBody::Entries(entries)) => {
+                    Expr::MapLit(entries, *span)
+                }
+                (Type::Named(name), TypedLitBody::Fields(fields)) => Expr::StructLit {
+                    type_name: name,
+                    type_args: Vec::new(),
+                    import_ns: None,
+                    as_trait: None,
+                    fields,
+                    inferred: false,
+                    span: *span,
+                },
+                (Type::Apply { name, args }, TypedLitBody::Fields(fields)) => Expr::StructLit {
+                    type_name: name,
+                    type_args: args,
+                    import_ns: None,
+                    as_trait: None,
+                    fields,
+                    inferred: false,
+                    span: *span,
+                },
+                (Type::Named(name), TypedLitBody::Empty) => Expr::StructLit {
+                    type_name: name,
+                    type_args: Vec::new(),
+                    import_ns: None,
+                    as_trait: None,
+                    fields: Vec::new(),
+                    inferred: false,
+                    span: *span,
+                },
+                (Type::Apply { name, args }, TypedLitBody::Empty) => Expr::StructLit {
+                    type_name: name,
+                    type_args: args,
+                    import_ns: None,
+                    as_trait: None,
+                    fields: Vec::new(),
+                    inferred: false,
+                    span: *span,
+                },
+                (_, TypedLitBody::Value(inner)) => {
+                    // Scalar `U8.{ 13 }` / `F32.{ -0.0 }` — lower the value, then
+                    // retag with head width (including nested float operands so
+                    // unary/binary keep F32/F64 lanes matched).
+                    let mut t = lower_expr(&inner, cx, env);
+                    retag_numeric_width(&mut t, &head);
+                    return t;
+                }
+                (_, TypedLitBody::Elements(elems)) if elems.len() == 1 => {
+                    let mut t = lower_expr(&elems[0], cx, env);
+                    retag_numeric_width(&mut t, &head);
+                    return t;
+                }
+                _ => {
+                    return TExpr {
+                        ty: Type::Int,
+                        kind: TExprKind::Todo {
+                            line: 0,
+                            expected_type: format!(
+                                "typed literal body vs head `{}`",
+                                head.name()
+                            ),
+                        },
+                    };
+                }
+            };
+            let mut t = lower_expr(&rewritten, cx, env);
+            // Prefer the typed head when the rewritten form under-specifies (empty list/map).
+            if matches!(
+                head,
+                Type::List(_)
+                    | Type::FixedList { .. }
+                    | Type::Map { .. }
+                    | Type::Named(_)
+                    | Type::Apply { .. }
+                    | Type::Int
+                    | Type::IntN { .. }
+                    | Type::Float
+                    | Type::Float32
+            ) {
+                t.ty = head;
+            }
+            t
         },
         Expr::Paren(inner, _) => lower_expr(inner, cx, env),
         Expr::PatternTest {
@@ -2286,13 +2462,34 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
         // Subset/gate drift: refuse with Todo so the interpreter returns E0956
         // instead of aborting the process (I2: never panic on user programs).
-        _ => TExpr {
+        other => TExpr {
             ty: Type::Int,
             kind: TExprKind::Todo {
                 line: 0,
-                expected_type: "expression outside TIR subset".into(),
+                expected_type: format!("expression outside TIR subset: {}", expr_tag(other)),
             },
         },
+    }
+}
+
+/// Retag a lowered scalar typed-literal body with the head's numeric width.
+/// Nested float unary/binary operands inherit the same width so TirBridge
+/// doesn't mix F32/F64 in `F32.{ -0.0 }` / `F32.{ max + max }`.
+fn retag_numeric_width(expr: &mut TExpr, head: &Type) {
+    expr.ty = head.clone();
+    if !matches!(head, Type::Float | Type::Float32) {
+        return;
+    }
+    match &mut expr.kind {
+        TExprKind::Unary { operand, .. } => retag_numeric_width(operand, head),
+        TExprKind::Binary { lhs, rhs, .. } => {
+            retag_numeric_width(lhs, head);
+            retag_numeric_width(rhs, head);
+        }
+        TExprKind::Clone(inner) | TExprKind::MaterializeView(inner) => {
+            retag_numeric_width(inner, head)
+        }
+        _ => {}
     }
 }
 

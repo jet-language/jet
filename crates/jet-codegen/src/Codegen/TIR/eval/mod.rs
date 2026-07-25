@@ -44,6 +44,36 @@ pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// Resolve a `__JetViewMut { base, start, end }` handle to the inclusive window List.
+pub(super) fn materialize_view_mut_window(
+    fields: &[(String, CtValue)],
+    scope: &HashMap<String, CtValue>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let mut base = None;
+    let mut start = None;
+    let mut end = None;
+    for (name, value) in fields {
+        match (name.as_str(), value) {
+            ("base", CtValue::Str(s)) => base = Some(s.clone()),
+            ("start", CtValue::Int(n)) => start = Some(*n),
+            ("end", CtValue::Int(n)) => end = Some(*n),
+            _ => {}
+        }
+    }
+    let (base, start, end) = match (base, start, end) {
+        (Some(b), Some(s), Some(e)) => (b, s, e),
+        _ => return Err(unsupported("view-mut fields", span)),
+    };
+    let Some(CtValue::List(items)) = scope.get(&base) else {
+        return Err(unsupported("view-mut owner", span));
+    };
+    if start < 0 || end < start || end as usize >= items.len() {
+        return Err(unsupported("view-mut bounds", span));
+    }
+    Ok(CtValue::List(items[start as usize..=end as usize].to_vec()))
+}
+
 #[derive(Debug)]
 pub(super) enum Flow {
     Normal,
@@ -412,12 +442,16 @@ fn eval_expr_hook(
     req: &mut Comptime::TirBridge::ExprEvalRequest<'_>,
 ) -> Result<CtValue, Diagnostic> {
     let tir = lower_expr_for_eval(req.expr, req.globals, req.core_imports)?;
-    let cx = empty_cx();
+    let mut cx = empty_cx();
+    cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs
         .values()
         .filter_map(|f| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| TIR::lower_func(f, &cx))).ok()
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_func(f, &cx))
+            }))
+            .ok()
         })
         .collect();
     let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();
@@ -454,12 +488,16 @@ fn eval_block_hook(
     req: &mut Comptime::TirBridge::BlockEvalRequest<'_>,
 ) -> Result<Comptime::TirBridge::StmtOutcome, Diagnostic> {
     let tir = lower_stmts_for_eval(req.stmts, req.globals, req.core_imports)?;
-    let cx = empty_cx();
+    let mut cx = empty_cx();
+    cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs
         .values()
         .filter_map(|f| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| TIR::lower_func(f, &cx))).ok()
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_func(f, &cx))
+            }))
+            .ok()
         })
         .collect();
     let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();

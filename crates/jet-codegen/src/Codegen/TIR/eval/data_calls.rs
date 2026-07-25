@@ -271,6 +271,73 @@ impl EvalCtx<'_> {
                 }
                 Ok(CtValue::List(out))
             }
+            "pivot_sum" => {
+                let rows = match self.eval_expr(&args[0], scope)? {
+                    CtValue::List(xs) => xs,
+                    _ => return Err(unsupported("`data.pivot_sum` needs a list", span)),
+                };
+                let row_key = &args[1];
+                let col_key = &args[2];
+                let value_f = &args[3];
+                let mut groups: BTreeMap<String, (i64, f64, String, String)> = BTreeMap::new();
+                for row in &rows {
+                    let left = self.apply_callable(row_key, vec![row.clone()], scope)?;
+                    let right = self.apply_callable(col_key, vec![row.clone()], scope)?;
+                    let left_s = match &left {
+                        CtValue::Str(s) => s.clone(),
+                        other => other.jet_show(),
+                    };
+                    let right_s = match &right {
+                        CtValue::Str(s) => s.clone(),
+                        other => other.jet_show(),
+                    };
+                    let key = format!("{left_s}|{right_s}");
+                    let amount = match self.apply_callable(value_f, vec![row.clone()], scope)? {
+                        CtValue::Float(f) => f.as_f64(),
+                        CtValue::Int(n) => n as f64,
+                        _ => {
+                            return Err(unsupported(
+                                "`data.pivot_sum` value closure must return Float",
+                                span,
+                            ));
+                        }
+                    };
+                    let entry = groups
+                        .entry(key)
+                        .or_insert((0, 0.0, left_s, right_s));
+                    entry.0 += 1;
+                    entry.1 += amount;
+                }
+                let cell_ty = if checked { "DataPivotCell" } else { "DataGroup" };
+                let out: Vec<CtValue> = groups
+                    .into_iter()
+                    .map(|(_, (count, sum, row, column))| {
+                        let mean = if count == 0 {
+                            0.0
+                        } else {
+                            sum / count as f64
+                        };
+                        // Always expose row_key/column_key — AOT DataPivotCell and
+                        // the parity harness read those fields (not only `key`).
+                        ct_struct(
+                            cell_ty,
+                            vec![
+                                ("row_key", CtValue::Str(row.clone())),
+                                ("column_key", CtValue::Str(column.clone())),
+                                ("key", CtValue::Str(format!("{row}|{column}"))),
+                                ("count", CtValue::Int(count)),
+                                ("sum", CtValue::Float(CtFloat::f64(sum))),
+                                ("mean", CtValue::Float(CtFloat::f64(mean))),
+                            ],
+                        )
+                    })
+                    .collect();
+                if checked {
+                    Ok(ok(CtValue::List(out)))
+                } else {
+                    Ok(CtValue::List(out))
+                }
+            }
             "bar_text" | "bar_svg" => {
                 let groups = self.eval_expr(&args[0], scope)?;
                 let v = apply_core_call(
@@ -291,7 +358,7 @@ impl EvalCtx<'_> {
             }
             "table" | "rows" | "series" | "values" | "schema" | "missing_count" | "lazy"
             | "plan" | "lazy_filter" | "lazy_sort_by" | "collect" | "sort_by" | "inner_join"
-            | "left_join" | "pivot_sum" | "describe" | "rolling_mean" | "csv_reader"
+            | "left_join" | "describe" | "rolling_mean" | "csv_reader"
             | "json_reader" => Err(unsupported(
                 &format!("`core.data.{method}()` at comptime (impure tier)"),
                 span,

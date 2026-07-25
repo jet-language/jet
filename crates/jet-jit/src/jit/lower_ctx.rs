@@ -4,9 +4,9 @@ use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
-    self, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr, TExprKind, TForInMethod,
-    THandleOp, TIfCond, TJitSpawnLambda, TLocal, TMethodRef, TModuleCallForm, TOrFallback, TPlace,
-    TStaticOwner, TStmt, TStrPart, TNumericOp,
+    self, TBuiltinOp, TCallArg, TClosureOp, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
+    TForInMethod, THandleOp, TIfCond, TJitSpawnLambda, TLambdaBody, TLocal, TMethodRef,
+    TModuleCallForm, TNumericOp, TOrFallback, TPlace, TStaticOwner, TStmt, TStrPart,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, Type, UnOp};
 use std::collections::HashMap;
@@ -897,7 +897,12 @@ impl LowerCtx<'_, '_> {
                 if *columnar {
                     return Err("jit for-in columnar unsupported".to_string());
                 }
-                if *by_value {
+                // `by_value` is set for Stream / Iter / HttpBodyChunks. JIT can
+                // only walk Iter<T> because producers materialize list handles
+                // (true JetIter cannot cross the host-shim ABI yet).
+                if *by_value
+                    && !jet_foundation::Collections::is_iter_type(&collection.ty)
+                {
                     return Err("jit for-in by-value stream unsupported".to_string());
                 }
                 let stride = match step {
@@ -2290,7 +2295,9 @@ impl LowerCtx<'_, '_> {
                 Err("jit pattern-matches expression unsupported".to_string())
             }
             TExprKind::OptionLift2 { .. } => Err("jit Option.lift2 unsupported".to_string()),
-            TExprKind::ClosureMethod { .. } => Err("jit closure method unsupported".to_string()),
+            TExprKind::ClosureMethod { recv, op, args } => {
+                self.lower_closure_method(recv, op, args)
+            }
             TExprKind::NumericMethod { recv, op } => self.lower_numeric_method(recv, op),
             TExprKind::DistinctConvert {
                 arg,
@@ -2395,6 +2402,21 @@ impl LowerCtx<'_, '_> {
                 .module
                 .declare_func_in_func(self.host.coll.list_get_opt, self.b.func);
             let call = self.b.ins().call(host_ref, &[list, idx]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        // Map.get(k) ?? … — same 0 / value+1 Option encoding as list_get_opt.
+        if let TExprKind::BuiltinMethod {
+            recv,
+            op: TBuiltinOp::GetMap,
+            args,
+        } = &value.kind
+        {
+            let map = self.lower_expr(recv)?;
+            let key = self.lower_expr(&args[0])?;
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
+            let call = self.b.ins().call(host_ref, &[map, key]);
             return Ok(self.b.inst_results(call)[0]);
         }
         Err("jit list get_opt status unsupported".to_string())
@@ -2506,13 +2528,33 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::InsertList => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::RemoveMap => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::RemoveList { .. } => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::GetMap => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::GetMap => {
+                let key = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, key]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::First => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Last => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Contains => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::IndexOf => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Reverse => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Sum { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Sum { float: false } => {
+                if !matches!(
+                    jit_list_iter_elem_type(&recv.ty),
+                    Some(Type::Int)
+                ) {
+                    return Err("jit builtin method unsupported".to_string());
+                }
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_sum_i64, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::Sum { float: true } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Product { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Min { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Max { .. } => Err("jit builtin method unsupported".to_string()),
@@ -2581,12 +2623,33 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::ContainsKey => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ToString => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::MatchGroup => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Take => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Skip => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::StepBy => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Dedup => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Chunks => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Windows => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Take => {
+                self.lower_iter_adapter(self.host.coll.iter_take, recv_val, Some(&args[0]), None)
+            }
+            TBuiltinOp::Skip => {
+                self.lower_iter_adapter(self.host.coll.iter_skip, recv_val, Some(&args[0]), None)
+            }
+            TBuiltinOp::StepBy => {
+                self.lower_iter_adapter(self.host.coll.iter_step_by, recv_val, Some(&args[0]), None)
+            }
+            TBuiltinOp::Dedup => {
+                let string_elems = matches!(
+                    jit_list_iter_elem_type(&recv.ty),
+                    Some(Type::String)
+                );
+                self.lower_iter_adapter(
+                    self.host.coll.iter_dedup,
+                    recv_val,
+                    None,
+                    Some(if string_elems { 1 } else { 0 }),
+                )
+            }
+            TBuiltinOp::Chunks => {
+                self.lower_iter_adapter(self.host.coll.iter_chunks, recv_val, Some(&args[0]), None)
+            }
+            TBuiltinOp::Windows => {
+                self.lower_iter_adapter(self.host.coll.iter_windows, recv_val, Some(&args[0]), None)
+            }
             TBuiltinOp::Enumerate { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Zip { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::OptionZip { .. } => Err("jit builtin method unsupported".to_string()),
@@ -2631,11 +2694,10 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::TryCollect => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ViewNew { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ViewMutNew { .. } => Err("jit builtin method unsupported".to_string()),
-            // D-ITERTOOLS1=A: Iter materialization — rustc/dev path owns this; JIT
-            // gap stays #729 (do not implement here).
-            TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
-                Err("jit builtin method unsupported".to_string())
-            }
+            // D-ITERTOOLS1=A: JIT ABI can't carry true JetIter handles. Producers
+            // (String.split, list adapters) already return list handles of the same
+            // pieces AOT would yield lazily — to_list / collect is identity.
+            TBuiltinOp::IterToList | TBuiltinOp::IterCollect => Ok(recv_val),
         }
     }
 
@@ -2656,7 +2718,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[value, op]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TNumericOp::BitCount(name) => {
+            TNumericOp::BitCount { method: name, .. } => {
                 let op = match name.as_str() {
                     "count_ones" => 0,
                     "count_zeros" => 1,
@@ -3565,6 +3627,19 @@ impl LowerCtx<'_, '_> {
                     .ty
                     .quantity_parts()
                     .map_or(&inner.ty, |(base, _)| base);
+                // List / materialized Iter — same jet_show `[a, b, c]` AOT uses.
+                if let Some(elem) = jit_list_iter_elem_type(print_ty) {
+                    let string_elems = matches!(elem, Type::String);
+                    let flag = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, if string_elems { 1 } else { 0 });
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.print_list, self.b.func);
+                    self.b.ins().call(host_ref, &[val, flag]);
+                    return Ok(());
+                }
                 let host_id = match print_ty {
                     Type::Int => self.host.print_i64,
                     Type::String => self.host.print_str,
@@ -3581,6 +3656,161 @@ impl LowerCtx<'_, '_> {
         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
         self.b.ins().call(host_ref, &[arg]);
         Ok(())
+    }
+
+    fn lower_iter_adapter(
+        &mut self,
+        host: FuncId,
+        recv_val: Value,
+        n_arg: Option<&TExpr>,
+        const_flag: Option<i64>,
+    ) -> Result<Value, String> {
+        let second = if let Some(n) = n_arg {
+            self.lower_expr(n)?
+        } else {
+            self.b.ins().iconst(types::I64, const_flag.unwrap_or(0))
+        };
+        let host_ref = self.module.declare_func_in_func(host, self.b.func);
+        let call = self.b.ins().call(host_ref, &[recv_val, second]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    /// Native Map/Filter over Int list/Iter handles — lambda body inlined in
+    /// Cranelift (no host closure table). Other closure ops stay named gaps.
+    fn lower_closure_method(
+        &mut self,
+        recv: &TExpr,
+        op: &TClosureOp,
+        args: &[TExpr],
+    ) -> Result<Value, String> {
+        match op {
+            TClosureOp::Map | TClosureOp::MapMut => self.lower_iter_map_filter(recv, args, false),
+            TClosureOp::Filter => self.lower_iter_map_filter(recv, args, true),
+            _ => Err("jit closure method unsupported".to_string()),
+        }
+    }
+
+    fn lower_iter_map_filter(
+        &mut self,
+        recv: &TExpr,
+        args: &[TExpr],
+        is_filter: bool,
+    ) -> Result<Value, String> {
+        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(elem_ty, Type::Int) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let lam_expr = args
+            .first()
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        let TExprKind::Lambda(lam) = &lam_expr.kind else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        if !lam.prep.is_empty() || lam.source_params.len() != 1 {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let TLambdaBody::Expr(body_expr) = &lam.executable else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        let param_place = TIR::local_place(&lam.source_params[0]);
+        let recv_val = self.lower_expr(recv)?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let out_call = self.b.ins().call(new_ref, &[]);
+        let out_val = self.b.inst_results(out_call)[0];
+        let out_var = self.fresh_var(types::I64);
+        self.b.def_var(out_var, out_val);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+
+        let old_var = self.vars.remove(&param_place);
+        let old_ty = self.var_tys.remove(&param_place);
+        let param_var = self.fresh_var(types::I64);
+        self.b.def_var(param_var, elem);
+        self.vars.insert(param_place.clone(), param_var);
+        self.var_tys.insert(param_place.clone(), Type::Int);
+
+        let pred_or_mapped = self.lower_expr(body_expr)?;
+
+        self.vars.remove(&param_place);
+        self.var_tys.remove(&param_place);
+        if let Some(v) = old_var {
+            self.vars.insert(param_place.clone(), v);
+        }
+        if let Some(t) = old_ty {
+            self.var_tys.insert(param_place, t);
+        }
+
+        if is_filter {
+            let keep_block = self.b.create_block();
+            let zero_b = self.b.ins().iconst(types::I8, 0);
+            let keep = self.b.ins().icmp(IntCC::NotEqual, pred_or_mapped, zero_b);
+            self.b.ins().brif(keep, keep_block, &[], step, &[]);
+            self.b.switch_to_block(keep_block);
+            self.b.seal_block(keep_block);
+            let out = self.b.use_var(out_var);
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.list_push, self.b.func);
+            self.b.ins().call(push_ref, &[out, elem]);
+            self.b.ins().jump(step, &[]);
+        } else {
+            let out = self.b.use_var(out_var);
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.list_push, self.b.func);
+            self.b.ins().call(push_ref, &[out, pred_or_mapped]);
+            self.b.ins().jump(step, &[]);
+        }
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        Ok(self.b.use_var(out_var))
     }
 }
 

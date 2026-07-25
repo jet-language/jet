@@ -212,6 +212,25 @@ pub(super) fn apply_static(
     }
     let n = arity(type_name)?;
     Some(match method {
+        "new" => {
+            if args.len() != n {
+                return Some(Err(unsupported(
+                    &format!("`{type_name}.new` needs {n} lane arguments"),
+                    span,
+                )));
+            }
+            list_to_lanes(&args, n, span).map(|lanes| {
+                let lanes = if is_f32_lanes(type_name) {
+                    lanes
+                        .into_iter()
+                        .map(|v| (v as f32) as f64)
+                        .collect::<Vec<_>>()
+                } else {
+                    lanes
+                };
+                from_lanes(type_name, &lanes)
+            })
+        }
         "splat" => {
             let Some(arg) = args.first() else {
                 return Some(Err(unsupported(
@@ -406,7 +425,7 @@ pub(super) fn apply_method(
     })
 }
 
-pub(super) fn lane_at(recv: &CtValue, index: i64, span: Span) -> Option<Result<CtValue, Diagnostic>> {
+pub fn lane_at(recv: &CtValue, index: i64, span: Span) -> Option<Result<CtValue, Diagnostic>> {
     let (name, vals) = lanes(recv)?;
     if !matches!(
         name,
@@ -429,7 +448,7 @@ pub(super) fn lane_at(recv: &CtValue, index: i64, span: Span) -> Option<Result<C
 }
 
 /// D-NUMOPS1: `wrapping`/`saturating`/`checked` over a single integer binary op.
-pub(super) fn overflow_opt(
+pub fn overflow_opt(
     mode: &str,
     op: BinOp,
     left: i64,

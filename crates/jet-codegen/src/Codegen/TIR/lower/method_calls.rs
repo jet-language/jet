@@ -1041,13 +1041,58 @@ pub(crate) fn lower_method_call(
         }
     }
 
-    // c109 Phase 10: a core/stdlib module call `alias.method(args)`. The gate proved
-    // `recv_type == None` + receiver is a core-import alias + `core_call_covered`.
+    // c109 Phase 10: a core/stdlib module call `alias.method(args)`.
     // Mirror `emit_core_call` (Source/Codegen/Expression.rs): resolve the module here
     // (total), lower args PLAINLY (no clone/borrow wrappers — `emit_core_call`'s
     // `arg(i)` is a raw `emit_expr`), and carry the return type from the authoritative
     // `core_fixed_sig` table. Tried BEFORE the builtin shape (a core method named
     // `get`/`split`/… must not be claimed by the receiver-keyed builtin op).
+    //
+    // #777 / TirBridge: prefer the core-import alias even when `recv_type` is Some —
+    // REPL/comptime fragments often mark the alias as a type-shaped receiver, which
+    // would otherwise fall through to `StaticCall { User(alias) }` and E0956.
+    if let Expr::Ident(alias, _) = receiver {
+        if !env.locals.contains_key(alias) {
+            if let Some(module) = cx.core_imports.get(alias).cloned() {
+                if let Some(t) = lower_core_closure_call(&module, method, args, cx, env) {
+                    return t;
+                }
+                let targs: Vec<TExpr> =
+                    args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                let widen_to_vec = core_widen_to_vec(&module, method, &targs);
+                let ty = if module == "core.mem" {
+                    match method {
+                        "address_of" => Type::Int,
+                        "volatile_read" => targs
+                            .first()
+                            .and_then(|a| crate::Sema::ptr_elem(&a.ty))
+                            .unwrap_or_else(unit_type),
+                        "volatile_write" => unit_type(),
+                        _ => core_call_return_ty(&module, method),
+                    }
+                } else if crate::Sema::is_polymorphic_core_special(&module, method) {
+                    resolved_ret.cloned().unwrap_or_else(unit_type)
+                } else if module == "core.event"
+                    && matches!(method, "new" | "with_policy" | "hook" | "async_result")
+                {
+                    resolved_ret
+                        .cloned()
+                        .unwrap_or_else(|| core_call_return_ty(&module, method))
+                } else {
+                    core_call_return_ty(&module, method)
+                };
+                return TExpr {
+                    ty,
+                    kind: TExprKind::CoreCall {
+                        module,
+                        method: method.to_string(),
+                        args: targs,
+                        widen_to_vec,
+                    },
+                };
+            }
+        }
+    }
     if recv_type.is_none() {
         if matches!(receiver, Expr::Field(..)) {
             if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, env)
@@ -1067,58 +1112,6 @@ pub(crate) fn lower_method_call(
         }
         if let Expr::Ident(alias, _) = receiver {
             if !env.locals.contains_key(alias) {
-                if let Some(module) = cx.core_imports.get(alias).cloned() {
-                    // c109 Phase 13: a closure-taking core call (spawn/serve/guard).
-                    // The gate proved a literal-lambda closure arg. Each renders its
-                    // bespoke shape at lowering (lambda in subset — Phase 11).
-                    if let Some(t) = lower_core_closure_call(&module, method, args, cx, env) {
-                        return t;
-                    }
-                    let targs: Vec<TExpr> =
-                        args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
-                    let widen_to_vec = core_widen_to_vec(&module, method, &targs);
-                    // c109 Phase 18: the `core.mem` pointer ops carry a non-fixed return
-                    // type. `address_of` is always `Int`; `volatile_read(p)` reads through
-                    // the typed pointer, so its result is `ptr_elem(p.ty)` — the `T` of the
-                    // `Ptr<T>` arg, recovered from the LOWERED arg's total `ty` (no emit-time
-                    // inference, I3). `volatile_write(p, value)` returns `Unit`.
-                    // A defensive `Unit` fallback (an ill-typed arg sema would already have
-                    // rejected) keeps the fact total.
-                    let ty = if module == "core.mem" {
-                        match method {
-                            "address_of" => Type::Int,
-                            "volatile_read" => targs
-                                .first()
-                                .and_then(|a| crate::Sema::ptr_elem(&a.ty))
-                                .unwrap_or_else(unit_type),
-                            "volatile_write" => unit_type(),
-                            _ => core_call_return_ty(&module, method),
-                        }
-                    } else if crate::Sema::is_polymorphic_core_special(&module, method) {
-                        // c109 Phase 20: the polymorphic special's return type is NOT in
-                        // `core_fixed_sig` — sema resolved it (arg-type dependent) and wrote
-                        // it onto the node's `resolved_ret`. Read it totally (I3); a unit
-                        // fallback (eprint/shuffle return nothing) keeps the fact total.
-                        resolved_ret.cloned().unwrap_or_else(unit_type)
-                    } else if module == "core.event"
-                        && matches!(method, "new" | "with_policy" | "hook" | "async_result")
-                    {
-                        resolved_ret
-                            .cloned()
-                            .unwrap_or_else(|| core_call_return_ty(&module, method))
-                    } else {
-                        core_call_return_ty(&module, method)
-                    };
-                    return TExpr {
-                        ty,
-                        kind: TExprKind::CoreCall {
-                            module,
-                            method: method.to_string(),
-                            args: targs,
-                            widen_to_vec,
-                        },
-                    };
-                }
                 // c109 Phase 14: a qualified cross-module call `alias.method(args)`.
                 // The gate proved the alias is a re-export / import_mod / code_module.
                 // Mirror `emit_method_call`'s arms IN ORDER (reexport, import_mods,
@@ -2175,10 +2168,62 @@ pub(crate) fn lower_method_call(
     // arg. Resolve the receiver-type + Fn-vs-FnMut dispatch HERE into a total
     // `TClosureOp` (reproducing `emit_builtin_method`'s closure arms, incl. its
     // `expr_jet_ty(receiver)` Map/trait-object branches), so emit makes no decision.
+    // SIMD/linalg `.reduce(#Op)` is MathMethod (below), not a collection fold —
+    // skip when the lowered receiver is a math value type.
     if recv_type.is_none() && crate::Collections::is_closure_method(method) {
         let recv_t = lower_expr(receiver, cx, env);
         let recv_ast_ty = tir_recv_jet_ty(receiver, env);
         let recv_ty = recv_ast_ty.unwrap_or_else(|| recv_t.ty.clone());
+        // `#Add/#Mul/#Min/#Max` reduce on SIMD is MathMethod, never collection fold.
+        let reduce_marker = method == "reduce"
+            && matches!(args.first().map(|a| &a.expr), Some(Expr::ReduceMarker(..)));
+        let skip_closure = reduce_marker
+            || matches!(
+                &recv_ty,
+                Type::Named(name)
+                    if crate::Sema::is_math_type(name) && !cx.type_names.contains(name)
+            );
+        if skip_closure {
+            if let Type::Named(handle) = &recv_ty {
+                let is_reduce = method == "reduce"
+                    && (crate::Sema::is_simd_lane_type(handle) || reduce_marker);
+                if is_reduce
+                    || crate::Sema::math_method_return(handle, method, args.len()).is_some()
+                {
+                    let (reduce_op, value_args): (Option<String>, Vec<TExpr>) = if is_reduce {
+                        let op = match args.first().map(|a| &a.expr) {
+                            Some(Expr::ReduceMarker(name, _)) => name.clone(),
+                            _ => "Add".to_string(),
+                        };
+                        (Some(op), Vec::new())
+                    } else {
+                        (
+                            None,
+                            args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect(),
+                        )
+                    };
+                    let ty = if is_reduce {
+                        crate::Sema::math_scalar_ty(handle)
+                    } else {
+                        crate::Sema::math_method_return(handle, method, args.len())
+                            .unwrap_or_else(unit_type)
+                    };
+                    return TExpr {
+                        ty,
+                        kind: TExprKind::HandleMethod {
+                            recv: Box::new(recv_t),
+                            op: THandleOp::MathMethod {
+                                type_name: handle.clone(),
+                                method: method.to_string(),
+                                reduce_op,
+                            },
+                            args: value_args,
+                        },
+                    };
+                }
+            }
+        }
+        if !skip_closure {
         let op = resolve_closure_op(&recv_ty, method, args, cx);
         let result_ty = resolved_ret
             .cloned()
@@ -2263,6 +2308,7 @@ pub(crate) fn lower_method_call(
                 args: targs,
             },
         };
+        }
     }
     // c109 Phase 12: a numeric predicate / bit-pop query
     // (`is_nan`/`count_ones`/…). The gate proved `recv_type ==
@@ -2275,7 +2321,10 @@ pub(crate) fn lower_method_call(
     if let Some(numeric_name) = recv_type {
         if let Some(recv_ty) = crate::AST::numeric_type_from_name(numeric_name) {
             if let Some(op) = resolve_numeric_op(method, numeric_name) {
-                let recv_t = lower_expr(receiver, cx, env);
+                let mut recv_t = lower_expr(receiver, cx, env);
+                // Sema's width is authoritative — Call/OrFallback lowering can
+                // fall back to Unit/Int and would silently widen bit queries.
+                recv_t.ty = recv_ty.clone();
                 let result_ty = builtin_result_ty(method, args.len(), Some(&recv_ty));
                 return TExpr {
                     ty: result_ty,
@@ -2505,6 +2554,11 @@ pub(crate) fn lower_method_call(
                                 )),
                             };
                         }
+                    }
+                    // `Rng.shuffle(&list)` must keep a writable place for TirBridge
+                    // write-back (CallArg Write + Ident is not Expr::Borrow).
+                    if handle == "Rng" && method == "shuffle" && i == 0 {
+                        return lower_expr_as_mut_place(&a.expr, cx, env);
                     }
                     lower_expr(&a.expr, cx, env)
                 })

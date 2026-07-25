@@ -98,12 +98,43 @@ pub(super) fn evaluate(
         ("core.net", "udp_packet_original_len") => net_value_field(args, "UdpPacket", "original_len", span),
         ("core.net", "udp_packet_truncated") => net_value_field(args, "UdpPacket", "truncated", span),
         ("core.crypto.expert", "ed25519_verify_strict") => crypto_ed25519_verify(args, span),
+        ("core.crypto.expert", "ed25519_sign") => crypto_ed25519_sign(args, span),
         ("core.crypto.expert", "hkdf_sha256") => crypto_hkdf(args, span),
         ("core.crypto.expert", "x25519") => crypto_x25519(args, span),
+        ("core.crypto.expert", "xchacha20poly1305_seal") => {
+            crypto_aead_seal(args, span, "expert.xchacha20poly1305_seal", 24, false)
+        }
+        ("core.crypto.expert", "xchacha20poly1305_open") => {
+            crypto_aead_open(args, span, "expert.xchacha20poly1305_open", 24)
+        }
+        ("core.crypto.expert", "aes256gcm_seal") => {
+            crypto_aead_seal(args, span, "expert.aes256gcm_seal", 12, true)
+        }
+        ("core.crypto.expert", "aes256gcm_open") => {
+            crypto_aead_open(args, span, "expert.aes256gcm_open", 12)
+        }
+        ("core.crypto.expert", "argon2id") => crypto_argon2id(args, span),
         ("core.crypto.expert", "secret_bytes") => crypto_extract(args, 0, "Secret", span),
         ("core.crypto.expert", "signing_key_bytes") => crypto_extract(args, 0, "SigningKey", span),
         ("core.crypto.expert", "x25519_secret_bytes") => crypto_extract(args, 0, "X25519SecretKey", span),
         ("core.crypto.expert", "shared_secret_bytes") => crypto_extract(args, 0, "SharedSecret", span),
+        // TIR lowers Signature/VerifyKey/… `.bytes()` to jet.crypto.__*_bytes;
+        // keep those pure field extracts resident so REPL does not hit E1802.
+        ("jet.crypto", "__signature_bytes") => crypto_extract(args, 0, "Signature", span),
+        ("jet.crypto", "__verify_key_bytes") => crypto_extract(args, 0, "VerifyKey", span),
+        ("jet.crypto", "__x25519_public_bytes") => crypto_extract(args, 0, "X25519PublicKey", span),
+        ("jet.crypto", "__sealed_bytes") => crypto_extract(args, 0, "Sealed", span),
+        ("jet.crypto", "__digest256_bytes") => crypto_extract(args, 0, "Digest256", span),
+        ("jet.crypto", "__digest512_bytes") => crypto_extract(args, 0, "Digest512", span),
+        // Typed decode/decode_bytes run in eval_method; arms prove inventory coverage.
+        ("core.encoding.xml", "decode") => Err(unsupported(
+            "core.encoding.xml.decode() requires a type argument",
+            span,
+        )),
+        ("core.encoding.xml", "decode_bytes") => Err(unsupported(
+            "core.encoding.xml.decode_bytes() requires a type argument",
+            span,
+        )),
         _ => return None,
     };
     Some(result)
@@ -119,6 +150,17 @@ pub(super) fn evaluate_method(
         return None;
     };
     let result = match (type_name.as_str(), method, args.len()) {
+        (
+            "Signature"
+                | "Secret"
+                | "SigningKey"
+                | "VerifyKey"
+                | "X25519SecretKey"
+                | "X25519PublicKey"
+                | "SharedSecret",
+            "bytes",
+            0,
+        ) => value_field(recv, type_name, "bytes", span),
         ("Mime", "media_type", 0) => string_field(recv, "Mime", "top", span),
         ("Mime", "subtype", 0) => string_field(recv, "Mime", "sub", span),
         ("Mime", "essence", 0) => mime_essence(recv, span).map(CtValue::Str),
@@ -378,6 +420,55 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             let status = if failures == 0 { "ok" } else { "failed" };
             Some(format!("Solver(status: {status}, failures: {failures})"))
         }
+        // Core pure structs: REPL/transcript show uses Type(field: jet_show) —
+        // not Rust `user_*` Debug — matching AOT JetShow for these foreign types.
+        CtValue::Struct { type_name, fields }
+            if matches!(
+                type_name.strip_prefix("user_").unwrap_or(type_name.as_str()),
+                "Mime"
+                    | "Period"
+                    | "LocalDate"
+                    | "LocalTime"
+                    | "DateTime"
+                    | "Date"
+                    | "Zone"
+                    | "ZonedDateTime"
+                    | "Instant"
+                    | "Url"
+                    | "Envelope"
+                    | "Address"
+                    | "Message"
+                    | "Attachment"
+            ) =>
+        {
+            let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|(name, v)| {
+                    let field = name.strip_prefix("user_").unwrap_or(name);
+                    let shown = display(v).unwrap_or_else(|| match v {
+                        CtValue::List(xs) => {
+                            let inner: Vec<String> = xs
+                                .iter()
+                                .map(|x| display(x).unwrap_or_else(|| x.jet_show()))
+                                .collect();
+                            format!("[{}]", inner.join(", "))
+                        }
+                        _ => v.jet_show(),
+                    });
+                    format!("{field}: {shown}")
+                })
+                .collect();
+            Some(format!("{ty}({})", parts.join(", ")))
+        }
+        CtValue::Some(inner) => {
+            // Option payloads in Address.display etc. show as the inner jet_show
+            // (null for None is handled by jet_show); keep Some unwrapped in
+            // nested core-struct display via the field map above.
+            display(inner)
+        }
+        CtValue::None(_) => Some("null".to_string()),
+        CtValue::ResOk(inner) => display(inner),
         _ => {
             let CtValue::Float(measured) = field(value, "Measurement", "value")? else {
                 return None;
@@ -714,19 +805,220 @@ fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
     let message = bytes_value(one(args, 1, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
     let signature = bytes_value(one(args, 2, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
     if public.len() != 32 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error("Ed25519 public keys must contain exactly 32 bytes"))));
+        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "expert.ed25519_verify_strict: public must be exactly 32; got {}",
+            public.len()
+        )))));
     }
     if signature.len() != 64 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error("Ed25519 signatures must contain exactly 64 bytes"))));
+        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "expert.ed25519_verify_strict: signature must be exactly 64; got {}",
+            signature.len()
+        )))));
     }
     if message.len() > 1_073_741_824 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error("Ed25519 messages must contain at most 1073741824 bytes"))));
+        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "expert.ed25519_verify_strict: message must be at most 1073741824; got {}",
+            message.len()
+        )))));
     }
     let public: [u8; 32] = public.try_into().expect("length checked");
     let signature: [u8; 64] = signature.try_into().expect("length checked");
     match crate::Comptime::CryptoLite::ed25519_verify_strict(&public, &message, &signature) {
         Ok(valid) => Ok(CtValue::ResOk(Box::new(CtValue::Bool(valid)))),
-        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error("invalid Ed25519 public key encoding")))),
+        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error(
+            "expert.ed25519_verify_strict: Ed25519 public key is not canonical",
+        )))),
+    }
+}
+
+fn crypto_ed25519_sign(args: &[CtValue], span: Span) -> EvalResult {
+    let seed = bytes_value(one(args, 0, "core.crypto.expert", "ed25519_sign", span)?, span)?;
+    let message = bytes_value(one(args, 1, "core.crypto.expert", "ed25519_sign", span)?, span)?;
+    if seed.len() != 32 {
+        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "expert.ed25519_sign: seed must be exactly 32; got {}",
+            seed.len()
+        )))));
+    }
+    if message.len() > 1_073_741_824 {
+        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "expert.ed25519_sign: message must be at most 1073741824; got {}",
+            message.len()
+        )))));
+    }
+    let seed: [u8; 32] = seed.try_into().expect("length checked");
+    let signature = crate::Comptime::CryptoLite::ed25519_sign(&seed, &message);
+    Ok(CtValue::ResOk(Box::new(crypto_secret(
+        "Signature",
+        signature.to_vec(),
+    ))))
+}
+
+fn crypto_aead_lengths(
+    operation: &str,
+    key: &[u8],
+    nonce: &[u8],
+    nonce_length: usize,
+    input: &[u8],
+    aad: &[u8],
+    opening: bool,
+) -> Option<CtValue> {
+    if key.len() != 32 {
+        return Some(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "{operation}: key must be exactly 32; got {}",
+            key.len()
+        )))));
+    }
+    let nonce_expected = if nonce_length == 24 {
+        "exactly 24"
+    } else {
+        "exactly 12"
+    };
+    if nonce.len() != nonce_length {
+        return Some(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "{operation}: nonce must be {nonce_expected}; got {}",
+            nonce.len()
+        )))));
+    }
+    let (minimum, maximum, label, expected) = if opening {
+        (16usize, 1_073_741_840usize, "ciphertext", "16..=1073741840")
+    } else {
+        (0usize, 1_073_741_824usize, "plaintext", "at most 1073741824")
+    };
+    if input.len() < minimum || input.len() > maximum {
+        return Some(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "{operation}: {label} must be {expected}; got {}",
+            input.len()
+        )))));
+    }
+    if aad.len() > 16_777_216 {
+        return Some(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "{operation}: aad must be at most 16777216; got {}",
+            aad.len()
+        )))));
+    }
+    None
+}
+
+fn crypto_aead_seal(
+    args: &[CtValue],
+    span: Span,
+    operation: &str,
+    nonce_length: usize,
+    aes: bool,
+) -> EvalResult {
+    let key = bytes_value(one(args, 0, "core.crypto.expert", operation, span)?, span)?;
+    let nonce = bytes_value(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
+    let plaintext = bytes_value(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
+    let aad = bytes_value(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
+    if let Some(error) =
+        crypto_aead_lengths(operation, &key, &nonce, nonce_length, &plaintext, &aad, false)
+    {
+        return Ok(error);
+    }
+    let sealed = if aes {
+        crate::Comptime::CryptoLite::aes256gcm_seal(&key, &nonce, &plaintext, &aad)
+    } else {
+        crate::Comptime::CryptoLite::xchacha20poly1305_seal(&key, &nonce, &plaintext, &aad)
+    };
+    match sealed {
+        Ok(bytes) => Ok(CtValue::ResOk(Box::new(CtValue::Bytes(bytes)))),
+        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "Jet could not preserve a cryptographic invariant; incident expert-{}-seal",
+            if aes { "aes" } else { "xchacha" }
+        ))))),
+    }
+}
+
+fn crypto_aead_open(
+    args: &[CtValue],
+    span: Span,
+    operation: &str,
+    nonce_length: usize,
+) -> EvalResult {
+    let key = bytes_value(one(args, 0, "core.crypto.expert", operation, span)?, span)?;
+    let nonce = bytes_value(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
+    let ciphertext = bytes_value(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
+    let aad = bytes_value(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
+    if let Some(error) =
+        crypto_aead_lengths(operation, &key, &nonce, nonce_length, &ciphertext, &aad, true)
+    {
+        return Ok(error);
+    }
+    let opened = if nonce_length == 12 {
+        crate::Comptime::CryptoLite::aes256gcm_open(&key, &nonce, &ciphertext, &aad)
+    } else {
+        crate::Comptime::CryptoLite::xchacha20poly1305_open(&key, &nonce, &ciphertext, &aad)
+    };
+    match opened {
+        Ok(bytes) => Ok(CtValue::ResOk(Box::new(CtValue::Bytes(bytes)))),
+        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error(
+            "encrypted data could not be opened",
+        )))),
+    }
+}
+
+fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
+    let password = match field(
+        one(args, 0, "core.crypto.expert", "argon2id", span)?,
+        "Secret",
+        "bytes",
+    ) {
+        Some(CtValue::Bytes(bytes)) => bytes.clone(),
+        Some(CtValue::List(bytes)) => {
+            bytes_value(&CtValue::List(bytes.clone()), span)?
+        }
+        _ => {
+            return Err(unsupported(
+                "core.crypto.expert.argon2id() needs a Secret password",
+                span,
+            ))
+        }
+    };
+    let salt = bytes_value(one(args, 1, "core.crypto.expert", "argon2id", span)?, span)?;
+    let memory_kib = int_arg(args, 2, span)?;
+    let iterations = int_arg(args, 3, span)?;
+    let lanes = int_arg(args, 4, span)?;
+    let output_length = int_arg(args, 5, span)?;
+    if password.len() > 1_048_576 {
+        return Ok(CtValue::ResErr(Box::new(crypto_error(
+            "password hash is outside Jet's accepted policy",
+        ))));
+    }
+    if !(8..=64).contains(&salt.len()) {
+        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "expert.argon2id: salt must be 8..=64; got {}",
+            salt.len()
+        )))));
+    }
+    if !(8_192..=262_144).contains(&memory_kib)
+        || !(1..=10).contains(&iterations)
+        || !(1..=8).contains(&lanes)
+        || memory_kib < 8 * lanes
+        || memory_kib.checked_mul(iterations).is_none_or(|value| value > 1_048_576)
+    {
+        return Ok(CtValue::ResErr(Box::new(crypto_error(
+            "password hash is outside Jet's accepted policy",
+        ))));
+    }
+    if !(16..=64).contains(&output_length) {
+        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+            "expert.argon2id: output length must be 16..64; got {output_length}"
+        )))));
+    }
+    match crate::Comptime::CryptoLite::argon2id(
+        &password,
+        &salt,
+        memory_kib as u32,
+        iterations as u32,
+        lanes as u32,
+        output_length as usize,
+    ) {
+        Ok(bytes) => Ok(CtValue::ResOk(Box::new(crypto_secret("Secret", bytes)))),
+        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error(
+            "password hash is outside Jet's accepted policy",
+        )))),
     }
 }
 

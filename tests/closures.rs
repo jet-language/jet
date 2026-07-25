@@ -242,28 +242,32 @@ fn run() {
     let out = jet::compile(src).expect("D-ITER1 adapters should compile");
     assert!(!common::strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "invariant I1");
     assert!(
-        out.rust.contains("jet_list_take"),
-        "take should lower to helper"
+        out.rust.contains("jet_iter_take"),
+        "take should lower to lazy jet_iter_take"
     );
     assert!(
         out.rust.contains("jet_iter_from_vec"),
-        "lazy adapters should wrap JetIter"
+        "list→Iter adapters should start from jet_iter_from_vec"
     );
     assert!(
-        out.rust.contains("jet_list_skip("),
-        "skip should lower to helper"
+        !out.rust.contains("jet_iter_from_vec(jet_list_take"),
+        "adapters must not eagerly collect then re-wrap"
+    );
+    assert!(
+        out.rust.contains("jet_iter_skip("),
+        "skip should lower to lazy helper"
     );
     assert!(
         out.rust.contains("jet_list_fold"),
         "fold should lower to helper"
     );
     assert!(
-        out.rust.contains("jet_list_take_while"),
-        "take_while should lower"
+        out.rust.contains("jet_iter_take_while"),
+        "take_while should lower lazily"
     );
     assert!(
-        out.rust.contains("jet_list_flat_map"),
-        "flat_map should lower"
+        out.rust.contains("jet_iter_flat_map"),
+        "flat_map should lower lazily"
     );
 }
 
@@ -277,9 +281,9 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("chunks/windows should compile");
-    assert!(out.rust.contains("jet_list_chunks"), "chunks should lower");
+    assert!(out.rust.contains("jet_iter_chunks"), "chunks should lower lazily");
     assert!(
-        out.rust.contains("jet_list_windows"),
-        "windows should lower"
+        out.rust.contains("jet_iter_windows"),
+        "windows should lower lazily"
     );
 }

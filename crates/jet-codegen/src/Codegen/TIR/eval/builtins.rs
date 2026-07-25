@@ -1,8 +1,10 @@
 //! Exhaustive TBuiltinOp dispatch (#777).
 use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_static_type_method};
+use crate::Comptime::CollectionEval;
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::TBuiltinOp;
+use crate::Syntax;
 use super::unsupported;
 
 pub(super) fn eval_builtin(
@@ -65,7 +67,8 @@ pub(super) fn eval_builtin(
         TBuiltinOp::BeforeView => apply_method(recv, "before", args, span),
         TBuiltinOp::Keys => apply_method(recv, "keys", args, span),
         TBuiltinOp::Values => apply_method(recv, "values", args, span),
-        TBuiltinOp::ContainsKey => apply_method(recv, "contains_key", args, span),
+        // Surface is `.has_key`; emit spells `contains_key` on the Rust map API.
+        TBuiltinOp::ContainsKey => apply_method(recv, "has_key", args, span),
         TBuiltinOp::ToString => apply_method(recv, "to_string", args, span),
         TBuiltinOp::MatchGroup => apply_method(recv, "group", args, span),
         TBuiltinOp::Take => apply_method(recv, "take", args, span),
@@ -79,46 +82,53 @@ pub(super) fn eval_builtin(
         TBuiltinOp::OptionZip { .. } => apply_method(recv, "zip", args, span),
         TBuiltinOp::IterToList => apply_method(recv, "to_list", args, span),
         TBuiltinOp::IterCollect => apply_method(recv, "collect", args, span),
-        TBuiltinOp::SetFrom => apply_method(recv, "from", args, span),
+        // From-ctors: recv is the source list/bytes (see method_calls.rs).
+        TBuiltinOp::SetFrom => CollectionEval::from_list(Syntax::TYPE_SET, recv, span),
         TBuiltinOp::SetInsert => apply_mutating(recv, "add", args, span),
         TBuiltinOp::SetRemove => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::SetToList => apply_method(recv, "to_list", args, span),
-        TBuiltinOp::SetUnion => Err(unsupported("builtin `SetUnion`", span)),
-        TBuiltinOp::SortedSetFrom => Err(unsupported("builtin `SortedSetFrom`", span)),
-        TBuiltinOp::SortedSetInsert => Err(unsupported("builtin `SortedSetInsert`", span)),
-        TBuiltinOp::SortedSetRemove => Err(unsupported("builtin `SortedSetRemove`", span)),
-        TBuiltinOp::SortedSetToList => Err(unsupported("builtin `SortedSetToList`", span)),
-        TBuiltinOp::SortedSetUnion => Err(unsupported("builtin `SortedSetUnion`", span)),
-        TBuiltinOp::PriorityQueueFrom => Err(unsupported("builtin `PriorityQueueFrom`", span)),
-        TBuiltinOp::PriorityQueuePeek => Err(unsupported("builtin `PriorityQueuePeek`", span)),
-        TBuiltinOp::PriorityQueueToSortedList => {
-            Err(unsupported("builtin `PriorityQueueToSortedList`", span))
+        TBuiltinOp::SetUnion => apply_method(recv, "union", args, span),
+        TBuiltinOp::SortedSetFrom => {
+            CollectionEval::from_list(Syntax::TYPE_SORTED_SET, recv, span)
         }
-        TBuiltinOp::LruPut => Err(unsupported("builtin `LruPut`", span)),
-        TBuiltinOp::LruAddNew => Err(unsupported("builtin `LruAddNew`", span)),
-        TBuiltinOp::LruGet => Err(unsupported("builtin `LruGet`", span)),
-        TBuiltinOp::LruCapacity => Err(unsupported("builtin `LruCapacity`", span)),
-        TBuiltinOp::LruKeys => Err(unsupported("builtin `LruKeys`", span)),
-        TBuiltinOp::BitSetAdd => Err(unsupported("builtin `BitSetAdd`", span)),
-        TBuiltinOp::BitSetRemove => Err(unsupported("builtin `BitSetRemove`", span)),
-        TBuiltinOp::BitSetCount => Err(unsupported("builtin `BitSetCount`", span)),
-        TBuiltinOp::BitSetToList => Err(unsupported("builtin `BitSetToList`", span)),
-        TBuiltinOp::BitSetNew => Err(unsupported("builtin `BitSetNew`", span)),
-        TBuiltinOp::ByteBufferNew => Err(unsupported("builtin `ByteBufferNew`", span)),
-        TBuiltinOp::ByteBufferFrom => Err(unsupported("builtin `ByteBufferFrom`", span)),
-        TBuiltinOp::ByteBufferWrite { .. } => Err(unsupported("builtin `ByteBufferWrite`", span)),
-        TBuiltinOp::ByteBufferToBytes => Err(unsupported("builtin `ByteBufferToBytes`", span)),
-        TBuiltinOp::BagAdd => Err(unsupported("builtin `BagAdd`", span)),
-        TBuiltinOp::BagRemove => Err(unsupported("builtin `BagRemove`", span)),
-        TBuiltinOp::BagHas => Err(unsupported("builtin `BagHas`", span)),
-        TBuiltinOp::BagCount => Err(unsupported("builtin `BagCount`", span)),
-        TBuiltinOp::BagLen => Err(unsupported("builtin `BagLen`", span)),
-        TBuiltinOp::DequePushFront => Err(unsupported("builtin `DequePushFront`", span)),
-        TBuiltinOp::DequePushBack => Err(unsupported("builtin `DequePushBack`", span)),
-        TBuiltinOp::DequePopFront => Err(unsupported("builtin `DequePopFront`", span)),
-        TBuiltinOp::DequePopBack => Err(unsupported("builtin `DequePopBack`", span)),
-        TBuiltinOp::DequePeekFront => Err(unsupported("builtin `DequePeekFront`", span)),
-        TBuiltinOp::DequePeekBack => Err(unsupported("builtin `DequePeekBack`", span)),
+        TBuiltinOp::SortedSetInsert => apply_mutating(recv, "add", args, span),
+        TBuiltinOp::SortedSetRemove => apply_mutating(recv, "remove", args, span),
+        TBuiltinOp::SortedSetToList => apply_method(recv, "to_list", args, span),
+        TBuiltinOp::SortedSetUnion => apply_method(recv, "union", args, span),
+        TBuiltinOp::PriorityQueueFrom => {
+            CollectionEval::from_list(Syntax::TYPE_PRIORITY_QUEUE, recv, span)
+        }
+        TBuiltinOp::PriorityQueuePeek => apply_method(recv, "peek", args, span),
+        TBuiltinOp::PriorityQueueToSortedList => apply_method(recv, "to_sorted_list", args, span),
+        TBuiltinOp::LruPut => apply_mutating(recv, "add", args, span),
+        TBuiltinOp::LruAddNew => apply_mutating(recv, "add_new", args, span),
+        TBuiltinOp::LruGet => apply_mutating(recv, "get", args, span),
+        TBuiltinOp::LruCapacity => apply_method(recv, "capacity", args, span),
+        TBuiltinOp::LruKeys => apply_method(recv, "keys", args, span),
+        TBuiltinOp::BitSetAdd => apply_mutating(recv, "add", args, span),
+        TBuiltinOp::BitSetRemove => apply_mutating(recv, "remove", args, span),
+        TBuiltinOp::BitSetCount => apply_method(recv, "count", args, span),
+        TBuiltinOp::BitSetToList => apply_method(recv, "to_list", args, span),
+        TBuiltinOp::BitSetNew => CollectionEval::prelude_new("JetBitSet", vec![], span)
+            .unwrap_or_else(|| Err(unsupported("BitSet.new", span))),
+        TBuiltinOp::ByteBufferNew => CollectionEval::prelude_new("JetByteBuffer", vec![], span)
+            .unwrap_or_else(|| Err(unsupported("ByteBuffer.new", span))),
+        TBuiltinOp::ByteBufferFrom => CollectionEval::byte_buffer_from(recv, span),
+        TBuiltinOp::ByteBufferWrite { method } => {
+            apply_mutating(recv, method.as_str(), args, span)
+        }
+        TBuiltinOp::ByteBufferToBytes => apply_method(recv, "to_bytes", args, span),
+        TBuiltinOp::BagAdd => apply_mutating(recv, "add", args, span),
+        TBuiltinOp::BagRemove => apply_mutating(recv, "remove", args, span),
+        TBuiltinOp::BagHas => apply_method(recv, "has", args, span),
+        TBuiltinOp::BagCount => apply_method(recv, "count", args, span),
+        TBuiltinOp::BagLen => apply_method(recv, "len", args, span),
+        TBuiltinOp::DequePushFront => apply_mutating(recv, "push_front", args, span),
+        TBuiltinOp::DequePushBack => apply_mutating(recv, "push_back", args, span),
+        TBuiltinOp::DequePopFront => apply_mutating(recv, "pop_front", args, span),
+        TBuiltinOp::DequePopBack => apply_mutating(recv, "pop_back", args, span),
+        TBuiltinOp::DequePeekFront => apply_method(recv, "peek_front", args, span),
+        TBuiltinOp::DequePeekBack => apply_method(recv, "peek_back", args, span),
         // D-FAILCOMP1 / D-ITERTOOLS1: materialize Iter<T?E> / [T?E] → T?E.
         TBuiltinOp::TryCollect => {
             let CtValue::List(xs) = recv else {

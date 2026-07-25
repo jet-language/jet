@@ -1117,14 +1117,18 @@ impl<'a> Checker<'a> {
                     *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
-                // D-TAG1: `Bag.new()` → `Bag<T>`. T is inferred from the annotation.
+                // D-TAG1: `Bag.new()` → `Bag<T>`. Turbofish / annotation supplies T.
                 if type_name == "Bag" && method == "new" && args.is_empty() {
-                    let elem_ty = match &self.expected_type {
-                        Some(Type::Apply { name, args, .. }) if name == "Bag" && !args.is_empty() => {
-                            args[0].clone()
+                    let elem_ty = type_args.first().cloned().unwrap_or_else(|| {
+                        match &self.expected_type {
+                            Some(Type::Apply { name, args, .. })
+                                if name == "Bag" && !args.is_empty() =>
+                            {
+                                args[0].clone()
+                            }
+                            _ => Type::Int,
                         }
-                        _ => Type::Int,
-                    };
+                    });
                     if !Collections::is_hashable_type(&elem_ty) {
                         self.diags.push(Diagnostic::error(
                             "E0506",

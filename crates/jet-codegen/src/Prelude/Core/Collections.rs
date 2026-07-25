@@ -217,14 +217,16 @@ impl JetDebug for JetByteBuffer {
     }
 }
 
-fn jet_list_sum<T>(xs: Vec<T>) -> T
+fn jet_list_sum<T, I>(xs: I) -> T
 where
+    I: IntoIterator<Item = T>,
     T: std::iter::Sum<T>,
 {
     xs.into_iter().sum()
 }
-fn jet_list_product<T>(xs: Vec<T>) -> T
+fn jet_list_product<T, I>(xs: I) -> T
 where
+    I: IntoIterator<Item = T>,
     T: std::iter::Product<T>,
 {
     xs.into_iter().product()
@@ -242,11 +244,9 @@ fn jet_list_intersperse<T: Clone>(xs: Vec<T>, sep: T) -> Vec<T> {
     }
     out
 }
-fn jet_list_count_by<T, K: Ord, F>(
-    xs: Vec<T>,
-    mut f: F,
-) -> std::collections::BTreeMap<K, i64>
+fn jet_list_count_by<T, K: Ord, F, I>(xs: I, mut f: F) -> std::collections::BTreeMap<K, i64>
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
     let mut m: std::collections::BTreeMap<K, i64> = std::collections::BTreeMap::new();
@@ -369,37 +369,304 @@ fn jet_cursor_skip_ws(c: &mut JetCursor) {
     let skipped = tail.len() - tail.trim_start().len();
     c.pos += skipped;
 }
-// ── D-ITER1: lazy iterator adapter set ───────────────────────────────────────
-// D-ITERTOOLS1=A: Jet surface returns `Iter<T>` (JetIter). Adapters rebuild the
-// underlying Vec today; true iterator fusion is a follow-up polish
-// (ponytail: Vec-backed must-use move view; fuse when capture/'static is free).
-struct JetIter<T>(Vec<T>);
+// ── D-ITER1 / D-ITERTOOLS1=A: true lazy iterator fusion ──────────────────────
+// Adapters return `JetIter<T>` = boxed `dyn Iterator`. No intermediate Vec until
+// `to_list` / `collect` / a terminal reducer. Closures are `'static` (Jet emits
+// `move` lambdas / capture prep for escaping adapter callbacks).
+struct JetIter<T>(Box<dyn Iterator<Item = T>>);
 
-impl<T> JetIter<T> {
+impl<T: 'static> JetIter<T> {
     fn to_list(self) -> Vec<T> {
-        self.0
+        self.0.collect()
     }
     fn collect(self) -> Vec<T> {
-        self.0
+        self.0.collect()
+    }
+    fn len(self) -> i64 {
+        self.0.count() as i64
+    }
+    fn is_empty(mut self) -> bool {
+        self.0.next().is_none()
     }
 }
 
 impl<T> IntoIterator for JetIter<T> {
     type Item = T;
-    type IntoIter = std::vec::IntoIter<T>;
+    type IntoIter = Box<dyn Iterator<Item = T>>;
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.0
     }
 }
 
-fn jet_iter_from_vec<T>(xs: Vec<T>) -> JetIter<T> {
-    JetIter(xs)
+fn jet_iter_from_vec<T: 'static>(xs: Vec<T>) -> JetIter<T> {
+    JetIter(Box::new(xs.into_iter()))
 }
 
-// All adapters are allocation-free until terminal — they materialise to Vec<T>
-// only when a terminal method (collect) is needed. For the Jet surface these
-// are the terminal forms (the language is not lazy at the surface); the Rust
-// functions are still lazy internally where the size is bounded.
+/// Lazy `String.split` — yields owned pieces on pull (no intermediate Vec of parts).
+/// Empty `sep` matches `jet_string_split` / Rust `str::split("")`: leading empty,
+/// one Char string per scalar, trailing empty.
+fn jet_iter_string_split(s: &String, sep: &str) -> JetIter<String> {
+    let s = s.clone();
+    let sep = sep.to_string();
+    if sep.is_empty() {
+        // Index into owned `s` — `s.chars()` would borrow and break `'static` JetIter.
+        let mut offset = 0usize;
+        // 0 = leading empty; 1 = chars; 2 = done after trailing empty.
+        let mut phase = 0u8;
+        return JetIter(Box::new(std::iter::from_fn(move || {
+            match phase {
+                0 => {
+                    phase = 1;
+                    Some(String::new())
+                }
+                1 => {
+                    if offset >= s.len() {
+                        phase = 2;
+                        return Some(String::new());
+                    }
+                    let ch = s[offset..].chars().next().expect("offset in bounds");
+                    let len = ch.len_utf8();
+                    let out = s[offset..offset + len].to_string();
+                    offset += len;
+                    Some(out)
+                }
+                _ => None,
+            }
+        })));
+    }
+    let mut start = 0usize;
+    let mut done = false;
+    JetIter(Box::new(std::iter::from_fn(move || {
+        if done {
+            return None;
+        }
+        match s[start..].find(&sep) {
+            Some(rel) => {
+                let end = start + rel;
+                let part = s[start..end].to_string();
+                start = end + sep.len();
+                Some(part)
+            }
+            None => {
+                done = true;
+                Some(s[start..].to_string())
+            }
+        }
+    })))
+}
+
+fn jet_iter_take<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
+    JetIter(Box::new(it.0.take(n.max(0) as usize)))
+}
+fn jet_iter_skip<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
+    JetIter(Box::new(it.0.skip(n.max(0) as usize)))
+}
+fn jet_iter_step_by<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
+    if n <= 0 {
+        return JetIter(Box::new(std::iter::empty()));
+    }
+    JetIter(Box::new(it.0.step_by(n as usize)))
+}
+
+struct JetDedupIter<T> {
+    inner: Box<dyn Iterator<Item = T>>,
+    prev: Option<T>,
+}
+impl<T: Clone + PartialEq> Iterator for JetDedupIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        while let Some(x) = self.inner.next() {
+            if self.prev.as_ref() == Some(&x) {
+                continue;
+            }
+            self.prev = Some(x.clone());
+            return Some(x);
+        }
+        None
+    }
+}
+fn jet_iter_dedup<T: 'static + Clone + PartialEq>(it: JetIter<T>) -> JetIter<T> {
+    JetIter(Box::new(JetDedupIter {
+        inner: it.0,
+        prev: None,
+    }))
+}
+
+struct JetChunksIter<T> {
+    inner: Box<dyn Iterator<Item = T>>,
+    size: usize,
+}
+impl<T> Iterator for JetChunksIter<T> {
+    type Item = Vec<T>;
+    fn next(&mut self) -> Option<Vec<T>> {
+        let mut chunk = Vec::with_capacity(self.size);
+        for _ in 0..self.size {
+            match self.inner.next() {
+                Some(x) => chunk.push(x),
+                None => break,
+            }
+        }
+        if chunk.is_empty() {
+            None
+        } else {
+            Some(chunk)
+        }
+    }
+}
+fn jet_iter_chunks<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<Vec<T>> {
+    JetIter(Box::new(JetChunksIter {
+        inner: it.0,
+        size: n.max(1) as usize,
+    }))
+}
+
+struct JetWindowsIter<T> {
+    inner: Box<dyn Iterator<Item = T>>,
+    size: usize,
+    buf: std::collections::VecDeque<T>,
+}
+impl<T: Clone> Iterator for JetWindowsIter<T> {
+    type Item = Vec<T>;
+    fn next(&mut self) -> Option<Vec<T>> {
+        while self.buf.len() < self.size {
+            self.buf.push_back(self.inner.next()?);
+        }
+        let out: Vec<T> = self.buf.iter().cloned().collect();
+        self.buf.pop_front();
+        Some(out)
+    }
+}
+fn jet_iter_windows<T: 'static + Clone>(it: JetIter<T>, n: i64) -> JetIter<Vec<T>> {
+    JetIter(Box::new(JetWindowsIter {
+        inner: it.0,
+        size: n.max(1) as usize,
+        buf: std::collections::VecDeque::new(),
+    }))
+}
+
+fn jet_iter_map<T: 'static, U: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<U>
+where
+    F: FnMut(&T) -> U,
+{
+    JetIter(Box::new(it.0.map(move |x| f(&x))))
+}
+fn jet_iter_map_mut<T: 'static, U: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<U>
+where
+    F: FnMut(&T) -> U,
+{
+    JetIter(Box::new(it.0.map(move |x| f(&x))))
+}
+fn jet_iter_filter<T: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<T>
+where
+    F: FnMut(&T) -> bool,
+{
+    JetIter(Box::new(it.0.filter(move |x| f(x))))
+}
+fn jet_iter_take_while<T: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<T>
+where
+    F: FnMut(&T) -> bool,
+{
+    JetIter(Box::new(it.0.take_while(move |x| f(x))))
+}
+fn jet_iter_skip_while<T: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<T>
+where
+    F: FnMut(&T) -> bool,
+{
+    JetIter(Box::new(it.0.skip_while(move |x| f(x))))
+}
+fn jet_iter_flat_map<T: 'static, U: 'static, F: 'static>(it: JetIter<T>, mut f: F) -> JetIter<U>
+where
+    F: FnMut(&T) -> Vec<U>,
+{
+    JetIter(Box::new(it.0.flat_map(move |x| f(&x))))
+}
+fn jet_iter_filter_map<T: 'static, U: 'static, E: 'static, F: 'static>(
+    it: JetIter<T>,
+    mut f: F,
+) -> JetIter<U>
+where
+    F: FnMut(&T) -> Result<U, E>,
+{
+    JetIter(Box::new(it.0.filter_map(move |x| f(&x).ok())))
+}
+fn jet_iter_scan<T: 'static, U: 'static + Clone, F: 'static>(
+    it: JetIter<T>,
+    init: U,
+    mut f: F,
+) -> JetIter<U>
+where
+    F: FnMut(&U, &T) -> U,
+{
+    let mut acc = init;
+    JetIter(Box::new(it.0.map(move |x| {
+        acc = f(&acc, &x);
+        acc.clone()
+    })))
+}
+fn jet_iter_flatten<T: 'static>(it: JetIter<Vec<T>>) -> JetIter<T> {
+    JetIter(Box::new(it.0.flatten()))
+}
+
+struct JetIntersperseIter<T> {
+    inner: Box<dyn Iterator<Item = T>>,
+    sep: T,
+    turn_sep: bool,
+    next_item: Option<T>,
+    started: bool,
+}
+impl<T: Clone> Iterator for JetIntersperseIter<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        if !self.started {
+            self.started = true;
+            return self.inner.next();
+        }
+        if self.turn_sep {
+            self.turn_sep = false;
+            self.next_item = self.inner.next();
+            if self.next_item.is_some() {
+                return Some(self.sep.clone());
+            }
+            return None;
+        }
+        self.turn_sep = true;
+        self.next_item.take()
+    }
+}
+fn jet_iter_intersperse<T: 'static + Clone>(it: JetIter<T>, sep: T) -> JetIter<T> {
+    JetIter(Box::new(JetIntersperseIter {
+        inner: it.0,
+        sep,
+        turn_sep: true,
+        next_item: None,
+        started: false,
+    }))
+}
+fn jet_iter_enumerate<T: 'static, U: 'static, F: 'static>(
+    it: JetIter<T>,
+    mut f: F,
+) -> JetIter<U>
+where
+    F: FnMut(i64, T) -> U,
+{
+    JetIter(Box::new(
+        it.0.enumerate()
+            .map(move |(i, x)| f(i as i64, x)),
+    ))
+}
+fn jet_iter_zip<A: 'static, B: 'static, O: 'static, F: 'static>(
+    a: JetIter<A>,
+    b: JetIter<B>,
+    mut f: F,
+) -> JetIter<O>
+where
+    F: FnMut(A, B) -> O,
+{
+    JetIter(Box::new(a.0.zip(b.0).map(move |(x, y)| f(x, y))))
+}
+
+// List-shaped helpers kept for non-Iter call sites / terminals that still
+// materialize; adapters above are the lazy path.
 fn jet_list_take<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
     xs.into_iter().take(n.max(0) as usize).collect()
 }
@@ -456,7 +723,10 @@ where
 {
     xs.iter().filter_map(|x| f(x).ok()).collect()
 }
-fn jet_list_try_collect<T: Clone, E: Clone>(xs: Vec<Result<T, E>>) -> Result<Vec<T>, E> {
+fn jet_list_try_collect<T, E, I>(xs: I) -> Result<Vec<T>, E>
+where
+    I: IntoIterator<Item = Result<T, E>>,
+{
     xs.into_iter().collect()
 }
 fn jet_list_scan<T, U: Clone, F>(xs: Vec<T>, init: U, mut f: F) -> Vec<U>
@@ -471,35 +741,37 @@ where
     }
     out
 }
-fn jet_list_fold<T, U, F>(xs: Vec<T>, init: U, mut f: F) -> U
+fn jet_list_fold<T, U, F, I>(xs: I, init: U, mut f: F) -> U
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&U, &T) -> U,
 {
-    xs.iter().fold(init, |acc, x| f(&acc, x))
+    xs.into_iter().fold(init, |acc, x| f(&acc, &x))
 }
-fn jet_list_position<T, F>(xs: Vec<T>, f: F) -> Option<i64>
+fn jet_list_position<T, F, I>(xs: I, mut f: F) -> Option<i64>
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T) -> bool,
 {
-    xs.iter().position(f).map(|i| i as i64)
+    xs.into_iter().position(|x| f(&x)).map(|i| i as i64)
 }
-fn jet_list_min_by<T, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
+fn jet_list_min_by<T, K: Ord, F, I>(xs: I, f: F) -> Option<T>
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
     xs.into_iter().min_by_key(f)
 }
-fn jet_list_max_by<T, K: Ord, F>(xs: Vec<T>, f: F) -> Option<T>
+fn jet_list_max_by<T, K: Ord, F, I>(xs: I, f: F) -> Option<T>
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
     xs.into_iter().max_by_key(f)
 }
-fn jet_list_group_by<T, K: Ord, F>(
-    xs: Vec<T>,
-    mut f: F,
-) -> std::collections::BTreeMap<K, Vec<T>>
+fn jet_list_group_by<T, K: Ord, F, I>(xs: I, mut f: F) -> std::collections::BTreeMap<K, Vec<T>>
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
     let mut m: std::collections::BTreeMap<K, Vec<T>> = std::collections::BTreeMap::new();
@@ -511,8 +783,9 @@ where
 }
 /// `partition(f)` — splits into (true-list, false-list) as a named-tuple struct.
 /// `build` receives `(true_vec, false_vec)` and wraps them into the JetTup struct.
-fn jet_list_partition<T, F, S, B>(xs: Vec<T>, mut f: F, build: B) -> S
+fn jet_list_partition<T, F, S, B, I>(xs: I, mut f: F, build: B) -> S
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T) -> bool,
     B: FnOnce(Vec<T>, Vec<T>) -> S,
 {

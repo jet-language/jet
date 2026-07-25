@@ -90,6 +90,10 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && c.args.len() == 1;
+            let is_expect = c.name == Syntax::BUILTIN_EXPECT
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.args.len() == 1;
             let is_close = c.name == Syntax::RESOURCE_CLOSE
                 && !locals.contains(&c.name)
                 && c.args.len() == 1;
@@ -210,6 +214,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // positional). So a labeled arg emits byte-identically to an unlabeled one.
             (is_print
                 || is_drop
+                || is_expect
                 || is_close
                 || is_ambient_input
                 || is_require

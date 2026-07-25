@@ -384,7 +384,7 @@ pub(crate) fn emit_tir_enum_arg(a: &TEnumArg, cx: &Cx) -> String {
 fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
     match op {
         TNumericOp::Predicate(m) => format!("({recv}).{m}()"),
-        TNumericOp::BitCount(m) => format!("(({recv}).{m}() as i64)"),
+        TNumericOp::BitCount { method: m, .. } => format!("(({recv}).{m}() as i64)"),
         TNumericOp::ToShow => format!("({recv}).jet_show()"),
         TNumericOp::Origin => format!("{}jet_float_origin(&({recv}))", cx.root_prefix),
         TNumericOp::CastAs { dst_rust } => format!("(({recv}) as {dst_rust})"),
@@ -717,25 +717,29 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     .map(|e| emit_tir_expr(e, cx))
                     .unwrap_or_default()
             };
-            // D-ITERTOOLS1=A: Iter methods consume the view (`.0`); list adapters clone.
+            // D-ITERTOOLS1=A: Iter is IntoIterator; List clones. Adapters start from JetIter.
             let vec_src = if recv_is_iter {
-                format!("({recv}).0")
+                format!("({recv})")
             } else {
                 format!("({recv}).clone()")
             };
-            let wrap_iter = |inner: String| format!("jet_iter_from_vec({inner})");
+            let as_iter = if recv_is_iter {
+                format!("({recv})")
+            } else {
+                format!("jet_iter_from_vec(({recv}).clone())")
+            };
             match op {
                 TBuiltinOp::LenString => format!("jet_char_len(&({}))", recv),
                 TBuiltinOp::LenList => {
                     if recv_is_iter {
-                        format!("({recv}).0.len() as i64")
+                        format!("({recv}).len()")
                     } else {
                         format!("({recv}).len() as i64")
                     }
                 }
                 TBuiltinOp::IsEmpty => {
                     if recv_is_iter {
-                        format!("({recv}).0.is_empty()")
+                        format!("({recv}).is_empty()")
                     } else {
                         format!("({recv}).is_empty()")
                     }
@@ -772,10 +776,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
                 TBuiltinOp::Reverse => format!("({}).reverse()", recv),
                 TBuiltinOp::Sort => format!("({}).sort()", recv),
-                TBuiltinOp::JoinSep => format!(
-                    "{vec_src}.into_iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
-                    a(0)
-                ),
+                // View/ViewMut are slices (`&[T]` / `&mut [T]`) — never `.clone()` the
+                // receiver (ViewMut is not Clone). Iter consumes; List/View borrow via `.iter()`.
+                TBuiltinOp::JoinSep => {
+                    if recv_is_iter {
+                        format!(
+                            "({recv}).into_iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
+                            a(0)
+                        )
+                    } else {
+                        format!(
+                            "({recv}).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
+                            a(0)
+                        )
+                    }
+                }
                 TBuiltinOp::Sum { float: true } => format!(
                     "{vec_src}.into_iter().fold(0.0, |__acc, __item| __acc + __item)"
                 ),
@@ -796,9 +811,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TBuiltinOp::Min { float: false } => format!("{vec_src}.into_iter().min()"),
                 TBuiltinOp::Max { float: false } => format!("{vec_src}.into_iter().max()"),
-                TBuiltinOp::Flatten => wrap_iter(format!("jet_list_flatten({vec_src})")),
+                TBuiltinOp::Flatten => format!("jet_iter_flatten({as_iter})"),
                 TBuiltinOp::Intersperse => {
-                    wrap_iter(format!("jet_list_intersperse({vec_src}, {})", a(0)))
+                    format!("jet_iter_intersperse({as_iter}, {})", a(0))
                 }
                 TBuiltinOp::Unzip { tuple_struct } => format!(
                     "{{ let mut __a = Vec::new(); let mut __b = Vec::new(); for __x in {vec_src} {{ __a.push(__x.user_a); __b.push(__x.user_b); }} {} {{ user_a: __a, user_b: __b }} }}",
@@ -811,10 +826,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TBuiltinOp::Trim => format!("jet_unicode_trim(&({}))", recv),
                 TBuiltinOp::Split => {
-                    wrap_iter(format!("jet_string_split(&({}), &{})", recv, a(0)))
+                    format!("jet_iter_string_split(&({}), &{})", recv, a(0))
                 },
-                // c97/D-STRPARSE1: `lines()` → `jet_string_lines` (imported via MOD_USE,
-                // like `jet_string_split` — emitted bare, no root prefix).
+                // c97/D-STRPARSE1: `lines()` → `jet_string_lines` (imported via MOD_USE;
+                // same bare-call convention as `jet_iter_string_split`).
                 TBuiltinOp::Lines => format!("jet_string_lines(&({}))", recv),
                 TBuiltinOp::ParseInt => format!(
                     "{{ let __jet_text = &({recv}); __jet_text.trim().parse::<i64>()\
@@ -839,7 +854,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     line
                 ),
                 // D-STR-AFTER1: `after`/`before` — bare calls, no root prefix (same
-                // MOD_USE-imported convention as `jet_string_split`/`jet_string_lines`).
+                // MOD_USE-imported convention as `jet_iter_string_split`/`jet_string_lines`).
                 TBuiltinOp::After => format!("jet_string_after(&({}), &{})", recv, a(0)),
                 TBuiltinOp::Before => format!("jet_string_before(&({}), &{})", recv, a(0)),
                 // D-MEM1 stage S5: zero-copy siblings, `Stmt::Val` lowering only
@@ -980,29 +995,35 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     cx.file,
                     line
                 ),
-                // D-ITERTOOLS1=A: non-closure lazy adapters return JetIter.
-                TBuiltinOp::Take => wrap_iter(format!("jet_list_take({vec_src}, {})", a(0))),
-                TBuiltinOp::Skip => wrap_iter(format!("jet_list_skip({vec_src}, {})", a(0))),
-                TBuiltinOp::StepBy => wrap_iter(format!("jet_list_step_by({vec_src}, {})", a(0))),
-                TBuiltinOp::Dedup => wrap_iter(format!("jet_list_dedup({vec_src})")),
-                TBuiltinOp::Chunks => wrap_iter(format!("jet_list_chunks({vec_src}, {})", a(0))),
-                TBuiltinOp::Windows => wrap_iter(format!("jet_list_windows({vec_src}, {})", a(0))),
-                TBuiltinOp::Enumerate { tuple_struct } => wrap_iter(format!(
-                    "{vec_src}.into_iter().enumerate()\
-                     .map(|(i, x)| {} {{ user_idx: i as i64, user_item: x }})\
-                     .collect::<Vec<_>>()",
+                // D-ITERTOOLS1=A: non-closure lazy adapters return JetIter (no eager Vec).
+                TBuiltinOp::Take => format!("jet_iter_take({as_iter}, {})", a(0)),
+                TBuiltinOp::Skip => format!("jet_iter_skip({as_iter}, {})", a(0)),
+                TBuiltinOp::StepBy => format!("jet_iter_step_by({as_iter}, {})", a(0)),
+                TBuiltinOp::Dedup => format!("jet_iter_dedup({as_iter})"),
+                TBuiltinOp::Chunks => format!("jet_iter_chunks({as_iter}, {})", a(0)),
+                TBuiltinOp::Windows => format!("jet_iter_windows({as_iter}, {})", a(0)),
+                TBuiltinOp::Enumerate { tuple_struct } => format!(
+                    "jet_iter_enumerate({as_iter}, |i, x| {} {{ user_idx: i, user_item: x }})",
                     tuple_struct
-                )),
+                ),
                 TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
                     format!("({recv}).to_list()")
                 }
-                TBuiltinOp::Zip { tuple_struct } => wrap_iter(format!(
-                    "{vec_src}.into_iter().zip(({}).clone().into_iter())\
-                     .map(|(x, y)| {} {{ user_a: x, user_b: y }})\
-                     .collect::<Vec<_>>()",
-                    a(0),
-                    tuple_struct
-                )),
+                TBuiltinOp::Zip { tuple_struct } => {
+                    let other_is_iter = args
+                        .first()
+                        .is_some_and(|e| crate::Collections::is_iter_type(&e.ty));
+                    let other = a(0);
+                    let other_iter = if other_is_iter {
+                        format!("({other})")
+                    } else {
+                        format!("jet_iter_from_vec(({other}).clone())")
+                    };
+                    format!(
+                        "jet_iter_zip({as_iter}, {other_iter}, |x, y| {} {{ user_a: x, user_b: y }})",
+                        tuple_struct
+                    )
+                }
                 // D-HOLE1: `.zip` on `T?` — Rust's native `Option::zip`, wrapped into
                 // the named-tuple struct (present only when both operands are).
                 TBuiltinOp::OptionZip { tuple_struct, .. } => format!(
@@ -1741,31 +1762,36 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let recv_is_fixed = matches!(recv.ty, Type::FixedList { .. });
             let recv_is_iter = crate::Collections::is_iter_type(&recv.ty);
             let recv = emit_tir_expr(recv, cx);
+            // para_* needs a concrete Vec; materialize Iter at the parallel boundary.
             let para_recv = if recv_is_fixed {
                 format!("({recv}).to_vec()")
             } else if recv_is_iter {
-                format!("({recv}).0")
+                format!("({recv}).to_list()")
             } else {
                 format!("({recv}).clone()")
             };
             let vec_src = if recv_is_iter {
-                format!("({recv}).0")
+                format!("({recv})")
             } else {
                 format!("({recv}).clone()")
             };
-            let wrap_iter = |inner: String| format!("jet_iter_from_vec({inner})");
+            let as_iter = if recv_is_iter {
+                format!("({recv})")
+            } else {
+                format!("jet_iter_from_vec(({recv}).clone())")
+            };
             let a = |i: usize| {
                 args.get(i)
                     .map(|e| emit_tir_expr(e, cx))
                     .unwrap_or_default()
             };
             match op {
-                TClosureOp::Map => wrap_iter(format!("jet_list_map({vec_src}, {})", a(0))),
-                TClosureOp::MapMut => wrap_iter(format!("jet_list_map_mut({vec_src}, {})", a(0))),
+                TClosureOp::Map => format!("jet_iter_map({as_iter}, {})", a(0)),
+                TClosureOp::MapMut => format!("jet_iter_map_mut({as_iter}, {})", a(0)),
                 // D-HOLE1/D-MEM-PARAM1: `.map` on `T?` lends the payload to
                 // its plain callback instead of cloning/moving it.
                 TClosureOp::OptionMap => format!("({}).as_ref().map({})", recv, a(0)),
-                TClosureOp::Filter => wrap_iter(format!("jet_list_filter({vec_src}, {})", a(0))),
+                TClosureOp::Filter => format!("jet_iter_filter({as_iter}, {})", a(0)),
                 TClosureOp::Each => format!("jet_list_each({vec_src}, {})", a(0)),
                 TClosureOp::EachMut => format!("jet_list_each_mut({vec_src}, {})", a(0)),
                 TClosureOp::EachRef => format!("jet_list_each_ref(&({}), {})", recv, a(0)),
@@ -1778,18 +1804,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::Reduce => {
                     format!("jet_list_reduce({vec_src}, {}, {})", a(0), a(1))
                 }
-                // D-ITERTOOLS1=A: closure adapters return JetIter.
+                // D-ITERTOOLS1=A: closure adapters return JetIter (no intermediate Vec).
                 TClosureOp::TakeWhile => {
-                    wrap_iter(format!("jet_list_take_while({vec_src}, {})", a(0)))
+                    format!("jet_iter_take_while({as_iter}, {})", a(0))
                 }
                 TClosureOp::SkipWhile => {
-                    wrap_iter(format!("jet_list_skip_while({vec_src}, {})", a(0)))
+                    format!("jet_iter_skip_while({as_iter}, {})", a(0))
                 }
                 TClosureOp::FlatMap => {
-                    wrap_iter(format!("jet_list_flat_map({vec_src}, {})", a(0)))
+                    format!("jet_iter_flat_map({as_iter}, {})", a(0))
                 }
                 TClosureOp::FilterMap => {
-                    wrap_iter(format!("jet_list_filter_map({vec_src}, {})", a(0)))
+                    format!("jet_iter_filter_map({as_iter}, {})", a(0))
                 }
                 // D-PARCAPTURE1=D: all adapters share the bounded `para_` engine.
                 TClosureOp::ParaMap => format!("jet_list_para_map({}, {})", para_recv, a(0)),
@@ -1815,7 +1841,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     )
                 }
                 TClosureOp::Scan => {
-                    wrap_iter(format!("jet_list_scan({vec_src}, {}, {})", a(0), a(1)))
+                    format!("jet_iter_scan({as_iter}, {}, {})", a(0), a(1))
                 }
                 TClosureOp::Fold => {
                     format!("jet_list_fold({vec_src}, {}, {})", a(0), a(1))

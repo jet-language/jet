@@ -637,6 +637,12 @@ impl<'a> Interp<'a> {
                 .map_err(|e| json_parse_err_to_decode("JSON", super::JsonInterp::json_error_value(e))),
             "core.encoding.toml" => super::EncodingLite::toml_parse(text).map_err(|e| json_parse_err_to_decode("TOML", e)),
             "core.encoding.yaml" => super::EncodingLite::yaml_parse(text).map_err(|e| json_parse_err_to_decode("YAML", e)),
+            "core.encoding.xml" => {
+                match super::EncodingLite::xml_parse(text) {
+                    Ok(document) => super::EncodingLite::xml_project_for_decode(&document),
+                    Err(e) => Err(super::EncodingLite::xml_error_value(e)),
+                }
+            }
             _ => {
                 return Err(unsupported(
                     &format!("`{}.{}()` at comptime", module, method),

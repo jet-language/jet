@@ -351,11 +351,19 @@ extern "C" fn jet_jit_str_lines(id: i64) -> i64 {
     })
 }
 
+/// `String.split` JIT host: same piece sequence as AOT `jet_iter_string_split`.
+///
+/// AOT returns a lazy `JetIter<String>`; Cranelift host shims can only pass i64
+/// handles, so this eagerly materializes that sequence into a list handle typed
+/// as `Iter<String>`. Observable values for split + adapters + `to_list` match
+/// AOT; true pull-based laziness waits on an Iter-capable JIT ABI.
 extern "C" fn jet_jit_str_split(id: i64, sep_id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
         let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
         let list = rt.heap.alloc_empty_list();
+        // Match AOT `jet_iter_string_split` / Rust `str::split` piece order
+        // (including empty-sep Char split with leading/trailing empties).
         for part in text.split(&sep) {
             let sid = rt.heap.alloc_string(part.to_string());
             rt.heap

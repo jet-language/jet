@@ -62,6 +62,53 @@ pub(super) fn verify_strict(
     Ok(encode(&public_point) == signature_r)
 }
 
+/// RFC 8032 §5.1.6 Ed25519 signing from a 32-byte seed.
+pub(super) fn sign(seed: &[u8; 32], message: &[u8]) -> [u8; 64] {
+    let digest = super::SHA512::digest(seed);
+    let mut az = digest;
+    az[0] &= 248;
+    az[31] &= 63;
+    az[31] |= 64;
+    let public = encode(&basepoint_multiply(&az[..32]));
+
+    let mut nonce_input = Vec::with_capacity(32 + message.len());
+    nonce_input.extend_from_slice(&digest[32..]);
+    nonce_input.extend_from_slice(message);
+    let mut nonce = super::SHA512::digest(&nonce_input);
+    reduce(&mut nonce);
+    let r_point = encode(&basepoint_multiply(&nonce[..32]));
+
+    let mut challenge_input = Vec::with_capacity(64 + message.len());
+    challenge_input.extend_from_slice(&r_point);
+    challenge_input.extend_from_slice(&public);
+    challenge_input.extend_from_slice(message);
+    let mut challenge = super::SHA512::digest(&challenge_input);
+    reduce(&mut challenge);
+
+    let mut signature = [0u8; 64];
+    signature[..32].copy_from_slice(&r_point);
+    // S = (r + k*a) mod L
+    let mut product = [0i64; 64];
+    for i in 0..32 {
+        for j in 0..32 {
+            product[i + j] += i64::from(challenge[i]) * i64::from(az[j]);
+        }
+    }
+    for i in 0..32 {
+        product[i] += i64::from(nonce[i]);
+    }
+    let mut carry = 0i64;
+    for slot in &mut product {
+        let value = *slot + carry;
+        *slot = value & 255;
+        carry = value >> 8;
+    }
+    let mut reduced = [0u8; 32];
+    mod_order(&mut reduced, &mut product);
+    signature[32..].copy_from_slice(&reduced);
+    signature
+}
+
 fn scalar_is_canonical(scalar: &[u8]) -> bool {
     for index in (0..32).rev() {
         if scalar[index] != ORDER[index] {
@@ -317,6 +364,19 @@ mod tests {
             "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155\
                                5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
         );
+        assert_eq!(verify_strict(&public, b"", &signature), Ok(true));
+    }
+
+    #[test]
+    fn rfc_8032_sign_empty_message() {
+        let seed = bytes::<32>("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+        let expected = bytes::<64>(
+            "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155\
+             5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
+        );
+        let signature = sign(&seed, b"");
+        assert_eq!(signature, expected);
+        let public = bytes::<32>("d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a");
         assert_eq!(verify_strict(&public, b"", &signature), Ok(true));
     }
 

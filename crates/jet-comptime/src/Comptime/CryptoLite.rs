@@ -1,5 +1,8 @@
 //! Deterministic std-only crypto transforms used by comptime and the REPL.
 
+mod Aes256Gcm;
+mod Argon2id;
+mod ChaCha20Poly1305;
 mod Ed25519;
 mod SHA512;
 
@@ -202,6 +205,57 @@ pub(super) fn ed25519_verify_strict(
     Ed25519::verify_strict(public, message, signature)
 }
 
+pub(super) fn ed25519_sign(seed: &[u8; 32], message: &[u8]) -> [u8; 64] {
+    Ed25519::sign(seed, message)
+}
+
+pub(super) fn xchacha20poly1305_seal(
+    key: &[u8],
+    nonce: &[u8],
+    plaintext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>, ()> {
+    ChaCha20Poly1305::xchacha20poly1305_seal(key, nonce, plaintext, aad)
+}
+
+pub(super) fn xchacha20poly1305_open(
+    key: &[u8],
+    nonce: &[u8],
+    ciphertext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>, ()> {
+    ChaCha20Poly1305::xchacha20poly1305_open(key, nonce, ciphertext, aad)
+}
+
+pub(super) fn aes256gcm_seal(
+    key: &[u8],
+    nonce: &[u8],
+    plaintext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>, ()> {
+    Aes256Gcm::seal(key, nonce, plaintext, aad)
+}
+
+pub(super) fn aes256gcm_open(
+    key: &[u8],
+    nonce: &[u8],
+    ciphertext: &[u8],
+    aad: &[u8],
+) -> Result<Vec<u8>, ()> {
+    Aes256Gcm::open(key, nonce, ciphertext, aad)
+}
+
+pub(super) fn argon2id(
+    password: &[u8],
+    salt: &[u8],
+    memory_kib: u32,
+    iterations: u32,
+    lanes: u32,
+    output_length: usize,
+) -> Result<Vec<u8>, ()> {
+    Argon2id::hash(password, salt, memory_kib, iterations, lanes, output_length)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +295,26 @@ mod tests {
             x25519(&secret, &public).unwrap().to_vec(),
             bytes("4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742")
         );
+    }
+
+    #[test]
+    fn expert_aead_roundtrips() {
+        let key = vec![0x11u8; 32];
+        let xnonce = vec![0x24u8; 24];
+        let anonce = vec![0x12u8; 12];
+        let message = b"expert crypto".to_vec();
+        let aad = b"tenant".to_vec();
+        let xsealed = xchacha20poly1305_seal(&key, &xnonce, &message, &aad).unwrap();
+        assert_eq!(xchacha20poly1305_open(&key, &xnonce, &xsealed, &aad).unwrap(), message);
+        let asealed = aes256gcm_seal(&key, &anonce, &message, &aad).unwrap();
+        assert_eq!(aes256gcm_open(&key, &anonce, &asealed, &aad).unwrap(), message);
+    }
+
+    #[test]
+    fn rfc_8032_sign_empty() {
+        let seed = bytes("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+        let expected = bytes("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b");
+        let seed: [u8; 32] = seed.try_into().unwrap();
+        assert_eq!(ed25519_sign(&seed, b"").to_vec(), expected);
     }
 }

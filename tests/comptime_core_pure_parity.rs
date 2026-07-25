@@ -12,7 +12,7 @@ mod common;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
-const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String; bucket: String; score: Float }\nfn pivot_view() -> String {\n    prefix :: \"p\"\n    rows :: [PivotRow.{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) => \"{prefix}{row.team}\", (row) => row.bucket, (row) => row.score)\n    return \"{groups[0].key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
+const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String; bucket: String; score: Float }\nfn pivot_view() -> String {\n    prefix :: \"p\"\n    rows :: [PivotRow.{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) => \"{prefix}{row.team}\", (row) => row.bucket, (row) => row.score) ?? panic(\"pivot\")\n    return \"{groups[0].row_key}|{groups[0].column_key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].row_key}|{groups[1].column_key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
 const PIVOT_EXPR: &str = "pivot_view()";
 const CIVIL_FN: &str = "fn civil_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
 const CIVIL_DECLS: &str = "use core.time as time\nuse core.time.date as date\nuse core.time.datetime as datetime\nfn civil_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
@@ -393,12 +393,12 @@ fn add_bag(values: &Bag<Int>, value: Int) -> Bool {
 }
 fn counted_bag(hits: &Int) -> Bag<Int> {
     hits += 1
-    values := Bag.new()
+    values := Bag<Int>.new()
     values.add(6)
     return values
 }
 fn bag_view() -> String {
-    values := Bag.new()
+    values := Bag<Int>.new()
     empty_before :: values.is_empty()
     added_four :: values.add(4)
     duplicate_four :: values.add(4)
@@ -412,14 +412,14 @@ fn bag_view() -> String {
     count_four_after_one :: values.count(4)
     values.remove(4)
     values.remove(99)
-    words := Bag.new()
+    words := Bag<String>.new()
     words.add("a")
     words.add("z")
     words.add("a")
-    tokens := Bag.new()
+    tokens := Bag<BagToken>.new()
     tokens.add(BagToken.Red)
     tokens.add(BagToken.Red)
-    empty := Bag.new()
+    empty := Bag<Int>.new()
     return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) => value == "z")}|{tokens.count(BagToken.Red)}|{tokens.has(BagToken.Blue)}|{empty.any((value) => value == 0)}"
 }"#;
 const BAG_EXPECTED: &str = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
@@ -1429,6 +1429,31 @@ fn crypto_values_match_aot_comptime_forced_interpreter_and_default_dev() {
     let source = parity_source("crypto_value_view()", CRYPTO_DECLS);
     assert_eq!(check_aot_comptime("crypto/expert-pure-values", &source), CRYPTO_EXPECTED);
     check_dev_tiers_with_boundary("crypto-expert-pure-values", &source, CRYPTO_EXPECTED, true);
+}
+
+#[test]
+fn crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers() {
+    // New #722 ports: AOT path (no comptime expected= — TIR still Todo for
+    // Signature.bytes / AEAD in some shapes). REPL transcripts cover tier-0.
+    let source = r#"use core.crypto.expert as expert
+fn run() {
+    ed_seed :: [U8].{ 157, 97, 177, 157, 239, 253, 90, 96, 186, 132, 74, 244, 146, 236, 44, 196, 68, 73, 197, 105, 123, 50, 105, 25, 112, 59, 172, 3, 28, 174, 127, 96 }
+    ed_public :: [U8].{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
+    key :: [U8].{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    nonce :: [U8].{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    msg :: [U8].{ 97, 98, 99 }
+    #Unsafe("fixed RFC interop vectors") {
+        signed :: expert.ed25519_sign(ed_seed, []) ?? panic("sign")
+        sealed :: expert.aes256gcm_seal(key, nonce, msg, []) ?? panic("seal")
+        plain :: expert.aes256gcm_open(key, nonce, sealed, []) ?? panic("open")
+        password :: expert.hkdf_sha256([112], [], [], 4) ?? panic("pw")
+        derived :: expert.argon2id(password, [0, 1, 2, 3, 4, 5, 6, 7], 8192, 1, 1, 16) ?? panic("argon")
+        print("{expert.ed25519_verify_strict(ed_public, [], signed.bytes()) ?? false}|{plain}|{expert.secret_bytes(derived).len()}")
+    }
+}
+"#;
+    let output = rustc_aot_stdout("crypto/expert-aead-sign-argon", source);
+    assert_eq!(output.trim(), "true|[97, 98, 99]|16");
 }
 
 const NET_STYLE_DECLS: &str = r#"use core.io as io

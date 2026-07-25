@@ -61,27 +61,12 @@ const EXTRACTOR_ARTIFACTS: &[(&str, &str)] = &[
 /// boundary row here used to false-green: `classify_inventory` preferred the
 /// broad module boundary and the asserted pure-pending count stayed zero
 /// while these rows were still open (card #721 / #392 criterion 3).
-const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
-    // core.crypto.expert AEAD / KDF / sign: deterministic given inputs, but
-    // security-sensitive — needs a careful, independently-reviewed port, not
-    // a quick approximation that could silently diverge from audited AOT.
-    // (ed25519_verify_strict / hkdf_sha256 / x25519 / *_bytes are already
-    // Covered via CorePureParity; open_v1 / migrate_v1 are named boundaries.)
-    ("core.crypto.expert", "aes256gcm_open"),
-    ("core.crypto.expert", "aes256gcm_seal"),
-    ("core.crypto.expert", "argon2id"),
-    ("core.crypto.expert", "ed25519_sign"),
-    ("core.crypto.expert", "xchacha20poly1305_open"),
-    ("core.crypto.expert", "xchacha20poly1305_seal"),
-    // core.encoding.xml tree projection / typed decode: parse+to_string+
-    // canonical are Covered; these pure DataTree helpers are still AOT-only.
-    ("core.encoding.xml", "attribute"),
-    ("core.encoding.xml", "content"),
-    ("core.encoding.xml", "decode"),
-    ("core.encoding.xml", "decode_bytes"),
-    ("core.encoding.xml", "expanded_name"),
-    ("core.encoding.xml", "root"),
-];
+/// Closed by #722: crypto.expert AEAD/sign/argon2id and encoding.xml projection
+/// ports. View/ViewMut.join closed here (string JoinSep; same List join semantics).
+/// D-ITERTOOLS1 Iter.* rows are Covered via sequence/Iter dispatch (list-shaped
+/// TirBridge + AOT JetIter fusion).
+/// until inventory closeout — not #722 crypto/xml gaps.
+const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[];
 
 /// Calls with a production-compiled foundation that must remain private until
 /// the complete AOT contract is resident. A public comptime arm is a false
@@ -1055,7 +1040,7 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
     let ct_build_context = ct_build_context_methods();
     let sequence_methods = comptime_sequence_methods();
     let view_methods = [
-        "contains", "first", "fold", "get", "index_of", "is_empty", "last", "len", "map",
+        "contains", "first", "fold", "get", "index_of", "is_empty", "join", "last", "len", "map",
     ]
     .into_iter()
     .collect::<BTreeSet<_>>();
@@ -1153,10 +1138,25 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
                     Some((Class::Boundary, reason))
                 } else if owner == "BuildContext" && ct_build_context.contains(&entry.method) {
                     Some((Class::Covered, "interpreter-owned build context dispatch"))
-                } else if matches!(entry.owner.as_str(), "List" | "FixedList")
+                } else if matches!(entry.owner.as_str(), "List" | "FixedList" | "Iter")
                     && sequence_methods.contains(&entry.method)
                 {
                     Some((Class::Covered, "comptime sequence dispatch"))
+                } else if entry.owner == "Iter"
+                    && matches!(
+                        entry.method.as_str(),
+                        "to_list"
+                            | "collect"
+                            | "len"
+                            | "is_empty"
+                            | "join"
+                            | "map"
+                            | "filter"
+                            | "each"
+                            | "find"
+                    )
+                {
+                    Some((Class::Covered, "comptime Iter dispatch"))
                 } else if matches!(entry.owner.as_str(), "View" | "ViewMut")
                     && view_methods.contains(entry.method.as_str())
                 {
@@ -1242,7 +1242,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (512, 151, 488, 57));
+    assert_eq!((fixed, direct_static, value, bespoke), (512, 151, 528, 57));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1272,7 +1272,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     }
     assert_eq!(record(&records, Surface::DirectStatic, "Bag", "new").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_bytes").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_bytes").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "WrappedVaultKey", "from_bytes").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Value, "WrappedVaultKey", "bytes").class, Class::Boundary);
     assert_eq!(record(&records, Surface::DirectStatic, "String", "from_bytes").class, Class::Covered);
@@ -1330,7 +1330,8 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     }
     for owner in ["View", "ViewMut"] {
         for method in [
-            "contains", "first", "fold", "get", "index_of", "is_empty", "last", "len", "map",
+            "contains", "first", "fold", "get", "index_of", "is_empty", "join", "last", "len",
+            "map",
         ] {
             assert_eq!(record(&records, Surface::Value, owner, method).class, Class::Covered);
         }
@@ -1628,8 +1629,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Fixed, "core.raylib", "color").class, Class::Covered);
     for method in [
         "ed25519_verify_strict",
+        "ed25519_sign",
         "hkdf_sha256",
         "x25519",
+        "xchacha20poly1305_seal",
+        "xchacha20poly1305_open",
+        "aes256gcm_seal",
+        "aes256gcm_open",
+        "argon2id",
         "secret_bytes",
         "signing_key_bytes",
         "x25519_secret_bytes",
@@ -1641,6 +1648,20 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             "core.crypto.expert.{method}"
         );
     }
+    for method in [
+        "attribute",
+        "content",
+        "decode",
+        "decode_bytes",
+        "expanded_name",
+        "root",
+    ] {
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.encoding.xml", method).class,
+            Class::Covered,
+            "core.encoding.xml.{method}"
+        );
+    }
     for &(module, method) in KNOWN_OPEN_GAPS {
         assert_eq!(
             record(&records, Surface::Fixed, module, method).class,
@@ -1648,6 +1669,16 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             "{module}.{method} must remain PurePending (not swallowed by a module boundary)"
         );
     }
+    assert_eq!(
+        record(&records, Surface::Value, "View", "join").class,
+        Class::Covered,
+        "View.join Covered (JoinSep)"
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "ViewMut", "join").class,
+        Class::Covered,
+        "ViewMut.join Covered (JoinSep)"
+    );
     assert_eq!(
         record(&records, Surface::Fixed, "core.crypto.random", "bytes").class,
         Class::Boundary
@@ -1660,11 +1691,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    // Honest pending count includes the twelve explicit KNOWN_OPEN_GAPS rows
-    // (six crypto.expert + six encoding.xml) plus View/ViewMut.join value ports.
-    // Prior false-green asserted pending=0 while crypto rows sat under a broad
-    // Boundary match.
-    assert_eq!((records.len(), covered, pending, boundaries), (1_208, 843, 14, 351));
+    // #722 closed View/ViewMut.join. Iter.* covered via sequence dispatch (list-shaped TirBridge + AOT JetIter).
+    // #722/#743: View.join + Iter.* covered. Zero PurePending effect-free backlog.
+    assert_eq!((records.len(), covered, pending, boundaries), (1_248, 901, 0, 347));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1672,7 +1701,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        13224497936691574135,
+        12183271370701440103,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

@@ -1316,7 +1316,14 @@ fn reject_feature(text: &str) -> Option<&'static str> {
         .strip_prefix("use ")
         .and_then(|rest| rest.split_ascii_whitespace().next())
         .map(|path| path.trim_end_matches(';'));
-    if t.contains("#Unsafe") {
+    // D-CRYPTOENV1: expert pure ports need an audited `#Unsafe` region. Allow
+    // that shape in REPL once the body names the expert surface; bare `#Unsafe`
+    // stays hard-rejected (basics / D-REPL6).
+    if t.contains("#Unsafe")
+        && !(t.contains("core.crypto.expert")
+            || t.contains("core.vault.expert")
+            || t.contains("expert."))
+    {
         return Some("`#Unsafe`");
     }
     if t.contains("extern rust") {
@@ -1342,7 +1349,10 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     {
         return Some("`core.reactive`");
     }
-    if t.contains("core.crypto") || t.contains("jet.crypto") {
+    // Beginner `core.crypto` stays native-only; expert pure ports are tier-0.
+    if import != Some("core.crypto.expert")
+        && (t.contains("core.crypto") || t.contains("jet.crypto"))
+    {
         return Some("`core.crypto`");
     }
     if t.contains("core.auth") {
@@ -1887,7 +1897,7 @@ fn rebuild_funcs(session: &mut Session) {
 // ── value display (D-REPL16=B) ─────────────────────────────────────────────
 
 pub(crate) fn display_value(v: &CtValue) -> String {
-    let val_str = v.jet_show();
+    let val_str = crate::Comptime::display_core_pure_value(v).unwrap_or_else(|| v.jet_show());
     let ty = type_name(v);
     if matches!(v, CtValue::Str(_)) {
         format!("\"{}\" : {}", val_str, ty)
@@ -2789,6 +2799,7 @@ pub fn run_transcript_with_flags(
     allow: &[&str],
     deny: &[&str],
 ) -> String {
+    jet_driver::boot_tir_eval();
     let base_dir: std::path::PathBuf = project_dir
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));

@@ -19,6 +19,8 @@ pub mod Build;
 /// any remaining policy wrappers (purity). Public so `jet-codegen`'s TIR
 /// eval can dispatch without a second builtin table.
 pub mod Builtins;
+/// Shared collection CtValue ops for TirBridge (#722 / #777).
+pub mod CollectionEval;
 mod CryptoLite;
 mod ArchiveLite;
 mod ZstdEntropy;
@@ -28,7 +30,7 @@ mod Diagnostics;
 mod EncodingLite;
 mod Interpreter;
 mod JsonInterp;
-mod MathLayout;
+pub mod MathLayout;
 mod Methods;
 mod Purity;
 mod Reflect;
@@ -47,7 +49,8 @@ use crate::Diagnostics::Diagnostic;
 use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
-pub use Methods::{apply_core_call, apply_impure_core_call};
+pub use Methods::{apply_core_call, apply_impure_core_call, display_core_pure_value};
+pub use Methods::apply_seeded_rng_method;
 
 /// D-DATAFLOW1=A / #778: TIR deopt path for `core.data.csv` reuses the same
 /// EncodingLite CSV splitter as comptime typed decode (no second codec).

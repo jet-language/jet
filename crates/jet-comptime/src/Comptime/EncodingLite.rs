@@ -1843,6 +1843,61 @@ pub(super) fn xml_render(value: &CtValue) -> String {
         .unwrap_or_default()
 }
 
+pub(super) fn xml_root(document: &CtValue) -> Result<CtValue, CtValue> {
+    let value = xml_from_ct(document).map_err(xml_shape_error_value)?;
+    jet_foundation::XmlPull::document_root(&value)
+        .map(xml_to_ct)
+        .map_err(xml_error_value)
+}
+
+pub(super) fn xml_expanded_name(node: &CtValue) -> Result<CtValue, CtValue> {
+    let value = xml_from_ct(node).map_err(xml_shape_error_value)?;
+    let (raw, prefix, local, namespace_uri) =
+        jet_foundation::XmlPull::expanded_name_parts(&value).map_err(xml_error_value)?;
+    Ok(CtValue::Struct {
+        type_name: String::new(),
+        fields: vec![
+            ("raw".to_string(), CtValue::Str(raw)),
+            (
+                "prefix".to_string(),
+                prefix
+                    .map(|value| CtValue::Some(Box::new(CtValue::Str(value))))
+                    .unwrap_or(CtValue::None(Type::String)),
+            ),
+            ("local".to_string(), CtValue::Str(local)),
+            (
+                "namespace_uri".to_string(),
+                namespace_uri
+                    .map(|value| CtValue::Some(Box::new(CtValue::Str(value))))
+                    .unwrap_or(CtValue::None(Type::String)),
+            ),
+        ],
+    })
+}
+
+pub(super) fn xml_attribute(element: &CtValue, name: &str) -> Result<CtValue, CtValue> {
+    let value = xml_from_ct(element).map_err(xml_shape_error_value)?;
+    match jet_foundation::XmlPull::lookup_attribute(&value, name).map_err(xml_error_value)? {
+        Some(text) => Ok(CtValue::Some(Box::new(CtValue::Str(text)))),
+        None => Ok(CtValue::None(Type::String)),
+    }
+}
+
+pub(super) fn xml_content(element: &CtValue) -> Result<CtValue, CtValue> {
+    let value = xml_from_ct(element).map_err(xml_shape_error_value)?;
+    let children = jet_foundation::XmlPull::element_content(&value).map_err(xml_error_value)?;
+    Ok(CtValue::List(children.into_iter().map(xml_to_ct).collect()))
+}
+
+/// D-ENCXML-PROJECTION1: project the closed XML tree into the Codable shape
+/// (`@attr` / `$text` / child keys) before typed decode.
+pub(super) fn xml_project_for_decode(document: &CtValue) -> Result<CtValue, CtValue> {
+    let value = xml_from_ct(document).map_err(xml_shape_error_value)?;
+    jet_foundation::XmlPull::project_document_for_decode(&value)
+        .map(xml_to_ct)
+        .map_err(xml_error_value)
+}
+
 pub(super) fn xml_to_bytes(
     value: &CtValue,
     options: Option<&CtValue>,

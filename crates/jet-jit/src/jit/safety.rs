@@ -58,6 +58,18 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         {
             Some(inner.as_ref().clone())
         }
+        // JIT ABI: `Iter<T>` producers (String.split, adapters) materialize list
+        // handles — same scalar elems as list for-in.
+        Type::Apply { name, args }
+            if name == jet_foundation::Syntax::TYPE_ITER
+                && args.len() == 1
+                && matches!(
+                    &args[0],
+                    Type::Int | Type::Float | Type::String | Type::Char
+                ) =>
+        {
+            Some(args[0].clone())
+        }
         _ => None,
     }
 }
@@ -297,8 +309,13 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && match op {
                     TNumericOp::Predicate(name) => matches!(&recv.ty, Type::Float)
                         && matches!(name.as_str(), "is_nan" | "is_infinite" | "is_finite"),
-                    TNumericOp::BitCount(name) => matches!(&recv.ty, Type::Int)
-                        && matches!(name.as_str(), "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"),
+                    TNumericOp::BitCount { method: name, width } => {
+                        (*width == 64 && matches!(&recv.ty, Type::Int))
+                            && matches!(
+                                name.as_str(),
+                                "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
+                            )
+                    }
                     TNumericOp::ToShow => matches!(&recv.ty, Type::Int | Type::Float),
                     TNumericOp::CastAs { dst_rust } => {
                         recv.ty.is_numeric()
@@ -425,6 +442,20 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && resident_safe_expr(else_value, callees)
         }
         TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
+        TExprKind::ClosureMethod { recv, op, args } => {
+            // Native Map/Filter over Int list/Iter; other closure ops remain gaps.
+            matches!(
+                op,
+                TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::Filter
+            ) && matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+                && resident_safe_expr(recv, callees)
+                && args.len() == 1
+                && matches!(&args[0].kind, TExprKind::Lambda(lam)
+                    if lam.prep.is_empty()
+                        && lam.source_params.len() == 1
+                        && matches!(&lam.executable, TIR::TLambdaBody::Expr(e)
+                            if resident_safe_expr(e, callees)))
+        }
         TExprKind::TaskGroupAll { tasks } => {
             jit_list_int_type(&expr.ty) && resident_safe_task_list_expr(tasks, callees)
         }
@@ -515,11 +546,20 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Sort => jit_list_int_type(&recv.ty) && args.is_empty(),
-        TBuiltinOp::LenList => jit_list_native_type(&recv.ty) && args.is_empty(),
+        TBuiltinOp::LenList => {
+            (jit_list_native_type(&recv.ty) || jit_list_iter_elem_type(&recv.ty).is_some())
+                && args.is_empty()
+        }
         TBuiltinOp::GetList => {
             jit_list_int_type(&recv.ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::GetMap => {
+            jit_map_string_type(&recv.ty)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::JoinSep => {
@@ -552,6 +592,21 @@ fn resident_safe_builtin_op(
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
+        }
+        // JIT ABI: Iter producers already materialize list handles.
+        TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
+            jit_list_iter_elem_type(&recv.ty).is_some() && args.is_empty()
+        }
+        TBuiltinOp::Take | TBuiltinOp::Skip | TBuiltinOp::StepBy | TBuiltinOp::Chunks
+        | TBuiltinOp::Windows => {
+            jit_list_iter_elem_type(&recv.ty).is_some()
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Dedup => jit_list_iter_elem_type(&recv.ty).is_some() && args.is_empty(),
+        TBuiltinOp::Sum { float: false } => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) && args.is_empty()
         }
         _ => false,
     }
@@ -707,9 +762,13 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             let map_ok = method_kind.is_none()
                 && var2.is_some()
                 && jit_map_string_type(&collection.ty);
+            // `by_value` marks Stream/Iter/HttpBodyChunks. Only Iter<T> is list-
+            // backed under the JIT host ABI (true lazy handles don't cross).
+            let by_value_ok = !*by_value
+                || jet_foundation::Collections::is_iter_type(&collection.ty);
             (chars_ok || list_ok || map_ok)
                 && !columnar
-                && !by_value
+                && by_value_ok
                 && resident_safe_expr(source, callees)
                 && resident_safe_expr(collection, callees)
                 && step.as_ref().is_none_or(|step| resident_safe_expr(step, callees))
