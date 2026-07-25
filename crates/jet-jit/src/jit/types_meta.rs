@@ -4,8 +4,40 @@ use cranelift_module::Module;
 use jet_codegen::Codegen::TIR::{
     JitProgram, SerdeCodec, TExpr, TExprKind, TFunc, TFuncKind, THandleOp, TNumericOp,
 };
-use jet_foundation::AST::Type;
+use jet_foundation::AST::{Item, ProgramBundle, Type};
+use std::cell::RefCell;
 use std::collections::HashMap;
+
+/// `TypeName → per-field #[Redact]` flags in declaration order (parallel to
+/// `JitProgram.struct_fields`). Populated from the ProgramBundle before compile
+/// so JetDebug can redact without extending `JitProgram` (#729 display_debug).
+thread_local! {
+    static STRUCT_REDACT: RefCell<HashMap<String, Vec<bool>>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn install_struct_redact(bundle: &ProgramBundle) {
+    let mut map = HashMap::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let Item::Struct(s) = item {
+                map.insert(
+                    s.name.clone(),
+                    s.fields.iter().map(|f| f.redact).collect(),
+                );
+            }
+        }
+    }
+    STRUCT_REDACT.with(|slot| *slot.borrow_mut() = map);
+}
+
+/// Whether field `idx` of `type_name` is `#[Redact]`. `None` = no metadata installed.
+pub(crate) fn struct_field_redacted(type_name: &str, idx: usize) -> Option<bool> {
+    STRUCT_REDACT.with(|slot| {
+        slot.borrow()
+            .get(type_name)
+            .and_then(|flags| flags.get(idx).copied())
+    })
+}
 
 use super::safety::{
     jit_concurrency_type, jit_enum_type, jit_list_iter_elem_type, jit_list_native_type,
@@ -283,6 +315,15 @@ impl<'a> JitMeta<'a> {
             return None;
         }
         Some((names.as_slice(), tys.as_slice()))
+    }
+
+    /// Field type by Jet or mangled Rust field name.
+    pub(crate) fn struct_field_ty(&self, type_name: &str, field: &str) -> Option<Type> {
+        let idx = self.struct_field_index(type_name, field)?;
+        self.struct_field_types
+            .get(type_name)
+            .and_then(|tys| tys.get(idx).cloned())
+            .or_else(|| core_struct_field_type(type_name, field))
     }
 
     /// Discriminant index from structured enum + variant Jet names.

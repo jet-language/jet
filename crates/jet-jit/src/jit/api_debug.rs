@@ -49,6 +49,7 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
         return Err(plan_tiers(bundle, None));
     }
     crate::Encoding::register_migrations(bundle);
+    super::types_meta::install_struct_redact(bundle);
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
@@ -94,6 +95,7 @@ pub(crate) fn try_resident_hot_swap(
         return Err(plan_tiers(bundle, None));
     }
     crate::Encoding::register_migrations(bundle);
+    super::types_meta::install_struct_redact(bundle);
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
@@ -123,6 +125,7 @@ pub(crate) fn try_resident_restart(
         return Err(plan_tiers(bundle, None));
     }
     crate::Encoding::register_migrations(bundle);
+    super::types_meta::install_struct_redact(bundle);
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
@@ -186,6 +189,7 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
     catch_jit_panic("compile", || {
         resident_teardown();
         crate::Encoding::register_migrations(bundle);
+        super::types_meta::install_struct_redact(bundle);
         RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
         ensure_resident_module(&program)
     })

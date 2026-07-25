@@ -2260,9 +2260,22 @@ fn scheduler_spawn_runs_via_jit() {
 #[test]
 fn dev_default_interprets_display_debug_interpolation() {
     let file = "examples/features/types/display_debug.jet";
-    // Whole-program deopt hits unbound `self` (E0956) until Display/Debug
-    // method eval lands (#779). Tiered run must not emit retired E2211.
-    assert_default_dev_jit_gap("types/display_debug", file);
+    // Named Display + JetDebug with #[Redact] now lower on the resident JIT.
+    jet_jit::reset_jit_trace_for_test();
+    match dev_iteration_with_timeout("types/display_debug", file, false) {
+        RunOutcome::Ran { stdout, .. } => {
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "types/display_debug must run native JIT"
+            );
+            let gold = fs::read_to_string("examples/features/expected/types/display_debug.out")
+                .expect("golden");
+            assert_eq!(stdout, gold);
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("types/display_debug must run: {diags:?}");
+        }
+    }
 }
 
 /// D-DEV1 "try anyway": the opt-in flag skips the boundary scan and attempts

@@ -64,13 +64,19 @@ covered:
   contracts/pre_post
   devloop/schedule_every
   devloop/task_runner
+  effects/all_sigils
+  effects/asset_pipeline
+  effects/capability_sigils
   effects/effect_caps
   effects/effect_grant
   effects/effect_prohibition
   effects/effect_trait_bound
   effects/effect_tree
   effects/effects
+  effects/infer_capability
+  effects/infer_receiver
   effects/method_receivers
+  effects/mix_write_take
   effects/move_no_uaf
   effects/pure
   effects/self_mutation
@@ -105,6 +111,7 @@ covered:
   math/random_audit
   memory/copy_verb
   memory/gc_cyclic
+  memory/no_alloc_policy
   memory/place_windows
   memory/ref_field
   memory/resource_close
@@ -166,6 +173,7 @@ covered:
   types/capability_bundles
   types/computed_field
   types/dimensional_quantities
+  types/display_debug
   types/distinct_types
   types/dot_construction
   types/enum_dot
@@ -224,15 +232,9 @@ gaps:
   crypto/vault_keys: provision: jit core call unsupported: core.vault.prepare_generate
   crypto/vault_secret: handler: jit core call unsupported: core.vault.get
   devloop/persist: run: jit const ref unsupported
-  effects/all_sigils: run: jit call arg wrapper unsupported
-  effects/asset_pipeline: run: jit call arg wrapper unsupported
-  effects/capability_sigils: run: jit call arg wrapper unsupported
   effects/determinism: roll_at: jit handle method unsupported
   effects/effect_higher_order: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
   effects/effect_levers: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: Some([]) }
-  effects/infer_capability: run: jit call arg wrapper unsupported
-  effects/infer_receiver: run: jit call arg wrapper unsupported
-  effects/mix_write_take: run: jit call arg wrapper unsupported
   effects/single_use_discard: run: jit unsafe region unsupported
   effects/smart_context: run: jit allocator constructor unsupported
   errors/error_context: load_config: jit host/default/uninit/ct-lit unsupported
@@ -275,7 +277,6 @@ gaps:
   memory/entity_tree: run: jit static `jet_std::JetPool::new`
   memory/entity_world: tick: jit host/default/uninit/ct-lit unsupported
   memory/expiring_secret: run: jit host/default/uninit/ct-lit unsupported
-  memory/no_alloc_policy: run: jit call arg wrapper unsupported
   memory/ownership: jit param type unsupported: Fn { params: [String], ret: Some(Int), effect_bound: None }
   memory/parameter_modes: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
   memory/pool_stale_id: run: jit static `jet_std::JetPool::new`
@@ -303,7 +304,7 @@ gaps:
   parsing/binary_pattern: run: jit host/default/uninit/ct-lit unsupported
   parsing/parse_interpolation: run: jit host/default/uninit/ct-lit unsupported
   parsing/text-cursor: run: jit handle method unsupported
-  patterns/struct_destructure: run: jit struct destructure unsupported
+  patterns/struct_destructure: run: jit host/default/uninit/ct-lit unsupported
   reflection/reflect-value: run: jit core call unsupported: core.reflect.of
   safety/sh_typed_text: run: jit host/default/uninit/ct-lit unsupported
   safety/typed_sql: run_query: jit host/default/uninit/ct-lit unsupported
@@ -331,7 +332,6 @@ gaps:
   tooling/testing_helpers: run: jit core call unsupported: core.testing.temp_dir
   tooling/todo_hole: not_yet: jit todo expression unsupported
   types/anonymous_unions: jit param type unsupported: Union([Int, String])
-  types/display_debug: run: jit string interp Debug type unsupported: Named("User")
   types/generic_types: run: jit call to unknown function `make_pair`
   types/measurement: run: jit core call unsupported: core.science.measurement.from
   types/no_any_alternatives: run: jit call to unknown function `echo`

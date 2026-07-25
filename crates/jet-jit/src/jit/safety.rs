@@ -705,15 +705,50 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
 }
 
 fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
-    // TIR marks non-scalar params as `borrow`; JIT passes them by handle/discriminant.
-    (!arg.borrow || jit_value_type(&arg.value.ty))
-        && !arg.mut_borrow
-        && !arg.clone
-        && !arg.arc_clone
-        && arg.fn_coerce.is_none()
-        && !arg.widen_to_vec
-        && (!jit_struct_type(&arg.value.ty) || arg.borrow)
-        && resident_safe_expr(&arg.value, callees)
+    // Arc/fn-coerce still unsupported. borrow/mut_borrow pass heap handles;
+    // clone lowers through `lower_clone` for the types below.
+    if arg.arc_clone || arg.fn_coerce.is_some() {
+        return false;
+    }
+    let ty = &arg.value.ty;
+    let handle_pass = jit_value_type(ty)
+        || jit_struct_type(ty)
+        || jit_tuple_type(ty)
+        || matches!(
+            ty,
+            Type::String
+                | Type::List(_)
+                | Type::FixedList { .. }
+                | Type::Option(_)
+                | Type::Map { .. }
+        );
+    if (arg.borrow || arg.mut_borrow) && !handle_pass {
+        return false;
+    }
+    if arg.clone {
+        let clone_ok = matches!(
+            ty,
+            Type::Int
+                | Type::Float
+                | Type::Bool
+                | Type::Char
+                | Type::String
+                | Type::Option(_)
+                | Type::IntN { .. }
+                | Type::Float32
+        ) || jit_struct_type(ty)
+            || jit_tuple_type(ty)
+            || jit_list_native_type(ty)
+            || jit_list_record_type(ty)
+            || jit_map_string_type(ty);
+        if !clone_ok {
+            return false;
+        }
+    }
+    if arg.widen_to_vec && !(jit_list_native_type(ty) || matches!(ty, Type::FixedList { .. })) {
+        return false;
+    }
+    resident_safe_expr(&arg.value, callees)
 }
 
 fn resident_safe_unary_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
@@ -1072,6 +1107,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             jit_list_native_type(&init.ty)
                 && !elems.is_empty()
                 && resident_safe_expr(init, callees)
+        }
+        TStmt::StructDestructure { init, binds, .. } => {
+            jit_struct_type(&init.ty) && !binds.is_empty() && resident_safe_expr(init, callees)
         }
         TStmt::Assign {
             place,

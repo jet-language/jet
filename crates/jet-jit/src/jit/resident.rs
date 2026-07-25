@@ -126,6 +126,8 @@ fn reset_run_heap(rt: &mut JitRuntime) {
 pub(crate) fn resident_teardown() {
     clear_deopt_state();
     crate::Collections::clear_packed_enum_show();
+    // Keep STRUCT_REDACT: resident_run_fresh teardowns then recompiles in the
+    // same try_resident that installed redact; clearing here dropped JetDebug.
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = None);
     Concurrency::set_active_runtime(None);

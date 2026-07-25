@@ -16,8 +16,8 @@ use super::runtime_host::HostFns;
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
     jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type, jit_list_record_type,
-    jit_map_string_type, jit_result_list_elem, jit_tuple_type, jit_value_type, record_type_key,
-    user_type_name,
+    jit_map_string_type, jit_result_list_elem, jit_struct_type, jit_tuple_type, jit_value_type,
+    record_type_key, user_type_name,
 };
 use super::types_meta::{clif_ty, core_struct_field_type, init_clif_ty, JitMeta};
 use super::JitRuntime;
@@ -2683,8 +2683,8 @@ impl LowerCtx<'_, '_> {
             TStmt::DebugOnly(body) => {
                 self.lower_stmts_scoped(body)?;
             }
-            TStmt::StructDestructure { .. } => {
-                return Err("jit struct destructure unsupported".to_string());
+            TStmt::StructDestructure { init, binds, .. } => {
+                self.lower_struct_destructure(init, binds)?;
             }
             TStmt::ListDestructure {
                 init,
@@ -2911,19 +2911,34 @@ impl LowerCtx<'_, '_> {
         })
     }
 
-    /// `TCallArg` wrapper flags (`mut_borrow`/`clone`/`arc_clone`/`fn_coerce`)
-    /// are AOT-only borrow/coercion machinery the JIT's value model (bare Cranelift
-    /// `Value`, no borrow tracking) cannot express; bail rather than silently drop
-    /// the wrapper's semantics. `widen_to_vec` is `[T#N]` → `[T]`: JIT stores both
-    /// as arena list handles, so clone matches AOT `.to_vec()`.
+    /// `TCallArg` wrappers: `arc_clone` / `fn_coerce` stay unsupported.
+    /// `borrow` / `mut_borrow` pass the same heap handle (JIT mutates in place).
+    /// `clone` lowers through `lower_clone` (structs/lists/strings — no silent drop).
+    /// `widen_to_vec` is `[T#N]` → `[T]`: both are arena list handles.
     fn lower_call_arg(&mut self, arg: &TCallArg) -> Result<Value, String> {
-        if arg.mut_borrow || arg.clone || arg.arc_clone || arg.fn_coerce.is_some() {
+        if arg.arc_clone || arg.fn_coerce.is_some() {
             return Err("jit call arg wrapper unsupported".to_string());
         }
-        if arg.borrow && !jit_value_type(&arg.value.ty) {
+        let ty = &arg.value.ty;
+        let handle_pass = jit_value_type(ty)
+            || jit_struct_type(ty)
+            || jit_tuple_type(ty)
+            || matches!(
+                ty,
+                Type::String
+                    | Type::List(_)
+                    | Type::FixedList { .. }
+                    | Type::Option(_)
+                    | Type::Map { .. }
+            );
+        if (arg.borrow || arg.mut_borrow) && !handle_pass {
             return Err("jit call arg borrow unsupported".to_string());
         }
-        let val = self.lower_expr(&arg.value)?;
+        let val = if arg.clone {
+            self.lower_clone(&arg.value)?
+        } else {
+            self.lower_expr(&arg.value)?
+        };
         if arg.widen_to_vec {
             let host_ref = self
                 .module
@@ -3024,7 +3039,8 @@ impl LowerCtx<'_, '_> {
 
     /// `{named}` / `{named#Debug}` — Display prefers `Type::display` when compiled;
     /// otherwise JetShow-style mangled Debug (`user_Type { user_field: … }`).
-    /// Debug format uses unmangled JetDebug shape (`Type { field: … }`).
+    /// Debug format uses unmangled JetDebug shape (`Type { field: … }`) and
+    /// `#[Redact]` → `[redacted]` when bundle metadata is installed.
     fn lower_named_str_interp(
         &mut self,
         buf_id: Value,
@@ -3058,16 +3074,20 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(host_ref, &[buf_id, text]);
                 return Ok(());
             }
-        } else {
-            // JetDebug needs #[Redact] metadata (not on JitProgram yet). Refuse
-            // rather than leak secrets — Display/JetShow path above stays covered.
-            return Err(format!(
-                "jit string interp Debug type unsupported: Named({type_name:?})"
-            ));
         }
         let (field_names, field_tys) = self.meta.struct_layout(type_name).ok_or_else(|| {
             format!("jit string interp type unsupported: Named({type_name:?})")
         })?;
+        // JetDebug needs #[Redact] metadata from the ProgramBundle. Refuse when
+        // missing rather than leak secrets (Display/JetShow path above is fine).
+        if matches!(fmt, StrFormat::Debug)
+            && !field_names.is_empty()
+            && super::types_meta::struct_field_redacted(type_name, 0).is_none()
+        {
+            return Err(format!(
+                "jit string interp Debug type unsupported: Named({type_name:?})"
+            ));
+        }
         let handle = self.lower_expr(expr)?;
         let mangled_show = matches!(fmt, StrFormat::Display);
         let head = if mangled_show {
@@ -3089,6 +3109,12 @@ impl LowerCtx<'_, '_> {
                     .to_string()
             };
             self.push_str_lit(buf_id, &format!("{label}: "))?;
+            if matches!(fmt, StrFormat::Debug)
+                && super::types_meta::struct_field_redacted(type_name, i) == Some(true)
+            {
+                self.push_str_lit(buf_id, "[redacted]")?;
+                continue;
+            }
             let idx = self.b.ins().iconst(types::I64, i as i64);
             match fty {
                 Type::Int => {
@@ -3411,6 +3437,34 @@ impl LowerCtx<'_, '_> {
             let value = self.lower_record_field(handle, &type_name, field_rust, &fallback_ty)?;
             let clif = clif_ty(&fallback_ty)
                 .ok_or_else(|| format!("jit tuple destructure unsupported: {fallback_ty:?}"))?;
+            let var = self.fresh_var(clif);
+            self.b.def_var(var, value);
+            self.vars.insert(local.clone(), var);
+            self.var_tys.insert(local.clone(), fallback_ty);
+        }
+        Ok(())
+    }
+
+    /// D-DESTRUCT1: `Incident.{id, severity: sev, ..} :: incident`.
+    fn lower_struct_destructure(
+        &mut self,
+        init: &TExpr,
+        binds: &[(String, String)],
+    ) -> Result<(), String> {
+        let handle = self.lower_expr(init)?;
+        let type_name = record_type_key(&init.ty).ok_or("jit struct destructure type")?;
+        for (local, field_rust) in binds {
+            let field_jet = field_rust
+                .strip_prefix("user_")
+                .unwrap_or(field_rust.as_str());
+            let fallback_ty = self
+                .meta
+                .struct_field_ty(&type_name, field_jet)
+                .or_else(|| self.meta.struct_field_ty(&type_name, field_rust))
+                .unwrap_or(Type::Int);
+            let value = self.lower_record_field(handle, &type_name, field_rust, &fallback_ty)?;
+            let clif = clif_ty(&fallback_ty)
+                .ok_or_else(|| format!("jit struct destructure unsupported: {fallback_ty:?}"))?;
             let var = self.fresh_var(clif);
             self.b.def_var(var, value);
             self.vars.insert(local.clone(), var);
