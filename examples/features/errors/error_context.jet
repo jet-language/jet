@@ -1,7 +1,7 @@
-// D-ERRCTX1=D: `.context("msg {var}")` adds a lazily-evaluated human boundary
-// message to an error as it crosses a layer — the message closure only runs
-// if the error actually propagates. Errors are plain text, so each
-// `.context()` crossed on the way out prepends to the same chain.
+// D-ERRCTX1=D: automatic `?`-propagation trace (dev builds) + `.context("msg {var}")`.
+// An uncaught Err prints each `?` site as `error propagated from: fn (file:line) via ?`
+// on stderr with zero user annotations; `.context` adds the human boundary message
+// on the same failure. Consecutive identical frames collapse.
 fn read_raw() -> String ? {
     return Err("file not found")
 }
@@ -16,14 +16,6 @@ fn load_config(path: String) -> String ? {
     return Ok(cfg)
 }
 
-fn run() {
-    if load_config("app.toml") == {
-        Ok(v) -> {
-            print("ok: {v}")
-        }
-        Err(e) -> {
-            print("failed: {e#Debug}")
-        }
-
-    }
+fn run() -> Void ? {
+    _ :: load_config("app.toml")?
 }

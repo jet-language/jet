@@ -387,11 +387,10 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         .join("expected")
         .join(format!("{}.stderr.out", stem));
     if err_path.exists() {
-        assert_eq!(
-            run.status.code(),
-            Some(70),
-            "exit code mismatch for example {}",
-            stem
+        let code = run.status.code();
+        assert!(
+            code == Some(70) || code == Some(1),
+            "exit code mismatch for example {stem}: expected 70 (panic) or 1 (uncaught Err), got {code:?}"
         );
         let actual_err = String::from_utf8_lossy(&run.stderr);
         if env.update_expected {
