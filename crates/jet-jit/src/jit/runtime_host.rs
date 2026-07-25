@@ -7,7 +7,9 @@ use jet_codegen::scheduler::{
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
-use super::{Collections, Concurrency, JitResultValue, Numeric, Solver, TRY_COMPILE_PANIC_HOOK_LOCK};
+use super::{
+    Collections, Concurrency, CoreHost, JitResultValue, Numeric, Solver, TRY_COMPILE_PANIC_HOOK_LOCK,
+};
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
     let result = {
@@ -905,6 +907,7 @@ pub(crate) struct HostFns {
     pub(crate) deopt_call: FuncId,
     pub(crate) coll: Collections::CollectionsHostFns,
     pub(crate) conc: Concurrency::ConcurrencyHostFns,
+    pub(crate) core: CoreHost::CoreHostFns,
     pub(crate) num: Numeric::NumericHostFns,
     pub(crate) solver: Solver::SolverHostFns,
 }
@@ -1024,14 +1027,16 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_deopt_call", super::deopt::jet_deopt_call as *const u8);
     Collections::register_collections_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
+    CoreHost::register_core_host_symbols(&mut builder);
     Numeric::register_numeric_symbols(&mut builder);
     Solver::register_solver_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
+    let core = CoreHost::declare_core_host_fns(&mut module)?;
     let num = Numeric::declare_numeric_host_fns(&mut module)?;
     let solver = Solver::declare_solver_host_fns(&mut module)?;
-    let host = declare_host_fns(&mut module, coll, conc, num, solver)?;
+    let host = declare_host_fns(&mut module, coll, conc, core, num, solver)?;
     Ok((module, host))
 }
 
@@ -1039,6 +1044,7 @@ fn declare_host_fns(
     module: &mut JITModule,
     coll: Collections::CollectionsHostFns,
     conc: Concurrency::ConcurrencyHostFns,
+    core: CoreHost::CoreHostFns,
     num: Numeric::NumericHostFns,
     solver: Solver::SolverHostFns,
 ) -> Result<HostFns, String> {
@@ -1291,6 +1297,7 @@ fn declare_host_fns(
         deopt_call: import("jet_deopt_call", &sig_deopt)?,
         coll,
         conc,
+        core,
         num,
         solver,
     })

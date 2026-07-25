@@ -13,6 +13,7 @@
 
 mod Collections;
 mod Concurrency;
+mod CoreHost;
 mod Numeric;
 mod Solver;
 
