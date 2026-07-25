@@ -1,6 +1,12 @@
-// D-ENCSTREAM-SURFACE1 hostile streaming law seam (card #711).
+// D-ENCSTREAM-SURFACE1 hostile streaming law seam (card #711 / #715 C6).
 // Std-only hook for encoding codec FileReader/FileWriter I/O. Active only when
 // JET_ENC_HOSTILE_IO=1; production callers never set it.
+//
+// Optional schedules (tests only):
+//   JET_ENC_HOSTILE_READ_PLAN=n1,n2,...   max bytes per successive read; last repeats
+//   JET_ENC_HOSTILE_WRITE_PLAN=n1,n2,...  max bytes per successive write slice; last repeats
+//   JET_ENC_HOSTILE_READ_ONE=1            shorthand for every read capped at 1
+//   JET_ENC_HOSTILE_WRITE_MAX=n           fixed write chunk (ignored when WRITE_PLAN set)
 
 #[derive(Clone, Copy, Debug, Default)]
 struct JetEncodingHostileIoPlan {
@@ -27,29 +33,86 @@ struct JetEncodingHostileIoState {
     stats: JetEncodingHostileIoStats,
     read_total: u64,
     write_total: u64,
+    read_plan: Vec<usize>,
+    read_plan_idx: usize,
+    write_plan: Vec<usize>,
+    write_plan_idx: usize,
 }
 
 impl JetEncodingHostileIoState {
+    fn fresh() -> Self {
+        Self {
+            plan: None,
+            stats: JetEncodingHostileIoStats::default(),
+            read_total: 0,
+            write_total: 0,
+            read_plan: Vec::new(),
+            read_plan_idx: 0,
+            write_plan: Vec::new(),
+            write_plan_idx: 0,
+        }
+    }
+
     fn active_plan(&self) -> Option<JetEncodingHostileIoPlan> {
         self.plan
+    }
+
+    fn next_read_cap(&mut self, plan: JetEncodingHostileIoPlan, buf_len: usize) -> usize {
+        if !self.read_plan.is_empty() {
+            let i = self.read_plan_idx.min(self.read_plan.len() - 1);
+            let cap = self.read_plan[i].max(1);
+            if self.read_plan_idx < self.read_plan.len() {
+                self.read_plan_idx += 1;
+            }
+            return cap.min(buf_len);
+        }
+        if plan.read_one_byte {
+            1.min(buf_len)
+        } else {
+            buf_len
+        }
+    }
+
+    fn next_write_chunk(&mut self, plan: JetEncodingHostileIoPlan, remaining: usize) -> usize {
+        if !self.write_plan.is_empty() {
+            let i = self.write_plan_idx.min(self.write_plan.len() - 1);
+            let cap = self.write_plan[i].max(1);
+            if self.write_plan_idx < self.write_plan.len() {
+                self.write_plan_idx += 1;
+            }
+            return cap.min(remaining);
+        }
+        if plan.write_chunk == 0 {
+            remaining
+        } else {
+            plan.write_chunk.min(remaining)
+        }
     }
 }
 
 thread_local! {
     static JET_ENCODING_HOSTILE_IO: std::cell::RefCell<JetEncodingHostileIoState> =
-        std::cell::RefCell::new(JetEncodingHostileIoState {
-            plan: None,
-            stats: JetEncodingHostileIoStats::default(),
-            read_total: 0,
-            write_total: 0,
-        });
+        std::cell::RefCell::new(JetEncodingHostileIoState::fresh());
 }
 
 fn jet_encoding_hostile_io_enabled() -> bool {
     std::env::var_os("JET_ENC_HOSTILE_IO").is_some_and(|v| v != "0")
 }
 
-fn jet_encoding_hostile_io_plan_from_env() -> Option<JetEncodingHostileIoPlan> {
+fn jet_encoding_hostile_parse_plan(raw: &str) -> Vec<usize> {
+    raw.split(',')
+        .filter_map(|part| {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                trimmed.parse::<usize>().ok().filter(|n| *n > 0)
+            }
+        })
+        .collect()
+}
+
+fn jet_encoding_hostile_io_plan_from_env() -> Option<(JetEncodingHostileIoPlan, Vec<usize>, Vec<usize>)> {
     if !jet_encoding_hostile_io_enabled() {
         return None;
     }
@@ -72,14 +135,26 @@ fn jet_encoding_hostile_io_plan_from_env() -> Option<JetEncodingHostileIoPlan> {
     let fail_write_after = std::env::var("JET_ENC_HOSTILE_FAIL_WRITE_AFTER")
         .ok()
         .and_then(|v| v.parse().ok());
-    Some(JetEncodingHostileIoPlan {
-        read_one_byte,
-        write_chunk,
-        interrupt_reads,
-        interrupt_writes,
-        fail_read_after,
-        fail_write_after,
-    })
+    let read_plan = std::env::var("JET_ENC_HOSTILE_READ_PLAN")
+        .ok()
+        .map(|v| jet_encoding_hostile_parse_plan(&v))
+        .unwrap_or_default();
+    let write_plan = std::env::var("JET_ENC_HOSTILE_WRITE_PLAN")
+        .ok()
+        .map(|v| jet_encoding_hostile_parse_plan(&v))
+        .unwrap_or_default();
+    Some((
+        JetEncodingHostileIoPlan {
+            read_one_byte,
+            write_chunk,
+            interrupt_reads,
+            interrupt_writes,
+            fail_read_after,
+            fail_write_after,
+        },
+        read_plan,
+        write_plan,
+    ))
 }
 
 fn jet_encoding_hostile_io_with<F, R>(f: F) -> R
@@ -94,20 +169,19 @@ fn jet_encoding_hostile_io_plan() -> Option<JetEncodingHostileIoPlan> {
         if let Some(plan) = state.active_plan() {
             return Some(plan);
         }
-        let plan = jet_encoding_hostile_io_plan_from_env()?;
+        let (plan, read_plan, write_plan) = jet_encoding_hostile_io_plan_from_env()?;
         state.plan = Some(plan);
+        state.read_plan = read_plan;
+        state.write_plan = write_plan;
+        state.read_plan_idx = 0;
+        state.write_plan_idx = 0;
         Some(plan)
     })
 }
 
 fn jet_encoding_hostile_io_reset() {
     jet_encoding_hostile_io_with(|state| {
-        *state = JetEncodingHostileIoState {
-            plan: None,
-            stats: JetEncodingHostileIoStats::default(),
-            read_total: 0,
-            write_total: 0,
-        };
+        *state = JetEncodingHostileIoState::fresh();
     });
 }
 
@@ -164,13 +238,8 @@ fn jet_encoding_file_read(reader: &mut JetFileReader, buf: &mut [u8]) -> std::io
         }
         use std::io::Read;
         let file = reader.inner.get_mut();
-        let want = if plan.read_one_byte {
-            1
-        } else {
-            buf.len()
-        };
-        let end = want.min(buf.len());
-        let count = file.read(&mut buf[..end])?;
+        let want = state.next_read_cap(plan, buf.len());
+        let count = file.read(&mut buf[..want])?;
         if count == 0 {
             return Ok(0);
         }
@@ -202,14 +271,10 @@ fn jet_encoding_file_write_all(writer: &mut JetFileWriter, bytes: &[u8]) -> std:
         }
         use std::io::Write;
         let file = writer.inner.get_mut();
-        let chunk = if plan.write_chunk == 0 {
-            bytes.len()
-        } else {
-            plan.write_chunk
-        };
         let mut offset = 0usize;
         while offset < bytes.len() {
-            let end = (offset + chunk).min(bytes.len());
+            let chunk = state.next_write_chunk(plan, bytes.len() - offset);
+            let end = offset + chunk;
             let slice = &bytes[offset..end];
             if let Some(limit) = plan.fail_write_after {
                 let next = state.write_total.saturating_add(slice.len() as u64);
