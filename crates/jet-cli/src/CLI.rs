@@ -664,6 +664,7 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
             | "audit"
             | "sbom"
             | "repl"
+            | "report"
             | "schema"
             | "semindex"
             | "dossier"
