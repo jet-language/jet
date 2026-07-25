@@ -2405,6 +2405,114 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &[]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.io" && method == "print" && args.len() == 1 {
+                    self.emit_print(&args[0])?;
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
+                if module == "core.os" && args.is_empty() {
+                    let host_id = match method.as_str() {
+                        "name" => self.host.core.os_name,
+                        "family" => self.host.core.os_family,
+                        "arch" => self.host.core.os_arch,
+                        "cpu_count" => self.host.core.os_cpu_count,
+                        "temp_dir" => self.host.core.os_temp_dir,
+                        "executable" => self.host.core.os_executable,
+                        "pid" => self.host.core.os_pid,
+                        "hostname" => self.host.core.os_hostname,
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "jet.log" {
+                    let (host_id, need_arg) = match method.as_str() {
+                        "set_level" if args.len() == 1 => (self.host.core.log_set_level, true),
+                        "setup" if args.len() == 1 => (self.host.core.log_setup, true),
+                        "debug" if args.len() == 1 => (self.host.core.log_debug, true),
+                        "info" if args.len() == 1 => (self.host.core.log_info, true),
+                        "warn" if args.len() == 1 => (self.host.core.log_warn, true),
+                        "error" if args.len() == 1 => (self.host.core.log_error, true),
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    if need_arg {
+                        let msg = self.lower_expr(&args[0])?;
+                        let _ = self.b.ins().call(host_ref, &[msg]);
+                    } else {
+                        let _ = self.b.ins().call(host_ref, &[]);
+                    }
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
+                if module == "core.math" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "sin" if args.len() == 1 => {
+                            (self.host.core.math_sin, vec![self.lower_expr(&args[0])?])
+                        }
+                        "cos" if args.len() == 1 => {
+                            (self.host.core.math_cos, vec![self.lower_expr(&args[0])?])
+                        }
+                        "exp" if args.len() == 1 => {
+                            (self.host.core.math_exp, vec![self.lower_expr(&args[0])?])
+                        }
+                        "degrees" if args.len() == 1 => {
+                            (self.host.core.math_degrees, vec![self.lower_expr(&args[0])?])
+                        }
+                        "radians" if args.len() == 1 => {
+                            (self.host.core.math_radians, vec![self.lower_expr(&args[0])?])
+                        }
+                        "is_finite" if args.len() == 1 => {
+                            (self.host.core.math_is_finite, vec![self.lower_expr(&args[0])?])
+                        }
+                        "sign" if args.len() == 1 => {
+                            (self.host.core.math_sign, vec![self.lower_expr(&args[0])?])
+                        }
+                        "atan2" if args.len() == 2 => (
+                            self.host.core.math_atan2,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "hypot" if args.len() == 2 => (
+                            self.host.core.math_hypot,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "lerp" if args.len() == 3 => (
+                            self.host.core.math_lerp,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "checked_add" if args.len() == 2 => (
+                            self.host.core.math_checked_add,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "saturating_add" if args.len() == 2 => (
+                            self.host.core.math_saturating_add,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "wrapping_add" if args.len() == 2 => (
+                            self.host.core.math_wrapping_add,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "int_pow" if args.len() == 2 => (
+                            self.host.core.math_int_pow,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "gcd" if args.len() == 2 => (
+                            self.host.core.math_gcd,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "lcm" if args.len() == 2 => (
+                            self.host.core.math_lcm,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.tasks" && method == "channel" && args.is_empty() {
                     let host_ref = self
                         .module
@@ -3105,6 +3213,10 @@ impl LowerCtx<'_, '_> {
             let call = self.b.ins().call(host_ref, &[map, key]);
             return Ok(self.b.inst_results(call)[0]);
         }
+        // Already-packed Option ABI (`0` = None, else bits+1), e.g. core.math.checked_*.
+        if matches!(&value.ty, Type::Option(_)) {
+            return self.lower_expr(value);
+        }
         Err("jit list get_opt status unsupported".to_string())
     }
 
@@ -3179,6 +3291,15 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TBuiltinOp::LenList => {
+                // CoreCall String receivers often lower `.len()` as LenList because
+                // `tir_recv_jet_ty` can't see through CoreCall — treat as char len.
+                if matches!(&recv.ty, Type::String) {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.str_len, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[recv_val]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if Self::is_view_mut_ty(&recv.ty) {
                     let (_, start, end) = self.unpack_view_mut(recv_val)?;
                     let one = self.b.ins().iconst(types::I64, 1);

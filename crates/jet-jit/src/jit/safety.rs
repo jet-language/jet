@@ -734,7 +734,8 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::Sort => jit_list_int_type(&recv.ty) && args.is_empty(),
         TBuiltinOp::LenList => {
-            (jit_list_native_type(&recv.ty)
+            (matches!(&recv.ty, Type::String)
+                || jit_list_native_type(&recv.ty)
                 || jit_list_iter_elem_type(&recv.ty).is_some()
                 || jit_closure_elem_type(&recv.ty).is_some())
                 && args.is_empty()
