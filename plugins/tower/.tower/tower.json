@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 794,
-    "rev": 14043,
+    "rev": 14106,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -172,11 +172,16 @@
       "epoch": "e4",
       "phase": "ready",
       "priority": "P2",
-      "plan": "Compatibility-only duplicate of #423. Existing local `jet publish` dirty-tree/test/API checks, immutable local yank markers, and highest-compatible selection are evidence, not live registry delivery. #423 exclusively owns namespace authority, atomic upload/yank, live consumer resolution, signed metadata, offline/vendor behavior, hostile registry proof, and stable diagnostics. Do no independent implementation here. Close this card only after #423 is independently verified and its evidence explicitly covers D-PUBLISH1A, D-VERSION1, D-RESOLVE1, and D-LOCK1; otherwise remain ready and blocked.",
+      "plan": "Compatibility-only duplicate of #423. Card #423 owns live registry delivery, resolution, signing, offline use, vendor use, hostile proof, and stable diagnostics. This card reuses that evidence. It adds no second registry implementation. The publish gate must compute the public API difference, reject a wrong version change, and apply the ratified deprecation law. D-REL1–5 already fixes the stability boundary: pre-1.0 has no compatibility promise, and 1.0.0 starts the full promise. No new stability ballot is needed.",
       "blockedBy": [
         "c09itznu"
       ],
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Removed two phantom gates. Deprecation and the 1.0 stability boundary are already ratified in release-policy.md; no D-DEPRECATE1 or stability-start ballot is needed."
+        },
         {
           "at": "2026-07-23",
           "by": "fable",
@@ -241,60 +246,55 @@
         }
       ],
       "created": "2026-06-21T00:00:00Z",
-      "updated": "2026-07-23",
+      "updated": "2026-07-25",
       "criteria": [
         {
           "n": 1,
-          "text": "#423 is done with independently verified live-registry evidence covering D-PUBLISH1A, D-VERSION1, D-RESOLVE1, D-LOCK1, publish/yank delivery, consumer resolution, offline/vendor behavior, hostile service cases, and stable diagnostics; no independent #6 implementation remains.",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T03:35:30.494Z"
+          "evidence": ""
         },
         {
           "n": 2,
-          "text": "Publish runs a computed API diff against the prior version and refuses a wrong semver bump; a diff command exposes the same result before publish (Elm lesson)",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-23T16:46:45.699Z"
+          "evidence": ""
         },
         {
           "n": 3,
-          "text": "A first-party semver-check gate ships default-on with publish, not as a later bolt-on (cargo-semver-checks lesson)",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-23T16:46:45.847Z"
+          "evidence": ""
         },
         {
           "n": 4,
-          "text": "Deprecation lifecycle ships per the D-DEPRECATE1 outcome, wired into publish warnings",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-23T16:46:46.004Z"
+          "evidence": ""
         },
         {
           "n": 5,
-          "text": "Before the first public publish, the stability-promise start date is balloted (anchors the ratified D-REL1-5 edition law)",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-23T16:46:46.158Z"
+          "evidence": ""
         }
       ],
       "needsAcceptance": false,
       "refs": [
-        "docs/plans/epoch-4/world-class-package-manager.md",
+        "docs/spec/release-policy.md",
         "docs/spec/syntax-decisions.md",
+        "docs/plans/epoch-4/world-class-package-manager.md",
         "Source/CmdSupply.rs",
-        "Source/Publish/Registry.rs",
         "tests/pkg.rs"
       ],
       "workOrder": 77
@@ -20129,12 +20129,17 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "building",
       "priority": "P0",
-      "plan": null,
+      "plan": "Treat this as the law umbrella for #688 and the one-core slices #776–#779. Do not build another compiler path here. Close only after #688 proves that every executable TIR form works through the jet run lens, the AOT lens stays feature-identical, and CI rejects any parity gap. Link the ratified D-VERDICT-687-1, D-ONECORE1, and D-LENS-RUN2 evidence in the final log.",
       "blockedBy": [
         "c02hbqjf"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Added the umbrella close plan. Existing one-core rulings cover the design; no ballot is needed."
+        },
         {
           "at": "2026-07-24",
           "by": "fable",
@@ -20161,11 +20166,42 @@
           "text": "Verdict recorded (D-VERDICT-687-1): One compiler core. JIT and AOT are lenses only over the same front end and executable TIR — never parallel feature implementations and never a supported-feature gap between lenses. jet run uses the JIT lens; jet build uses the AOT lens. Missing JIT coverage is a compiler defect, not a user fallback to AOT."
         }
       ],
-      "criteria": [],
-      "refs": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [
+        "docs/spec/architecture.md",
+        "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+        "crates/jet-jit/src/jit/lower_ctx.rs",
+        "tests/parity.rs",
+        "tests/dev.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-21T12:42:34.183Z",
-      "updated": "2026-07-24",
+      "updated": "2026-07-25",
       "workOrder": 44
     },
     {
@@ -23343,11 +23379,16 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "building",
       "priority": "P0",
-      "plan": "Implement and prove only this inherited acceptance slice. Read #392's ratified decisions before writing; preserve one canonical mechanism.",
+      "plan": "Prove only the no-dependency slice inherited from #392. Read #392 and the current one-core decisions first. Use the current PurePending inventory, then show that every effect-free case runs through the shared semantic core without an external runtime or hidden host helper. Compare observable transcripts across the interpreter, tier-1 JIT, and AOT. Add no evaluator, package, or fallback.",
       "blockedBy": [],
       "workOrder": 47,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Added exact no-dependency proof criteria. This is machine proof under existing law, not an owner choice."
+        },
         {
           "at": "2026-07-25",
           "by": "one-core-orch",
@@ -23379,7 +23420,40 @@
           "text": "Reintegration: comptime/zstd stack is on master via 0e1039ed, 0c0bf426, and 0dc79011. Prior targeted archive proof used the full environment; this sweep does not close the card."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
       "refs": [
         "docs/spec/architecture.md",
         "docs/spec/spec.md",
@@ -23859,6 +23933,41 @@
       "workOrder": 43,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w7",
+          "text": "[handoff] Merged f4f6316e8. Covered 196→199 / gaps 160→157. Closed: io/path, io/env_overlay, io/io_prelude. Next: io/db or io/scope_guard / terminal_parity."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w7",
+          "text": "[handoff] Merged f4f6316. Covered 196→199 / gaps 160→157. Closed: io/path, io/env_overlay, io/io_prelude. Next: io/db or io/scope_guard."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w7",
+          "text": "e3-729-w7: path+env+input JIT shims landed (f4f6316). +3 covered / -3 gaps."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w21",
+          "text": "[handoff] Merged b093a22d1. Covered 186→189 / gaps 170→167. Closed: io/db, io/db_read_footprint, io/io_prelude. Next: io/db_checked_sql (migrate + sql TypedText); concurrency/parallel_scan (list.pop + string sort)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w21",
+          "text": "Merged b093a22d1. Covered 186→189 / gaps 170→167. Closed: io/db, io/db_read_footprint, io/io_prelude (jet.db hosts via include! rusqlite runtime + DbValue pack; ambient io.input / core.io.input). Next: io/db_checked_sql needs jet.db.migrate (+ TypedText sql); concurrency/parallel_scan needs list.pop + [String].sort. Note: jet run on db stems still deopts to interp on ResourceNew (compile-gate green)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w3",
+          "text": "[handoff] Merged 8f8013f6f. Next: struct_destructure match (host/default/uninit), Shared(Named) params, remaining call-arg/fn_coerce, crypto/net skipped."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w3",
+          "text": "w3 merged 8f8013f6f to master. covered 186→194 gaps 170→162. Worktree jet-bd-729b removed."
+        },
         {
           "at": "2026-07-25",
           "by": "e3-729-w4",
@@ -25722,11 +25831,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Implement ratified D-UNIONTYPE1=A as structural enum sugar, not a second sum mechanism. Add Type::Union with one canonicalizer that recursively flattens members, removes exact duplicates, and sorts by canonical source spelling; define parser precedence so T ? E1 | E2 places the union on the error side. Extend formatting, type traversal, equality/display, API snapshots, semantic index, and LSP to use that canonical form. In sema, allow only concrete closed member types, add implicit member-to-union widening at binding, argument, return, field, and error-propagation boundaries, and preserve exact union identity elsewhere. Extend union match heads to resolve an exact member type and feed the existing enum exhaustiveness and binding checks. Lower each canonical union to one deterministic compiler-generated enum emitted once per resolved union, with injection and match operations carried explicitly in TIR so codegen remains mechanical and native/web/dev agree. Extend Codable synthesis so each member encodes normally and decode selects a unique compatible wire shape; reject ambiguous or unsupported shapes in sema with registered UI diagnostics. Keep named-enum crossings explicit through ordinary match-based conversion functions and add no Any or cast escape. Update the syntax decision log and examples, regenerate grammar/tooling artifacts, bless snapshots, and run focused parser/formatter/sema/serde/golden plus AOT/dev/web parity checks.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-744-union",
       "log": [
         {
           "at": "2026-07-25",
@@ -25870,28 +25979,82 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:45:54.472Z",
-      "updated": "2026-07-25"
+      "updated": "2026-07-25",
+      "claimedAt": "2026-07-25T20:26:30.290Z"
     },
     {
       "id": "c0gprkh8",
       "num": 745,
       "title": "Expert borrow ceiling: audit what second-class borrows block, fix checker precision",
-      "body": "Field audit Rust row: borrows being second-class is the ceiling that sends the expert back to Rust — you cannot return or store a borrow. Audit what that ceiling blocks in real code, then ballot the sanctioned way past it ONLY if one is missing. D-MEM1 is ratified; this does not reopen it.\n\nConcrete checker-precision inputs from the persona audit (Klaus, Sam):\n- The move checker misses a sure reassign after a move inside a loop, forcing a `~` copy every turn.\n- `&particles[idx]` cannot be borrowed and the `&xs[a..b]` write-window idiom is never surfaced (fix-text half is on #740).\n\nFlip test: an expert ports a borrow-heavy Rust library without giving up.",
+      "body": "The field audit reported an expert borrow ceiling and two checker-precision failures. Current law has moved: D-MEM-VIEWRET1=B already ships returned and stored View<T>/ViewMut<T> with public provenance. This card must not reopen D-MEM1 or create lifetime syntax. It now audits real borrow-heavy ports against the shipped view boundary and fixes only concrete precision or teaching failures.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Start with three representative borrow-heavy ports: a zero-copy parser, an indexed simulation update, and an owner-backed collection view. Classify each failure against D-SHAPE-PLACE1, D-MEM-VIEWRET1, Shared<T>, or Pool<T>/Id<T>. Fix the shared provenance and ownership checker when valid code is rejected. Fix diagnostics when the current mechanism works but is hidden. Raise a new ballot only if a reduced case proves that no ratified mechanism can express a safe need. Do not add raw reference fields, lifetime syntax, or a second view type.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] D-MEM-VIEWRET1 already removed the reported return/store ceiling. Reframed this card as a concrete precision audit; no ballot is currently justified."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/spec.md",
+        "crates/jet-sema/src/Sema/CheckerOwnership.rs",
+        "tests/ownership.rs",
+        "examples/features/memory/returned_views.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:45:54.626Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0j80rjg",
@@ -26593,10 +26756,15 @@
       "milestoneId": null,
       "phase": "building",
       "priority": "P2",
-      "plan": null,
+      "plan": "Continue from the merged code-action slice. Extend the existing semantic-index action engine only where sema proves ownership, effects, and totality. Finish non-scalar extract with explicit read, write, take, and returned-value contracts. Add one more high-value action through the same edit protocol. Document the shipped set and keep version-pinned edits, dirty-overlay guards, and exact source revisions. Do not add a second refactor engine or syntax-only safety guess.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Added the remaining implementation plan. Existing semantic and edit mechanisms cover the work; no owner choice is open."
+        },
         {
           "at": "2026-07-25",
           "by": "e3-751-lsp",
@@ -26713,9 +26881,10 @@
         }
       ],
       "refs": [
-        "Source/LSP/Completion.rs",
         "Source/LSP/Features.rs",
-        "Source/LSP/Server.rs"
+        "Source/LSP/Server.rs",
+        "crates/jet-sema/src",
+        "tests/lsp.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:46:20.035Z",
@@ -27049,15 +27218,71 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": null,
-      "blockedBy": [],
+      "plan": "Split the card into one gated syntax slice and one ungated reflection proof. D-LITERAL-PREFIX1 must choose the only user-prefix contract before parser or sema work. After ratification, lower every prefix literal through the existing typed-text engine. Preserve typed holes until the prefix processor handles them. Keep T.reflect() comptime-only and observational under S56; only derive may emit code. No runtime Mirror, stringly schema, or second interpolation engine.",
+      "blockedBy": [
+        "D-LITERAL-PREFIX1"
+      ],
       "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Found one genuine gate: the user-defined typed-text prefix contract. Reflection remains governed by S56."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [
+        "docs/archive/surface-research-2026-07-23.md",
+        "docs/spec/syntax-decisions.md",
+        "docs/spec/spec.md",
+        "crates/jet-parser/src",
+        "crates/jet-sema/src",
+        "tests/safety.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:46:45.237Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0sad0nq",
@@ -27068,14 +27293,19 @@
       "track": "epoch",
       "epoch": "e6",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Implement D-CANVAS-RAD1=A as one Canvas editor with two source-backed surfaces. Add a design surface beside the logic graph. Both surfaces must use the existing source transaction engine, semantic index, undo history, and text round-trip. Start with a real component tree, property inspector, layout, callback creation, and graph or text navigation for handlers. Keep generated code ordinary and editable. Block visual implementation on the current M5 acceptance chain, but finish protocol, source-model, and test planning now.",
       "blockedBy": [
         "c00zbmhz"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Propagated ratified D-CANVAS-RAD1=A into a complete source-backed plan. No follow-up choice is open."
+        },
         {
           "at": "2026-07-23",
           "by": "codex-root",
@@ -27087,11 +27317,57 @@
           "text": "D-CANVAS-RAD1=A ratified: one editor, two surfaces. Acceptance terms: design surface staged strictly after the current M-arc, no shipped milestone moves — blockedBy set to #384 (M6, arc end). Next step when unblocked: milestone series design for palette/inspector/callback-jump over the source-transaction engine."
         }
       ],
-      "criteria": [],
-      "refs": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [
+        "docs/plans/epoch-6/canvas-design-spec.md",
+        "docs/plans/epoch-6/canvas-workspace-architecture.md",
+        "crates/jet-canvas",
+        "tests/canvas_scenarios.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:46:45.392Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0utsmdj",
@@ -27104,15 +27380,68 @@
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Reuse the shipped jet build --target path and typed target profiles. Extend it to resolve a complete target toolchain and sysroot, including C headers, libraries, linker, and runtime objects. Route package builds through #398 and the existing target identity. Preserve explicit expert control over target, CPU, features, libc, linker, and toolchain source. Fail before codegen when a required target component is unavailable. Add no second cross command or host-specific script path.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] The command and target model already exist. Added the complete toolchain/sysroot plan; no new syntax or CLI ballot is needed."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
+      "refs": [
+        "Source/CmdCompile.rs",
+        "crates/jet-foundation/src/TargetProfile.rs",
+        "tests/cross.rs",
+        "tests/cffi_native_matrix.rs",
+        "docs/spec/architecture.md"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:46:45.546Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0duxoc2",
@@ -27121,14 +27450,20 @@
       "body": "",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Implement D-MARKSIG1=A through one declarative marker registry. Each row owns the marker name, typed signature, legal sites, form, and status. Replace every bespoke argument parser with the ordinary call-argument reader. Make parser, sema, formatter, LSP, explain, diagnostics, and retirement handling read the same row. Migrate current markers without changing their ratified behavior.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Added the implementation plan for ratified D-MARKSIG1=A and advanced the card to ready."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -27194,10 +27529,16 @@
           "at": "2026-07-23T18:39:51.787Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-foundation/src/Syntax/markers.rs",
+        "crates/jet-parser/src/Parser/Items/markers_contracts.rs",
+        "crates/jet-sema/src/Sema/CheckerMarkers.rs",
+        "tests/ui"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T18:26:45.908Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0gj9wjj",
@@ -27206,14 +27547,19 @@
       "body": "",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Apply D-ACRO-CASE1=A and D-ACRO-LEX1=A as one mechanical rename. Generate the exact rename table from the ratified lexicon. Update marker names, marker values, Core names, RenameAll conversions, diagnostics, docs, examples, and tool completions together. Retired spellings get one teaching fix. Add a vocabulary test so new user-facing names cannot bypass the casing law.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Added the implementation plan for the two ratified acronym decisions and advanced the card to ready."
+        },
         {
           "at": "2026-07-23",
           "by": "fable",
@@ -27285,10 +27631,17 @@
           "at": "2026-07-23T18:39:53.420Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-foundation/src/Syntax.rs",
+        "crates/jet-foundation/src/Syntax/markers.rs",
+        "crates/jet-parser/src/Formatter",
+        "tests/grammar.rs",
+        "tests/fmt.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T18:26:46.070Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0j3g2ec",
@@ -27297,14 +27650,20 @@
       "body": "",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Implement D-MARK-STACK1=A in the shared marker parser and formatter. Accept one bare marker or one bracket list containing two or more markers. Reject single-item brackets and bare stacks with automatic fixes. Migrate examples, specs, snapshots, grammars, and generated tooling in one change. Preserve marker order and prove formatter stability.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Added the ratified stacking plan and advanced the card to ready."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -27361,10 +27720,16 @@
           "at": "2026-07-23T18:39:52.116Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-parser/src/Parser/Items/marker_groups.rs",
+        "crates/jet-parser/src/Formatter/Items.rs",
+        "tests/fmt.rs",
+        "tests/ui/stacked_type_markers.jet"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T18:26:46.225Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0lu14lt",
@@ -27373,14 +27738,20 @@
       "body": "",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Apply the five ratified marker condensations as one registry migration. Replace #InlineAlways with #Inline(Always). Move reduce selectors to ReduceOp values. Merge Comparable and Printable capability rows. Replace lowercase const markers with #Static and #Inline. Require a reason on #Unsafe. Each retired spelling gets the selected fix, and old parser branches and diagnostics are removed after migration.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Added the unified migration plan for all five ratified decisions and advanced the card to ready."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -27464,10 +27835,16 @@
           "at": "2026-07-23T18:39:52.910Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-foundation/src/Syntax/markers.rs",
+        "crates/jet-parser/src/Parser/Items/markers_contracts.rs",
+        "crates/jet-sema/src/Sema/CheckerMarkers.rs",
+        "tests/ui"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T18:26:46.391Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0og097v",
@@ -27476,14 +27853,19 @@
       "body": "",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Turn the completed triage into a checked closeout. Preserve implemented markers. Treat #Raw, #Locale, and #Sanitized as D-QUAL4 value tags, not marker rows. Keep #Persist and #Track on cards #765 and #766. Remove only stale #Marker and #NoCopy prose through #764. Re-run the registry, examples, and behavior inventory so no active marker lacks a real implementation or a canonical child card.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Research confirms no retire choice remains. Added a proof-only close plan and advanced the card to ready."
+        },
         {
           "at": "2026-07-23",
           "by": "fable",
@@ -27501,10 +27883,15 @@
           "at": "2026-07-23T18:39:54.272Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/archive/marker-plane-source-of-truth-matrix-2026-07-07.md",
+        "crates/jet-foundation/src/Syntax/markers.rs",
+        "crates/jet-sema/src/Sema/CheckerMarkers.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T18:26:46.548Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0r1jtw1",
@@ -27513,14 +27900,19 @@
       "body": "",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Build on #759 and #761. Put active and retired marker facts in the shared registry. Route retired_marker_fix, inline #Audit handling, E0922, parser placement, formatter output, LSP, and explain through registry rows. Delete duplicate marker tables and bespoke retirement branches. Purge #[repr(C)], fix stale source references, and remove #Marker/#NoCopy prose. Preserve all ratified semantics.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Added the mechanical unification plan. It reuses ratified marker law and needs no ballot."
+        },
         {
           "at": "2026-07-23",
           "by": "fable",
@@ -27547,10 +27939,16 @@
           "at": "2026-07-23T18:39:53.764Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "crates/jet-foundation/src/Syntax/markers.rs",
+        "crates/jet-parser/src/Parser/Items/markers_contracts.rs",
+        "crates/jet-parser/src/Parser/Items/marker_groups.rs",
+        "crates/jet-sema/src/Sema/CheckerMarkers.rs",
+        "tests/ui"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T18:26:46.706Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c09f5jk7",
@@ -27559,14 +27957,19 @@
       "body": "",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "Implement the already-ratified #Persist behavior at the shared runtime-heap boundary used by tier-0 and tier-1. Key each persisted binding by stable module and binding identity plus checked type and schema facts. On a successful hot reload, move compatible values into the new generation. On a failed or incompatible reload, keep the last good generation and report the exact reset reason. Do not keep state inside one JIT module or add another marker.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] D-PERSIST1 already fixes the surface. Added a shared-heap hot-reload plan and advanced the card to ready."
+        },
         {
           "at": "2026-07-24",
           "by": "fable",
@@ -27589,10 +27992,16 @@
           "at": "2026-07-23T18:39:53.933Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "Source/CmdDev.rs",
+        "crates/jet-jit/src",
+        "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+        "tests/dev.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T18:32:14.334Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0c6w0rd",
@@ -27601,14 +28010,19 @@
       "body": "",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "Apply D-PROVENANCE1=B exactly. The ratified scope is Float binding provenance only. Add a real #Track behavior test for tracked and untracked Float values across AOT and dev. Confirm the semantic index and diagnostics expose the binding site. Do not generalize to all values or create a provenance graph; that would reopen a rejected option and require a new card.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Re-read D-PROVENANCE1=B: Float-only behavior is the ratified scope. Added the proof plan and advanced the card to ready."
+        },
         {
           "at": "2026-07-23",
           "by": "fable",
@@ -27626,10 +28040,16 @@
           "at": "2026-07-23T18:39:54.104Z"
         }
       ],
-      "refs": [],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-codegen/src/Prelude/Core/Values.rs",
+        "crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs",
+        "tests/corelib.rs",
+        "tests/dev.rs"
+      ],
       "needsAcceptance": false,
       "created": "2026-07-23T18:32:14.502Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0jc2vuy",
@@ -27708,10 +28128,18 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
-      "plan": "blockedBy: none — protocol planning and owner ballots are leaf work. Define one versioned protocol core with transport adapters, then split implementation only if independently testable child slices are needed. Implement the current MCP specification at build time while declaring the oldest supported baseline. Map one Jet function schema into CLI validation, JSON Schema, MCP tool metadata, docs, and runtime validation through existing ArgsSpec/Codable/reflection paths. Use core.process for stdio and core.http for Streamable HTTP. Treat remote metadata, tool output, resource links, and elicited input as untrusted. Before moving to ready, attach any still-live transport, reflection, security, or JIT dependencies; do not duplicate them.",
-      "blockedBy": [],
+      "plan": "D-MCP-SURFACE1 must choose the public Core surface before implementation. Reuse DataTree, Codable, typed reflection, ArgsSpec, core.process, core.http, and core.ws. Implement the current MCP revision with explicit negotiation and a declared minimum revision. Keep stdio and Streamable HTTP as transport adapters over one protocol core. Add no MCP syntax, schema language, reflection engine, or compiler dependency. Attach live transport and security blockers after ratification.",
+      "blockedBy": [
+        "D-MCP-SURFACE1"
+      ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Confirmed a genuine public-surface choice. Plan now gates on D-MCP-SURFACE1 and keeps the implementation dependency-free at compiler seams."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -27778,14 +28206,15 @@
         }
       ],
       "refs": [
-        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
+        "docs/archive/field-audit-2026-07-23.md",
         "docs/spec/architecture.md",
         "docs/spec/syntax-decisions.md",
-        "docs/spec/diagnostics.md"
+        "docs/spec/diagnostics.md",
+        "docs/reference/core-library.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:55:54.737Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0h9cjc7",
@@ -27796,12 +28225,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
       "plan": "blockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Corpus scoring is machine-verifiable and changes no user surface. Plan is complete; advanced to ready with the corrected archived research reference."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -27859,13 +28294,13 @@
         }
       ],
       "refs": [
-        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
+        "docs/archive/field-audit-2026-07-23.md",
         "docs/spec/philosophy.md",
         "docs/spec/architecture.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:00.999Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0vrs94y",
@@ -27878,10 +28313,19 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "planning",
       "priority": "P0",
-      "plan": "blockedBy: none — API/policy planning and owner ballots are leaf work. Before moving to ready, attach #398 as the implementation blocker and preserve D-JPK-EPOCHBOUNDARY1=B: Epoch 3 owns the agent-facing policy and integration card, while #398 remains the sole native hostile-isolation implementation and proof in Epoch 8. Ballot the exact public API and command spelling. Reuse core.process, effects/capabilities, RuntimePolicy, diagnostics, and existing receipt/provenance shapes. No status-only facade and no alternate container/sandbox backend.",
-      "blockedBy": [],
+      "plan": "D-AGENT-EXEC1 must choose the API and CLI spelling. Extend core.process and consume #398's native isolation engine. Keep argv execution canonical. The policy must deny ambient authority, describe exact grants, and produce one dry-run plan plus one final receipt. After ratification, block implementation on #398 and reuse its Linux, macOS, and Windows hostile proof. Add no second sandbox, process API, shell DSL, or container fallback.",
+      "blockedBy": [
+        "D-AGENT-EXEC1",
+        "c0zqnb18"
+      ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Confirmed the agent executor needs one API/CLI ballot. Plan now reuses core.process and #398 without a second isolation engine."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -27948,16 +28392,16 @@
         }
       ],
       "refs": [
-        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
+        "docs/archive/field-audit-2026-07-23.md",
+        "docs/reference/core-library.md",
         "crates/jetpack/src/RuntimePolicy.rs",
         "crates/jetpack/src/Recipe.rs",
-        "docs/reference/core-library.md",
         "docs/spec/architecture.md",
         "docs/spec/diagnostics.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:04.053Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0ft6gme",
@@ -27970,10 +28414,18 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "planning",
       "priority": "P0",
-      "plan": "blockedBy: none — planning and the public-surface ballot are leaf work. Extend ProcessSpec/ProcessChild and the existing TIR/runtime path. Use native PTY on Unix and ConPTY on Windows. Keep text line streams as convenience over one bounded byte-stream mechanism. Process groups/jobs, cancellation, signals, waits, transcript capture, and resource accounting must share one child lifecycle. Reuse core.watcher/core.event for readiness and exit events. Add no terminal-emulator dependency unless hostile conformance proves the native/stdlib route insufficient and the owner approves it.",
-      "blockedBy": [],
+      "plan": "D-PROCESS-SESSION1 must choose the public extension to ProcessSpec and ProcessChild. Keep non-interactive argv execution as the safe default. Use native Unix PTYs and Windows ConPTY, with one byte-stream and lifecycle model. Make interrupt, terminate, kill, wait, timeout, and drop control the full process tree. Reuse core.io, core.watcher, core.event, task cancellation, and native job or process-group controls. Add no terminal emulator or sibling process module.",
+      "blockedBy": [
+        "D-PROCESS-SESSION1"
+      ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Confirmed one public Core decision is required. Plan keeps terminal mode as an explicit ProcessSpec option."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -28031,16 +28483,16 @@
         }
       ],
       "refs": [
-        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
-        "examples/features/io/process_builder.jet",
-        "tests/corelib.rs",
+        "docs/archive/field-audit-2026-07-23.md",
         "docs/reference/core-library.md",
-        "docs/spec/syntax-decisions.md",
-        "docs/spec/architecture.md"
+        "examples/features/io/process_builder.jet",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/process_ui.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs",
+        "tests/corelib.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:07.441Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0dixxk4",
@@ -28053,10 +28505,18 @@
       "milestoneId": "e3-universal-product-parity",
       "phase": "planning",
       "priority": "P1",
-      "plan": "blockedBy: none — protocol/API planning and owner ballots are leaf work. Before ready, attach the canonical #301 HTTP/WebSocket implementation and any live browser-runtime dependency. Define one Browser/Context/Page lifecycle with typed commands, events, timeouts, cancellation, and trace receipts. Prefer WebDriver BiDi for portable behavior; isolate CDP or platform-driver gaps behind explicit capability checks, not silent fallback. Use #180 only for unavoidable native bridges. Do not invent a second async/event or selector mechanism.",
-      "blockedBy": [],
+      "plan": "D-BROWSER-AUTO1 must choose the public package and dependency law. Use WebDriver BiDi as the portable protocol and core.http/core.ws as transport. Keep browser, context, page, locator, event, cancellation, timeout, trace, and cleanup under one lifecycle. Expose protocol-specific expert controls only through explicit capability checks. Provision browser and driver tools through Jetpack. Add no Node or Playwright runtime dependency and do not expose the test-only Canvas harness as the product API.",
+      "blockedBy": [
+        "D-BROWSER-AUTO1"
+      ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Confirmed the browser package surface and dependency law need one ballot. Plan uses WebDriver BiDi and existing transports."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -28114,13 +28574,15 @@
         }
       ],
       "refs": [
-        "plugins/tower/.tower/scratch/field-audit-2026-07-23.md",
+        "docs/archive/field-audit-2026-07-23.md",
         "docs/spec/architecture.md",
-        "docs/spec/diagnostics.md"
+        "docs/spec/diagnostics.md",
+        "tests/canvas_scenarios.rs",
+        "tests/web_browser.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:11.657Z",
-      "updated": "2026-07-23"
+      "updated": "2026-07-25"
     },
     {
       "id": "c00n65jx",
@@ -29181,10 +29643,17 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "planning",
       "priority": "P0",
-      "plan": "blockedBy: none — flake-class graph is campaign root; coordinates with #396/#397 but not hard-blocked.\n\nBeginner facet: typed env.* + imports (no flake-parts required).\nExpert facet (#793): flake-parts interop maps into Jet's existing single-file vs multi-module paradigms (owner comment on D-ENV-FLAKEPARTS1).\n\n1. Map L0204 + devenv fields to env/Output/Service.\n2. Flake-class URI/follows on sources/lock.\n3. Deepen foreign flake/devenv bridge into Jet modules.\n4. Goldens for lock + bridge round-trip.\n5. Coordinate #396 native eval; flake-parts expert path details on #793.",
-      "blockedBy": [],
+      "plan": "D-ENV-FLAKEGRAPH1 must choose how flake-class inputs and outputs extend the existing package graph. Reuse sources, .jet/lock, Output values, env modules, providers, and the U16 bridge. Do not add a second flake manifest or resolver. After ratification, close each L0204 gap with a lossless translation or an explicit owner-approved non-goal. Keep the native #396/#397 evaluator as the long-term foreign evaluator and report the stopgap honestly.",
+      "blockedBy": [
+        "D-ENV-FLAKEGRAPH1"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Found one unresolved graph-surface choice: how follows and structured foreign outputs enter the existing Jet graph."
+        },
         {
           "at": "2026-07-24",
           "by": "cursor-devenv-parity",
@@ -29242,11 +29711,12 @@
       "refs": [
         "docs/research/2026-07-24-devenv-parity.md",
         "docs/plans/epoch-4/vision.md",
-        "docs/plans/epoch-4/README.md"
+        "docs/plans/epoch-4/README.md",
+        "docs/spec/syntax-decisions.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:51.475Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0lcnxch",
@@ -29259,10 +29729,17 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "planning",
       "priority": "P0",
-      "plan": "blockedBy: none — D-ENVHOOK1 already shipped; this extends lifecycle.\n\n1. Trust allow UX.\n2. Hot-reload proof on env hash.\n3. enterShell lifecycle + dotenv/unset.\n4. Env smoke doctor/Check.\n5. Snapshots.",
-      "blockedBy": [],
+      "plan": "D-ENV-LIFECYCLE2 must choose the remaining env field and command surface. Preserve D-ENVHOOK1 and D-JPK-DEVCOMPOSE1. Implement the owner locks: first-run prompt plus hash allowlist, background re-evaluation applied at the next prompt, reload on by default, and jet env test for clean-shell proof. Reuse #Task for trusted lifecycle work. Do not add enterShell strings or a second test runner.",
+      "blockedBy": [
+        "D-ENV-LIFECYCLE2"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Owner locks fix behavior, but the remaining typed field and command shape still needs D-ENV-LIFECYCLE2."
+        },
         {
           "at": "2026-07-24",
           "by": "cursor-devenv-parity",
@@ -29272,49 +29749,54 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Trust allow + re-prompt on env hash change",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:17.822Z"
+          "evidence": ""
         },
         {
           "n": 2,
-          "text": "Hot-reload: env edit applies at next prompt",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:17.960Z"
+          "evidence": ""
         },
         {
           "n": 3,
-          "text": "dotenv + unsetEnvVars",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:18.090Z"
+          "evidence": ""
         },
         {
           "n": 4,
-          "text": "Env smoke Check or jet env doctor green",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:18.219Z"
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
         }
       ],
       "refs": [
         "docs/research/2026-07-24-devenv-parity.md",
+        "docs/spec/syntax-decisions.md",
         "crates/jetpack/src/EnvHook.rs",
         "tests/env_hook.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:51.612Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0nliloo",
@@ -29327,10 +29809,17 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "planning",
       "priority": "P0",
-      "plan": "blockedBy: none — extends D-JPK-SERVICE1; reuse #439/#771 primitives without waiting.\n\n1. Extend Service/process fields (ballot if new syntax).\n2. Probes/restart/watch/ports/listen.\n3. Task DAG + wait.\n4. Goldens.",
-      "blockedBy": [],
+      "plan": "D-JPK-SERVICEDEPTH1 must choose the added Service fields and command behavior. Extend D-JPK-SERVICE1's one typed Service and supervisor. Reuse core.process, core.watcher, core.event, #Task calls, and the current jet os services group. Keep dependency order as ordinary task or service references. Add no process-compose model, detached supervisor, or shell command field. After ratification, split implementation only into independently testable probe, restart, watch, socket, and port slices.",
+      "blockedBy": [
+        "D-JPK-SERVICEDEPTH1"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] D-JPK-SERVICE1 fixes the base model, but the added typed fields remain an owner choice. Gated on D-JPK-SERVICEDEPTH1."
+        },
         {
           "at": "2026-07-24",
           "by": "cursor-devenv-parity",
@@ -29340,48 +29829,54 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Ready probes exec/http/notify/TCP",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:18.357Z"
+          "evidence": ""
         },
         {
           "n": 2,
-          "text": "Restart + watch restart",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:18.498Z"
+          "evidence": ""
         },
         {
           "n": 3,
-          "text": "Port alloc + socket activation",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:18.639Z"
+          "evidence": ""
         },
         {
           "n": 4,
-          "text": "Process-task DAG + wait",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:18.780Z"
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
         }
       ],
       "refs": [
         "docs/research/2026-07-24-devenv-parity.md",
-        "https://devenv.sh/processes/"
+        "docs/spec/syntax-decisions.md",
+        "crates/jetpack/src",
+        "docs/reference/core-library.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:51.748Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0pqeiev",
@@ -29392,14 +29887,19 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": "e4-jetpack-world-class",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "1. Map devenv services list → Jet Service preset modules.\n2. Ship flagship 7 with hostile health tests.\n3. Scaffold remaining catalog entries behind same type.\n4. Docs + examples/features.",
+      "plan": "Build presets as ordinary typed Service constructors after #785 fixes the full Service contract. Start with one shared preset framework, then PostgreSQL, Redis, MySQL or MariaDB, Nginx, MinIO, mail, and administration tools. Continue toward the full documented catalog; do not stop at seven. Each preset expands to the same Service value, supports package or version override, and has a real health-gated jet dev example. Add no new syntax or alternate supervisor.",
       "blockedBy": [
         "c0nliloo"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Existing Service law covers preset construction. Expanded the plan beyond the stale seven-service cap and advanced to ready."
+        },
         {
           "at": "2026-07-24",
           "by": "cursor-devenv-parity",
@@ -29409,39 +29909,46 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Flagship 7 service presets with health proofs",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:18.920Z"
+          "evidence": ""
         },
         {
           "n": 2,
-          "text": "Documented path to remaining devenv services",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:19.056Z"
+          "evidence": ""
         },
         {
           "n": 3,
-          "text": "Examples for postgres one-liner jet dev",
+          "text": "",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T20:53:19.190Z"
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
         }
       ],
       "refs": [
         "docs/research/2026-07-24-devenv-parity.md",
-        "https://devenv.sh/services/"
+        "docs/spec/syntax-decisions.md",
+        "crates/jetpack/src",
+        "examples/features"
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:51.877Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0s1t30c",
@@ -29454,27 +29961,76 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "planning",
       "priority": "P1",
-      "plan": "1. Extend #Task / run metadata for packages+cwd+status+ifModified.\n2. Typed env files: materialize closed formats only.\n3. git-hooks module + install on enter.\n4. treefmt/formatter bridge.\n5. Ballot only if new user-typeable syntax beyond ratified Task/env fields.",
+      "plan": "Two owner choices remain. D-TASK-META1 must choose task-local package, working-directory, and skip metadata without replacing plain function-call dependencies. D-ENV-FILES1 must choose the typed files schema under the owner-locked symlink, seed, copy, and jet env sync behavior. Git hooks and formatter integration must reuse #Task, the selected files model, and existing formatter commands. Add no scripts map, task DAG language, template engine, or second hook runner.",
       "blockedBy": [
-        "c0lcnxch"
+        "c0lcnxch",
+        "D-TASK-META1",
+        "D-ENV-FILES1"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Split two real choices: #Task metadata and typed generated files. Hooks and formatter work reuse those mechanisms."
+        },
         {
           "at": "2026-07-24",
           "by": "cursor-devenv-parity",
           "text": "task/files/hooks after env lifecycle hooks exist"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
       "refs": [
         "docs/research/2026-07-24-devenv-parity.md",
-        "https://devenv.sh/tasks/",
-        "https://devenv.sh/git-hooks/"
+        "docs/spec/syntax-decisions.md",
+        "docs/plans/epoch-4/vision.md",
+        "examples/features/devloop/task_runner.jet"
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:52.017Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0u5x7kf",
@@ -29487,27 +30043,76 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "planning",
       "priority": "P1",
-      "plan": "1. Define Image.from env / processes projection under D-JPK-IMAGE1.\n2. Implement build/run for shell+processes.\n3. copyToRoot + startupCommand.\n4. Devcontainer export as optional slice.\n5. Wire remote builder for macOS→linux (D-JPK-REMOTE1).",
+      "plan": "D-ENV-IMAGE1 must choose how the ratified image.* record projects an Environment into OCI. Preserve D-JPK-IMAGE1, the hangar closure, one jet os image command group, and remote-builder law. The selected surface must distinguish a shell image from a supervised-services image without a Dockerfile or compose file. Reuse the same env and Service graph, add explicit extra files only through the ratified files model, and keep registry push TLS-gated until it is real.",
       "blockedBy": [
         "c0j346pt",
-        "c0pqeiev"
+        "c0pqeiev",
+        "D-ENV-IMAGE1"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] D-JPK-IMAGE1 does not define Environment projections. Added the exact follow-up gate D-ENV-IMAGE1."
+        },
         {
           "at": "2026-07-24",
           "by": "cursor-devenv-parity",
           "text": "env containers need flake-class graph + services"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
       "refs": [
         "docs/research/2026-07-24-devenv-parity.md",
-        "https://devenv.sh/containers/"
+        "docs/spec/syntax-decisions.md",
+        "crates/jetpack/src/Image.rs",
+        "tests/image.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:52.145Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0wbxcvq",
@@ -29518,9 +30123,9 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": "e4-jetpack-world-class",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "1. jet env info summary sections.\n2. Complete LSP hover/complete for env.* fields.\n3. jet env doctor for trust/bridge/unmapped.\n4. MCP resources via #768.",
+      "plan": "Reuse D-JPK-DISCOVER1 and D-CLI-SURFACE3. Put env summaries in jet inspect info, package and option search in jet inspect search, and env health checks in jet self doctor --env. Complete LSP hover and completion from the same provider and typed-field metadata. Expose the same read-only facts as MCP resources only after #768 lands. Do not add jet env doctor, a web-only index, or a second metadata store.",
       "blockedBy": [
         "c0j346pt",
         "c00jpncd"
@@ -29528,18 +30133,67 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Current CLI and discovery law already fixes the surface. Replaced stale jet env doctor wording and advanced to ready."
+        },
+        {
           "at": "2026-07-24",
           "by": "cursor-devenv-parity",
           "text": "info/LSP after graph + langpack spelling"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
       "refs": [
-        "docs/research/2026-07-24-devenv-parity.md"
+        "docs/research/2026-07-24-devenv-parity.md",
+        "docs/spec/syntax-decisions.md",
+        "Source/LSP",
+        "Source/main.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:52.276Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0yf5gxv",
@@ -29689,27 +30343,75 @@
       "milestoneId": "e4-jetpack-world-class",
       "phase": "planning",
       "priority": "P2",
-      "plan": "1. Prioritize android/apple if mobile FFI cards need them.\n2. certificates/hosts as env fields.\n3. Editor/agent modules cooperate with #768 MCP — no duplicate agent runtime.\n4. Update research matrix statuses.",
+      "plan": "D-ENV-INTEGRATIONS1 must choose the public home for optional platform and agent integrations. Reuse typed env modules, language packs, providers, vault, host bindings, and #768 MCP. Cover Android and Apple SDKs, certificates, hosts, and editor or agent tools without copying devenv's Nix-shaped names. Each integration must expand to ordinary packages, variables, files, tasks, or MCP settings. Add no agent runtime or stringly module escape.",
       "blockedBy": [
         "c0j346pt",
-        "c00jpncd"
+        "c00jpncd",
+        "D-ENV-INTEGRATIONS1"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "codex-root",
+          "text": "[ballot audit] Full support is owner-locked, but the public integration namespace is not. Added one naming and mechanism ballot."
+        },
         {
           "at": "2026-07-24",
           "by": "cursor-devenv-parity",
           "text": "optional modules after core graph + langpacks"
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 2,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 3,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 4,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        },
+        {
+          "n": 5,
+          "text": "",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": ""
+        }
+      ],
       "refs": [
         "docs/research/2026-07-24-devenv-parity.md",
-        "https://devenv.sh/reference/options/"
+        "docs/spec/syntax-decisions.md",
+        "docs/plans/epoch-4/vision.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-24T20:52:52.662Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0wetpt1",
@@ -44712,6 +45414,698 @@
       "created": "2026-07-25T09:08:24.858Z",
       "outcome": "B",
       "ratifiedAt": "2026-07-25"
+    },
+    {
+      "id": "D-LITERAL-PREFIX1",
+      "cardId": "c0pq9ng2",
+      "group": "syntax",
+      "title": "One contract for user literal prefixes",
+      "gist": "Choose how a type defines a checked literal prefix without adding a second macro system.",
+      "lesson": "A literal prefix turns source text into a typed value during compilation.\n\nThe contract must preserve text parts and typed holes separately. Joining them first would lose injection safety and useful source locations.\n\nBuilt-in and user prefixes should use the same compiler path. The choice is how authors connect a prefix spelling to a type and its comptime builder.",
+      "explainer": "",
+      "story": "Iris owns a database library. She wants sql\"...\" to reject malformed queries during compilation and keep interpolated values separate from SQL text.",
+      "inWild": "derive Sql.Literal {\n  comptime fn build(input: TypedLiteral) -> Sql ? LiteralError\n}\nquery :: sql\"select * from users where id = {user_id}\"",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Type-derived literal contract",
+          "detail": "A type derives one Literal contract with a comptime builder. The lowercase type name becomes the prefix unless the derive supplies an explicit spelling.",
+          "code": "derive Sql.Literal {\n  comptime fn build(input: TypedLiteral) -> Sql ? LiteralError\n}"
+        },
+        {
+          "key": "B",
+          "name": "Tag function convention",
+          "detail": "Any comptime function with a TypedLiteral parameter may be called as a prefix. Function naming supplies the spelling.",
+          "code": "comptime fn sql(input: TypedLiteral) -> Sql ? LiteralError\nquery :: sql\"select {value}\""
+        },
+        {
+          "key": "C",
+          "name": "Built-ins only",
+          "detail": "Keep literal prefixes closed to the standard library. User libraries expose ordinary comptime constructors instead.",
+          "code": "query :: Sql.parse(comptime \"select {value}\")?"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Procedural macros can parse custom token streams, but they create a separate macro programming surface.",
+          "code": "sql!(\"select * from users\")"
+        },
+        {
+          "lang": "JavaScript",
+          "note": "Tagged templates receive text parts and values separately, but ordinary tags run at runtime.",
+          "code": "sql`select * from users where id = ${id}`"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes the capability explicit on the result type and keeps every prefix on Jet’s typed comptime path.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A naming convention makes ordinary functions gain syntax implicitly and leaves prefix ownership less clear."
+          },
+          {
+            "key": "C",
+            "reason": "Built-ins only cannot support safe domain literals from user libraries."
+          }
+        ],
+        "tradeoff": "Authors write a derive block and must choose an explicit spelling when the default lowercase name is unsuitable."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:57.792Z"
+    },
+    {
+      "id": "D-MCP-SURFACE1",
+      "cardId": "c0lpd9yg",
+      "group": "tooling",
+      "title": "First-party MCP surface",
+      "gist": "Choose the public client and server shape for MCP tools, resources, prompts, transports, and authorization.",
+      "lesson": "MCP uses JSON-RPC 2.0 and a negotiated lifecycle. The current protocol revision is 2025-11-25.\n\nServers expose tools, resources, and prompts. Clients discover and invoke those features through stdio or Streamable HTTP transports.\n\nJet needs typed schemas, cancellation, progress, logging, version negotiation, and transport security. The choice is whether these compose from ordinary functions or a new marker system.",
+      "explainer": "",
+      "story": "Noor wants one Jet binary to serve repository tools over stdio locally and Streamable HTTP remotely. The same typed functions should back both transports.",
+      "inWild": "use core.mcp as mcp\nserver :: mcp.server(\"repo-tools\")\n  .tool(\"search\", search)\n  .resource(\"repo://status\", status)\nserver.serve(.Stdio)?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed builders over functions",
+          "detail": "Add core.mcp client and server builders. Authors register ordinary typed functions, then choose stdio or Streamable HTTP adapters.",
+          "code": "server :: mcp.server(\"repo-tools\").tool(\"search\", search)\nserver.serve(.Stdio)?"
+        },
+        {
+          "key": "B",
+          "name": "MCP declaration markers",
+          "detail": "Add markers such as #MCPTool and #MCPResource. Compiler reflection discovers marked functions and generates registration.",
+          "code": "#MCPTool(\"search\")\nfn search(args: SearchArgs) -> SearchReply ? ToolError"
+        },
+        {
+          "key": "C",
+          "name": "Low-level protocol package",
+          "detail": "Ship JSON-RPC messages, schemas, and transports only. Each application writes its own registry and dispatch layer.",
+          "code": "peer :: mcp.Peer.connect(.Stdio)?\npeer.handle(\"tools/call\", dispatch)?"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "MCP specification",
+          "note": "The protocol fixes lifecycle and transports, but SDKs choose their own registration APIs.",
+          "code": "initialize -> initialized -> tools/list -> tools/call"
+        },
+        {
+          "lang": "gRPC",
+          "note": "Generated service declarations are strong, but MCP already carries runtime JSON schemas and discovery.",
+          "code": "service RepoTools { rpc Search(SearchArgs) returns (SearchReply); }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A reuses typed functions and ordinary composition while keeping protocol negotiation, schema generation, and transport security in one standard implementation.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "New markers duplicate an explicit builder registry and burden functions that may also be called normally."
+          },
+          {
+            "key": "C",
+            "reason": "A protocol-only package makes every application rebuild the same registry, validation, and lifecycle machinery."
+          }
+        ],
+        "tradeoff": "Registration is explicit, so a tool must appear in the builder before a client can discover it."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:57.927Z"
+    },
+    {
+      "id": "D-AGENT-EXEC1",
+      "cardId": "c0vrs94y",
+      "group": "safety",
+      "title": "Authority model for agent command execution",
+      "gist": "Choose how agent-launched commands declare workspace access, isolation, network rights, plans, and audit receipts.",
+      "lesson": "Agent execution is process execution with an untrusted planner. Safety comes from explicit authority and enforcement, not from a friendly command name.\n\nA plan explains the executable, arguments, working directory, files, network rights, limits, and expected outputs before launch.\n\nA receipt records what ran and what authority was used. The choice is whether Jet extends core.process or creates a separate agent executor.",
+      "explainer": "",
+      "story": "Sam lets an agent run tests in a repository. The command may write target files, but it must not read credentials or open the network.",
+      "inWild": "policy :: process.ProcessAuthority.workspace(\".\")\n  .write([\"src\", \"tests\", \"target\"])\n  .network([])\nspec :: process.cmd([\"cargo\", \"test\"]).under(policy)\nprint(spec.plan())\nresult :: spec.run()?\nprint(result.receipt)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Extend core.process authority",
+          "detail": "Add authority, plan, isolation, and receipt types to ProcessSpec. The CLI exposes the same engine through jet self exec.",
+          "code": "process.cmd(args).under(policy).run()?\njet self exec --workspace . -- cargo test"
+        },
+        {
+          "key": "B",
+          "name": "Separate agent executor",
+          "detail": "Create core.agent.exec and jet agent exec with their own command, policy, result, and receipt types.",
+          "code": "agent.exec(Command.{ args, authority })?"
+        },
+        {
+          "key": "C",
+          "name": "CLI-only sandbox",
+          "detail": "Keep core.process unchanged. Provide authority and receipts only through a jet self exec command for external agents.",
+          "code": "jet self exec --workspace . --write src,tests -- cargo test"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps one process mechanism and makes the safety model available to Jet programs, the CLI, tests, and agent integrations.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A separate executor duplicates command and child-process semantics, then risks diverging from core.process."
+          },
+          {
+            "key": "C",
+            "reason": "CLI-only authority cannot protect commands launched inside Jet programs or first-party agent SDKs."
+          }
+        ],
+        "tradeoff": "core.process gains more policy types, and unsupported host enforcement must fail closed instead of silently weakening authority."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:58.066Z"
+    },
+    {
+      "id": "D-PROCESS-SESSION1",
+      "cardId": "c0ft6gme",
+      "group": "runtime",
+      "title": "Interactive process session surface",
+      "gist": "Choose how PTY or ConPTY sessions, process trees, terminal resize, and resource limits extend core.process.",
+      "lesson": "A pipe carries bytes, but many interactive programs change behavior unless attached to a terminal.\n\nUnix uses a pseudoterminal. Windows uses a pseudoconsole, commonly called ConPTY. Both need size changes, byte streams, and reliable process-tree cleanup.\n\nResource limits and cancellation belong to the launched process tree. The choice is whether terminal sessions remain ProcessSpec options or become a second process API.",
+      "explainer": "",
+      "story": "Lea runs a debugger from a Jet test harness. It needs terminal behavior, resize events, time limits, and one cancellation that ends every descendant.",
+      "inWild": "child :: process.cmd([\"lldb\", app])\n  .terminal(.{ cols: 120, rows: 40 })\n  .limits(.{ wall_time: 30.seconds })\n  .spawn()?\nchild.terminal.resize(160, 50)?\nchild.kill_tree()?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "ProcessSpec terminal capability",
+          "detail": "Add terminal and limit options to ProcessSpec. ProcessChild exposes the terminal channel, resize, and tree-wide cancellation.",
+          "code": "process.cmd(args).terminal(size).limits(limits).spawn()?"
+        },
+        {
+          "key": "B",
+          "name": "Separate TerminalSession type",
+          "detail": "Add core.terminal.Session as a sibling launch API. It owns PTY or ConPTY processes and terminal events.",
+          "code": "session :: terminal.Session.spawn(args, size)?"
+        },
+        {
+          "key": "C",
+          "name": "Platform-specific session APIs",
+          "detail": "Expose Unix PTY and Windows ConPTY modules directly. Portable callers choose a platform branch.",
+          "code": "session :: if windows { conpty.spawn(args)? } else { pty.spawn(args)? }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Windows",
+          "note": "ConPTY gives a UTF-8 pseudoconsole stream, but the host still manages communication channels and resize.",
+          "code": "CreatePseudoConsole(size, input, output, flags, &hpc)"
+        },
+        {
+          "lang": "Unix",
+          "note": "A PTY pairs a controller with a terminal-facing child process.",
+          "code": "openpty(&master, &slave, ...)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A preserves one launch, cancellation, environment, and resource model while making terminal behavior an explicit capability.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A sibling session API would repeat spawn, environment, cancellation, and child lifecycle semantics."
+          },
+          {
+            "key": "C",
+            "reason": "Platform APIs leak host differences into every portable agent and test workflow."
+          }
+        ],
+        "tradeoff": "ProcessChild needs optional terminal operations, and hosts without a supported terminal backend must return a clear capability error."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:58.208Z"
+    },
+    {
+      "id": "D-BROWSER-AUTO1",
+      "cardId": "c0dixxk4",
+      "group": "tooling",
+      "title": "Portable browser automation surface",
+      "gist": "Choose the first-party browser, context, page, locator, event, and protocol model for Jet agents and tests.",
+      "lesson": "Browser automation needs isolated contexts, pages, locators, input, navigation, screenshots, events, and deterministic cleanup.\n\nWebDriver BiDi is the portable bidirectional protocol. Some browser-specific capabilities still exist only through Chrome DevTools Protocol.\n\nJet can implement these protocols directly or depend on another runtime. The choice determines portability, provisioning, and escape hatches.",
+      "explainer": "",
+      "story": "Ari tests a local web app and gives the same workflow to an agent. The test must run without Node and must explain unsupported browser capabilities.",
+      "inWild": "browser :: Browser.launch(.Chromium)?\ncontext :: browser.context(.{ viewport: .{ width: 1280, height: 720 } })?\npage :: context.page()?\npage.goto(url)?\npage.locator(\"role=button[name='Save']\").click()?\npage.screenshot(\"result.png\")?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "BiDi core with explicit CDP escape",
+          "detail": "Implement core.browser over WebDriver BiDi. Expose explicit CDP sessions only for capabilities the portable protocol lacks.",
+          "code": "page :: context.page()?\npage.locator(selector).click()?\ncdp :: page.protocol(.CDP)?"
+        },
+        {
+          "key": "B",
+          "name": "Playwright-backed API",
+          "detail": "Wrap Playwright and provision Node plus its browser drivers. Jet mirrors its browser, context, page, and locator model.",
+          "code": "page :: playwright.chromium.launch()?.new_page()?"
+        },
+        {
+          "key": "C",
+          "name": "Browser-specific protocol packages",
+          "detail": "Ship separate CDP, Firefox, and WebKit packages. Applications build their own portable layer when needed.",
+          "code": "session :: cdp.connect(endpoint)?"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "WebDriver BiDi",
+          "note": "The W3C protocol defines bidirectional modules, commands, events, and browsing contexts across supporting browsers.",
+          "code": "{ \"method\": \"browsingContext.navigate\", \"params\": { ... } }"
+        },
+        {
+          "lang": "Playwright",
+          "note": "Its Browser, BrowserContext, Page, and Locator model is proven, but it brings a Node runtime and external driver stack.",
+          "code": "await page.getByRole('button', { name: 'Save' }).click()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives Jet a portable native foundation, preserves browser isolation, and keeps protocol-specific power explicit and auditable.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A Playwright wrapper makes first-party browser automation depend on Node and an independently versioned client stack."
+          },
+          {
+            "key": "C",
+            "reason": "Separate protocol packages make every caller rebuild contexts, locators, waits, and portability."
+          }
+        ],
+        "tradeoff": "Jet must maintain protocol clients and may initially expose fewer conveniences than Playwright."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:58.353Z"
+    },
+    {
+      "id": "D-ENV-FLAKEGRAPH1",
+      "cardId": "c0j346pt",
+      "group": "tooling",
+      "title": "Flake-class source graph in Jet environments",
+      "gist": "Choose how Jet models pinned inputs, follows edges, outputs, locks, and foreign flake or devenv projection.",
+      "lesson": "A flake-class graph names external sources, pins them in a lock, connects follows edges, and exposes reproducible outputs.\n\nJet already has sources, locks, outputs, and typed environment modules. A second flake block could mirror Nix, but it would duplicate those concepts.\n\nForeign projection means importing or exporting enough graph structure to interoperate without making Nix syntax Jet’s public model.",
+      "explainer": "",
+      "story": "Mina pins nixpkgs and a Rust overlay. She wants the overlay to follow the same nixpkgs node and wants one lock to reproduce the environment.",
+      "inWild": "module env.dev {\n  sources: {\n    nixpkgs: \"nixos/nixpkgs@nixos-unstable\"\n    rust_overlay: { source: \"oxalica/rust-overlay\", follows: [nixpkgs] }\n  }\n  packages: [rust_overlay.rust]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Extend the existing env graph",
+          "detail": "Add typed follows edges and foreign-output projection to sources and outputs. Keep .jet/lock as the only lock.",
+          "code": "sources: { overlay: { source: ref, follows: [nixpkgs] } }"
+        },
+        {
+          "key": "B",
+          "name": "Add a flake compatibility block",
+          "detail": "Add a separate flake section that mirrors inputs, outputs, and follows. Env modules may consume its outputs.",
+          "code": "flake: { inputs: { ... }, outputs: fn(inputs) { ... } }"
+        },
+        {
+          "key": "C",
+          "name": "Foreign bridge only",
+          "detail": "Keep Jet’s graph unchanged. Evaluate flake or devenv projects through an external bridge and import only resolved packages.",
+          "code": "packages: import_flake(\".\").packages"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix flakes",
+          "note": "Inputs, follows edges, outputs, and flake.lock form one reproducible graph.",
+          "code": "inputs.rust-overlay.inputs.nixpkgs.follows = \"nixpkgs\";"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A reaches graph parity by completing Jet’s existing source and output mechanism instead of adding a parallel flake language.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A flake block duplicates sources, outputs, and lock ownership inside the same project."
+          },
+          {
+            "key": "C",
+            "reason": "Bridge-only import cannot express Jet-native follows edges or export a complete reproducible graph."
+          }
+        ],
+        "tradeoff": "Foreign projection cannot preserve every arbitrary Nix function as a typed Jet value."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:58.492Z"
+    },
+    {
+      "id": "D-ENV-LIFECYCLE2",
+      "cardId": "c0lcnxch",
+      "group": "tooling",
+      "title": "Typed environment lifecycle hooks",
+      "gist": "Choose how enter hooks, dotenv, unset rules, reload, trust, and enter-shell checks compose with Jet tasks.",
+      "lesson": "Environment lifecycle actions run when a developer enters or reloads an environment. They can change files, variables, and local services.\n\nJet already has typed tasks, effects, trust, and jet env test. Lifecycle behavior should reuse those controls.\n\nThe choice is whether modules reference tasks explicitly, embed shell strings, or rely on magic function names.",
+      "explainer": "",
+      "story": "Tess enters a repository that seeds a local config, loads approved dotenv keys, removes one inherited variable, and runs a smoke check after reload.",
+      "inWild": "module env.dev {\n  on_enter: [seed_config]\n  dotenv: [\".env\"]\n  unset: [\"OLD_TOKEN\"]\n  checks: [smoke]\n}\n#Task\nfn seed_config() #Fs { ... }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Explicit typed task references",
+          "detail": "Add closed lifecycle fields that reference #Task functions. Dotenv and unset remain typed data, while trust and effects govern execution.",
+          "code": "on_enter: [seed_config]\nchecks: [smoke]"
+        },
+        {
+          "key": "B",
+          "name": "Embedded shell hooks",
+          "detail": "Add enterShell and enterTest string fields. The host shell evaluates them during entry and testing.",
+          "code": "enterShell: \"./scripts/setup.sh\"\nenterTest: \"test -f .env\""
+        },
+        {
+          "key": "C",
+          "name": "Lifecycle function conventions",
+          "detail": "A module may define reserved functions such as enter and enter_test. The environment runner discovers them by name.",
+          "code": "fn enter() #Fs { ... }\nfn enter_test() #Fs { ... }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A reuses tasks, effect checking, caching, trust, and diagnostics while keeping every lifecycle action visible in the module record.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Shell strings bypass typed effects and make host-shell behavior part of the environment contract."
+          },
+          {
+            "key": "C",
+            "reason": "Reserved names hide lifecycle wiring and make ordinary function renames change environment behavior."
+          }
+        ],
+        "tradeoff": "Authors must define small task functions for actions that would fit in one shell line."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:58.632Z"
+    },
+    {
+      "id": "D-JPK-SERVICEDEPTH1",
+      "cardId": "c0nliloo",
+      "group": "runtime",
+      "title": "Depth of the Jetpack Service record",
+      "gist": "Choose how readiness, restart, watch, ports, sockets, ordering, and task dependencies extend one dev-service mechanism.",
+      "lesson": "A development service is a long-running command managed with logs and cleanup. Readiness tells dependents when it can accept work.\n\nRestart and watch policies describe recovery and file-triggered reload. Ports, sockets, and ordering describe resources and dependencies.\n\nJet already has one Service record and service CLI. The choice is whether to deepen that record or introduce another process graph.",
+      "explainer": "",
+      "story": "Owen runs a database, API, and web watcher. The API waits for database readiness, and the watcher restarts only when source files change.",
+      "inWild": "api :: Service.{\n  run: [\"jet\", \"run\", \"src/api.jet\"]\n  ready: .Http(\"http://127.0.0.1:8080/health\")\n  restart: .OnFailure\n  watch: [\"src/**\"]\n  after: [db]\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Extend one Service record",
+          "detail": "Add typed readiness, restart, watch, port, socket, and after fields to Service. Task functions remain the dependency mechanism for finite work.",
+          "code": "Service.{ run, ready, restart, watch, ports, sockets, after }"
+        },
+        {
+          "key": "B",
+          "name": "Add a process DAG record",
+          "detail": "Keep Service simple and add ProcessGraph for dependencies, probes, restarts, sockets, and task nodes.",
+          "code": "ProcessGraph.{ nodes: [db, migrate, api], edges: [...] }"
+        },
+        {
+          "key": "C",
+          "name": "Delegate to process-compose",
+          "detail": "Keep only basic services. Export advanced graphs to process-compose and call its CLI.",
+          "code": "jet os services export --format process-compose | process-compose up"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "process-compose",
+          "note": "It combines dependencies, readiness, restart policies, logs, and process supervision in a separate configuration system.",
+          "code": "depends_on: { db: { condition: process_healthy } }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A completes the existing service mechanism and keeps finite tasks distinct from supervised long-running processes.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A second graph duplicates service identity, ordering, logs, cancellation, and CLI status."
+          },
+          {
+            "key": "C",
+            "reason": "Delegation makes a third-party configuration and binary part of core environment behavior."
+          }
+        ],
+        "tradeoff": "The Service record becomes broader, so fields need strong defaults and concise diagnostics."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:58.775Z"
+    },
+    {
+      "id": "D-TASK-META1",
+      "cardId": "c0s1t30c",
+      "group": "syntax",
+      "title": "Task-local packages and execution metadata",
+      "gist": "Choose how a task declares local packages, working directory, inputs, and cache-relevant execution metadata.",
+      "lesson": "A task may need tools that the interactive environment does not need. Task-local packages keep those tools out of every developer shell.\n\nWorking directory and declared inputs also affect reproducibility and cache keys. Dependencies already use ordinary task calls.\n\nThe choice is whether #Task accepts typed metadata or whether a separate task configuration duplicates function identity.",
+      "explainer": "",
+      "story": "Rae has a documentation task that needs mdbook only while it runs. The task should cache by its source directory and execute from docs.",
+      "inWild": "#Task(packages: [pkg.mdbook], cwd: \"docs\", inputs: [\"src/**\", \"book.toml\"])\nfn book() #Fs {\n  sh\"mdbook build\"\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Parameterized #Task metadata",
+          "detail": "Extend #Task with closed typed arguments for packages, cwd, inputs, outputs, and cache policy. Task calls still express dependencies.",
+          "code": "#Task(packages: [pkg.mdbook], cwd: \"docs\", inputs: [\"src/**\"])\nfn book() #Fs"
+        },
+        {
+          "key": "B",
+          "name": "Separate tasks configuration",
+          "detail": "Keep #Task bare. Add a tasks map that points at functions and supplies execution metadata.",
+          "code": "tasks: { book: { fn: book, packages: [pkg.mdbook], cwd: \"docs\" } }"
+        },
+        {
+          "key": "C",
+          "name": "Provision inside task bodies",
+          "detail": "Keep the declaration unchanged. Task code enters a package scope and changes directory at runtime.",
+          "code": "#Task\nfn book() #Fs {\n  packages.with([pkg.mdbook]) { fs.in_dir(\"docs\") { ... } }\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps one task identity and makes execution metadata available to planning, caching, trust review, and diagnostics before the body runs.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A separate map duplicates names and can drift from function signatures and dependencies."
+          },
+          {
+            "key": "C",
+            "reason": "Runtime provisioning hides packages and directories from static plans and cache-key construction."
+          }
+        ],
+        "tradeoff": "#Task gains arguments, so D-MARKSIG1 grammar and diagnostics must remain the single marker-argument mechanism."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:58.923Z"
+    },
+    {
+      "id": "D-ENV-FILES1",
+      "cardId": "c0s1t30c",
+      "group": "tooling",
+      "title": "Generated and linked environment files",
+      "gist": "Choose how environments declare generated files, linked sources, seed behavior, and synchronization.",
+      "lesson": "Environment files include tool configuration, seed data, and links into managed stores. Their update behavior must be explicit.\n\nA symlink always follows the managed source. A seed copies only when the destination is absent. A copy replaces managed output during synchronization.\n\nTemplates add another language and secret risks. The choice is whether typed file records are sufficient.",
+      "explainer": "",
+      "story": "Kai wants a repository config linked from a checked source and a local settings file seeded once without overwriting developer changes.",
+      "inWild": "files: {\n  \".config/tool.toml\": { source: config_text, mode: .Symlink }\n  \".env.local\": { source: \"defaults.env\", mode: .Seed }\n}\n$ jet env sync",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed files map",
+          "detail": "Add a files map with typed source values and explicit Symlink, Seed, or Copy modes. jet env sync applies and audits it.",
+          "code": "files: { path: { source: value, mode: .Seed } }"
+        },
+        {
+          "key": "B",
+          "name": "Lifecycle tasks only",
+          "detail": "Use on-enter tasks and ordinary filesystem APIs for every generated or linked file.",
+          "code": "on_enter: [seed_files]\n#Task fn seed_files() #Fs { ... }"
+        },
+        {
+          "key": "C",
+          "name": "Template manifest",
+          "detail": "Add a separate generated-files manifest with string templates, substitutions, destination paths, and overwrite rules.",
+          "code": "generated_files: { \".env\": template(\"env.tpl\", values) }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes ownership and overwrite behavior inspectable before execution and covers static text, paths, and generated typed values without a template language.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Imperative tasks hide file ownership and overwrite policy from environment plans."
+          },
+          {
+            "key": "C",
+            "reason": "A template manifest adds another interpolation system and increases accidental secret rendering."
+          }
+        ],
+        "tradeoff": "Dynamic file generation must return a typed text or byte value before synchronization."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:59.063Z"
+    },
+    {
+      "id": "D-ENV-IMAGE1",
+      "cardId": "c0u5x7kf",
+      "group": "tooling",
+      "title": "OCI images from environment graphs",
+      "gist": "Choose how an environment produces shell and service images without creating a second container mechanism.",
+      "lesson": "An environment graph already knows packages, variables, files, tasks, and services. An OCI image can reuse that closed graph as its root filesystem and entrypoint.\n\nJet already has one image record and hangar workflow. A new container namespace would duplicate build, inspect, publish, and lock behavior.\n\nThe choice is how an image selects an environment and whether it starts a shell or its services.",
+      "explainer": "",
+      "story": "Uma wants the same tools locally and in CI. She also wants a service image that starts the API definition already tested by jet os services.",
+      "inWild": "image.dev_shell {\n  from: env.dev\n  run: .Shell\n}\nimage.api {\n  from: env.dev\n  run: .Services([api])\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Extend the existing image record",
+          "detail": "Add an environment source and typed Shell or Services entrypoint to image records. Reuse inspect, hangar, lock, and publish commands.",
+          "code": "image.api { from: env.dev, run: .Services([api]) }"
+        },
+        {
+          "key": "B",
+          "name": "Add container environment records",
+          "detail": "Create a container namespace with its own env source, command, ports, layers, build, and publish workflow.",
+          "code": "container.api { environment: env.dev, command: api.run }"
+        },
+        {
+          "key": "C",
+          "name": "CLI-only image projection",
+          "detail": "Keep source files unchanged. Build a shell or services image through jet image flags.",
+          "code": "jet image build --env dev --services api"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps one image mechanism and makes the environment projection reviewable, reproducible, and reusable from source.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A container namespace duplicates image identity, lifecycle, registry, and provenance."
+          },
+          {
+            "key": "C",
+            "reason": "CLI-only flags hide the image contract from source review and reproducible builds."
+          }
+        ],
+        "tradeoff": "Only environment values representable in the closed image graph can cross into the OCI result."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:59.203Z"
+    },
+    {
+      "id": "D-ENV-INTEGRATIONS1",
+      "cardId": "c02ptuvv",
+      "group": "tooling",
+      "title": "Typed homes for optional environment integrations",
+      "gist": "Choose where Android, Apple, certificates, hosts, and editor-agent integrations live in Jet environment modules.",
+      "lesson": "Optional integrations combine packages, variables, files, permissions, and host capabilities. They should compose from those existing mechanisms.\n\nMirroring another tool’s top-level names improves migration but freezes that tool’s organization into Jet. Unstructured packages avoid new fields but lose validation and planning.\n\nThe choice is a small set of Jet-native typed domains or a direct compatibility mirror.",
+      "explainer": "",
+      "story": "Devon maintains a mobile repository with Android and Apple targets, development certificates, local host aliases, and Codex MCP settings. One environment should explain every host requirement.",
+      "inWild": "module env.mobile {\n  platforms: {\n    android: AndroidSDK.{ api: 35, build_tools: \"35.0.0\" }\n    apple: AppleSDK.{ targets: [.IOS, .MacOS] }\n  }\n  certificates: [dev_certificate]\n  hosts: { \"api.local\": \"127.0.0.1\" }\n  agents: { codex: AgentTool.{ mcp: [repo_server] } }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Jet-native typed domains",
+          "detail": "Add platforms, certificates, hosts, and agents fields with closed typed records. Each lowers to existing packages, files, variables, trust, and host checks.",
+          "code": "platforms: { android: AndroidSDK.{ ... }, apple: AppleSDK.{ ... } }\nagents: { codex: AgentTool.{ ... } }"
+        },
+        {
+          "key": "B",
+          "name": "Mirror devenv module roots",
+          "detail": "Adopt compatibility names and nesting from devenv for Android, Apple, certificates, hosts, and editor-agent modules.",
+          "code": "android: { enable: true }\napple.sdk: { enable: true }\nclaude.code: { enable: true }"
+        },
+        {
+          "key": "C",
+          "name": "Packages and lifecycle tasks only",
+          "detail": "Add no first-party integration fields. Recipes compose packages, environment variables, files, and tasks manually.",
+          "code": "packages: [pkg.android_sdk]\non_enter: [configure_android]"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A gives diagnostics and planning a stable typed shape while reusing existing environment mechanisms underneath.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A direct mirror imports another project’s taxonomy and creates names that do not fit Jet’s existing domains."
+          },
+          {
+            "key": "C",
+            "reason": "Recipes alone cannot validate licenses, host support, certificate handling, or agent configuration before execution."
+          }
+        ],
+        "tradeoff": "Jet must define and maintain a compact schema for each supported integration family."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-25T20:26:59.347Z"
     }
   ],
   "questions": [
@@ -45627,6 +47021,447 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-25T20:28:47.464Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c02ptuvv",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:47.292Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0u5x7kf",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:47.118Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0s1t30c",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:46.949Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0nliloo",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:46.788Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0lcnxch",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:46.628Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0j346pt",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:46.466Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0dixxk4",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:46.303Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:46.135Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0vrs94y",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:45.970Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0lpd9yg",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:28:45.810Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0pq9ng2",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-25T20:26:59.347Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-ENV-INTEGRATIONS1",
+      "note": "Typed homes for optional environment integrations"
+    },
+    {
+      "at": "2026-07-25T20:26:59.203Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-ENV-IMAGE1",
+      "note": "OCI images from environment graphs"
+    },
+    {
+      "at": "2026-07-25T20:26:59.063Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-ENV-FILES1",
+      "note": "Generated and linked environment files"
+    },
+    {
+      "at": "2026-07-25T20:26:58.923Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-TASK-META1",
+      "note": "Task-local packages and execution metadata"
+    },
+    {
+      "at": "2026-07-25T20:26:58.775Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-JPK-SERVICEDEPTH1",
+      "note": "Depth of the Jetpack Service record"
+    },
+    {
+      "at": "2026-07-25T20:26:58.632Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-ENV-LIFECYCLE2",
+      "note": "Typed environment lifecycle hooks"
+    },
+    {
+      "at": "2026-07-25T20:26:58.492Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-ENV-FLAKEGRAPH1",
+      "note": "Flake-class source graph in Jet environments"
+    },
+    {
+      "at": "2026-07-25T20:26:58.353Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-BROWSER-AUTO1",
+      "note": "Portable browser automation surface"
+    },
+    {
+      "at": "2026-07-25T20:26:58.209Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-PROCESS-SESSION1",
+      "note": "Interactive process session surface"
+    },
+    {
+      "at": "2026-07-25T20:26:58.066Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-AGENT-EXEC1",
+      "note": "Authority model for agent command execution"
+    },
+    {
+      "at": "2026-07-25T20:26:57.928Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-MCP-SURFACE1",
+      "note": "First-party MCP surface"
+    },
+    {
+      "at": "2026-07-25T20:26:57.792Z",
+      "by": "codex-root",
+      "action": "decision.add",
+      "ref": "D-LITERAL-PREFIX1",
+      "note": "One contract for user literal prefixes"
+    },
+    {
+      "at": "2026-07-25T20:26:30.290Z",
+      "by": "e3-744-union",
+      "action": "card.update",
+      "ref": "c0e61zyf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-25T20:26:30.131Z",
+      "by": "e3-744-union",
+      "action": "card.claim",
+      "ref": "c0e61zyf",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T20:21:28.354Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c02ptuvv",
+      "note": "plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:27.961Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0wbxcvq",
+      "note": "phase,plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:27.564Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0u5x7kf",
+      "note": "plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:27.170Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0s1t30c",
+      "note": "plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:26.776Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0pqeiev",
+      "note": "phase,plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:26.382Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0nliloo",
+      "note": "plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:25.989Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0lcnxch",
+      "note": "plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:25.593Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0j346pt",
+      "note": "plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:25.201Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0dixxk4",
+      "note": "plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:24.800Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:24.409Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0vrs94y",
+      "note": "plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:24.017Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0h9cjc7",
+      "note": "phase,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:23.623Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0lpd9yg",
+      "note": "plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:23.229Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0c6w0rd",
+      "note": "phase,epoch,plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:22.838Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c09f5jk7",
+      "note": "phase,epoch,plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:22.448Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0r1jtw1",
+      "note": "phase,epoch,plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:22.044Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0og097v",
+      "note": "phase,epoch,plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:21.650Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0lu14lt",
+      "note": "phase,epoch,plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:21.258Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0j3g2ec",
+      "note": "phase,epoch,plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:20.858Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0gj9wjj",
+      "note": "phase,epoch,plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:20.453Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0duxoc2",
+      "note": "phase,epoch,plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:20.049Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0utsmdj",
+      "note": "plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:19.651Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0sad0nq",
+      "note": "phase,plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:19.259Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0pq9ng2",
+      "note": "plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:18.865Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c04x8v2l",
+      "note": "plan,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:18.475Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0gprkh8",
+      "note": "body,plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:18.074Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0xjw07j",
+      "note": "plan,criteria,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:17.670Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c0dbcwz5",
+      "note": "plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:21:17.274Z",
+      "by": "codex-root",
+      "action": "card.update",
+      "ref": "c96",
+      "note": "plan,criteria,refs,logEntry"
+    },
+    {
+      "at": "2026-07-25T20:16:00.775Z",
+      "by": "e3-729-w7",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T20:14:34.067Z",
+      "by": "e3-729-w7",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T20:14:33.935Z",
+      "by": "e3-729-w7",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T20:13:38.412Z",
+      "by": "e3-729-w21",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T20:13:38.203Z",
+      "by": "e3-729-w21",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T20:12:16.636Z",
+      "by": "e3-729-w3",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T20:12:16.483Z",
+      "by": "e3-729-w3",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T20:08:39.410Z",
+      "by": "e3-744-union",
+      "action": "card.update",
+      "ref": "c0e61zyf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-25T20:08:39.238Z",
+      "by": "e3-744-union",
+      "action": "card.claim",
+      "ref": "c0e61zyf",
+      "note": ""
+    },
     {
       "at": "2026-07-25T20:03:10.657Z",
       "by": "e3-729-w4",
@@ -48685,447 +50520,6 @@
       "action": "card.claim",
       "ref": "c0o9ibua",
       "note": ""
-    },
-    {
-      "at": "2026-07-25T03:16:03.581Z",
-      "by": "one-core-778-grok",
-      "action": "card.update",
-      "ref": "c0o9ibua",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T03:14:45.154Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c06ekrib",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-25T03:14:44.455Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0hxraci",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T03:14:44.288Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0hxraci",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T03:14:44.149Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0hxraci",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T03:14:43.913Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0hxraci",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T03:14:43.650Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0hxraci",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T03:14:43.477Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0hxraci",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T03:14:40.532Z",
-      "by": "e3-439-grok",
-      "action": "card.update",
-      "ref": "c0hxraci",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T03:14:24.906Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T03:14:24.742Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T03:14:24.567Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T03:14:24.397Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T03:14:24.232Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T03:14:24.102Z",
-      "by": "e3-439-grok",
-      "action": "card.update",
-      "ref": "c0hxraci",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T03:14:10.526Z",
-      "by": "e3-439-grok",
-      "action": "card.update",
-      "ref": "c0hxraci",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T03:14:10.320Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T03:14:10.186Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T03:14:10.054Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T03:14:09.920Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T03:14:09.784Z",
-      "by": "e3-439-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0hxraci",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T03:06:15.310Z",
-      "by": "e3-439-grok",
-      "action": "card.update",
-      "ref": "c0hxraci",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T03:06:15.132Z",
-      "by": "e3-439-grok",
-      "action": "card.claim",
-      "ref": "c0hxraci",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T03:06:06.208Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0hxraci",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-25T03:05:17.189Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "caq065h8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T03:05:17.033Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "caq065h8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T03:05:16.901Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "caq065h8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T03:05:16.762Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "caq065h8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T03:05:16.614Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "caq065h8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T03:05:13.315Z",
-      "by": "e3-239-grok",
-      "action": "card.criteria-meet",
-      "ref": "caq065h8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T03:05:13.176Z",
-      "by": "e3-239-grok",
-      "action": "card.criteria-meet",
-      "ref": "caq065h8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T03:05:13.042Z",
-      "by": "e3-239-grok",
-      "action": "card.criteria-meet",
-      "ref": "caq065h8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T03:05:12.903Z",
-      "by": "e3-239-grok",
-      "action": "card.criteria-meet",
-      "ref": "caq065h8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T03:05:12.765Z",
-      "by": "e3-239-grok",
-      "action": "card.update",
-      "ref": "caq065h8",
-      "note": "logEntry,refs"
-    },
-    {
-      "at": "2026-07-25T03:04:19.348Z",
-      "by": "e3-239-grok",
-      "action": "card.update",
-      "ref": "caq065h8",
-      "note": "refs"
-    },
-    {
-      "at": "2026-07-25T03:04:19.167Z",
-      "by": "e3-239-grok",
-      "action": "card.update",
-      "ref": "caq065h8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T03:04:18.983Z",
-      "by": "e3-239-grok",
-      "action": "card.criteria-meet",
-      "ref": "caq065h8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T03:04:18.820Z",
-      "by": "e3-239-grok",
-      "action": "card.criteria-meet",
-      "ref": "caq065h8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T03:04:18.654Z",
-      "by": "e3-239-grok",
-      "action": "card.criteria-meet",
-      "ref": "caq065h8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T03:04:18.487Z",
-      "by": "e3-239-grok",
-      "action": "card.criteria-meet",
-      "ref": "caq065h8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:59:10.418Z",
-      "by": "one-core-778-grok",
-      "action": "card.claim",
-      "ref": "c0o9ibua",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:58:22.246Z",
-      "by": "one-core-778-grok",
-      "action": "card.claim",
-      "ref": "c0o9ibua",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:57:23.091Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0o9ibua",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-25T02:57:22.930Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c06ekrib",
-      "note": "phase,logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-25T02:56:54.642Z",
-      "by": "e3-741-grok",
-      "action": "card.release",
-      "ref": "c06ekrib",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-25T02:56:54.092Z",
-      "by": "e3-239-grok",
-      "action": "card.update",
-      "ref": "caq065h8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T02:56:53.936Z",
-      "by": "e3-239-grok",
-      "action": "card.claim",
-      "ref": "caq065h8",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:56:41.072Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0qshpq5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T02:56:26.665Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c03jshb5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T02:56:26.508Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c03jshb5",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-25T02:56:26.379Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c03jshb5",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-25T02:56:26.247Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c03jshb5",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T02:56:26.114Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c03jshb5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T02:56:25.984Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c03jshb5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T02:56:25.863Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c03jshb5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T02:56:25.732Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c03jshb5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:55:34.110Z",
-      "by": "e3-782-grok",
-      "action": "card.update",
-      "ref": "c03jshb5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T02:55:33.952Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-25T02:55:33.821Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-25T02:55:33.661Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T02:55:33.510Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T02:55:33.376Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T02:55:33.234Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
