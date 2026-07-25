@@ -539,6 +539,24 @@
     drawGraph(latestDoc);
   }
 
+  function distributeSelectedNodes(axis) {
+    const graph = currentGraphOrNull();
+    const nodes = selectedGraphNodes(graph).slice().sort((a, b) =>
+      axis === "y" ? nodeY(a) - nodeY(b) : nodeX(a) - nodeX(b));
+    if (nodes.length < 3) return showToast("Select three nodes to distribute");
+    const first = axis === "y" ? nodeY(nodes[0]) : nodeX(nodes[0]);
+    const last = axis === "y" ? nodeY(nodes[nodes.length - 1]) : nodeX(nodes[nodes.length - 1]);
+    const step = (last - first) / (nodes.length - 1);
+    nodes.forEach((node, index) => {
+      const x = axis === "x" ? first + step * index : nodeX(node);
+      const y = axis === "y" ? first + step * index : nodeY(node);
+      setNodeViewPosition(node, x, y);
+    });
+    saveEditorState();
+    showToast(axis === "y" ? "Distributed vertically" : "Distributed horizontally");
+    drawGraph(latestDoc);
+  }
+
   function tidyGraphLayout() {
     const graph = currentGraphOrNull();
     if (!graph) return;

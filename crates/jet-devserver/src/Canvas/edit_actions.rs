@@ -797,12 +797,18 @@ pub(super) fn apply_create_collapse_region(
             "Canvas collapse needs one valid source span",
         ));
     }
-    let insert_at = line_after(src, end.min(src.len()));
+    let selected = validated_collapse_selection(
+        path,
+        src,
+        graph_id,
+        SourceSpan { start, end },
+    )?;
+    let insert_at = selected.end;
     let indent = indentation_at(src, insert_at.min(src.len()));
     let comment = format!(
         "{indent}// canvas:collapse span={}..{} title={}\n",
-        start,
-        end,
+        selected.start,
+        selected.end,
         quoted_attr(title)
     );
     let changed = FixEngine::apply_edits(
@@ -817,6 +823,63 @@ pub(super) fn apply_create_collapse_region(
     )
     .map_err(|_| edit_error("overlap", "Canvas collapse insert overlapped"))?;
     write_checked_formatted(path, src, &changed)
+}
+
+fn validated_collapse_selection(
+    path: &Path,
+    src: &str,
+    graph_id: &str,
+    requested: SourceSpan,
+) -> Result<SourceSpan, String> {
+    let Some(name_span) = graph_id_name_span(graph_id) else {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas graph id is not a function graph",
+        ));
+    };
+    let path_str = path.to_string_lossy();
+    let (diags, bundle) = jet_driver::Driver::check_file(&path_str, None, true);
+    let errors = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return Err(diagnostics_error(path, src, &errors));
+    }
+    let Some(bundle) = bundle else {
+        return Err(edit_error(
+            "check",
+            "Canvas could not read checked statement facts",
+        ));
+    };
+    let Some(func) = find_func_by_name_span(&bundle, name_span) else {
+        return Err(edit_error("not_found", "Canvas graph no longer exists"));
+    };
+    let mut locs = Vec::new();
+    collect_statement_locs(src, &func.body, &mut Vec::new(), &mut locs);
+    let first = locs.iter().find(|loc| {
+        requested.start == loc.anchor.start || requested.start == loc.source.start
+    });
+    let last = locs.iter().find(|loc| {
+        requested.end == loc.anchor.end || requested.end == loc.source.end
+    });
+    let (Some(first), Some(last)) = (first, last) else {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas collapse must select whole statements from this graph",
+        ));
+    };
+    if first.block != last.block || first.index > last.index {
+        return Err(edit_error(
+            "cross_block",
+            "Canvas collapse cannot cross a block boundary",
+        ));
+    }
+    Ok(SourceSpan {
+        start: first.full.start,
+        end: last.full.end,
+    })
 }
 
 pub(super) fn extract_inline_candidate(
@@ -915,6 +978,7 @@ pub(super) fn inline_helper_candidate(
 #[derive(Clone)]
 struct StatementLoc {
     anchor: SourceSpan,
+    source: SourceSpan,
     full: SourceSpan,
     block: Vec<usize>,
     index: usize,
@@ -2188,6 +2252,7 @@ fn collect_statement_locs(
     for (index, stmt) in stmts.iter().enumerate() {
         out.push(StatementLoc {
             anchor: stmt_canvas_anchor(stmt).into(),
+            source: stmt_source_span(stmt),
             full: stmt_text_span(src, stmt),
             block: block.clone(),
             index,
@@ -2300,7 +2365,15 @@ fn stmt_canvas_anchor(stmt: &Stmt) -> Span {
 }
 
 fn stmt_text_span(src: &str, stmt: &Stmt) -> SourceSpan {
-    let span = match stmt {
+    let span = stmt_source_span(stmt);
+    SourceSpan {
+        start: line_start(src, span.start),
+        end: line_after(src, span.end),
+    }
+}
+
+fn stmt_source_span(stmt: &Stmt) -> SourceSpan {
+    match stmt {
         Stmt::Val(b) => SourceSpan {
             start: b.name_span.start,
             end: b.init.span().end,
@@ -2316,10 +2389,6 @@ fn stmt_text_span(src: &str, stmt: &Stmt) -> SourceSpan {
         },
         Stmt::If(ifs) => ifs.span.into(),
         _ => stmt.span().into(),
-    };
-    SourceSpan {
-        start: line_start(src, span.start),
-        end: line_after(src, span.end),
     }
 }
 

@@ -932,6 +932,14 @@
       lastToast: toast ? toast.textContent : "",
       hoveredNodeTitle: hoverNode && hoverNode.title || "",
       hoveredNodeDescription: hoverNode ? nodeDescription(hoverNode, graph) : "",
+      graphTitle: graph.title || graph.graph_id,
+      selectedNodeIds: Array.from(selectedNodeIds),
+      savedNodePositions: JSON.parse(JSON.stringify((editorState.nodePositions || {})[graph.graph_id] || {})),
+      renderedCommentRegions: renderedCommentRegions.map((region) => Object.assign({}, region)),
+      favorites: (editorState.favorites || []).slice(),
+      favoriteCandidate: actionEntries[0] && (actionEntries[0].action_id || actionEntries[0].callee || actionEntries[0].title) || "",
+      favoriteCandidateTitle: actionEntries[0] && actionEntries[0].title || "",
+      favoriteCandidateRank: actionEntries[0] ? rankAction(actionEntries[0]) : 0,
       loadCoreCatalog: (query) => loadCoreCatalogActions(query || "").then(() => window.__jetCanvasCoreCatalogPalette || actionEntries.length),
       openCoreCatalogPalette: (query) => { openCoreCatalogPalette(query || ""); return true; },
       openGraphActionPalette: (query) => { openGraphActionPalette(window.innerWidth / 2 - 210, 72, query || "", viewportCenterGraphPoint()); return true; },
@@ -940,6 +948,14 @@
         if (!target) return false;
         switchGraph(target.graph_id);
         return true;
+      },
+      selectNodeTitles: (titles) => {
+        const selected = (titles || []).map((title) =>
+          graph.nodes.find((node) => node.title === title && node.source_span)).filter(Boolean);
+        selectedNodeIds = new Set(selected.map((node) => node.node_id));
+        selectedNodeId = selected.length ? selected[selected.length - 1].node_id : null;
+        drawGraph(latestDoc);
+        return selected.length;
       },
       actionEntries: () => actionEntries.map((entry) => {
         const availability = actionAvailability(entry, currentGraphOrNull());
@@ -1086,6 +1102,7 @@
 
   function drawCommentRegions(graph) {
     commentHit = [];
+    renderedCommentRegions = [];
     for (const box of graphCommentBoxes(graph)) {
       const x = sx(box.x || 0), y = sy(box.y || 0), w = (box.w || 260) * view.zoom, h = (box.h || 160) * view.zoom;
       const selected = selectedNodeIds.has(box.comment_id);
@@ -1102,6 +1119,7 @@
       ctx.fillStyle = "#eaf3ff";
       ctx.font = `${Math.max(11, 13 * view.zoom)}px ${UI_FONT}`;
       ctx.fillText(ellipsizeText(box.title || "Comment", w - 24 * view.zoom), x + 12 * view.zoom, y + 19 * view.zoom);
+      renderedCommentRegions.push({ title: box.title || "Comment", x, y, w, h, source_backed: false });
       const grip = Math.max(12, 14 * view.zoom);
       ctx.strokeStyle = hexToRgba(box.color || COMMENT_TINTS[0], .86);
       ctx.beginPath();
@@ -1126,6 +1144,7 @@
       ctx.fillStyle = "#eaf3ff";
       ctx.font = `${Math.max(11, 14 * view.zoom)}px "Segoe UI", system-ui, sans-serif`;
       ctx.fillText(region.title || "Comment", x + 12 * view.zoom, y + 23 * view.zoom);
+      renderedCommentRegions.push({ title: region.title || "Comment", x, y, w, h, source_backed: true });
     }
   }
 

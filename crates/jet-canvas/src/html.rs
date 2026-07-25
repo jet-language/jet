@@ -137,7 +137,6 @@ body:not(.is-dev-mode) #graph-strip { display: none; }
 .graph-tab-kind { color: #77a7d7; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
 .graph-tab-count { color: #8fb2dc; border: 1px solid #2b4a67; background: rgba(2,8,15,.42); border-radius: 999px; padding: 2px 6px; }
 #wire-status { position: absolute; left: 10px; top: 58px; z-index: 13; display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 7px; max-width: min(470px, calc(100% - 24px)); min-height: 34px; padding: 7px 10px; border: 1px solid rgba(54,90,127,.78); background: rgba(7,16,28,.82); box-shadow: 0 14px 34px rgba(0,0,0,.34); border-radius: 6px; color: #93b3d7; font: 11px ui-monospace, "SFMono-Regular", Consolas, monospace; pointer-events: none; }
-body:not(.is-dev-mode) #wire-status { display: none; }
 #wire-status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--wire-color, #7dd3fc); box-shadow: 0 0 16px var(--wire-color, #7dd3fc); }
 #wire-status b { color: #eaf5ff; font-weight: 700; }
 #wire-status span:last-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -309,6 +308,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
       <button id="undo-edit" class="icon-button" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14l-5-5 5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg></button>
       <button id="redo-edit" class="icon-button" title="Redo" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h2"/></svg></button>
       <button id="org-align" class="icon-button" title="Align selected nodes" aria-label="Align selected nodes"><svg viewBox="0 0 24 24"><path d="M6 4v16"/><path d="M10 7h8"/><path d="M10 12h6"/><path d="M10 17h10"/></svg></button>
+      <button id="org-distribute" class="icon-button" title="Distribute selected nodes" aria-label="Distribute selected nodes"><svg viewBox="0 0 24 24"><path d="M4 4v16"/><path d="M20 4v16"/><path d="M8 9h3v6H8z"/><path d="M13 9h3v6h-3z"/></svg></button>
       <button id="org-tidy" class="icon-button" title="Tidy graph" aria-label="Tidy graph"><svg viewBox="0 0 24 24"><path d="M4 7h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M14 14h6v6h-6z"/><path d="M10 10l4-3"/><path d="M10 13l4 4"/></svg></button>
     </div>
     <div class="toolbar-group" aria-label="Run controls">
@@ -326,7 +326,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     </div>
     <div class="toolbar-spacer"></div>
     <div class="toolbar-group" aria-label="Source and navigation">
-      <details class="toolbar-menu"><summary class="icon-button" title="More tools" aria-label="More tools"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></summary><div class="toolbar-popover">
+      <details class="toolbar-menu"><summary id="more-tools-toggle" class="icon-button" title="More tools" aria-label="More tools"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg></summary><div class="toolbar-popover">
         <select id="graph-select" aria-label="Graph"></select>
         <button id="reload">Reload</button>
         <button id="source-diff">Diff</button>
@@ -357,7 +357,7 @@ body:not(.is-dev-mode) #graph-meta { display: none; }
     <section id="stage">
       <div id="canvas-dock" aria-label="Canvas panels"><button id="dock-graphs">Graphs</button><button id="dock-details">Inspector</button></div>
       <div id="graph-strip" aria-label="Graph tabs"></div>
-      <div id="wire-status" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Drag from a pin or right-click the canvas</span></div>
+      <div id="wire-status" role="status" aria-label="Canvas hover details" aria-live="polite"><span id="wire-status-dot"></span><b>Ready</b><span>Hover a node or pin for details</span></div>
       <div id="graph-overview" aria-label="Graph overview"></div>
       <div id="run-hud" aria-live="polite">run idle</div>
       <canvas id="jet-canvas-view" width="1400" height="900"></canvas>

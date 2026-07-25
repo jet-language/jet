@@ -290,6 +290,7 @@
   undoEdit.addEventListener("click", undoTransaction);
   redoEdit.addEventListener("click", redoTransaction);
   orgAlign.addEventListener("click", () => alignSelectedNodes("y"));
+  orgDistribute.addEventListener("click", () => distributeSelectedNodes("x"));
   orgTidy.addEventListener("click", tidyGraphLayout);
   bookmarkAdd.addEventListener("click", bookmarkCurrentGraph);
   bookmarkJump.addEventListener("click", jumpBookmark);
@@ -377,6 +378,11 @@
       alignSelectedNodes(ev.shiftKey ? "x" : "y");
       return;
     }
+    if (ev.altKey && ev.key.toLowerCase() === "d") {
+      ev.preventDefault();
+      distributeSelectedNodes(ev.shiftKey ? "y" : "x");
+      return;
+    }
     if (ev.altKey && ev.key.toLowerCase() === "t") {
       ev.preventDefault();
       tidyGraphLayout();
@@ -395,6 +401,12 @@
     if (ev.altKey && ev.key.toLowerCase() === "g") {
       ev.preventDefault();
       jumpBookmark();
+      return;
+    }
+    if (!editingText && ev.altKey && ev.key.toLowerCase() === "c") {
+      ev.preventDefault();
+      if (ev.shiftKey) expandSelectedCollapse();
+      else collapseSelectedNodes();
       return;
     }
     if (ev.altKey && ev.key === "Enter") {

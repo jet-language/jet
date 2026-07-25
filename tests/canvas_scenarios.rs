@@ -381,8 +381,8 @@ fn math_expression_keyboard_edit() {
 }
 
 #[test]
-fn collapse_expand_pointer_gesture() {
-    run_canvas_scenario("collapse-expand-pointer-gesture");
+fn collapse_expand_keyboard_gesture() {
+    run_canvas_scenario("collapse-expand-keyboard-gesture");
 }
 
 #[test]

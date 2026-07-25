@@ -189,7 +189,7 @@
   function syncWireStatus(state) {
     if (!wireStatus) return;
     let title = "Ready";
-    let detail = "Drag from a pin or right-click the canvas";
+    let detail = "Hover a node or pin for details";
     let color = "#7dd3fc";
     if (state) {
       title = state.title || title;
@@ -391,6 +391,37 @@
     });
   }
 
+  function collapseSelectedNodes() {
+    const graph = currentGraphOrNull();
+    if (!graph) return;
+    const selected = selectedGraphNodes(graphWithViewState(graph)).filter((node) => node.source_span);
+    if (!selected.length) return showToast("Select source nodes to collapse");
+    const title = window.prompt("Collapsed region title", "Collapsed");
+    if (!title) return;
+    postTransaction({
+      schema_version: 1,
+      op: "create_collapsed_region",
+      revision: latestDoc.revision,
+      graph_id: graph.graph_id,
+      start: Math.min(...selected.map((node) => node.source_span.start)),
+      end: Math.max(...selected.map((node) => node.source_span.end)),
+      title
+    });
+  }
+
+  function expandSelectedCollapse() {
+    const graph = currentGraphOrNull();
+    const selected = graph && selectedGraphNodes(graphWithViewState(graph));
+    const collapsed = selected && selected.find((node) => node.collapsed_region_id);
+    if (!collapsed) return showToast("Select one collapsed region to expand");
+    postTransaction({
+      schema_version: 1,
+      op: "expand_collapsed_region",
+      revision: latestDoc.revision,
+      region_id: collapsed.collapsed_region_id
+    });
+  }
+
   function nodeContextActions(graph, node) {
     const actions = [
       { title: "Copy", detail: "selection", group: "edit", run: copySelection },
@@ -400,44 +431,6 @@
       { title: "Find references", detail: "search index", group: "query", run: () => postQuery({ op: "references", symbol: node.title }) },
       { title: "Set breakpoint", detail: "local span", group: "debug", run: () => toggleBreakpoint(node) }
     ];
-    if (node.collapsed_region_id) {
-      actions.unshift({
-        title: "Expand collapsed region",
-        detail: "source transaction",
-        group: "view",
-        run: () => postTransaction({
-          schema_version: 1,
-          op: "expand_collapsed_region",
-          revision: latestDoc.revision,
-          region_id: node.collapsed_region_id
-        })
-      });
-    } else if (node.source_span) {
-      actions.unshift({
-        title: "Collapse selection",
-        detail: "source-backed view",
-        group: "view",
-        run: () => {
-          const selected = selectedGraphNodes(graph).filter((item) => item.source_span);
-          if (!selected.length) return showToast("Select source nodes to collapse");
-          if (selected.some((item) => ["branch", "dispatch", "loop", "match"].includes(item.kind))) {
-            return showToast("Canvas collapse cannot cross a block boundary");
-          }
-          const start = Math.min(...selected.map((item) => item.source_span.start));
-          const end = Math.max(...selected.map((item) => item.source_span.end));
-          const title = window.prompt("Collapsed region title", "Collapsed");
-          if (title) postTransaction({
-            schema_version: 1,
-            op: "create_collapsed_region",
-            revision: latestDoc.revision,
-            graph_id: graph.graph_id,
-            start,
-            end,
-            title
-          });
-        }
-      });
-    }
     if ((node.edit_affordances || []).includes("add_pattern_arm")) actions.unshift({ title: "Add pattern arm", detail: "source transaction", group: "Patterns", run: () => addPatternArm(node) });
     if ((node.edit_affordances || []).includes("append_multi_input")) actions.unshift({ title: "Append input", detail: "source transaction", group: "Pins", run: () => appendMultiInput(node) });
     if (node.staged) actions.unshift({ title: "Delete staged node", detail: "local view", group: "edit", run: () => { removeStagedNode(node.node_id); drawGraph(latestDoc); } });

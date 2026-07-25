@@ -58,6 +58,7 @@
   const undoEdit = document.getElementById("undo-edit");
   const redoEdit = document.getElementById("redo-edit");
   const orgAlign = document.getElementById("org-align");
+  const orgDistribute = document.getElementById("org-distribute");
   const orgTidy = document.getElementById("org-tidy");
   const bookmarkAdd = document.getElementById("bookmark-add");
   const bookmarkJump = document.getElementById("bookmark-jump");
@@ -112,6 +113,7 @@
   let autoNodeOffsets = new Map();
   let hoverPin = null;
   let hoverNode = null;
+  let renderedCommentRegions = [];
   let hoverDiagnostic = null;
   let pendingPin = null;
   let spaceDown = false;

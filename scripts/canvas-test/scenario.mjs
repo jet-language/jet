@@ -663,19 +663,56 @@ async function failScratchLimit(ctx) {
 }
 
 async function elementCenter(ctx, expression, label) {
-  const point = await ctx.driver.evaluate(`(() => {
+  const result = await ctx.driver.evaluate(`(() => {
     const element = ${expression};
-    if (!element) return null;
+    if (!element) return { ok: false, reason: "missing" };
     element.scrollIntoView({ block: "center", inline: "center" });
     const rect = element.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    const style = getComputedStyle(element);
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(centerX, centerY);
+    const receivesPointer = hit === element || element.contains(hit);
+    const visible = rect.width > 0
+      && rect.height > 0
+      && rect.right > 0
+      && rect.bottom > 0
+      && rect.left < window.innerWidth
+      && rect.top < window.innerHeight
+      && style.display !== "none"
+      && style.visibility !== "hidden"
+      && Number(style.opacity || "1") > 0
+      && style.pointerEvents !== "none"
+      && receivesPointer
+      && !element.disabled;
+    return {
+      ok: visible,
+      reason: visible ? "" : "not-visible",
+      x: centerX,
+      y: centerY,
+      rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+      display: style.display,
+      visibility: style.visibility,
+      opacity: style.opacity,
+      pointerEvents: style.pointerEvents,
+      hit: hit && (hit.id || hit.tagName),
+      receivesPointer,
+      disabled: !!element.disabled
+    };
   })()`);
-  if (!point) throw new Error(`element missing: ${label}`);
-  return point;
+  if (!result.ok) throw new Error(`element cannot receive a real pointer gesture: ${label}: ${JSON.stringify(result)}`);
+  return result;
 }
 
 async function clickElement(ctx, expression, label) {
   const point = await elementCenter(ctx, expression, label);
+  if (ctx.driver.pageSession) {
+    await ctx.driver.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: point.x,
+      y: point.y,
+    }, ctx.driver.pageSession);
+  }
   await ctx.driver.click(point.x, point.y);
   await sleep(160);
 }
@@ -694,14 +731,26 @@ async function pressAttribute(ctx, attribute, value, label) {
     if (!element) return { ok: false, reason: "missing" };
     element.focus();
     const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const visible = rect.width > 0
+      && rect.height > 0
+      && rect.right > 0
+      && rect.bottom > 0
+      && rect.left < window.innerWidth
+      && rect.top < window.innerHeight
+      && style.display !== "none"
+      && style.visibility !== "hidden"
+      && Number(style.opacity || "1") > 0
+      && !element.disabled;
     return {
-      ok: document.activeElement === element,
+      ok: visible && document.activeElement === element,
       tag: element.tagName,
       disabled: !!element.disabled,
       connected: element.isConnected,
       rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
-      display: getComputedStyle(element).display,
-      visibility: getComputedStyle(element).visibility,
+      display: style.display,
+      visibility: style.visibility,
+      opacity: style.opacity,
       active: document.activeElement && document.activeElement.tagName
     };
   })()`);
@@ -723,6 +772,79 @@ async function pressAttribute(ctx, attribute, value, label) {
     nativeVirtualKeyCode: 13,
   }, ctx.driver.pageSession);
   await sleep(160);
+}
+
+async function selectNodeTitles(ctx, titles, label) {
+  const count = await ctx.driver.evaluate(`window.__jetCanvasTest.selectNodeTitles(${JSON.stringify(titles)})`);
+  if (count !== titles.length) throw new Error(`${label} selected ${count}/${titles.length} nodes`);
+  await sleep(120);
+}
+
+async function doubleClickCanvasPoint(ctx, point) {
+  await ctx.driver.send("Input.dispatchMouseEvent", {
+    type: "mousePressed",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 2,
+  }, ctx.driver.pageSession);
+  await ctx.driver.send("Input.dispatchMouseEvent", {
+    type: "mouseReleased",
+    x: point.x,
+    y: point.y,
+    button: "left",
+    clickCount: 2,
+  }, ctx.driver.pageSession);
+  await sleep(160);
+}
+
+async function visibleSurface(ctx, expression, label) {
+  const result = await ctx.driver.evaluate(`(() => {
+    const element = ${expression};
+    if (!element) return { ok: false, reason: "missing" };
+    const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return {
+      ok: rect.width > 0
+        && rect.height > 0
+        && rect.right > 0
+        && rect.bottom > 0
+        && rect.left < window.innerWidth
+        && rect.top < window.innerHeight
+        && style.display !== "none"
+        && style.visibility !== "hidden"
+        && Number(style.opacity || "1") > 0,
+      text: element.textContent || "",
+      rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+      display: style.display,
+      visibility: style.visibility,
+      opacity: style.opacity
+    };
+  })()`);
+  if (!result.ok) throw new Error(`${label} is not visibly rendered: ${JSON.stringify(result)}`);
+  return result;
+}
+
+async function expectRenderedComment(ctx, title, label) {
+  await ctx.waitFor(async () => {
+    const state = await ctx.state();
+    return (state.renderedCommentRegions || []).some((region) =>
+      region.source_backed && region.title === title && region.w > 0 && region.h > 0);
+  }, label);
+  const state = await ctx.state();
+  const region = (state.renderedCommentRegions || []).find((candidate) =>
+    candidate.source_backed && candidate.title === title);
+  const canvas = await ctx.canvasRect();
+  if (!region
+    || region.w <= 0
+    || region.h <= 0
+    || region.x + region.w <= 0
+    || region.y + region.h <= 0
+    || region.x >= canvas.width
+    || region.y >= canvas.height) {
+    throw new Error(`${label} has no visible text geometry: ${JSON.stringify({ region, canvas })}`);
+  }
+  return region;
 }
 
 async function selectInlineExpression(ctx, graphTitle, predicate, label) {
@@ -1292,7 +1414,7 @@ fn run() {
     if (await ctx.source() !== valid) throw new Error("invalid math edit partially changed source");
   },
 
-  "collapse-expand-pointer-gesture": async (ctx) => {
+  "collapse-expand-keyboard-gesture": async (ctx) => {
     await ctx.openCanvas();
     await ctx.replaceSource(`fn compute(x: Int) {
     a :: x + 1
@@ -1307,25 +1429,52 @@ fn run() {
     await ctx.openCanvas();
     await ctx.switchGraph("compute");
     const before = await ctx.source();
+    await selectNodeTitles(ctx, ["a", "b"], "collapse selection setup");
     await ctx.driver.evaluate(`window.prompt = () => "Compute value"`);
-    const a = await ctx.node("a");
-    await ctx.driver.rightClick(a.x, a.y);
-    await ctx.expectMenu("Collapse selection");
-    await ctx.pickEntry("Collapse selection");
+    await ctx.driver.shortcut(["Alt", "c"]);
     await ctx.waitFor(async () => (await ctx.source()).includes("canvas:collapse"), "collapse source hint");
-    await assertCleanSourceSync(ctx, ["pointer collapse"]);
-    await ctx.waitFor(async () => {
-      const state = await ctx.state();
-      return Object.values(state.nodeBounds || {}).some((node) => node.title === "Compute value");
-    }, "collapsed node");
+    await assertCleanSourceSync(ctx, ["keyboard collapse"]);
+    const collapsedState = await ctx.state();
+    const collapsedNodes = Object.values(collapsedState.nodeBounds || {});
+    const collapsedTitles = collapsedNodes.map((node) => node.title);
+    const retainedBindings = collapsedNodes.filter((node) =>
+      node.kind === "binding" && ["a", "b"].includes(node.title));
+    if (!collapsedTitles.includes("Compute value") || retainedBindings.length) {
+      const projected = graphByTitle(await ctx.graph(), "compute");
+      throw new Error(`collapsed node did not replace both statements: ${JSON.stringify({
+        collapsedTitles,
+        retainedBindings,
+        regions: projected.regions,
+        source: await ctx.source()
+      })}`);
+    }
 
-    const collapsed = await ctx.node("Compute value");
-    await ctx.driver.rightClick(collapsed.x, collapsed.y);
-    await ctx.expectMenu("Expand collapsed region");
-    await ctx.pickEntry("Expand collapsed region");
+    await selectNodeTitles(ctx, ["Compute value"], "collapsed region setup");
+    await ctx.driver.shortcut(["Alt", "Shift", "c"]);
     await ctx.waitFor(async () => !(await ctx.source()).includes("canvas:collapse"), "expanded source");
     if (await ctx.source() !== before) throw new Error("collapse/expand did not restore exact source");
-    await assertCleanSourceSync(ctx, ["pointer collapse", "pointer expand"]);
+    await assertCleanSourceSync(ctx, ["keyboard collapse", "keyboard expand"]);
+
+    const computeDoc = await ctx.graph();
+    const compute = graphByTitle(computeDoc, "compute");
+    const aNode = nodeByTitle(compute, "a");
+    const bNode = nodeByTitle(compute, "b");
+    for (const hostile of [
+      { start: 1, end: 2, label: "non-member collapse span" },
+      { start: aNode.source_span.start + 1, end: bNode.source_span.end, label: "partial-statement collapse span" }
+    ]) {
+      const result = await ctx.uiTransaction({
+        schema_version: 1,
+        op: "create_collapsed_region",
+        revision: computeDoc.revision,
+        graph_id: compute.graph_id,
+        start: hostile.start,
+        end: hostile.end,
+        title: "Hostile"
+      });
+      if (result.ok) throw new Error(`${hostile.label} unexpectedly wrote source`);
+      if (await ctx.source() !== before) throw new Error(`${hostile.label} partially changed source`);
+    }
 
     await ctx.replaceSource(`fn cross(x: Int) {
     if x > 0 {
@@ -1340,11 +1489,9 @@ fn run() {
     await ctx.openCanvas();
     await ctx.switchGraph("cross");
     const crossBefore = await ctx.source();
+    await selectNodeTitles(ctx, ["if", "print"], "cross-block collapse setup");
     await ctx.driver.evaluate(`window.prompt = () => "Invalid block"`);
-    const branch = await ctx.node("if");
-    await ctx.driver.rightClick(branch.x, branch.y);
-    await ctx.expectMenu("Collapse selection");
-    await ctx.pickEntry("Collapse selection");
+    await ctx.driver.shortcut(["Alt", "c"]);
     await expectVisibleRefusal(ctx, "block boundary", "cross-block collapse refusal");
     if (await ctx.source() !== crossBefore) throw new Error("cross-block collapse partially changed source");
   },
@@ -1358,50 +1505,149 @@ fn run() {
     await ctx.driver.press("c");
     await ctx.waitFor(async () => (await ctx.source()).includes("canvas:comment"), "source-backed comment");
     await assertCleanSourceSync(ctx, ["keyboard source comment"]);
+    await expectRenderedComment(ctx, "Scratch note", "source comment before reload");
     const changed = await ctx.source();
     if (changed === before) throw new Error("keyboard source comment did not write source");
     await ctx.openCanvas();
-    const graph = graphByTitle(await ctx.graph(), "scratch");
-    if (!(graph.regions || []).some((region) => region.kind === "comment" && region.title === "Scratch note")) {
-      throw new Error("source-backed comment did not reproject after reload");
-    }
+    if (await ctx.source() !== changed) throw new Error("source-backed comment reload changed source bytes");
+    await ctx.switchGraph("scratch");
+    await expectRenderedComment(ctx, "Scratch note", "source comment after reload");
   },
 
   "workspace-keyboard-view-state": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.switchGraph("summarize");
+    await ctx.driver.send("Emulation.setDeviceMetricsOverride", {
+      width: 1440,
+      height: 900,
+      deviceScaleFactor: 1,
+      mobile: false,
+    }, ctx.driver.pageSession);
+    await sleep(120);
+    await ctx.replaceSource(`fn child(n: Int) -> Int {
+    return n * 2
+}
+
+fn layout(x: Int) {
+    a :: x + 1
+    b :: x + 2
+    c :: x + 3
+    print(child(a + b + c))
+}
+
+fn run() {
+    layout(1)
+}
+`);
+    await ctx.openCanvas();
+    await clickElement(ctx, `document.getElementById("tour-dismiss")`, "dismiss first-run guide");
+    await clickElement(ctx, `Array.from(document.querySelectorAll("[data-sidebar-graph]")).find((button) => button.textContent.includes("layout"))`, "layout graph sidebar button");
+    await ctx.waitFor(async () => (await ctx.state()).graphTitle === "layout", "layout graph navigation");
     const before = await ctx.source();
-    await ctx.click("total");
-    const first = (await ctx.state()).selectedNodeId;
-    const beforeNudge = (await ctx.state()).nodeBounds[first];
-    await ctx.driver.press("ArrowRight");
-    const afterNudge = (await ctx.state()).nodeBounds[first];
-    if (!afterNudge || afterNudge.x <= beforeNudge.x) throw new Error("keyboard nudge did not move selected node");
+
+    const childCall = await ctx.node("child");
+    await doubleClickCanvasPoint(ctx, childCall);
+    await ctx.waitFor(async () => (await ctx.state()).graphTitle === "child", "child graph pointer navigation");
+    await clickElement(ctx, `document.getElementById("graph-back")`, "parent graph back");
+    await ctx.waitFor(async () => (await ctx.state()).graphTitle === "layout", "parent graph pointer navigation");
+
     await ctx.driver.shortcut(["Alt", "b"]);
     await expectVisibleRefusal(ctx, "bookmark saved", "bookmark keyboard status");
-    await ctx.driver.shortcut(["Alt", "t"]);
-    await expectVisibleRefusal(ctx, "graph tidied", "tidy keyboard status");
-    await ctx.driver.shortcut(["Alt", "a"]);
-    await expectVisibleRefusal(ctx, "select nodes to align", "align refusal status");
-    await clickElement(ctx, `Array.from(document.querySelectorAll("[data-graph-tab]")).find((button) => button.textContent.includes("scratch"))`, "scratch graph tab");
+    await doubleClickCanvasPoint(ctx, await ctx.node("child"));
+    await ctx.waitFor(async () => (await ctx.state()).graphTitle === "child", "bookmarked child pointer navigation");
     await ctx.driver.shortcut(["Alt", "g"]);
-    await ctx.waitFor(async () => (await ctx.state()).graphId && (await ctx.state()).graphId.includes("summarize"), "bookmark keyboard jump");
+    await ctx.waitFor(async () => (await ctx.state()).graphTitle === "layout", "bookmark keyboard return");
+
+    await selectNodeTitles(ctx, ["a"], "nudge a setup");
+    await ctx.driver.press("ArrowLeft");
+    await ctx.driver.press("ArrowLeft");
+    await ctx.driver.press("ArrowLeft");
+    await selectNodeTitles(ctx, ["c"], "nudge c setup");
+    await ctx.driver.press("ArrowRight");
+    await ctx.driver.press("ArrowRight");
+    await ctx.driver.press("ArrowRight");
+    await ctx.driver.press("ArrowRight");
+    await ctx.driver.press("ArrowRight");
+    await selectNodeTitles(ctx, ["a", "b", "c"], "layout selection setup");
+    await ctx.driver.shortcut(["Alt", "a"]);
+    await expectVisibleRefusal(ctx, "aligned top", "successful align status");
+    const aligned = Object.fromEntries(Object.values((await ctx.state()).nodeBounds || {})
+      .filter((node) => ["a", "b", "c"].includes(node.title))
+      .map((node) => [node.title, node]));
+    if (Object.keys(aligned).length !== 3 || Math.max(aligned.a.y, aligned.b.y, aligned.c.y) - Math.min(aligned.a.y, aligned.b.y, aligned.c.y) > 1) {
+      throw new Error(`align did not produce one visible row: ${JSON.stringify(aligned)}`);
+    }
+
+    await ctx.driver.shortcut(["Alt", "d"]);
+    await expectVisibleRefusal(ctx, "distributed horizontally", "successful distribute status");
+    const distributed = Object.values((await ctx.state()).nodeBounds || {})
+      .filter((node) => ["a", "b", "c"].includes(node.title))
+      .sort((a, b) => a.x - b.x);
+    if (distributed.length !== 3) throw new Error(`distribute lost selected nodes: ${JSON.stringify(distributed)}`);
+    const leftGap = distributed[1].x - distributed[0].x;
+    const rightGap = distributed[2].x - distributed[1].x;
+    if (leftGap <= 0 || Math.abs(leftGap - rightGap) > 1) {
+      throw new Error(`distribute did not create equal visible spacing: ${JSON.stringify(distributed)}`);
+    }
+
+    const beforeTidy = JSON.stringify((await ctx.state()).nodeBounds);
+    await clickElement(ctx, `document.getElementById("org-tidy")`, "tidy graph");
+    await expectVisibleRefusal(ctx, "graph tidied", "successful tidy status");
+    const tidyState = await ctx.state();
+    if (JSON.stringify(tidyState.nodeBounds) === beforeTidy) throw new Error("tidy did not change visible positions");
+    if (!Object.keys(tidyState.savedNodePositions || {}).length) throw new Error("tidy did not persist node positions");
+
+    await ctx.waitFor(async () => (await ctx.state()).favoriteCandidate, "favorite candidate");
+    const favoriteBefore = await ctx.state();
+    await clickElement(ctx, `document.getElementById("more-tools-toggle")`, "more tools");
     await clickElement(ctx, `document.getElementById("favorite-action")`, "favorite action");
-    await assertSourceUnchangedAfterReload(ctx, before, "workspace keyboard view state");
+    await expectVisibleRefusal(ctx, "favorite pinned", "favorite status");
+    const savedPositions = JSON.stringify(favoriteBefore.savedNodePositions);
+    const favoriteId = favoriteBefore.favoriteCandidate;
+    const favoriteTitle = favoriteBefore.favoriteCandidateTitle;
+
+    await ctx.openCanvas();
+    if (await ctx.source() !== before) throw new Error("workspace view state changed source bytes across reload");
+    await clickElement(ctx, `Array.from(document.querySelectorAll("[data-sidebar-graph]")).find((button) => button.textContent.includes("layout"))`, "reloaded layout graph sidebar button");
+    await ctx.waitFor(async () => (await ctx.state()).favoriteCandidate === favoriteId, "reloaded favorite candidate");
+    const reloaded = await ctx.state();
+    if (JSON.stringify(reloaded.savedNodePositions) !== savedPositions) {
+      throw new Error(`node positions did not persist across reload: ${JSON.stringify({ savedPositions, reloaded: reloaded.savedNodePositions })}`);
+    }
+    if (!reloaded.favorites.includes(favoriteId)
+      || reloaded.favoriteCandidateRank < favoriteBefore.favoriteCandidateRank + 100000) {
+      throw new Error(`favorite did not persist with durable ranking across reload: ${JSON.stringify({ favoriteBefore, reloaded })}`);
+    }
+    await ctx.driver.shortcut(["Control", "k"]);
+    await ctx.type(favoriteTitle);
+    const favoriteRow = await visibleSurface(ctx, `document.querySelector("#context-menu .action-result.is-favorite")`, "ranked favorite action");
+    if (!favoriteRow.text.includes(favoriteTitle) || !favoriteRow.text.includes("★")) {
+      throw new Error(`favorite action is not visibly ranked/pinned after reload: ${JSON.stringify({ favoriteRow, favoriteTitle })}`);
+    }
   },
 
   "node-docs-pointer-hover": async (ctx) => {
     await ctx.openCanvas();
     const before = await ctx.source();
-    const target = await ctx.node("square");
-    await ctx.driver.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: target.x, y: target.y }, ctx.driver.pageSession);
-    await ctx.waitFor(async () => {
+    const hoverAndAssert = async (label) => {
+      const defaultProfile = await ctx.driver.evaluate(`!document.body.classList.contains("is-dev-mode")`);
+      if (!defaultProfile) throw new Error(`${label} unexpectedly enabled developer mode`);
+      const target = await ctx.node("square");
+      await ctx.driver.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: target.x, y: target.y }, ctx.driver.pageSession);
+      await ctx.waitFor(async () => {
+        const state = await ctx.state();
+        return state.hoveredNodeTitle === "square" && String(state.hoveredNodeDescription || "").length > 0;
+      }, `${label} node hover documentation`);
       const state = await ctx.state();
-      return state.hoveredNodeTitle === "square" && String(state.hoveredNodeDescription || "").length > 0;
-    }, "node hover documentation");
-    const visible = await ctx.driver.evaluate(`document.getElementById("wire-status").textContent`);
-    if (!visible.includes("square")) throw new Error(`node hover docs not visible: ${visible}`);
-    await assertSourceUnchangedAfterReload(ctx, before, "node docs hover");
+      const visible = await visibleSurface(ctx, `document.getElementById("wire-status")`, `${label} node hover details`);
+      if (!visible.text.includes("square") || !visible.text.includes(state.hoveredNodeDescription)) {
+        throw new Error(`${label} node hover text mismatch: ${JSON.stringify({ visible, description: state.hoveredNodeDescription })}`);
+      }
+    };
+    await hoverAndAssert("before reload");
+    if (await ctx.source() !== before) throw new Error("node docs hover changed source");
+    await ctx.openCanvas();
+    if (await ctx.source() !== before) throw new Error("node docs hover reload changed source");
+    await hoverAndAssert("after reload");
   },
 
   "rename-variable-sidebar": async (ctx) => {
