@@ -17,25 +17,26 @@ analysis of each one lives in Jet's own primary documents:
 - `docs/archive/language-lessons-and-regrets.md` — the master lineage study
   (2026-07-15): 30+ languages, each with creator regrets, official
   retrospectives, and Jet's defensive position.
-- `docs/proposals/language-shape-research.md` — surface-shape research mining
-  other languages for concrete syntax/semantics transplants.
+- `docs/archive/language-shape-research.md` — surface-shape research mining
+  other languages for concrete syntax/semantics transplants (archived).
 - `docs/proposals/ecosystem-shape.md` — package/config/ecosystem research.
 - `docs/plans/epoch-3/universal-language-core.md` — web/UI/notebook/numeric
   reach research.
 - `docs/plans/epoch-4/world-class-package-manager.md` — package-manager and
   supply-chain research.
-- `docs/research/*` — dated deep-dive mining reports (video, feature studies).
+- `docs/research/*` — active dated deep-dive reports; finished mines live under
+  `docs/archive/`.
 
 ---
 
 ## Videos, talks & podcasts
 
-Mined in full with transcript + comment analysis (see `docs/research/` and the
-`mine-video` skill).
+Mined in full with transcript + comment analysis (see `docs/research/`,
+`docs/archive/`, and the `mine-video` skill).
 
 **Logan Smith — Rust series (9 videos, mined 2026-07-24).** External validation
 of Jet's ratified safety/error/ownership design; report at
-`docs/research/2026-07-24-logan-smith-rust-series-mining.md`.
+`docs/archive/2026-07-24-logan-smith-rust-series-mining.md`.
 
 - 5 Strong Opinions On Everyday Rust — https://www.youtube.com/watch?v=8j_FbjiowvE
 - Constructors Are Broken (build-then-construct-valid; "named constructor" not "factory") — https://www.youtube.com/watch?v=KWB-gDVuy_I
@@ -50,7 +51,7 @@ of Jet's ratified safety/error/ownership design; report at
 **Logan Smith — "Verse: A New Scripting Language? In THIS Economy?"** (mined
 2026-07-24). Crash course on Epic's Verse; source of the transactional-rollback
 "watch" lesson and strategic validation of the Epoch-6 Canvas bet. Report at
-`docs/research/2026-07-24-verse-video-mining.md`.
+`docs/archive/2026-07-24-verse-video-mining.md`.
 https://www.youtube.com/watch?v=ebqKYLKjL6U
 
 **Jonathan Blow on Jai** (The Standup w/ ThePrimeagen, transcript) — closed-beta
@@ -98,7 +99,7 @@ build-script supply chain, feature unification.
 - Cargo issues #14414 / #8088 — https://github.com/rust-lang/cargo/issues/14414 · https://github.com/rust-lang/cargo/issues/8088
 - The Book: ownership ch04 / enums ch06 / patterns ch19-01 — https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html · https://doc.rust-lang.org/book/ch06-00-enums.html · https://doc.rust-lang.org/book/ch19-01-all-the-places-for-patterns.html
 - API Guidelines: predictability — https://rust-lang.github.io/api-guidelines/predictability.html
-- struct/impl colocation study (`docs/research/2026-07-24-rust-struct-impl-colocation.md`): Clippy `multiple_inherent_impl` — https://github.com/rust-lang/rust-clippy/blob/master/clippy_lints/src/inherent_impl.rs · Clippy #6446 explicit-drop — https://github.com/rust-lang/rust-clippy/issues/6446 · Canonical ordering discipline — https://canonical.github.io/rust-best-practices/ordering-discipline.html · PingCAP trait style — https://pingcap.github.io/style-guide/rust/traits.html · users.rust-lang style thread — https://users.rust-lang.org/t/a-question-of-style-for-impl-of-structs/118029
+- struct/impl colocation study (`docs/archive/2026-07-24-rust-struct-impl-colocation.md`): Clippy `multiple_inherent_impl` — https://github.com/rust-lang/rust-clippy/blob/master/clippy_lints/src/inherent_impl.rs · Clippy #6446 explicit-drop — https://github.com/rust-lang/rust-clippy/issues/6446 · Canonical ordering discipline — https://canonical.github.io/rust-best-practices/ordering-discipline.html · PingCAP trait style — https://pingcap.github.io/style-guide/rust/traits.html · users.rust-lang style thread — https://users.rust-lang.org/t/a-question-of-style-for-impl-of-structs/118029
 
 **Zig** — explicit control, freestanding, comptime, expected-type shorthand,
 allocator visibility, integrated build; watch: release-mode safety-off, removed

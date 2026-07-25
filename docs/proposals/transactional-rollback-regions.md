@@ -1,7 +1,7 @@
 # Proposal: checked transaction regions (rollback on failure)
 
 **Status: DRAFT — parked for owner review. Not a ballot. Do not ballot yet.**
-*Source: mined from Verse (`decides` effect) and the Logan Smith video series, 2026-07-24. See `docs/research/2026-07-24-verse-video-mining.md`. Current Jet disposition on this idea is "watch" — see `docs/proposals/language-shape-research.md:354` and `docs/archive/language-lessons-and-regrets.md:399-407`.*
+*Source: mined from Verse (`decides` effect) and the Logan Smith video series, 2026-07-24. See `docs/archive/2026-07-24-verse-video-mining.md`. Current Jet disposition on this idea is "watch" — see `docs/archive/language-shape-research.md` and `docs/archive/language-lessons-and-regrets.md:399-407`.*
 
 ## Glossary
 

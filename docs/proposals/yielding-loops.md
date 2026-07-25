@@ -1,9 +1,9 @@
 # Proposal: yielding loops
 
-**Status: deferred by owner 2026-07-23** (chat). Revisit after the `#` sigil
-sweep (#732) lands. Builds on D-LOOPLABEL3=A: `outer :: loop` naming,
-`outer.break()` / `outer.next()` exits, bare `break`/`next` keywords for the
-innermost loop.
+**Status: active proposal** (owner keep 2026-07-25). Revisit sequencing after
+the `#` sigil sweep (#732) lands. Builds on D-LOOPLABEL3=A: `outer :: loop`
+naming, `outer.break()` / `outer.next()` exits, bare `break`/`next` keywords
+for the innermost loop.
 
 ## The idea
 
