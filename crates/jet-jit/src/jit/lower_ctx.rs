@@ -2674,6 +2674,56 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.compress.gzip" || module == "core.compress.zstd" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                        ("core.compress.gzip", "compress") if args.len() == 1 => {
+                            (self.host.compress.gzip_compress, vec![self.lower_expr(&args[0])?])
+                        }
+                        ("core.compress.gzip", "decompress") if args.len() == 1 => {
+                            (self.host.compress.gzip_decompress, vec![self.lower_expr(&args[0])?])
+                        }
+                        ("core.compress.zstd", "compress") if args.len() == 1 => {
+                            (self.host.compress.zstd_compress, vec![self.lower_expr(&args[0])?])
+                        }
+                        ("core.compress.zstd", "decompress") if args.len() == 1 => {
+                            (self.host.compress.zstd_decompress, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.archive" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "zip_compress" if args.len() == 2 => (
+                            self.host.archive.zip_compress,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "zip_decompress" if args.len() == 1 => {
+                            (self.host.archive.zip_decompress, vec![self.lower_expr(&args[0])?])
+                        }
+                        "tar_add" if args.len() == 3 => (
+                            self.host.archive.tar_add,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "tar_get" if args.len() == 2 => (
+                            self.host.archive.tar_get,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "tar_names_json" if args.len() == 1 => {
+                            (self.host.archive.tar_names_json, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.path" && method == "join" && args.len() == 2 {
                     let host_ref = self
                         .module
@@ -5283,6 +5333,22 @@ impl LowerCtx<'_, '_> {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.str_eq, self.b.func);
+                let call = self.b.ins().call(host_ref, &[l, r]);
+                let eq = self.b.inst_results(call)[0];
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().isub(one, eq)
+            }
+            (Type::List(_) | Type::FixedList { .. }, BinOp::Eq) => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_eq, self.b.func);
+                let call = self.b.ins().call(host_ref, &[l, r]);
+                self.b.inst_results(call)[0]
+            }
+            (Type::List(_) | Type::FixedList { .. }, BinOp::Ne) => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_eq, self.b.func);
                 let call = self.b.ins().call(host_ref, &[l, r]);
                 let eq = self.b.inst_results(call)[0];
                 let one = self.b.ins().iconst(types::I8, 1);

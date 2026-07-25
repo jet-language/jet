@@ -11,7 +11,9 @@
 
 #![allow(non_snake_case)]
 
+mod Archive;
 mod Collections;
+mod Compress;
 mod Concurrency;
 mod CoreHost;
 mod Encoding;

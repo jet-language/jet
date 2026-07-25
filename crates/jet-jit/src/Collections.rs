@@ -59,6 +59,28 @@ extern "C" fn jet_jit_list_len(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).expect("jit list len: bad handle"))
 }
 
+/// Element-wise list equality for `[T]` / fixed lists (int/byte elements).
+extern "C" fn jet_jit_list_eq(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        if a == b {
+            return 1;
+        }
+        let (Some(la), Some(lb)) = (rt.heap.list_len(a), rt.heap.list_len(b)) else {
+            return 0;
+        };
+        if la != lb {
+            return 0;
+        }
+        for i in 0..la {
+            match (rt.heap.list_get_int(a, i), rt.heap.list_get_int(b, i)) {
+                (Some(x), Some(y)) if x == y => {}
+                _ => return 0,
+            }
+        }
+        1
+    })
+}
+
 /// Mirror AOT `jet_iter_indexes(n)` — materialize `Iter<Int>` as a list handle.
 extern "C" fn jet_jit_list_indexes(n: i64) -> i64 {
     let n = n.max(0);
@@ -547,6 +569,7 @@ pub(crate) struct CollectionsHostFns {
     pub list_set: cranelift_module::FuncId,
     pub list_set_f64: cranelift_module::FuncId,
     pub list_len: cranelift_module::FuncId,
+    pub list_eq: cranelift_module::FuncId,
     pub list_indexes: cranelift_module::FuncId,
     pub list_sort: cranelift_module::FuncId,
     pub list_clone: cranelift_module::FuncId,
@@ -585,6 +608,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_set", jet_jit_list_set as *const u8);
     builder.symbol("jet_jit_list_set_f64", jet_jit_list_set_f64 as *const u8);
     builder.symbol("jet_jit_list_len", jet_jit_list_len as *const u8);
+    builder.symbol("jet_jit_list_eq", jet_jit_list_eq as *const u8);
     builder.symbol("jet_jit_list_indexes", jet_jit_list_indexes as *const u8);
     builder.symbol("jet_jit_list_sort", jet_jit_list_sort as *const u8);
     builder.symbol("jet_jit_list_clone", jet_jit_list_clone as *const u8);
@@ -641,6 +665,10 @@ pub(crate) fn declare_collections_host_fns(
     sig_get_f64.returns.push(AbiParam::new(types::F64));
     let mut sig_get_opt = sig_len.clone();
     sig_get_opt.params.push(AbiParam::new(types::I64));
+    let mut sig_list_eq = Signature::new(cc);
+    sig_list_eq.params.push(AbiParam::new(types::I64));
+    sig_list_eq.params.push(AbiParam::new(types::I64));
+    sig_list_eq.returns.push(AbiParam::new(types::I8));
     // list_set(list, idx, val, line)
     let mut sig_set = Signature::new(cc);
     sig_set.params.push(AbiParam::new(types::I64));
@@ -697,6 +725,7 @@ pub(crate) fn declare_collections_host_fns(
         list_set: import("jet_jit_list_set", &sig_set)?,
         list_set_f64: import("jet_jit_list_set_f64", &sig_set_f64)?,
         list_len: import("jet_jit_list_len", &sig_len)?,
+        list_eq: import("jet_jit_list_eq", &sig_list_eq)?,
         list_indexes: import("jet_jit_list_indexes", &sig_len)?,
         list_sort: import("jet_jit_list_sort", &sig_sort)?,
         list_clone: import("jet_jit_list_clone", &sig_len)?,

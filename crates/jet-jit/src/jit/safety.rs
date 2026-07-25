@@ -333,8 +333,14 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::ListLit(elems) => {
             (jit_list_native_type(&expr.ty)
                 && elems.iter().all(|e| {
-                    matches!(&e.ty, Type::Int | Type::Float | Type::String | Type::Char)
-                        && resident_safe_expr(e, callees)
+                    matches!(
+                        &e.ty,
+                        Type::Int
+                            | Type::IntN { .. }
+                            | Type::Float
+                            | Type::String
+                            | Type::Char
+                    ) && resident_safe_expr(e, callees)
                 }))
                 || (jit_list_of_int_list_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
