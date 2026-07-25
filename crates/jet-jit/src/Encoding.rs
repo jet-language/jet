@@ -790,6 +790,394 @@ extern "C" fn jet_jit_json_canonical(tree: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
+/// `core.encoding.json.events` — same walk as `jet_std_json_events`.
+fn json_events(t: &json_rt::DataTree) -> String {
+    fn walk(path: String, t: &json_rt::DataTree, out: &mut Vec<String>) {
+        let here = if path.is_empty() {
+            "$".to_string()
+        } else {
+            path
+        };
+        match t {
+            json_rt::DataTree::Object(entries) => {
+                out.push(format!("object_start {here}"));
+                for (k, v) in entries {
+                    walk(format!("{here}.{k}"), v, out);
+                }
+                out.push(format!("object_end {here}"));
+            }
+            json_rt::DataTree::Array(items) => {
+                out.push(format!("array_start {here}"));
+                for (i, v) in items.iter().enumerate() {
+                    walk(format!("{here}[{i}]"), v, out);
+                }
+                out.push(format!("array_end {here}"));
+            }
+            _ => out.push(format!("value {here} {}", render_canonical(t))),
+        }
+    }
+    let mut out = Vec::new();
+    walk(String::new(), t, &mut out);
+    out.join("\n")
+}
+
+extern "C" fn jet_jit_json_events(tree: i64) -> i64 {
+    let rendered = read_datatree(tree)
+        .map(|t| json_events(&t))
+        .unwrap_or_else(|| String::new());
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+}
+
+/// `core.encoding.jsonl.parse` — same as `jet_std_jsonl_parse`.
+extern "C" fn jet_jit_jsonl_parse(text: i64) -> i64 {
+    let src = clone_heap_string(text);
+    let mut handles = Vec::new();
+    for (idx, line) in src.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match json_rt::parse_datatree(trimmed) {
+            Ok(tree) => handles.push(alloc_datatree(&tree)),
+            Err(e) => {
+                return result_err_msg(&format!(
+                    "invalid JSON (line {}): {}",
+                    idx as i64 + e.line,
+                    e.message
+                ));
+            }
+        }
+    }
+    let list = Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for h in handles {
+            let _ = rt.heap.list_push_int(list, h);
+        }
+        list
+    });
+    result_ok_bits(list as u64)
+}
+
+/// `core.encoding.jsonl.to_string` — same as `jet_std_jsonl_render`.
+extern "C" fn jet_jit_jsonl_to_string(rows: i64) -> i64 {
+    let trees: Vec<json_rt::DataTree> = Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(rows).unwrap_or(0);
+        let mut out = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            out.push(rt.heap.list_get_int(rows, i).unwrap_or(0));
+        }
+        out
+    })
+    .into_iter()
+    .filter_map(read_datatree)
+    .collect();
+    let mut rendered = trees
+        .iter()
+        .map(render_canonical)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !rendered.is_empty() {
+        rendered.push('\n');
+    }
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+}
+
+// ── XML via jet_foundation::XmlPull (same runtime as EncodingCodecs) ─────────
+
+fn xml_value_to_datatree(value: jet_foundation::XmlPull::Value) -> json_rt::DataTree {
+    use jet_foundation::XmlPull::Value;
+    match value {
+        Value::Null => json_rt::DataTree::Null,
+        Value::Bool(b) => json_rt::DataTree::Bool(b),
+        Value::Int(n) => json_rt::DataTree::Int(n),
+        Value::Text(s) => json_rt::DataTree::Text(s),
+        Value::Array(xs) => json_rt::DataTree::Array(xs.into_iter().map(xml_value_to_datatree).collect()),
+        Value::Object(es) => json_rt::DataTree::Object(
+            es.into_iter()
+                .map(|(k, v)| (k, xml_value_to_datatree(v)))
+                .collect(),
+        ),
+    }
+}
+
+fn datatree_to_xml_value(tree: &json_rt::DataTree) -> Result<jet_foundation::XmlPull::Value, String> {
+    use jet_foundation::XmlPull::Value;
+    match tree {
+        json_rt::DataTree::Null => Ok(Value::Null),
+        json_rt::DataTree::Bool(b) => Ok(Value::Bool(*b)),
+        json_rt::DataTree::Int(n) => Ok(Value::Int(*n)),
+        json_rt::DataTree::Text(s) => Ok(Value::Text(s.clone())),
+        json_rt::DataTree::Array(xs) => Ok(Value::Array(
+            xs.iter()
+                .map(datatree_to_xml_value)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        json_rt::DataTree::Object(es) => Ok(Value::Object(
+            es.iter()
+                .map(|(k, v)| Ok((k.clone(), datatree_to_xml_value(v)?)))
+                .collect::<Result<Vec<_>, String>>()?,
+        )),
+        json_rt::DataTree::Float(_) | json_rt::DataTree::Bytes(_) => {
+            Err("XML tree cannot contain Float or Bytes values".to_string())
+        }
+    }
+}
+
+fn xml_err_msg(e: jet_foundation::XmlPull::Error) -> String {
+    let path = if e.path.is_empty() { "$" } else { e.path.as_str() };
+    format!("XML error at {path}: {}", e.reason)
+}
+
+extern "C" fn jet_jit_xml_parse(text: i64) -> i64 {
+    match jet_foundation::XmlPull::parse_document(&clone_heap_string(text)) {
+        Ok(mut value) => {
+            jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
+            result_ok_bits(alloc_datatree(&xml_value_to_datatree(value)) as u64)
+        }
+        Err(e) => result_err_msg(&xml_err_msg(e)),
+    }
+}
+
+extern "C" fn jet_jit_xml_to_string(tree: i64) -> i64 {
+    let rendered = read_datatree(tree)
+        .and_then(|t| datatree_to_xml_value(&t).ok())
+        .and_then(|v| jet_foundation::XmlPull::render_document(&v).ok())
+        .unwrap_or_default();
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+}
+
+// ── CBOR (mirrors EncodingCodecs jet_cbor_* for DataTree; safe options) ─────
+
+fn cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {
+    if n < 24 {
+        out.push((major << 5) | n as u8);
+    } else if n <= u8::MAX as u64 {
+        out.extend_from_slice(&[(major << 5) | 24, n as u8]);
+    } else if n <= u16::MAX as u64 {
+        out.push((major << 5) | 25);
+        out.extend_from_slice(&(n as u16).to_be_bytes());
+    } else if n <= u32::MAX as u64 {
+        out.push((major << 5) | 26);
+        out.extend_from_slice(&(n as u32).to_be_bytes());
+    } else {
+        out.push((major << 5) | 27);
+        out.extend_from_slice(&n.to_be_bytes());
+    }
+}
+
+fn cbor_encode_val(v: &json_rt::DataTree, out: &mut Vec<u8>) -> Result<(), String> {
+    match v {
+        json_rt::DataTree::Null => out.push(0xf6),
+        json_rt::DataTree::Bool(false) => out.push(0xf4),
+        json_rt::DataTree::Bool(true) => out.push(0xf5),
+        json_rt::DataTree::Int(n) if *n >= 0 => cbor_push_len(out, 0, *n as u64),
+        json_rt::DataTree::Int(n) => cbor_push_len(out, 1, (-1 - *n) as u64),
+        json_rt::DataTree::Float(f) => {
+            out.push((7 << 5) | 27);
+            out.extend_from_slice(&f.to_bits().to_be_bytes());
+        }
+        json_rt::DataTree::Text(s) => {
+            cbor_push_len(out, 3, s.len() as u64);
+            out.extend_from_slice(s.as_bytes());
+        }
+        json_rt::DataTree::Bytes(bs) => {
+            cbor_push_len(out, 2, bs.len() as u64);
+            out.extend_from_slice(bs);
+        }
+        json_rt::DataTree::Array(xs) => {
+            cbor_push_len(out, 4, xs.len() as u64);
+            for x in xs {
+                cbor_encode_val(x, out)?;
+            }
+        }
+        json_rt::DataTree::Object(es) => {
+            cbor_push_len(out, 5, es.len() as u64);
+            for (k, v) in es {
+                cbor_encode_val(&json_rt::DataTree::Text(k.clone()), out)?;
+                cbor_encode_val(v, out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cbor_read_len(input: &[u8], i: &mut usize, add: u8) -> Result<u64, String> {
+    let need = match add {
+        n @ 0..=23 => return Ok(n as u64),
+        24 => 1,
+        25 => 2,
+        26 => 4,
+        27 => 8,
+        _ => return Err("indefinite/reserved CBOR length unsupported".to_string()),
+    };
+    if *i + need > input.len() {
+        return Err("CBOR length argument is truncated".to_string());
+    }
+    let mut n = 0u64;
+    for _ in 0..need {
+        n = (n << 8) | input[*i] as u64;
+        *i += 1;
+    }
+    Ok(n)
+}
+
+fn cbor_decode_val(input: &[u8], i: &mut usize, depth: i64) -> Result<json_rt::DataTree, String> {
+    const MAX_DEPTH: i64 = 256;
+    if depth > MAX_DEPTH {
+        return Err(format!("max_depth {MAX_DEPTH} exceeded"));
+    }
+    if *i >= input.len() {
+        return Err("CBOR value is missing".to_string());
+    }
+    let b = input[*i];
+    *i += 1;
+    let major = b >> 5;
+    let add = b & 31;
+    match major {
+        0 => i64::try_from(cbor_read_len(input, i, add)?)
+            .map(json_rt::DataTree::Int)
+            .map_err(|_| "CBOR integer outside Jet Int".to_string()),
+        1 => i64::try_from(cbor_read_len(input, i, add)?)
+            .ok()
+            .and_then(|n| n.checked_neg()?.checked_sub(1))
+            .map(json_rt::DataTree::Int)
+            .ok_or_else(|| "CBOR integer outside Jet Int".to_string()),
+        2 => {
+            let n = usize::try_from(cbor_read_len(input, i, add)?)
+                .map_err(|_| "CBOR byte string too large".to_string())?;
+            if n > input.len() - *i {
+                return Err("CBOR byte string truncated".to_string());
+            }
+            let bytes = input[*i..*i + n].to_vec();
+            *i += n;
+            Ok(json_rt::DataTree::Bytes(bytes))
+        }
+        3 => {
+            let n = usize::try_from(cbor_read_len(input, i, add)?)
+                .map_err(|_| "CBOR text too large".to_string())?;
+            if n > input.len() - *i {
+                return Err("CBOR text truncated".to_string());
+            }
+            let s = std::str::from_utf8(&input[*i..*i + n])
+                .map_err(|_| "CBOR text is not UTF-8".to_string())?
+                .to_string();
+            *i += n;
+            Ok(json_rt::DataTree::Text(s))
+        }
+        4 => {
+            let n = usize::try_from(cbor_read_len(input, i, add)?)
+                .map_err(|_| "CBOR array too large".to_string())?;
+            let mut xs = Vec::with_capacity(n);
+            for _ in 0..n {
+                xs.push(cbor_decode_val(input, i, depth + 1)?);
+            }
+            Ok(json_rt::DataTree::Array(xs))
+        }
+        5 => {
+            let n = usize::try_from(cbor_read_len(input, i, add)?)
+                .map_err(|_| "CBOR map too large".to_string())?;
+            let mut es = Vec::with_capacity(n);
+            for _ in 0..n {
+                let k = match cbor_decode_val(input, i, depth + 1)? {
+                    json_rt::DataTree::Text(s) => s,
+                    _ => return Err("CBOR map key must be text".to_string()),
+                };
+                let v = cbor_decode_val(input, i, depth + 1)?;
+                es.push((k, v));
+            }
+            Ok(json_rt::DataTree::Object(es))
+        }
+        7 => match add {
+            20 => Ok(json_rt::DataTree::Bool(false)),
+            21 => Ok(json_rt::DataTree::Bool(true)),
+            22 => Ok(json_rt::DataTree::Null),
+            25 => {
+                if *i + 2 > input.len() {
+                    return Err("CBOR Float16 truncated".to_string());
+                }
+                let bits = u16::from_be_bytes([input[*i], input[*i + 1]]);
+                *i += 2;
+                Ok(json_rt::DataTree::Float(cbor_half_to_f64(bits)))
+            }
+            26 => {
+                if *i + 4 > input.len() {
+                    return Err("CBOR Float32 truncated".to_string());
+                }
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&input[*i..*i + 4]);
+                *i += 4;
+                Ok(json_rt::DataTree::Float(f32::from_be_bytes(buf) as f64))
+            }
+            27 => {
+                if *i + 8 > input.len() {
+                    return Err("CBOR Float64 truncated".to_string());
+                }
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&input[*i..*i + 8]);
+                *i += 8;
+                Ok(json_rt::DataTree::Float(f64::from_bits(u64::from_be_bytes(
+                    buf,
+                ))))
+            }
+            _ => Err(format!("unsupported CBOR simple value {add}")),
+        },
+        6 => Err("CBOR tags are unsupported".to_string()),
+        _ => Err(format!("unsupported CBOR major type {major}")),
+    }
+}
+
+fn cbor_half_to_f64(bits: u16) -> f64 {
+    let sign = (bits >> 15) & 1;
+    let exp = ((bits >> 10) & 0x1f) as i32;
+    let frac = (bits & 0x3ff) as u32;
+    let value = if exp == 0 {
+        if frac == 0 {
+            0.0
+        } else {
+            (frac as f64) * f64::from_bits(0x3e20_0000_0000_0000) // 2^-24
+        }
+    } else if exp == 31 {
+        if frac == 0 {
+            f64::INFINITY
+        } else {
+            f64::NAN
+        }
+    } else {
+        let fbits = ((sign as u64) << 63)
+            | (((exp - 15 + 1023) as u64) << 52)
+            | ((frac as u64) << 42);
+        f64::from_bits(fbits)
+    };
+    if sign != 0 && value != 0.0 {
+        -value
+    } else {
+        value
+    }
+}
+
+extern "C" fn jet_jit_cbor_to_bytes(tree: i64) -> i64 {
+    match read_datatree(tree) {
+        Some(t) => {
+            let mut out = Vec::new();
+            match cbor_encode_val(&t, &mut out) {
+                Ok(()) => result_ok_bits(alloc_byte_list(&out) as u64),
+                Err(e) => result_err_msg(&e),
+            }
+        }
+        None => result_err_msg("invalid DataTree"),
+    }
+}
+
+extern "C" fn jet_jit_cbor_parse(bytes: i64) -> i64 {
+    let input = clone_heap_bytes(bytes);
+    let mut i = 0usize;
+    match cbor_decode_val(&input, &mut i, 0) {
+        Ok(tree) if i == input.len() => result_ok_bits(alloc_datatree(&tree) as u64),
+        Ok(_) => result_err_msg("trailing CBOR data after root value"),
+        Err(e) => result_err_msg(&e),
+    }
+}
+
 /// CSV typed decode front half: header+rows → `[DataTree]` of Text-cell objects
 /// (mirrors `jet_enc_csv_decode` before `T::jet_decode`).
 extern "C" fn jet_jit_csv_decode_trees(text: i64) -> i64 {
@@ -965,6 +1353,13 @@ pub(crate) struct EncodingHostFns {
     pub json_to_string: cranelift_module::FuncId,
     pub json_to_string_pretty: cranelift_module::FuncId,
     pub json_canonical: cranelift_module::FuncId,
+    pub json_events: cranelift_module::FuncId,
+    pub jsonl_parse: cranelift_module::FuncId,
+    pub jsonl_to_string: cranelift_module::FuncId,
+    pub xml_parse: cranelift_module::FuncId,
+    pub xml_to_string: cranelift_module::FuncId,
+    pub cbor_to_bytes: cranelift_module::FuncId,
+    pub cbor_parse: cranelift_module::FuncId,
     pub csv_decode_trees: cranelift_module::FuncId,
     pub datatree_field: cranelift_module::FuncId,
     pub datatree_at: cranelift_module::FuncId,
@@ -1000,6 +1395,13 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
         jet_jit_json_to_string_pretty as *const u8,
     );
     builder.symbol("jet_jit_json_canonical", jet_jit_json_canonical as *const u8);
+    builder.symbol("jet_jit_json_events", jet_jit_json_events as *const u8);
+    builder.symbol("jet_jit_jsonl_parse", jet_jit_jsonl_parse as *const u8);
+    builder.symbol("jet_jit_jsonl_to_string", jet_jit_jsonl_to_string as *const u8);
+    builder.symbol("jet_jit_xml_parse", jet_jit_xml_parse as *const u8);
+    builder.symbol("jet_jit_xml_to_string", jet_jit_xml_to_string as *const u8);
+    builder.symbol("jet_jit_cbor_to_bytes", jet_jit_cbor_to_bytes as *const u8);
+    builder.symbol("jet_jit_cbor_parse", jet_jit_cbor_parse as *const u8);
     builder.symbol("jet_jit_csv_decode_trees", jet_jit_csv_decode_trees as *const u8);
     builder.symbol("jet_jit_datatree_field", jet_jit_datatree_field as *const u8);
     builder.symbol("jet_jit_datatree_at", jet_jit_datatree_at as *const u8);
@@ -1057,6 +1459,13 @@ pub(crate) fn declare_encoding_host_fns(
         json_to_string: import("jet_jit_json_to_string", &sig_unary)?,
         json_to_string_pretty: import("jet_jit_json_to_string_pretty", &sig_unary)?,
         json_canonical: import("jet_jit_json_canonical", &sig_unary)?,
+        json_events: import("jet_jit_json_events", &sig_unary)?,
+        jsonl_parse: import("jet_jit_jsonl_parse", &sig_unary)?,
+        jsonl_to_string: import("jet_jit_jsonl_to_string", &sig_unary)?,
+        xml_parse: import("jet_jit_xml_parse", &sig_unary)?,
+        xml_to_string: import("jet_jit_xml_to_string", &sig_unary)?,
+        cbor_to_bytes: import("jet_jit_cbor_to_bytes", &sig_unary)?,
+        cbor_parse: import("jet_jit_cbor_parse", &sig_unary)?,
         csv_decode_trees: import("jet_jit_csv_decode_trees", &sig_unary)?,
         datatree_field: import("jet_jit_datatree_field", &sig_binary)?,
         datatree_at: import("jet_jit_datatree_at", &sig_binary)?,

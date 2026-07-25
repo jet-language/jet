@@ -808,10 +808,17 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_typed_json_decode(&mut self, text: &TExpr, ok_ty: &Type) -> Result<Value, String> {
+        self.lower_typed_tree_decode(text, ok_ty, self.host.encoding.json_parse)
+    }
+
+    fn lower_typed_tree_decode(
+        &mut self,
+        text: &TExpr,
+        ok_ty: &Type,
+        parse_host: FuncId,
+    ) -> Result<Value, String> {
         let text_v = self.lower_expr(text)?;
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.encoding.json_parse, self.b.func);
+        let host_ref = self.module.declare_func_in_func(parse_host, self.b.func);
         let parse_call = self.b.ins().call(host_ref, &[text_v]);
         let parsed = self.b.inst_results(parse_call)[0];
         let status_ref = self
@@ -846,12 +853,20 @@ impl LowerCtx<'_, '_> {
         arg: &TExpr,
         pretty: bool,
     ) -> Result<Value, String> {
-        let tree = self.lower_serde_encode(arg)?;
         let host_id = if pretty {
             self.host.encoding.json_to_string_pretty
         } else {
             self.host.encoding.json_to_string
         };
+        self.lower_typed_tree_to_string(arg, host_id)
+    }
+
+    fn lower_typed_tree_to_string(
+        &mut self,
+        arg: &TExpr,
+        host_id: FuncId,
+    ) -> Result<Value, String> {
+        let tree = self.lower_serde_encode(arg)?;
         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
         let call = self.b.ins().call(host_ref, &[tree]);
         Ok(self.b.inst_results(call)[0])
@@ -3447,9 +3462,136 @@ impl LowerCtx<'_, '_> {
                             self.host.encoding.json_canonical,
                             vec![self.lower_expr(&args[0])?],
                         ),
+                        "events" if args.len() == 1 && datatree_arg => (
+                            self.host.encoding.json_events,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         _ => {
                             return Err(format!(
                                 "jit core call unsupported: core.encoding.json.{method}"
+                            ))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.encoding.jsonl" {
+                    let datatree_list_ok = matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. }
+                            if matches!(ok.as_ref(), Type::List(elem)
+                                if matches!(
+                                    elem.as_ref(),
+                                    Type::Named(n)
+                                        if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                ))
+                    );
+                    let datatree_list_arg = args.first().is_some_and(|a| {
+                        matches!(
+                            &a.ty,
+                            Type::List(elem)
+                                if matches!(
+                                    elem.as_ref(),
+                                    Type::Named(n)
+                                        if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                )
+                        )
+                    });
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "parse" if args.len() == 1 && datatree_list_ok => {
+                            (self.host.encoding.jsonl_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        "to_string" if args.len() == 1 && datatree_list_arg => (
+                            self.host.encoding.jsonl_to_string,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!(
+                                "jit core call unsupported: core.encoding.jsonl.{method}"
+                            ))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.encoding.xml" {
+                    let datatree_ok = matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. }
+                            if matches!(
+                                ok.as_ref(),
+                                Type::Named(n)
+                                    if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv" | "Xml")
+                            )
+                    );
+                    let datatree_arg = args.first().is_some_and(|a| {
+                        matches!(
+                            &a.ty,
+                            Type::Named(n)
+                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv" | "Xml")
+                        )
+                    });
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "parse" if args.len() == 1 && datatree_ok => {
+                            (self.host.encoding.xml_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        "to_string" if args.len() == 1 && datatree_arg => (
+                            self.host.encoding.xml_to_string,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!(
+                                "jit core call unsupported: core.encoding.xml.{method}"
+                            ))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.encoding.cbor" {
+                    let datatree_ok = matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. }
+                            if matches!(
+                                ok.as_ref(),
+                                Type::Named(n)
+                                    if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                            )
+                    );
+                    let datatree_arg = args.first().is_some_and(|a| {
+                        matches!(
+                            &a.ty,
+                            Type::Named(n)
+                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                        )
+                    });
+                    let bytes_arg = args.first().is_some_and(|a| {
+                        matches!(
+                            &a.ty,
+                            Type::List(elem)
+                                if matches!(
+                                    elem.as_ref(),
+                                    Type::IntN {
+                                        signed: false,
+                                        bits: 8
+                                    }
+                                ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
+                        )
+                    });
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "to_bytes" if args.len() == 1 && datatree_arg => (
+                            self.host.encoding.cbor_to_bytes,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "parse" if args.len() == 1 && bytes_arg && datatree_ok => {
+                            (self.host.encoding.cbor_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => {
+                            return Err(format!(
+                                "jit core call unsupported: core.encoding.cbor.{method}"
                             ))
                         }
                     };
@@ -3474,6 +3616,24 @@ impl LowerCtx<'_, '_> {
                                 if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
                         )
                     });
+                    if method == "decode" && args.len() == 1 && !datatree_ok {
+                        if let Type::Result { ok, .. } = &expr.ty {
+                            let parse_host = if module == "core.encoding.toml" {
+                                self.host.encoding.toml_parse
+                            } else {
+                                self.host.encoding.yaml_parse
+                            };
+                            return self.lower_typed_tree_decode(&args[0], ok, parse_host);
+                        }
+                    }
+                    if method == "to_string" && args.len() == 1 && !datatree_arg {
+                        let render_host = if module == "core.encoding.toml" {
+                            self.host.encoding.toml_to_string
+                        } else {
+                            self.host.encoding.yaml_to_string
+                        };
+                        return self.lower_typed_tree_to_string(&args[0], render_host);
+                    }
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
                         ("core.encoding.toml", "parse") if args.len() == 1 && datatree_ok => {
                             (self.host.encoding.toml_parse, vec![self.lower_expr(&args[0])?])
