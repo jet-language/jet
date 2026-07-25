@@ -81,23 +81,140 @@ pub(super) fn rolling_mean(values: &[f64], width: i64) -> Vec<f64> {
     out
 }
 
-/// `(step, path, replacement)` rows — mirrors `jet_data_status`'s
-/// `Vec<DataStatus>` literal exactly.
-pub(super) fn status_rows() -> Vec<(&'static str, &'static str, &'static str)> {
+/// Full DataStatus rows — mirrors `jet_data_status` exactly
+/// `(step, path, copy, ownership, trust, fallback, replacement)`.
+fn bridge_tool_on_path(tool: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| dir.join(tool).is_file())
+}
+
+fn bridge_path(step: &str) -> &'static str {
+    match step {
+        "r.*"
+            if bridge_tool_on_path("Rscript")
+                && std::env::var("JET_DATA_R_BRIDGE").as_deref() == Ok("1") =>
+        {
+            "available"
+        }
+        _ => "unavailable",
+    }
+}
+
+pub(super) fn status_rows(
+) -> Vec<(
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+)> {
     vec![
-        ("core.data.csv", "native", "native"),
-        ("core.data.stats", "native", "native"),
-        ("core.data.table", "native", "native"),
-        ("core.data.lazy", "native", "native"),
-        ("core.data.missing", "native", "native"),
-        ("core.data.schema", "native", "native"),
-        ("core.data.json", "native", "native"),
         (
-            "py.* / r.* / gpu.*",
-            "bridge-ready",
-            "report via data.status() and jet inspect dossier data",
+            "core.data.csv",
+            "native",
+            "none",
+            "jet",
+            "native",
+            "none",
+            "native",
+        ),
+        (
+            "core.data.stats",
+            "native",
+            "none",
+            "jet",
+            "native",
+            "none",
+            "native",
+        ),
+        (
+            "core.data.table",
+            "native",
+            "none",
+            "jet",
+            "native",
+            "none",
+            "native",
+        ),
+        (
+            "core.data.lazy",
+            "native",
+            "none",
+            "jet",
+            "native",
+            "none",
+            "native",
+        ),
+        (
+            "core.data.missing",
+            "native",
+            "none",
+            "jet",
+            "native",
+            "none",
+            "native",
+        ),
+        (
+            "core.data.schema",
+            "native",
+            "none",
+            "jet",
+            "native",
+            "none",
+            "native",
+        ),
+        (
+            "core.data.json",
+            "native",
+            "none",
+            "jet",
+            "native",
+            "none",
+            "native",
+        ),
+        (
+            "py.*",
+            bridge_path("py.*"),
+            "owned-copy",
+            "python-sidecar",
+            "untrusted-foreign",
+            "none",
+            "core.data native table/series/stats",
+        ),
+        (
+            "r.*",
+            bridge_path("r.*"),
+            "owned-copy",
+            "r-sidecar",
+            "untrusted-foreign",
+            "none",
+            "core.data.Table typed round-trip",
+        ),
+        (
+            "gpu.*",
+            bridge_path("gpu.*"),
+            "device-transfer",
+            "device-buffer",
+            "untrusted-accelerator",
+            "none",
+            "core.data / Tensor native CPU path",
         ),
     ]
+}
+
+pub(super) fn normalize_bridge_provider(provider: &str) -> Option<&'static str> {
+    let lower = provider.trim().trim_end_matches('.').to_ascii_lowercase();
+    let p = lower.strip_suffix(".*").unwrap_or(lower.as_str());
+    match p {
+        "py" | "python" => Some("py.*"),
+        "r" => Some("r.*"),
+        "gpu" | "cuda" | "metal" | "vulkan" | "webgpu" => Some("gpu.*"),
+        _ => None,
+    }
 }
 
 /// `(key, count)` pairs — the `bar_text`/`bar_svg` renderers only read

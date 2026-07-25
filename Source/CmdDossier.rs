@@ -38,6 +38,13 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
         return;
     }
 
+    // D-DATA-STATUS1=A: `jet inspect dossier data` — human/JSON lens over
+    // the same bridge/native status rows as `data.status()`.
+    if positional.first().copied() == Some("data") {
+        render_data_status_dossier(json);
+        return;
+    }
+
     let (path, target) = match positional.as_slice() {
         [path] => (*path, None),
         [path, target] => (*path, Some(*target)),
@@ -45,6 +52,7 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
             eprintln!("error: `jet inspect dossier` needs an entry file and optional symbol");
             eprintln!(" Fix: jet inspect dossier examples/features/basics/hello.jet run");
             eprintln!(" Fix: jet inspect dossier target board.sensor_v1");
+            eprintln!(" Fix: jet inspect dossier data");
             exit(ExitCodes::USER_ERROR);
         }
     };
@@ -246,5 +254,38 @@ fn absolutize(path: &str) -> PathBuf {
         std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(p)
+    }
+}
+
+/// D-DATA-STATUS1=A: project `data.status()` rows through the dossier lens.
+fn render_data_status_dossier(json: bool) {
+    let rows = jet::Comptime::data_status_rows();
+    if json {
+        let body = rows
+            .iter()
+            .map(|(step, path, copy, ownership, trust, fallback, replacement)| {
+                format!(
+                    "{{\"step\":{},\"path\":{},\"copy\":{},\"ownership\":{},\"trust\":{},\"fallback\":{},\"replacement\":{}}}",
+                    json_string(step),
+                    json_string(path),
+                    json_string(copy),
+                    json_string(ownership),
+                    json_string(trust),
+                    json_string(fallback),
+                    json_string(replacement),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "{{\"lens\":\"data\",\"schema\":\"jet.data-status\",\"rows\":[{body}]}}"
+        );
+        return;
+    }
+    println!("data status");
+    for (step, path, copy, ownership, trust, fallback, replacement) in rows {
+        println!(
+            "  {step}: path={path} copy={copy} ownership={ownership} trust={trust} fallback={fallback} replacement={replacement}"
+        );
     }
 }

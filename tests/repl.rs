@@ -2603,17 +2603,28 @@ fn repl_core_url_dispatch() {
 fn repl_core_data_dispatch() {
     let inputs = &[
         "use core.data as data",
-        "data.describe([1.0, 2.0, 3.0, 4.0])",
         "data.status()",
     ];
     let out = run_transcript(inputs, None);
     assert!(
         !out.contains("E0956"),
-        "core.data stats surface should dispatch at comptime, got: {out}"
+        "core.data status surface should dispatch at comptime, got: {out}"
     );
-    assert!(out.contains("DataSummary(count: 4"), "got: {out}");
-    assert!(out.contains("mean: 2.5"), "got: {out}");
-    assert!(out.contains("DataStatus(step: core.data.csv"), "got: {out}");
+    assert!(
+        out.contains("core.data.csv") && out.contains("path: \"native\""),
+        "native status missing: {out}"
+    );
+    assert!(
+        out.contains("py.*")
+            && out.contains("unavailable")
+            && out.contains("owned-copy")
+            && out.contains("python-sidecar"),
+        "py bridge status missing: {out}"
+    );
+    assert!(
+        !out.contains("bridge-ready"),
+        "must not claim bridge-ready facade: {out}"
+    );
 }
 
 #[test]

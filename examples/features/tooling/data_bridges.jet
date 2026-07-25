@@ -1,0 +1,33 @@
+// D-DATA-BRIDGE1 / D-DATA-STATUS1: honest Python/R/GPU bridge facts (#708).
+use core.data as data
+
+fn show_bridge(step: String) {
+    status :: data.status()
+    loop row; status {
+        if row.step == step {
+            print("{row.step} path={row.path} copy={row.copy} ownership={row.ownership} trust={row.trust} fallback={row.fallback} replacement={row.replacement}")
+        }
+    }
+}
+
+fn probe_bridge(name: String) {
+    asked := data.require_bridge(name)
+    if asked == {
+        Ok(_) -> print("{name}: available")
+        Err(error) -> print("{name}: {error}")
+    }
+}
+
+fn run() {
+    show_bridge("py.*")
+    show_bridge("r.*")
+    show_bridge("gpu.*")
+    probe_bridge("py")
+    probe_bridge("r")
+    probe_bridge("gpu")
+    bad := data.require_bridge("nope")
+    if bad == {
+        Ok(_) -> print("nope: unexpectedly ok")
+        Err(error) -> print("nope: {error}")
+    }
+}

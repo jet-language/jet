@@ -1138,6 +1138,9 @@ pub(crate) fn emit_tir_core_call(
             }
         }
         ("core.data", "status") => format!("{}()", helper("jet_data_status")),
+        ("core.data", "require_bridge") => {
+            format!("{}(&({}))", helper("jet_data_require_bridge"), arg(0))
+        }
         ("core.data", "bar_text") => {
             if matches!(ret_ty, Type::Result { .. }) {
                 format!("{}(&({}))", helper("jet_data_bar_text_checked"), arg(0))

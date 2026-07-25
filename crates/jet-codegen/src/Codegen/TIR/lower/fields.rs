@@ -143,7 +143,10 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             "kind" | "operation" | "row" | "column" | "index" | "reason" | "cause"
         ),
         "DataColumn" => matches!(member, "name" | "type_name"),
-        "DataStatus" => matches!(member, "step" | "path" | "replacement"),
+        "DataStatus" => matches!(
+            member,
+            "step" | "path" | "copy" | "ownership" | "trust" | "fallback" | "replacement"
+        ),
         "DataSummary" => matches!(
             member,
             "count" | "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev"
@@ -437,7 +440,9 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
     }
     if name == "DataStatus" && !cx.struct_fields.contains_key(name) {
         return match field {
-            "step" | "path" | "replacement" => Some(Type::String),
+            "step" | "path" | "copy" | "ownership" | "trust" | "fallback" | "replacement" => {
+                Some(Type::String)
+            }
             _ => None,
         };
     }

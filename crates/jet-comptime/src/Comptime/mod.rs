@@ -54,6 +54,20 @@ pub use Methods::{apply_core_call, apply_impure_core_call};
 pub fn runtime_csv_parse(text: &str) -> Result<Vec<Vec<String>>, String> {
     EncodingLite::csv_parse(text)
 }
+
+/// D-DATA-STATUS1 / #708: same status rows as `data.status()` / AOT
+/// `jet_data_status` — used by `jet inspect dossier data`.
+pub fn data_status_rows() -> Vec<(
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+)> {
+    DataLite::status_rows()
+}
 pub use Methods::apply_dollar_splices;
 pub use Purity::walk_calls;
 pub use Reflect::{build_program_info, build_struct_type_info, ProgramSemanticFacts};
