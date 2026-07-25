@@ -2631,6 +2631,11 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::TryCollect => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ViewNew { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ViewMutNew { .. } => Err("jit builtin method unsupported".to_string()),
+            // D-ITERTOOLS1=A: Iter materialization — rustc/dev path owns this; JIT
+            // gap stays #729 (do not implement here).
+            TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
+                Err("jit builtin method unsupported".to_string())
+            }
         }
     }
 

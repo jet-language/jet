@@ -16,6 +16,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_SORTED_SET,
     Syntax::TYPE_PRIORITY_QUEUE,
     Syntax::TYPE_LRU,
+    Syntax::TYPE_ITER,
     "Bag",
     Syntax::TYPE_DEQUE,
     Syntax::TYPE_BIGINT,
@@ -81,6 +82,80 @@ pub fn is_closure_method(method: &str) -> bool {
     )
 }
 
+/// D-ITERTOOLS1=A: adapters that return a lazy `Iter<T>` view.
+pub fn is_lazy_adapter(method: &str) -> bool {
+    matches!(
+        method,
+        "map"
+            | "filter"
+            | "take"
+            | "skip"
+            | "step_by"
+            | "dedup"
+            | "chunks"
+            | "windows"
+            | "flatten"
+            | "intersperse"
+            | "enumerate"
+            | "zip"
+            | "take_while"
+            | "skip_while"
+            | "flat_map"
+            | "filter_map"
+            | "scan"
+    )
+}
+
+/// D-ITERTOOLS1=A: terminals that consume an `Iter` (or list) and materialize
+/// or reduce. `sort_by` stays in-place on lists only.
+pub fn is_iter_terminal(method: &str) -> bool {
+    matches!(
+        method,
+        "to_list"
+            | "collect"
+            | "each"
+            | "find"
+            | "any"
+            | "all"
+            | "reduce"
+            | "fold"
+            | "sum"
+            | "product"
+            | "min"
+            | "max"
+            | "min_by"
+            | "max_by"
+            | "position"
+            | "group_by"
+            | "count_by"
+            | "partition"
+            | "unzip"
+            | "try_collect"
+            | "join"
+    )
+}
+
+/// D-ITERTOOLS1=A: `Iter<T>` type constructor.
+pub fn iter_ty(elem: Type) -> Type {
+    Type::Apply {
+        name: Syntax::TYPE_ITER.to_string(),
+        args: vec![elem],
+    }
+}
+
+pub fn is_iter_type(ty: &Type) -> bool {
+    matches!(ty, Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1)
+}
+
+pub fn iter_elem(ty: &Type) -> Option<&Type> {
+    match ty {
+        Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+            Some(&args[0])
+        }
+        _ => None,
+    }
+}
+
 /// `None` = not a built-in method; `Some(None)` = void; `Some(Some(t))` = returns `t`.
 pub fn builtin_method_return(
     recv_ty: &Type,
@@ -98,6 +173,10 @@ pub fn builtin_method_return(
         Type::List(inner) => list_method_return(inner, method, arg_count),
         // S76: [T#N] delegates to list methods; length-changing ops are blocked in sema (E0964).
         Type::FixedList { elem, .. } => list_method_return(elem, method, arg_count),
+        // D-ITERTOOLS1=A: lazy views share the list adapter/reducer surface.
+        Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+            iter_method_return(&args[0], method, arg_count)
+        }
         Type::Map { key, value, .. } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
@@ -246,6 +325,10 @@ pub fn builtin_method_return(
         // D-DYNARRAY1: `View<T>` — read-only method surface on a zero-copy window.
         Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
             view_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        // D-ITERTOOLS1=A: lazy `Iter<T>` — adapters chain; terminals materialize.
+        Type::Apply { name, args } if name == Syntax::TYPE_ITER => {
+            iter_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
         }
         // D-HOLE1: `.map` on `T?` (no general "hole"/absent-propagating value type —
         // Option composition gets library combinators instead). `.zip` is handled
@@ -463,31 +546,29 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("join", 1) => Some(Some(Type::String)),
         ("sum" | "product", 0) => Some(Some(inner.clone())),
         ("min" | "max", 0) => Some(Some(Type::Option(Box::new(inner.clone())))),
-        // M8 closure methods — return type depends on callback; sema fills `map` element type.
-        ("map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // placeholder; sema refines
-        ("filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
+        // D-ITERTOOLS1=A: adapters return lazy `Iter` views; sema refines `map` elem.
+        ("map", 1) => Some(Some(iter_ty(Type::Int))), // placeholder; sema refines
+        ("filter", 1) => Some(Some(iter_ty(inner.clone()))),
         ("each", 1) => Some(None),
         ("find", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
         ("any" | "all", 1) => Some(Some(Type::Bool)),
         ("sort_by", 1) => Some(None),
         ("reduce", 2) => Some(Some(Type::Int)), // placeholder; sema refines from init arg
-        // D-ITER1: non-closure lazy adapters (return [T]).
-        ("take" | "skip" | "step_by", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
-        ("dedup", 0) => Some(Some(Type::List(Box::new(inner.clone())))),
-        ("chunks" | "windows", 1) => Some(Some(Type::List(Box::new(Type::List(Box::new(
-            inner.clone(),
-        )))))),
+        // D-ITERTOOLS1=A: non-closure lazy adapters return `Iter<T>`.
+        ("take" | "skip" | "step_by", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("dedup", 0) => Some(Some(iter_ty(inner.clone()))),
+        ("chunks" | "windows", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
         ("flatten", 0) => match inner {
-            Type::List(elem) => Some(Some(Type::List(elem.clone()))),
-            _ => Some(Some(Type::List(Box::new(Type::Int)))),
+            Type::List(elem) => Some(Some(iter_ty(*elem.clone()))),
+            _ => Some(Some(iter_ty(Type::Int))),
         },
-        ("intersperse", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
-        // D-ITER1: enumerate → [(idx: Int, item: T)].
-        ("enumerate", 0) => Some(Some(Type::List(Box::new(enumerate_elem_ty(inner))))),
-        // D-ITER1: zip([U]) → [(a: T, b: U)]; sema refines `b` from arg type.
+        ("intersperse", 1) => Some(Some(iter_ty(inner.clone()))),
+        // D-ITER1: enumerate → Iter<(idx: Int, item: T)>.
+        ("enumerate", 0) => Some(Some(iter_ty(enumerate_elem_ty(inner)))),
+        // D-ITER1: zip([U]) → Iter<(a: T, b: U)>; sema refines `b` from arg type.
         ("zip", 1) => {
             // placeholder element type (Int for `b`); sema will correct via resolved_ret.
-            Some(Some(Type::List(Box::new(zip_elem_ty(inner, &Type::Int)))))
+            Some(Some(iter_ty(zip_elem_ty(inner, &Type::Int))))
         }
         ("unzip", 0) => match inner {
             Type::Tuple(fields) => {
@@ -513,12 +594,12 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         },
         // D-ITER1: partition(f) → (false_: [T], true_: [T]).
         ("partition", 1) => Some(Some(partition_ret_ty(inner))),
-        // D-ITER1: closure adapters returning [T].
-        ("take_while" | "skip_while", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
-        // D-ITER1: flat_map(f: T->[U]) → [U]; placeholder; sema refines.
-        ("flat_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
-        // D-FAILCOMP1: filter_map(f: T -> V?E) → [V]; keeps ok, drops err; sema refines V.
-        ("filter_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
+        // D-ITERTOOLS1=A: closure adapters returning `Iter<T>`.
+        ("take_while" | "skip_while", 1) => Some(Some(iter_ty(inner.clone()))),
+        // D-ITER1: flat_map(f: T->[U]) → Iter<U>; placeholder; sema refines.
+        ("flat_map", 1) => Some(Some(iter_ty(Type::Int))),
+        // D-FAILCOMP1: filter_map(f: T -> V?E) → Iter<V>; keeps ok, drops err; sema refines V.
+        ("filter_map", 1) => Some(Some(iter_ty(Type::Int))),
         // D-FAILCOMP1: try_collect on [Result<T,E>] → Result<[T],E>.
         ("try_collect", 0) => {
             match inner {
@@ -529,8 +610,8 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
                 _ => Some(Some(Type::Int)), // guard: only valid on [Result<T,E>]
             }
         }
-        // D-ITER1: scan(seed, f: (acc,T)->acc) → [acc]; placeholder; sema refines.
-        ("scan", 2) => Some(Some(Type::List(Box::new(Type::Int)))),
+        // D-ITERTOOLS1=A: scan(seed, f: (acc,T)->acc) → Iter<acc>; placeholder; sema refines.
+        ("scan", 2) => Some(Some(iter_ty(Type::Int))),
         // D-ITER1: position(f) → Int?
         ("position", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         // D-ITER1: min_by/max_by(f: T->K) → T?
@@ -548,7 +629,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             key_span: None,
             value: Box::new(Type::Int),
         })),
-        // D-PARCAPTURE1=D: all adapters share the explicit `para_` surface.
+        // D-PARCAPTURE1=D: parallel adapters stay eager lists.
         ("para_map", 1) => Some(Some(Type::List(Box::new(Type::Int)))), // sema refines V
         ("para_filter", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("para_partition", 1) => Some(Some(partition_ret_ty(inner))),
@@ -562,6 +643,58 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             name: "View".to_string(),
             args: vec![inner.clone()],
         })),
+        _ => None,
+    }
+}
+
+/// D-ITERTOOLS1=A: methods on a lazy `Iter<T>` view.
+/// Adapters return another `Iter`; `to_list`/`collect` and reducers materialize.
+fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        // Explicit materialization.
+        ("to_list" | "collect", 0) => Some(Some(Type::List(Box::new(inner.clone())))),
+        // Lazy adapters / reducers: same surface as lists (minus in-place mutators).
+        ("len", 0) => Some(Some(Type::Int)),
+        ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("sum" | "product", 0) => Some(Some(inner.clone())),
+        ("min" | "max", 0) => Some(Some(Type::Option(Box::new(inner.clone())))),
+        ("map", 1) => Some(Some(iter_ty(Type::Int))),
+        ("filter", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("each", 1) => Some(None),
+        ("find", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
+        ("any" | "all", 1) => Some(Some(Type::Bool)),
+        ("reduce", 2) => Some(Some(Type::Int)),
+        ("take" | "skip" | "step_by", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("dedup", 0) => Some(Some(iter_ty(inner.clone()))),
+        ("chunks" | "windows", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
+        ("flatten", 0) => match inner {
+            Type::List(elem) => Some(Some(iter_ty(*elem.clone()))),
+            _ => Some(Some(iter_ty(Type::Int))),
+        },
+        ("intersperse", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("enumerate", 0) => Some(Some(iter_ty(enumerate_elem_ty(inner)))),
+        ("zip", 1) => Some(Some(iter_ty(zip_elem_ty(inner, &Type::Int)))),
+        ("unzip", 0) => list_method_return(inner, "unzip", 0),
+        ("partition", 1) => Some(Some(partition_ret_ty(inner))),
+        ("take_while" | "skip_while", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("flat_map", 1) => Some(Some(iter_ty(Type::Int))),
+        ("filter_map", 1) => Some(Some(iter_ty(Type::Int))),
+        ("try_collect", 0) => list_method_return(inner, "try_collect", 0),
+        ("scan", 2) => Some(Some(iter_ty(Type::Int))),
+        ("position", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("min_by" | "max_by", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
+        ("fold", 2) => Some(Some(Type::Int)),
+        ("group_by", 1) => Some(Some(Type::Map {
+            key: Box::new(Type::String),
+            key_span: None,
+            value: Box::new(Type::List(Box::new(inner.clone()))),
+        })),
+        ("count_by", 1) => Some(Some(Type::Map {
+            key: Box::new(Type::String),
+            key_span: None,
+            value: Box::new(Type::Int),
+        })),
+        ("join", 1) => Some(Some(Type::String)),
         _ => None,
     }
 }
@@ -629,7 +762,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         // D-STR-AFTER1: first-occurrence substring split; `sep` absent -> the
         // whole original string (mirrors `.replace`'s no-match-is-identity).
         ("after" | "before", 1) => Some(Some(Type::String)),
-        ("split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("split", 1) => Some(Some(iter_ty(Type::String))),
         // c97/D-STRPARSE1: split text into its lines (mirrors `split`).
         ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         ("chars", 0) => Some(Some(Type::List(Box::new(Type::Char)))),
@@ -1200,6 +1333,15 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Named(n) if n == Syntax::TYPE_TYPE_INFO && matches!(method, "implements" | "has_method") => Some(vec![Type::String]),
         Type::Named(n) if n == "FunctionInfo" && method == "reaches_panic" => Some(vec![]),
         Type::Named(n) if n == "EffectInfo" && method == "has" => Some(vec![Type::String]),
+        // D-ITERTOOLS1=A: Iter shares list adapter arg types; materializers take none.
+        Type::Apply { name, args }
+            if name == Syntax::TYPE_ITER && args.len() == 1 && matches!(method, "to_list" | "collect") =>
+        {
+            Some(vec![])
+        }
+        Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+            builtin_method_arg_types(&Type::List(Box::new(args[0].clone())), method)
+        }
         Type::List(inner) => match method {
             "push" | "contains" => Some(vec![(**inner).clone()]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),

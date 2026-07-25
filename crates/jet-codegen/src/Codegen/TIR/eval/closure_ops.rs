@@ -239,6 +239,44 @@ impl EvalCtx<'_> {
                 }
                 Ok(acc)
             }
+            // D-ITERTOOLS1=A: key-selecting reducers (JIT may deopt here; #729 owns native).
+            op @ (TClosureOp::MinBy | TClosureOp::MaxBy) => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("min_by/max_by receiver", self.span()));
+                };
+                let Some(mut best) = items.first().cloned() else {
+                    return Ok(CtValue::None(crate::AST::Type::Named("Any".into())));
+                };
+                let maximum = matches!(op, TClosureOp::MaxBy);
+                let mut best_key = call1(self, best.clone())?;
+                for candidate in items.into_iter().skip(1) {
+                    let candidate_key = call1(self, candidate.clone())?;
+                    let order = cmp(best_key.clone(), candidate_key.clone(), self.span())?;
+                    if (maximum && order != std::cmp::Ordering::Greater)
+                        || (!maximum && order == std::cmp::Ordering::Greater)
+                    {
+                        best = candidate;
+                        best_key = candidate_key;
+                    }
+                }
+                Ok(CtValue::Some(Box::new(best)))
+            }
+            TClosureOp::CountBy => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("count_by receiver", self.span()));
+                };
+                let mut out = std::collections::BTreeMap::new();
+                for item in items {
+                    let key_v = call1(self, item)?;
+                    let key = crate::AST::CtKey::from_value(key_v)
+                        .ok_or_else(|| unsupported("this map key type", self.span()))?;
+                    match out.entry(key).or_insert(CtValue::Int(0)) {
+                        CtValue::Int(n) => *n += 1,
+                        _ => unreachable!(),
+                    }
+                }
+                Ok(CtValue::Map(out))
+            }
             _ => Err(unsupported("closure method variant", self.span())),
         }
     }

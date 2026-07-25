@@ -306,6 +306,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
         Expr::MethodCall {
             receiver,
             method,
+            args,
             resolved_ret,
             ..
         } => {
@@ -314,11 +315,18 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             if let Some(ty) = resolved_ret {
                 return Some(ty.clone());
             }
+            // D-ITERTOOLS1=A: chained adapters (`nums.take(3).to_list()`) must
+            // resolve as `Iter`, not fall through to the list receiver — otherwise
+            // `to_list` lowers as SetToList and rustc sees `.iter()` on JetIter.
+            if let Some(recv_ty) = tir_recv_jet_ty(receiver, env) {
+                if let Some(Some(ret)) =
+                    crate::Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+                {
+                    return Some(ret);
+                }
+            }
             if method == "chars" {
                 return Some(Type::List(Box::new(Type::Char)));
-            }
-            if method == "split" {
-                return Some(Type::List(Box::new(Type::String)));
             }
             // D-DYNARRAY1: `xs.view(a..b).fold(...)` chained with no intermediate
             // binding — resolve the constructed `View<T>`'s element type from the

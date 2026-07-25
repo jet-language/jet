@@ -149,7 +149,10 @@ See `examples/features/types/option_combinators.jet`.
 ## Collections and iterators (D-ITERTOOLS1=A)
 
 Core collection spellings stay explicit: `[T]` for lists, `[K: V]` for the
-default ordered map, and named types for specialized behavior.
+default ordered map, and named types for specialized behavior. Adapter methods
+return a lazy `Iter<T>` view; call `to_list()`, `collect()`, or a reducer
+(`sum`, `fold`, …) to materialize. String `.split` returns `Iter<String>` on
+the same model.
 
 | Type | Constructors | Main methods |
 | --- | --- | --- |
@@ -165,7 +168,8 @@ default ordered map, and named types for specialized behavior.
 | `ByteBuffer` | `ByteBuffer.new()`, `ByteBuffer.from(bytes)` | `write_u8`, `write_u16_le`, `write_u16_be`, `write_u32_le`, `write_u32_be`, `write_u64_le`, `write_u64_be`, `write_bytes`, `to_bytes`, `len`, `is_empty`, `clear` |
 
 Example: `examples/features/collections/iter_tools_audit.jet` covers the
-adapter and specialized-container surface.
+adapter and specialized-container surface. Lazy protocol:
+`examples/features/collections/lazy_iter.jet`.
 
 ---
 

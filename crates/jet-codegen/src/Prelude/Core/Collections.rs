@@ -370,6 +370,32 @@ fn jet_cursor_skip_ws(c: &mut JetCursor) {
     c.pos += skipped;
 }
 // ── D-ITER1: lazy iterator adapter set ───────────────────────────────────────
+// D-ITERTOOLS1=A: Jet surface returns `Iter<T>` (JetIter). Adapters rebuild the
+// underlying Vec today; true iterator fusion is a follow-up polish
+// (ponytail: Vec-backed must-use move view; fuse when capture/'static is free).
+struct JetIter<T>(Vec<T>);
+
+impl<T> JetIter<T> {
+    fn to_list(self) -> Vec<T> {
+        self.0
+    }
+    fn collect(self) -> Vec<T> {
+        self.0
+    }
+}
+
+impl<T> IntoIterator for JetIter<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+fn jet_iter_from_vec<T>(xs: Vec<T>) -> JetIter<T> {
+    JetIter(xs)
+}
+
 // All adapters are allocation-free until terminal — they materialise to Vec<T>
 // only when a terminal method (collect) is needed. For the Jet surface these
 // are the terminal forms (the language is not lazy at the surface); the Rust

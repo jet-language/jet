@@ -1110,6 +1110,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     Type::Apply { name, args } if name == "Stream" && args.len() == 1 => {
                         Some(args[0].clone())
                     }
+                    // D-ITERTOOLS1=A: lazy `Iter<T>` view — element is T.
+                    Type::Apply { name, args }
+                        if name == crate::Syntax::TYPE_ITER && args.len() == 1 =>
+                    {
+                        Some(args[0].clone())
+                    }
                     Type::Named(name) if name == "HttpBodyChunks" => Some(Type::Result {
                         ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
                         err: Box::new(Type::Named("HttpError".to_string())),
@@ -1122,7 +1128,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     _ => None,
                 };
                 let by_value = matches!(&lowered_coll.ty,
-                    Type::Apply { name, .. } if name == "Stream"
+                    Type::Apply { name, .. } if name == "Stream" || name == crate::Syntax::TYPE_ITER
                 ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HttpBodyChunks");
                 if method_kind.is_none() {
                     if let Type::Named(n) = &lowered_coll.ty {

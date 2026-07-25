@@ -11,12 +11,12 @@ fn apply(f: fn(Int) -> Int, x: Int) -> Int {
 
 fn run() {
     nums :: [1, 2, 3]
-    print(nums.map((n: Int) => n * n).len())
+    print(nums.map((n: Int) => n * n).to_list().len())
     total := 0
     nums.each((n: Int) => { total += n })
     print(total)
     print(apply((x: Int) => x + 1, 5))
-    print(nums.filter((n: Int) => n > 1).len())
+    print(nums.filter((n: Int) => n > 1).to_list().len())
     print(nums.any((n: Int) => n == 2))
     print(nums.reduce(0, (acc: Int, n: Int) => acc + n))
 }
@@ -222,12 +222,12 @@ fn iter_adapters_compile() {
     let src = r#"
 fn run() {
     nums := [1, 2, 3, 4, 5]
-    print(nums.take(3))
-    print(nums.skip(2))
-    print(nums.step_by(2))
-    print(nums.dedup())
-    print(nums.take_while((n: Int) => (n < 4)))
-    print(nums.skip_while((n: Int) => (n < 4)))
+    print(nums.take(3).to_list())
+    print(nums.skip(2).to_list())
+    print(nums.step_by(2).to_list())
+    print(nums.dedup().to_list())
+    print(nums.take_while((n: Int) => (n < 4)).to_list())
+    print(nums.skip_while((n: Int) => (n < 4)).to_list())
     sum := nums.fold(0, (acc: Int, n: Int) => (acc + n))
     print(sum)
     pos := nums.position((n: Int) => (n == 3))
@@ -236,7 +236,7 @@ fn run() {
     print(words.min_by((w: String) => w.len()))
     print(words.max_by((w: String) => w.len()))
     nested := [[1, 2], [3, 4]]
-    print(nested.flat_map((xs: [Int]) => xs))
+    print(nested.flat_map((xs: [Int]) => xs).to_list())
 }
 "#;
     let out = jet::compile(src).expect("D-ITER1 adapters should compile");
@@ -244,6 +244,10 @@ fn run() {
     assert!(
         out.rust.contains("jet_list_take"),
         "take should lower to helper"
+    );
+    assert!(
+        out.rust.contains("jet_iter_from_vec"),
+        "lazy adapters should wrap JetIter"
     );
     assert!(
         out.rust.contains("jet_list_skip("),

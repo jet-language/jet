@@ -713,8 +713,10 @@ loops.
 `chunks`, `windows`, `enumerate`, `zip`, `unzip`, `take_while`, `skip_while`,
 `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`,
 `min_by`, `max_by`, `group_by`, `count_by`, `partition`, `flatten`, and
-`intersperse` use one iterator model. Methods return materialized collections
-until the lazy protocol lands; no second adapter spelling is introduced.
+`intersperse` use one iterator model. Adapters return lazy `Iter<T>` views;
+materialize with `to_list`, `collect`, or terminal reducers. String `.split`
+returns the same `Iter<String>`. Unconsumed chains are `#MustUse` (E0419);
+driving a consumed `Iter` twice is use-after-move (E0121).
 
 **D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
 `SortedSet<T>`, ring-buffer `Deque<T>`, `PriorityQueue<T>`, `Lru<K,V>`,
@@ -1331,9 +1333,8 @@ predates this migration — nothing to build). `String.trim()`/`.after(sep)`/
 `.before(sep)` bound to a local return a zero-copy string view instead of an
 owned `String`. Local use remains codegen-invisible; crossing a return or field
 boundary uses D-MEM-VIEWRET1's named, provenance-carrying `View<str>` contract.
-`split` stays eager (`Vec<String>`) — a view-of-views
-list needs S6-scale representation work, named as a deferred gap, not built
-here. **S6 shipped (2026-07-04)**: `Shared<T>` (D-SHARED-API1=A) is a
+`split` later joined the lazy `Iter` model under D-ITERTOOLS1=A (was eager
+`Vec<String>` through S5). **S6 shipped (2026-07-04)**: `Shared<T>` (D-SHARED-API1=A) is a
 lock-guarded shared handle — `Shared.new(x)` constructs (bare type-name call,
 `T` inferred from `x`); `.read(f)`/`.edit(f)` run a closure against a read- or
 write-locked view, the lock scoped to the call only; cloning is always a

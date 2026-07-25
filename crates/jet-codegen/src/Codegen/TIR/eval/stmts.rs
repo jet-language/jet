@@ -490,7 +490,36 @@ impl EvalCtx<'_> {
                     CtValue::None(_) | CtValue::Unit
                 ))
             }
-            TIfCond::IfLet { .. } => Err(unsupported("if-let", self.span())),
+            TIfCond::IfLet { pattern, subj } => {
+                let value = self.eval_expr(subj, scope)?;
+                match &pattern.pattern {
+                    crate::AST::Pattern::Ok { binding, .. } => match value {
+                        CtValue::ResOk(inner) => {
+                            scope.insert(binding.clone(), *inner);
+                            Ok(true)
+                        }
+                        _ => Ok(false),
+                    },
+                    crate::AST::Pattern::Err { binding, .. } => match value {
+                        CtValue::ResErr(inner) => {
+                            scope.insert(binding.clone(), *inner);
+                            Ok(true)
+                        }
+                        _ => Ok(false),
+                    },
+                    crate::AST::Pattern::Present { binding, .. } => match value {
+                        CtValue::Some(inner) => {
+                            scope.insert(binding.clone(), *inner);
+                            Ok(true)
+                        }
+                        _ => Ok(false),
+                    },
+                    crate::AST::Pattern::Absent(_) => {
+                        Ok(matches!(value, CtValue::None(_) | CtValue::Unit))
+                    }
+                    _ => Err(unsupported("if-let pattern", self.span())),
+                }
+            }
             TIfCond::Matches { .. } => Err(unsupported("if-matches", self.span())),
         }
     }
