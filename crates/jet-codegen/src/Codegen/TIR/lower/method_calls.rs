@@ -1081,6 +1081,7 @@ pub(crate) fn lower_method_call(
                 } else {
                     core_call_return_ty(&module, method)
                 };
+                demand_generic_serde_codec(cx, &module, method, &targs, &ty);
                 return TExpr {
                     ty,
                     kind: TExprKind::CoreCall {
@@ -1099,8 +1100,14 @@ pub(crate) fn lower_method_call(
             {
                 let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
                 let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
+                let ty = if crate::Sema::is_polymorphic_core_special(&submodule, method) {
+                    resolved_ret.cloned().unwrap_or_else(|| core_call_return_ty(&submodule, method))
+                } else {
+                    core_call_return_ty(&submodule, method)
+                };
+                demand_generic_serde_codec(cx, &submodule, method, &targs, &ty);
                 return TExpr {
-                    ty: core_call_return_ty(&submodule, method),
+                    ty,
                     kind: TExprKind::CoreCall {
                         module: submodule,
                         method: method.to_string(),
@@ -2501,10 +2508,17 @@ pub(crate) fn lower_method_call(
     }
     if let Some(handle) = recv_type {
         if handle == "__SerdeEncode__" && method == "encode" && args.is_empty() {
+            let recv = lower_expr(receiver, cx, env);
+            if matches!(&recv.ty, Type::Apply { .. }) {
+                cx.jit_method_calls.borrow_mut().insert(
+                    format!("{}::encode", recv.ty.name()),
+                    (recv.ty.clone(), "encode".to_string()),
+                );
+            }
             return TExpr {
                 ty: Type::Named(Syntax::TYPE_DATA.to_string()),
                 kind: TExprKind::HandleMethod {
-                    recv: Box::new(lower_expr(receiver, cx, env)),
+                    recv: Box::new(recv),
                     op: THandleOp::SerdeEncode,
                     args: Vec::new(),
                 },
@@ -2515,6 +2529,12 @@ pub(crate) fn lower_method_call(
             && args.is_empty()
         {
             if let Some(Type::Result { ok, .. }) = resolved_ret {
+                if matches!(ok.as_ref(), Type::Apply { .. }) {
+                    cx.jit_method_calls.borrow_mut().insert(
+                        format!("{}::decode", ok.name()),
+                        ((**ok).clone(), "decode".to_string()),
+                    );
+                }
                 return TExpr {
                     ty: resolved_ret.cloned().unwrap_or_else(unit_type),
                     kind: TExprKind::HandleMethod {
@@ -3496,5 +3516,46 @@ pub(crate) fn lower_method_call(
             args: targs,
             operator_line: None,
         },
+    }
+}
+
+/// Demand monomorphized `T::encode` / `T::decode` when encoding core calls touch
+/// a generic Apply type (JIT looks up `Wrap<Int>::encode`).
+fn demand_generic_serde_codec(
+    cx: &Cx,
+    module: &str,
+    method: &str,
+    args: &[TExpr],
+    ret_ty: &Type,
+) {
+    let encoding = matches!(
+        module,
+        "core.encoding.json"
+            | "core.encoding.toml"
+            | "core.encoding.yaml"
+            | "core.encoding.csv"
+    );
+    if !encoding {
+        return;
+    }
+    if matches!(method, "to_string" | "to_string_pretty") {
+        if let Some(arg) = args.first() {
+            if matches!(&arg.ty, Type::Apply { .. }) {
+                cx.jit_method_calls.borrow_mut().insert(
+                    format!("{}::encode", arg.ty.name()),
+                    (arg.ty.clone(), "encode".to_string()),
+                );
+            }
+        }
+    }
+    if method == "decode" {
+        if let Type::Result { ok, .. } = ret_ty {
+            if matches!(ok.as_ref(), Type::Apply { .. }) {
+                cx.jit_method_calls.borrow_mut().insert(
+                    format!("{}::decode", ok.name()),
+                    ((**ok).clone(), "decode".to_string()),
+                );
+            }
+        }
     }
 }

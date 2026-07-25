@@ -314,8 +314,23 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         } => {
             if module == "core.text" {
                 return matches!(args.as_slice(), [arg]
-                    if matches!(method.as_str(), "lower" | "upper" | "trim")
-                        && matches!(&arg.ty, Type::String)
+                    if matches!(
+                        method.as_str(),
+                        "lower" | "upper" | "trim" | "scalar_count" | "byte_count"
+                    ) && matches!(&arg.ty, Type::String)
+                        && resident_safe_expr(arg, callees));
+            }
+            if module == "core.text.unicode" {
+                return matches!(args.as_slice(), [arg]
+                    if matches!(
+                        method.as_str(),
+                        "scalar_count"
+                            | "byte_count"
+                            | "is_ascii"
+                            | "lower"
+                            | "upper"
+                            | "scalars"
+                    ) && matches!(&arg.ty, Type::String)
                         && resident_safe_expr(arg, callees));
             }
             if module == "core.io" && method == "args" {

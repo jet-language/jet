@@ -324,6 +324,36 @@ extern "C" fn jet_jit_str_len(id: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_str_byte_len(id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        rt.heap
+            .get_string(id)
+            .map(|s| s.len() as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_str_is_ascii(id: i64) -> i8 {
+    with_runtime_result(0, |rt| {
+        i8::from(rt.heap.get_string(id).map(|s| s.is_ascii()).unwrap_or(false))
+    })
+}
+
+/// `core.text.unicode.scalars` — list of one-scalar strings (AOT `Vec<String>`).
+extern "C" fn jet_jit_str_scalar_strings(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let list = rt.heap.alloc_empty_list();
+        for ch in text.chars() {
+            let sid = rt.heap.alloc_string(ch.to_string());
+            rt.heap
+                .list_push_int(list, sid)
+                .expect("jit str scalar strings: bad list handle");
+        }
+        list
+    })
+}
+
 extern "C" fn jet_jit_str_clone(id: i64) -> i64 {
     with_runtime_result(0, |rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
@@ -914,6 +944,8 @@ pub(crate) struct HostFns {
     pub(crate) str_contains: FuncId,
     pub(crate) str_clone: FuncId,
     pub(crate) str_len: FuncId,
+    pub(crate) str_byte_len: FuncId,
+    pub(crate) str_is_ascii: FuncId,
     pub(crate) str_trim: FuncId,
     pub(crate) str_to_upper: FuncId,
     pub(crate) str_to_lower: FuncId,
@@ -921,6 +953,7 @@ pub(crate) struct HostFns {
     pub(crate) str_lines: FuncId,
     pub(crate) str_split: FuncId,
     pub(crate) str_chars: FuncId,
+    pub(crate) str_scalar_strings: FuncId,
     pub(crate) str_after: FuncId,
     pub(crate) str_before: FuncId,
     pub(crate) str_slice: FuncId,
@@ -1005,6 +1038,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_contains", jet_jit_str_contains as *const u8);
     builder.symbol("jet_jit_str_clone", jet_jit_str_clone as *const u8);
     builder.symbol("jet_jit_str_len", jet_jit_str_len as *const u8);
+    builder.symbol("jet_jit_str_byte_len", jet_jit_str_byte_len as *const u8);
+    builder.symbol("jet_jit_str_is_ascii", jet_jit_str_is_ascii as *const u8);
     builder.symbol("jet_jit_str_trim", jet_jit_str_trim as *const u8);
     builder.symbol("jet_jit_str_to_upper", jet_jit_str_to_upper as *const u8);
     builder.symbol("jet_jit_str_to_lower", jet_jit_str_to_lower as *const u8);
@@ -1012,6 +1047,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_lines", jet_jit_str_lines as *const u8);
     builder.symbol("jet_jit_str_split", jet_jit_str_split as *const u8);
     builder.symbol("jet_jit_str_chars", jet_jit_str_chars as *const u8);
+    builder.symbol("jet_jit_str_scalar_strings", jet_jit_str_scalar_strings as *const u8);
     builder.symbol("jet_jit_str_after", jet_jit_str_after as *const u8);
     builder.symbol("jet_jit_str_before", jet_jit_str_before as *const u8);
     builder.symbol("jet_jit_str_slice", jet_jit_str_slice as *const u8);
@@ -1193,6 +1229,9 @@ fn declare_host_fns(
     let mut sig_str_unary_i64 = Signature::new(cc);
     sig_str_unary_i64.params.push(AbiParam::new(types::I64));
     sig_str_unary_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_str_unary_i8 = Signature::new(cc);
+    sig_str_unary_i8.params.push(AbiParam::new(types::I64));
+    sig_str_unary_i8.returns.push(AbiParam::new(types::I8));
     let mut sig_str_replace = Signature::new(cc);
     sig_str_replace.params.push(AbiParam::new(types::I64));
     sig_str_replace.params.push(AbiParam::new(types::I64));
@@ -1352,6 +1391,8 @@ fn declare_host_fns(
         str_contains: import("jet_jit_str_contains", &sig_str_eq)?,
         str_clone: import("jet_jit_str_clone", &sig_str_unary_i64)?,
         str_len: import("jet_jit_str_len", &sig_str_unary_i64)?,
+        str_byte_len: import("jet_jit_str_byte_len", &sig_str_unary_i64)?,
+        str_is_ascii: import("jet_jit_str_is_ascii", &sig_str_unary_i8)?,
         str_trim: import("jet_jit_str_trim", &sig_str_unary_i64)?,
         str_to_upper: import("jet_jit_str_to_upper", &sig_str_unary_i64)?,
         str_to_lower: import("jet_jit_str_to_lower", &sig_str_unary_i64)?,
@@ -1359,6 +1400,7 @@ fn declare_host_fns(
         str_lines: import("jet_jit_str_lines", &sig_str_unary_i64)?,
         str_split: import("jet_jit_str_split", &sig_str_binary_i64)?,
         str_chars: import("jet_jit_str_chars", &sig_str_unary_i64)?,
+        str_scalar_strings: import("jet_jit_str_scalar_strings", &sig_str_unary_i64)?,
         str_after: import("jet_jit_str_after", &sig_str_binary_i64)?,
         str_before: import("jet_jit_str_before", &sig_str_binary_i64)?,
         str_slice: import("jet_jit_str_slice", &sig_str_replace)?,

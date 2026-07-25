@@ -437,8 +437,10 @@ impl LowerCtx<'_, '_> {
             Type::List(elem) | Type::FixedList { elem, .. } => {
                 self.lower_serde_encode_list(val, elem)
             }
-            Type::Named(name) => {
-                let key = format!("{name}::encode");
+            Type::Named(_) | Type::Apply { .. } => {
+                let key = self
+                    .serde_codec_key(&ty, "encode")
+                    .ok_or_else(|| format!("jit SerdeEncode unsupported: {ty:?}"))?;
                 let func_id = self
                     .func_ids
                     .get(&key)
@@ -452,6 +454,19 @@ impl LowerCtx<'_, '_> {
             }
             other => Err(format!("jit SerdeEncode unsupported: {other:?}")),
         }
+    }
+
+    /// Monomorphized Codable methods are named `Wrap<Int>::encode`; fall back to
+    /// `Wrap::encode` when only the base owner was lowered.
+    fn serde_codec_key(&self, ty: &Type, method: &str) -> Option<String> {
+        let base = user_type_name(ty)?;
+        if matches!(ty, Type::Apply { .. }) {
+            let concrete = format!("{}::{method}", ty.name());
+            if self.func_ids.contains_key(&concrete) {
+                return Some(concrete);
+            }
+        }
+        Some(format!("{base}::{method}"))
     }
 
     fn lower_serde_encode_list(&mut self, list: Value, elem_ty: &Type) -> Result<Value, String> {
@@ -568,8 +583,10 @@ impl LowerCtx<'_, '_> {
             Type::List(elem) | Type::FixedList { elem, .. } => {
                 self.lower_datatree_decode_list(tree, elem)
             }
-            Type::Named(name) => {
-                let key = format!("{name}::decode");
+            Type::Named(_) | Type::Apply { .. } => {
+                let key = self
+                    .serde_codec_key(&target, "decode")
+                    .ok_or_else(|| format!("jit DataTreeDecode unsupported: {target:?}"))?;
                 let func_id = self
                     .func_ids
                     .get(&key)
@@ -2800,23 +2817,27 @@ impl LowerCtx<'_, '_> {
         })
     }
 
-    /// `TCallArg` wrapper flags (`mut_borrow`/`clone`/`arc_clone`/`fn_coerce`/
-    /// `widen_to_vec`) are all AOT-only borrow/coercion machinery the JIT's
-    /// value model (bare Cranelift `Value`, no borrow tracking) cannot express;
-    /// bail rather than silently drop the wrapper's semantics.
+    /// `TCallArg` wrapper flags (`mut_borrow`/`clone`/`arc_clone`/`fn_coerce`)
+    /// are AOT-only borrow/coercion machinery the JIT's value model (bare Cranelift
+    /// `Value`, no borrow tracking) cannot express; bail rather than silently drop
+    /// the wrapper's semantics. `widen_to_vec` is `[T#N]` → `[T]`: JIT stores both
+    /// as arena list handles, so clone matches AOT `.to_vec()`.
     fn lower_call_arg(&mut self, arg: &TCallArg) -> Result<Value, String> {
-        if arg.mut_borrow
-            || arg.clone
-            || arg.arc_clone
-            || arg.fn_coerce.is_some()
-            || arg.widen_to_vec
-        {
+        if arg.mut_borrow || arg.clone || arg.arc_clone || arg.fn_coerce.is_some() {
             return Err("jit call arg wrapper unsupported".to_string());
         }
         if arg.borrow && !jit_value_type(&arg.value.ty) {
             return Err("jit call arg borrow unsupported".to_string());
         }
-        self.lower_expr(&arg.value)
+        let val = self.lower_expr(&arg.value)?;
+        if arg.widen_to_vec {
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.list_clone, self.b.func);
+            let call = self.b.ins().call(host_ref, &[val]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        Ok(val)
     }
 
     /// `TStrPart` (`TIR/mod.rs`) is exhaustive here inline (`Lit`/`Interp`), not
@@ -4493,7 +4514,29 @@ impl LowerCtx<'_, '_> {
                         "lower" => self.host.str_to_lower,
                         "upper" => self.host.str_to_upper,
                         "trim" => self.host.str_trim,
+                        "scalar_count" => self.host.str_len,
+                        "byte_count" => self.host.str_byte_len,
                         _ => return Err(format!("jit core.text call unsupported: {method}")),
+                    };
+                    let text = self.lower_expr(&args[0])?;
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[text]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.text.unicode" && args.len() == 1 {
+                    let host_id = match method.as_str() {
+                        // str_len already counts Unicode scalars via jet_rt.
+                        "scalar_count" => self.host.str_len,
+                        "byte_count" => self.host.str_byte_len,
+                        "is_ascii" => self.host.str_is_ascii,
+                        "lower" => self.host.str_to_lower,
+                        "upper" => self.host.str_to_upper,
+                        "scalars" => self.host.str_scalar_strings,
+                        _ => {
+                            return Err(format!(
+                                "jit core.text.unicode call unsupported: {method}"
+                            ))
+                        }
                     };
                     let text = self.lower_expr(&args[0])?;
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
@@ -7455,7 +7498,7 @@ impl LowerCtx<'_, '_> {
                     }
                 }
                 let host_id = match &print_ty {
-                    Type::Int => self.host.print_i64,
+                    Type::Int | Type::IntN { .. } => self.host.print_i64,
                     Type::String => self.host.print_str,
                     Type::Float => self.host.print_f64,
                     Type::Bool => self.host.print_bool,

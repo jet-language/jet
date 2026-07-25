@@ -310,8 +310,97 @@ impl TPlace {
     }
 }
 
+fn demand_serde_codec(
+    demands: &mut std::collections::BTreeMap<String, (Type, String)>,
+    ty: &Type,
+    method: &str,
+) {
+    if matches!(ty, Type::Apply { .. }) {
+        demands.insert(
+            format!("{}::{method}", ty.name()),
+            (ty.clone(), method.to_string()),
+        );
+    }
+}
+
+/// Seed monomorphize demand for generic Codable from encoding core calls and
+/// SerdeEncode/DataTreeDecode ops already present in lowered bodies.
+fn collect_serde_codec_demands(
+    funcs: &[TFunc],
+    demands: &mut std::collections::BTreeMap<String, (Type, String)>,
+) {
+    fn walk_expr(expr: &TExpr, demands: &mut std::collections::BTreeMap<String, (Type, String)>) {
+        match &expr.kind {
+            TExprKind::Print(inner) | TExprKind::DistinctCtor { arg: inner, .. } => {
+                walk_expr(inner, demands);
+            }
+            TExprKind::Call { args, .. } => {
+                for a in args {
+                    walk_expr(&a.value, demands);
+                }
+            }
+            TExprKind::HandleMethod { recv, op, args } => {
+                walk_expr(recv, demands);
+                for a in args {
+                    walk_expr(a, demands);
+                }
+                match op {
+                    THandleOp::SerdeEncode => demand_serde_codec(demands, &recv.ty, "encode"),
+                    THandleOp::DataTreeDecode(target) => {
+                        demand_serde_codec(demands, target, "decode")
+                    }
+                    _ => {}
+                }
+            }
+            TExprKind::CoreCall {
+                module,
+                method,
+                args,
+                ..
+            } => {
+                for a in args {
+                    walk_expr(a, demands);
+                }
+                let encoding = matches!(
+                    module.as_str(),
+                    "core.encoding.json"
+                        | "core.encoding.toml"
+                        | "core.encoding.yaml"
+                        | "core.encoding.csv"
+                );
+                if encoding && matches!(method.as_str(), "to_string" | "to_string_pretty") {
+                    if let Some(arg) = args.first() {
+                        demand_serde_codec(demands, &arg.ty, "encode");
+                    }
+                }
+                if encoding && method == "decode" {
+                    if let Type::Result { ok, .. } = &expr.ty {
+                        demand_serde_codec(demands, ok, "decode");
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    fn walk_stmt(stmt: &TStmt, demands: &mut std::collections::BTreeMap<String, (Type, String)>) {
+        match stmt {
+            TStmt::ExprStmt(e) | TStmt::Return(Some(e)) => walk_expr(e, demands),
+            TStmt::Let { init, .. } | TStmt::Assign { value: init, .. } => {
+                walk_expr(init, demands)
+            }
+            _ => {}
+        }
+    }
+    for func in funcs {
+        for stmt in &func.body {
+            walk_stmt(stmt, demands);
+        }
+    }
+}
+
 fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc>) -> Option<()> {
     let mut pending = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
+    collect_serde_codec_demands(funcs, &mut pending);
     let mut processed = std::collections::BTreeSet::new();
     while let Some((key, (owner_ty, method_name))) = pending.pop_first() {
         if !processed.insert(key) {
@@ -341,26 +430,57 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
             .map(|(param, arg)| (param.name.clone(), arg.clone()))
             .collect();
         for item in items {
-            let method = match item {
+            let (method, trait_name) = match item {
                 Item::Struct(def) if def.name == *name => {
-                    def.methods.iter().find(|method| method.name == method_name)
+                    match def.methods.iter().find(|method| method.name == method_name) {
+                        Some(method) => (method, None),
+                        None => continue,
+                    }
                 }
-                Item::Impl(imp) if imp.type_name == *name && imp.trait_name.is_none() => {
-                    imp.methods.iter().find(|method| method.name == method_name)
+                Item::Impl(imp) if imp.type_name == *name => {
+                    let Some(method) = imp.methods.iter().find(|method| method.name == method_name)
+                    else {
+                        continue;
+                    };
+                    match &imp.trait_name {
+                        None => (method, None),
+                        Some(t)
+                            if t == crate::Generics::ENCODE || t == crate::Generics::DECODE =>
+                        {
+                            (method, Some(t.as_str()))
+                        }
+                        Some(_) => continue,
+                    }
                 }
-                _ => None,
+                _ => continue,
             };
-            let Some(method) = method else {
-                continue;
+            let mut specialized = crate::Sema::specialize_function_types(method.clone(), &subst);
+            // Subst already rewrote the binder; drop residual type params so the
+            // mono body is admitted as a concrete JIT function.
+            specialized.type_params.clear();
+            let mut lowered = if let Some(trait_name) = trait_name {
+                if !tir_covers_trait_method(&specialized, name, cx, trait_name) {
+                    continue;
+                }
+                // Bind `self` as `Wrap<Int>` so field reads substitute `T` → arg.
+                // Encode is an ordinary instance method; Decode stays on the static
+                // trait-method ABI (`tree` only, no receiver).
+                if trait_name == crate::Generics::ENCODE
+                    && matches!(&owner_ty, Type::Apply { .. })
+                {
+                    lower_method_for_owner(&specialized, name, owner_ty.clone(), cx)
+                } else {
+                    lower_trait_method(&specialized, name, cx, trait_name)
+                }
+            } else {
+                if !tir_covers_method(&specialized, name, cx) {
+                    continue;
+                }
+                lower_method_for_owner(&specialized, name, owner_ty.clone(), cx)
             };
-            let specialized = crate::Sema::specialize_function_types(method.clone(), &subst);
-            if !specialized.type_params.is_empty()
-                || !tir_covers_method(&specialized, name, cx)
-            {
-                continue;
-            }
-            let mut lowered = lower_method_for_owner(&specialized, name, owner_ty.clone(), cx);
             lowered.name = format!("{}::{}", owner_ty.name(), method.name);
+            // Nested SerdeEncode/DataTreeDecode inside this body may demand more.
+            collect_serde_codec_demands(std::slice::from_ref(&lowered), &mut pending);
             funcs.push(lowered);
         }
         for (key, call) in std::mem::take(&mut *cx.jit_method_calls.borrow_mut()) {
