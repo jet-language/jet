@@ -1,0 +1,44 @@
+// #709 / #237 C4: flagship typed-data analysis on one core.data path.
+use core.data as data
+
+#Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+#Codable
+struct Owner {
+    team: String
+    owner: String
+}
+
+fn run() {
+    tickets_csv :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0\nTools,7.0"
+    owners_csv :: "team,owner\nCore,Ada\nTools,Grace\nDocs,Lin"
+    tickets :: data.csv<Ticket>(tickets_csv) ?? panic("tickets")
+    owners :: data.csv<Owner>(owners_csv) ?? panic("owners")
+
+    focused :: data.filter(tickets, (t) => t.minutes >= 4.0)
+    sorted :: data.sort_by(focused, (t) => t.team) ?? panic("sort")
+    joined :: data.inner_join(sorted, owners, (t) => t.team, (o) => o.team) ?? panic("join")
+    groups :: data.group_mean(sorted, (t) => t.team, (t) => t.minutes) ?? panic("group")
+    values :: [4.0, 5.0, 8.0, 3.0, 7.0]
+    summary :: data.describe(values) ?? panic("describe")
+    chart :: data.bar_text(groups) ?? panic("bar")
+    svg :: data.bar_svg(groups) ?? panic("svg")
+    status :: data.status()
+
+    print("tickets: {data.count(tickets)}")
+    print("focused: {data.count(focused)}")
+    loop pair; joined {
+        print("owned: {pair.left.team} {pair.left.minutes} -> {pair.right.owner}")
+    }
+    loop g; groups {
+        print("mean: {g.key} count={g.count} mean={g.mean}")
+    }
+    print("describe: count={summary.count} mean={summary.mean} median={summary.median}")
+    print(chart)
+    print("svg bytes: {svg.len()}")
+    print("status: {status[0].step} {status[0].path}")
+}

@@ -1694,6 +1694,15 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 terminal errors latch, and complete rows already returned stay valid. Edition
 2026 keeps the prior non-fallible signatures frozen.
 
+Flagship proof for this slice is `examples/features/tooling/data_analysis.jet`
+(CSV ingest → filter → sort → join → group → stats → plot → status). The
+hostile corpus is `examples/features/tooling/data_hostile.jet`: empty and
+missing series, duplicate-key joins, delimiter-like pivot keys, stable sort
+ties, non-finite numerics, invalid quantiles and windows, SVG-escaped plot
+labels, and tightened `DataLimits` failures. Both ship golden output under
+`examples/features/expected/tooling/` and AOT coverage in
+`tests/data_hostile.rs`.
+
 `Table<T>` and `LazyFrame<T>` keep typed rows; `Series<T>` keeps typed values.
 `data.schema` returns `[DataColumn]` with `.name` and `.type_name` for each
 column of a table/lazy row type, or a single `value` column for a series element
