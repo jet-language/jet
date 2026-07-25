@@ -701,6 +701,11 @@ fn repl_net_style_values_exact_transcript() {
 }
 
 #[test]
+fn repl_crypto_expert_ports_exact_transcript() {
+    run_transcript_file_strict(include_str!("repl/crypto_expert_ports.txt"));
+}
+
+#[test]
 fn repl_crypto_expert_exact_transcript() {
     run_transcript_file_strict(include_str!("repl/crypto_expert.txt"));
 }

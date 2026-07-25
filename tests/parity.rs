@@ -62,8 +62,9 @@ const EXTRACTOR_ARTIFACTS: &[(&str, &str)] = &[
 /// broad module boundary and the asserted pure-pending count stayed zero
 /// while these rows were still open (card #721 / #392 criterion 3).
 /// Closed by #722: crypto.expert AEAD/sign/argon2id and encoding.xml projection
-/// ports. Remaining PurePending rows are View/ViewMut.join (value-surface string
-/// JoinSep; deferred to #743 itertools coordination — not listed here).
+/// ports. #722-owned PurePending remainder is View/ViewMut.join (string JoinSep;
+/// #743 coordination). Separately, D-ITERTOOLS1 discovery currently lists Iter.*
+/// rows as PurePending until #743 inventory closeout — not #722 crypto/xml gaps.
 const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[];
 
 /// Calls with a production-compiled foundation that must remain private until
@@ -1225,7 +1226,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (512, 151, 488, 57));
+    assert_eq!((fixed, direct_static, value, bespoke), (512, 151, 528, 57));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1651,8 +1652,8 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             "{module}.{method} must remain PurePending (not swallowed by a module boundary)"
         );
     }
-    // #743 owns View/ViewMut.join (string JoinSep); leave PurePending until
-    // itertools protocol lands — do not pretend a partial port is Covered.
+    // #743 owns View/ViewMut.join (string JoinSep) and Iter.* inventory closeout.
+    // Leave join PurePending — do not pretend a partial port is Covered.
     assert_eq!(
         record(&records, Surface::Value, "View", "join").class,
         Class::PurePending,
@@ -1675,10 +1676,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    // #722 closed the twelve KNOWN_OPEN_GAPS ports; remaining PurePending is
-    // View/ViewMut.join only (#743). Secret.from_bytes is Covered (needed by
-    // argon2id); a few ambient Boundary rows also moved once exact arms landed.
-    assert_eq!((records.len(), covered, pending, boundaries), (1_208, 859, 2, 347));
+    // #722 closed KNOWN_OPEN_GAPS (crypto.expert + encoding.xml). Remaining
+    // PurePending: View/ViewMut.join + Iter.* discovery rows (#743 follow-through).
+    assert_eq!((records.len(), covered, pending, boundaries), (1_248, 859, 42, 347));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1686,7 +1686,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        17762160720318830830,
+        15252890080749693386,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
