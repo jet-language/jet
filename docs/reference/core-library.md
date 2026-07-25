@@ -470,14 +470,6 @@ Server surface:
 | `server.static_file(path, mime)` / `.static_file_range(req, path, mime)` | `HttpSrvResp ? String` | Static file response, with Range support |
 | `server.access_log(req, status)` | `String` | Stable access-log line |
 | `server.request_id(mux)` | nothing | Install D-HTTP-SERVER2 built-in `request_id` middleware on `mux` |
-| `server.mux_handler(mux)` | `HttpHandler` | Treat a mux as a Handler for middleware composition |
-| `server.static_files(root)` | `HttpHandler` | Traversal-safe static file Handler for a directory root |
-| `middleware.timeout(duration, handler)` | `HttpHandler` | Handler wrapper with scheduler cancellation deadline |
-| `middleware.body_limit(bytes, handler)` | `HttpHandler` | Reject oversize bodies before the inner handler |
-| `middleware.cors_policy(origin)` | `HttpCorsPolicy` | Build an explicit CORS allow-origin policy |
-| `middleware.cors(policy, handler)` | `HttpHandler` | CORS preflight and response decoration |
-| `middleware.compress(.Gzip, handler)` | `HttpHandler` | Gzip response encoding when accepted |
-| `middleware.access_log(handler)` | `HttpHandler` | Emit structured access logs via `core.log` |
 | `req.method()` / `.path()` / `.param(name)` / `.header(name)` / `.body()` / `.body_len()` / `.under_limit(max)` | mixed | Inspect request data and enforce body limits |
 | `req.trailers()` | `HttpHeaders ? HttpError` | Read ordered request trailers after Body reaches EOF; returns empty headers when none were sent |
 
@@ -493,11 +485,11 @@ Card 301 audit state:
 | Middleware engine | Partial: the one Handler wrapper chain is declaration-order outermost-first, supports request/response mutation and short-circuiting, and runs routed responses plus automatic 400/404/405 and redacted 500 recovery responses through the same boundary. Each composed layer is total: handler errors/panics and middleware factory/runtime errors/panics become bounded responses that reached outer wrappers can observe. An outer short-circuit does not run inner middleware. The boundary is shared by plaintext pipelines and TLS-backed HTTP/1.1 or HTTP/2. The real Jet AOT example is executable; the dev/JIT status remains listed in `tests/jit_gaps.txt`. |
 | Built-in `request_id` middleware | Shipped on the approved surface as an ordinary declaration-ordered Handler wrapper: `server.request_id(mux)` preserves one 1–128-byte visible-ASCII inbound `x-request-id` or assigns a fresh bounded ID, exposes it to access events, and correlates router and recovery responses that reach its layer unless the response already chose one. Plaintext and TLS-backed HTTP/1.1 or HTTP/2 share the same wrapper. |
 | Built-in `recover` middleware | Partial: the shared dispatch boundary contains handler and middleware factory/runtime failures and maps them to a redacted internal response on every shipped transport. A separately installable `recover` wrapper and incident publication policy have no approved public spelling yet. |
-| Built-in `timeout` / `body_limit` middleware | Shipped: `middleware.timeout(Duration, handler)` and `middleware.body_limit(bytes, handler)` are ordinary Handler wrappers. Timeout runs the inner handler on the task scheduler with `JetTaskControl` cancellation (no detached worker thread) and returns 504 when the budget expires. Body limit rejects oversize declared bodies with `HttpError::BodyTooLarge` before the inner handler runs. |
-| Built-in CORS middleware | Shipped: `middleware.cors_policy(origin)` builds an explicit `HttpCorsPolicy`; `middleware.cors(policy, handler)` answers OPTIONS preflight and decorates matching origins on ordinary responses. No permissive ambient CORS fallback. |
-| Built-in compression middleware | Shipped: `middleware.compress(.Gzip, handler)` gzip-encodes bounded text/bytes responses when `Accept-Encoding` includes `gzip`, using the native std-only gzip stored-block encoder. |
-| Built-in access-log middleware | Shipped: `middleware.access_log(handler)` emits a structured `core.log` info line with request id, method, redacted path, route template, status, and duration after the inner handler returns. The compatibility `server.access_log(req, status)` string helper remains for query-free snapshots. |
-| Built-in `static_files` handler | Shipped: `server.static_files(root)` returns a traversal-safe GET/HEAD Handler with `index.html`, conditional requests, and one byte range over the existing static file engine. Legacy `static_file` / `static_file_range` helpers remain. |
+| Built-in `timeout` / `body_limit` middleware | Open: server transport deadlines and the default 1 MiB framing cap are shipped, but they are not Handler wrappers. Timeout needs task cancellation rather than a detached worker, and route-specific limit/policy spellings remain owner-gated. |
+| Built-in CORS middleware | Open: D-HTTP-SERVER2 requires an explicit policy, but the policy type, defaults, preflight behavior, and installation spelling remain owner-gated; there is no permissive ambient CORS fallback. |
+| Built-in compression middleware | Open: response compression policy and public spelling are not implemented in this tranche; native request gzip decoding is a separate transport feature described below. |
+| Built-in access-log middleware | Partial: `server.access_log(req, status)` remains a query-free compatibility string, while the internal typed event includes request ID, route template, status, bytes, duration, peer, protocol, and TLS without authorization, cookies, body, or query. The ordinary Handler wrapper cannot truthfully know final streamed wire bytes; core.log emission and the writer-completion hook remain open, and no new public wrapper spelling is claimed. |
+| Built-in `static_files` handler | Partial: traversal-safe file identity, MIME, conditional requests, GET/HEAD, and one byte range are implemented by the existing `static_file` / `static_file_range` compatibility helpers. The ratified `static_files(root)` Handler constructor, index/symlink policy types, and exact public spelling remain owner-gated. |
 | Bounded hostile request parsing | Partial: HTTP/1.1 incrementally frames and dechunks octets (including extensions), preserves pipelined boundaries, and caps the decoded body at 1 MiB plus 32 KiB of chunk metadata and trailers. The canonical transport request retains declared trailers in order after the body drains; undeclared, forbidden, malformed, folded, excessive, or non-UTF-8 trailers fail closed. The parser also rejects malformed/truncated chunks, non-HTTP header whitespace/control values, multiple/unsupported transfer codings, oversized headers/bodies, ambiguous Content-Length, Content-Length with Transfer-Encoding, folded headers, and malformed framing. Plaintext handlers receive the shared byte-native Body without an eager compatibility buffer; gzip decoding and the TLS bridge still buffer a bounded request before dispatch. |
 | Request method | Shipped: standard and extension methods preserve their case and route case-sensitively; only exact uppercase `GET`, `HEAD`, and `OPTIONS` receive those standard server semantics, and `Allow` preserves registered extension-method case. Methods must be one nonempty HTTP token; separators, controls, whitespace, and non-ASCII bytes fail with 400 and close before body permission or dispatch. |
 | Request target and Host authority | Partial: origin-form and HTTP(S) absolute-form share strict raw path/query validation and route through the same path; exact `OPTIONS *` uses automatic server-wide `Allow` through the ordinary middleware chain without route-handler dispatch. Absolute authority must match Host after case, IPv6, percent-hex, and default-port normalization. CONNECT uses authority-form only: the request target is a Host-matching authority (exact port identity, no scheme default), handlers see the normalized authority in `path`, and routing matches `/{authority}` patterns such as `/:authority`. HTTP/1.1 requires exactly one valid Host, while HTTP/1.0 may omit it; malformed escapes, illegal raw URI characters, mismatch, userinfo, fragments, unsupported target forms, non-OPTIONS asterisk-form, non-CONNECT authority-form, CONNECT origin/absolute/asterisk forms, and malformed or ambiguous authorities fail with 400 and close before dispatch. HTTP/2 CONNECT omits `:scheme` and `:path`, requires `:authority`, shares the same Host-matching normalization and `/{authority}` routing, and rejects CONNECT with `:path`/`:scheme`, missing or malformed `:authority`, or Host mismatch before dispatch. |
@@ -511,11 +503,10 @@ Card 301 audit state:
 | Transparent Content-Encoding decoding | Partial across both facets: the native client advertises and decodes gzip by default, hides decoded Content-Encoding/Length while retaining `raw_content_encoding()`, supports `.raw_encoding()`, and fails closed on unsupported encodings (exact `http_client_law`). Plaintext and TLS HTTP/1.x server requests decode native gzip after transfer framing, remove the stale Content-Encoding/Length view, reject unsupported coding with 415 and malformed gzip with 400, and cap encoded plus decoded bodies at the server limit with 413. HTTP/2 request decoding and response compression middleware remain open. |
 | Graceful shutdown | Shipped for HTTP/1.x and HTTP/2 over cleartext or TLS: `Server.bind`/`serve`/`shutdown(grace)` stop accepts, send HTTP/2 GOAWAY with the accepted last-stream id, drain active work until grace, cancel stragglers, refuse new streams/requests (including TLS keep-alive reuse), and return bounded report counts |
 | Pooling and HTTP/2 | Shipped across both facets: shared native `Client` pools HTTP/1.1 keepalive after drained bodies and multiplexed HTTP/2 sessions (ALPN plus explicit h2c); concurrent streams open without holding the connection mutex across HEADERS waits, with exact `http_client_law` interop coverage for reuse, hostile HPACK, and TLS ALPN. Native HTTP/2 server serving runs over cleartext preface and rustls ALPN with flow control and graceful GOAWAY drain. |
-| WebSocket | Shipped in standalone `core.ws` (D-WS1=B): client `connect` / server `upgrade`, live echo, hostile handshake fail-closed, and cancellation-safe close are covered by `tests/ws_law.rs` plus `examples/features/net/ws_echo.jet`. WebSocket APIs are not exported from `core.http`. |
+| WebSocket | Ratified as standalone `core.ws` (D-WS1=B); implementation and interoperability proof remain open |
 
-Examples: `examples/features/net/http_rest_service.jet`,
-`examples/features/net/http_server_trailers.jet`, and
-`examples/features/net/ws_echo.jet`.
+Examples: `examples/features/net/http_rest_service.jet` and
+`examples/features/net/http_server_trailers.jet`.
 
 ### `core.crypto` — safe envelopes and expert primitives
 
@@ -1595,7 +1586,7 @@ test vectors, and edition migrations are normative in
 | `core.encoding.json` | `canonical(data, limits)`, `reader`, `writer` | Edition-2027 RFC 8785 JCS; pull `DataEvent` streaming; shipped `events(DataTree)->String` remains separate until migration |
 | `core.encoding.jsonl` | `parse(text)`, `to_string(rows)` | JSON Lines over `[DataTree]` |
 | `core.encoding.csv` | `parse(text)`, `decode<T>`, `to_string(rows)`, `reader`, `writer` | Whole-value and bounded pull records over the same CSV quoting and validation law |
-| `core.encoding.xml` | `parse`, `parse_bytes`, `to_string`, `to_bytes`, `canonical`, `reader`, `writer` | Exact tagged ordinary-`DataTree` tree/events with namespaces, token-local lexical evidence, safe entities/limits, and W3C C14N |
+| `core.encoding.xml` | `parse`, `parse_bytes`, `decode<T>`, `decode_bytes<T>`, `root`, `expanded_name`, `attribute`, `content`, `to_string`, `to_bytes`, `canonical`, `reader`, `writer` | Exact tagged ordinary-`DataTree` tree/events with namespaces, token-local lexical evidence, safe entities/limits, W3C C14N, and D-ENCXML-PROJECTION1=A typed helpers |
 | `core.encoding.cbor` | `parse`, `decode<T>`, `to_bytes`, `to_bytes_canonical`, `reader`, `writer` | RFC 8949 typed/native bytes and Core deterministic profile |
 
 Each adapter is a full serde equivalent, not a lossy subset:
@@ -1635,12 +1626,14 @@ exist. XML whole and stream parsing enforce the exact XML 1.0 Fifth Edition
 typed errors across every byte split. XML attribute and namespace values apply
 XML 1.0 line-end and whitespace normalization, including explicit general-entity
 replacement text, while numeric references remain literal and lexical tokens
-remain exact for preserving writers in comptime, AOT, and dev. CBOR's
+remain exact for preserving writers in comptime, AOT, and dev. D-ENCXML-PROJECTION1=A
+ships `xml.decode`/`decode_bytes` plus `root`/`expanded_name`/`attribute`/`content`
+over that tree. CBOR's
 typed whole-value byte verbs, closed errors/options, native `[U8]`, original-wire
 Core deterministic validation, live allocation limits, and normal-mode
 indefinite values execute in the native runtime; pull handles also exist. Exact
 XML 1.0/Namespaces and inclusive/exclusive C14N corpus closure, XML byte-identity
-whole-value verbs, XML Codable projection, RFC 8785 serialization, strict edition
+whole-value verbs, RFC 8785 serialization, strict edition
 migration, full hostile standards corpora, complete stream lifecycle proof, and
 error-allocation oracles remain open. Entries above state ratified API law, not a
 broad-complete implementation claim.
@@ -2361,15 +2354,6 @@ fn init() {
 reads an input value or text content. `web.storage.local` and
 `web.storage.session` provide `get`, `set`, `remove`, and `clear`; `get` returns
 `String?` so ordinary `??` handles missing keys.
-
-**Web build (hybrid JS + Wasm).** `jet build --target web <entry.jet>` emits
-`build/app.js`, `build/app.wasm`, `build/jet_dom_runtime.js`, and
-`build/web.manifest.json`. View code with `Browser` effects (or `#Target(Js)`)
-lowers to the DOM shim; pure compute may compile to Wasm and export through
-`#WasmExport`. Unsupported executable forms fail at preflight with
-`E-WEB-TIR-UNSUPPORTED` rather than silent omission. Example index, scoped
-test matrix, and explicit non-goals:
-`docs/sidequests/web-backend-wasm.md`.
 
 ---
 

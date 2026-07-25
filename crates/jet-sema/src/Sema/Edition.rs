@@ -1,3 +1,6 @@
+// Staged edition-deprecation helpers; Bundle uses `with_package_edition` today.
+#![allow(dead_code)]
+
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 

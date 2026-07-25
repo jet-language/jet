@@ -578,6 +578,7 @@ fn repl_help_shows_commands() {
         ":? <name>",
         "Interactive terminal only",
         "Tab",
+        "F1",
         "^P",
         "^F",
         "^R",
@@ -1859,6 +1860,45 @@ fn repl_raw_member_completion_menu_is_selectable() {
     assert!(output.status.success(), "selectable completion PTY failed: {out}");
     assert!(out.contains("filter") && out.contains("filter_map"), "shared candidates missing: {out:?}");
     assert!(out.contains("items.find"), "two Down keys did not select the third completion: {out:?}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_raw_core_module_member_completion_inserts_sqrt() {
+    // Review reopen: `use core.math as math` then `math.s<Tab>` must complete
+    // module members from the canonical Core catalog (not only live bindings).
+    let output = run_raw_multiline_pty(
+        "printf 'use core.math as math\\r'; sleep 0.15; printf 'math.sq\\t'; sleep 0.12; printf '(16.0)\\r'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "module completion PTY failed: {out}");
+    assert!(
+        out.contains("4") && (out.contains("Float") || out.contains("4.0")),
+        "math.sq<Tab> did not become math.sqrt(16.0): {out:?}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn repl_raw_f1_shows_cursor_docs_for_core_import_member() {
+    let output = run_raw_multiline_pty(
+        "printf 'use core.math as math\\r'; sleep 0.15; printf 'math.sqrt\\033OP'; sleep 0.15; printf '\\003'",
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "F1 cursor docs PTY failed: {out}");
+    assert!(
+        out.contains("core.math.sqrt"),
+        "F1 did not show module member docs: {out:?}"
+    );
+}
+
+#[test]
+fn repl_docs_resolve_imported_core_module_member() {
+    let out = run_transcript(&["use core.math as math", "?math.sqrt"], None);
+    assert!(
+        out.contains("core.math.sqrt") && out.contains("Source: core.math"),
+        "imported module member docs missing: {out:?}"
+    );
 }
 
 #[test]

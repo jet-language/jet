@@ -73,6 +73,21 @@ pub(crate) fn completion_candidates(
         .collect()
 }
 
+/// Dotted Tab candidates: runtime receiver members first, else Core import alias.
+pub(crate) fn dotted_completion_candidates(
+    session: &Session,
+    receiver: &str,
+    partial: &str,
+) -> Vec<jet_semindex::SemanticSymbol> {
+    if let Some(value) = session.scope.get(receiver) {
+        return completion_candidates(session, partial, Some(super::type_name(value)));
+    }
+    if let Some(module) = session.core_imports.get(receiver) {
+        return jet_semindex::SemanticSymbolIndex::complete_core_module(module, partial);
+    }
+    Vec::new()
+}
+
 fn render(symbol: &jet_semindex::SemanticSymbol) -> String {
     let mut out = format!("{}\n", symbol.signature);
     if !symbol.summary.is_empty() {
@@ -96,7 +111,18 @@ fn render(symbol: &jet_semindex::SemanticSymbol) -> String {
 
 pub fn lookup(session: &Session, name: &str) -> Option<String> {
     let index = symbol_index(session);
-    index.resolve_visible(name).map(render)
+    if let Some(doc) = index.resolve_visible(name).map(render) {
+        return Some(doc);
+    }
+    // `alias.member` after `use core.X as alias` — same catalog as Tab completion.
+    if let Some((alias, member)) = name.split_once('.') {
+        if let Some(module) = session.core_imports.get(alias) {
+            return jet_semindex::SemanticSymbolIndex::lookup_core_module_member(module, member)
+                .as_ref()
+                .map(render);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -135,5 +161,52 @@ mod tests {
         let candidates = completion_candidates(&session, "ans", None);
         assert_eq!(candidates.len(), 1, "{candidates:?}");
         assert_eq!(candidates[0].identity, "session:binding:answer");
+    }
+
+    #[test]
+    fn core_import_alias_completes_module_members() {
+        let mut session = Session::new();
+        session
+            .core_imports
+            .insert("math".to_string(), "core.math".to_string());
+        let candidates = dotted_completion_candidates(&session, "math", "sq");
+        assert_eq!(candidates.len(), 1, "{candidates:?}");
+        assert_eq!(candidates[0].name, "sqrt");
+        assert_eq!(candidates[0].module_path, "core.math");
+    }
+
+    #[test]
+    fn runtime_receiver_beats_core_import_alias() {
+        let mut session = Session::new();
+        session
+            .core_imports
+            .insert("items".to_string(), "core.math".to_string());
+        session.scope.insert(
+            "items".to_string(),
+            crate::AST::CtValue::List(vec![
+                crate::AST::CtValue::Int(1),
+                crate::AST::CtValue::Int(2),
+            ]),
+        );
+        let candidates = dotted_completion_candidates(&session, "items", "f");
+        assert!(
+            candidates.iter().any(|c| c.name == "filter"),
+            "expected List members, got {candidates:?}"
+        );
+        assert!(
+            !candidates.iter().any(|c| c.name == "floor"),
+            "core.math must not win over a live List binding: {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn core_import_alias_docs_resolve_member() {
+        let mut session = Session::new();
+        session
+            .core_imports
+            .insert("math".to_string(), "core.math".to_string());
+        let doc = lookup(&session, "math.sqrt").expect("math.sqrt docs");
+        assert!(doc.contains("core.math.sqrt"), "got: {doc:?}");
+        assert!(doc.contains("Source: core.math"), "got: {doc:?}");
     }
 }

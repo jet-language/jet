@@ -41,8 +41,9 @@ pub fn render_banner(version: &str, color: bool) -> String {
 pub fn render_discovery_hint(raw_mode: bool, color: bool) -> String {
     if raw_mode {
         format!(
-            "Try: {} complete · {} docs · {} history · {} pin · {} fold · {} rerun · {} bindings",
+            "Try: {} complete · {} cursor docs · {} docs · {} history · {} pin · {} fold · {} rerun · {} bindings",
             bold("Tab", color),
+            bold("F1", color),
             bold("?name", color),
             bold("F3", color),
             bold("^P", color),
@@ -212,7 +213,7 @@ mod tests {
     fn discovery_hints_match_available_modes() {
         assert_eq!(
             render_discovery_hint(true, false),
-            "Try: Tab complete · ?name docs · F3 history · ^P pin · ^F fold · ^R rerun · ^B bindings"
+            "Try: Tab complete · F1 cursor docs · ?name docs · F3 history · ^P pin · ^F fold · ^R rerun · ^B bindings"
         );
         assert_eq!(
             render_discovery_hint(false, false),

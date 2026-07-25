@@ -400,25 +400,6 @@ impl<'a> Checker<'a> {
                 }
                 return resolved_core_fixed_sig(module, name).and_then(|(_, ret)| ret);
             }
-            if module == "core.encoding.cbor"
-                && matches!(name, "encode" | "decode")
-                && (name != "decode" || type_args.is_empty())
-            {
-                if let Some(dep) = super::super::Edition::check_core_deprecation(module, name) {
-                    use super::super::Edition::{deprecation_phase, DeprecationPhase};
-                    match deprecation_phase(&dep) {
-                        DeprecationPhase::Removed => {
-                            self.diags
-                                .push(super::super::Edition::e2002(&dep, Some(span)));
-                        }
-                        DeprecationPhase::Deprecated => {
-                            self.diags
-                                .push(super::super::Edition::l2001(&dep, Some(span)));
-                        }
-                        DeprecationPhase::Active => {}
-                    }
-                }
-            }
             // D-EFF1: `#Pure` is the empty effect set, so any effectful Core call —
             // `Fs`/`Net`/`Env`/`Exec`/`Db`/`Log`/`Io` — is impure inside a `#Pure fn`.
             // (Time/Rand return early above via E3403; stdin via the E3401 check
@@ -607,39 +588,6 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(0) { self.expect_core_arg(name, 0, &Type::List(Box::new(u8_ty())), arg); }
                     if let Some(arg) = args.get_mut(1) { self.expect_core_arg(name, 1, &Type::Named("CBOROptions".to_string()), arg); }
                     return Some(result_ty(Type::Named("DataTree".to_string()), Type::Named("CBORError".to_string())));
-                }
-                ("core.encoding.cbor", "encode") => {
-                    if super::super::Edition::edition_at_least("2028") {
-                        for arg in args.iter_mut() {
-                            self.infer(&mut arg.expr);
-                        }
-                        return None;
-                    }
-                    if args.len() != 1 {
-                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-                    }
-                    if let Some(arg) = args.get_mut(0) {
-                        self.expect_core_arg(name, 0, &Type::Named("DataTree".to_string()), arg);
-                    }
-                    return Some(Type::List(Box::new(u8_ty())));
-                }
-                ("core.encoding.cbor", "decode") if type_args.is_empty() => {
-                    if !(1..=2).contains(&args.len()) {
-                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
-                    }
-                    if let Some(arg) = args.get_mut(0) {
-                        self.expect_core_arg(name, 0, &Type::List(Box::new(u8_ty())), arg);
-                    }
-                    if let Some(arg) = args.get_mut(1) {
-                        self.expect_core_arg(name, 1, &Type::Named("CBOROptions".to_string()), arg);
-                    }
-                    if super::super::Edition::edition_at_least("2027") {
-                        return Some(result_ty(
-                            Type::Named("DataTree".to_string()),
-                            Type::Named("CBORError".to_string()),
-                        ));
-                    }
-                    return Some(result_ty(Type::Named("DataTree".to_string()), Type::String));
                 }
                 ("core.encoding.xml", "parse_bytes") => {
                     if !(1..=2).contains(&args.len()) {
@@ -2838,42 +2786,6 @@ impl<'a> Checker<'a> {
                     self.expect_url_arg("request", 1, &mut args[1]);
                     return Some(Type::Named("HttpRequest".to_string()));
                 }
-                // D-WS1=B: WebSocket entry points.
-                ("core.ws", "connect") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("connect", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg("connect", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Result {
-                        ok: Box::new(Type::Named("WsConn".to_string())),
-                        err: Box::new(Type::Named("WsError".to_string())),
-                    });
-                }
-                ("core.ws", "upgrade") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("upgrade", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg(
-                        "upgrade",
-                        0,
-                        &Type::Named("HttpRequest".to_string()),
-                        &mut args[0],
-                    );
-                    return Some(Type::Result {
-                        ok: Box::new(Type::Named("WsConn".to_string())),
-                        err: Box::new(Type::Named("WsError".to_string())),
-                    });
-                }
                 ("core.http.server", "mux") => {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
@@ -3118,151 +3030,6 @@ impl<'a> Checker<'a> {
                         &mut args[0],
                     );
                     return Some(Type::Named("Unit".to_string()));
-                }
-                ("core.http.server", "mux_handler") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("mux_handler", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg(
-                        "mux_handler",
-                        0,
-                        &Type::Named("HttpMux".to_string()),
-                        &mut args[0],
-                    );
-                    return Some(Type::Named("HttpHandler".to_string()));
-                }
-                ("core.http.server", "static_files") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("static_files", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg("static_files", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HttpHandler".to_string()));
-                }
-                ("core.http.middleware", "timeout") => {
-                    if args.len() != 2 {
-                        self.diags
-                            .push(wrong_core_arity("timeout", 2, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg(
-                        "timeout",
-                        0,
-                        &Type::Named("Duration".to_string()),
-                        &mut args[0],
-                    );
-                    self.expect_core_arg(
-                        "timeout",
-                        1,
-                        &Type::Named("HttpHandler".to_string()),
-                        &mut args[1],
-                    );
-                    return Some(Type::Named("HttpHandler".to_string()));
-                }
-                ("core.http.middleware", "body_limit") => {
-                    if args.len() != 2 {
-                        self.diags
-                            .push(wrong_core_arity("body_limit", 2, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg("body_limit", 0, &Type::Int, &mut args[0]);
-                    self.expect_core_arg(
-                        "body_limit",
-                        1,
-                        &Type::Named("HttpHandler".to_string()),
-                        &mut args[1],
-                    );
-                    return Some(Type::Named("HttpHandler".to_string()));
-                }
-                ("core.http.middleware", "cors_policy") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("cors_policy", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg("cors_policy", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HttpCorsPolicy".to_string()));
-                }
-                ("core.http.middleware", "cors") => {
-                    if args.len() != 2 {
-                        self.diags
-                            .push(wrong_core_arity("cors", 2, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg(
-                        "cors",
-                        0,
-                        &Type::Named("HttpCorsPolicy".to_string()),
-                        &mut args[0],
-                    );
-                    self.expect_core_arg(
-                        "cors",
-                        1,
-                        &Type::Named("HttpHandler".to_string()),
-                        &mut args[1],
-                    );
-                    return Some(Type::Named("HttpHandler".to_string()));
-                }
-                ("core.http.middleware", "compress") => {
-                    if args.len() != 2 {
-                        self.diags
-                            .push(wrong_core_arity("compress", 2, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg(
-                        "compress",
-                        0,
-                        &Type::Named("HttpCompressEncoding".to_string()),
-                        &mut args[0],
-                    );
-                    self.expect_core_arg(
-                        "compress",
-                        1,
-                        &Type::Named("HttpHandler".to_string()),
-                        &mut args[1],
-                    );
-                    return Some(Type::Named("HttpHandler".to_string()));
-                }
-                ("core.http.middleware", "access_log") => {
-                    if args.len() != 1 {
-                        self.diags
-                            .push(wrong_core_arity("access_log", 1, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return None;
-                    }
-                    self.expect_core_arg(
-                        "access_log",
-                        0,
-                        &Type::Named("HttpHandler".to_string()),
-                        &mut args[0],
-                    );
-                    return Some(Type::Named("HttpHandler".to_string()));
                 }
                 // D-TIMEDEPTH1=A: civil-time constructors.
                 ("core.time.date", "new") => {

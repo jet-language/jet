@@ -458,6 +458,22 @@ fn read_line<R: Read>(
                     display = EditorDisplay::default();
                 }
             }
+            Key::F1 => {
+                display.finish();
+                print!("\r\n");
+                match name_at_cursor(&buf, cursor) {
+                    Some(name) => match Docs::lookup(session, &name) {
+                        Some(doc) => print!("{doc}"),
+                        None => println!("{}", dim(&format!("no docs for `{name}`"), color)),
+                    },
+                    None => {
+                        println!(
+                            "{}",
+                            dim("move the cursor onto a name, then press F1", color)
+                        );
+                    }
+                }
+            }
             Key::F3 => {
                 display.finish();
                 if let Some(found) = read_history_search(reader, session, color) {
@@ -465,7 +481,7 @@ fn read_line<R: Read>(
                     cursor = buf.len();
                 }
             }
-            Key::Escape | Key::Unknown | Key::F1 | Key::CtrlB | Key::CtrlP | Key::CtrlF
+            Key::Escape | Key::Unknown | Key::CtrlB | Key::CtrlP | Key::CtrlF
             | Key::CtrlR => {
                 // Mid-edit control keys are reserved (see module docs); a
                 // bare Escape/unrecognized byte is swallowed rather than
@@ -904,6 +920,37 @@ mod display_tests {
     }
 }
 
+/// Identifier (or `alias.member`) under / just before the cursor for F1 docs.
+fn name_at_cursor(buf: &[char], cursor: usize) -> Option<String> {
+    if buf.is_empty() {
+        return None;
+    }
+    let mut i = if cursor < buf.len() {
+        cursor
+    } else {
+        cursor.saturating_sub(1)
+    };
+    let is_name_char = |c: char| c.is_alphanumeric() || c == '_' || c == '.';
+    if !is_name_char(buf[i]) {
+        if i > 0 && is_name_char(buf[i - 1]) {
+            i -= 1;
+        } else {
+            return None;
+        }
+    }
+    let mut start = i;
+    while start > 0 && is_name_char(buf[start - 1]) {
+        start -= 1;
+    }
+    let mut end = i + 1;
+    while end < buf.len() && is_name_char(buf[end]) {
+        end += 1;
+    }
+    let name: String = buf[start..end].iter().collect();
+    let name = name.trim_matches('.').to_string();
+    (!name.is_empty()).then_some(name)
+}
+
 /// Tab completion over the same semantic facts as `?name`, LSP, and help.
 /// Multiple matches open a selectable raw list; NO_COLOR keeps textual `>`
 /// selection markers. Single matches insert immediately.
@@ -921,13 +968,7 @@ fn apply_completion<R: Read>(
         let is_ident = !receiver.is_empty()
             && receiver.chars().all(|c| c.is_alphanumeric() || c == '_');
         let candidates = if is_ident {
-            session
-                .scope
-                .get(receiver)
-                .map(|v| {
-                    Docs::completion_candidates(session, partial, Some(super::type_name(v)))
-                })
-                .unwrap_or_default()
+            Docs::dotted_completion_candidates(session, receiver, partial)
         } else {
             Vec::new()
         };

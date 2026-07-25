@@ -1,4 +1,5 @@
-//! D-TELEMETRY1=A: explicit, local-only toolchain report bundles.
+//! D-TELEMETRY1=A / D-REPORT-SEND1=A: local-only toolchain report bundles.
+//! Jet never uploads the bundle; sharing stays outside the toolchain.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -8,7 +9,7 @@ const README: &str = "\
 Jet local report bundle
 
 This bundle was created only because you ran `jet report`.
-Jet has not sent it anywhere.
+Jet has not sent it anywhere and has no `jet report --send` command.
 
 Included:
 - Jet version and supported edition information
@@ -21,6 +22,9 @@ Excluded:
 - arguments and environment values
 - hostname, username, machine identifiers, and network addresses
 - crash data and package names
+
+To share this bundle, attach the directory yourself through a support
+channel you already trust.
 ";
 
 fn report_text() -> String {
@@ -219,6 +223,12 @@ fn create_bundle() -> Result<PathBuf, String> {
 }
 
 pub(crate) fn run_report(args: &[String]) -> i32 {
+    if args.iter().any(|arg| arg == "--send" || arg.starts_with("--send=")) {
+        eprintln!("error: `jet report --send` is not available");
+        eprintln!(" why: Jet never uploads report bundles (D-REPORT-SEND1=A)");
+        eprintln!(" fix: run `jet report`, inspect `.jet/reports/…`, then attach that directory yourself");
+        return jet::ExitCodes::USAGE;
+    }
     if !args.is_empty() {
         eprintln!("error: `jet report` takes no arguments");
         eprintln!(" fix: run `jet report` to write a private local bundle");
