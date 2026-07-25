@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 794,
-    "rev": 13927,
+    "rev": 14002,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23857,8 +23857,273 @@
       "plan": "Amended 2026-07-24 after D-ONECORE1=A: this card is now the tier-1 performance ratchet, not a completeness gate. Sequence:\n1. Finish the ABI/value-layout fidelity slice already in hand (parameter types, verifier mismatches, return typing) — that work is tier-1 correctness and survives the rework.\n2. Then pause new gap classes until #776 lands the structured semantic-core TIR; string-parsing workarounds written against today's Rust-text TIR would be thrown away.\n3. Resume on the new core, widening native coverage family by family in the #729 plan order, guided by tier-0/tier-1 timing from #778's --trace-tiers.\n4. Every family keeps the differential proof (stdout/stderr/exit identical to AOT) and shrinks tests/jit_gaps.txt in the same diff.",
       "blockedBy": [],
       "workOrder": 43,
-      "assignee": null,
+      "assignee": "e3-729-w21",
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w21",
+          "text": "e3-729-w21 claimed. Priority: io/db + db_checked_sql (jet.db.open_memory) else core.io.input / parallel_scan. Skip ocean. Paths: crates/jet-jit/** + tests/jit_gaps.txt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w20",
+          "text": "[handoff] Merged fb917a010. Covered 182→186 / gaps 174→170. Closed: collections/set, collections/deque, collections/list_remove_bounds, errors/errors. Next: io/db + io/db_checked_sql (jet.db.open_memory) if include! of db runtime is clean; else concurrency/parallel_scan via core.io.input; skip crypto/net/http/game/watcher/ocean."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w20",
+          "text": "e3-729-w20: closed collections/set, collections/deque, collections/list_remove_bounds, errors/errors. Covered 182→186 / gaps 174→170. Hosts: Set (HashSet), Deque (VecDeque), list.remove (arena), ParseError string show. Merged fb917a010."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w20",
+          "text": "e3-729-w20 claimed. Priority: collections set/list_remove/deque OR io/db open_memory OR core.io.input. Skip crypto/net/http/game/watcher. Paths: crates/jet-jit/** + tests/jit_gaps.txt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w19",
+          "text": "[handoff] Merged d942fe439. Covered 178→182 / gaps 178→174. Closed: text/unicode_text_audit, collections/sketch, io/args_spec, io/args_audit. Next: remaining non-ocean gaps (avoid crypto/net/http/game/watcher); prefer next shallow host stems."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w19",
+          "text": "e3-729-w19: closed text/unicode_text_audit, collections/sketch, io/args_spec, io/args_audit. Wired include!-backed Text/Sketch/Args hosts; recovered Unit-stamped TIR for print/interp/Result??/Option??. Covered 178→182 / gaps 178→174. Merged d942fe439."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w19",
+          "text": "e3-729-w19 claimed. Priority: unicode_text_audit graphemes + collections/sketch hll (or io/args.spec). Paths: crates/jet-jit/** + tests/jit_gaps.txt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w18",
+          "text": "[handoff] Merged 578e4a98c. Covered 175→178 / gaps 181→178. Closed: serde/serde_generic, text/unicode_text, collections/fixed_arrays. Next: text/unicode_text_audit (graphemes) or collections/sketch (thin host, no third algo copy)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w18",
+          "text": "e3-729-w18: closed serde/serde_generic, text/unicode_text, collections/fixed_arrays. Covered 175→178 / gaps 181→178. Generic Encode/Decode monomorphize for Apply; unicode hosts via jet_rt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w8",
+          "text": "[handoff] Merged 84b4ac2f7. Covered 141→145 / gaps 215→211. Closed: io/files_depth, serde/encoding_base, text/hex_base64, memory/resource_close. Next: io/compress_gzip + compress_zstd (same bytes ABI; needs flate2/zstd or ArchiveLite hosts), or serde/encoding JSON cluster."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w8",
+          "text": "Merged 84b4ac2f7. Covered 141→145 / gaps 215→211. Closed: io/files_depth, serde/encoding_base, text/hex_base64, memory/resource_close. Hosts: core.files depth ops, core.encoding hex/base64/base32, Result Ok/Err enum match, best-effort ResourceNew/Take/Close. Tests: jet-jit --lib; jit_coverage_audit."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w18",
+          "text": "e3-729-w18 claimed. Priority: serde/serde_generic (SerdeEncode Apply Wrap) or next high-value core-call cluster. Paths: crates/jet-jit/** + tests/jit_gaps.txt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w17",
+          "text": "[handoff] Merged 2e247f7f7 (on master; prior stream hosts 6b6fb6e1f). Covered 170→175 / gaps 186→181. Closed: serde/encoding_json_stream, encoding_jsonl_stream, encoding_csv_stream, encoding_cbor_stream, encoding_xml_stream. Next: serde/serde_generic (SerdeEncode Apply Wrap) or next high-value core-call gap outside crypto/net/http/game/watcher."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w17",
+          "text": "e3-729-w17: closed encoding_*_stream cluster. Hosts for files.create/open plus JSON/JSONL/CSV/CBOR/XML stream writer/reader; ResourceNew/IsNone safety; nested MapLit SSA fix so XML Object events keep \\$xml_event. Covered 170→175 / gaps 186→181. Tip 2e247f7f7. Tests: jet-jit --lib; jit_coverage_audit; jet run five stream examples."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w17",
+          "text": "[handoff] Merged 6b6fb6e1f. Covered 170→175 / gaps 186→181. Closed: serde/encoding_json_stream, encoding_jsonl_stream, encoding_csv_stream, encoding_cbor_stream, encoding_xml_stream. Next: serde/serde_generic (SerdeEncode Wrap<Int>) or next high-value core-call outside crypto/net/http/game/watcher."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w17",
+          "text": "Closed encoding_*_stream cluster (5 stems). Covered 170→175 / gaps 186→181. Hosts: files.create/open + EncodingStream include! readers/writers; Option named-enum ABI; IsNone+break verifier fix. Commit 6b6fb6e1f."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w8",
+          "text": "[handoff] Merged 84b4ac2f7. Covered 141→145 / gaps 215→211. Closed: io/files_depth, serde/encoding_base, text/hex_base64, memory/resource_close. Next: io/compress_gzip + compress_zstd (same bytes ABI; needs flate2/zstd or ArchiveLite hosts), or serde/encoding JSON cluster."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w8",
+          "text": "Merged 84b4ac2f7. Covered 141→145 / gaps 215→211. Closed: io/files_depth, serde/encoding_base, text/hex_base64, memory/resource_close. Hosts: core.files depth ops, core.encoding hex/base64/base32, Result Ok/Err enum match, best-effort ResourceNew/Take/Close. Tests: jet-jit --lib; jit_coverage_audit."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w7",
+          "text": "[handoff] Merged ebbd0a610. Covered 135→141 / gaps 221→215. Closed: io/files, io/dir_entry, io/log_structured, math/random_audit (+ effect_grant, discard_fallible). Next: io/files_depth (stat/walk/glob/symlink/…) or chase random_audit runtime deopt at body stmt 15; skip crypto/net/http/game."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w7",
+          "text": "e3-729-w7: host shims for core.files/path/random + structured log. Covered 135→141 / gaps 221→215. Closed compile: io/files, io/dir_entry, io/log_structured, math/random_audit (+ effect_grant, discard_fallible). files_depth still deep API surface. random_audit compile-ok but runtime still deopts mid-body."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "[handoff] Merged 61880e5c1. Covered 151→153 / gaps 205→203. Closed: io/process_builder, effects/taint. Next: serde/json* DataTree parse-decode cluster, or remaining jit core call / print-type gaps (skip watcher unless thin unlock)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "e3-729-w11: JIT host for core.process (cmd/run/pipeline, ProcessSpec builder, spawn/wait, stdout/stderr.lines). Closed io/process_builder + effects/taint. Covered 151→153 / gaps 205→203. Merged 61880e5c1."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w17",
+          "text": "e3-729-w17 claimed. Priority: encoding_*_stream write_catalog hosts (files.create/open + EncodingStream). Paths: crates/jet-jit/** + tests/jit_gaps.txt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w16",
+          "text": "[handoff] Merged 22e4a9b00. Covered 167→170 / gaps 189→186. Closed: serde/decode_traced, serde/validate, text/human_format. Next: serde/encoding_*_stream (files.create/open + JSON/CSV/XML/CBOR/JSONL writer/reader hosts via EncodingStream include), or serde/serde_generic (Apply Wrap encode)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w16",
+          "text": "Merged 22e4a9b00. Covered 167→170 / gaps 189→186. Closed: serde/decode_traced (DecodeResult/MigrationStatus + migrate host), serde/validate (FieldError), text/human_format (core.fmt). Streams still blocked on files.create/open + writer/reader hosts."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w7",
+          "text": "[handoff] Merged ebbd0a610. Covered 135→141 / gaps 221→215. Closed: io/files, io/dir_entry, io/log_structured, math/random_audit (+ effect_grant, discard_fallible). Next: io/files_depth (stat/walk/glob/symlink/…) or chase random_audit runtime deopt at body stmt 15; skip crypto/net/http/game."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w7",
+          "text": "e3-729-w7: host shims for core.files/path/random + structured log. Covered 135→141 / gaps 221→215. Closed compile: io/files, io/dir_entry, io/log_structured, math/random_audit (+ effect_grant, discard_fallible). files_depth still deep API surface. random_audit compile-ok but runtime still deopts mid-body."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "[handoff] Merged 61880e5c1. Covered 151→153 / gaps 205→203. Closed: io/process_builder, effects/taint. Next: serde/json* DataTree parse-decode cluster, or remaining jit core call / print-type gaps (skip watcher unless thin unlock)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "e3-729-w11: JIT host for core.process (cmd/run/pipeline, ProcessSpec builder, spawn/wait, stdout/stderr.lines). Closed io/process_builder + effects/taint. Covered 151→153 / gaps 205→203. Merged 61880e5c1."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w16",
+          "text": "e3-729-w16 claimed. Priority: decode_traced + encoding_*_stream write_catalog if shared. Paths: crates/jet-jit/** + tests/jit_gaps.txt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w15",
+          "text": "[handoff] Merged 4d0c4e6c7. Covered 164→167 / gaps 192→189. Closed: serde/encoding_xml_projection, serde/encoding_stream_types, types/option. Next: serde/decode_traced or encoding_*_stream write_catalog."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w15",
+          "text": "e3-729-w15: closed serde/encoding_xml_projection, serde/encoding_stream_types, types/option. Covered 164→167 / gaps 192→189. Merged 4d0c4e6c7. Next: serde/decode_traced (json.decode_traced + MigrationStatus) or encoding_*_stream write_catalog."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w15",
+          "text": "e3-729-w15 claimed. Priority: encoding_xml_projection + EncodingLimits.safe / decode_traced if shared. Paths: crates/jet-jit/** + tests/jit_gaps.txt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w14",
+          "text": "[handoff] Merged bb1e91214. Covered 161→164 / gaps 195→192. Closed: serde/encoding_breadth, serde/toml, serde/yaml. Next: serde/encoding_xml_projection (xml.root + helpers/typed decode), or encoding_stream_types (EncodingLimits.safe), or decode_traced."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w14",
+          "text": "e3-729-w14: JIT hosts for json.events/jsonl/xml/cbor plus typed toml/yaml decode. Covered 161→164 / gaps 195→192. Closed serde/encoding_breadth, serde/toml, serde/yaml. Merged bb1e91214."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w14",
+          "text": "e3-729-w14 claimed. Priority: serde/encoding_breadth (json.events/canonical) + nearby encoding_* if shared. Paths: crates/jet-jit/** + tests/jit_gaps.txt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w13",
+          "text": "[handoff] Merged 787d7ed5f. Covered 156→161 / gaps 200→195. Closed: serde/json_typed, serde/csv_typed, serde/hand_codec, serde/codable_default. Next: serde/encoding_breadth via core.encoding.json.events (then remaining encoding formats)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w13",
+          "text": "e3-729-w13: typed Codable JIT. Covered 156→161 / gaps 200→195. Closed serde/json_typed, serde/csv_typed, serde/hand_codec, serde/codable_default. Added encode/decode lowering, csv_decode_trees, json.canonical host, Option Present if-let. encoding_breadth still gaps on core.encoding.json.events. Merged 787d7ed5f."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "[handoff] Merged 61880e5c1. Covered 151→153 / gaps 205→203. Closed: io/process_builder, effects/taint. Next: serde/json* DataTree parse-decode cluster, or remaining jit core call / print-type gaps (skip watcher unless thin unlock)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "e3-729-w11: JIT host for core.process (cmd/run/pipeline, ProcessSpec builder, spawn/wait, stdout/stderr.lines). Closed io/process_builder + effects/taint. Covered 151→153 / gaps 205→203. Merged 61880e5c1."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w13",
+          "text": "e3-729-w13 claimed. Priority: typed Codable serde/json_typed + csv_typed (+ hand_codec / encoding_breadth if shared). Paths: crates/jet-jit/** + tests/jit_gaps.txt. Rebuild -p jet before smoke."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w8",
+          "text": "[handoff] Merged 84b4ac2f7. Covered 141→145 / gaps 215→211. Closed: io/files_depth, serde/encoding_base, text/hex_base64, memory/resource_close. Next: io/compress_gzip + compress_zstd (same bytes ABI; needs flate2/zstd or ArchiveLite hosts), or serde/encoding JSON cluster."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w8",
+          "text": "Merged 84b4ac2f7. Covered 141→145 / gaps 215→211. Closed: io/files_depth, serde/encoding_base, text/hex_base64, memory/resource_close. Hosts: core.files depth ops, core.encoding hex/base64/base32, Result Ok/Err enum match, best-effort ResourceNew/Take/Close. Tests: jet-jit --lib; jit_coverage_audit."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w12",
+          "text": "[handoff] Merged 1ba8609df. Covered 153→156 / gaps 203→200. Closed: serde/json_coerce, serde/datatree_accessors, serde/encoding. Next: serde/json_typed + serde/csv_typed need Codable typed decode; serde/hand_codec needs json.to_string on Encode types; encoding_breadth needs json.canonical."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w12",
+          "text": "e3-729-w12: JIT JSON/DataTree hosts (include! + Yaml strip). Closed serde/json_coerce, serde/datatree_accessors, serde/encoding. Covered 153→156 / gaps 203→200. Merged 1ba8609df."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w12",
+          "text": "e3-729-w12 claimed. Priority: serde/json* DataTree decode cluster (+ csv_typed if shared). Paths: crates/jet-jit/** + tests/jit_gaps.txt. Rebuild -p jet before jet-run smoke."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "[handoff] Merged 61880e5c1. Covered 151→153 / gaps 205→203. Closed: effects/taint, io/process_builder. Next: serde/json* DataTree parse-decode cluster, or other process stems if any remain; skip watcher unless thin unlock."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "w11: closed effects/taint + io/process_builder (core.process.run/cmd + ProcessSpec/Child + LinesProcessStream). ProcessResult field ABI recovery for TIR Int fallback. Covered 151→153 / gaps 205→203. Merged 61880e5c1."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "[handoff] Merged 61880e5c1. Covered 151→153 / gaps 205→203. Closed: io/process_builder, effects/taint. Next: serde/json* DataTree parse-decode cluster, or remaining jit core call / print-type gaps (skip watcher unless thin unlock)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "e3-729-w11: JIT host for core.process (cmd/run/pipeline, ProcessSpec builder, spawn/wait, stdout/stderr.lines). Closed io/process_builder + effects/taint. Covered 151→153 / gaps 205→203. Merged 61880e5c1."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w11",
+          "text": "e3-729-w11 claimed. Priority: process.cmd/ProcessSpec cluster OR serde/json DataTree; skip watcher if event.scope too deep alone. Paths: crates/jet-jit/** + tests/jit_gaps.txt."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w10",
+          "text": "[handoff] Merged f979c8bc7. Covered 148→151 / gaps 208→205. Closed: io/cli, serde/csv, text/uuid. Blocked: io/watcher (core.event.scope + callbacks/net), io/process_builder (process.cmd + ProcessSpec/Child + LinesProcessStream). Next: process.cmd + ProcessSpec run/spawn path, or serde/json.parse/decode DataTree cluster."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w10",
+          "text": "e3-729-w10: Closed 3 stems (148→151 covered / 208→205 gaps). Added JIT hosts for core.env.get, core.process.exit, core.encoding.csv parse/to_string, core.uuid v4/v7, Clock.new, and String.slice. Merged f979c8bc7."
+        },
         {
           "at": "2026-07-25",
           "by": "docs-cleanup-agent",
@@ -24004,7 +24269,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T11:03:26.809Z",
-      "updated": "2026-07-25"
+      "updated": "2026-07-25",
+      "claimedAt": "2026-07-25T19:56:22.145Z"
     },
     {
       "id": "c00t02hw",
@@ -25083,12 +25349,32 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Amended 2026-07-24: two facts change this card. First, the 2026-07-24 environment fix (batch-pass rewrite of scripts/agent/clean-nix-tmp.sh) removed a multi-minute shellHook stall; the recorded no-op baseline (jet-env true 57.826 s, cold 13.905 s, warm 12.088 s) is invalid — re-measure all spans before enforcing any budget. Second, D-ONECORE1=A / D-LENS-RUN2=A (#776-#778) make default jet run tiered; the interpreter tier needs no Cranelift compile, which changes the cold-start calculus.\nResume when #778 lands the tiered run path and #439 exposes the shared invalidation service. Put warm artifact reuse at the tier boundary: cache compiled tier-1 modules keyed by exact source, dependency, compiler-build identity, target, capability, and configuration facts; a hit skips load, parse, check, lowering, and code generation with trace proof. Do not extend the AOT BuildCache path or add another runner, cache, watcher, or daemon. Measure spans separately: environment entry; compiler startup; load; parse; check; TIR lowering; tier-1 compile; artifact load; program time. Add the slow-run signpost only in the common run coordinator (once, stderr, TTY-aware, NO_COLOR/JSON suppressed). Benchmark matched no-op, file/JSON, and subprocess fixtures against Bash, Python, and Node; record machine facts, cold and warm medians, and tail latency; enforce the ratified budget only after the method and value exist.",
       "blockedBy": [],
-      "assignee": "e3-741-grok",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "e3-741-budget",
+          "text": "criteria 1-5 already verified; B assert merged; closing without re-meet."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-741-budget",
+          "text": "D-SCRIPT-BUDGET1=B wired in tests/run_cache.rs: µs peer-ratio vs release jet (or JET_BUDGET_BIN); debug keeps 100ms sanity. cargo test --test run_cache 7/7 @ 95297f602; evidence /tmp/741-budget-run_cache5.log (warm≈2.2ms vs bash≈2.1ms)."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-741-budget",
+          "text": "criteria 1-5 already verified; B assert merged; closing without re-meet."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-741-budget",
+          "text": "D-SCRIPT-BUDGET1=B wired in tests/run_cache.rs: µs peer-ratio vs release jet (or JET_BUDGET_BIN); debug keeps 100ms sanity. cargo test --test run_cache 7/7 @ 95297f602; evidence /tmp/741-budget-run_cache5.log (warm≈2.2ms vs bash≈2.1ms)."
+        },
         {
           "at": "2026-07-25",
           "text": "All decisions ratified; advanced out of deciding."
@@ -25230,8 +25516,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:45:54.003Z",
-      "updated": "2026-07-25",
-      "claimedAt": "2026-07-25T09:08:25.545Z"
+      "updated": "2026-07-25"
     },
     {
       "id": "c08z8z0h",
@@ -26264,6 +26549,36 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-07-25",
+          "by": "e3-751-lsp",
+          "text": "[handoff] Merged 1d91db177. Criteria 1-6 met, need different agent to --verify then either continue broader parity (non-scalar ownership extract, more actions, docs) or close when verified if that slice is enough. Proof: code_action 6/6 + LSP:: 48/48 with RUST_MIN_STACK=16M."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-751-lsp",
+          "text": "[handoff] Slice merged to master: 1d91db177 + merge 98a423905. Expanded: extract on any exact total-pure expr (call args, paren groups); Bool ==/!= when operands prove Bool; multi-use pure immutable inline; Ident+( call guard. Proof: focused code_action 6/6; LSP:: 48/48 (use RUST_MIN_STACK=16M — default-stack overflow on some LSP tests is pre-existing). Criteria 1–6 met by e3-751-lsp; need independent --verify. Card stays building for remaining parity: ownership-aware non-scalar extract, more editor actions, docs/integration. Worktree jet-bd-751 removed after merge."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-751-lsp",
+          "text": "[handoff] Merged 1d91db177. Criteria 1-6 met, need different agent to --verify then either continue broader parity (non-scalar ownership extract, more actions, docs) or close when verified if that slice is enough. Proof: code_action 6/6 + LSP:: 48/48 with RUST_MIN_STACK=16M."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-751-lsp",
+          "text": "[handoff] Slice merged to master: 1d91db177 + merge 98a423905. Expanded: extract on any exact total-pure expr (call args, paren groups); Bool ==/!= when operands prove Bool; multi-use pure immutable inline; Ident+( call guard. Proof: focused code_action 6/6; LSP:: 48/48 (use RUST_MIN_STACK=16M — default-stack overflow on some LSP tests is pre-existing). Criteria 1–6 met by e3-751-lsp; need independent --verify. Card stays building for remaining parity: ownership-aware non-scalar extract, more editor actions, docs/integration. Worktree jet-bd-751 removed after merge."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-751-lsp",
+          "text": "[handoff] Merged 1d91db177. Criteria 1-6 met, need different agent to --verify then either continue broader parity (non-scalar ownership extract, more actions, docs) or close when verified if that slice is enough. Proof: code_action 6/6 + LSP:: 48/48 with RUST_MIN_STACK=16M."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-751-lsp",
+          "text": "[handoff] Slice merged to master: 1d91db177 + merge 98a423905. Expanded: extract on any exact total-pure expr (call args, paren groups); Bool ==/!= when operands prove Bool; multi-use pure immutable inline; Ident+( call guard. Proof: focused code_action 6/6; LSP:: 48/48 (use RUST_MIN_STACK=16M — default-stack overflow on some LSP tests is pre-existing). Criteria 1–6 met by e3-751-lsp; need independent --verify. Card stays building for remaining parity: ownership-aware non-scalar extract, more editor actions, docs/integration. Worktree jet-bd-751 removed after merge."
+        },
+        {
           "at": "2026-07-24",
           "by": "telemetry-review",
           "text": "Independent final review accepts the landed sub-slice through 02f41d4a, 54c1a14f, and d8da5b71. Refactor actions now use version-pinned documentChanges, one-revision public import proof, dirty-overlay exclusion, and a deliberately total/effect-free syntax subset; Clock comparisons and other unproved expressions are rejected. Focused actions pass 4/4; full LSP passes 46/46. No material finding remains. Card stays building for broader refactor parity."
@@ -26312,7 +26627,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:46:20.035Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25"
     },
     {
       "id": "c07eunp3",
@@ -45386,6 +45701,531 @@
   ],
   "events": [
     {
+      "at": "2026-07-25T19:56:22.145Z",
+      "by": "e3-729-w21",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:56:21.805Z",
+      "by": "e3-729-w21",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T19:56:06.920Z",
+      "by": "e3-729-w20",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T19:56:06.779Z",
+      "by": "e3-729-w20",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:54:26.885Z",
+      "by": "e3-751-lsp",
+      "action": "card.release",
+      "ref": "c04x8v2l",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T19:54:26.697Z",
+      "by": "e3-751-lsp",
+      "action": "card.update",
+      "ref": "c04x8v2l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:45:27.354Z",
+      "by": "e3-729-w20",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:45:27.001Z",
+      "by": "e3-729-w20",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T19:45:08.488Z",
+      "by": "e3-729-w19",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T19:45:08.355Z",
+      "by": "e3-729-w19",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:31:08.706Z",
+      "by": "e3-729-w19",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:31:08.364Z",
+      "by": "e3-729-w19",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T19:28:54.359Z",
+      "by": "e3-729-w18",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T19:28:54.215Z",
+      "by": "e3-729-w18",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:22:41.016Z",
+      "by": "e3-729-w8",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T19:22:40.863Z",
+      "by": "e3-729-w8",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:13:15.401Z",
+      "by": "e3-729-w18",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:13:15.066Z",
+      "by": "e3-729-w18",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T19:12:52.364Z",
+      "by": "e3-729-w17",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T19:12:52.218Z",
+      "by": "e3-729-w17",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T19:12:52.054Z",
+      "by": "e3-729-w17",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T19:07:28.193Z",
+      "by": "e3-729-w17",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T19:07:28.054Z",
+      "by": "e3-729-w17",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:57:33.998Z",
+      "by": "e3-741-budget",
+      "action": "card.update",
+      "ref": "c06ekrib",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-25T18:57:33.844Z",
+      "by": "e3-741-budget",
+      "action": "card.update",
+      "ref": "c06ekrib",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:57:20.540Z",
+      "by": "e3-729-w8",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:57:20.394Z",
+      "by": "e3-729-w8",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:56:55.242Z",
+      "by": "e3-729-w7",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:56:55.101Z",
+      "by": "e3-729-w7",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:56:04.557Z",
+      "by": "e3-729-w11",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:56:04.382Z",
+      "by": "e3-729-w11",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:45:14.114Z",
+      "by": "e3-729-w17",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:45:13.779Z",
+      "by": "e3-729-w17",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T18:44:19.956Z",
+      "by": "e3-729-w16",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:44:19.815Z",
+      "by": "e3-729-w16",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:39:19.277Z",
+      "by": "e3-729-w7",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:39:19.136Z",
+      "by": "e3-729-w7",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:35:33.512Z",
+      "by": "e3-729-w11",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:35:33.364Z",
+      "by": "e3-729-w11",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:29:00.596Z",
+      "by": "e3-729-w16",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:29:00.261Z",
+      "by": "e3-729-w16",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T18:28:43.414Z",
+      "by": "e3-729-w15",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:28:43.271Z",
+      "by": "e3-729-w15",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:19:27.125Z",
+      "by": "e3-729-w15",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:19:26.786Z",
+      "by": "e3-729-w15",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T18:18:57.225Z",
+      "by": "e3-729-w14",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:18:57.087Z",
+      "by": "e3-729-w14",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:12:30.799Z",
+      "by": "e3-729-w14",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:12:30.459Z",
+      "by": "e3-729-w14",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T18:12:02.196Z",
+      "by": "e3-729-w13",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:12:02.058Z",
+      "by": "e3-729-w13",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:10:52.840Z",
+      "by": "e3-729-w11",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:10:52.696Z",
+      "by": "e3-729-w11",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:04:29.765Z",
+      "by": "e3-741-budget",
+      "action": "card.update",
+      "ref": "c06ekrib",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-25T18:04:29.609Z",
+      "by": "e3-741-budget",
+      "action": "card.update",
+      "ref": "c06ekrib",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:01:52.019Z",
+      "by": "e3-729-w13",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:01:51.681Z",
+      "by": "e3-729-w13",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T18:01:03.250Z",
+      "by": "e3-751-lsp",
+      "action": "card.release",
+      "ref": "c04x8v2l",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:01:03.063Z",
+      "by": "e3-751-lsp",
+      "action": "card.update",
+      "ref": "c04x8v2l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T18:00:01.015Z",
+      "by": "e3-729-w8",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T18:00:00.876Z",
+      "by": "e3-729-w8",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T17:59:38.244Z",
+      "by": "e3-729-w12",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T17:59:38.104Z",
+      "by": "e3-729-w12",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T17:42:07.776Z",
+      "by": "e3-729-w12",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T17:42:07.440Z",
+      "by": "e3-729-w12",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T17:41:11.545Z",
+      "by": "e3-751-lsp",
+      "action": "card.release",
+      "ref": "c04x8v2l",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T17:41:11.346Z",
+      "by": "e3-751-lsp",
+      "action": "card.update",
+      "ref": "c04x8v2l",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T17:40:12.569Z",
+      "by": "e3-729-w11",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T17:40:12.436Z",
+      "by": "e3-729-w11",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T17:39:51.599Z",
+      "by": "e3-729-w11",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T17:39:51.452Z",
+      "by": "e3-729-w11",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T17:21:07.376Z",
+      "by": "e3-729-w11",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T17:21:07.040Z",
+      "by": "e3-729-w11",
+      "action": "card.claim",
+      "ref": "c0xdsvm9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T17:20:47.291Z",
+      "by": "e3-729-w10",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T17:20:43.601Z",
+      "by": "e3-729-w10",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-25T14:16:54.944Z",
       "by": "docs-cleanup-agent",
       "action": "card.update",
@@ -48359,531 +49199,6 @@
       "action": "card.criteria-verify",
       "ref": "c0dcrcm9",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-25T02:36:06.300Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0dcrcm9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T02:36:06.160Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0dcrcm9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:32:45.430Z",
-      "by": "one-core-777-grok",
-      "action": "card.update",
-      "ref": "c0dcrcm9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T02:32:45.277Z",
-      "by": "one-core-777-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0dcrcm9",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T02:32:45.141Z",
-      "by": "one-core-777-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0dcrcm9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T02:32:45.012Z",
-      "by": "one-core-777-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0dcrcm9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T02:32:44.872Z",
-      "by": "one-core-777-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0dcrcm9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T02:32:44.735Z",
-      "by": "one-core-777-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0dcrcm9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:30:10.830Z",
-      "by": "one-core-777-grok",
-      "action": "card.claim",
-      "ref": "c0dcrcm9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:20:13.514Z",
-      "by": "one-core-777-grok",
-      "action": "card.claim",
-      "ref": "c0dcrcm9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:10:28.101Z",
-      "by": "e3-781-grok",
-      "action": "card.claim",
-      "ref": "c03jshb5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:10:03.155Z",
-      "by": "e3-781-grok",
-      "action": "card.update",
-      "ref": "c0182sm1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T02:10:02.990Z",
-      "by": "e3-781-grok",
-      "action": "card.claim",
-      "ref": "c0182sm1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:09:42.771Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0yr3crz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T02:09:09.937Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0yr3crz",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-25T02:09:09.802Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0yr3crz",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-25T02:09:09.664Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0yr3crz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T02:09:09.518Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0yr3crz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T02:09:09.373Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0yr3crz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T02:09:09.235Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0yr3crz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T02:09:09.102Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0yr3crz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:08:47.843Z",
-      "by": "e3-780-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0yr3crz",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-25T02:08:47.708Z",
-      "by": "e3-780-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0yr3crz",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-25T02:08:47.581Z",
-      "by": "e3-780-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0yr3crz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T02:08:47.448Z",
-      "by": "e3-780-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0yr3crz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T02:08:47.329Z",
-      "by": "e3-780-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0yr3crz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T02:08:47.205Z",
-      "by": "e3-780-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0yr3crz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T02:08:47.076Z",
-      "by": "e3-780-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0yr3crz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:08:38.111Z",
-      "by": "e3-780-grok",
-      "action": "card.claim",
-      "ref": "c0yr3crz",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:08:37.981Z",
-      "by": "e3-780-grok",
-      "action": "card.update",
-      "ref": "c0yr3crz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T02:07:23.607Z",
-      "by": "one-core-777-grok",
-      "action": "card.claim",
-      "ref": "c0dcrcm9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:04:35.222Z",
-      "by": "one-core-777-grok",
-      "action": "card.update",
-      "ref": "c0dcrcm9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T01:53:05.881Z",
-      "by": "e3-780-grok",
-      "action": "card.update",
-      "ref": "c0yr3crz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T01:49:33.734Z",
-      "by": "e3-780-grok",
-      "action": "card.update",
-      "ref": "c0yr3crz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T01:49:33.582Z",
-      "by": "e3-780-grok",
-      "action": "card.claim",
-      "ref": "c0yr3crz",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T01:48:57.794Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0xdsvm9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T01:48:35.501Z",
-      "by": "e3-729-grok",
-      "action": "card.release",
-      "ref": "c0xdsvm9",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-25T01:48:35.369Z",
-      "by": "e3-729-grok",
-      "action": "card.update",
-      "ref": "c0xdsvm9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T01:47:39.423Z",
-      "by": "one-core-777-grok",
-      "action": "card.claim",
-      "ref": "c0dcrcm9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T01:46:00.457Z",
-      "by": "one-core-777-grok",
-      "action": "card.claim",
-      "ref": "c0dcrcm9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T01:39:24.156Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0jmhruv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T01:39:23.947Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0jkuma7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T01:38:53.162Z",
-      "by": "e3-715-grok",
-      "action": "card.release",
-      "ref": "c0jmhruv",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-25T01:38:46.054Z",
-      "by": "e3-715-grok",
-      "action": "card.update",
-      "ref": "c0jmhruv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T01:38:45.890Z",
-      "by": "e3-715-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0jmhruv",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-25T01:38:45.744Z",
-      "by": "e3-715-grok",
-      "action": "card.claim",
-      "ref": "c0jmhruv",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T01:31:37.351Z",
-      "by": "one-core-777-grok",
-      "action": "card.claim",
-      "ref": "c0qshpq5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T01:30:18.383Z",
-      "by": "e3-729-grok",
-      "action": "card.claim",
-      "ref": "c0xdsvm9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T01:30:18.150Z",
-      "by": "e3-729-grok",
-      "action": "card.update",
-      "ref": "c0xdsvm9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T01:30:08.167Z",
-      "by": "e3-729-grok",
-      "action": "card.claim",
-      "ref": "c0xdsvm9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T01:29:48.640Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0dw8lwn",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-25T01:29:48.486Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0dcrcm9",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-25T01:29:47.677Z",
-      "by": "one-core-777-grok",
-      "action": "card.update",
-      "ref": "c0dcrcm9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T01:29:47.508Z",
-      "by": "one-core-777-grok",
-      "action": "card.claim",
-      "ref": "c0dcrcm9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T01:29:38.700Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0asrfsj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T01:29:20.682Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0asrfsj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T01:29:20.537Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0asrfsj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T01:29:20.404Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0asrfsj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T01:29:20.276Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0asrfsj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T01:29:20.137Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0asrfsj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T01:28:23.883Z",
-      "by": "one-core-776-grok",
-      "action": "card.update",
-      "ref": "c0asrfsj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T01:28:23.722Z",
-      "by": "one-core-776-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0asrfsj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T01:28:23.584Z",
-      "by": "one-core-776-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0asrfsj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T01:28:23.449Z",
-      "by": "one-core-776-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0asrfsj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T01:28:23.320Z",
-      "by": "one-core-776-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0asrfsj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T01:22:00.447Z",
-      "by": "one-core-776-grok",
-      "action": "card.update",
-      "ref": "c0asrfsj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T01:07:11.847Z",
-      "by": "one-core-776-grok",
-      "action": "card.update",
-      "ref": "c0asrfsj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T00:40:19.570Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0asrfsj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T00:40:19.422Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0asrfsj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T00:40:15.287Z",
-      "by": "one-core-orch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0asrfsj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T00:40:15.152Z",
-      "by": "one-core-orch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0asrfsj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T00:40:15.025Z",
-      "by": "one-core-orch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0asrfsj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T00:40:14.894Z",
-      "by": "one-core-orch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0asrfsj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T00:40:09.710Z",
-      "by": "one-core-orch-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0asrfsj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T00:39:47.441Z",
-      "by": "one-core-776-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0asrfsj",
-      "note": "#5"
     }
   ],
   "nextNum": 368,
