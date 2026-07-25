@@ -73,7 +73,7 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
     let r = Command::new(&bin).output().unwrap();
     assert!(
         r.status.success(),
-        "generated layout program panicked/exited non-zero:\nstdout: {}\nstderr: {}",
+        "generated layout program panicked/exited non-zero:\nstdout: {}\nstderr :: {}",
         String::from_utf8_lossy(&r.stdout),
         String::from_utf8_lossy(&r.stderr)
     );
@@ -91,7 +91,7 @@ fn run() {
         a.width == b.width
         a.width + b.width == 200.0
     }
-    aw :: form.value(form.h("a", "width"))
+    aw.{ form.value(form.h("a", "width"))
     bw :: form.value(form.h("b", "width"))
     print("a={aw} b={bw}")
 }
@@ -102,7 +102,7 @@ fn run() {
         error_codes(src)
     );
     if let Some(out) = build_and_run("equal_split", src) {
-        assert_eq!(out, "a=100.0 b=100.0\n");
+        assert_eq!(out, "a=100.0 b=100.0 }\n");
     }
 }
 

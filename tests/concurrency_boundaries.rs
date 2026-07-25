@@ -69,7 +69,7 @@ fn every_parallel_adapter_rejects_mutable_captures() {
             "para_map",
             r#"
 fn run() {
-    seen: [Int] := []
+    seen := [Int].{}
     values :: [1, 2, 3]
     values.para_map((n: Int) => {
         seen.push(n)
@@ -81,7 +81,7 @@ fn run() {
             "para_filter",
             r#"
 fn run() {
-    seen: [Int] := []
+    seen := [Int].{}
     values :: [1, 2, 3]
     values.para_filter((n: Int) => {
         seen.push(n)
@@ -93,7 +93,7 @@ fn run() {
             "para_partition",
             r#"
 fn run() {
-    seen: [Int] := []
+    seen := [Int].{}
     values :: [1, 2, 3]
     values.para_partition((n: Int) => {
         seen.push(n)
@@ -105,7 +105,7 @@ fn run() {
             "para_fold",
             r#"
 fn run() {
-    seen: [Int] := []
+    seen := [Int].{}
     values :: [1, 2, 3]
     values.para_fold(
         () => 0,

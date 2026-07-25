@@ -1,31 +1,31 @@
 Error [E1111]: parallel item cannot use `fn(Int) -> Int` across workers
-  --> tests/ui/parallel_function_worker_type.jet:7:27
+  --> tests/ui/parallel_function_worker_type.jet:11:27
     |
-  7 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
+ 11 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
     |                           ^^^^^^^^^^^
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
 Error [E1111]: parallel result cannot use `[fn(Int) -> Int]` across workers
-  --> tests/ui/parallel_function_worker_type.jet:7:27
+  --> tests/ui/parallel_function_worker_type.jet:11:27
     |
-  7 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
+ 11 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
     |                           ^^^^^^^^^^^
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
 Error [E1111]: parallel result cannot use `[fn(Int) -> Int]` across workers
-  --> tests/ui/parallel_function_worker_type.jet:8:23
+  --> tests/ui/parallel_function_worker_type.jet:12:23
     |
-  8 |     bad_result :: [1].para_map((n: Int) => (x: Int) => x + n)
+ 12 |     bad_result :: [1].para_map((n: Int) => (x: Int) => x + n)
     |                       ^^^^^^^^
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
 Error [E1111]: parallel result cannot use `fn(Int) -> Int` across workers
-  --> tests/ui/parallel_function_worker_type.jet:9:20
+  --> tests/ui/parallel_function_worker_type.jet:13:20
     |
-  9 |     bad_acc :: [1].para_fold(
+ 13 |     bad_acc :: [1].para_fold(() => (x: Int) => x, (callback: fn(Int) -> Int, n: Int) => callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) => left)
     |                    ^^^^^^^^^
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential

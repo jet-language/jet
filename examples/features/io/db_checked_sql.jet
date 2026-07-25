@@ -3,20 +3,13 @@ use core.db as db
 
 fn run() {
     conn := db.open_memory()
-    created :: db.migrate(conn, "person-v1", [
-        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"
-    ]) ?? panic("migrate")
-    skipped :: db.migrate(conn, "person-v1", [
-        "CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"
-    ]) ?? panic("migrate again")
+    created :: db.migrate(conn, "person-v1", ["CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"]) ?? panic("migrate")
+    skipped :: db.migrate(conn, "person-v1", ["CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"]) ?? panic("migrate again")
     id :: 7
     name :: "Ada"
     insert :: sql"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"
     _inserted :: conn.execute(insert.template(), db.params(insert)) ?? panic("insert")
-    failed :: db.transaction(conn, "bad batch", [
-        "INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)",
-        "INSERT INTO missing_table VALUES (1)"
-    ]) ?? 0
+    failed :: db.transaction(conn, "bad batch", ["INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)", "INSERT INTO missing_table VALUES (1)"]) ?? 0
     row :: conn.query_one("SELECT id, name, active FROM person WHERE id = ?", [DbValue.Int(7)]) ?? panic("query")
     found :: row ?? panic("missing")
     count :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")

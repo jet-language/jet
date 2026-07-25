@@ -2,7 +2,9 @@
 // Email owns a bare-string wire form; Signup's generated codec composes it.
 use core.encoding.json as json
 
-struct Email { address: String }
+struct Email {
+    address: String
+}
 
 impl Email.Encode {
     fn encode(self) -> DataTree {
@@ -14,17 +16,20 @@ impl Email.Decode {
     fn decode(tree: DataTree) -> Email ? DecodeError {
         address := tree.text()?
         if !address.contains("@") {
-            return Err(DecodeError.{ path: "", reason: "not a valid email: {address}" })
+            return Err(DecodeError.{path: "", reason: "not a valid email: {address}"})
         }
-        return Ok(Email.{ address })
+        return Ok(Email.{address: address})
     }
 }
 
-#[Codable]
-struct Signup { name: String  email: Email }
+#Codable
+struct Signup {
+    name: String
+    email: Email
+}
 
 fn run() {
-    signup := Signup.{ name: "Ada", email: Email.{ address: "ada@lovelace.org" } }
+    signup := Signup.{name: "Ada", email: Email.{address: "ada@lovelace.org"}}
     wire := json.to_string(signup)
     print(wire)
     decoded := json.decode<Signup>(wire) ?? panic("decode failed")

@@ -90,7 +90,7 @@ fn fmt_preserves_binary_pattern_holes() {
     // D-BINPAT1 (card #506): a `b"…"` binary pattern must survive fmt with
     // every hole intact — the bit widths, endian suffixes, and rest capture.
     // Idempotence alone can miss a dropped token, so assert the exact spelling.
-    let src = "fn run() {\n    packet: [U8] :: [0x45]\n    if packet == {\n        b\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\" -> { print(\"ok\") }\n        else -> { print(\"no\") }\n    }\n}\n";
+    let src = "fn run() {\n    packet :: [0x45]\n    if packet == {\n        b\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\" -> { print(\"ok\") }\n        else -> { print(\"no\") }\n    }\n}\n";
     let once = jet::format_source(src).expect("binary pattern should format");
     assert!(
         once.contains("b\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\""),
@@ -555,7 +555,7 @@ fn paint(c: Color) {
     print(c)
 }
 fn run() {
-    c: Color = .Red
+    c := .Red
     paint(.Blue)
     paint(c)
 }
@@ -579,8 +579,8 @@ fn run() {
 #[test]
 fn fmt_preserves_optional_result_variants() {
     let src = r#"fn f(flag: Bool) -> Int ? String {
-    maybe: Int? :: .Val(1)
-    empty: Int? :: .None
+    maybe :: .Val(1)
+    empty :: .None
     if maybe == {
         .Val(n) -> { print(n) }
         .None -> { print(0) }
@@ -607,8 +607,8 @@ fn fmt_preserves_named_payload_variant_dot_brace() {
     Box(width: Int)
 }
 fn run() {
-    a: View :: .Text.{ text: "hi" }
-    b: View :: .Box.{ width: 10 }
+    a :: .Text.{ text: "hi" }
+    b :: .Box.{ width: 10 }
 }
 "#;
     let out =
@@ -653,7 +653,7 @@ fn fmt_preserves_bin_take_pattern_literal() {
     // — the byte-mode sibling of `fmt_preserves_take_pattern_literal` above.
     // Must round-trip byte-for-byte (fmt STABILITY, not just accept-without-crash).
     let src = r#"fn run() {
-    header: [U8] :: [69, 0, 0, 40]
+    header :: [69, 0, 0, 40]
     r :: Reader.over(header)
     parsed :: r.take_pattern(b"{version:U4}{ihl:U4}{tos:U8}{len:U16be}") ?? panic("no match")
     print("{parsed.version} {parsed.ihl} {parsed.tos} {parsed.len}")
@@ -827,7 +827,7 @@ enum Damage {
 }
 
 fn run() {
-    d: Damage := Damage.Fire.Burn
+    d := Damage.Fire.Burn
     if d == {
         .Physical -> { print(\"physical\") }
         .Fire -> { print(\"fire\") }
@@ -1225,7 +1225,7 @@ fn fmt_dot_construction_d_dotctor1() {
 
 #[test]
 fn fmt_inferred_new_stability() {
-    let src = "struct Box<T> {\n    value: T\n}\n\nimpl Box {\n    fn new(value: ^T) -> Box<T> {\n        return Box<T>.{ value: value }\n    }\n}\n\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n    expected: Box<Int> :: .new(3)\n}\n";
+    let src = "struct Box<T> {\n    value: T\n}\n\nimpl Box {\n    fn new(value: ^T) -> Box<T> {\n        return Box<T>.{ value: value }\n    }\n}\n\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n    expected :: Box<Int>.new(3)\n}\n";
     let out = jet::format_source(src).expect("fmt should accept `.new(...)`");
     for spelling in ["Box.new(1)", "Box<Int>.new(2)", ".new(3)"] {
         assert!(out.contains(spelling), "formatter lost `{spelling}`:\n{out}");
@@ -1398,24 +1398,23 @@ fn run() {
 }
 
 #[test]
-fn fmt_explicit_binding_d_bind3_stability() {
-    // D-BIND4: `name: Type :: val` (immutable) and `name: Type := val` (mutable)
-    // must survive fmt unchanged.
+fn fmt_bare_binding_d_bind_bare1_stability() {
+    // D-BIND-BARE1: bare bindings must survive fmt unchanged.
     let src = "\
 fn run() {
-    x: Int :: 42
-    s: String := \"hi\"
+    x :: 42
+    s := \"hi\"
     print(\"{x} {s}\")
 }
 ";
     assert_fmt_keeps(
         src,
-        &["x: Int :: 42", "s: String := \"hi\""],
-        "explicit binding",
+        &["x :: 42", "s := \"hi\""],
+        "bare binding",
     );
-    let once = jet::format_source(src).expect("fmt should accept explicit-type bindings");
-    let twice = jet::format_source(&once).expect("second fmt of explicit bindings must succeed");
-    assert_eq!(once, twice, "explicit-type binding fmt must be idempotent");
+    let once = jet::format_source(src).expect("fmt should accept bare bindings");
+    let twice = jet::format_source(&once).expect("second fmt of bare bindings must succeed");
+    assert_eq!(once, twice, "bare binding fmt must be idempotent");
 }
 
 #[test]
@@ -1424,7 +1423,7 @@ fn fmt_preserves_track_binding_marker() {
 fn run() {
     #Track count :: 1
     #Track total := 2
-    #Track label: String :: \"ok\"
+    #Track label :: \"ok\"
     print(\"{count} {total} {label}\")
 }
 ";
@@ -1506,7 +1505,7 @@ fn archive(t: ^Ticket) -> String {
 }
 
 fn run() {
-    name: String :: \"vault\"
+    name :: \"vault\"
     saved :: ~name
     t :: Ticket.{id: 1, label: \"root\"}
     print(archive(~t))
@@ -1612,7 +1611,7 @@ fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
         2 {
         next
     }
-    loop cursor: Int := 1000000000000000000; cursor < 9000000000000000000; cursor += 1000000000000000000 {
+    loop cursor := 1000000000000000000; cursor < 9000000000000000000; cursor += 1000000000000000000 {
         print(cursor)
     }
     loop ready := true; ready {
@@ -1626,7 +1625,7 @@ fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
         "// source clause",
         "];",
         "// stride clause",
-        "loop cursor: Int := 1000000000000000000;",
+        "loop cursor := 1000000000000000000;",
         "cursor < 9000000000000000000;",
         "cursor += 1000000000000000000",
         "loop ready := true; ready {",
@@ -1634,7 +1633,7 @@ fn fmt_long_loop_headers_wrap_at_clause_boundaries_stability() {
         assert!(once.contains(token), "fmt dropped loop token `{token}`:\n{once}");
     }
     assert!(
-        once.contains("loop cursor: Int := 1000000000000000000;\n"),
+        once.contains("loop cursor := 1000000000000000000;\n"),
         "long state header must wrap after a semicolon:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted long loop headers must reparse");
@@ -1911,7 +1910,7 @@ fn run() {
     trusted :: Html.raw(\"<b>audited</b>\")
     render(trusted)
     arg :: \"two words;*.jet\"
-    expected: Sh :: \"printf <%s> {arg}\"
+    expected :: \"printf <%s> {arg}\"
     prefixed :: sh\"printf [%s] {arg}\"
     audited_cmd :: Sh.raw(\"printf raw\")
 }
@@ -2082,7 +2081,7 @@ fn fmt_preserves_view_call_range_args() {
     // but formatter recovery must still preserve the retired source losslessly.
     let src = "\
 fn run() {
-    incidents: [Int] := [1, 2, 3]
+    incidents := [1, 2, 3]
     window :: incidents.view(0..2)
     print(window.len())
 }
@@ -2097,7 +2096,7 @@ fn retired_view_keyword_is_an_ordinary_identifier() {
     let src = "\
 fn run() {
     view :: 7
-    values: [Int] := [1, 2, 3]
+    values := [1, 2, 3]
     window :: values.view(0..2)
     print(view + window.len())
 }
@@ -2123,7 +2122,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_uninit_sentinel() {
-    // D-UNINIT-SENTINEL1: `name: Type := uninit` — the binding's `init` AST
+    // D-BIND-BARE1 interim: bare Int.{0} until #782 — the binding's `init` AST
     // node is a harmless never-evaluated placeholder, so the formatter must
     // special-case `b.uninit` and print the `uninit` keyword literally
     // instead of formatting the placeholder (own-CLAUDE-memory rule: new
@@ -2132,7 +2131,7 @@ fn fmt_preserves_uninit_sentinel() {
 use core.mem
 
 fn run() {
-    n: Int := uninit
+    n := Int.{0}
     n = 99
     print(n)
 }
@@ -2155,7 +2154,7 @@ struct Stats {
 }
 
 fn run() {
-    s: Stats := Stats.{strength: 10, gear_mod: 3}
+    s := Stats.{strength: 10, gear_mod: 3}
     print(\"attack: {s.attack}\")
 }
 ";
@@ -2297,7 +2296,7 @@ fn fmt_preserves_call_spread() {
     // that flag, so every spread call argument silently lost its `...` on
     // the first fmt pass (a real behavior change: `join("tags:", ...parts)`
     // reformatted to `join("tags:", parts)`, which then fails to type-check).
-    let src = "fn join(prefix: String, msgs: ...String) -> String {\n    return [prefix, ...msgs].join(\" \")\n}\n\nfn run() {\n    parts: [String] := [\"one\", \"two\"]\n    b :: join(\"tags:\", ...parts)\n    print(b)\n}\n";
+    let src = "fn join(prefix: String, msgs: ...String) -> String {\n    return [prefix, ...msgs].join(\" \")\n}\n\nfn run() {\n    parts := [\"one\", \"two\"]\n    b :: join(\"tags:\", ...parts)\n    print(b)\n}\n";
     assert_fmt_stable(src, "call-argument spread");
 }
 
@@ -2350,7 +2349,7 @@ fn fmt_preserves_int_literal_radix() {
     // destroying the radix the author chose (same failure class as a dropped
     // token; caught decimalizing examples/features/parsing/binary-reader.jet
     // and the crypto examples' key material).
-    let src = "fn run() {\n    packet: [U8] :: [0x2a, 0x00, 0xFF, 0o17, 0b1010, 116]\n    big :: 1_000_000\n    print(\"{packet.len()} {big}\")\n}\n";
+    let src = "fn run() {\n    packet :: [0x2a, 0x00, 0xFF, 0o17, 0b1010, 116]\n    big :: 1_000_000\n    print(\"{packet.len()} {big}\")\n}\n";
     assert_fmt_stable(src, "int literal radix");
 }
 

@@ -14,20 +14,15 @@ fn run() {
     files.write("/tmp/jet_http_static.txt", "0123456789") ?? panic("static")
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr() ?? panic("address")
-
     mux :: http_server.mux()
     mux.post("/api/:name/*path", (req: HttpRequest) => handle_api(req))
     mux.get("/events", (req: HttpRequest) => Ok(http_server.sse("ready")))
-    mux.get("/file", (req: HttpRequest) =>
-        Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range"))
-    )
-
+    mux.get("/file", (req: HttpRequest) => Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")))
     t :: tasks.spawn(take(listener, mux) () => {
         http_server.serve_once_listener(listener, mux) ?? panic("serve1")
         http_server.serve_once_listener(listener, mux) ?? panic("serve2")
         http_server.serve_once_listener(listener, mux) ?? panic("serve3")
     })
-
     req0 :: http_client.request("POST", "http://{addr}/api/ada/profile")
     req1 :: req0.form("tool", "jet")
     req2 :: req1.cookie("session", "abc")

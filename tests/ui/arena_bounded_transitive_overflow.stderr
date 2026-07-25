@@ -1,7 +1,8 @@
-Error [E0921]: `Arena.new` reserves arena storage at tests/ui/arena_bounded_transitive_overflow.jet violates the effective `arena_bounded(4)` declared at tests/ui/arena_bounded_transitive_overflow.jet
-  --> tests/ui/arena_bounded_transitive_overflow.jet:4:14
+Error [E0921]: `Arena.new` reserves bounded arena storage at /home/nate/Projects/Github/jet-bd-781/tests/ui/arena_bounded_transitive_overflow.jet violates the effective `arena_bounded(4)` declared at /home/nate/Projects/Github/jet-bd-781/tests/ui/arena_bounded_transitive_overflow.jet
+  --> tests/ui/arena_bounded_transitive_overflow.jet:4:24
     |
   4 |     arena :: mem.Arena.new(capacity: 8)
-    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: tests/ui/arena_bounded_transitive_overflow.jet is reachable through arena_bounded_transitive_overflow::run -> arena_bounded_transitive_overflow::reserve from code governed by `arena_bounded(4)`; the proven path total is 8 bytes; declaration provenance: function arena_bounded(4) declared at tests/ui/arena_bounded_transitive_overflow.jet:8; operation provenance: reserve in tests/ui/arena_bounded_transitive_overflow.jet
+    |                        ^^^
+ Why: /home/nate/Projects/Github/jet-bd-781/tests/ui/arena_bounded_transitive_overflow.jet is reachable through arena_bounded_transitive_overflow::run -> arena_bounded_transitive_overflow::reserve from code governed by `arena_bounded(4)`; the proven path total is 8 bytes; declaration provenance: arena_bounded = 4
+  function 4 at /home/nate/Projects/Github/jet-bd-781/tests/ui/arena_bounded_transitive_overflow.jet:97..122; operation provenance: reserve in /home/nate/Projects/Github/jet-bd-781/tests/ui/arena_bounded_transitive_overflow.jet
  Fix: remove or replace the incompatible operation, call an implementation whose transitive memory facts satisfy the contract, or move the call outside this policy scope

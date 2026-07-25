@@ -1,7 +1,15 @@
-Error [E0142]: `db` can't be shared — it must be used exactly once
-  --> tests/ui/single_use_aliased.jet:16:10
+Error [E0120]: `resource` was not moved here, so it cannot fill an owned field
+  --> tests/ui/single_use_aliased.jet:7:28
     |
- 16 |     peek(db)
+  7 |     return Lock.{resource: resource}
+    |                            ^^^^^^^^
+ Why: this function has read access only and does not own the value
+ Fix: copy it explicitly with `~resource`
+
+Error [E0142]: `db` can't be shared — it must be used exactly once
+  --> tests/ui/single_use_aliased.jet:20:10
+    |
+ 20 |     peek(db)
     |          ^^
  Why: this value's type is `#SingleUse`, so it can only be moved (handed over for good); `peek` would borrow or copy it, and a `#SingleUse` value has no second use to give
  Fix: move it with `^db` to give it away, or rework the call so it takes ownership (`^`)

@@ -34,7 +34,7 @@ fn run() {
 fn parallel_adapters_reject_unsafe_boundaries_before_codegen() {
     let mutable_capture = r#"
 fn run() {
-    seen: [Int] := []
+    seen := [Int].{}
     ignored :: [1, 2, 3].para_map((n: Int) => { seen.push(n) })
 }
 "#;
@@ -70,7 +70,7 @@ fn run() {
             "item",
             r#"fn bump(n: Int) -> Int { return n + 1 }
 fn run() {
-    callbacks: [fn(Int) -> Int] :: [bump]
+    callbacks :: [fn(Int) -> Int].{ bump }
     ignored :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
 }
 "#,
@@ -99,7 +99,7 @@ fn run() {
 enum CallbackPayload { Callback(Boxed<fn(Int) -> Int>) }
 fn bump(n: Int) -> Int { return n + 1 }
 fn run() {
-    payloads: [CallbackPayload] :: [CallbackPayload.Callback(bump)]
+    payloads :: [CallbackPayload].{ CallbackPayload.Callback(bump) }
     ignored :: payloads.para_map((payload: CallbackPayload) => 1)
 }
 "#,

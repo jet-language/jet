@@ -32,13 +32,13 @@ fn add_argument_once_view() -> String {
     return "{sum.value()}|{hits}"
 }"#;
 const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
-    i8: I8 :: -12
-    i16: I16 :: -1234
-    i32: I32 :: -123456
-    u8: U8 :: 255
-    u16: U16 :: 1234
-    u32: U32 :: 123456
-    u64: U64 :: 123456789
+    i8 :: I8.{ -12 }
+    i16 :: I16.{ -1234 }
+    i32 :: I32.{ -123456 }
+    u8 :: U8.{ 255 }
+    u16 :: U16.{ 1234 }
+    u32 :: U32.{ 123456 }
+    u64 :: U64.{ 123456789 }
     nan :: Float.parse("NaN") ?? 0.0
     infinity :: Float.parse("inf") ?? 0.0
     return "{"a@b@c".after("@")}|{"a@b@c".before("@")}|{"no-sep".after("@")}|{"no-sep".before("@")}|{"é🙂".bytes()}|{"aé🙂z".slice(1, 2)}|{nan.is_nan()}|{infinity.is_infinite()}|{1.0.is_finite()}|{i8.to_string()}|{i16.to_string()}|{i32.to_string()}|{u8.to_string()}|{u16.to_string()}|{u32.to_string()}|{u64.to_string()}"
@@ -47,21 +47,21 @@ const SCALAR_EXPR: &str = "scalar_view()";
 const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|-12|-1234|-123456|255|1234|123456|123456789";
 const F32_MATH_DECLS: &str = r#"use core.math as math
 fn f32_math_view() -> String {
-    rounded: F32 :: 16777217.0
-    max: F32 :: F32.MAX
-    positive_overflow: F32 :: max + max
-    negative_overflow: F32 :: -max + -max
-    negative_zero: F32 :: -0.0
-    nan: F32 :: F32.NAN
-    root_input: F32 :: 2.0
-    exponent: F32 :: 3.0
-    low: F32 :: 1.0
-    high: F32 :: 4.0
-    t: F32 :: 0.25
-    floor_input: F32 :: 1.75
-    ceil_input: F32 :: 1.25
-    wide: Float :: 16777217.0
-    wide_root: Float :: 2.0
+    rounded :: F32.{ 16777217.0 }
+    max :: F32.MAX
+    positive_overflow :: F32.{ max + max }
+    negative_overflow :: F32.{ -max + -max }
+    negative_zero :: F32.{ -0.0 }
+    nan :: F32.NAN
+    root_input :: F32.{ 2.0 }
+    exponent :: F32.{ 3.0 }
+    low :: F32.{ 1.0 }
+    high :: F32.{ 4.0 }
+    t :: F32.{ 0.25 }
+    floor_input :: F32.{ 1.75 }
+    ceil_input :: F32.{ 1.25 }
+    wide :: 16777217.0
+    wide_root :: 2.0
     return "{math.to_bits(rounded)}|{math.sqrt(root_input)}|{math.pow(root_input, exponent)}|{math.floor(floor_input)}|{math.ceil(ceil_input)}|{math.sin(root_input)}|{math.atan2(root_input, exponent)}|{math.hypot(root_input, exponent)}|{math.lerp(low, high, t)}|{math.min(low, high)}|{math.max(low, high)}|{math.clamp(exponent, low, root_input)}|{math.abs(-root_input)}|{math.is_inf(positive_overflow)}|{math.is_inf(negative_overflow)}|{math.is_nan(nan)}|{math.is_finite(rounded)}|{math.sign(negative_zero)}|{math.to_bits(negative_zero)}|{wide}|{math.sqrt(wide_root)}"
 }"#;
 const F32_MATH_EXPECTED: &str = "1266679808|1.4142135|8.0|1.0|2.0|0.9092974|0.5880026|3.6055512|1.75|1.0|4.0|2.0|2.0|true|true|true|true|0|2147483648|16777217.0|1.4142135623730951";
@@ -80,14 +80,14 @@ fn bit_inferred_local() -> Int {
     return value.leading_zeros()
 }
 fn integer_bit_queries_view() -> String {
-    int: Int :: -1
-    i8: I8 :: -2
-    i16: I16 :: -32768
-    i32: I32 :: 0
-    u8: U8 :: 13
-    u16: U16 :: 256
-    u32: U32 :: 2147483648
-    u64: U64 :: 255
+    int :: -1
+    i8 :: I8.{ -2 }
+    i16 :: I16.{ -32768 }
+    i32 :: I32.{ 0 }
+    u8 :: U8.{ 13 }
+    u16 :: U16.{ 256 }
+    u32 :: U32.{ 2147483648 }
+    u64 :: U64.{ 255 }
     return "{int.count_ones()}:{int.count_zeros()}:{int.leading_zeros()}:{int.trailing_zeros()}|{i8.count_ones()}:{i8.count_zeros()}:{i8.leading_zeros()}:{i8.trailing_zeros()}|{i16.count_ones()}:{i16.count_zeros()}:{i16.leading_zeros()}:{i16.trailing_zeros()}|{i32.count_ones()}:{i32.count_zeros()}:{i32.leading_zeros()}:{i32.trailing_zeros()}|{u8.count_ones()}:{u8.count_zeros()}:{u8.leading_zeros()}:{u8.trailing_zeros()}|{u16.count_ones()}:{u16.count_zeros()}:{u16.leading_zeros()}:{u16.trailing_zeros()}|{u32.count_ones()}:{u32.count_zeros()}:{u32.leading_zeros()}:{u32.trailing_zeros()}|{u64.count_ones()}:{u64.count_zeros()}:{u64.leading_zeros()}:{u64.trailing_zeros()}|{bit_byte(13).leading_zeros()}|{bit_parameter(13)}|{bit_inferred_local()}"
 }"#;
 const INTEGER_BIT_QUERIES_EXPECTED: &str =
@@ -111,7 +111,7 @@ const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() -> String {
 }"#;
 const BYTE_BUFFER_EXPECTED: &str = "true|31|[18, 86, 52, 120, 154, 4, 3, 2, 1, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1, 17, 18, 19, 20, 21, 22, 23, 24, 9, 10]|true|0|[255, 0]|2";
 const DEQUE_DECLS: &str = r#"fn deque_view() -> String {
-    deque: Deque<Int> := Deque.new()
+    deque := Deque.new()
     empty_before :: deque.is_empty()
     missing_front :: deque.peek_front() ?? -1
     missing_back :: deque.peek_back() ?? -1
@@ -130,7 +130,7 @@ const DEQUE_DECLS: &str = r#"fn deque_view() -> String {
 }"#;
 const DEQUE_EXPECTED: &str = "true|-1|-1|3|1|3|1|3|2|true|0|-1";
 const LRU_DECLS: &str = r#"fn lru_view() -> String {
-    cache: Lru<String, Int> := Lru.new(2)
+    cache := Lru.new(2)
     empty_before :: cache.is_empty()
     first :: cache.add("a", 1) ?? -1
     added_b :: cache.add_new("b", 2)
@@ -143,7 +143,7 @@ const LRU_DECLS: &str = r#"fn lru_view() -> String {
     missing :: cache.remove("missing") ?? -1
     length :: cache.len()
     cache.clear()
-    zero: Lru<String, Int> := Lru.new(-2)
+    zero := Lru.new(-2)
     zero_add :: zero.add("x", 7) ?? -1
     zero_add_new :: zero.add_new("x", 7)
     return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"
@@ -157,13 +157,13 @@ fn counted_map(hits: &Int) -> [String: Int] {
     return ["a": 1]
 }
 fn map_view() -> String {
-    values: [String: Int] := ["b": 2, "a": 1]
+    values := [String: Int].{ "b": 2, "a": 1 }
     empty_before :: values.is_empty()
     fresh_c :: values.add("c", 3) ?? -1
     displaced_b :: add_map(&values, "b", 20)
     added_d :: values.add_new("d", 4)
     duplicate_a :: values.add_new("a", 99)
-    seen: [String] := []
+    seen := [String].{}
     values.each((key, value) => {
         require((key == "a" && value == 1) || (key == "b" && value == 20) || (key == "c" && value == 3) || (key == "d" && value == 4), "Map.each pair")
         seen.push(key)
@@ -195,14 +195,14 @@ const POOL_DECLS: &str = r#"fn pool_view() -> String {
 const POOL_EXPECTED: &str = "first|stale|2|true|true|false|2|true|true|third|second|0";
 const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() -> String {
     values := [1, 2, 3, 4]
-    each_seen: [Int] := []
+    each_seen := [Int].{}
     shadow := 99
     values.each((shadow: Int) => { each_seen.push(shadow) })
-    predicate_seen: Set<Int> := Set.from([0])
+    predicate_seen := Set.from([0])
     has_three :: values.any((n: Int) => predicate_seen.add(n) && n == 3)
-    fold_seen: [Int: Int] := [0: 0]
+    fold_seen := [Int: Int].{ 0: 0 }
     total :: values.fold(0, (acc: Int, n: Int) => fold_seen.add(n, n) ?? (acc + n))
-    partition_seen: Set<Int> := Set.from([0])
+    partition_seen := Set.from([0])
     partition_shadow := 88
     split :: values.partition((partition_shadow: Int) => partition_seen.add(partition_shadow) && partition_shadow % 2 == 0)
     return "{each_seen}|{shadow}|{predicate_seen.len()}:{predicate_seen.has(1)}:{predicate_seen.has(2)}:{predicate_seen.has(3)}:{predicate_seen.has(4)}|{has_three}|{fold_seen.values()}|{total}|{partition_shadow}|{partition_seen.len()}:{partition_seen.has(1)}:{partition_seen.has(2)}:{partition_seen.has(3)}:{partition_seen.has(4)}|{split.false_}|{split.true_}"
@@ -285,7 +285,7 @@ const BIT_SET_DECLS: &str = r#"fn add_bit(values: &BitSet, bit: Int) -> Bool {
     return values.add(bit)
 }
 fn bit_set_view() -> String {
-    bits: BitSet := BitSet.new()
+    bits := BitSet.new()
     empty_before :: bits.is_empty()
     negative_added :: bits.add(-1)
     added_four :: bits.add(4)
@@ -311,7 +311,7 @@ fn counted_priority(hits: &Int) -> PriorityQueue<Int> {
     return PriorityQueue.from([2, 6])
 }
 fn priority_queue_view() -> String {
-    values: PriorityQueue<Int> := PriorityQueue.from([4, 1, 7, 3, 7])
+    values := PriorityQueue.from([4, 1, 7, 3, 7])
     initial_len :: values.len()
     initial_empty :: values.is_empty()
     initial_peek :: values.peek() ?? -1
@@ -323,8 +323,8 @@ fn priority_queue_view() -> String {
     popped_nine :: values.pop() ?? -1
     popped_seven :: values.pop() ?? -1
     after_pop :: values.to_sorted_list()
-    words: PriorityQueue<String> := PriorityQueue.from(["a", "z", "m"])
-    empty: PriorityQueue<Int> := PriorityQueue.new()
+    words := PriorityQueue.from(["a", "z", "m"])
+    empty := PriorityQueue.new()
     receiver_hits := 0
     counted_values := counted_priority(&receiver_hits)
     counted_peek :: counted_values.peek() ?? -1
@@ -339,7 +339,7 @@ const PRIORITY_QUEUE_CALL_RECEIVER_DECLS: &str = r#"fn priority_queue_call_recei
     return "{value}|{receiver_hits}"
 }"#;
 const SET_DECLS: &str = r#"fn set_view() -> String {
-    values: Set<Int> := Set.from([3, 1, 2, 3])
+    values := Set.from([3, 1, 2, 3])
     initial := values.to_list()
     initial.sort()
     initial_len :: values.len()
@@ -351,16 +351,16 @@ const SET_DECLS: &str = r#"fn set_view() -> String {
     has_two :: values.has(2)
     current := values.to_list()
     current.sort()
-    other: Set<Int> := Set.from([5, 4, 0])
+    other := Set.from([5, 4, 0])
     combined_values :: values.union(other)
     combined := combined_values.to_list()
     combined.sort()
     after_union := values.to_list()
     after_union.sort()
-    words: Set<String> := Set.from(["z", "a", "m", "a"])
+    words := Set.from(["z", "a", "m", "a"])
     word_list := words.to_list()
     word_list.sort()
-    additional: Set<Int> := Set.from([9, 7])
+    additional := Set.from([9, 7])
     additional_added :: additional.add(8)
     additional_list := additional.to_list()
     additional_list.sort()
@@ -378,7 +378,7 @@ fn counted_set(hits: &Int) -> Set<Int> {
     return Set.from([2, 6])
 }
 fn set_call_receiver_view() -> String {
-    values: Set<Int> := Set.from([9, 7])
+    values := Set.from([9, 7])
     added :: add_set(&values, 8)
     receiver_hits := 0
     value :: counted_set(&receiver_hits).has(6)
@@ -393,12 +393,12 @@ fn add_bag(values: &Bag<Int>, value: Int) -> Bool {
 }
 fn counted_bag(hits: &Int) -> Bag<Int> {
     hits += 1
-    values: Bag<Int> := Bag.new()
+    values := Bag.new()
     values.add(6)
     return values
 }
 fn bag_view() -> String {
-    values: Bag<Int> := Bag.new()
+    values := Bag.new()
     empty_before :: values.is_empty()
     added_four :: values.add(4)
     duplicate_four :: values.add(4)
@@ -412,14 +412,14 @@ fn bag_view() -> String {
     count_four_after_one :: values.count(4)
     values.remove(4)
     values.remove(99)
-    words: Bag<String> := Bag.new()
+    words := Bag.new()
     words.add("a")
     words.add("z")
     words.add("a")
-    tokens: Bag<BagToken> := Bag.new()
+    tokens := Bag.new()
     tokens.add(BagToken.Red)
     tokens.add(BagToken.Red)
-    empty: Bag<Int> := Bag.new()
+    empty := Bag.new()
     return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) => value == "z")}|{tokens.count(BagToken.Red)}|{tokens.has(BagToken.Blue)}|{empty.any((value) => value == 0)}"
 }"#;
 const BAG_EXPECTED: &str = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
@@ -432,7 +432,7 @@ const SORTED_SET_DECLS: &str = r#"fn add_through_param(values: &SortedSet<Int>, 
     return values.add(value)
 }
 fn sorted_set_view() -> String {
-    values: SortedSet<Int> := SortedSet.from([3, 1, 2, 3])
+    values := SortedSet.from([3, 1, 2, 3])
     initial :: values.to_list()
     initial_len :: values.len()
     initial_empty :: values.is_empty()
@@ -444,20 +444,20 @@ fn sorted_set_view() -> String {
     values.remove(2)
     has_two :: values.has(2)
     current :: values.to_list()
-    other: SortedSet<Int> := SortedSet.from([5, 4, 0])
+    other := SortedSet.from([5, 4, 0])
     combined :: values.union(other).to_list()
     after_union :: values.to_list()
-    words: SortedSet<String> := SortedSet.from(["z", "a", "m", "a"])
-    through_param: SortedSet<Int> := SortedSet.from([9, 7])
+    words := SortedSet.from(["z", "a", "m", "a"])
+    through_param := SortedSet.from([9, 7])
     param_added :: add_through_param(&through_param, 8)
     values.clear()
-    empty: SortedSet<Int> := SortedSet.new()
+    empty := SortedSet.new()
     return "{initial}|{initial_len}|{initial_empty}|{first}|{last}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{words.to_list()}|{param_added}|{through_param.to_list()}|{values.is_empty()}|{values.len()}|{values.first() ?? -1}|{empty.is_empty()}"
 }"#;
 const SORTED_SET_EXPECTED: &str = "[1, 2, 3]|3|false|1|3|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|-1|true";
 const SORTED_SET_FIELD_DECLS: &str = r#"struct SortedSetHolder { values: SortedSet<Int> }
 fn sorted_set_field_view() -> String {
-    values: SortedSet<Int> := SortedSet.from([9, 7])
+    values := SortedSet.from([9, 7])
     holder := SortedSetHolder.{ values: values }
     added :: holder.values.add(8)
     return "{added}|{holder.values.to_list()}"
@@ -1226,24 +1226,24 @@ fn rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpr
 }
 
 const LINALG_DECLS: &str = r#"fn linalg_view() -> String {
-    a: Vec3 :: Vec3(1.0, 2.0, 3.0)
-    b: Vec3 :: Vec3(4.0, 5.0, 6.0)
-    sum: Vec3 :: a + b
-    crossed: Vec3 :: a.cross(b)
-    scale: Mat3 :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
-    scaled: Vec3 :: scale * Vec3(1.0, 2.0, 3.0)
-    v: F32x4 :: F32x4(1.0, 2.0, 3.0, 4.0)
-    w: F32x4 :: F32x4(10.0, 20.0, 30.0, 40.0)
-    added: F32x4 :: v + w
-    d: F64x2 :: F64x2.from_array([1.5, 2.5])
+    a :: Vec3(1.0, 2.0, 3.0)
+    b :: Vec3(4.0, 5.0, 6.0)
+    sum :: Vec3.{ a + b }
+    crossed :: Vec3.{ a.cross(b) }
+    scale :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+    scaled :: Vec3.{ scale * Vec3(1.0, 2.0, 3.0) }
+    v :: F32x4(1.0, 2.0, 3.0, 4.0)
+    w :: F32x4(10.0, 20.0, 30.0, 40.0)
+    added :: F32x4.{ v + w }
+    d :: F64x2.from_array([1.5, 2.5])
     return "{sum.to_array()}|{a.dot(b)}|{crossed.to_array()}|{Vec3(0.0, 3.0, 4.0).length()}|{Vec3(0.0, 3.0, 4.0).normalize().to_array()}|{scaled.to_array()}|{scale.matmul(scale).to_array()}|{added.to_array()}|{(v * w).to_array()}|{F32x4.splat(7.0).to_array()}|{v[2]}|{v.sum()}|{v.product()}|{v.min()}|{v.max()}|{v.reduce(#Max)}|{v.reduce(#Mul)}|{(d + d).to_array()}|{d.sum()}|{d.product()}|{d.min()}|{d.max()}"
 }"#;
 const LINALG_EXPECTED: &str = "[5.0, 7.0, 9.0]|32.0|[-3.0, 6.0, -3.0]|5.0|[0.0, 0.6, 0.8]|[2.0, 4.0, 6.0]|[4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0]|[11.0, 22.0, 33.0, 44.0]|[10.0, 40.0, 90.0, 160.0]|[7.0, 7.0, 7.0, 7.0]|3.0|10.0|24.0|1.0|4.0|4.0|24.0|[3.0, 5.0]|4.0|3.75|1.5|2.5";
 
 const OVERFLOW_DECLS: &str = r#"fn overflow_view() -> String {
-    hi: U8 :: 200
-    lo: U8 :: 100
-    fallback: U8 :: 0
+    hi :: U8.{ 200 }
+    lo :: U8.{ 100 }
+    fallback :: U8.{ 0 }
     wrapped :: wrapping(hi + lo)
     saturated :: saturating(hi + lo)
     checked_miss :: checked(hi + lo) ?? fallback
@@ -1326,9 +1326,9 @@ fn public_transcript_covers_solver_exactly() {
 
 const ARCHIVE_DECLS: &str = r#"use core.archive as archive
 fn archive_view() -> String {
-    bytes: [U8] :: [72, 101, 108, 108, 111]
+    bytes :: [U8].{ 72, 101, 108, 108, 111 }
     zipped :: archive.zip_compress("hello.txt", bytes)
-    empty: [U8] :: []
+    empty :: [U8].{}
     tarred := archive.tar_add(empty, "hello.txt", bytes)
     tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116])
     zip_bytes :: archive.zip_decompress(zipped)
@@ -1339,7 +1339,7 @@ const ARCHIVE_EXPECTED: &str =
     "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0";
 const ARCHIVE_INVALID_TAR_NAME_DECLS: &str = r#"use core.archive as archive
 fn invalid_tar_name_view(name: String) -> String {
-    empty: [U8] :: []
+    empty :: [U8].{}
     valid :: archive.tar_add(empty, "keep.txt", [1])
     attempted :: archive.tar_add(valid, name, [2])
     return "{archive.tar_names_json(attempted)}|{archive.tar_get(attempted, "keep.txt")}|{archive.tar_get(attempted, name)}"
@@ -1404,13 +1404,13 @@ fn ui_values_match_aot_comptime_forced_interpreter_and_default_dev() {
 
 const CRYPTO_DECLS: &str = r#"use core.crypto.expert as expert
 fn crypto_value_view() -> String {
-    ikm: [U8] :: [11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11]
-    salt: [U8] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-    info: [U8] :: [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]
-    x_secret: [U8] :: [119, 7, 109, 10, 115, 24, 165, 125, 60, 22, 193, 114, 81, 178, 102, 69, 223, 76, 47, 135, 235, 192, 153, 42, 177, 119, 251, 165, 29, 185, 44, 42]
-    x_public: [U8] :: [222, 158, 219, 125, 123, 125, 193, 180, 211, 91, 97, 194, 236, 228, 53, 55, 63, 131, 67, 200, 91, 120, 103, 77, 173, 252, 126, 20, 111, 136, 43, 79]
-    ed_public: [U8] :: [215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26]
-    ed_signature: [U8] :: [229, 86, 67, 0, 195, 96, 172, 114, 144, 134, 226, 204, 128, 110, 130, 138, 132, 135, 127, 30, 184, 229, 217, 116, 216, 115, 224, 101, 34, 73, 1, 85, 95, 184, 130, 21, 144, 163, 59, 172, 198, 30, 57, 112, 28, 249, 180, 107, 210, 91, 245, 240, 89, 91, 190, 36, 101, 81, 65, 67, 142, 122, 16, 11]
+    ikm :: [U8].{ 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11 }
+    salt :: [U8].{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }
+    info :: [U8].{ 240, 241, 242, 243, 244, 245, 246, 247, 248, 249 }
+    x_secret :: [U8].{ 119, 7, 109, 10, 115, 24, 165, 125, 60, 22, 193, 114, 81, 178, 102, 69, 223, 76, 47, 135, 235, 192, 153, 42, 177, 119, 251, 165, 29, 185, 44, 42 }
+    x_public :: [U8].{ 222, 158, 219, 125, 123, 125, 193, 180, 211, 91, 97, 194, 236, 228, 53, 55, 63, 131, 67, 200, 91, 120, 103, 77, 173, 252, 126, 20, 111, 136, 43, 79 }
+    ed_public :: [U8].{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
+    ed_signature :: [U8].{ 229, 86, 67, 0, 195, 96, 172, 114, 144, 134, 226, 204, 128, 110, 130, 138, 132, 135, 127, 30, 184, 229, 217, 116, 216, 115, 224, 101, 34, 73, 1, 85, 95, 184, 130, 21, 144, 163, 59, 172, 198, 30, 57, 112, 28, 249, 180, 107, 210, 91, 245, 240, 89, 91, 190, 36, 101, 81, 65, 67, 142, 122, 16, 11 }
     output := ""
     #Unsafe("fixed RFC interop vectors") {
         derived :: expert.hkdf_sha256(ikm, salt, info, 42) ?? panic("hkdf")

@@ -77,15 +77,14 @@ pub const MARKER_PUBLIC_FILE: &str = "PublicFile";
 /// access to sibling packages in the same payload/workspace.
 pub const PUB_PACKAGE_QUALIFIER: &str = "package";
 
-/// S2 / D-BIND1 / D-BIND4: immutable binding sigil `name :: expr`.
-/// D-BIND4: explicit-type immutable form is `name: Type :: expr`; explicit mutable is
-/// `name: Type := expr`. Inferred mutable stays `name := expr`; `=` reassigns `:=`
-/// bindings (S17).
+/// S2 / D-BIND1 / D-BIND4 / D-BIND-BARE1: immutable binding sigil `name :: expr`.
+/// D-BIND-BARE1 retires typed bindings (`name: Type :: expr`); types ride the
+/// value (`Type.{ … }`) or live on signatures and fields.
 pub const SIGIL_BIND_IMMUT: &str = "::";
 
 /// S2 / D-BIND1 (ratified 2026-06-18): mutable binding sigil `name := expr`
 /// (was the keyword `var`). `=` stays reassignment of an existing `:=` (S17).
-/// D-BIND4: explicit-type mutable form is `name: Type := expr`.
+/// D-BIND-BARE1 retires typed bindings (`name: Type := expr`).
 pub const SIGIL_BIND_MUT: &str = ":=";
 
 /// D-PROVENANCE1=B: binding-level tracking marker, written before the binding:
@@ -399,18 +398,15 @@ pub const CORE_MEM_MODULE: &str = "core.mem";
 /// teaching error (E0426) pointing at the new spelling.
 pub const ATTR_UNINIT: &str = "Uninit";
 
-/// D-UNINIT-SENTINEL1 (ratified 2026-07-02, opt D): contextual keyword
-/// `uninit`, legal only as the RHS of `:=` on a binding with an explicit type
-/// annotation — `name: Type := uninit`. Supersedes the `#Uninit name: Type`
-/// marker (D-UNINIT1); reuses that decision's sema flow-analysis engine
-/// unchanged (`CheckerCore.rs`'s uninit tracking map) — only the trigger that
-/// flips `Binding.uninit` moves from seeing the marker to seeing this word in
-/// initializer position. Still gated by `use core.mem` (E0424) and restricted
-/// to plain-data types (E0423). Contextual like `region`/`state`/`migration`:
-/// the word `uninit` stays usable as an ordinary identifier everywhere else;
-/// the lexer emits it as a plain `Ident`, and only the parser's initializer
-/// position recognizes it.
-pub const KW_UNINIT: &str = "uninit"; // D-UNINIT-SENTINEL1
+/// D-UNINIT-SENTINEL1 (ratified 2026-07-02, opt D) → D-UNINIT-SENTINEL2:
+/// contextual keyword `uninit`. After D-BIND-BARE1 the trigger is
+/// `name := Type.{ uninit }` (thin support landed with #781; #782 owns the
+/// remaining SENTINEL2 checklist). Bare `name := uninit` is E0421. Still gated
+/// by `use core.mem` (E0424) and restricted to plain-data types (E0423).
+/// Contextual like `region`/`state`/`migration`: the word `uninit` stays
+/// usable as an ordinary identifier everywhere else; the lexer emits it as a
+/// plain `Ident`, and only the typed-literal / initializer position recognizes it.
+pub const KW_UNINIT: &str = "uninit"; // D-UNINIT-SENTINEL1 → D-UNINIT-SENTINEL2
 
 /// D-SOLVER-LIB1=A (ratified 2026-07-06): explicit finite solver library.
 pub const CORE_SOLVE_MODULE: &str = "core.solve";

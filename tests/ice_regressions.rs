@@ -140,7 +140,7 @@ fn b5_fixed_array_index_assign() {
         "b5_fixed_array_index_assign",
         r#"
 fn run() {
-    buf: [Int#3] := [1, 2, 3]
+    buf := [Int#3].{ 1, 2, 3 }
     i := 1
     buf[i] = 99
     print(buf[0])
@@ -168,7 +168,7 @@ enum Wrapped {
     Value(String)
 }
 fn run() {
-    s: String := "hi"
+    s := "hi"
     w := Wrapped.Value(s)
     print("{s}")
     print(w == Wrapped.Value("hi"))
@@ -189,7 +189,7 @@ struct Holder {
     payload: String
 }
 fn run() {
-    s: String := "hi"
+    s := "hi"
     h := Holder.{ payload: s }
     print("{s}")
     print(h.payload)

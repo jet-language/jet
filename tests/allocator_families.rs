@@ -70,7 +70,10 @@ fn run_jet(label: &str, src: &str) -> (i32, String, String) {
         .lines()
         .filter(|line| {
             line.contains("unsafe")
-                && !(src.contains(":= uninit") && line.contains("MaybeUninit"))
+                && !(
+                    (src.contains(":= uninit") || src.contains(".{ uninit }") || src.contains(".{uninit}"))
+                        && line.contains("MaybeUninit")
+                )
         })
         .collect::<Vec<_>>();
     assert!(
@@ -248,7 +251,7 @@ fn run() {
     let over_src = r#"
 use core.mem
 fn run() {
-    bytes: [U8#128] := uninit
+    bytes := [U8#128].{ uninit }
     fixed :: mem.Fixed.over(&bytes)
     value :: fixed.alloc(9)
     print(value)
@@ -330,7 +333,7 @@ fn fixed_over_exclusively_borrows_one_inline_byte_array() {
         r#"
 use core.mem
 fn run() {
-    bytes: [U8#8] := uninit
+    bytes := [U8#8].{ uninit }
     fixed :: mem.Fixed.over(&bytes)
     bytes[0] = 1
     close(^fixed)

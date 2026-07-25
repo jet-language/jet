@@ -1,23 +1,23 @@
 Error [E2305]: a lambda cannot return a stored or borrowed view
-  --> tests/ui/task_detach_view_capture.jet:8:22
+  --> tests/ui/task_detach_view_capture.jet:10:22
     |
-  8 |     t :: tasks.spawn(() => peek([1, 2, 3]))
+ 10 |     t :: tasks.spawn(() => peek([1, 2, 3]))
     |                      ^^^^^^^^^^
  Why: a lambda value has no stable public owner slot for the returned view, and captured owners may move with the closure
  Fix: use a named function or method whose returned-view provenance can be inferred and published
 
 Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
-  --> tests/ui/task_detach_view_capture.jet:8:22
+  --> tests/ui/task_detach_view_capture.jet:10:22
     |
-  8 |     t :: tasks.spawn(() => peek([1, 2, 3]))
+ 10 |     t :: tasks.spawn(() => peek([1, 2, 3]))
     |                      ^^^^^^^^^^
  Why: a view is a borrow, not an owned value; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 
 Error [E1106]: can't detach task `t` — it captured a `view` borrow that may not live long enough
-  --> tests/ui/task_detach_view_capture.jet:9:7
+  --> tests/ui/task_detach_view_capture.jet:11:7
     |
-  9 |     t.detach()
+ 11 |     t.detach()
     |       ^^^^^^
  Why: a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle
  Fix: pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`

@@ -923,8 +923,8 @@ use c.store as store
 struct Record { id: U64; flags: U32 }
 #Extern module c.store { fn store_load(id: U64, out: *Record) -> I32 = "store_load"; }
 fn load(id: U64) -> Record ? String {
-    slot: Record := Record.{id: 0, flags: 0}
-    status: I32 := 1
+    slot := Record.{id: 0, flags: 0}
+    status := I32.{ 1 }
     #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = store.store_load(id, p)

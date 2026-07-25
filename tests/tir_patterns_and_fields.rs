@@ -64,7 +64,7 @@ fn run() {
     print(m.is_empty())
     s :: \"hi\"
     print(s.is_empty())
-empty: [Int] :: []
+empty :: [Int].{}
     check(empty)
     check([9])
 }
@@ -92,7 +92,7 @@ fn f(xs: [Int]) {
 }
 fn run() {
     f([10, 20])
-empty: [Int] :: []
+empty :: [Int].{}
     f(empty)
     print(99)
 }
@@ -120,7 +120,7 @@ struct Tree {
 }
 fn sum(t: Tree) -> Int {
     total := t.value
-kid: Tree? :: t.child
+kid ::  t.child 
     if kid == {
         Val(c) -> {
             total = total + sum(c)
@@ -291,7 +291,7 @@ fn fixed_size_list_widens_at_core_call() {
 use core.crypto.expert as expert
 
 fn run() {
-    seed: [U8#32] :: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+    seed :: [U8#32].{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 }
     #Unsafe(\"fixed signature vector\") {
         signature :: expert.ed25519_sign(seed, [])
     }
@@ -374,7 +374,7 @@ fn comptime_local_is_literal_data() {
     }
     let src = "\
 fn build() -> [Int] {
-    xs: [Int] := []
+    xs := [Int].{}
     loop i; 1..3 {
         xs.push(i * 10)
     }

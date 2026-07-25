@@ -40,7 +40,7 @@ fn total(ps: [P]) -> Float {
     return s
 }
 fn run() {
-    ps: [P] := [P.{ x: 0.0, mass: 1.0 }, P.{ x: 1.0, mass: 2.0 }]
+    ps := [P].{ P.{ x: 0.0, mass: 1.0 }, P.{ x: 1.0, mass: 2.0 } }
     ps.push(P.{ x: 2.0, mass: 3.0 })
     print(ps.len())
     print(ps[2].x)
@@ -96,8 +96,8 @@ struct Pt { a: Int, b: Int }
 #[Codable]
 struct PlainPt { a: Int, b: Int }
 fn run() {
-    cs: [Pt] :: [Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 }]
-    ps: [PlainPt] :: [PlainPt.{ a: 1, b: 2 }, PlainPt.{ a: 3, b: 4 }]
+    cs :: [Pt].{ Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 } }
+    ps :: [PlainPt].{ PlainPt.{ a: 1, b: 2 }, PlainPt.{ a: 3, b: 4 } }
     print(json.to_string(cs) == json.to_string(ps))
     print(json.to_string(cs))
 }
@@ -116,14 +116,14 @@ fn linalg_vectors_and_matrices() {
     }
     let src = "\
 fn run() {
-a: Vec3 :: Vec3(1.0, 2.0, 3.0)
-b: Vec3 :: Vec3(4.0, 5.0, 6.0)
+a :: Vec3(1.0, 2.0, 3.0)
+b :: Vec3(4.0, 5.0, 6.0)
     print(a.dot(b))
-c: Vec3 :: a + b
+c :: Vec3.{ a + b }
     print(c.to_array())
     print(a.cross(b).to_array())
-scale: Mat3 :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
-out: Vec3 :: scale * a
+scale :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+out :: Vec3.{ scale * a }
     print(out.to_array())
 }
 ";
@@ -144,16 +144,16 @@ fn simd_lanes_ops_and_reductions() {
     }
     let src = "\
 fn run() {
-v: F32x4 :: F32x4(1.0, 2.0, 3.0, 4.0)
-w: F32x4 :: F32x4(10.0, 20.0, 30.0, 40.0)
-s: F32x4 :: v + w
+v :: F32x4(1.0, 2.0, 3.0, 4.0)
+w :: F32x4(10.0, 20.0, 30.0, 40.0)
+s :: F32x4.{ v + w }
     print(s.to_array())
     print(v[2])
     print(v.sum())
     print(v.reduce(#Max))
     print(v.reduce(#Mul))
     print(F32x4.splat(5.0).to_array())
-d: F64x2 :: F64x2.from_array([1.5, 2.5])
+d :: F64x2.from_array([1.5, 2.5])
     print(d.sum())
 }
 ";
@@ -175,7 +175,7 @@ fn user_type_shadows_builtin_math_name() {
     let src = "\
 struct Vec3 { x: Int, y: Int }
 fn run() {
-    v: Vec3 :: Vec3.{ x: 3, y: 4 }
+    v :: Vec3.{ x: 3, y: 4 }
     print(v.x)
     print(v.y)
 }

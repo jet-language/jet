@@ -8,15 +8,14 @@ fn run() {
     addr :: listener.local_addr() ?? panic("address")
     mux :: http_server.mux()
     mux.post("/", (req: HttpRequest) => Ok(http_server.response(200, "handler ran")))
-
     server :: tasks.spawn(take(listener, mux) () => {
         http_server.serve_once_listener(listener, mux) ?? panic("serve smuggling")
         http_server.serve_once_listener(listener, mux) ?? panic("serve body limit")
     })
-
     smuggling :: net.tcp_connect(addr) ?? panic("connect smuggling")
     smuggling_request := "".bytes()
-    loop line; ["POST / HTTP/1.1", "Host: local", "Content-Length: 4", "Transfer-Encoding: chunked", "", "0", ""] {
+    loop line;
+        ["POST / HTTP/1.1", "Host: local", "Content-Length: 4", "Transfer-Encoding: chunked", "", "0", ""] {
         loop byte; line.bytes() { smuggling_request.push(byte) }
         smuggling_request.push(13)
         smuggling_request.push(10)
@@ -25,7 +24,6 @@ fn run() {
     smuggling_response :: smuggling.read_text(8192) ?? panic("read smuggling")
     print(smuggling_response.starts_with("HTTP/1.1 400 Bad Request"))
     print(smuggling_response.contains("handler ran"))
-
     oversized :: net.tcp_connect(addr) ?? panic("connect oversized")
     oversized_request := "".bytes()
     loop line; ["POST / HTTP/1.1", "Host: local", "Content-Length: 1048577", ""] {

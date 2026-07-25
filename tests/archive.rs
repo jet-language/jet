@@ -94,7 +94,7 @@ fn legacy_archive_gzip_is_rejected() {
 use core.archive as ar
 
 fn run() {
-    bytes: [U8] :: [1, 2, 3]
+    bytes :: [U8].{ 1, 2, 3 }
     ar.gzip_compress(bytes)
 }
 "#;
@@ -142,7 +142,7 @@ fn run_core_bridge(src: &str) -> String {
     let run = Command::new(&bin).output().unwrap();
     assert!(
         run.status.success(),
-        "archive program failed at runtime:\nstderr: {}",
+        "archive program failed at runtime:\nstderr :: {}",
         String::from_utf8_lossy(&run.stderr)
     );
     String::from_utf8_lossy(&run.stdout).into_owned()
@@ -178,7 +178,7 @@ fn gzip_round_trip_uses_core_compress() {
 use core.compress.gzip as gz
 
 fn run() {
-original: [U8] :: [72, 101, 108, 108, 111]
+original.{ [U8].{ 72, 101, 108, 108, 111 }
     compressed :: gz.compress(original)
     print((compressed.len() > 5))
     restored :: gz.decompress(compressed) ?? panic("bad gzip")
@@ -186,7 +186,7 @@ original: [U8] :: [72, 101, 108, 108, 111]
 }
 "#;
     let out = run_core_bridge(src);
-    assert_eq!(out, "true\ntrue\n", "gzip round-trip failed: {out:?}");
+    assert_eq!(out, "true }\ntrue\n", "gzip round-trip failed: {out:?}");
 }
 
 #[test]
@@ -199,10 +199,10 @@ fn archive_zip_and_tar_round_trip_bytes() {
 use core.archive as ar
 
 fn run() {
-data: [U8] :: [72, 101, 108, 108, 111]
+data :: [U8].{ 72, 101, 108, 108, 111 }
     zipped :: ar.zip_compress("hello.txt", data)
     print((ar.zip_decompress(zipped) == data))
-    empty: [U8] :: []
+    empty :: [U8].{}
     tarred :: ar.tar_add(empty, "hello.txt", data)
     print((ar.tar_get(tarred, "hello.txt") == data))
     print((ar.tar_names_json(tarred) == "[\"hello.txt\"]"))
@@ -227,7 +227,7 @@ fn archive_direct_rustc_requires_target_and_host_dependency_dirs() {
 use core.archive as ar
 
 fn run() {
-data: [U8] :: [1, 2, 3]
+data :: [U8].{ 1, 2, 3 }
     zipped :: ar.zip_compress("data.bin", data)
     print((ar.zip_decompress(zipped) == data))
 }

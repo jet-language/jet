@@ -244,7 +244,7 @@ fn run() {
     }
     outer_hits := 0
     inner_hits := 0
-    outer :: loop i := 0; i < 3; i += 1 {
+    outer := : loop i.{ 0; i < 3; i += 1 { }
         loop j := 0; j < 3; j += 1 {
             if j == 1 {
                 outer.next()

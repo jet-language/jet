@@ -17,26 +17,45 @@ struct Account {
 // the debit and the credit land together at the transaction's commit.
 fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
     #Transact(tx) {
-        from.edit(a => { a.balance -= amount })  // both land, or neither
-        to.edit(a => { a.balance += amount })    // no lock ordering to get wrong
+        from.edit(a => {
+            a.balance -= amount
+        })  // both land, or neither
+        to.edit(a => {
+            a.balance += amount
+        })  // no lock ordering to get wrong
     }
 }
 
 fn run() {
-    from :: Shared.new(Account.{ balance: 1000 })
-    to :: Shared.new(Account.{ balance: 0 })
-
+    from :: Shared.new(Account.{balance: 1000})
+    to :: Shared.new(Account.{balance: 0})
     // Eight concurrent transfers of 100 each. Whatever order the runtime picks,
     // every transfer is atomic, so the final balances are deterministic and the
     // grand total is conserved exactly.
-    t1 :: tasks.spawn(() => { transfer(from, to, 100) })
-    t2 :: tasks.spawn(() => { transfer(from, to, 100) })
-    t3 :: tasks.spawn(() => { transfer(from, to, 100) })
-    t4 :: tasks.spawn(() => { transfer(from, to, 100) })
-    t5 :: tasks.spawn(() => { transfer(from, to, 100) })
-    t6 :: tasks.spawn(() => { transfer(from, to, 100) })
-    t7 :: tasks.spawn(() => { transfer(from, to, 100) })
-    t8 :: tasks.spawn(() => { transfer(from, to, 100) })
+    t1 :: tasks.spawn(() => {
+        transfer(from, to, 100)
+    })
+    t2 :: tasks.spawn(() => {
+        transfer(from, to, 100)
+    })
+    t3 :: tasks.spawn(() => {
+        transfer(from, to, 100)
+    })
+    t4 :: tasks.spawn(() => {
+        transfer(from, to, 100)
+    })
+    t5 :: tasks.spawn(() => {
+        transfer(from, to, 100)
+    })
+    t6 :: tasks.spawn(() => {
+        transfer(from, to, 100)
+    })
+    t7 :: tasks.spawn(() => {
+        transfer(from, to, 100)
+    })
+    t8 :: tasks.spawn(() => {
+        transfer(from, to, 100)
+    })
     t1.wait()
     t2.wait()
     t3.wait()
@@ -45,7 +64,6 @@ fn run() {
     t6.wait()
     t7.wait()
     t8.wait()
-
     from_bal :: from.read(a => a.balance)
     to_bal :: to.read(a => a.balance)
     print("from={from_bal}")

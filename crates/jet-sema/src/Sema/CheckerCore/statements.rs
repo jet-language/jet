@@ -250,7 +250,7 @@ impl<'a> Checker<'a> {
                                     "E0420",
                                     format!("`{}` may be read before it is given a value", name),
                                     format!(
-                                        "`{}+=` reads `{}` first, but it was declared `:= uninit` and has no value yet",
+                                        "`{}+=` reads `{}` first, but it was declared with `Type.{{ uninit }}` and has no value yet",
                                         name, name
                                     ),
                                     format!("give `{}` a value with `{} = …` before updating it", name, name),

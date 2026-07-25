@@ -5,3 +5,11 @@ Error [E2307]: `d` can't be used directly here yet
     |            ^
  Why: `d` is a zero-copy view into `email` (`.trim()`/`.after()`/`.before()`); only chaining another `.trim()`/`.after()`/`.before()` on it works directly — other methods and calls need the full owned value
  Fix: write `~d` first to get an owned `String`, then use that
+
+Error [E2305]: this view points into `email`, which this function owns
+  --> tests/ui/string_view_outlives_owner.jet:4:12
+    |
+  4 |     return d
+    |            ^
+ Why: `email` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
+ Fix: return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it

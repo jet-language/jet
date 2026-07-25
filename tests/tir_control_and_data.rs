@@ -194,8 +194,8 @@ fn overflow_still_traps_on_tir_path() {
     }
     let src = "\
 fn run() {
-a: U8 :: 200
-b: U8 :: 100
+a :: U8.{ 200 }
+b :: U8.{ 100 }
     print(a + b)
 }
 ";
@@ -339,7 +339,7 @@ fn run() {
         if item == 0 { next }
     }
 
-    outer :: loop i := 0; i < 3; i += 1 {
+    outer := : loop i.{ 0; i < 3; i += 1 { }
         loop {
             if i < 2 { outer.next() }
             break

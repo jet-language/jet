@@ -79,7 +79,7 @@ fn generated_atomic_write_has_durable_replace_contract() {
 use core.files as fs
 
 fn run() {
-    bytes: [U8] :: [1, 2, 3]
+    bytes :: [U8].{ 1, 2, 3 }
     fs.write_atomic("atomic.bin", bytes) ?? panic("atomic write failed")
 }
 "#;
@@ -110,7 +110,7 @@ fn relative_atomic_write_syncs_the_current_directory_and_reports_success() {
 use core.files as fs
 
 fn run() {
-    bytes: [U8] :: [110, 101, 119]
+    bytes :: [U8].{ 110, 101, 119 }
     fs.write_atomic("relative.bin", bytes) ?? panic("relative atomic write failed")
     written :: fs.read("relative.bin") ?? panic("relative read failed")
     fs.remove("relative.bin") ?? panic("relative cleanup failed")
@@ -135,7 +135,7 @@ fn windows_atomic_replace_rejects_embedded_nul_without_touching_prefix_target() 
 use core.files as fs
 
 fn run() {
-    bytes: [U8] :: [1]
+    bytes :: [U8].{ 1 }
     fs.write_atomic("atomic.bin", bytes) ?? panic("atomic write failed")
 }
 "#;
@@ -212,7 +212,7 @@ fn run() {{
     root :: "{}"
     stale :: path.join(root, ".jet_tmp_{{os.pid()}}_0")
     fs.write(stale, "stale") ?? panic("stale setup failed")
-    bytes: [U8] :: [110, 101, 119]
+    bytes :: [U8].{ 110, 101, 119 }
     fs.write_atomic("{}", bytes) ?? panic("replacement failed")
     fs.write_atomic("{}", bytes) ?? panic("expected replacement failure")
 }}
@@ -260,14 +260,14 @@ fn concurrent_atomic_writers_leave_one_whole_payload() {
 use core.files as fs
 
 fn write_a() -> Int {{
-    bytes: [U8] :: [{}]
+    bytes :: [U8].{ {} }
     loop _; 1..25 {{
         fs.write_atomic("{}", bytes) ?? panic("writer a failed")
     }}
     return 1
 }}
 fn write_b() -> Int {{
-    bytes: [U8] :: [{}]
+    bytes :: [U8].{ {} }
     loop _; 1..25 {{
         fs.write_atomic("{}", bytes) ?? panic("writer b failed")
     }}

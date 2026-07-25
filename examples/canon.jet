@@ -12,12 +12,12 @@ use core.mem
 use core.encoding.json as json
 
 // --- variables & types ---------------------------------------------------
-// `name :: val` / `name := val` infer types; `name: Type :: val` / `name: Type := val` annotate.
+// `name :: val` / `name := val` / `name = val` bind; types ride values (`Type.{ … }`) or live on signatures/fields (D-BIND-BARE1).
 fn show_values() {
-    name: String :: "Jet"
+    name :: "Jet"
     year :: 2026
     version :: 0.1
-    ready: Bool :: true
+    ready :: true
     print("values: {name} {year} {version} {ready}")
     count := 0
     count = count + 3
@@ -121,7 +121,7 @@ module math {
 // Opts a binding out of automatic zero-fill; sema proves every read happens
 // after a write on all paths (E0420, D-UNINIT-SENTINEL1). Gated by `use core.mem`.
 fn show_uninit() -> Int {
-    n: Int := uninit
+    n := Int.{ uninit }
     n = 99
     return n
 }
@@ -151,7 +151,7 @@ struct ServeArgs {
 // D-SHIFT1: the "shift" kernel for linear stream parsing — every read
 // advances position and returns `? Error`, never panics or truncates silently.
 fn parse_packet() -> String {
-    packet: [U8] :: [42, 0, 0, 0, 3, 0, 16, 32, 48]
+    packet :: [U8].{42, 0, 0, 0, 3, 0, 16, 32, 48}
     r :: Reader.over(packet)
     magic :: r.read_u32_le() ?? panic("bad packet: no magic")
     count :: r.read_u16_le() ?? panic("bad packet: no count")
@@ -253,10 +253,10 @@ fn run() {
     print("day: {kind}")
     // errors
     if double_age("42") == {
-        Ok(n) -> {
+        .Ok(n) -> {
             print("ok: {n}")
         }
-        Err(e) -> {
+        .Err(e) -> {
             print("err: {e}")
         }
 
@@ -264,7 +264,7 @@ fn run() {
     fallback :: parse_age("") ?? 0
     print("fallback: {fallback}")
     // collections + closures
-    nums: [Int] := [3, 1, 2]
+    nums := [Int].{3, 1, 2}
     nums.push(4)
     nums.sort()
     squares :: nums.map((n: Int) => n * n)

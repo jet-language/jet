@@ -2,18 +2,25 @@
 // by null, TUI, DOM, and GTK backends.
 use core.ui as ui
 
-struct Label { text: String }
+struct Label {
+    text: String
+}
+
 fn label(text: String) -> Label { return Label.{text: ~text} }
+
 fn label_view(value: Label) -> UiNode { return ui.text(value.text) }
 
 struct Input {
     value: String
     placeholder: String
 }
+
 fn input(placeholder: String) -> Input { return Input.{value: "", placeholder: ~placeholder} }
+
 fn type_char(value: Input, ch: String) -> Input {
     return Input.{value: "{value.value}{ch}", placeholder: ~value.placeholder}
 }
+
 fn input_view(value: Input) -> UiNode {
     shown := ~value.value
     if value.value == "" { shown = ~value.placeholder }
@@ -24,9 +31,14 @@ struct Button {
     label: String
     clicks: Int
 }
+
 fn button(label: String) -> Button { return Button.{label: ~label, clicks: 0} }
+
 fn press(value: Button) -> Button { return Button.{label: ~value.label, clicks: value.clicks + 1} }
-fn button_view(value: Button) -> UiNode { return ui.button("[{value.label}] clicks={value.clicks}") }
+
+fn button_view(value: Button) -> UiNode {
+    return ui.button("[{value.label}] clicks={value.clicks}")
+}
 
 fn container(children: [UiNode]) -> UiNode { return ui.box(children) }
 

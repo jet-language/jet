@@ -14,26 +14,11 @@ fn run() {
         response :: http_server.response(200, body)
         return response.trailers(^trailers)
     })
-
-    serving :: tasks.spawn(take(listener, mux) () =>
-        http_server.serve_once_listener(listener, mux) ?? panic("serve")
-    )
+    serving :: tasks.spawn(take(listener, mux) () => http_server.serve_once_listener(listener, mux) ?? panic("serve"))
     stream :: net.tcp_connect(addr) ?? panic("connect")
     request := "".bytes()
-    loop line; [
-        "POST / HTTP/1.1",
-        "Host: local",
-        "Transfer-Encoding: chunked",
-        "Trailer: X-Trace",
-        "Connection: close",
-        "",
-        "4",
-        "body",
-        "0",
-        "X-Trace: first",
-        "x-trace: second",
-        "",
-    ] {
+    loop line;
+        ["POST / HTTP/1.1", "Host: local", "Transfer-Encoding: chunked", "Trailer: X-Trace", "Connection: close", "", "4", "body", "0", "X-Trace: first", "x-trace: second", ""] {
         loop byte; line.bytes() { request.push(byte) }
         request.push(13)
         request.push(10)

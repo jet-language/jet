@@ -1,15 +1,15 @@
 Error [E3107]: `raw_pointer` is missing unsafe obligations: no_alias
-  --> tests/ui/unsafe_obligation_no_bleed.jet:9:32
+  --> tests/ui/unsafe_obligation_no_bleed.jet:9:27
     |
-  9 |         second_pointer: *Int :: *second
-    |                                ^^^^^^^
+  9 |         second_pointer :: *Int.{*second}
+    |                           ^^^^^^^^^^^^^^
  Why: the effective `.Obligations` policy requires a typed proof immediately after each low-level operation
  Fix: add `assert no_alias` immediately after this operation
 
-Error [E3107]: `dereference` is missing unsafe obligations: valid_ptr, aligned
-  --> tests/ui/unsafe_obligation_no_bleed.jet:10:15
+Error [E3107]: `raw_pointer` is missing unsafe obligations: no_alias
+  --> tests/ui/unsafe_obligation_no_bleed.jet:9:33
     |
- 10 |         print(first_pointer.*)
-    |               ^^^^^^^^^^^^^^^
+  9 |         second_pointer :: *Int.{*second}
+    |                                 ^^^^^^^
  Why: the effective `.Obligations` policy requires a typed proof immediately after each low-level operation
- Fix: add `assert valid_ptr, aligned` immediately after this operation
+ Fix: add `assert no_alias` immediately after this operation

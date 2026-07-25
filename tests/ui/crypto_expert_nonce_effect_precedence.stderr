@@ -1,7 +1,7 @@
 Error [E3401]: `protect` calls the impure function `next_byte`
-  --> tests/ui/crypto_expert_nonce_effect_precedence.jet:13:14
+  --> tests/ui/crypto_expert_nonce_effect_precedence.jet:11:148
     |
- 13 |             [next_byte()],
-    |              ^^^^^^^^^
+ 11 |         sealed :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [next_byte()], [], [])
+    |                                                                                                                                                    ^^^^^^^^^
  Why: `next_byte` is impure, but `protect` declares `--[]->`
  Fix: give `next_byte` an explicit `--[]->` bound, or remove the call from `protect`

@@ -1,9 +1,10 @@
 use super::super::*;
 
 impl<'a> Parser<'a> {
-    /// D-BIND4: a binding starting with the target (no keyword), written
-    /// `name (: type)? (:: | :=) expr`. The sigil chooses mutability:
-    /// `::` immutable (was `val` / `::`), `:=` mutable (was `var`).
+    /// D-BIND-BARE1: a binding starting with the target (no keyword), written
+    /// `name (:: | :=) expr`. The sigil chooses mutability.
+    /// Typed forms `name: Type :: expr` / `name: Type := expr` are retired —
+    /// ordinary parse error, no teaching window.
     pub(super) fn sigil_binding(&mut self) -> Result<Binding, Diagnostic> {
         // S74: a destructuring target — `[ … ]` for a list, `Ident { … }` for a
         // struct — instead of a plain `name`.
@@ -31,229 +32,31 @@ impl<'a> Parser<'a> {
             });
         }
         let (name, name_span) = self.expect_ident("for the binding name")?;
-        // D-BIND4: retired D-BINDEXPLICIT1 form `name@ Type = expr`.
-        if matches!(self.peek().kind, TokKind::At) {
-            self.bump(); // `@`
-            let (ty, ty_span) = self.type_()?;
-            self.diags.push(Diagnostic::error(
-                "E0998",
+        // Retired D-BINDEXPLICIT1 / D-BIND4 typed forms — ordinary parse error.
+        // `name@ Type` and `name: Type` never open a binding under D-BIND-BARE1.
+        if matches!(self.peek().kind, TokKind::At | TokKind::Colon) {
+            return Err(Diagnostic::error(
+                "E0003",
                 format!(
-                    "explicit immutable binding uses `name: Type {}`, not `name@ Type =`",
-                    Syntax::SIGIL_BIND_IMMUT
+                    "expected `{}` or `{}` in a binding, found {}",
+                    Syntax::SIGIL_BIND_IMMUT,
+                    Syntax::SIGIL_BIND_MUT,
+                    describe(&self.peek().kind)
                 ),
                 format!(
-                    "explicit immutable bindings use `: Type {}` (D-BIND4)",
-                    Syntax::SIGIL_BIND_IMMUT
+                    "a binding is `name {} value` (immutable) or `name {} value` (mutable); types ride the value",
+                    Syntax::SIGIL_BIND_IMMUT,
+                    Syntax::SIGIL_BIND_MUT
                 ),
                 format!(
-                    "write `{name}: <Type> {}` instead of `{name}@ <Type> =`",
+                    "write `name {} value` or put the type on the value (e.g. `Type.{{ … }}`)",
                     Syntax::SIGIL_BIND_IMMUT
                 ),
-                Some(name_span),
+                Some(self.peek().span),
             ));
-            self.expect(TokKind::Eq, "after the type in `name@ Type = expr`")?;
-            let init = self.expr()?;
-            return Ok(Binding {
-                mutable: false,
-                track: false,
-                track_span: None,
-                meta: None,
-                name,
-                name_span,
-                pattern: None,
-                ty: Some(ty),
-                ty_span: Some(ty_span),
-                init,
-                is_comptime: false,
-                ct: None,
-                uninit: false,
-                arena_view: false,
-                string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
-            });
-        }
-        let (ty, ty_span) = if matches!(self.peek().kind, TokKind::Colon) {
-            self.bump();
-            let (t, s) = self.type_()?;
-            (Some(t), Some(s))
-        } else {
-            (None, None)
-        };
-        if ty.is_some() {
-            let sigil_span = self.peek().span;
-            match self.peek().kind {
-                // D-BIND4: `name: Type :: expr` — explicit immutable.
-                TokKind::ColonColon => {
-                    self.bump();
-                    let init = self.expr()?;
-                    return Ok(Binding {
-                        mutable: false,
-                        track: false,
-                        track_span: None,
-                meta: None,
-                        name,
-                        name_span,
-                        pattern: None,
-                        ty,
-                        ty_span,
-                        init,
-                        is_comptime: false,
-                        ct: None,
-                        uninit: false,
-                        arena_view: false,
-                        string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
-                    });
-                }
-                // D-BIND4: `name: Type := expr` — explicit mutable.
-                TokKind::ColonEq => {
-                    self.bump();
-                    // D-UNINIT-SENTINEL1: `name: Type := uninit` — the contextual
-                    // `uninit` keyword, legal only when it is the whole initializer
-                    // (nothing else follows on the line). Reuses the existing
-                    // sema flow-analysis engine (E0420/E0423/E0424) unchanged; only
-                    // this trigger moved from the retired `#Uninit` marker.
-                    if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_UNINIT)
-                        && matches!(
-                            self.peek2().kind,
-                            TokKind::Semi | TokKind::RBrace | TokKind::Eof
-                        )
-                    {
-                        let marker_span = self.bump().span; // `uninit`
-                        return Ok(Binding {
-                            mutable: true,
-                            track: false,
-                            track_span: None,
-                meta: None,
-                            name,
-                            name_span,
-                            pattern: None,
-                            ty,
-                            ty_span,
-                            // Harmless placeholder — never evaluated; sema/codegen
-                            // branch on `uninit` first and use `ty` for the type.
-                            init: Expr::Int(0, marker_span, None, None),
-                            is_comptime: false,
-                            ct: None,
-                            uninit: true,
-                            arena_view: false,
-                            string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
-                        });
-                    }
-                    let init = self.expr()?;
-                    return Ok(Binding {
-                        mutable: true,
-                        track: false,
-                        track_span: None,
-                meta: None,
-                        name,
-                        name_span,
-                        pattern: None,
-                        ty,
-                        ty_span,
-                        init,
-                        is_comptime: false,
-                        ct: None,
-                        uninit: false,
-                        arena_view: false,
-                        string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
-                    });
-                }
-                // Retired: `name: Type : expr`.
-                TokKind::Colon => {
-                    self.bump();
-                    self.diags.push(Diagnostic::error(
-                        "E0998",
-                        format!(
-                            "explicit immutable binding uses `name: Type {}`, not `name: Type :`",
-                            Syntax::SIGIL_BIND_IMMUT
-                        ),
-                        format!(
-                            "when the type is written, immutable uses `{}` and mutable uses `{}` (D-BIND4)",
-                            Syntax::SIGIL_BIND_IMMUT,
-                            Syntax::SIGIL_BIND_MUT
-                        ),
-                        format!(
-                            "write `{name}: <Type> {}` instead of `{name}: <Type> :`",
-                            Syntax::SIGIL_BIND_IMMUT
-                        ),
-                        Some(sigil_span),
-                    ));
-                    let init = self.expr()?;
-                    return Ok(Binding {
-                        mutable: false,
-                        track: false,
-                        track_span: None,
-                meta: None,
-                        name,
-                        name_span,
-                        pattern: None,
-                        ty,
-                        ty_span,
-                        init,
-                        is_comptime: false,
-                        ct: None,
-                        uninit: false,
-                        arena_view: false,
-                        string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
-                    });
-                }
-                // Retired: `name: Type = expr`.
-                TokKind::Eq => {
-                    self.bump();
-                    self.diags.push(Diagnostic::error(
-                        "E0998",
-                        format!(
-                            "explicit mutable binding uses `name: Type {}`, not `name: Type =`",
-                            Syntax::SIGIL_BIND_MUT
-                        ),
-                        format!(
-                            "when the type is written, immutable uses `{}` and mutable uses `{}` (D-BIND4)",
-                            Syntax::SIGIL_BIND_IMMUT,
-                            Syntax::SIGIL_BIND_MUT
-                        ),
-                        format!(
-                            "write `{name}: <Type> {}` instead of `{name}: <Type> =`",
-                            Syntax::SIGIL_BIND_MUT
-                        ),
-                        Some(sigil_span),
-                    ));
-                    let init = self.expr()?;
-                    return Ok(Binding {
-                        mutable: true,
-                        track: false,
-                        track_span: None,
-                meta: None,
-                        name,
-                        name_span,
-                        pattern: None,
-                        ty,
-                        ty_span,
-                        init,
-                        is_comptime: false,
-                        ct: None,
-                        uninit: false,
-                        arena_view: false,
-                        string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
-                    });
-                }
-                _ => {}
-            }
         }
         let mutable = self.expect_bind_sigil()?;
-        // D-UNINIT-SENTINEL1: `name := uninit` with no type annotation — the type
-        // can't be inferred from `uninit`, so this is E0421 (same rule the retired
-        // `#Uninit name` marker enforced).
+        // Bare `name := uninit` — type must ride a `Type.{ uninit }` head.
         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_UNINIT)
             && matches!(
                 self.peek2().kind,
@@ -263,35 +66,66 @@ impl<'a> Parser<'a> {
             let uninit_span = self.peek().span;
             return Err(Diagnostic::error(
                 "E0421",
-                "`uninit` needs a type annotation".to_string(),
-                "an uninitialized binding has no value to infer its type from, so the type must be written".to_string(),
-                format!("write `{name}: <Type> := uninit`, e.g. `buffer: [4096]U8 := uninit`"),
+                "`uninit` needs a typed-literal head".to_string(),
+                "an uninitialized binding has no value to infer its type from, so the type must head the literal".to_string(),
+                format!(
+                    "write `{name} {} <Type>.{{ {} }}`, e.g. `buffer := [U8#4096].{{ {} }}`",
+                    Syntax::SIGIL_BIND_MUT,
+                    Syntax::KW_UNINIT,
+                    Syntax::KW_UNINIT
+                ),
                 Some(uninit_span),
             ));
         }
         let init = self.expr()?;
+        // Thin D-UNINIT-SENTINEL2 trigger: `name := Type.{ uninit }`. Keeps a
+        // working uninit path after typed bindings retire; #782 owns remaining
+        // SENTINEL2 docs/UI polish.
+        if mutable {
+            if let Some((ty, ty_span, marker_span)) = typed_lit_uninit_head(&init) {
+                return Ok(Binding {
+                    mutable: true,
+                    track: false,
+                    track_span: None,
+                    meta: None,
+                    name,
+                    name_span,
+                    pattern: None,
+                    ty: Some(ty),
+                    ty_span: Some(ty_span),
+                    init: Expr::Int(0, marker_span, None, None),
+                    is_comptime: false,
+                    ct: None,
+                    uninit: true,
+                    arena_view: false,
+                    string_view: false,
+                    gc_promotion: None,
+                    gc_transferred: false,
+                });
+            }
+        }
         Ok(Binding {
             mutable,
             track: false,
             track_span: None,
-                meta: None,
+            meta: None,
             name,
             name_span,
             pattern: None,
-            ty,
-            ty_span,
+            ty: None,
+            ty_span: None,
             init,
             is_comptime: false,
             ct: None,
             uninit: false,
             arena_view: false,
             string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
+            gc_promotion: None,
+            gc_transferred: false,
         })
     }
 
-    /// D-BIND4: consume `::` (immutable) or `:=` (mutable); returns `mutable`.
+    /// D-BIND-BARE1: consume `::` (immutable) or `:=` (mutable); returns `mutable`.
     pub(super) fn expect_bind_sigil(&mut self) -> Result<bool, Diagnostic> {
         match self.peek().kind {
             TokKind::ColonColon => {
@@ -321,9 +155,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-BIND4: true when the tokens at the cursor begin a sigil binding —
-    /// `name ::`, `name :=`, `name : type ::`, `name : type :=`, or a destructuring
-    /// pattern target (`[ … ] ::`, `Ident { … } ::`).
+    /// D-BIND-BARE1: true when the tokens at the cursor begin a sigil binding —
+    /// `name ::`, `name :=`, or a destructuring pattern target.
+    /// Also matches retired `name : …` so sigil_binding can emit the ordinary
+    /// parse error (no teaching window).
     /// Used by the statement dispatcher to tell a binding apart from an
     /// expression/assignment that also starts with a name.
     pub(super) fn looks_like_sigil_binding(&self) -> bool {
@@ -334,14 +169,13 @@ impl<'a> Parser<'a> {
             {
                 true
             }
-            // `name : type :: e` / `name : type := e` / `name: Type := e` — typed binding.
-            // A bare `:` only ever opens a type annotation here, so any `name :` at
-            // statement start is a binding (a map index uses `[`, not `:`).
+            // Retired typed form `name : Type ::/:= …` — still recognized so
+            // sigil_binding can reject it with E0003 (D-BIND-BARE1).
             TokKind::Ident(_) | TokKind::KwSelf if matches!(self.peek2().kind, TokKind::Colon) => {
                 true
             }
             // Destructuring targets: scan ahead to a `::`/`:=` after the matching
-            // close. Cheap bounded lookahead. `[a, b] ::`, `(a, b) ::`,
+            // close. Cheap bounded lookahead. `[ … ] ::`, `( … ) ::`,
             // `Type { … } ::` (E0320 recovery), and `Type.{ … } ::` (D-DOTCTOR1).
             TokKind::LBracket | TokKind::LParen => self.pattern_target_is_binding(),
             TokKind::Ident(_) if matches!(self.peek2().kind, TokKind::LBrace) => {
@@ -674,7 +508,7 @@ impl<'a> Parser<'a> {
             mutable: false,
             track: false,
             track_span: None,
-                meta: None,
+            meta: None,
             name,
             name_span,
             pattern: None,
@@ -686,12 +520,41 @@ impl<'a> Parser<'a> {
             uninit: false,
             arena_view: false,
             string_view: false,
-                gc_promotion: None,
-                gc_transferred: false,
+            gc_promotion: None,
+            gc_transferred: false,
         })
     }
 
     // --- expressions -----------------------------------------------------
+}
+
+/// D-UNINIT-SENTINEL2 thin trigger: `Type.{ uninit }` as a whole typed-literal
+/// body. Returns `(head_type, ty_span, uninit_span)`.
+fn typed_lit_uninit_head(init: &Expr) -> Option<(Type, Span, Span)> {
+    let Expr::TypedLit { head, body, span } = init else {
+        return None;
+    };
+    let head = head.as_ref()?;
+    let marker_span = match body {
+        TypedLitBody::Value(inner) => match inner.as_ref() {
+            Expr::Ident(n, sp) if n == Syntax::KW_UNINIT => *sp,
+            _ => return None,
+        },
+        TypedLitBody::Elements(elems) if elems.len() == 1 => match &elems[0] {
+            Expr::Ident(n, sp) if n == Syntax::KW_UNINIT => *sp,
+            _ => return None,
+        },
+        // Named heads parse a bare `uninit` as a one-field shorthand.
+        TypedLitBody::Fields(fields) if fields.len() == 1 => {
+            let (fname, fspan, val) = &fields[0];
+            match val {
+                Expr::Ident(n, _) if fname == Syntax::KW_UNINIT && n == Syntax::KW_UNINIT => *fspan,
+                _ => return None,
+            }
+        }
+        _ => return None,
+    };
+    Some((head.clone(), *span, marker_span))
 }
 
 /// D-LAYOUT1: is `field` one of the recognized box-anchor names? `left`/

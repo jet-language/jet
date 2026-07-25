@@ -15,17 +15,14 @@ fn run() {
         time.sleep(60000)
         return
     }
-
     root :: "/tmp/jet_watcher_demo"
     if fs.exists(root) {
         fs.remove_all(root) ?? panic("cleanup failed")
     }
     fs.create_dir_all(root) ?? panic("mkdir failed")
-
     nested :: path.join(root, "nested")
     fs.create_dir_all(nested) ?? panic("nested mkdir failed")
     created :: path.join(nested, "note.txt")
-
     scope :: event.scope()
     files :: watcher.files(root) ?? panic("watch files failed")
     callback_path :: ~created
@@ -34,7 +31,6 @@ fn run() {
             print("callback {ev.domain}:{ev.kind}:recursive")
         }
     })
-
     fs.write(created, "hello") ?? panic("write failed")
     first :: files.poll()
     first_kind := "none"
@@ -47,7 +43,6 @@ fn run() {
     print("callback active: {sub.is_active()}")
     scope.cancel()
     print("callback after scope cancel: {sub.is_active()}")
-
     after_drop :: path.join(nested, "after-drop.txt")
     dropped_path :: ~after_drop
     if true {
@@ -67,18 +62,15 @@ fn run() {
         }
     }
     print("scope drop file: {after_drop_kind}")
-
     child :: process.cmd([os.executable(), "--watch-child"]).spawn() ?? panic("child spawn failed")
     exited :: watcher.process_pid(child.id())
     before_exit :: exited.poll()
     print("process events before exit: {before_exit.len()}")
     child.kill() ?? panic("child kill failed")
     _ :: child.wait() ?? panic("child wait failed")
-
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen failed")
     address :: net.listener_local_socket_addr(listener) ?? panic("listener address failed")
     ready :: watcher.port("127.0.0.1", net.socket_port(address))
-
     set := watcher.set()
     set.add(exited)
     set.add(ready)
@@ -97,7 +89,6 @@ fn run() {
     print("process event: {process_kind}")
     print("port event: {port_kind}")
     print("set events: {combined.len()}")
-
     files.cancel()
     print("file watcher active: {files.is_active()}")
     cancelled_path :: path.join(nested, "after-cancel.txt")

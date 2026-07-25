@@ -2,14 +2,13 @@
 use core.auth as auth
 
 fn run() {
-    jwt_key: [U8] :: [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]
+    jwt_key :: [U8].{48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102}
     jwt :: #Tainted(Credential) "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrY"
     jwt_claims :: auth.verify_jwt(jwt, key: jwt_key, audience: "gateway", issuer: "partner") ?? panic("JWT rejected")
     print("JWT audience: {jwt_claims.audience}")
-
-    public_key: [U8] :: [198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45]
-    footer: [U8] :: [107, 105, 100, 45, 49]
-    implicit: [U8] :: [116, 101, 110, 97, 110, 116, 45, 97]
+    public_key :: [U8].{198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45}
+    footer :: [U8].{107, 105, 100, 45, 49}
+    implicit :: [U8].{116, 101, 110, 97, 110, 116, 45, 97}
     no_skew :: Duration.milliseconds(0) ?? panic("duration")
     paseto :: #Tainted(Credential) "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
     paseto_claims :: auth.verify_paseto(paseto, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) ?? panic("PASETO rejected")

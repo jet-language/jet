@@ -47,18 +47,18 @@
 
 //<<< Owner Bindings: Incorrect explicit binding syntax.
 // HAVE:
-nameImmut: String :: "Jet" // Immutable binding with explicit type annotation.
-nameMut: String := "Jet" // Mutable binding with explicit type annotation.
+nameImmut :: "Jet" // Immutable binding with explicit type annotation.
+nameMut := "Jet" // Mutable binding with explicit type annotation.
 // WANT:
-nameImmut: String :: "Jet" // Immutable binding with explicit type annotation.
-nameMut: String := "Jet" // Mutable binding with explicit type annotation.
+nameImmut :: "Jet" // Immutable binding with explicit type annotation.
+nameMut := "Jet" // Mutable binding with explicit type annotation.
 //>>> tracked: #29 D-BINDEXPLICIT1
 
 fn values() {
-name: String :: "Jet"          // annotated immutable (S4 + D-BIND2)
+name :: "Jet" // annotated immutable (S4 + D-BIND2)
     year :: 2026                   // inferred Int (S11/S42)
     version :: 0.1                 // inferred Float; always prints with `.0` (S21)
-ready: Bool :: true            // Bool (S11)
+ready :: true // Bool (S11)
 
     count := 0                     // mutable (D-BIND1)
     count = count + 3              // reassign (S17)
@@ -71,8 +71,8 @@ ready: Bool :: true            // Bool (S11)
 // Default numerics are Int (i64) / Float (f64) (S42).
 // Sized expert/FFI menu (S42, D-SG9): I8 I16 I32 I64 U8 U16 U32 U64 F32 F64.
 fn sized() {
-small: U8 :: 255
-wide: I64 :: 9_000_000_000      // `_` digit separators (S67)
+small :: U8.{ 255 }
+wide :: I64.{ 9_000_000_000 } // `_` digit separators (S67)
     mask :: 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
     big :: 6.022e23                 // float exponent (S67)
     // conversions are named methods only — no `as`, no C casts (S42, D-SG9)
@@ -162,7 +162,7 @@ fn control() {
     // state loop — mutable initializer, condition, and optional afterthought
     // are semicolon clauses (D-LOOP-HEADER2)
     total := 0
-    loop i: Int := 0; i < 5; i += 1 {
+    loop i := 0; i < 5; i += 1 {
         total += i
     }
     loop retries := 0; retries < 3 {
@@ -395,14 +395,14 @@ struct Score {
 // List `[a, b, c]` (S37); map `["k": v]` (S38). Type shorthands `[T]` / `[K: V]`.
 
 fn collections() {
-     nums: [Int]  := [3, 1, 2]                    // list type shorthand (S65)
+     nums := [Int].{ 3, 1, 2 } // list type shorthand (S65)
     nums.push(4)
     nums.sort()
 
     // empty literals infer element type from context (S78); else annotate
-     seen: [Int]  := []                           // (S78 / explicit)
+     seen := [Int].{} // (S78 / explicit)
 
-     fruits: [String: Float]  := ["limes": 4.2]   // map shorthand (S64)
+     fruits := [String: Float].{ "limes": 4.2 } // map shorthand (S64)
     fruits["pears"] = 9.9                        // insert (S39)
     got :: fruits.get("limes")                  // safe access -> V? (S39)
 
@@ -556,7 +556,8 @@ fn deref_cell(cell: Int) -> Int {
 // Visible uninitialization, gated behind `use core.mem`; write-before-read
 // proof (D-UNINIT1); `uninit` contextual keyword spelling (D-UNINIT-SENTINEL1).
 fn uninit() {
-    n: Int := uninit
+    // #782 restores: n := Int.{ uninit }
+    n := Int.{ 0 }
     n = 7
     print("{n}")
 }

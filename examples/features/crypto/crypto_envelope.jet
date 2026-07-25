@@ -3,8 +3,8 @@ use core.crypto as crypto
 
 fn run() {
     recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient key")
-    msg: [U8] :: [104, 101, 108, 108, 111, 44, 32, 106, 101, 116]
-    aad: [U8] :: [0x6a, 0x65, 0x74]
+    msg :: [U8].{104, 101, 108, 108, 111, 44, 32, 106, 101, 116}
+    aad :: [U8].{0x6a, 0x65, 0x74}
     box :: crypto.seal([recipient.public_key()], msg, aad) ?? panic("seal failed")
     print("sealed bytes: {box.bytes().len()}")
     plain :: crypto.open(recipient, box, aad) ?? panic("open failed")

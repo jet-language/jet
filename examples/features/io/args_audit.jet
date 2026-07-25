@@ -6,7 +6,6 @@ use core.args as args
 fn run() {
     serve :: args.spec()
         .option_int("port", "listen port", "PORT")
-
     spec :: args.spec()
         .flag_short("verbose", "v", "print extra detail")
         .option_int("jobs", "worker count", "N")
@@ -15,10 +14,8 @@ fn run() {
         .repeat("tag", "classification tag", "TAG")
         .subcommand("serve", "run the server", serve)
         .version("args-audit 1.0")
-
     argv :: ["tool", "-vv", "--jobs", "4", "--color=never", "--tag", "alpha", "--tag=beta", "serve", "--port", "8080"]
     parsed :: spec.parse(argv) ?? panic("bad args")
-
     print(parsed.flag("verbose"))
     print(parsed.option_int("jobs") ?? 0)
     print(parsed.option("mode") ?? "")

@@ -3,15 +3,21 @@
 enum FileErr {
     NotFound
 }
+
 enum AppErr {
     File(FileErr)
 }
+
 fn inner() -> String ? FileErr {
     return Ok("hi")
 }
+
 // No `impl FileErr -> AppErr` declared — E2404 fires here.
 fn outer() -> String ? AppErr {
     inner()?
     return Ok("done")
 }
-fn run() {}
+
+fn run() {
+
+}

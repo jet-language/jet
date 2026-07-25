@@ -69,11 +69,11 @@ block    = "{" { stmt } "}" ;            // S3: curly braces
 stmt     = binding | assign | if | loop
          | "break" NL | next | "return" [ expr ] NL
          | expr NL ;
-binding  = [ "#Track" ] ( ident "::" expr     // inferred immutable
-         | ident ":=" expr                    // inferred mutable
-         | ident ":" type "::" expr           // explicit immutable
-         | ident ":" type ":=" expr ) NL      // explicit mutable
+binding  = [ "#Track" ] ( ident "::" expr     // immutable
+         | ident ":=" expr ) NL               // mutable
          | destructure ( "::" | ":=" ) expr NL ;
+// Types ride the value (D-DOTCTOR3 `Type.{ … }`) or live on signatures/fields.
+// Retired: ident ":" type ("::" | ":=") expr  (D-BIND-BARE1).
 destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
@@ -93,7 +93,7 @@ loop     = [ ident "::" ] loop-body ;            // D-LOOPLABEL3: optional ordin
 loop-body= "loop" block
          | "loop" cond block
          | "loop" ident [ "," ident ] ";" source [ ";" expr ] block
-         | "loop" ident [ ":" type ] ":=" expr ";" cond [ ";" expr ] block ;
+         | "loop" ident ":=" expr ";" cond [ ";" expr ] block ;
 source   = expr [ ".." expr ] ;
 break    = "break" NL | ident "." "break" "(" ")" NL ;
 next     = "next" NL | ident "." "next" "(" ")" NL ;
@@ -112,16 +112,17 @@ expr     = precedence climbing over:
 
 ### Semantics
 
-- Types: `Int`, `Float`, `Bool`, `String`. Local inference: annotations on
-  bindings are optional; mismatched annotations are E0108.
+- Types: `Int`, `Float`, `Bool`, `String`. Local inference: types ride the
+  value (`Type.{ … }`) when needed; mismatched headed literals are ordinary
+  type errors.
 - A program must define `fn run` with no parameters and no return type,
   `fn run() -> Void ?` for top-level error propagation, or a single typed CLI
   parameter as described by D-CLIFLAG1 (E0101, E0122, E1308). Execution starts
   there. `run` never takes `pub` (S12).
-- `name :: value` and `name: Type :: value` are immutable; `name := value` and
-  `name: Type := value` are mutable (D-BIND4).
+- `name :: value` is immutable; `name := value` is mutable (D-BIND-BARE1).
   Assigning to an immutable binding is E0111.
   Names may not shadow an existing name in scope (E0118).
+  Types never annotate the binding name — use `Type.{ … }` or a signature/field.
 - `#Track name :: value` / `#Track name := value` opt a binding into
   D-PROVENANCE1 provenance. Today this records Float binding origins for
   `value.origin() -> String`; untracked Floats return `"untracked"`.

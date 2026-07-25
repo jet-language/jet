@@ -1593,7 +1593,7 @@ fn dev_default_reports_jit_gap_for_auth_verification() {
         r#"use core.auth as auth
 
 fn run() {
-    key: [U8] :: [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]
+    key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
     token := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrY"
     claims :: auth.verify_jwt(token, key: key, audience: "gateway") ?? panic("verification failed")
     print(claims.audience)
@@ -2655,9 +2655,9 @@ fn forced_interpreter_preserves_f32_width_like_aot() {
     }
     let source = r#"fn pass(value: F32) -> F32 { return value }
 fn run() {
-    value: F32 :: 16777217.0
-    one: F32 :: 1.0
-    mutable: F32 := value
+    value :: F32.{ 16777217.0 }
+    one :: F32.{ 1.0 }
+    mutable := F32.{ value }
     mutable += one
     print(pass(value))
     print(mutable)
@@ -2693,14 +2693,14 @@ fn gzip_golden_matches_forced_interpreter_and_aot() {
     let source = r#"use core.compress.gzip as gzip
 
 fn run() {
-    bytes: [U8] :: [72, 101, 108, 108, 111]
-    gz: [U8] :: gzip.decompress(gzip.compress(bytes)) ?? []
-    golden: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? []
-    bad_size: [U8] :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [255]
-    h: U8 :: 72
-    lower_h: U8 :: 104
-    o: U8 :: 111
-    max: U8 :: 255
+    bytes :: [U8].{ 72, 101, 108, 108, 111 }
+    gz :: [U8].{ gzip.decompress(gzip.compress(bytes)) ?? [] }
+    golden :: [U8].{ gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [] }
+    bad_size :: [U8].{ gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [255] }
+    h :: U8.{ 72 }
+    lower_h :: U8.{ 104 }
+    o :: U8.{ 111 }
+    max :: U8.{ 255 }
     print(gz.len() == 5)
     print(gz[0] == h)
     print(golden.len() == 5)
@@ -2736,10 +2736,10 @@ fn zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape() {
 
 fn run() {
     frame :: zstd.compress([72, 101, 108, 108, 111])
-    m0: U8 :: 40
-    m1: U8 :: 181
-    m2: U8 :: 47
-    m3: U8 :: 253
+    m0 :: U8.{ 40 }
+    m1 :: U8.{ 181 }
+    m2 :: U8.{ 47 }
+    m3 :: U8.{ 253 }
     print(frame.len() > 9)
     print(frame[0] == m0 && frame[1] == m1 && frame[2] == m2 && frame[3] == m3)
 }
@@ -2773,16 +2773,16 @@ fn resident_jit_checked_numeric_and_distinct_conversion_matrix_is_native() {
 
 fn run() {
     print(I64.from_u8(255))
-    byte_ok: I32 :: 100
-    byte_bad: I32 :: 100000
+    byte_ok :: I32.{ 100 }
+    byte_bad :: I32.{ 100000 }
     U8.from_i32(byte_ok).drop("checked conversion success proof")
     U8.from_i32(byte_bad).drop("checked conversion error proof")
-    float_ok: Float :: 42.9
-    float_bad: Float :: 300.0
+    float_ok :: 42.9
+    float_bad :: 300.0
     U8.from_float(float_ok).drop("checked float conversion success proof")
     U8.from_float(float_bad).drop("checked float conversion error proof")
-    narrow_ok: Float :: 2.5
-    narrow_bad: Float :: 1e100
+    narrow_ok :: 2.5
+    narrow_bad :: 1e100
     F32.from_float(narrow_ok).drop("checked F32 conversion success proof")
     F32.from_float(narrow_bad).drop("checked F32 conversion error proof")
     user_source :: U64.from_u8(8)
@@ -3681,7 +3681,7 @@ fn resident_jit_safe_labeled_loop_control() {
     }
     let src = r#"
 fn run() {
-    outer :: loop i := 0; i < 2; i++ {
+    outer := : loop i.{ 0; i < 2; i++ { }
         loop {
             if i == 0 {
                 outer.next()
@@ -3706,7 +3706,7 @@ fn resident_jit_named_or_fallback_loop_control() {
     let src = r#"
 fn run() {
     values := [7]
-    outer :: loop i := 0; i < 2; i++ {
+    outer := : loop i.{ 0; i < 2; i++ { }
         loop {
             value :: values.get(1 - i) ?? outer.next()
             print(value)
@@ -4650,7 +4650,7 @@ fn cranelift_covers_string_print() {
 #[test]
 fn cranelift_covers_float_lists() {
     assert_cranelift_reports_jit_gap(
-        "fn run() {\n    xs: [Float] := [1.5, 2.5]\n    xs.push(3.5)\n    print(xs.len())\n    print(xs[0])\n    xs[1] = 4.5\n    print(xs[1])\n    mid :: xs[1..2]\n    print(mid[0])\n}\n",
+        "fn run() {\n    xs := [Float].{ 1.5, 2.5 }\n    xs.push(3.5)\n    print(xs.len())\n    print(xs[0])\n    xs[1] = 4.5\n    print(xs[1])\n    mid :: xs[1..2]\n    print(mid[0])\n}\n",
         "float_lists",
     );
 }
@@ -4751,7 +4751,7 @@ fn cranelift_trap_then_hot_swap_continues() {
     }
 
     let panics = checked_bundle(
-        "fn run() {\n    xs: [Int] :: [1, 2, 3]\n    print(xs[99])\n}\n",
+        "fn run() {\n    xs :: [Int].{ 1, 2, 3 }\n    print(xs[99])\n}\n",
         "jit_trap_v1",
     );
     let recovers = checked_bundle("fn run() {\n    print(\"recovered\")\n}\n", "jit_trap_v2");
@@ -4982,7 +4982,7 @@ struct Email { addr: String }
 
 impl Email.Encode {
     fn encode(self) -> DataTree {
-        m: [String: DataTree] :: ["email": DataTree.Text(~self.addr)]
+        m :: [String: DataTree].{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }

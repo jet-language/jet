@@ -1,15 +1,15 @@
 Error [E0702]: `s` can't use `&` at the FFI boundary
   --> tests/ui/ffi_bad_type.jet:2:12
     |
-  2 |     fn bad(s: &String) -> String = "std::convert::identity";
+  2 |     fn bad(s: &String) -> String = "std::convert::identity"
     |            ^
  Why: foreign functions take owned copies — `&` and `^` aren't allowed here
  Fix: remove the capability sigil and pass by value
 
 Error [E0102]: nothing named `bad` exists here
-  --> tests/ui/ffi_bad_type.jet:6:11
+  --> tests/ui/ffi_bad_type.jet:7:11
     |
-  6 |     print(bad("hi"))
+  7 |     print(bad("hi"))
     |           ^^^
  Why: only functions that have been defined (or built in, like `print` / `input`) can be called
  Fix: define it first (fn bad() { ... }), or call one that exists

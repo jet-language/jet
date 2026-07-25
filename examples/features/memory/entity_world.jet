@@ -14,7 +14,7 @@ struct Player {
 fn tick(world: &Pool<Player>) {
     loop id; world.ids() {
         target :: ~world[id].target
-        if target == Val(t) {
+        if target == .Val(t) {
             dmg :: world[id].attack
             world[t].hp -= dmg
         }
@@ -23,18 +23,15 @@ fn tick(world: &Pool<Player>) {
 
 fn run() {
     world := Pool<Player>.new()
-    kai :: world.add(Player.{ name: "Kai", hp: 100, attack: 15, target: None })
-    rem :: world.add(Player.{ name: "Rem", hp: 100, attack: 10, target: None })
+    kai :: world.add(Player.{name: "Kai", hp: 100, attack: 15, target: None})
+    rem :: world.add(Player.{name: "Rem", hp: 100, attack: 10, target: None})
     world[kai].target = Val(rem)
     world[rem].target = Val(kai)
-
     tick(&world)
-
     print("kai hp={world[kai].hp}")
     print("rem hp={world[rem].hp}")
-
     fallen :: world.remove(kai)
-    if fallen == Val(f) {
+    if fallen == .Val(f) {
         print("removed {f.name}")
     }
 }

@@ -1,25 +1,22 @@
 // D-ENCXML-PROJECTION1=A: typed decode + focused tree helpers.
 use core.encoding.xml as xml
 
-#[Codable]
+#Codable
 struct Catalog {
-    book: [Book],
+    book: [Book]
 }
 
-#[Codable]
+#Codable
 struct Book {
-    #[Rename("@id")]
-    id: String,
-    title: String,
-    price: Price,
+    #[Rename("@id")] id: String
+    title: String
+    price: Price
 }
 
-#[Codable]
+#Codable
 struct Price {
-    #[Rename("@currency")]
-    currency: String,
-    #[Rename("$text")]
-    amount: String,
+    #[Rename("@currency")] currency: String
+    #[Rename("$text")] amount: String
 }
 
 fn run() {
@@ -29,21 +26,18 @@ fn run() {
     name := xml.expanded_name(root) ?? panic("name")
     print(name.local)
     print((xml.attribute(root, "id") ?? panic("attr")) ?? "missing")
-
     children := xml.content(root) ?? panic("content")
     loop child; children {
         child_name := xml.expanded_name(child) ?? panic("child")
         print(child_name.local)
         print((xml.attribute(child, "id") ?? panic("child attr")) ?? "missing")
     }
-
     catalog := xml.decode<Catalog>(source) ?? panic("decode")
     print(catalog.book.len())
     print(catalog.book[0].id)
     print(catalog.book[0].title)
     print(catalog.book[0].price.currency)
     print(catalog.book[0].price.amount)
-
     wire := xml.to_bytes(document) ?? panic("bytes")
     again := xml.decode_bytes<Catalog>(wire) ?? panic("decode_bytes")
     print(again.book[1].title)

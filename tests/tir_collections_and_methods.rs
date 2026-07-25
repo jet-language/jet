@@ -67,7 +67,7 @@ fn map_literal_index_insert_and_iteration() {
     }
     let src = "\
 fn run() {
-    counts: [String: Int] := []
+    counts := [String: Int].{}
     counts[\"banana\"] = 3
     counts[\"apple\"] = 5
     print(counts[\"apple\"])
@@ -503,7 +503,7 @@ fn run() {
     p :: Profile.{ handle: Val(\"jay\") }
     acct :: Account.{ profile: p }
     print(handle_of(Val(acct)) ?? \"none\")
-missing: (Account?) :: None
+missing :: (Account?).{ None }
     print(handle_of(missing) ?? \"none\")
 }
 ";
@@ -614,7 +614,7 @@ fn map_builtin_methods() {
     }
     let src = "\
 fn run() {
-    m: [String: Int] := []
+    m := [String: Int].{}
     print(m.add(\"banana\", 3) ?? 0)
     print(m.add(\"apple\", 5) ?? 0)
     print(m.add(\"apple\", 7) ?? 0)
@@ -655,7 +655,7 @@ fn drop_key(m: [String: Int]) -> Int {
 }
 fn run() {
     print(drop_first([10, 20, 30]))
-    counts: [String: Int] := []
+    counts := [String: Int].{}
     counts[\"a\"] = 1
     counts[\"b\"] = 2
     print(drop_key(counts))

@@ -3,7 +3,7 @@ use core.crypto as crypto
 
 fn run() {
     key :: crypto.SigningKey.new_random() ?? panic("signing key")
-    msg: [U8] :: [116, 0x65, 0x73, 0x74]
+    msg :: [U8].{ 116, 0x65, 0x73, 0x74 }
     sig :: crypto.sign(key, msg) ?? panic("sign failed")
     print("sig len: {sig.bytes().len()}")
     print("verify ok: {crypto.verify(key.public_key(), msg, sig) ?? panic("verify failed")}")

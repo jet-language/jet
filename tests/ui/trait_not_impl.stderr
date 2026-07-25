@@ -1,23 +1,7 @@
-Error [E0904]: can't figure out what `T` should be here
-  --> tests/ui/trait_not_impl.jet:14:11
+Error [E0905]: `Point` isn't `Ordered`
+  --> tests/ui/trait_not_impl.jet:15:11
     |
- 14 |     print(largest(xs))
+ 15 |     print(largest(xs))
     |           ^^^^^^^
- Why: generic calls need enough context to pick a concrete type
- Fix: add a type annotation on a binding, like `p: Pair<Int> :: …`
-
-Error [E0112]: `largest` wants [T] for argument 1, but this is [Point]
-  --> tests/ui/trait_not_impl.jet:14:19
-    |
- 14 |     print(largest(xs))
-    |                   ^^
- Why: every argument must match its parameter's type
- Fix: use [T] here
-
-Error [E0112]: `print` doesn't know how to show T?
-  --> tests/ui/trait_not_impl.jet:14:11
-    |
- 14 |     print(largest(xs))
-    |           ^^^^^^^
- Why: print shows values that have a display
- Fix: print one of its parts instead
+ Why: `Point` would need to implement `Ordered` before it can be used here
+ Fix: write `impl Point: Ordered { … }` with every required method

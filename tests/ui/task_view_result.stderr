@@ -1,15 +1,15 @@
 Error [E2305]: a lambda cannot return a stored or borrowed view
-  --> tests/ui/task_view_result.jet:6:22
+  --> tests/ui/task_view_result.jet:8:22
     |
-  6 |     t :: tasks.spawn(() => peek([1, 2, 3]))
+  8 |     t :: tasks.spawn(() => peek([1, 2, 3]))
     |                      ^^^^^^^^^^
  Why: a lambda value has no stable public owner slot for the returned view, and captured owners may move with the closure
  Fix: use a named function or method whose returned-view provenance can be inferred and published
 
 Error [E1102]: this task returns a view that cannot be shared — it does not live long enough to cross into a task
-  --> tests/ui/task_view_result.jet:6:22
+  --> tests/ui/task_view_result.jet:8:22
     |
-  6 |     t :: tasks.spawn(() => peek([1, 2, 3]))
+  8 |     t :: tasks.spawn(() => peek([1, 2, 3]))
     |                      ^^^^^^^^^^
  Why: a view is a borrow, not an owned value; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning

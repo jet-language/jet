@@ -48,7 +48,7 @@ module complete<T, count: Int, label: String> {
     #Meta(category: label)
     pub fn marked(value: #Marked T) -> #Marked T {
         #Meta(category: label)
-        local: T := value
+        local := T.{ value }
         return ~local
     }
     #Test fn identity(value: T) { expect(count == count) }

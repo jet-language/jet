@@ -588,7 +588,8 @@ module.exports = grammar({
         "}",
       ),
 
-    // Binding sigils (D-BIND4): `name :: expr` immutable, `name := expr` mutable.
+    // Binding sigils (D-BIND-BARE1): `name :: expr` immutable, `name := expr` mutable.
+    // Types never ride the binding name — they ride the value (`Type.{ … }`).
     bind_stmt: ($) =>
       seq(
         field(
@@ -600,7 +601,6 @@ module.exports = grammar({
             $.tuple_pattern,
           ),
         ),
-        optional(seq(":", field("type", $._type))),
         choice("::", ":="),
         field("value", $._expr),
       ),
@@ -666,7 +666,6 @@ module.exports = grammar({
         ),
         seq(
           field("state", $.identifier),
-          optional(seq(":", field("state_type", $._type))),
           ":=",
           field("init", $._expr),
           ";",

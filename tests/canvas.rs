@@ -3069,14 +3069,14 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
     loop i; 0..3; 2 {
         total += i
     }
-    counts: [String: Int] := ["one": 1]
+    counts := [String: Int].{ "one": 1 }
     loop entry; counts {
         total += entry.value
     }
     loop key, value; counts {
         total += value
     }
-    loop cursor: Int := 0; cursor < 1; cursor += 1 {
+    loop cursor := 0; cursor < 1; cursor += 1 {
         total += cursor
     }
 }
@@ -3143,7 +3143,7 @@ fn canvas_projects_and_edits_every_unified_loop_clause() {
         .expect("edit complete state afterthought clause");
     let after_headers = fs::read_to_string(&path).unwrap();
     assert!(
-        after_headers.contains("loop cursor: Int := 1; cursor < 1; cursor += 2"),
+        after_headers.contains("loop cursor := 1; cursor < 1; cursor += 2"),
         "{after_headers}"
     );
 }

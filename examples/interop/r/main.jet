@@ -14,7 +14,7 @@ fn run() --[R, Io]-> {
     print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("first call failed")))
     print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("second call failed")))
     print(json.canonical(ops.double_values(session, DataTree.Array([DataTree.Int(2), DataTree.Int(4)]), 5000) ?? panic("vector call failed")))
-    scores :: data.table([Score.{ label: "a", score: 1.5 }, Score.{ label: "b", score: 2.0 }])
+    scores :: data.table([Score.{label: "a", score: 1.5}, Score.{label: "b", score: 2.0}])
     scaled :: ops.scale_table_table<Score>(session, scores, 5000) ?? panic("table call failed")
     loop row; data.rows(scaled) {
         print("{row.label}:{row.score}")

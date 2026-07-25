@@ -16,12 +16,10 @@ fn run() {
         sock.close(1000, "") ?? return Ok(http_server.response(500, "close failed"))
         return Ok(http_server.response(500, "unused"))
     })
-
     server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind")
     addr :: server.local_addr() ?? panic("address")
     serving :: tasks.spawn(() => server.serve() ?? panic("serve"))
     time.sleep(20)
-
     client :: ws.connect("ws://{addr}/live") ?? panic("connect")
     client.send_text("ping") ?? panic("send")
     reply :: client.recv() ?? panic("recv")

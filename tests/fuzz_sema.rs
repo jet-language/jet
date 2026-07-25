@@ -128,7 +128,7 @@ fn second(xs: [Int#3]) -> Int {
 }
 
 fn run() {
-    xs: [Int#3] :: [1, 2, 3]
+    xs :: [Int#3].{ 1, 2, 3 }
     print(second(xs))
 }
 "#
@@ -145,7 +145,7 @@ fn pick(xs: [Int#3], i: Index3) -> Int {
 }
 
 fn run() {
-    xs: [Int#3] :: [1, 2, 3]
+    xs :: [Int#3].{ 1, 2, 3 }
     print(pick(xs, Index3.from_int(2)))
 }
 "#
@@ -159,7 +159,7 @@ fn inc(x: Int) -> Int {
 }
 
 fn run() {
-    ys: [Int#3] :: inc.[1, 2, 3]
+    ys :: [Int#3].{ inc.[1, 2, 3] }
     print(ys[2])
 }
 "#

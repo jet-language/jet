@@ -58,14 +58,14 @@ fn increment(value: Int) -> Int {
 }
 
 fn run() {
-    bound: Counter :: .new(1)
-    holder: Holder :: .{ counter: .new(2) }
-    pool: Pool<Holder> :: .new()
-    nested_pool: Pool<Pool<Holder>> :: .new()
-    nested: GenericHolder<GenericHolder<Int>> :: .new(.new(7))
-    nested_explicit: GenericHolder<GenericHolder<Int>> :: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
+    bound :: Counter.new(1)
+    holder :: Holder.{ counter: .new(2) }
+    pool :: Pool<Holder>.new()
+    nested_pool :: Pool<Pool<Holder>>.new()
+    nested :: GenericHolder<GenericHolder<Int>>.new(.new(7))
+    nested_explicit :: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
     callback :: increment
-    callback_holder: GenericHolder<fn(Int) -> Int> :: .new(^callback)
+    callback_holder :: GenericHolder<fn(Int) -> Int>.new(^callback)
     explicit :: Counter.new(4)
     print(read(.new(5)))
     print("{bound.value}{holder.counter.value}{explicit.value}")
@@ -114,7 +114,7 @@ fn returned() -> Box<Int> {
 
 fn run() {
     direct :: Box.new(1)
-    expected: Box<[Int]> :: Box.new([])
+    expected :: Box.new([])
     nested :: Box.new(Box.new(2))
     pair :: Pair.new("three", 3)
     explicit :: Box<Int>.new(5)
@@ -333,7 +333,7 @@ fn direct() -> Severity { return Severity.from_u8(8) }
 fn run() {
     a :: pass_checked(checked(4)) ?? panic(\"range\")
     b :: checked(6) ?? panic(\"range\")
-    widened: Int :: a + b
+    widened :: a + b
     print(\"{widened}\")
     print(direct().raw())
 }
@@ -409,7 +409,7 @@ fn run() {
     if data == Object(entries) {
         print(entries.len())
     }
-    obj: [String: Json] := []
+    obj := [String: Json].{}
     obj[\"name\"] = Json.Text(\"jet\")
     obj[\"ok\"] = Json.Bool(true)
     obj[\"none\"] = Json.Null

@@ -69,13 +69,13 @@ pub fn render_prompt(turn_no: usize, color: bool) -> String {
     format!("{} {} ", theme.dim(&turn_no.to_string()), theme.accent("user>"))
 }
 
-/// `name: Type :: value` (immutable) / `name: Type := value` (mutable) —
+/// `name :: value` (immutable) / `name := value` (mutable) —
 /// the one shared line shape used by both the pin rail and the `^B`
-/// bindings pane (D-FE-REPL1=D "workspace" layer). The sigil matches the
+/// bindings pane (D-FE-REPL1=D / D-BIND-BARE1). The sigil matches the
 /// binding's original spelling so the pane reads as valid Jet.
 pub fn format_binding(name: &str, v: &CtValue, mutable: bool) -> String {
     let sigil = if mutable { ":=" } else { "::" };
-    format!("{}: {} {} {}", name, type_name(v), sigil, v.jet_show())
+    format!("{} {} {}", name, sigil, v.jet_show())
 }
 
 /// The element type name shown inside a fold marker (`[Row]`, `[Int]`, …).
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn format_binding_matches_workspace_shape() {
-        assert_eq!(format_binding("total", &CtValue::Int(15), false), "total: Int :: 15");
-        assert_eq!(format_binding("total", &CtValue::Int(15), true), "total: Int := 15");
+        assert_eq!(format_binding("total", &CtValue::Int(15), false), "total :: 15");
+        assert_eq!(format_binding("total", &CtValue::Int(15), true), "total := 15");
     }
 }

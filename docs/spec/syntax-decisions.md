@@ -73,18 +73,21 @@ backtracking/unification. Initial Core surface: `solve.Solver.new(seed)`,
 
 ### Bindings & assignment
 
-**S2 — Bindings** *(current law = D-BIND4)*:
+**S2 — Bindings** *(current law = D-BIND-BARE1)*:
 
 ```jet
 name :: expr            // immutable binding
 name := expr            // mutable binding
-name: Type :: expr      // explicit-typed immutable
-name: Type := expr      // explicit-typed mutable
 name = expr             // reassignment of an existing := binding
 ```
 
-**S4 — Type annotations**: `name: Type` after the name, everywhere (bindings,
-params, fields). Never `Type name`.
+Types never ride the binding name. Put the type on the value
+(`U8.{ 250 }`, `Color.{ r: 64, g: 128, b: 200 }`) or on signatures and fields
+(`name: Type`). The retired forms `name: Type :: expr` and `name: Type := expr`
+are ordinary parse errors (D-BIND-BARE1; amends D-BIND4).
+
+**S4 — Type annotations**: `name: Type` after the name on signatures and fields.
+Never on a local binding. Never `Type name`.
 
 **S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=`
 `>>=`. Arithmetic four on Int/Float; the rest Int-only. LHS must be a mutable
@@ -4855,6 +4858,13 @@ edge before retesting. Implemented end to end on card #681.
 every type. Body elaborates against the head with no silent conversion;
 `[T].{}` is the explicit empty; bare `[]` stays contextual. Amends S29 /
 D-DOTCTOR1 / D-DOTCTOR2 and D-EMPTYLIT1. Implemented on card #780.
+
+**2026-07-24 — D-BIND-BARE1=A**: bindings are always bare — only
+`name :: value`, `name := value`, and reassignment `name = value`. Retires
+`name: Type :: expr` and `name: Type := expr` as an immediate clean break
+(ordinary parse error, no teaching window). Types ride the value
+(`Type.{ … }` from D-DOTCTOR3) or live on signatures and fields. Amends S2 /
+D-BIND4. Implemented on card #781.
 
 **2026-07-19 — D-SHAPE-OUTPUT-CALLABLE1=A,
 D-ECO-OUTPUT-CALLCONTRACT1=A**: typed runnable Outputs now parse and format as

@@ -1,12 +1,12 @@
 use core.mem
 
 fn run() {
-    first: Int :: 1
-    second: Int :: 2
+    first :: 1
+    second :: 2
     #Unsafe("two independent pointer operations", obligations: .Track) {
-        first_pointer: *Int :: *first
+        first_pointer :: *Int.{*first}
         assert no_alias
-        second_pointer: *Int :: *second
+        second_pointer :: *Int.{*second}
         print(first_pointer.*)
         assert valid_ptr, aligned
     }

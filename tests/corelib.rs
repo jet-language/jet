@@ -423,9 +423,9 @@ fn core_email_limits_are_constructible_real_jet_values() {
 use core.email as email
 
 fn run() {
-    safe: email.Limits := email.Limits.safe()
+    safe := email.Limits.safe()
     print("{safe.max_reply_line_bytes},{safe.max_reply_lines},{safe.max_capabilities},{safe.max_recipients},{safe.max_message_bytes},{safe.max_auth_challenge_bytes}")
-    strict: email.Limits := email.Limits.{
+    strict := email.Limits.{
         max_reply_line_bytes: 64,
         max_reply_lines: 1,
         max_capabilities: 2,
@@ -458,7 +458,7 @@ fn run() {
         private_key: dkim_key,
         signed_headers: ["from", "subject", "mime-version", "content-type"],
     }
-    auth: email.SmtpAuth := .Password.{ username: "mailer", password: password }
+    auth := email.SmtpAuth.Password.{ username: "mailer", password: password }
     config := email.SmtpConfig.{
         host: "localhost",
         port: 465,
@@ -521,7 +521,7 @@ fn keep_cbor_reader(v: ^cbor.CBORReader) -> cbor.CBORReader {{ return v }}
 fn keep_cbor_writer(v: ^cbor.CBORWriter) -> cbor.CBORWriter {{ return v }}
 
 fn run() {{
-    limits: encoding.EncodingLimits := encoding.EncodingLimits.safe()
+    limits := encoding.EncodingLimits.safe()
     print("{{limits.buffer_bytes}}:{{limits.max_depth}}:{{limits.max_item_bytes}}:{{limits.max_expansion_depth}}:{{limits.max_expansion_bytes}}")
     if limits.max_total_bytes == None {{ print(true) }} else {{ print(false) }}
     print(keep_format(^encoding.EncodingFormat.JSON) == encoding.EncodingFormat.JSON)
@@ -992,7 +992,7 @@ fn run() {{
 
     bytes_output :: files.create("{}") ?? panic("create bytes")
     bytes_writer :: json.writer(^bytes_output, encoding.EncodingLimits.safe(), true) ?? panic("bytes writer")
-    bytes: [U8] :: [U8.from_int(1) ?? panic("byte")]
+    bytes :: [U8].{ U8.from_int(1) ?? panic("byte") }
     if bytes_writer.write(encoding.DataEvent.Bytes(bytes)) == {{
         Ok(_) -> print("bytes accepted")
         Err(error) -> print(error.reason)
@@ -1968,7 +1968,7 @@ fn run() {{
     write_unfinished("{partial}")
     // Same-path reopen after Drop: incomplete leftover still here (empty wire).
     leftover :: files.read_bytes("{partial}") ?? panic("same-path read after Drop")
-    empty: [U8] :: []
+    empty :: [U8].{}
     print(leftover == empty)
     // Same-path recreate: Drop must have released the unfinished writer handle.
     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
@@ -1976,7 +1976,7 @@ fn run() {{
     reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
     reopen_writer.finish() ?? panic("reopen finish")
     finished :: files.read_bytes("{partial}") ?? panic("same-path read after finish")
-    null_wire: [U8] :: [246]
+    null_wire :: [U8].{ 246 }
     print(finished == null_wire)
     // Honesty: unfinished Drop wire ≠ finished complete root.
     print(leftover != finished)
@@ -2287,7 +2287,7 @@ fn run() {{
     float_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("float array end")
     float_writer.finish() ?? panic("float finish")
     whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
-    expected_whole: [U8] :: [162, 97, 97, 1, 97, 98, 98, 120, 121]
+    expected_whole :: [U8].{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }
     print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
     after :: writer.write(encoding.DataEvent.Null)
     if after == {{
@@ -2780,9 +2780,9 @@ fn run() {
     packet := Packet.{ id: 7, payload: [222, 173] }
     wire := cbor.to_bytes(packet) ?? panic("encode")
     stable := cbor.to_bytes_canonical(packet) ?? panic("canonical encode")
-    back: Packet := cbor.decode<Packet>(wire) ?? panic("decode")
+    back := Packet.{ cbor.decode<Packet>(wire) ?? panic("decode") }
     raw_wire := cbor.to_bytes([1, 2, 255]) ?? panic("byte encode")
-    raw: [U8] := cbor.decode<[U8]>(raw_wire) ?? panic("byte decode")
+    raw := [U8].{ cbor.decode<[U8]>(raw_wire) ?? panic("byte decode") }
     print(wire)
     print(stable == wire)
     print(back.id)
@@ -2877,13 +2877,13 @@ use core.encoding.cbor as cbor
 struct Packet { name: String, data: [U8] }
 
 fn run() {
-    array: [Int] := cbor.decode<[Int]>([159, 1, 2, 255]) ?? panic("indefinite array")
+    array := [Int].{ cbor.decode<[Int]>([159, 1, 2, 255]) ?? panic("indefinite array") }
     text := cbor.parse([127, 97, 97, 98, 98, 99, 255]) ?? panic("indefinite text")
     print(array)
     print(text.text() ?? "bad")
 
     // {_ "name": (_ "J", "et"), "data": (_ h'0102', h'03')}
-    packet: Packet := cbor.decode<Packet>([191, 100, 110, 97, 109, 101, 127, 97, 74, 98, 101, 116, 255, 100, 100, 97, 116, 97, 95, 66, 1, 2, 65, 3, 255, 255]) ?? panic("typed indefinite decode")
+    packet := Packet.{ cbor.decode<Packet>([191, 100, 110, 97, 109, 101, 127, 97, 74, 98, 101, 116, 255, 100, 100, 97, 116, 97, 95, 66, 1, 2, 65, 3, 255, 255]) ?? panic("typed indefinite decode") }
     print(packet.name)
     print(packet.data)
 
@@ -2952,7 +2952,7 @@ fn cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev() {
 use core.encoding.cbor as cbor
 
 fn wire(values: [Int]) -> [U8] {
-    bytes: [U8] := []
+    bytes := [U8].{}
     loop value; values {
         bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
     }
@@ -2990,7 +2990,7 @@ fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) 
 }
 
 fn run() {
-    empty: [Int] := []
+    empty := [Int].{}
     // RFC 8949 argument widths, scalar families, nested containers, preferred
     // floats, and every supported normal-mode indefinite family.
     print(accepted([0]))
@@ -3204,7 +3204,7 @@ fn pick(xs: [String#4], i: Index4) -> String {
 }
 
 fn run() {
-    words: [String#4] :: ["zero", "one", "two", "three"]
+    words :: [String#4].{ "zero", "one", "two", "three" }
     print(pick(words, Index4.from_int(2)))
 }
 "#;
@@ -4437,11 +4437,11 @@ fn run() {
     ready_address :: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))
     ready_client :: net.tcp_connect(ready_address) ?? panic("ready connect")
     ready_server := net.tcp_accept(ready_listener) ?? panic("ready accept")
-    write_interest: NetReadyInterest :: .Write
+    write_interest :: NetReadyInterest.Write
     write_ready :: ready_server.ready(write_interest, deadline: Duration.milliseconds(1000) ?? panic("write ready deadline")) ?? panic("write ready")
     print(net.ready_readable(write_ready))
     print(net.ready_writable(write_ready))
-    interest: NetReadyInterest :: .Read
+    interest :: NetReadyInterest.Read
     (wait_tx, wait_rx) :: tasks.channel<Int>()
     ready_wait :: tasks.spawn(take(ready_server, wait_tx) () => {
         wait_tx.send(1)
@@ -4484,7 +4484,7 @@ fn run() {
     client :: net.udp_bind("127.0.0.1:0") ?? panic("client bind")
     address :: net.udp_local_addr(server) ?? panic("server address")
     budget :: Duration.seconds(1) ?? panic("deadline")
-    payload: [U8] :: [0, 255, 1, 2, 3]
+    payload :: [U8].{ 0, 255, 1, 2, 3 }
     sent :: client.send_to(payload, address, deadline: budget) ?? panic("send")
     packet :: server.receive(3, deadline: budget) ?? panic("receive")
     print("{sent}:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
@@ -4516,7 +4516,7 @@ use core.time as time
 
 fn run() {
     socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind")
-    interest: NetReadyInterest :: .Read
+    interest :: NetReadyInterest.Read
     (ready_tx, ready_rx) :: tasks.channel<Int>()
     waiter :: tasks.spawn(take(socket, ready_tx) () => {
         ready_tx.send(1)
@@ -4610,7 +4610,7 @@ fn run() {
         Ok(_) -> panic("expired read succeeded")
         Err(error) -> print(net.error_operation(error))
     }
-    byte: [U8] :: [1]
+    byte :: [U8].{ 1 }
     if client.write(byte, deadline: expired) == {
         Ok(_) -> panic("expired write succeeded")
         Err(error) -> print(net.error_operation(error))
@@ -4777,17 +4777,17 @@ fn run() {{
     client := net.unix_connect("{socket}", deadline: budget) ?? panic("connect")
     server := listener.accept(deadline: budget) ?? panic("accept")
     client.set_timeout(budget) ?? panic("persistent timeout")
-    both: NetReadyInterest :: .ReadWrite
+    both :: NetReadyInterest.ReadWrite
     observed :: client.ready(both, deadline: budget) ?? panic("read-write readiness")
     print(net.ready_readable(observed))
     print(net.ready_writable(observed))
-    interest: NetReadyInterest :: .Read
+    interest :: NetReadyInterest.Read
     expired :: Duration.milliseconds(0) ?? panic("expired")
     if client.ready(interest, deadline: expired) == {{
         Ok(_) -> panic("expired readiness succeeded")
         Err(error) -> print(net.error_operation(error))
     }}
-    payload: [U8] :: [7]
+    payload :: [U8].{ 7 }
     client.write_all(payload, deadline: budget) ?? panic("write")
     print(server.read(1, deadline: budget) ?? panic("read"))
     client.close() ?? panic("close")
@@ -5217,17 +5217,17 @@ fn run() {
     budget :: Duration.seconds(1) ?? panic("deadline")
     cfg :: tls.ClientConfig.default().with_alpn(["http/1.0"]) ?? panic("ALPN")
     secure := tls.client(^tcp, server_name: "localhost", config: cfg, deadline: budget) ?? panic("tls handshake")
-    request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
-    interest: NetReadyInterest :: .Write
+    request :: [U8].{ 71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10 }
+    interest :: NetReadyInterest.Write
     readiness :: secure.ready(interest, deadline: budget) ?? panic("ready")
     print(net.ready_readable(readiness))
     print(net.ready_writable(readiness))
     print(zero_rejected(&secure))
-    empty: [U8] :: []
+    empty :: [U8].{}
     empty_count :: send(&secure, empty) ?? panic("empty write")
     secure.write_all(request, deadline: budget) ?? panic("write bytes")
     print(empty_count)
-    read_interest: NetReadyInterest :: .Read
+    read_interest :: NetReadyInterest.Read
     response_ready :: secure.ready(read_interest, deadline: budget) ?? panic("response ready")
     print(net.ready_readable(response_ready))
     response :: secure.read(4096, deadline: budget) ?? panic("read bytes")
@@ -5324,10 +5324,10 @@ fn invalid_alpn() -> [String] {{
 }}
 
 fn run() {{
-    ca: [U8] :: [{}]
-    client_cert: [U8] :: [{}]
-    client_key: [U8] :: [{}]
-    wrong_key: [U8] :: [{}]
+    ca :: [U8].{ {} }
+    client_cert :: [U8].{ {} }
+    client_key :: [U8].{ {} }
+    wrong_key :: [U8].{ {} }
     roots :: tls.RootCertificates.from_pem(ca) ?? panic("root validation")
     identity :: tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: client_key) ?? panic("identity validation")
     if tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: wrong_key) == {{
@@ -5364,11 +5364,11 @@ fn run() {{
     print(peer.leaf.valid_from_unix_ms < peer.leaf.valid_until_unix_ms)
     print(peer.leaf.subject.contains("CN=T") && peer.leaf.subject.contains("\\xc3"))
     print(peer.leaf.issuer.len() > 0)
-    request: [U8] :: [71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10]
+    request :: [U8].{ 71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10 }
     secure.write_all(request, deadline: budget) ?? panic("request")
     secure.close_write(deadline: budget) ?? panic("close write")
     secure.close_write(deadline: budget) ?? panic("repeat close write")
-    one: [U8] :: [1]
+    one :: [U8].{ 1 }
     if secure.write_all(one, deadline: budget) == {{
         Ok(_) -> panic("write after close_write succeeded")
         Err(error) -> if error == {{
@@ -5732,7 +5732,7 @@ use core.process as process
 
 fn run() {
     hostile :: "two words;*.jet"
-    expected: Sh :: "printf <%s> {hostile}"
+    expected :: Sh.{ "printf <%s> {hostile}" }
     first :: process.run(expected) ?? panic("expected-type command failed")
     print(first.output)
 
@@ -5860,18 +5860,18 @@ fn run() {
         Ok(_) -> panic("address injection accepted")
         Err(_) -> print("address-rejected")
     }
-    if email.message(~sender, [~recipient], [], "hello\nBcc: stolen@example.com", "text", "", []) == {
+    if email.message(~sender, [~recipient], [], "hello\nBcc := stolen@example.com", "text", "", []) == {
         Ok(_) -> panic("header injection accepted")
         Err(_) -> print("header-rejected")
     }
-    recipients := [~recipient]
+    recipients.{ [~recipient]
     count := 1
     loop count < 101 { recipients.push(~recipient); count++ }
     if email.message(~sender, recipients, [], "subject", "text", "", []) == {
         Ok(_) -> panic("recipient bound ignored")
         Err(_) -> print("recipient-bound")
     }
-    too_large: [U8] := [0]
+    too_large := [U8].{ 0 }
     count = 1
     loop count < 26214401 { too_large.push(0); count++ }
     if email.attachment("large.bin", "application/octet-stream", too_large) == {
@@ -5888,7 +5888,7 @@ fn run() {
 
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "email_mime", src, &[], None);
-    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(code, 0, "stderr: }\n{stderr}");
     assert!(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{stdout}");
     let file = dir.join("email_mime.jet");
     fs::write(&file, src).unwrap();
@@ -5928,9 +5928,9 @@ fn run() {
     envelope :: email.envelope(sender, [~hidden]) ?? panic("envelope")
     replaced :: message.with_envelope(envelope) ?? panic("replace")
     bytes :: email.serialize(replaced) ?? panic("serialize")
-    start_tls: email.SmtpSecurity := .StartTls
-    transport_tls: email.SmtpSecurity := .Tls
-    require_all: email.RecipientPolicy := .RequireAll
+    start_tls := email.SmtpSecurity.StartTls
+    transport_tls := email.SmtpSecurity.Tls
+    require_all := email.RecipientPolicy.RequireAll
     recipient := email.RecipientReport.{
         address: hidden,
         accepted: true,
@@ -5945,13 +5945,13 @@ fn run() {
         response: "queued",
         accepted_at: "2026-07-13T17:00:00Z",
     }
-    problem: email.EmailError := .Configuration.{
+    problem := email.EmailError.Configuration.{
         operation: "send",
         server: Val("smtp.example.com"),
         code: Val(451),
         reason: "stopped",
     }
-    tls_problem: email.EmailError := .Tls.{
+    tls_problem := email.EmailError.Tls.{
         operation: "handshake",
         server: Val("smtp.example.com"),
         code: Val(525),
@@ -6931,8 +6931,8 @@ fn run() {
     loop ticket; data.rows(collected) {
         print("planned:{ticket.team}:{ticket.minutes}")
     }
-    none: Float? :: None
-    maybe_minutes: [Float?] :: [Val(2.0), none, Val(6.0), none]
+    none ::  None 
+    maybe_minutes :: [ Val(2.0), none, Val(6.0), none ]
     series :: data.series(maybe_minutes)
     print(data.count(series))
     print(data.missing_count(series))
@@ -7106,7 +7106,7 @@ struct Box<T> {
 }
 
 fn run() {
-    empty_rows: [Ticket] := []
+    empty_rows := [Ticket].{}
     empty_table :: data.table(empty_rows)
     loop c; data.schema(empty_table) {
         print("empty:{c.name}:{c.type_name}")
@@ -7122,16 +7122,16 @@ fn run() {
         print("struct:{c.name}:{c.type_name}")
     }
 
-    empty_tickets: [Ticket] := []
+    empty_tickets := [Ticket].{}
     empty_series :: data.series(empty_tickets)
     loop c; data.schema(empty_series) {
         print("empty_series:{c.name}:{c.type_name}")
     }
 
-    empty_units: [Empty] := []
+    empty_units := [Empty].{}
     print("empty_struct:{data.count(data.schema(data.table(empty_units)))}")
 
-    boxed: [Box<Int>] := []
+    boxed := [Box<Int>].{}
     loop c; data.schema(data.table(boxed)) {
         print("generic:{c.name}:{c.type_name}")
     }
@@ -7312,7 +7312,7 @@ fn run() {
     print(encoded.len() > 0)
     decoded := cbor.parse(encoded) ?? panic("cbor parse")
     print(json.canonical(decoded))
-    bytes: [U8] :: [104, 105]
+    bytes :: [U8].{ 104, 105 }
     u := base64.encode_url(bytes)
     print(u)
     print((base64.decode_url(u) ?? panic("base64url")).len())
@@ -7525,10 +7525,10 @@ fn same_bytes(left: [U8], right: [U8]) -> Bool {
 }
 
 fn summarize() -> String {
-    plain: [U8] :: [60, 114, 62, 111, 107, 60, 47, 114, 62]
-    utf8_bom: [U8] :: [239, 187, 191, 60, 63, 120, 109, 108, 32, 118, 101, 114, 115, 105, 111, 110, 61, 39, 49, 46, 48, 39, 32, 101, 110, 99, 111, 100, 105, 110, 103, 61, 39, 85, 84, 70, 45, 56, 39, 63, 62, 60, 114, 62, 195, 169, 240, 159, 153, 130, 60, 47, 114, 62]
-    utf16: [U8] :: [255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0]
-    conflict: [U8] :: [255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 56, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 47, 0, 62, 0]
+    plain :: [U8].{ 60, 114, 62, 111, 107, 60, 47, 114, 62 }
+    utf8_bom :: [U8].{ 239, 187, 191, 60, 63, 120, 109, 108, 32, 118, 101, 114, 115, 105, 111, 110, 61, 39, 49, 46, 48, 39, 32, 101, 110, 99, 111, 100, 105, 110, 103, 61, 39, 85, 84, 70, 45, 56, 39, 63, 62, 60, 114, 62, 195, 169, 240, 159, 153, 130, 60, 47, 114, 62 }
+    utf16 :: [U8].{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0 }
+    conflict :: [U8].{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 56, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 47, 0, 62, 0 }
 
     plain_doc := xml.parse_bytes(plain) ?? panic("plain parse")
     plain_out := xml.to_bytes(plain_doc) ?? panic("plain render")
@@ -7537,7 +7537,7 @@ fn summarize() -> String {
     utf16_doc := xml.parse_bytes(utf16) ?? panic("UTF-16 parse")
     utf16_out := xml.to_bytes(utf16_doc, xml.XMLRenderOptions.{ encoding: .UTF16LE, lexical: .PreserveValid }) ?? panic("UTF-16 render")
 
-    conflict_result: DataTree ? XMLError :: xml.parse_bytes(conflict)
+    conflict_result :: DataTree ? XMLError.{ xml.parse_bytes(conflict) }
     if conflict_result == {
         Ok(_) -> return "encoding-conflict-missed"
         Err(error) -> {
@@ -7882,7 +7882,7 @@ use core.encoding.xml as xml
 use core.files as files
 
 fn run() {{
-    paths: [String] :: [{boundary_paths}]
+    paths :: [String].{ {boundary_paths} }
     passed := 0
     loop path; paths {{
         input :: files.open(path) ?? panic("open boundary")
@@ -8800,7 +8800,7 @@ fn run() {
             dup.send(1)
         })
     }
-    total: Int := 0
+    total := 0
     loop i; 1..1000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
@@ -8839,7 +8839,7 @@ fn run() {
             dup.send(1)
         })
     }
-    total: Int := 0
+    total := 0
     loop i; 1..10000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
@@ -8879,7 +8879,7 @@ fn run() {
             dup.send(1)
         })
     }
-    total: Int := 0
+    total := 0
     loop i; 1..100000 {
         total = (total + (ch.receive() ?? panic("channel closed")))
     }
@@ -9243,7 +9243,7 @@ struct Email { addr: String }
 
 impl Email.Encode {
     fn encode(self) -> DataTree {
-        m: [String: DataTree] :: ["email": DataTree.Text(~self.addr)]
+        m :: [String: DataTree].{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }
@@ -9294,10 +9294,10 @@ impl Email.Decode {
 }
 
 fn run() {
-    i_tree: DataTree := DataTree.Int(41)
-    xs_tree: DataTree := DataTree.Array([DataTree.Int(1), DataTree.Int(2)])
-    p_tree: DataTree := DataTree.Object(["x": DataTree.Int(7)])
-    e_tree: DataTree := DataTree.Object(["address": DataTree.Text("a@b")])
+    i_tree := DataTree.Int(41)
+    xs_tree := DataTree.Array([DataTree.Int(1), DataTree.Int(2)])
+    p_tree := DataTree.Object(["x": DataTree.Int(7)])
+    e_tree := DataTree.Object(["address": DataTree.Text("a@b")])
     i := i_tree.decode<Int>() ?? panic("primitive")
     xs := xs_tree.decode<[Int]>() ?? panic("list")
     p := p_tree.decode<Point>() ?? panic("derive")
@@ -9332,9 +9332,9 @@ enum Event {
     Named(name: String, enabled: Bool)
 }
 fn run() {
-    a: Event := .Idle
-    b: Event := .Count(3)
-    c: Event := .Named.{ name: "x", enabled: true }
+    a := Event.Idle
+    b := Event.Count(3)
+    c := Event.Named.{ name: "x", enabled: true }
     print(json.to_string(a))
     print(json.to_string(b))
     print(json.to_string(c))
@@ -9367,9 +9367,9 @@ enum Event {
 }
 
 fn run() {
-    unit: Event := .Idle
-    tuple: Event := .Count(3)
-    named: Event := .Named.{ name: "x", enabled: true }
+    unit := Event.Idle
+    tuple := Event.Count(3)
+    named := Event.Named.{ name: "x", enabled: true }
     print(json.to_string(unit))
     print(json.to_string(tuple))
     print(json.to_string(named))
@@ -9524,7 +9524,7 @@ struct Wire {
 fn run() {
     absent := Wire.{ first: "a", second: "b", maybe: None, last: 4 }
     present := Wire.{ first: "a", second: "b", maybe: Val("c"), last: 4 }
-    arbitrary: [String: Int] := ["z": 1, "a": 2]
+    arbitrary := [String: Int].{ "z": 1, "a": 2 }
     print(json.to_string(absent))
     print(json.to_string(present))
     print(json.to_string(arbitrary))
@@ -9754,7 +9754,7 @@ struct Box<T> { value: T }
 
 fn run() {
     boxed := Box<Int>.{ value: 7 }
-    n: Int := boxed.get_value()
+    n := boxed.get_value()
     print(n)
     print(boxed.type_name())
 }
@@ -10327,18 +10327,18 @@ fn option_zip_and_lift2_combinators() {
         "option_combinators",
         r#"
 fn run() {
-    both_a: Float? :: Val(2.0)
-    both_b: Float? :: Val(5.0)
+    both_a :: Val(2.0)
+    both_b :: Val(5.0)
     print(both_a.zip(both_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_a, both_b))
 
-    a_only: Float? :: Val(2.0)
-    b_missing: Float? :: None
+    a_only :: Val(2.0)
+    b_missing ::  None 
     print(a_only.zip(b_missing).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, a_only, b_missing))
 
-    both_missing_a: Float? :: None
-    both_missing_b: Float? :: None
+    both_missing_a ::  None 
+    both_missing_b ::  None 
     print(both_missing_a.zip(both_missing_b).map((pair) => pair.a * pair.b))
     print(Option.lift2((x, y) => x * y, both_missing_a, both_missing_b))
 }
@@ -11090,7 +11090,7 @@ fn core_auth_strict_jwt_and_paseto_hostile_matrix() {
 use core.auth as auth
 
 fn run() {
-    jwt_key: [U8] :: [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]
+    jwt_key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
     no_skew :: Duration.milliseconds(0) ?? panic("duration")
     valid_jwt := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrY"
     wrong_aud := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImJpbGxpbmciLCJleHAiOjQxMDI0NDQ4MDB9.4HckXFIKTMLaJr8Zjz8hYC0NQ9gO1xbLzZwoNxU1ew4"
@@ -11134,18 +11134,18 @@ fn run() {
     if auth.verify_jwt(expired, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("expired-accepted") } .Err(_) -> { print("expired-rejected") } }
     if auth.verify_jwt(overflow_expiry, key: jwt_key, audience: "gateway") == { .Ok(_) -> { print("overflow-accepted") } .Err(_) -> { print("overflow-rejected") } }
     if auth.verify_jwt(noncanonical_base64, key: jwt_key, audience: "gateway", issuer: "partner") == { .Ok(_) -> { print("noncanonical-accepted") } .Err(_) -> { print("noncanonical-rejected") } }
-    weak_key: [U8] :: [115, 104, 111, 114, 116]
+    weak_key :: [U8].{ 115, 104, 111, 114, 116 }
     if auth.verify_jwt(valid_jwt, key: weak_key, audience: "gateway") == { .Ok(_) -> { print("weak-key-accepted") } .Err(error) -> { if error == { .WeakKey -> { print("weak-key-rejected") } else -> { print("weak-key-wrong-error") } } } }
 
-    public_key: [U8] :: [198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45]
-    footer: [U8] :: [107, 105, 100, 45, 49]
-    implicit: [U8] :: [116, 101, 110, 97, 110, 116, 45, 97]
+    public_key :: [U8].{ 198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45 }
+    footer :: [U8].{ 107, 105, 100, 45, 49 }
+    implicit :: [U8].{ 116, 101, 110, 97, 110, 116, 45, 97 }
     paseto := "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
     bad_signature := "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAg.a2lkLTE"
     wrong_purpose := "v4.local.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
     wrong_version := "v3.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
-    bad: [U8] :: [98, 97, 100]
-    zero_key: [U8] :: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    bad :: [U8].{ 98, 97, 100 }
+    zero_key :: [U8].{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
     if auth.verify_paseto(paseto, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == {
         .Ok(claims) -> { print("ok:{claims.audience}") }
         .Err(_) -> { print("rejected") }
@@ -11212,7 +11212,7 @@ use core.auth as auth
 use core.env as env
 
 fn run() {
-    key: [U8] :: [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102]
+    key :: [U8].{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
     token := env.get("JET_AUTH_CLOCK_TOKEN") ?? panic("token")
     zero :: Duration.milliseconds(0) ?? panic("zero")
     skew :: Duration.milliseconds(1500) ?? panic("skew")

@@ -33,10 +33,10 @@ fn default_paths() -> [String] {
 
 fn paths_from_args() -> [String] {
     args :: io.args()
-    out: [String] := []
+    out := [String].{}
     i := 1
     loop i < args.len() {
-        if args.get(i) == Val(path) {
+        if args.get(i) == .Val(path) {
             out.push(path)
         }
         i += 1
@@ -46,7 +46,7 @@ fn paths_from_args() -> [String] {
 
 fn paths_from_prompt() -> [String] {
     print("Enter file paths (blank line when done):")
-    out: [String] := []
+    out := [String].{}
     loop true {
         raw :: io.input("> ") ?? return ~out
         if raw == "" {
@@ -70,10 +70,10 @@ fn gather_paths() -> [String] {
 
 fn scan_parallel(paths: [String]) -> [String] {
     (sender, ch) :: tasks.channel<String>()
-    workers: [Task<Unit>] := []
+    workers := [Task<Unit>].{}
     i := 0
     loop i < paths.len() {
-        if paths.get(i) == Val(path) {
+        if paths.get(i) == .Val(path) {
             tx :: ~sender
             file :: ~path
             workers.push(tasks.spawn(take(tx, file) () => {
@@ -86,7 +86,7 @@ fn scan_parallel(paths: [String]) -> [String] {
         worker :: workers.pop() ?? panic("missing worker")
         worker.join()
     }
-    results: [String] := []
+    results := [String].{}
     got := 0
     loop got < paths.len() {
         results.push(ch.receive() ?? panic("channel closed early"))
@@ -97,7 +97,7 @@ fn scan_parallel(paths: [String]) -> [String] {
 }
 
 fn copy_paths(paths: [String]) -> [String] {
-    out: [String] := []
+    out := [String].{}
     loop path; paths {
         out.push(path)
     }
