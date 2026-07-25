@@ -1016,7 +1016,7 @@ fn project_stmt(
             add_node(
                 g,
                 &node_id,
-                "scope_member",
+                "function_exec",
                 &format!(".{name}"),
                 (*span).into(),
                 x,

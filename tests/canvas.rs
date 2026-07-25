@@ -433,47 +433,77 @@ fn json_field(haystack: &str, field: &str) -> String {
     rest[..rest.find('"').expect("json field terminator")].to_string()
 }
 
-fn json_object_containing_at(haystack: &str, marker_at: usize) -> &str {
-    let start = haystack[..marker_at]
-        .rfind('{')
-        .expect("JSON object start before marker");
-    let mut depth = 0usize;
-    let mut quoted = false;
+fn json_array_field<'a>(haystack: &'a str, field: &str) -> &'a str {
+    let marker = format!("\"{field}\":[");
+    let start = haystack
+        .find(&marker)
+        .map(|offset| offset + marker.len())
+        .unwrap_or_else(|| panic!("missing JSON array `{field}`"));
+    let mut depth = 1usize;
+    let mut in_string = false;
     let mut escaped = false;
-    for (offset, ch) in haystack[start..].char_indices() {
-        if quoted {
+    for (offset, byte) in haystack.as_bytes()[start..].iter().enumerate() {
+        if in_string {
             if escaped {
                 escaped = false;
-            } else if ch == '\\' {
+            } else if *byte == b'\\' {
                 escaped = true;
-            } else if ch == '"' {
-                quoted = false;
+            } else if *byte == b'"' {
+                in_string = false;
             }
             continue;
         }
-        match ch {
-            '"' => quoted = true,
-            '{' => depth += 1,
-            '}' => {
+        match *byte {
+            b'"' => in_string = true,
+            b'[' => depth += 1,
+            b']' => {
                 depth -= 1;
                 if depth == 0 {
-                    return &haystack[start..start + offset + 1];
+                    return &haystack[start..start + offset];
                 }
             }
             _ => {}
         }
     }
-    panic!("unterminated JSON object at {marker_at}")
+    panic!("unterminated JSON array `{field}`")
 }
 
-fn json_objects_containing<'a>(haystack: &'a str, marker: &str) -> Vec<&'a str> {
+fn json_top_level_objects(array: &str) -> Vec<&str> {
     let mut objects = Vec::new();
-    let mut offset = 0usize;
-    while let Some(found) = haystack[offset..].find(marker) {
-        let marker_at = offset + found;
-        objects.push(json_object_containing_at(haystack, marker_at));
-        offset = marker_at + marker.len();
+    let mut start = None;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, byte) in array.as_bytes().iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if *byte == b'\\' {
+                escaped = true;
+            } else if *byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match *byte {
+            b'"' => in_string = true,
+            b'{' => {
+                if depth == 0 {
+                    start = Some(offset);
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let object_start = start.take().expect("top-level JSON object start");
+                    objects.push(&array[object_start..=offset]);
+                }
+            }
+            _ => {}
+        }
     }
+    assert_eq!(depth, 0, "unterminated top-level JSON object: {array}");
     objects
 }
 
@@ -566,19 +596,28 @@ fn canvas_graph_json_is_stable_and_typed() {
 
 #[test]
 fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
-    let path = write_fixture("node_descriptor_catalog", CANVAS_COVERAGE_FIXTURE);
+    let projection_fixtures = [
+        ("node_descriptor_coverage", CANVAS_COVERAGE_FIXTURE),
+        ("node_descriptor_data", CANVAS_DATA_FIXTURE),
+        ("node_descriptor_patterns", CANVAS_PATTERN_MULTI_FIXTURE),
+        ("node_descriptor_fallible", CANVAS_RAILS_FIXTURE),
+        (
+            "node_descriptor_yield",
+            include_str!("../examples/features/streams/generators.jet"),
+        ),
+        (
+            "node_descriptor_scope",
+            include_str!("../examples/features/tooling/test_members.jet"),
+        ),
+    ];
+    let path = write_fixture(projection_fixtures[0].0, projection_fixtures[0].1);
     let json = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
-    let catalog_start = json
-        .find("\"node_descriptors\":[")
-        .expect("node descriptor catalog");
-    let catalog_end = json[catalog_start..]
-        .find("],\"graphs\":[")
-        .map(|offset| catalog_start + offset + 1)
-        .expect("node descriptor catalog end");
-    let catalog = &json[catalog_start..catalog_end];
-    let descriptors = json_objects_containing(catalog, "\"id\":\"");
+    let catalog = json_array_field(&json, "node_descriptors");
+    let descriptors = json_top_level_objects(catalog);
     assert!(!descriptors.is_empty(), "descriptor catalog is empty: {catalog}");
     let mut catalog_ids = HashSet::new();
+    let mut catalog_projected_ids = HashSet::new();
+    let mut catalog_insertable_ids = HashSet::new();
     for descriptor in &descriptors {
         let id = json_field(descriptor, "id");
         assert!(
@@ -596,6 +635,12 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
         let projected = descriptor.contains("\"projected\":true");
         let insertable = descriptor.contains("\"insertable\":true");
         assert!(projected || insertable, "orphaned descriptor `{id}`: {descriptor}");
+        if projected {
+            catalog_projected_ids.insert(id.clone());
+        }
+        if insertable {
+            catalog_insertable_ids.insert(id.clone());
+        }
         assert_eq!(
             insertable,
             !descriptor.contains("\"transaction\":null"),
@@ -603,15 +648,31 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
         );
     }
 
-    let projected_nodes = json_objects_containing(&json[catalog_end..], "\"node_descriptor_id\":\"");
-    assert!(!projected_nodes.is_empty(), "projection must stamp descriptors");
-    for node in projected_nodes {
-        let id = json_field(node, "node_descriptor_id");
-        assert!(
-            catalog_ids.contains(&id),
-            "projected node references missing descriptor `{id}`"
-        );
+    let mut projected_ids = HashSet::new();
+    for (fixture_name, fixture_src) in projection_fixtures {
+        let fixture_path = write_fixture(fixture_name, fixture_src);
+        let projection =
+            jet::Canvas::graph_json_for_file(&fixture_path).expect("descriptor coverage graph");
+        for graph in json_top_level_objects(json_array_field(&projection, "graphs")) {
+            for node in json_top_level_objects(json_array_field(graph, "nodes")) {
+                assert_eq!(
+                    count_occurrences(node, "\"node_descriptor_id\":"),
+                    1,
+                    "projected node must carry exactly one descriptor id: {node}"
+                );
+                let id = json_field(node, "node_descriptor_id");
+                assert!(
+                    catalog_ids.contains(&id),
+                    "projected node references missing descriptor `{id}`: {node}"
+                );
+                projected_ids.insert(id);
+            }
+        }
     }
+    assert_eq!(
+        projected_ids, catalog_projected_ids,
+        "catalog/projector coverage must be exactly bidirectional"
+    );
 
     let src = fs::read_to_string(&path).unwrap();
     let actions_request = format!(
@@ -620,10 +681,21 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
     );
     let actions =
         jet::Canvas::query_json_for_file(&path, &actions_request).expect("Canvas actions");
-    let action_objects = json_objects_containing(&actions, "\"node_descriptor_id\":\"");
+    let mut action_objects = json_top_level_objects(json_array_field(&actions, "project_functions"));
+    action_objects.extend(
+        json_top_level_objects(json_array_field(&actions, "actions"))
+            .into_iter()
+            .filter(|action| !action.contains("\"kind\":\"canvas.command\"")),
+    );
     assert!(!action_objects.is_empty(), "insertable actions need descriptors: {actions}");
 
+    let mut exported_insertable_ids = HashSet::new();
     for action in &action_objects {
+        assert_eq!(
+            count_occurrences(action, "\"node_descriptor_id\":"),
+            1,
+            "served insertable action must carry exactly one descriptor id: {action}"
+        );
         let id = json_field(action, "node_descriptor_id");
         let descriptor = descriptors
             .iter()
@@ -633,6 +705,7 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
             descriptor.contains("\"insertable\":true"),
             "action exports non-insertable descriptor `{id}`: {action}"
         );
+        exported_insertable_ids.insert(id.clone());
         let transaction = json_field(descriptor, "transaction");
         let action_transaction = if action.contains("\"insert_op\":\"") {
             json_field(action, "insert_op")
@@ -644,19 +717,10 @@ fn canvas_node_descriptor_catalog_is_complete_and_transaction_matched() {
             "action/descriptor transaction mismatch for `{id}`: {action}"
         );
     }
-
-    for descriptor in descriptors {
-        if !descriptor.contains("\"insertable\":true") {
-            continue;
-        }
-        let id = json_field(descriptor, "id");
-        assert!(
-            action_objects
-                .iter()
-                .any(|action| json_field(action, "node_descriptor_id") == id),
-            "insertable descriptor `{id}` has no real served action export: {actions}"
-        );
-    }
+    assert_eq!(
+        exported_insertable_ids, catalog_insertable_ids,
+        "catalog/action export coverage must be exactly bidirectional"
+    );
 }
 
 #[test]
