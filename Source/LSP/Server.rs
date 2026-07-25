@@ -2436,6 +2436,154 @@ mod project_part_tests {
     }
 
     #[test]
+    fn code_actions_extract_from_call_arg_and_bool_equality() {
+        let call_src =
+            "fn run(left: Bool, right: Bool) {\n    print(left && right)\n}\n";
+        let call_root = std::env::temp_dir().join(format!(
+            "jet-lsp-call-extract-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&call_root);
+        std::fs::create_dir_all(&call_root).unwrap();
+        let call_path = call_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&call_path, call_src).unwrap();
+        let call_uri = path_to_uri(&call_path);
+        let mut call_server = Server::new();
+        call_server
+            .workspace_roots
+            .push(call_root.to_string_lossy().into_owned());
+        call_server.docs.insert(
+            call_uri.clone(),
+            Document::new(call_path, call_src.to_string(), 4),
+        );
+        let expr = call_src.find("left && right").unwrap();
+        let extracted = code_actions_for(
+            &call_server,
+            &call_uri,
+            call_src,
+            expr,
+            expr + "left && right".len(),
+        );
+        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
+        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
+        assert!(
+            extracted.contains(&format!(
+                r#""textDocument":{{"uri":"{}","version":4}}"#,
+                json_escape(&call_uri)
+            )),
+            "{extracted}"
+        );
+        let _ = std::fs::remove_dir_all(call_root);
+
+        let eq_src =
+            "fn run(left: Bool, right: Bool) {\n    same :: left == right\n    print(same)\n}\n";
+        let eq_root = std::env::temp_dir().join(format!(
+            "jet-lsp-bool-eq-refactor-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&eq_root);
+        std::fs::create_dir_all(&eq_root).unwrap();
+        let eq_path = eq_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&eq_path, eq_src).unwrap();
+        let eq_uri = path_to_uri(&eq_path);
+        let mut eq_server = Server::new();
+        eq_server
+            .workspace_roots
+            .push(eq_root.to_string_lossy().into_owned());
+        eq_server.docs.insert(
+            eq_uri.clone(),
+            Document::new(eq_path, eq_src.to_string(), 5),
+        );
+        let equality = eq_src.find("left == right").unwrap();
+        let extracted = code_actions_for(
+            &eq_server,
+            &eq_uri,
+            eq_src,
+            equality,
+            equality + "left == right".len(),
+        );
+        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
+        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
+        let use_site = eq_src.rfind("same").unwrap();
+        let inlined = code_actions_for(
+            &eq_server,
+            &eq_uri,
+            eq_src,
+            use_site,
+            use_site + "same".len(),
+        );
+        assert!(inlined.contains("\"title\":\"Inline `same`\""), "{inlined}");
+        let _ = std::fs::remove_dir_all(eq_root);
+    }
+
+    #[test]
+    fn code_actions_multi_use_pure_inline_and_paren_extract() {
+        let multi_src = "fn run(left: Bool, right: Bool) {\n    flag :: left && right\n    print(flag)\n    print(flag)\n}\n";
+        let multi_root = std::env::temp_dir().join(format!(
+            "jet-lsp-multi-inline-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&multi_root);
+        std::fs::create_dir_all(&multi_root).unwrap();
+        let multi_path = multi_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&multi_path, multi_src).unwrap();
+        let multi_uri = path_to_uri(&multi_path);
+        let mut multi_server = Server::new();
+        multi_server
+            .workspace_roots
+            .push(multi_root.to_string_lossy().into_owned());
+        multi_server.docs.insert(
+            multi_uri.clone(),
+            Document::new(multi_path, multi_src.to_string(), 6),
+        );
+        let use_site = multi_src.find("print(flag)").unwrap() + "print(".len();
+        let inlined = code_actions_for(
+            &multi_server,
+            &multi_uri,
+            multi_src,
+            use_site,
+            use_site + "flag".len(),
+        );
+        assert!(inlined.contains("\"title\":\"Inline `flag`\""), "{inlined}");
+        assert!(
+            inlined.matches("left && right").count() >= 2,
+            "{inlined}"
+        );
+        let _ = std::fs::remove_dir_all(multi_root);
+
+        let paren_src =
+            "fn run(left: Bool, right: Bool) {\n    print((left && right))\n}\n";
+        let paren_root = std::env::temp_dir().join(format!(
+            "jet-lsp-paren-extract-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&paren_root);
+        std::fs::create_dir_all(&paren_root).unwrap();
+        let paren_path = paren_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&paren_path, paren_src).unwrap();
+        let paren_uri = path_to_uri(&paren_path);
+        let mut paren_server = Server::new();
+        paren_server
+            .workspace_roots
+            .push(paren_root.to_string_lossy().into_owned());
+        paren_server.docs.insert(
+            paren_uri.clone(),
+            Document::new(paren_path, paren_src.to_string(), 8),
+        );
+        let grouped = paren_src.find("(left && right)").unwrap();
+        let extracted = code_actions_for(
+            &paren_server,
+            &paren_uri,
+            paren_src,
+            grouped,
+            grouped + "(left && right)".len(),
+        );
+        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
+        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
+        let _ = std::fs::remove_dir_all(paren_root);
+    }
+
+    #[test]
     fn code_action_imports_one_unique_workspace_symbol() {
         let root = std::env::temp_dir().join(format!(
             "jet-lsp-import-action-{}",
