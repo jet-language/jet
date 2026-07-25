@@ -1,5 +1,7 @@
 
 // Graph layout, node and wire rendering, minimap, comments, and hit maps.
+  let lastDrawnSource = null;
+
   function rankedGraphLayout(graph) {
     const nodes = graph.nodes || [];
     const byId = new Map(nodes.map((node) => [node.node_id, node]));
@@ -719,11 +721,21 @@
   }
 
   function drawGraph(doc) {
+    const source = doc.source_text || "";
+    const reprojected = lastDrawnSource !== null && lastDrawnSource !== source;
+    lastDrawnSource = source;
     latestDoc = doc;
     loadDebugState(doc);
     const sourceGraph = currentGraph(doc);
     if (!sourceGraph) return;
     const graph = graphWithViewState(sourceGraph);
+    if (reprojected) {
+      hoverPin = null;
+      hoverNode = null;
+      hoverDiagnostic = null;
+    } else if (hoverNode) {
+      hoverNode = graph.nodes.find((node) => node.node_id === hoverNode.node_id) || null;
+    }
     selectedGraphId = graph.graph_id;
     window.__jetCanvasSelectedGraphId = selectedGraphId;
     if (!selectedNodeId || (!graph.nodes.some((n) => n.node_id === selectedNodeId) && !graphCommentBoxes(sourceGraph).some((b) => b.comment_id === selectedNodeId))) selectedNodeId = graph.entry_node;

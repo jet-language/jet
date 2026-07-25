@@ -1773,8 +1773,33 @@ fn run() {
       throw new Error(`navigated graph did not visibly replace hover docs: ${JSON.stringify({ squareDocs, totalDocs })}`);
     }
     if (await ctx.source() !== before) throw new Error("node docs hover changed source");
+    const renamed = before.replace(/\btotal\b/g, "score");
+    if (renamed === before) throw new Error("hover reprojection fixture has no total binding");
+    const hoverDoc = await ctx.graph();
+    const renameResult = await ctx.uiTransaction({
+      schema_version: 1,
+      op: "replace_source",
+      revision: hoverDoc.revision,
+      source: renamed
+    });
+    if (!renameResult.ok) throw new Error(`hover reprojection source write failed: ${JSON.stringify(renameResult)}`);
+    await ctx.waitFor(async () => {
+      const source = await ctx.source();
+      return source.includes("score") && !source.includes("total");
+    }, "hover reprojection source");
+    const changed = await ctx.source();
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      return state.sourceText === changed && state.hoveredNodeTitle !== "total";
+    }, "hover docs refreshed after reprojection");
+    await assertCleanSourceSync(ctx, ["hover reprojection"]);
+    const refreshed = await visibleSurface(ctx, `document.getElementById("wire-status")`, "reprojected node hover details");
+    if (refreshed.text.includes("total")
+      || (!refreshed.text.includes("score") && !refreshed.text.includes("Hover a node or pin for details"))) {
+      throw new Error(`same-graph reprojection retained stale hover docs: ${JSON.stringify({ totalDocs, refreshed })}`);
+    }
     await ctx.openCanvas();
-    if (await ctx.source() !== before) throw new Error("node docs hover reload changed source");
+    if (await ctx.source() !== changed) throw new Error("node docs hover reload changed source");
     await hoverAndAssert("square", "after reload");
   },
 
