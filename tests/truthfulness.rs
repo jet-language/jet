@@ -409,6 +409,8 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     // Ratified section so an exemption can never quietly outlive its
     // ratification (or cite an ID that was never ratified).
     const EXEMPTIONS: &[(&str, &[&str])] = &[
+        // Root package: test-only rustls lifecycle HTTPS e2e (D-DEP1).
+        ("<root>", &["D-DEP1"]),
         ("jet-jit", &["D-JITDEP1", "D-JIT2"]),
         ("jet-net", &["D-DEP1"]),
         ("jetpack", &["D-DEP-CRYPTO1=A"]),
@@ -423,16 +425,21 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     let root = root();
     let decisions_doc = fs::read_to_string(root.join("docs/spec/syntax-decisions.md"))
         .expect("docs/spec/syntax-decisions.md missing");
-    let tower = fs::read_to_string(root.join(".tower/tower.json"))
-        .expect(".tower/tower.json missing");
+    // Live board plus history: ratified exemptions may retire into
+    // history.json while remaining law (Tower archive / #461).
+    let tower_live = fs::read_to_string(root.join("plugins/tower/.tower/tower.json"))
+        .expect("plugins/tower/.tower/tower.json missing");
+    let tower_history = fs::read_to_string(root.join("plugins/tower/.tower/history.json"))
+        .unwrap_or_default();
+    let tower = format!("{tower_live}\n{tower_history}");
 
     for (crate_name, ids) in EXEMPTIONS {
         for id in *ids {
             assert!(
                 ratified_decision_exists(&decisions_doc, &tower, id),
                 "I6 exemption for `{crate_name}` cites {id}, which is not ratified in \
-                 docs/spec/syntax-decisions.md or Tower — revoke the exemption or get \
-                 {id} ratified"
+                 docs/spec/syntax-decisions.md or Tower (live+history) — revoke the \
+                 exemption or get {id} ratified"
             );
         }
     }
