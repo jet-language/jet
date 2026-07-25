@@ -58,6 +58,18 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         {
             Some(inner.as_ref().clone())
         }
+        // JIT ABI: `Iter<T>` producers (String.split, adapters) materialize list
+        // handles — same scalar elems as list for-in.
+        Type::Apply { name, args }
+            if name == jet_foundation::Syntax::TYPE_ITER
+                && args.len() == 1
+                && matches!(
+                    &args[0],
+                    Type::Int | Type::Float | Type::String | Type::Char
+                ) =>
+        {
+            Some(args[0].clone())
+        }
         _ => None,
     }
 }
@@ -520,11 +532,20 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Sort => jit_list_int_type(&recv.ty) && args.is_empty(),
-        TBuiltinOp::LenList => jit_list_native_type(&recv.ty) && args.is_empty(),
+        TBuiltinOp::LenList => {
+            (jit_list_native_type(&recv.ty) || jit_list_iter_elem_type(&recv.ty).is_some())
+                && args.is_empty()
+        }
         TBuiltinOp::GetList => {
             jit_list_int_type(&recv.ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::GetMap => {
+            jit_map_string_type(&recv.ty)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::JoinSep => {
@@ -557,6 +578,10 @@ fn resident_safe_builtin_op(
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
+        }
+        // JIT ABI: Iter producers already materialize list handles.
+        TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
+            jit_list_iter_elem_type(&recv.ty).is_some() && args.is_empty()
         }
         _ => false,
     }
@@ -712,9 +737,13 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             let map_ok = method_kind.is_none()
                 && var2.is_some()
                 && jit_map_string_type(&collection.ty);
+            // `by_value` marks Stream/Iter/HttpBodyChunks. Only Iter<T> is list-
+            // backed under the JIT host ABI (true lazy handles don't cross).
+            let by_value_ok = !*by_value
+                || jet_foundation::Collections::is_iter_type(&collection.ty);
             (chars_ok || list_ok || map_ok)
                 && !columnar
-                && !by_value
+                && by_value_ok
                 && resident_safe_expr(source, callees)
                 && resident_safe_expr(collection, callees)
                 && step.as_ref().is_none_or(|step| resident_safe_expr(step, callees))

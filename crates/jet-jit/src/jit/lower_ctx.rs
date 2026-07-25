@@ -897,7 +897,12 @@ impl LowerCtx<'_, '_> {
                 if *columnar {
                     return Err("jit for-in columnar unsupported".to_string());
                 }
-                if *by_value {
+                // `by_value` is set for Stream / Iter / HttpBodyChunks. JIT can
+                // only walk Iter<T> because producers materialize list handles
+                // (true JetIter cannot cross the host-shim ABI yet).
+                if *by_value
+                    && !jet_foundation::Collections::is_iter_type(&collection.ty)
+                {
                     return Err("jit for-in by-value stream unsupported".to_string());
                 }
                 let stride = match step {
@@ -2397,6 +2402,21 @@ impl LowerCtx<'_, '_> {
             let call = self.b.ins().call(host_ref, &[list, idx]);
             return Ok(self.b.inst_results(call)[0]);
         }
+        // Map.get(k) ?? … — same 0 / value+1 Option encoding as list_get_opt.
+        if let TExprKind::BuiltinMethod {
+            recv,
+            op: TBuiltinOp::GetMap,
+            args,
+        } = &value.kind
+        {
+            let map = self.lower_expr(recv)?;
+            let key = self.lower_expr(&args[0])?;
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
+            let call = self.b.ins().call(host_ref, &[map, key]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
         Err("jit list get_opt status unsupported".to_string())
     }
 
@@ -2506,7 +2526,14 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::InsertList => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::RemoveMap => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::RemoveList { .. } => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::GetMap => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::GetMap => {
+                let key = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, key]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::First => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Last => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Contains => Err("jit builtin method unsupported".to_string()),
@@ -2631,11 +2658,10 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::TryCollect => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ViewNew { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ViewMutNew { .. } => Err("jit builtin method unsupported".to_string()),
-            // D-ITERTOOLS1=A: Iter materialization — rustc/dev path owns this; JIT
-            // gap stays #729 (do not implement here).
-            TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
-                Err("jit builtin method unsupported".to_string())
-            }
+            // D-ITERTOOLS1=A: JIT ABI can't carry true JetIter handles. Producers
+            // (String.split, list adapters) already return list handles of the same
+            // pieces AOT would yield lazily — to_list / collect is identity.
+            TBuiltinOp::IterToList | TBuiltinOp::IterCollect => Ok(recv_val),
         }
     }
 
