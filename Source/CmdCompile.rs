@@ -2198,17 +2198,32 @@ pub(crate) fn run_dev_web(
     }
     host.start();
 
-    let mut last_mtime = jet_devserver::file_mtime(path);
+    // #439 / E3-UL6: same WatchSession engine as native `jet dev` / `jet run --watch`.
+    let mut watch = jet_devserver::WatchSession::open(path);
     loop {
         thread::sleep(Duration::from_millis(120));
         if let Some(code) = host.exit_code() {
             exit(code);
         }
-        let now = jet_devserver::file_mtime(path);
-        if now != last_mtime {
-            last_mtime = now;
-            thread::sleep(Duration::from_millis(30));
-            rebuild_dev_web(file, mode, verbose, true, &host);
+        if let Some(receipt) = watch.poll() {
+            if receipt.change_kinds.iter().all(|k| *k == "stale") {
+                continue;
+            }
+            let mut txn = jet_devserver::HotReplaceTxn::begin(jet_devserver::SessionSnapshot {
+                generation: receipt.generation.saturating_sub(1),
+                artifact_token: format!("web-gen-{}", receipt.generation.saturating_sub(1)),
+                persist: jet_devserver::PersistStore::new(),
+            });
+            let ok = rebuild_dev_web(file, mode, verbose, true, &host);
+            if ok {
+                txn.mark_server_ready();
+                txn.mark_client_ready();
+                let _ = txn.commit();
+            } else {
+                txn.fail("web rebuild failed; prior session kept");
+                let _ = txn.commit();
+            }
+            watch.acknowledge(&receipt);
         }
     }
 }

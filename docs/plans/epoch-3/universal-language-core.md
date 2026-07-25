@@ -317,6 +317,12 @@ the syntax ledger, no module inheritance, and no invented symbol decoration.
 - Exit: edit-to-visible budgets, crash/reconnect, rename/delete, dependency
   update, and state-migration lanes pass in real browsers and native apps.
 
+**Shipped surface (#439):** `jet-devserver::WatchService` owns the typed
+`WatchGraph` / `WatchSession` / `PersistStore` / `HotReplaceTxn`. Both
+`jet run --watch` and `jet dev` (native + web) poll that engine. Receipts are
+deterministic JSON; unsupported hot replacement keeps the prior session and
+reports the failure.
+
 ### UL7 — formatter, test, docs, debug, IDE, and profiling product
 
 - New project-formatter card extends `jet fmt` to workspace recursion,

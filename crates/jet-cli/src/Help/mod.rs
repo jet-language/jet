@@ -152,10 +152,9 @@ fn see_also_for(cmd: &str) -> Vec<&'static str> {
 /// Task/outcome phrase aliases the owner ratified into `jet ?`'s default
 /// static text (kept 1:1 with `question_mark_palette`'s "Task keywords"
 /// section in `Source/main.rs`) — attached here to the real command that
-/// carries them out. "run on save" resolves to `dev` (the real watch/rerun
-/// command); `run` itself has no `--watch` flag (checked against
-/// `crate::CLI::FLAGS`), so the alias does not point at a command that can't
-/// do the job (no invented commands, per the card brief).
+/// carries them out. "run on save" resolves to `dev` (richer overlay/session
+/// surface); `jet run --watch` shares the same dependency-aware engine
+/// (#439 / E3-UL6) for plain re-run on save.
 fn keywords_for(cmd: &str) -> Vec<&'static str> {
     match cmd {
         "dev" => vec![
@@ -165,6 +164,7 @@ fn keywords_for(cmd: &str) -> Vec<&'static str> {
             "watch",
             "start a web app",
         ],
+        "run" => vec!["watch", "run on save"],
         "add" => vec!["add a dependency", "dependency"],
         "explain" => vec!["understand an error message", "error", "diagnostic"],
         _ => Vec::new(),
@@ -470,9 +470,9 @@ mod tests {
     fn run_flags_are_real_not_invented() {
         let index = build_index();
         let run = index.iter().find(|e| e.symbol.name == "run").unwrap();
-        // `run` has no `--watch` flag on the real CLI surface (that's `dev`'s
-        // job) — the help index must not invent one.
-        assert!(!run.flags.iter().any(|(f, _)| *f == "--watch"));
+        // #439 / E3-UL6: `jet run --watch` shares the dependency-aware engine
+        // with `jet dev` (plain re-run surface).
+        assert!(run.flags.iter().any(|(f, _)| *f == "--watch"));
         assert!(run.flags.iter().any(|(f, _)| *f == "--release"));
     }
 

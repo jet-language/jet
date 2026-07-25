@@ -12,15 +12,14 @@ use jet::ExitCodes;
 use crate::CmdCompile::{build, stem};
 use crate::{report_problems, BuildProfile, OutputMode};
 pub(crate) use jet_devserver::{watch_policy_from, WatchPolicy};
-use jet_devserver::file_mtime;
-
 
 /// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4), extended by c77
 /// with three-mode routing (D-DEVMODE1=A) and hot-swap/restart (D-HOTSWAP1=B).
-/// Re-checks and re-runs the entry file on every save, streaming output. The
-/// per-iteration work lives in `jet::Interpreter::dev_iteration` (so it can be
-/// golden-tested); this is the thin std-only watcher around it (I6: no `notify`
-/// crate — we poll the file's mtime in a loop).
+/// Re-checks and re-runs on dependency-aware invalidation (#439 / E3-UL6),
+/// streaming output. The per-iteration work lives in
+/// `jet::Interpreter::dev_iteration` (so it can be golden-tested); this is the
+/// thin std-only watcher around the shared `WatchSession` engine (I6: no
+/// `notify` crate).
 pub(crate) fn run_dev(
     file: &str,
     try_anyway: bool,
@@ -50,30 +49,110 @@ pub(crate) fn run_dev(
     // The bundle from the last successful load, kept so a resident edit can be
     // diffed against it for type stability (D-HOTSWAP1).
     let mut prev_bundle = render_dev_iteration(file, try_anyway, mode, use_interpreter);
-    let mut last_mtime = file_mtime(path);
+    // #439 / E3-UL6: dependency-aware watch session shared with `jet run --watch`.
+    let mut watch = jet_devserver::WatchSession::open(path);
     // D-SCHEDULE1 (card #505): due `#Task #Every(…)` fns fire on their own
     // schedule, independent of file-change ticks.
     let mut clock = TaskClock::new();
+    let mut persist = jet_devserver::PersistStore::new();
+    let mut session = jet_devserver::SessionSnapshot {
+        generation: 0,
+        artifact_token: "gen-0".into(),
+        persist: persist.clone(),
+    };
 
     loop {
         std::thread::sleep(std::time::Duration::from_millis(120));
         if let Some(bundle) = &prev_bundle {
             run_due_tasks(bundle, file, try_anyway, mode, &mut clock);
+            sync_persist_bindings(bundle, &mut persist);
         }
-        let now = file_mtime(path);
-        if now != last_mtime {
-            last_mtime = now;
-            // A debounce sleep lets editors finish writing before we read.
-            std::thread::sleep(std::time::Duration::from_millis(30));
-            prev_bundle = render_dev_change(
+        if let Some(receipt) = watch.poll() {
+            if receipt.change_kinds.iter().all(|k| *k == "stale") {
+                continue;
+            }
+            let next = render_dev_change(
                 file,
                 try_anyway,
                 policy,
                 prev_bundle.as_ref(),
                 mode,
                 use_interpreter,
-            )
-            .or(prev_bundle);
+            );
+            // Transactional hot replacement: commit only when the new bundle
+            // loaded; otherwise keep the prior session valid.
+            let mut txn = jet_devserver::HotReplaceTxn::begin(session.clone());
+            match &next {
+                Some(bundle) => {
+                    sync_persist_bindings(bundle, &mut persist);
+                    txn.mark_server_ready();
+                    txn.mark_client_ready();
+                    match txn.commit() {
+                        Ok(snap) => {
+                            session = snap;
+                            session.persist = persist.clone();
+                            prev_bundle = next;
+                        }
+                        Err((prior, reason)) => {
+                            eprintln!("[hot-replace] {reason}");
+                            session = prior;
+                        }
+                    }
+                }
+                None => {
+                    txn.fail("reload failed; prior session kept");
+                    let _ = txn.commit();
+                }
+            }
+            watch.acknowledge(&receipt);
+            if let Some(ms) = receipt.edit_to_visible_ms {
+                if !jet_devserver::within_budget(&receipt) {
+                    eprintln!(
+                        "[watch] edit-to-visible {ms}ms exceeded budget {}ms",
+                        jet_devserver::EDIT_TO_VISIBLE_BUDGET_MS
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// D-PERSIST1: refresh `#Persist` bindings from the loaded bundle into the
+/// shared persist store (typed migration on shape change).
+fn sync_persist_bindings(
+    bundle: &jet::AST::ProgramBundle,
+    store: &mut jet_devserver::PersistStore,
+) {
+    for module in &bundle.modules {
+        for item in &module.items {
+            let jet::AST::Item::Const(c) = item else {
+                continue;
+            };
+            if !c.is_persist {
+                continue;
+            }
+            let shape = c
+                .ty
+                .as_ref()
+                .map(|t| format!("{t:?}"))
+                .unwrap_or_else(|| "Unknown".to_string());
+            let fresh = c
+                .ct
+                .as_ref()
+                .map(|v| format!("{v:?}"))
+                .unwrap_or_else(|| "null".to_string());
+            match store.migrate(&module.display, &c.name, &shape, &fresh) {
+                jet_devserver::PersistOutcome::Reset { reason, .. } => {
+                    eprintln!("[persist] {reason}");
+                }
+                jet_devserver::PersistOutcome::Migrated(_) => {
+                    eprintln!(
+                        "[persist] migrated `{}::{}` to new shape",
+                        module.display, c.name
+                    );
+                }
+                jet_devserver::PersistOutcome::Kept(_) => {}
+            }
         }
     }
 }
