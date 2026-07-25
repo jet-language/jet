@@ -125,24 +125,19 @@ fn reserve() {{
 
     let dynamic = source(12, "stride").replace(
         "#Policy(arena_bounded(12)) fn run() {",
-        "#Policy(arena_bounded(12)) fn run() {\n    stride :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
-"#;
-    let plain = r#"
-trait Shape { fn area(self) -> Int; }
-struct Square { side: Int }
-impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
-fn sq(n: Int) -> Int { return n * n; }
-fn load(p: String) { print(p); }
-fn invoke(n: Int) { load("{sq(n)}"); }
-fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
-"#;
-    let a = jet::compile(annotated).expect("annotated compiles").rust;
-    let b = jet::compile(plain).expect("plain compiles").rust;
-    assert_eq!(
-        a, b,
-        "effect annotations must leave no trace in generated Rust (I3)"
+        "#Policy(arena_bounded(12)) fn run() {\n    stride := 2",
     );
-} /// I3: a `#Caps(…)` region lowers to a plain lexical block — the generated Rust
+    let (diagnostics, facts) = check("jet_stride_arena_dynamic", &dynamic);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
+    assert!(matches!(
+        facts.memory_projections.get(&run_12),
+        Some(jet::Sema::MemoryProjection::OpenWorld { reason, .. })
+            if reason.contains("loop iteration count")
+    ));
+    assert!(facts.solved["run"].contains("Io"));
+}
+
+/// I3: a `#Caps(…)` region lowers to a plain lexical block — the generated Rust
 /// carries no effect machinery (no `Caps`, no `#(`, no effect runtime), and the
 /// body runs unchanged.
 #[test]
@@ -168,6 +163,36 @@ fn run() {
     assert!(
         rust.contains("inside") && rust.contains("outside"),
         "region body must survive:\n{rust}"
+    );
+}
+
+/// I3 / D-EFF1: effect annotations (`#(…)`, `#Pure`, trait-method bounds) are a
+/// compile-time proof only — they must leave NO trace in generated Rust.
+#[test]
+fn effect_annotations_are_erased() {
+    let annotated = r#"
+trait Shape { fn area(self) --[]-> Int; }
+struct Square { side: Int }
+impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
+fn sq(n: Int) --[]-> Int { return n * n; }
+fn load(p: String) --[Io]-> { print(p); }
+fn invoke(n: Int) --[Io]-> { load("{sq(n)}"); }
+fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
+"#;
+    let plain = r#"
+trait Shape { fn area(self) -> Int; }
+struct Square { side: Int }
+impl Square.Shape { fn area(self) -> Int { return self.side * self.side; } }
+fn sq(n: Int) -> Int { return n * n; }
+fn load(p: String) { print(p); }
+fn invoke(n: Int) { load("{sq(n)}"); }
+fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
+"#;
+    let a = jet::compile(annotated).expect("annotated compiles").rust;
+    let b = jet::compile(plain).expect("plain compiles").rust;
+    assert_eq!(
+        a, b,
+        "effect annotations must leave no trace in generated Rust (I3)"
     );
 }
 
