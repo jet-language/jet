@@ -27,6 +27,10 @@ WatchService path stamps, so source and dependency edits miss the cache.
 
 ## Budget
 
-CI keeps a provisional warm no-op sanity gate (<100 ms process or in-process).
-The peer-parity number is owner-gated as `D-SCRIPT-BUDGET1` and is enforced only
-after that ruling.
+`D-SCRIPT-BUDGET1=B`: when `target/release/jet` (or `JET_BUDGET_BIN`) is present,
+CI fails if the warm Jet no-op median is more than twice the fastest available
+peer median (Bash / Python / Node) on that host. Timing uses microsecond
+process-spawn medians (null stdio, one discard + seven samples). Peers still
+log for file and subprocess fixtures. Without a release binary, the test keeps
+a 100 ms debug sanity floor and logs that the hard B gate needs release jet.
+

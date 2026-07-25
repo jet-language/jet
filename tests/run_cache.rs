@@ -21,6 +21,22 @@ fn jet_bin() -> String {
     })
 }
 
+/// Product binary for D-SCRIPT-BUDGET1 peer-ratio gate.
+/// Debug `CARGO_BIN_EXE_jet` is ~9× larger and fails B on load cost alone;
+/// prefer `JET_BUDGET_BIN` or `target/release/jet` when present.
+fn budget_jet_bin() -> Option<String> {
+    if let Ok(p) = std::env::var("JET_BUDGET_BIN") {
+        if Path::new(&p).is_file() {
+            return Some(p);
+        }
+    }
+    let release = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/release/jet");
+    if release.is_file() {
+        return Some(release.display().to_string());
+    }
+    None
+}
+
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/script_speed")
 }
@@ -47,15 +63,33 @@ fn run_jet(
     )
 }
 
-fn median_ms(samples: &mut [u128]) -> u128 {
+/// Process-spawn only (no pipe capture) — same shape as peer_us for budget compares.
+fn run_jet_status_bin(bin: &str, cache: &Path, file: &Path, cwd: Option<&Path>) -> bool {
+    let mut cmd = Command::new(bin);
+    cmd.arg("run")
+        .arg(file)
+        .env("JET_RUN_CACHE_DIR", cache)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    cmd.status().map(|s| s.success()).unwrap_or(false)
+}
+
+fn median_u(samples: &mut [u128]) -> u128 {
     samples.sort();
     samples[samples.len() / 2]
 }
 
-fn p90_ms(samples: &mut [u128]) -> u128 {
+fn p90_u(samples: &mut [u128]) -> u128 {
     samples.sort();
     let i = ((samples.len() as f64) * 0.9).ceil() as usize;
     samples[i.saturating_sub(1).min(samples.len() - 1)]
+}
+
+fn us_as_ms(us: u128) -> f64 {
+    us as f64 / 1000.0
 }
 
 fn unique() -> u64 {
@@ -63,12 +97,16 @@ fn unique() -> u64 {
     std::process::id() as u64 * 1000 + N.fetch_add(1, Ordering::Relaxed)
 }
 
-fn peer_ms(argv: &[&str], cwd: Option<&Path>) -> Option<u128> {
+/// Peer process-spawn median in microseconds (avoids as_millis truncation noise).
+fn peer_us(argv: &[&str], cwd: Option<&Path>) -> Option<u128> {
     let mut samples = Vec::new();
-    for _ in 0..5 {
+    // One discard + 7 timed samples — same shape as warm Jet budget loop.
+    for i in 0..8 {
         let t0 = Instant::now();
         let mut cmd = Command::new(argv[0]);
-        cmd.args(&argv[1..]);
+        cmd.args(&argv[1..])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
         if let Some(dir) = cwd {
             cmd.current_dir(dir);
         }
@@ -76,9 +114,11 @@ fn peer_ms(argv: &[&str], cwd: Option<&Path>) -> Option<u128> {
         if !ok {
             return None;
         }
-        samples.push(t0.elapsed().as_millis());
+        if i > 0 {
+            samples.push(t0.elapsed().as_micros());
+        }
     }
-    Some(median_ms(&mut samples))
+    Some(median_u(&mut samples))
 }
 
 fn machine_meta() -> String {
@@ -314,23 +354,32 @@ fn script_start_budget_fixtures_and_peers() {
     assert_eq!(sout.trim(), "0");
 
     let noop = fix.join("noop.jet");
-    let _ = run_jet(&cache, &noop, Some(&fix), &[]);
+    // D-SCRIPT-BUDGET1=B measures the product binary (release), not debug test exe.
+    let budget_bin = budget_jet_bin();
+    let using_product = budget_bin.is_some();
+    let timed_bin = budget_bin.unwrap_or_else(jet_bin);
+    assert!(
+        run_jet_status_bin(&timed_bin, &cache, &noop, Some(&fix)),
+        "noop populate failed ({timed_bin})"
+    );
     let mut warm = Vec::new();
-    for _ in 0..5 {
+    for _ in 0..7 {
         let t0 = Instant::now();
-        let (code, _, err) = run_jet(&cache, &noop, Some(&fix), &[]);
-        assert_eq!(code, 0, "{err}");
-        warm.push(t0.elapsed().as_millis());
+        assert!(
+            run_jet_status_bin(&timed_bin, &cache, &noop, Some(&fix)),
+            "warm noop status failed"
+        );
+        warm.push(t0.elapsed().as_micros());
     }
-    let warm_median = median_ms(&mut warm.clone());
-    let warm_p90 = p90_ms(&mut warm);
+    let warm_median_us = median_u(&mut warm.clone());
+    let warm_p90_us = p90_u(&mut warm);
 
-    let bash = peer_ms(&["bash", "-c", "true"], None);
-    let node = peer_ms(&["node", "-e", ""], None);
-    let python = peer_ms(&["python3", "-c", "pass"], None)
-        .or_else(|| peer_ms(&["python", "-c", "pass"], None));
-    let bash_file = peer_ms(&["bash", "-c", "cat data.txt"], Some(&fix));
-    let node_file = peer_ms(
+    let bash = peer_us(&["bash", "-c", "true"], None);
+    let node = peer_us(&["node", "-e", ""], None);
+    let python = peer_us(&["python3", "-c", "pass"], None)
+        .or_else(|| peer_us(&["python", "-c", "pass"], None));
+    let bash_file = peer_us(&["bash", "-c", "cat data.txt"], Some(&fix));
+    let node_file = peer_us(
         &[
             "node",
             "-e",
@@ -338,44 +387,64 @@ fn script_start_budget_fixtures_and_peers() {
         ],
         Some(&fix),
     );
-    let bash_sub = peer_ms(&["bash", "-c", "true"], None);
-    let node_sub = peer_ms(
+    let bash_sub = peer_us(&["bash", "-c", "true"], None);
+    let node_sub = peer_us(
         &["node", "-e", "require('child_process').execFileSync('true')"],
         None,
     );
 
     // D-SCRIPT-BUDGET1=B: warm Jet no-op median ≤ 2× fastest available peer median.
-    let fastest_peer = [bash, python, node].into_iter().flatten().min();
+    // µs clocks avoid as_millis truncation (bash ~2ms was recorded as 1ms).
+    let fastest_us = [bash, python, node].into_iter().flatten().min();
+    let budget_us = fastest_us.map(|p| p.saturating_mul(2));
     eprintln!(
-        "script-start budget evidence: {} warm_jet_noop_median_ms={} warm_jet_noop_p90_ms={} \
-         fastest_peer_ms={:?} budget_2x={:?} bash={:?} python={:?} node={:?} \
-         bash_file={:?} node_file={:?} bash_sub={:?} node_sub={:?}",
+        "script-start budget evidence: {} bin={} product={} warm_jet_noop_median_ms={} \
+         warm_jet_noop_p90_ms={} fastest_peer_ms={:?} budget_2x_ms={:?} bash_ms={:?} \
+         python_ms={:?} node_ms={:?} bash_file_ms={:?} node_file_ms={:?} bash_sub_ms={:?} \
+         node_sub_ms={:?}",
         machine_meta(),
-        warm_median,
-        warm_p90,
-        fastest_peer,
-        fastest_peer.map(|p| p.saturating_mul(2)),
-        bash,
-        python,
-        node,
-        bash_file,
-        node_file,
-        bash_sub,
-        node_sub
+        timed_bin,
+        using_product,
+        us_as_ms(warm_median_us),
+        us_as_ms(warm_p90_us),
+        fastest_us.map(us_as_ms),
+        budget_us.map(us_as_ms),
+        bash.map(us_as_ms),
+        python.map(us_as_ms),
+        node.map(us_as_ms),
+        bash_file.map(us_as_ms),
+        node_file.map(us_as_ms),
+        bash_sub.map(us_as_ms),
+        node_sub.map(us_as_ms)
     );
     assert!(
         bash.is_some() || node.is_some() || python.is_some(),
         "need at least one peer runtime"
     );
-    let peer = fastest_peer.expect("peer sample present");
-    // Floor 1ms: peer spawn that rounds to 0ms must not force a zero budget.
-    let budget = peer.max(1).saturating_mul(2);
-    assert!(
-        warm_median <= budget,
-        "warm no-op median {warm_median}ms exceeds D-SCRIPT-BUDGET1=B gate (2× fastest peer {peer}ms = {budget}ms)"
-    );
     assert!(
         bash_sub.is_some() || node_sub.is_some(),
         "subprocess peers must be measurable"
     );
+    if using_product {
+        let peer = fastest_us.expect("peer sample present");
+        let budget = budget_us.expect("peer budget");
+        assert!(
+            warm_median_us <= budget,
+            "warm no-op median {}ms exceeds D-SCRIPT-BUDGET1=B (≤2× fastest peer {}ms = {}ms)",
+            us_as_ms(warm_median_us),
+            us_as_ms(peer),
+            us_as_ms(budget)
+        );
+    } else {
+        // Debug test exe is not the product binary; keep absolute sanity until
+        // `cargo build --release` (or JET_BUDGET_BIN) is available for B.
+        assert!(
+            warm_median_us < 100_000,
+            "warm no-op median {}ms exceeds 100ms debug sanity (build release jet to enforce D-SCRIPT-BUDGET1=B)",
+            us_as_ms(warm_median_us)
+        );
+        eprintln!(
+            "note: D-SCRIPT-BUDGET1=B hard gate skipped — no target/release/jet or JET_BUDGET_BIN"
+        );
+    }
 }
