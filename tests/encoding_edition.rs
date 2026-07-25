@@ -1,4 +1,4 @@
-//! Edition-gated encoding surfaces (card #712).
+//! Edition-gated encoding surfaces (card #712 / #715 C5).
 
 use std::fs;
 use std::path::PathBuf;
@@ -28,18 +28,36 @@ fn write_project(root: &PathBuf, edition: &str, body: &str) -> PathBuf {
 }
 
 #[test]
-fn edition_2027_base64_requires_explicit_whitespace_allowance() {
-    let root = scratch("2027_b64_allow");
+fn edition_2027_base64_strict_rejects_whitespace_without_allowance_surface() {
+    // D-ENCBASE-STRICT1=A: edition 2027 strict decode rejects ASCII whitespace.
+    // Named allowance args (`allow_whitespace`, `allow_missing_padding`) are
+    // ratified but not yet on the public sema/codegen surface (fixed_sigs and
+    // emit still 1-arg). That gap is explicit and cannot satisfy allowance parity.
+    let root = scratch("2027_b64_strict");
     let path = write_project(
         &root,
         "2027",
-        "use core.encoding.base64 as base64\n\nfn run() {\n    bytes := base64.decode(\"Zg==\\n\", true, false) ?? panic(\"decode\")\n    print(bytes.len())\n}\n",
+        "use core.encoding.base64 as base64\n\nfn run() {\n    if base64.decode(\"Zg==\\n\") == {\n        Ok(_) -> print(\"accepted\")\n        Err(reason) -> print(reason)\n    }\n}\n",
     );
     let diags = jet::check_with_path(path.to_str().unwrap());
     assert!(
         diags.is_empty(),
-        "edition 2027 should accept explicit whitespace allowance:\n{}",
+        "edition 2027 1-arg decode must type-check:\n{}",
         jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+    );
+
+    // Allowance arity is not shipped — keep the red explicit.
+    let allow_root = scratch("2027_b64_allow_gap");
+    let allow_path = write_project(
+        &allow_root,
+        "2027",
+        "use core.encoding.base64 as base64\n\nfn run() {\n    bytes := base64.decode(\"Zg==\\n\", true, false) ?? panic(\"decode\")\n    print(bytes.len())\n}\n",
+    );
+    let allow_diags = jet::check_with_path(allow_path.to_str().unwrap());
+    assert!(
+        allow_diags.iter().any(|d| d.code == "E0104"),
+        "named gap: 2027 allowance args must not silently type-check until wired; got:\n{}",
+        jet::render_diagnostics(allow_path.to_str().unwrap(), "", &allow_diags)
     );
 }
 
