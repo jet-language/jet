@@ -229,6 +229,14 @@ pub const TYPE_OPTION_SUFFIX: &str = "?";
 
 /// S32 / D-OPT-SPELL1 / D-SHAPE3b: Optional variants are `Val` / `None`.
 /// Both also support the expected-type forms `.Val` / `.None`.
+///
+/// D-FLOWTYPE1=A: for a direct immutable local or parameter of type `T?`,
+/// `x != None` narrows `x` to `T` in the true branch; `x == None` narrows `x`
+/// to `T` in the false branch. The fact reaches the right side of short-circuit
+/// `&&` (not `||`) and ends at the branch boundary. Mutable locals, fields,
+/// indexes, aliases, and calls never narrow. `x == Val(v)` keeps S31 binding
+/// behavior. Sema records the proven unwrap as an S31 Present/`IfLet` fact;
+/// codegen performs no proof.
 pub const LIT_VALUE: &str = "Val";
 pub const LIT_NULL: &str = "None";
 

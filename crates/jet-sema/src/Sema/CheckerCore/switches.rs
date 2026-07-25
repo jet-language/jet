@@ -1,4 +1,4 @@
-use crate::AST::{BinOp, Expr, Pattern, Stmt, Type};
+use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, Pattern, Stmt, Type};
 use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Sema::Diagnostics::{missing_arms_text, missing_pattern_coverage, pattern_variant_name};
 use crate::Sema::{Checker, LocalInfo};
@@ -9,6 +9,36 @@ fn leading_guard_pattern_subject(expr: &Expr) -> Option<&Expr> {
     match expr {
         Expr::PatternTest { subject, .. } => Some(subject),
         Expr::Binary(BinOp::And, left, _, _) => leading_guard_pattern_subject(left),
+        _ => None,
+    }
+}
+
+/// D-FLOWTYPE1=A: `None` as a compared value (`x != None`), not a pattern head.
+fn expr_is_absent_none(expr: &Expr) -> bool {
+    match expr {
+        Expr::Absent(_) => true,
+        Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            ..
+        } if type_name.is_empty() && variant == Syntax::LIT_NULL && args.is_empty() => true,
+        Expr::Paren(inner, _) | Expr::Copy(inner, _) => expr_is_absent_none(inner),
+        _ => false,
+    }
+}
+
+/// D-FLOWTYPE1=A: atomic `x == None` / `x == .None` pattern test subject.
+pub(crate) fn atomic_absent_optional_subject(cond: &Expr) -> Option<(String, Span, Span)> {
+    match cond {
+        Expr::PatternTest {
+            subject,
+            pattern: Pattern::Absent(_),
+            span,
+        } => match subject.as_ref() {
+            Expr::Ident(name, name_span) => Some((name.clone(), *name_span, *span)),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -87,10 +117,179 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
 }
 
 impl<'a> Checker<'a> {
+        /// D-FLOWTYPE1=A: immutable local/param of type `T?` may refine to `T`.
+        pub(crate) fn flow_narrowable_optional_inner(&self, name: &str) -> Option<Type> {
+            let info = self.lookup(name)?;
+            if info.mutable {
+                return None;
+            }
+            match &info.ty {
+                Type::Option(inner) => Some((**inner).clone()),
+                _ => None,
+            }
+        }
+
+        /// D-FLOWTYPE1=A: `Present` binding that refines the same stable Optional name.
+        pub(crate) fn is_optional_flow_refine(&self, name: &str, binding_ty: &Type) -> bool {
+            let Some(info) = self.lookup(name) else {
+                return false;
+            };
+            if info.mutable {
+                return false;
+            }
+            matches!(&info.ty, Type::Option(inner) if inner.as_ref() == binding_ty)
+        }
+
+        /// D-FLOWTYPE1=A: refine a stable Optional name in the current scope (no E0118).
+        pub(crate) fn declare_optional_flow_narrow(
+            &mut self,
+            name: &str,
+            name_span: Span,
+            inner: Type,
+        ) {
+            if name == "_" {
+                return;
+            }
+            if self
+                .scopes
+                .last()
+                .is_some_and(|scope| scope.contains_key(name))
+            {
+                self.diags
+                    .push(crate::Sema::Registration::already_defined(name, name_span));
+            }
+            self.scopes.last_mut().unwrap().insert(
+                name.to_string(),
+                LocalInfo {
+                    def_span: name_span,
+                    ty: inner,
+                    mutable: false,
+                    param_conv: None,
+                    decl_loop_depth: self.loop_depth,
+                    sendable: true,
+                    reactive_local: false,
+                    reactive_shared: false,
+                    task_lint_span: None,
+                    single_use_span: None,
+                    constant_value: None,
+                },
+            );
+        }
+
+        pub(crate) fn declare_condition_binding(
+            &mut self,
+            name: &str,
+            span: Span,
+            ty: Type,
+        ) -> Option<(String, Span)> {
+            let restore = if self.is_optional_flow_refine(name, &ty) {
+                let moved_at = self.moved.remove(name);
+                self.declare_optional_flow_narrow(name, span, ty);
+                moved_at.map(|at| (name.to_string(), at))
+            } else {
+                self.declare(
+                    name,
+                    span,
+                    LocalInfo {
+                        def_span: span,
+                        ty,
+                        mutable: false,
+                        param_conv: None,
+                        decl_loop_depth: self.loop_depth,
+                        sendable: true,
+                        reactive_local: false,
+                        reactive_shared: false,
+                        task_lint_span: None,
+                        single_use_span: None,
+                        constant_value: None,
+                    },
+                );
+                None
+            };
+            restore
+        }
+
+        /// D-FLOWTYPE1=A: rewrite stable `x != None` into S31 `x == Val(x)` so TIR
+        /// records a proven unwrap (`IfLet`) and codegen stays mechanical.
+        pub(crate) fn rewrite_optional_flow_ne_none(&self, cond: &mut Expr) {
+            match cond {
+                Expr::Binary(BinOp::Ne, left, right, span) => {
+                    let Expr::Ident(name, name_span) = left.as_ref() else {
+                        return;
+                    };
+                    if !expr_is_absent_none(right) {
+                        return;
+                    }
+                    if self.flow_narrowable_optional_inner(name).is_none() {
+                        return;
+                    }
+                    *cond = Expr::PatternTest {
+                        subject: Box::new(Expr::Ident(name.clone(), *name_span)),
+                        pattern: Pattern::Present {
+                            binding: name.clone(),
+                            binding_span: *name_span,
+                            span: *span,
+                        },
+                        span: *span,
+                    };
+                }
+                Expr::Binary(BinOp::And, left, right, _) => {
+                    self.rewrite_optional_flow_ne_none(left);
+                    self.rewrite_optional_flow_ne_none(right);
+                }
+                Expr::Paren(inner, _) => self.rewrite_optional_flow_ne_none(inner),
+                _ => {}
+            }
+        }
+
+        /// D-FLOWTYPE1=A: `if x == None { A } else { B }` ≡ `if x == Val(x) { B } else { A }`.
+        /// Only atomic None tests invert — compound conditions do not prove presence on the
+        /// false path.
+        pub(crate) fn invert_optional_none_else_narrow(&self, ifs: &mut IfStmt) {
+            if ifs.else_branch.is_none() {
+                return;
+            }
+            let Some((name, name_span, span)) = atomic_absent_optional_subject(&ifs.cond) else {
+                return;
+            };
+            if self.flow_narrowable_optional_inner(&name).is_none() {
+                return;
+            }
+            let then_body = std::mem::take(&mut ifs.then_body);
+            let else_branch = ifs.else_branch.take();
+            match else_branch {
+                Some(ElseBranch::Else(else_body)) => {
+                    ifs.then_body = else_body;
+                    ifs.else_branch = Some(ElseBranch::Else(then_body));
+                }
+                Some(ElseBranch::ElseIf(next)) => {
+                    ifs.then_body = vec![Stmt::If(*next)];
+                    ifs.else_branch = Some(ElseBranch::Else(then_body));
+                }
+                None => return,
+            }
+            ifs.cond = Expr::PatternTest {
+                subject: Box::new(Expr::Ident(name.clone(), name_span)),
+                pattern: Pattern::Present {
+                    binding: name,
+                    binding_span: name_span,
+                    span,
+                },
+                span,
+            };
+        }
+
+        pub(crate) fn prepare_optional_flow_if(&self, ifs: &mut IfStmt) {
+            self.invert_optional_none_else_narrow(ifs);
+            self.rewrite_optional_flow_ne_none(&mut ifs.cond);
+        }
+
         pub(crate) fn check_condition_with_bindings(
             &mut self,
             cond: &mut Expr,
         ) -> HashMap<String, Type> {
+            // Idempotent with `prepare_optional_flow_if` for statement `if`.
+            self.rewrite_optional_flow_ne_none(cond);
             match cond {
                 Expr::PatternTest {
                     subject,
@@ -115,27 +314,19 @@ impl<'a> Checker<'a> {
                 Expr::Binary(BinOp::And, l, r, _) => {
                     let left_bindings = self.check_condition_with_bindings(l);
                     self.push_scope();
+                    let mut restore_moved = Vec::new();
                     for (name, ty) in &left_bindings {
-                        self.declare(
-                            name,
-                            l.span(),
-                            LocalInfo {
-                                def_span: l.span(),
-                                ty: ty.clone(),
-                                mutable: false,
-                                param_conv: None,
-                                decl_loop_depth: self.loop_depth,
-                                sendable: true,
-                                reactive_local: false,
-                                reactive_shared: false,
-                                task_lint_span: None,
-                                single_use_span: None,
-                                constant_value: None,
-                            },
-                        );
+                        if let Some(restored) =
+                            self.declare_condition_binding(name, l.span(), ty.clone())
+                        {
+                            restore_moved.push(restored);
+                        }
                     }
                     let mut right_bindings = self.check_condition_with_bindings(r);
                     self.pop_scope();
+                    for (name, at) in restore_moved {
+                        self.moved.insert(name, at);
+                    }
                     left_bindings.into_iter().for_each(|(k, v)| {
                         right_bindings.entry(k).or_insert(v);
                     });
@@ -247,27 +438,19 @@ impl<'a> Checker<'a> {
                         let bindings = self.validate_pattern(st, &pattern, pspan);
                         self.mark_pattern_subject_moved(subject, &bindings);
                         self.push_scope();
+                        let mut restore_moved = Vec::new();
                         for (name, ty) in bindings {
-                            self.declare(
-                                &name,
-                                pspan,
-                                LocalInfo {
-                                    def_span: pspan,
-                                    ty,
-                                    mutable: false,
-                                    param_conv: None,
-                                    decl_loop_depth: self.loop_depth,
-                                    sendable: true,
-                                    reactive_local: false,
-                                    reactive_shared: false,
-                                    task_lint_span: None,
-                                    single_use_span: None,
-                                    constant_value: None,
-                                },
-                            );
+                            if let Some(restored) =
+                                self.declare_condition_binding(&name, pspan, ty)
+                            {
+                                restore_moved.push(restored);
+                            }
                         }
                         self.check_block(&mut arm.body, false);
                         self.pop_scope();
+                        for (name, at) in restore_moved {
+                            self.moved.insert(name, at);
+                        }
                         for (k, v) in self.moved.drain() {
                             move_after.entry(k).or_insert(v);
                         }
@@ -279,27 +462,19 @@ impl<'a> Checker<'a> {
                     self.check_block(&mut arm.body, true);
                 } else {
                     self.push_scope();
+                    let mut restore_moved = Vec::new();
                     for (name, ty) in bindings {
-                        self.declare(
-                            &name,
-                            arm.cond.span(),
-                            LocalInfo {
-                                def_span: arm.cond.span(),
-                                ty,
-                                mutable: false,
-                                param_conv: None,
-                                decl_loop_depth: self.loop_depth,
-                                sendable: true,
-                                reactive_local: false,
-                                reactive_shared: false,
-                                task_lint_span: None,
-                                single_use_span: None,
-                                constant_value: None,
-                            },
-                        );
+                        if let Some(restored) =
+                            self.declare_condition_binding(&name, arm.cond.span(), ty)
+                        {
+                            restore_moved.push(restored);
+                        }
                     }
                     self.check_block(&mut arm.body, false);
                     self.pop_scope();
+                    for (name, at) in restore_moved {
+                        self.moved.insert(name, at);
+                    }
                 }
                 for (k, v) in self.moved.drain() {
                     move_after.entry(k).or_insert(v);

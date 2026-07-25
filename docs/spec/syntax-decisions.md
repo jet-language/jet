@@ -294,6 +294,17 @@ typestate transition graph itself — no separate surface (D-ROLE1).
 depth (`r == .Ok(Rect(w, h))`). Guards are plain `&&`: a pattern-bound name is
 in scope for the rest of the same condition. No `is`, no Rust `match`.
 
+**D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified
+2026-07-24, card #746)*: for a direct immutable local or parameter of type
+`T?`, `x != None` refines `x` to `T` in the true branch; `x == None` refines
+`x` to `T` in the false/`else` branch. The fact reaches the right side of
+short-circuit `&&`, not `||`, and ends at the branch boundary. Mutable locals,
+field paths, indexes, aliases, and calls never narrow — bind with
+`x == Val(v)` (S31) instead. Sema records each proven unwrap as an S31 Present
+binding for typed IR; codegen stays mechanical. Documentation teaches the
+`None` check for a direct stable name and the binding pattern for every other
+case.
+
 **D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns take a
 leading dot (`.Circle(r)`, `.Empty`); value position too when the expected
 type is known (`.Red`; E0330 fallback). `Color.Red` always valid.
@@ -412,6 +423,17 @@ including patterns. `Some` is never a spelling or alias. Old lowercase result
 forms and foreign optional spellings receive ordinary current name/parse
 errors; E0020's teaching path is retired. **D-RESULT-OPTION-CANON1**: `T?`
 always means Optional; fallible is spaced `T ? E` / `T ?` (S34).
+
+**D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified
+2026-07-24, card #746)*: for a direct immutable local or parameter of type
+`T?`, `x != None` narrows `x` to `T` in the true branch, and `x == None`
+narrows `x` to `T` in the false branch. The fact reaches the right side of
+short-circuit `&&`, but not `||`, and ends at the branch boundary. Mutable
+locals, field paths, indexes, aliases, and calls never narrow. `x == Val(v)`
+keeps its existing S31 binding behavior. Sema records each proven unwrap in
+typed IR as an S31 Present / `IfLet` fact; codegen performs no proof or
+speculative check. Teach the `None` check for a direct stable name and the
+binding pattern for every other case.
 
 **S33 — Generic type arguments**: `Type<Args>` angle brackets; `[]` is
 reserved for collections/indexing/shorthands. No call-site type args in
@@ -4880,10 +4902,23 @@ D-DOTCTOR1 / D-DOTCTOR2 and D-EMPTYLIT1. Implemented on card #780.
 (`Type.{ … }` from D-DOTCTOR3) or live on signatures and fields. Amends S2 /
 D-BIND4. Implemented on card #781.
 
+**2026-07-25 — D-FLOWTYPE1=A**: a direct immutable local or parameter of type
+`T?` narrows to `T` after `x != None` (true branch) or `x == None` (false
+branch). Facts reach `&&` tails, not `||`, and end at the branch boundary.
+Mutable storage, fields, indexes, aliases, and calls stay un-narrowed; bind
+with `x == Val(v)` there. Sema desugars to S31 Present/`IfLet` so codegen stays
+proof-free. Implemented on card #746.
+
 **2026-07-24 — D-UNINIT-SENTINEL2=A**: `uninit` is legal only as the whole
 body of a typed literal — `name := Type.{ uninit }`. Amends D-UNINIT-SENTINEL1
 (retires `name: Type := uninit`). Flow proof E0420/E0423/E0424 and
 `use core.mem` unchanged. Implemented on card #782.
+
+**2026-07-25 — D-FLOWTYPE1=A**: after a stable immutable `T?` name is checked
+with `x != None` (true) or `x == None` (false/else), that name refines to `T`
+in the proven branch. Facts reach `&&` RHS only; mutable storage, fields,
+indexes, aliases, and calls stay `T?` (use `x == Val(v)`). Sema records the
+unwrap for TIR; no new spelling. Implemented on card #746.
 
 **2026-07-19 — D-SHAPE-OUTPUT-CALLABLE1=A,
 D-ECO-OUTPUT-CALLCONTRACT1=A**: typed runnable Outputs now parse and format as
