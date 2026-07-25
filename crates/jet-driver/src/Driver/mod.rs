@@ -67,6 +67,278 @@ pub fn compile_bundle_path_with_target_profile(
     .map_err(TargetProfileCompileError::Diagnostics)
 }
 
+/// Artifacts from a typed no-OS profile build (linker, map, audit, size, ELF).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetFirmwareArtifacts {
+    pub out_dir: std::path::PathBuf,
+    pub linker_script: std::path::PathBuf,
+    pub startup: std::path::PathBuf,
+    pub map: std::path::PathBuf,
+    pub elf: std::path::PathBuf,
+    pub audit_json: std::path::PathBuf,
+    pub size_budget: crate::TargetProfile::SizeBudgetReport,
+    pub audit: String,
+}
+
+/// D-TARGET-*: validate profile, generate linker/startup, link firmware ELF,
+/// write audit + size budget under `out_dir` (typically `.jet/target/<name>/`).
+pub fn build_target_profile_firmware(
+    profile: &crate::TargetProfile::TargetProfile,
+    usage: &crate::TargetProfile::TargetProfileUse,
+    out_dir: &std::path::Path,
+) -> Result<TargetFirmwareArtifacts, TargetProfileCompileError> {
+    use crate::TargetProfile::{ExecutionTier, TargetProfileError};
+    use std::fs;
+    use std::process::Command;
+
+    if let Err(err) = profile.supports_execution_tier(ExecutionTier::Aot) {
+        return Err(TargetProfileCompileError::Profile(vec![err]));
+    }
+    // Explicit honesty: Dev/JIT are rejected for no-OS before any artifact work.
+    if let Err(err) = profile.supports_execution_tier(ExecutionTier::Dev) {
+        // expected for no-os; record in audit via execution field
+        let _ = err;
+    }
+    let mut errors = profile.validate(usage);
+    if !profile.no_os {
+        errors.push(TargetProfileError::HostedHasNoLinkerScript);
+    }
+    if !errors.is_empty() {
+        return Err(TargetProfileCompileError::Profile(errors));
+    }
+
+    let linker = profile
+        .generate_linker_script()
+        .map_err(|e| TargetProfileCompileError::Profile(vec![e]))?;
+    let startup = profile
+        .generate_startup_source()
+        .map_err(|e| TargetProfileCompileError::Profile(vec![e]))?;
+
+    fs::create_dir_all(out_dir).map_err(|e| {
+        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+            detail: format!("create out dir: {e}"),
+        }])
+    })?;
+
+    let linker_path = out_dir.join("memory.ld");
+    let startup_path = out_dir.join(&startup.filename);
+    let obj_path = out_dir.join("startup.o");
+    let map_path = out_dir.join("firmware.map");
+    let elf_path = out_dir.join("firmware.elf");
+    let audit_path = out_dir.join(format!("{}.target.json", sanitize_name(&profile.name)));
+
+    fs::write(&linker_path, &linker).map_err(|e| {
+        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+            detail: format!("write linker: {e}"),
+        }])
+    })?;
+    fs::write(&startup_path, &startup.contents).map_err(|e| {
+        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+            detail: format!("write startup: {e}"),
+        }])
+    })?;
+
+    let clang = resolve_target_clang().map_err(TargetProfileCompileError::Profile)?;
+    let lld = resolve_tool("ld.lld").map_err(TargetProfileCompileError::Profile)?;
+
+    let mut clang_cmd = Command::new(&clang);
+    clang_cmd
+        .arg(format!("--target={}", profile.triple))
+        .arg("-nostdlib")
+        .arg("-ffreestanding")
+        .arg("-fno-builtin")
+        .arg("-c")
+        .arg(&startup_path)
+        .arg("-o")
+        .arg(&obj_path);
+    let clang_out = clang_cmd.output().map_err(|e| {
+        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+            detail: format!("spawn clang: {e}"),
+        }])
+    })?;
+    if !clang_out.status.success() {
+        return Err(TargetProfileCompileError::Profile(vec![
+            TargetProfileError::FirmwareBuildFailed {
+                detail: format!(
+                    "clang failed: {}",
+                    String::from_utf8_lossy(&clang_out.stderr).trim()
+                ),
+            },
+        ]));
+    }
+
+    let mut link_cmd = Command::new(&lld);
+    link_cmd
+        .arg(format!("-T{}", linker_path.display()))
+        .arg(format!("-Map={}", map_path.display()))
+        .arg("-o")
+        .arg(&elf_path)
+        .arg(&obj_path);
+    if profile.triple.contains("aarch64") {
+        link_cmd.arg("--image-base=0x40000000");
+    }
+    let link_out = link_cmd.output().map_err(|e| {
+        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+            detail: format!("spawn ld.lld: {e}"),
+        }])
+    })?;
+    if !link_out.status.success() {
+        return Err(TargetProfileCompileError::Profile(vec![
+            TargetProfileError::FirmwareBuildFailed {
+                detail: format!(
+                    "ld.lld failed: {}",
+                    String::from_utf8_lossy(&link_out.stderr).trim()
+                ),
+            },
+        ]));
+    }
+
+    let artifact_bytes = fs::metadata(&elf_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let size_budget = profile.size_budget(usage, artifact_bytes);
+    if !size_budget.ok() {
+        return Err(TargetProfileCompileError::Profile(vec![
+            TargetProfileError::SizeBudgetExceeded {
+                report: size_budget,
+            },
+        ]));
+    }
+    let audit = profile.audit_json_with_budget(usage, Some(&size_budget));
+    fs::write(&audit_path, &audit).map_err(|e| {
+        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+            detail: format!("write audit: {e}"),
+        }])
+    })?;
+
+    Ok(TargetFirmwareArtifacts {
+        out_dir: out_dir.to_path_buf(),
+        linker_script: linker_path,
+        startup: startup_path,
+        map: map_path,
+        elf: elf_path,
+        audit_json: audit_path,
+        size_budget,
+        audit,
+    })
+}
+
+/// Run QEMU virt smoke for an aarch64 no-OS ELF; returns serial output.
+pub fn qemu_virt_aarch64_smoke(
+    elf: &std::path::Path,
+) -> Result<String, Vec<crate::TargetProfile::TargetProfileError>> {
+    use crate::TargetProfile::TargetProfileError;
+    use std::process::Command;
+
+    let qemu = resolve_tool("qemu-system-aarch64")?;
+    // `timeout` keeps the smoke bounded; virt UART prints "OK\n" from startup.
+    let output = Command::new("timeout")
+        .arg("3")
+        .arg(&qemu)
+        .arg("-machine")
+        .arg("virt")
+        .arg("-cpu")
+        .arg("cortex-a57")
+        .arg("-nographic")
+        .arg("-kernel")
+        .arg(elf)
+        .output()
+        .map_err(|e| {
+            vec![TargetProfileError::FirmwareBuildFailed {
+                detail: format!("spawn qemu: {e}"),
+            }]
+        })?;
+    let serial = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    if serial.contains("OK") {
+        Ok(serial)
+    } else {
+        Err(vec![TargetProfileError::FirmwareBuildFailed {
+            detail: format!(
+                "qemu smoke missing OK marker (status={:?}); serial={serial:?}",
+                output.status.code()
+            ),
+        }])
+    }
+}
+
+/// D-TARGET-AUDIT1: machine audit JSON for a named board profile.
+pub fn target_profile_dossier_json(profile_name: &str) -> Result<String, String> {
+    let profile = match profile_name {
+        "board.sensor_v1" | "firmware" | "sensor" => {
+            crate::TargetProfile::TargetProfile::board_sensor_v1()
+        }
+        "board.virt_aarch64" | "virt" => crate::TargetProfile::TargetProfile::board_virt_aarch64(),
+        "hosted" => crate::TargetProfile::TargetProfile::hosted("x86_64-unknown-linux-gnu"),
+        other => {
+            return Err(format!(
+                "unknown target profile `{other}` (try board.sensor_v1, board.virt_aarch64, hosted)"
+            ))
+        }
+    };
+    let usage = crate::TargetProfile::TargetProfileUse::default();
+    Ok(profile.audit_json(&usage))
+}
+
+fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+fn resolve_target_clang() -> Result<std::path::PathBuf, Vec<crate::TargetProfile::TargetProfileError>> {
+    if let Ok(path) = std::env::var("JET_TARGET_CLANG") {
+        let p = std::path::PathBuf::from(path);
+        if p.is_file() {
+            return Ok(p);
+        }
+    }
+    // Prefer unwrapped clang: `clang -print-prog-name=clang` often resolves past the nix wrapper.
+    if let Ok(out) = std::process::Command::new("clang")
+        .arg("-print-prog-name=clang")
+        .output()
+    {
+        if out.status.success() {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let p = std::path::PathBuf::from(&path);
+            if p.is_file() {
+                return Ok(p);
+            }
+        }
+    }
+    resolve_tool("clang")
+}
+
+fn resolve_tool(
+    name: &str,
+) -> Result<std::path::PathBuf, Vec<crate::TargetProfile::TargetProfileError>> {
+    if let Ok(path) = which_tool(name) {
+        return Ok(path);
+    }
+    Err(vec![crate::TargetProfile::TargetProfileError::FirmwareToolchainMissing {
+        tool: name.to_string(),
+    }])
+}
+
+fn which_tool(name: &str) -> Result<std::path::PathBuf, ()> {
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {name}"))
+        .output()
+        .map_err(|_| ())?;
+    if !output.status.success() {
+        return Err(());
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() {
+        return Err(());
+    }
+    Ok(std::path::PathBuf::from(path))
+}
+
 /// Like `compile_bundle_path_opts`, but for `jet build --target=plugin`
 /// (D-PLUGIN1=B / D-DEP-WASM1=A, c81): also emits the guest `.wit` + wasm32
 /// Rust artifacts (`Codegen::emit_plugin`).
