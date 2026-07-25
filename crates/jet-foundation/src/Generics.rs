@@ -138,6 +138,9 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
             marker: match subst.get(marker) { Some(Type::Named(name)) => name.clone(), _ => marker.clone() },
             inner: Box::new(substitute_type(inner, subst)),
         },
+        Type::Union(members) => crate::AST::canonicalize_union(
+            members.iter().map(|m| substitute_type(m, subst)).collect(),
+        ),
         other => other.clone(),
     }
 }
@@ -224,6 +227,7 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
         Type::Tuple(fields) => fields.iter().for_each(|(_, t)| collect_free(t, out)),
         Type::FixedList { elem, .. } => collect_free(elem, out),
         Type::Tagged { inner, .. } => collect_free(inner, out),
+        Type::Union(members) => members.iter().for_each(|m| collect_free(m, out)),
     }
 }
 
@@ -693,6 +697,11 @@ pub fn collect_type_param_mentions(
             collect_type_param_mentions(inner, param_names, out)
         }
         Type::FixedList { elem, .. } => collect_type_param_mentions(elem, param_names, out),
+        Type::Union(members) => {
+            for m in members {
+                collect_type_param_mentions(m, param_names, out);
+            }
+        }
         Type::Map { key, value, .. } => {
             collect_type_param_mentions(key, param_names, out);
             collect_type_param_mentions(value, param_names, out);

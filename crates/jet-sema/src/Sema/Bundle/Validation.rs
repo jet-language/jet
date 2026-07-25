@@ -254,6 +254,7 @@ fn type_mentions_encoding_surface(ty: &Type) -> bool {
                 || ret.as_deref().is_some_and(type_mentions_encoding_surface)
         }
         Type::Tuple(fields) => fields.iter().any(|(_, t)| type_mentions_encoding_surface(t)),
+        Type::Union(members) => members.iter().any(type_mentions_encoding_surface),
         Type::Int
         | Type::Float
         | Type::Bool

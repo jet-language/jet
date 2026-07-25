@@ -140,6 +140,7 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
                 && ret.as_deref().is_none_or(|r| is_c_abi_type(r, registry))
         }
         Type::Tagged { inner, .. } => is_c_abi_type(inner, registry),
+        Type::Union(_) => false,
     }
 }
 
@@ -385,6 +386,7 @@ pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Apply { .. } | Type::TraitObject(_) | Type::Fn { .. } | Type::Tuple(_) => false,
         Type::FixedList { elem, .. } => is_ffi_type(elem, registry),
         Type::Tagged { inner, .. } => is_ffi_type(inner, registry),
+        Type::Union(_) => false,
     }
 }
 

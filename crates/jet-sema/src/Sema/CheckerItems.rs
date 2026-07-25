@@ -1904,6 +1904,59 @@ impl<'a> Checker<'a> {
                 ));
                 HashMap::new()
             }
+            // D-UNIONTYPE1=A: arm head is the member type name; binds that member.
+            (
+                Type::Union(members),
+                Pattern::Variant {
+                    variant,
+                    bindings,
+                    ..
+                },
+            ) => {
+                let Some(member_ty) = members
+                    .iter()
+                    .find(|m| crate::AST::union_member_tag(m) == *variant)
+                    .cloned()
+                else {
+                    self.diags.push(Diagnostic::error(
+                        "E0305",
+                        format!(
+                            "pattern `{}` doesn't belong to `{}`",
+                            variant,
+                            subject_ty.name()
+                        ),
+                        "union match arms name a member type of the subject's union".to_string(),
+                        format!(
+                            "members are {}",
+                            members
+                                .iter()
+                                .map(crate::AST::union_member_tag)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                        Some(span),
+                    ));
+                    return HashMap::new();
+                };
+                if bindings.len() != 1 {
+                    self.diags.push(Diagnostic::error(
+                        "E0306",
+                        format!(
+                            "pattern `{}` expects 1 binding, got {}",
+                            variant,
+                            bindings.len()
+                        ),
+                        "each union member arm binds the member value once".to_string(),
+                        format!("write `{}(v)`", variant),
+                        Some(span),
+                    ));
+                }
+                let mut result = HashMap::new();
+                if let Some(crate::AST::PatSlot::Bind { name, .. }) = bindings.first() {
+                    result.insert(name.clone(), member_ty);
+                }
+                result
+            }
             (
                 Type::Named(type_name)
                 | Type::Apply {

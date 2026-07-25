@@ -5,12 +5,39 @@ use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_lambda_expecting;
 use crate::Codegen::TIR::TCallArg;
+use crate::Codegen::TIR::TEnumArg;
+use crate::Codegen::TIR::TEnumPayload;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TExternArg;
 use crate::Codegen::TIR::TFnCoerce;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::unit_type;
+
+/// D-UNIONTYPE1=A: wrap a member value into the compiler-generated union enum.
+pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type) -> TExpr {
+    match want {
+        Type::Union(members)
+            if members.iter().any(|m| m == &value.ty) && !matches!(&value.ty, Type::Union(_)) =>
+        {
+            let enum_type = crate::AST::union_enum_name(members);
+            let variant = crate::AST::union_member_tag(&value.ty);
+            TExpr {
+                ty: want.clone(),
+                kind: TExprKind::EnumLit {
+                    enum_type,
+                    variant,
+                    payload: TEnumPayload::Positional(vec![TEnumArg {
+                        value,
+                        clone: false,
+                        boxed: false,
+                    }]),
+                },
+            }
+        }
+        _ => value,
+    }
+}
 
 /// Last expression-producing statement in a lambda block (mirrors sema tail rules).
 /// Only the **final** statement may be a tail; an earlier `send()`/`call()` followed
@@ -206,6 +233,13 @@ pub(crate) fn lower_one_call_arg(
         (Type::FixedList { elem: arg_elem, .. }, Some(Type::List(param_elem)))
             if arg_elem == param_elem
     );
+    // D-UNIONTYPE1=A: member → union inject at the call boundary.
+    let widen_to_union = match (&value.ty, conv.as_ref().map(|(_, t)| t)) {
+        (got, Some(want @ Type::Union(members))) if members.iter().any(|m| m == got) => {
+            Some(want.clone())
+        }
+        _ => None,
+    };
     // Borrow wrappers (applied after the clone + fn-coerce wrappers). A `Read`
     // non-scalar is `&(…)`; a `Mutate` is `&mut (…)`.
     // When widening to Vec, the borrow wrapper applies to the widened Vec (not the array).
@@ -227,6 +261,7 @@ pub(crate) fn lower_one_call_arg(
         arc_clone,
         fn_coerce,
         widen_to_vec,
+        widen_to_union,
     }
 }
 

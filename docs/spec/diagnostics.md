@@ -314,6 +314,7 @@ renumbered, and no new `W` code may be allocated.
 | E0360 | sema  | a nominal type uses arithmetic without the required operator hook (D-OPDEF1) |
 | E0361 | sema  | an operator hook directly dispatches back to itself through its symbol (D-OPDEF1) |
 | E0362 | sema  | a hooked compound assignment targets a nested field place not yet lowerable as one write (D-OPDEF1) |
+| E0363 | sema  | anonymous-union member is not a concrete closed type (D-UNIONTYPE1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | guard table should use closed-enum subject dispatch (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -934,6 +935,7 @@ block reserved for M6.
 | E2412 | `E2412: unknown field `{field}`` (runtime `DecodeError`). | The struct is marked `#[DenyUnknownFields]` (D-SERDE8) and the input carried a key the struct doesn't declare, so decoding fails fast instead of silently dropping it. | Remove `#[DenyUnknownFields]` to ignore extra keys (the lenient default), add the field, or fix the producer. |
 | E2413 | retired (D-SERDE12) — generic `#[Codable]` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
 | E2414 | `#[Default(...)]` on `{field}` must be a compile-time constant. | A decode default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, Card #131). An argument that can only be computed at runtime — an impure call, a non-deterministic value — has no fixed value to bake, and both the compiled binary and `jet dev` must agree on the default (R12). | Use a literal or a `comptime`-evaluable expression, e.g. `#[Default(8080)]`, `#[Default(Color.Red)]`, or `#[Default([1, 2])]`. |
+| E2415 | union `{Union}` can't be decoded — `{A}` and `{B}` share wire shape `{shape}`. | Anonymous-union decode (D-UNIONTYPE1=A) picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order. | Use a named enum with an explicit tag, or change the members so each has a distinct wire shape. |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
 | L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) -> String { … } }`, or use `{value#Debug}` for debug output. |
 
@@ -1237,6 +1239,7 @@ already-freed arena), these track the views themselves.
 | E0360 | No `{symbol}` operator is defined for `{type}`. | User arithmetic dispatches only through the matching fixed operator trait hook; the compiler does not guess a method or fall through to rustc. | Implement the named `Type.Trait` hook, or call a named method instead. |
 | E0361 | `{hook}` calls itself through `{symbol}`. | The symbol inside its own hook dispatches directly back to that hook, so evaluation would recurse forever. | Combine the value's fields directly, or call a different named helper inside the hook. |
 | E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
+| E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not trait objects or function types. | Use a named enum when a member needs an open shape. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

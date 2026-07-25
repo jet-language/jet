@@ -371,6 +371,9 @@ pub enum TryConvert {
     /// Declared `impl Source -> Target { … }` conversion (D-ERR-CONV).
     /// Holds the mangled Rust function name emitted by codegen.
     Typed(String),
+    /// D-UNIONTYPE1=A: source error is one member of the return's anonymous union.
+    /// Codegen wraps with `user_<enum>::<tag>(e)`.
+    WidenUnion { enum_name: String, tag: String },
 }
 
 /// D-ERR-CONV (ratified 2026-06-19): `impl Source -> Target { body }` — declares

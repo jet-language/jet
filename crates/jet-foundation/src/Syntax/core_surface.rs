@@ -227,6 +227,11 @@ pub const KW_ALIAS: &str = "alias";
 /// S32 (ratified M3): optional type suffix — `Int?` is “maybe an Int”.
 pub const TYPE_OPTION_SUFFIX: &str = "?";
 
+/// D-UNIONTYPE1=A: anonymous closed structural sum — `Int | String`.
+/// Order-insensitive; nested unions flatten; duplicates disappear. Underneath
+/// it is compiler-generated enum sugar; named enums stay the documenting form.
+pub const TYPE_UNION_SEP: &str = "|";
+
 /// S32 / D-OPT-SPELL1 / D-SHAPE3b: Optional variants are `Val` / `None`.
 /// Both also support the expected-type forms `.Val` / `.None`.
 ///

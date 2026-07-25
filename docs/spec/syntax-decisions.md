@@ -187,6 +187,14 @@ fn area(Rect(w: Float, h: Float)) -> Float { return w * h }
 (`fn f<T: [Renderable, Serializable]>(parts: ...T)`, **D-VARARGBOUND1**).
 No top type; general `Any` rejected.
 
+**D-UNIONTYPE1=A — Anonymous union types** *(ratified 2026-07-24, card #744)*:
+`A | B` is closed structural enum sugar. Nested unions flatten, duplicates
+disappear, and identity is order-insensitive. `T ? E1 | E2` places the union on
+the error side. Members widen into the union only at binding, argument, return,
+Codable field, and `?` error boundaries. Match arms name member types; Codable
+decode rejects ambiguous wire shapes (E2415). Named enums remain the documenting
+form; crossings use ordinary match conversion. Does not reopen D-ANY-JAI1.
+
 **D-TRAILBLOCK1 — Trailing block argument**: when a call's final param is a
 function type, a bare `{ }` after `)` stands in for that lambda —
 `ui.button("Save") { prefs.save() }`. Zero-parameter blocks only in v1
@@ -4897,6 +4905,16 @@ branch). Facts reach `&&` tails, not `||`, and end at the branch boundary.
 Mutable storage, fields, indexes, aliases, and calls stay un-narrowed; bind
 with `x == Val(v)` there. Sema desugars to S31 Present/`IfLet` so codegen stays
 proof-free. Implemented on card #746.
+
+**2026-07-25 — D-UNIONTYPE1=A**: `A | B` is closed structural enum sugar, not a
+second sum mechanism. Nested unions flatten, duplicates drop, and identity is
+order-insensitive with a deterministic canonical spelling and codegen enum.
+`T ? E1 | E2` parses as `T ? (E1 | E2)`. A member widens into its union only at
+binding, argument, return, Codable field, and `?` error-propagation boundaries.
+Match arms name member types (`Int(n)`, `String(s)`). Codable decode dispatches
+by primary wire shape and rejects ambiguous shapes (E2415). Named enums stay the
+documenting form; union↔named-enum crossings stay explicit match conversions.
+D-ANY-JAI1 stays intact — no Any or cast escape. Implemented on card #744.
 
 **2026-07-24 — D-UNINIT-SENTINEL2=A**: `uninit` is legal only as the whole
 body of a typed literal — `name := Type.{ uninit }`. Amends D-UNINIT-SENTINEL1

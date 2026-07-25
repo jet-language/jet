@@ -699,21 +699,33 @@ impl<'a> Parser<'a> {
                 Some(qspan),
             ));
         }
-        if matches!(self.peek().kind, TokKind::Question) {
+        let member = if matches!(self.peek().kind, TokKind::Question) {
             self.bump();
             if self.type_starts_here() {
+                // Recursive `type_()` so `T ? E1 | E2` places the union on the
+                // error side (D-UNIONTYPE1=A).
                 let (err_ty, _) = self.type_()?;
-                return Ok((
-                    Type::Result {
-                        ok: Box::new(base),
-                        err: Box::new(err_ty),
-                    },
-                    start,
-                ));
+                Type::Result {
+                    ok: Box::new(base),
+                    err: Box::new(err_ty),
+                }
+            } else {
+                Type::Option(Box::new(base))
             }
-            return Ok((Type::Option(Box::new(base)), start));
+        } else {
+            base
+        };
+        // D-UNIONTYPE1=A: `A | B | …`. Right-hand side is recursive so nested
+        // pipes flatten through `canonicalize_union`.
+        if matches!(self.peek().kind, TokKind::Pipe) {
+            self.bump();
+            let (right, _) = self.type_()?;
+            return Ok((
+                crate::AST::canonicalize_union(vec![member, right]),
+                start,
+            ));
         }
-        Ok((base, start))
+        Ok((member, start))
     }
 
     /// Parse a function type `fn(T1, …) --[E]-> R`, the cursor at `fn`.
