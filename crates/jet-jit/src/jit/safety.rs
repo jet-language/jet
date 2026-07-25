@@ -228,7 +228,14 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
         Type::Named(n)
             if matches!(
                 n.as_str(),
-                "Unit" | "Duration" | "DurationUnit" | "RangeError" | "ParseError"
+                "Unit"
+                    | "Duration"
+                    | "DurationUnit"
+                    | "RangeError"
+                    | "ParseError"
+                    | "ProcessResult"
+                    | "ProcessSpec"
+                    | "ProcessChild"
             ) =>
         {
             true
@@ -733,9 +740,13 @@ fn resident_safe_builtin_op(
         return false;
     }
     match op {
-        TBuiltinOp::LenString => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::LenString => {
+            (matches!(&recv.ty, Type::String) || is_process_result_string_field(recv))
+                && args.is_empty()
+        }
         TBuiltinOp::Trim | TBuiltinOp::ToUpper | TBuiltinOp::ToLower => {
-            matches!(&recv.ty, Type::String) && args.is_empty()
+            (matches!(&recv.ty, Type::String) || is_process_result_string_field(recv))
+                && args.is_empty()
         }
         TBuiltinOp::Replace => {
             matches!(&recv.ty, Type::String)
@@ -1013,6 +1024,26 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             use jet_codegen::Codegen::TIR::TForInMethod;
             let chars_ok = matches!(method_kind, Some(TForInMethod::Chars))
                 && matches!(&source.ty, Type::String);
+            let process_lines_ok = matches!(method_kind, Some(TForInMethod::LinesProcessStream))
+                && var2.is_none()
+                && matches!(
+                    &source.kind,
+                    TExprKind::Field { recv, field, boxed: false }
+                        if matches!(&recv.ty, Type::Named(n) if n == "ProcessChild")
+                            && (field == "stdout" || field == "stderr")
+                );
+            // TIR leaves `.lines()` MethodCall as Unit and the loop var unbound;
+            // lower hardcodes String elems. Don't demand collection/body types.
+            if process_lines_ok {
+                return !columnar
+                    && resident_safe_expr(source, callees)
+                    && step
+                        .as_ref()
+                        .is_none_or(|step| resident_safe_expr(step, callees))
+                    && body
+                        .iter()
+                        .all(|s| resident_safe_process_lines_body(s, callees));
+            }
             let list_ok = method_kind.is_none()
                 && var2.is_none()
                 && (jit_list_iter_elem_type(&collection.ty).is_some()
@@ -1379,6 +1410,41 @@ fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
     }
 }
 
+fn is_process_result_string_field(expr: &TExpr) -> bool {
+    matches!(
+        &expr.kind,
+        TExprKind::Field {
+            recv,
+            field,
+            boxed: false
+        } if matches!(&recv.ty, Type::Named(n) if n == "ProcessResult")
+            && matches!(field.as_str(), "output" | "errors")
+    )
+}
+
+/// Body of `child.stdout.lines()` — loop var type is erased to Unit in TIR.
+fn resident_safe_process_lines_body(stmt: &TStmt, callees: &HashSet<String>) -> bool {
+    match stmt {
+        TStmt::ExprStmt(e) => match &e.kind {
+            TExprKind::Print(inner) => match &inner.kind {
+                TExprKind::BuiltinMethod { op, recv, args }
+                    if matches!(
+                        op,
+                        TBuiltinOp::Trim | TBuiltinOp::ToUpper | TBuiltinOp::ToLower
+                    ) && args.is_empty()
+                        && matches!(&recv.kind, TExprKind::Local(_)) =>
+                {
+                    true
+                }
+                TExprKind::Local(_) => true,
+                _ => resident_safe_expr(e, callees),
+            },
+            _ => resident_safe_expr(e, callees),
+        },
+        _ => resident_safe_stmt(stmt, callees),
+    }
+}
+
 fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool {
     match op {
         THandleOp::TaskJoin | THandleOp::TaskCancel => {
@@ -1402,6 +1468,17 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                     (method.as_str(), args.len()),
                     ("add" | "sub" | "mul", 1) | ("neg" | "to_string", 0)
                 )
+        }
+        THandleOp::DurationNew { .. } => args.is_empty(),
+        THandleOp::ProcessSpecMethod { method } => {
+            matches!(
+                (method.as_str(), args.len()),
+                ("stdout" | "stderr" | "stdin" | "timeout" | "output_limit" | "cwd", 1)
+                    | ("run" | "spawn", 0)
+            )
+        }
+        THandleOp::ProcessChildMethod { method } => {
+            method == "wait" && args.is_empty()
         }
         _ => false,
     }

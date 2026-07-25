@@ -261,6 +261,16 @@ impl<'a> JitMeta<'a> {
 
     /// Discriminant index from structured enum + variant Jet names.
     pub(crate) fn enum_variant_index(&self, enum_name: &str, variant: &str) -> Option<i64> {
+        // Core ProcessStreamMode is not registered on JitProgram; fixed order
+        // matches jet_std::ProcessStreamMode { Stream, Inherit, Capture }.
+        if enum_name == "ProcessStreamMode" {
+            return match variant {
+                "Stream" => Some(0),
+                "Inherit" => Some(1),
+                "Capture" => Some(2),
+                _ => None,
+            };
+        }
         let variants = self.enum_variants.get(enum_name)?;
         let mangled = format!("user_{variant}");
         variants
@@ -321,7 +331,25 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "LogField" => &["key", "value", "kind", "redacted"],
         "LogSpan" => &["id", "name"],
         "Rng" => &["state"],
+        // Mirrors jet_std::ProcessResult field order (Open.rs).
+        "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)
+}
+
+/// Sema-known CORE struct field types. TIR `struct_field_type` falls back to
+/// `Int` when `cx.struct_fields` lacks CORE entries (ProcessResult is not a
+/// user struct); recover the real type so JIT field/print/ABI stay total.
+pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Type> {
+    match type_name {
+        "ProcessResult" => match field {
+            "code" => Some(Type::Int),
+            "output" | "errors" => Some(Type::String),
+            "success" | "timed_out" => Some(Type::Bool),
+            "signal" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        },
+        _ => None,
+    }
 }

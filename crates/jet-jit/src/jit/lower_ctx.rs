@@ -19,7 +19,7 @@ use super::safety::{
     jit_map_string_type, jit_result_list_elem, jit_tuple_type, jit_value_type, record_type_key,
     user_type_name,
 };
-use super::types_meta::{clif_ty, init_clif_ty, JitMeta};
+use super::types_meta::{clif_ty, core_struct_field_type, init_clif_ty, JitMeta};
 use super::JitRuntime;
 
 #[derive(Clone)]
@@ -1110,12 +1110,13 @@ impl LowerCtx<'_, '_> {
                     Some(
                         TForInMethod::LinesFile
                             | TForInMethod::LinesStdin
-                            | TForInMethod::LinesProcessStream
                             | TForInMethod::Iterable { .. }
                     )
                 ) {
                     return Err("jit for-in method-call collection unsupported".to_string());
                 }
+                // LinesProcessStream drains via host then walks the string list
+                // (handled with Chars in the single-binding arm below).
                 if *columnar {
                     return Err("jit for-in columnar unsupported".to_string());
                 }
@@ -1124,6 +1125,7 @@ impl LowerCtx<'_, '_> {
                 // (true JetIter cannot cross the host-shim ABI yet).
                 if *by_value
                     && !jet_foundation::Collections::is_iter_type(&collection.ty)
+                    && !matches!(method_kind, Some(TForInMethod::LinesProcessStream))
                 {
                     return Err("jit for-in by-value stream unsupported".to_string());
                 }
@@ -1279,8 +1281,15 @@ impl LowerCtx<'_, '_> {
                     self.b.seal_block(exit);
                     self.dead = false;
                 } else {
-                    let elem_ty = if matches!(method_kind, Some(TForInMethod::Chars)) {
-                        Type::Char
+                    let elem_ty = if matches!(
+                        method_kind,
+                        Some(TForInMethod::Chars | TForInMethod::LinesProcessStream)
+                    ) {
+                        if matches!(method_kind, Some(TForInMethod::Chars)) {
+                            Type::Char
+                        } else {
+                            Type::String
+                        }
                     } else {
                         jit_list_iter_elem_type(&collection.ty)
                             .or_else(|| jit_closure_elem_type(&collection.ty))
@@ -1299,6 +1308,33 @@ impl LowerCtx<'_, '_> {
                             .module
                             .declare_func_in_func(self.host.str_chars, self.b.func);
                         let call = self.b.ins().call(host_ref, &[text]);
+                        self.b.inst_results(call)[0]
+                    } else if matches!(method_kind, Some(TForInMethod::LinesProcessStream)) {
+                        let (child_expr, stream_tag) = match &source.kind {
+                            TExprKind::Field {
+                                recv,
+                                field,
+                                boxed: false,
+                            } if matches!(&recv.ty, Type::Named(n) if n == "ProcessChild")
+                                && (field == "stdout" || field == "stderr") =>
+                            {
+                                (
+                                    recv.as_ref(),
+                                    if field == "stderr" { 1i64 } else { 0i64 },
+                                )
+                            }
+                            _ => {
+                                return Err(
+                                    "jit for-in method-call collection unsupported".to_string(),
+                                )
+                            }
+                        };
+                        let child_val = self.lower_expr(child_expr)?;
+                        let tag = self.b.ins().iconst(types::I64, stream_tag);
+                        let host_ref = self
+                            .module
+                            .declare_func_in_func(self.host.process.stream_lines, self.b.func);
+                        let call = self.b.ins().call(host_ref, &[child_val, tag]);
                         self.b.inst_results(call)[0]
                     } else {
                         self.lower_expr(source)?
@@ -2729,6 +2765,23 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().call(host_ref, &[a0]);
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
+                if module == "core.process" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "cmd" if args.len() == 1 => {
+                            (self.host.process.cmd, vec![self.lower_expr(&args[0])?])
+                        }
+                        "run" if args.len() == 1 => {
+                            (self.host.process.run, vec![self.lower_expr(&args[0])?])
+                        }
+                        "pipeline" if args.len() == 1 => {
+                            (self.host.process.pipeline, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.compress.gzip" || module == "core.compress.zstd" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
                         ("core.compress.gzip", "compress") if args.len() == 1 => {
@@ -3291,7 +3344,11 @@ impl LowerCtx<'_, '_> {
                 let type_name = record_type_key(&recv.ty)
                     .or_else(|| self.method_struct.clone())
                     .ok_or("jit field recv type")?;
-                self.lower_record_field(handle, &type_name, field, &expr.ty)
+                // TIR may leave CORE struct fields as Int when cx.struct_fields
+                // lacks the type; recover the real ABI type for get_*/print.
+                let field_ty = core_struct_field_type(&type_name, field)
+                    .unwrap_or_else(|| expr.ty.clone());
+                self.lower_record_field(handle, &type_name, field, &field_ty)
             }
             TExprKind::MethodCall {
                 recv,
@@ -3350,6 +3407,13 @@ impl LowerCtx<'_, '_> {
                     let disc = self
                         .meta
                         .enum_variant_index(enum_type, variant)
+                        .or_else(|| match (enum_type.as_str(), variant.as_str()) {
+                            // Core enum — not always in program.enum_variants.
+                            ("ProcessStreamMode", "Stream") => Some(0),
+                            ("ProcessStreamMode", "Inherit") => Some(1),
+                            ("ProcessStreamMode", "Capture") => Some(2),
+                            _ => None,
+                        })
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     Ok(self.b.ins().iconst(types::I64, disc))
                 }
@@ -4938,8 +5002,36 @@ impl LowerCtx<'_, '_> {
             THandleOp::ParsedArgsOptions => Err("jit handle method unsupported".to_string()),
             THandleOp::ParsedArgsSubcommand => Err("jit handle method unsupported".to_string()),
             THandleOp::ParsedArgsPositional => Err("jit handle method unsupported".to_string()),
-            THandleOp::ProcessSpecMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::ProcessChildMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::ProcessSpecMethod { method } => {
+                let (host_fn, arity) = match method.as_str() {
+                    "stdout" => (self.host.process.spec_stdout, 1),
+                    "stderr" => (self.host.process.spec_stderr, 1),
+                    "stdin" => (self.host.process.spec_stdin, 1),
+                    "timeout" => (self.host.process.spec_timeout, 1),
+                    "output_limit" => (self.host.process.spec_output_limit, 1),
+                    "cwd" => (self.host.process.spec_cwd, 1),
+                    "run" => (self.host.process.spec_run, 0),
+                    "spawn" => (self.host.process.spec_spawn, 0),
+                    _ => return Err("jit handle method unsupported".to_string()),
+                };
+                let mut arg_vals = vec![recv_val];
+                for a in args.iter().take(arity) {
+                    arg_vals.push(self.lower_expr(a)?);
+                }
+                let host = self.module.declare_func_in_func(host_fn, self.b.func);
+                let call = self.b.ins().call(host, &arg_vals);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ProcessChildMethod { method } => match method.as_str() {
+                "wait" => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.process.child_wait, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                _ => Err("jit handle method unsupported".to_string()),
+            },
             THandleOp::ProcessStdinWrite => Err("jit handle method unsupported".to_string()),
             THandleOp::ReflectValueTypeName => Err("jit handle method unsupported".to_string()),
             THandleOp::ReflectValueDisplay => Err("jit handle method unsupported".to_string()),
@@ -5309,6 +5401,27 @@ impl LowerCtx<'_, '_> {
         }
         if let Some(ty) = self.expr_arith_type_from_op(expr) {
             return ty;
+        }
+        // CORE struct fields (ProcessResult.output, …) — TIR may say Int.
+        if let TExprKind::Field { recv, field, .. } = &expr.kind {
+            if let Some(name) = record_type_key(&recv.ty) {
+                if let Some(ty) = core_struct_field_type(&name, field) {
+                    return self.erase_distinct_ty(&ty);
+                }
+            }
+        }
+        // String transforms keep Type::String even when the receiver's field
+        // type was erased to Int above.
+        if let TExprKind::BuiltinMethod { op, .. } = &expr.kind {
+            if matches!(
+                op,
+                TBuiltinOp::Trim
+                    | TBuiltinOp::TrimView
+                    | TBuiltinOp::ToUpper
+                    | TBuiltinOp::ToLower
+            ) {
+                return Type::String;
+            }
         }
         self.erase_distinct_ty(&expr.ty)
     }
@@ -6672,6 +6785,8 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "TempDir" | "TempFile" | "FileLock" => &["path"],
         "LogField" => &["key", "value", "kind", "redacted"],
         "LogSpan" => &["id", "name"],
+        // Mirrors jet_std::ProcessResult field order (Open.rs).
+        "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)

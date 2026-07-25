@@ -18,6 +18,7 @@ mod Concurrency;
 mod CoreHost;
 mod Encoding;
 mod Numeric;
+mod Process;
 mod Random;
 mod Solver;
 

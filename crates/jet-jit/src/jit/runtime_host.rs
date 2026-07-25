@@ -9,7 +9,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use super::resident::resident_teardown;
 use super::{
     Archive, Collections, Compress, Concurrency, CoreHost, Encoding, JitResultValue, Numeric,
-    Random, Solver, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Process, Random, Solver, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
@@ -58,6 +58,10 @@ pub(crate) struct JitRuntime {
     pub(crate) rngs: Vec<crate::Random::RngState>,
     /// Manual `Clock.new(ms)` handles — 1-based indices into this vec (#729 uuid).
     pub(crate) clocks: Vec<i64>,
+    /// `ProcessSpec` handles — 1-based indices (#729 process builder).
+    pub(crate) process_specs: Vec<Process::JitProcessSpec>,
+    /// `ProcessChild` handles — 1-based indices (#729 process spawn).
+    pub(crate) process_children: Vec<Process::JitProcessChild>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -950,6 +954,7 @@ pub(crate) struct HostFns {
     pub(crate) encoding: Encoding::EncodingHostFns,
     pub(crate) compress: Compress::CompressHostFns,
     pub(crate) archive: Archive::ArchiveHostFns,
+    pub(crate) process: Process::ProcessHostFns,
     pub(crate) num: Numeric::NumericHostFns,
     pub(crate) solver: Solver::SolverHostFns,
     pub(crate) random: Random::RandomHostFns,
@@ -1077,6 +1082,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     Encoding::register_encoding_symbols(&mut builder);
     Compress::register_compress_symbols(&mut builder);
     Archive::register_archive_symbols(&mut builder);
+    Process::register_process_symbols(&mut builder);
     Numeric::register_numeric_symbols(&mut builder);
     Solver::register_solver_symbols(&mut builder);
     Random::register_random_symbols(&mut builder);
@@ -1087,6 +1093,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let encoding = Encoding::declare_encoding_host_fns(&mut module)?;
     let compress = Compress::declare_compress_host_fns(&mut module)?;
     let archive = Archive::declare_archive_host_fns(&mut module)?;
+    let process = Process::declare_process_host_fns(&mut module)?;
     let num = Numeric::declare_numeric_host_fns(&mut module)?;
     let solver = Solver::declare_solver_host_fns(&mut module)?;
     let random = Random::declare_random_host_fns(&mut module)?;
@@ -1098,6 +1105,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         encoding,
         compress,
         archive,
+        process,
         num,
         solver,
         random,
@@ -1113,6 +1121,7 @@ fn declare_host_fns(
     encoding: Encoding::EncodingHostFns,
     compress: Compress::CompressHostFns,
     archive: Archive::ArchiveHostFns,
+    process: Process::ProcessHostFns,
     num: Numeric::NumericHostFns,
     solver: Solver::SolverHostFns,
     random: Random::RandomHostFns,
@@ -1373,6 +1382,7 @@ fn declare_host_fns(
         encoding,
         compress,
         archive,
+        process,
         num,
         solver,
         random,
