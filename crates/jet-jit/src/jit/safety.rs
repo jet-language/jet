@@ -48,6 +48,18 @@ fn jit_list_native_type(ty: &Type) -> bool {
     jit_list_int_type(ty) || jit_list_float_type(ty) || jit_list_string_type(ty)
 }
 
+/// `[[Int]]` / `Iter<[Int]>` — flat_map identity receivers in iter_adapters.
+pub(crate) fn jit_list_of_int_list_type(ty: &Type) -> bool {
+    matches!(ty, Type::List(inner) if jit_list_int_type(inner))
+        || matches!(
+            ty,
+            Type::Apply { name, args }
+                if name == jet_foundation::Syntax::TYPE_ITER
+                    && args.len() == 1
+                    && jit_list_int_type(&args[0])
+        )
+}
+
 pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
     match ty {
         Type::List(inner) | Type::FixedList { elem: inner, .. }
@@ -128,6 +140,7 @@ pub(crate) fn jit_enum_type(ty: &Type) -> bool {
 
 fn jit_compound_type(ty: &Type) -> bool {
     jit_list_native_type(ty)
+        || jit_list_of_int_list_type(ty)
         || jit_list_task_int_type(ty)
         || jit_list_record_type(ty)
         || jit_map_string_type(ty)
@@ -266,8 +279,11 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::ListLit(elems) => {
             (jit_list_native_type(&expr.ty)
                 && elems.iter().all(|e| {
-                    matches!(&e.ty, Type::Int | Type::Float) && resident_safe_expr(e, callees)
+                    matches!(&e.ty, Type::Int | Type::Float | Type::String | Type::Char)
+                        && resident_safe_expr(e, callees)
                 }))
+                || (jit_list_of_int_list_type(&expr.ty)
+                    && elems.iter().all(|e| resident_safe_expr(e, callees)))
                 || (jit_list_task_int_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
                 || (jit_list_record_type(&expr.ty)
@@ -443,18 +459,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         }
         TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
         TExprKind::ClosureMethod { recv, op, args } => {
-            // Native Map/Filter over Int list/Iter; other closure ops remain gaps.
-            matches!(
-                op,
-                TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::Filter
-            ) && matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
-                && resident_safe_expr(recv, callees)
-                && args.len() == 1
-                && matches!(&args[0].kind, TExprKind::Lambda(lam)
-                    if lam.prep.is_empty()
-                        && lam.source_params.len() == 1
-                        && matches!(&lam.executable, TIR::TLambdaBody::Expr(e)
-                            if resident_safe_expr(e, callees)))
+            resident_safe_closure_method(recv, op, args, callees)
         }
         TExprKind::TaskGroupAll { tasks } => {
             jit_list_int_type(&expr.ty) && resident_safe_task_list_expr(tasks, callees)
@@ -498,6 +503,75 @@ fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
         && !arg.widen_to_vec
         && (!jit_struct_type(&arg.value.ty) || arg.borrow)
         && resident_safe_expr(&arg.value, callees)
+}
+
+fn resident_safe_unary_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
+    args.len() == 1
+        && matches!(
+            &args[0].kind,
+            TExprKind::Lambda(lam)
+                if lam.prep.is_empty()
+                    && lam.source_params.len() == 1
+                    && matches!(
+                        &lam.executable,
+                        TIR::TLambdaBody::Expr(e) if resident_safe_expr(e, callees)
+                    )
+        )
+}
+
+fn resident_safe_fold_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
+    args.len() == 2
+        && matches!(&args[0].ty, Type::Int)
+        && resident_safe_expr(&args[0], callees)
+        && matches!(
+            &args[1].kind,
+            TExprKind::Lambda(lam)
+                if lam.prep.is_empty()
+                    && lam.source_params.len() == 2
+                    && matches!(
+                        &lam.executable,
+                        TIR::TLambdaBody::Expr(e) if resident_safe_expr(e, callees)
+                    )
+        )
+}
+
+fn resident_safe_closure_method(
+    recv: &TExpr,
+    op: &TIR::TClosureOp,
+    args: &[TExpr],
+    callees: &HashSet<String>,
+) -> bool {
+    if !resident_safe_expr(recv, callees) {
+        return false;
+    }
+    match op {
+        TIR::TClosureOp::Map | TIR::TClosureOp::MapMut => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+                && resident_safe_unary_lambda(args, callees)
+        }
+        TIR::TClosureOp::Filter => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+                && resident_safe_unary_lambda(args, callees)
+        }
+        TIR::TClosureOp::TakeWhile
+        | TIR::TClosureOp::SkipWhile
+        | TIR::TClosureOp::Position => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+                && resident_safe_unary_lambda(args, callees)
+        }
+        TIR::TClosureOp::Fold | TIR::TClosureOp::Reduce => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+                && resident_safe_fold_lambda(args, callees)
+        }
+        TIR::TClosureOp::MinBy | TIR::TClosureOp::MaxBy => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
+                && resident_safe_unary_lambda(args, callees)
+        }
+        TIR::TClosureOp::FlatMap => {
+            jit_list_of_int_list_type(&recv.ty) && resident_safe_unary_lambda(args, callees)
+        }
+        _ => false,
+    }
 }
 
 fn resident_safe_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>) -> bool {
