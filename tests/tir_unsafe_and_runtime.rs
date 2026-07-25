@@ -660,7 +660,7 @@ fn text_ne(x: String?) -> String {
     if x != None {
         return x
     }
-    return "?"
+    return \"?\"
 }
 fn run() {
     print(from_ne(Val(3)))
@@ -671,7 +671,7 @@ fn run() {
     print(and_tail(Val(0)))
     print(and_tail(None))
     print(still_binds(Val(4)))
-    print(text_ne(Val("hi")))
+    print(text_ne(Val(\"hi\")))
     print(text_ne(None))
 }
 ";
