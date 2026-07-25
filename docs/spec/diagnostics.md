@@ -774,7 +774,6 @@ the `core.args` runtime-error voice above (no new code for that).
 | E1307 | a subcommand variant's payload isn't a `#[Cli]` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `#[Cli]`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `#[Cli]` struct payload. |
 | E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `#[Cli]`-derived, or an `enum` whose every variant carries a `#[Cli]` struct payload. | Mark the struct `#[Cli]`, or give the enum's variants `#[Cli]` struct payloads. |
 | E1309 | `` `#[Flag]` on `name` has nothing to opt out of `` | `#[Flag]` keeps a required value field flag-only (D-CLI-POS1=A). Bool fields, `T?` fields, and fields with `#[Default(...)]` are already flag-only. | Remove `#[Flag]`, or make the field a required scalar without `#[Default]`. |
-| E1309 | `` `#[Flag]` on `name` has nothing to opt out of `` | `#[Flag]` keeps a required value field flag-only. Bool fields, optional fields (`T?`), and fields with `#[Default(...)]` already stay flag-only. | Remove `#[Flag]`, or make the field a required scalar without `#[Default]`. |
 
 ### Checked Output callables (D-SHAPE-OUTPUT-CALLABLE1)
 
