@@ -110,7 +110,10 @@ covered:
   operators/chained_comparison
   operators/user_defined
   serde/csv
+  serde/datatree_accessors
+  serde/encoding
   serde/encoding_base
+  serde/json_coerce
   serde/user_derive
   syntax/maturity_tags
   text/hex_base64
@@ -168,7 +171,7 @@ gaps:
   cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
   collections/deque: run: jit static `std::collections::VecDeque::new`
-  collections/fixed_arrays: run: jit print type unsupported
+  collections/fixed_arrays: run: jit print type unsupported: IntN { signed: false, bits: 8 }
   collections/index_hook: run: jit index-hook assign unsupported
   collections/iter_hook: run: jit for-in method-call collection unsupported
   collections/iter_tools_audit: run: jit builtin method unsupported
@@ -208,7 +211,7 @@ gaps:
   effects/single_use_discard: run: jit unsafe region unsupported
   effects/smart_context: run: jit allocator constructor unsupported
   errors/error_context: load_config: jit host/default/uninit/ct-lit unsupported
-  errors/errors: run: jit print type unsupported
+  errors/errors: run: jit print type unsupported: Named("ParseError")
   errors/must_use: run: jit scope guard closure unsupported
   errors/panic: run: jit require/panic stop unsupported
   errors/rollback_trait: transfer: jit transact block unsupported
@@ -284,19 +287,16 @@ gaps:
   safety/typed_sql: run_query: jit host/default/uninit/ct-lit unsupported
   serde/codable_default: run: jit core call unsupported: core.encoding.json.decode
   serde/csv_typed: run: jit core call unsupported
-  serde/datatree_accessors: run: jit core call unsupported: core.encoding.json.parse
   serde/decode_traced: run: jit core call unsupported: core.encoding.json.decode_traced
-  serde/encoding: run: jit core call unsupported: core.encoding.json.parse
-  serde/encoding_breadth: run: jit core call unsupported: core.encoding.json.parse
+  serde/encoding_breadth: run: jit core call unsupported: core.encoding.json.canonical
   serde/encoding_cbor_stream: write_catalog: jit core call unsupported
   serde/encoding_csv_stream: write_catalog: jit core call unsupported
   serde/encoding_json_stream: write_catalog: jit core call unsupported
   serde/encoding_jsonl_stream: write_catalog: jit core call unsupported
   serde/encoding_stream_types: run: jit static `jet_std::EncodingLimits::safe`
   serde/encoding_xml_projection: run: jit core call unsupported: core.encoding.xml.parse
-  serde/encoding_xml_stream: xml_name: jit JSON literal unsupported
-  serde/hand_codec: Email::encode: jit JSON literal unsupported
-  serde/json_coerce: run: jit core call unsupported: core.encoding.json.decode
+  serde/encoding_xml_stream: write_catalog: jit core call unsupported
+  serde/hand_codec: run: jit core call unsupported: core.encoding.json.to_string
   serde/json_typed: run: jit core call unsupported: core.encoding.json.decode
   serde/serde_derive: run: jit core call unsupported: core.encoding.json.to_string
   serde/serde_generic: run: jit core call unsupported: core.encoding.json.to_string

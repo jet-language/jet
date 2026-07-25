@@ -215,6 +215,9 @@ impl<'a> JitMeta<'a> {
         enum_name: &str,
         variant: &str,
     ) -> Option<&[Type]> {
+        if matches!(enum_name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv") {
+            return Some(datatree_payload(variant));
+        }
         let key = format!("user_{enum_name}::user_{variant}");
         self.enum_variant_payload_types
             .get(&key)
@@ -271,6 +274,19 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
+        // DataTree (+ format aliases): Null/Bool/Int/Float/Text/Array/Object.
+        if matches!(enum_name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv") {
+            return match variant {
+                "Null" => Some(0),
+                "Bool" => Some(1),
+                "Int" => Some(2),
+                "Float" => Some(3),
+                "Text" => Some(4),
+                "Array" => Some(5),
+                "Object" => Some(6),
+                _ => None,
+            };
+        }
         let variants = self.enum_variants.get(enum_name)?;
         let mangled = format!("user_{variant}");
         variants
@@ -280,7 +296,8 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn is_enum(&self, name: &str) -> bool {
-        self.enum_variants.contains_key(name)
+        matches!(name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv" | "ProcessStreamMode")
+            || self.enum_variants.contains_key(name)
     }
 
     /// Packed i64 enum ABI (disc in low byte, payload >> 8): every variant is
@@ -351,5 +368,32 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             _ => None,
         },
         _ => None,
+    }
+}
+
+fn datatree_payload(variant: &str) -> &'static [Type] {
+    use std::sync::LazyLock;
+    static BOOL: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Bool]);
+    static INT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Int]);
+    static FLOAT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Float]);
+    static TEXT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::String]);
+    static ARRAY: LazyLock<[Type; 1]> =
+        LazyLock::new(|| [Type::List(Box::new(Type::Named("DataTree".into())))]);
+    static OBJECT: LazyLock<[Type; 1]> = LazyLock::new(|| {
+        [Type::Map {
+            key: Box::new(Type::String),
+            key_span: None,
+            value: Box::new(Type::Named("DataTree".into())),
+        }]
+    });
+    match variant {
+        "Null" => &[],
+        "Bool" => BOOL.as_slice(),
+        "Int" => INT.as_slice(),
+        "Float" => FLOAT.as_slice(),
+        "Text" => TEXT.as_slice(),
+        "Array" => ARRAY.as_slice(),
+        "Object" => OBJECT.as_slice(),
+        _ => &[],
     }
 }

@@ -6,8 +6,8 @@ use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
     self, TBuiltinOp, TCallArg, TClosureOp, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
     TForInMethod, THandleOp, THostArg, THostCall, TIfCond, TJitSpawnLambda, TLambdaBody, TLocal,
-    TMethodRef, TModuleCallForm, TNumericOp, TOrFallback, TPattern, TPlace, TStaticOwner, TStmt,
-    TStrPart,
+    TMethodRef, TModuleCallForm, TNumericOp, TOrFallback, TPattern, TPatternPosition, TPlace,
+    TStaticOwner, TStmt, TStrPart,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
 use std::collections::HashMap;
@@ -253,7 +253,7 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// True when this enum match uses heap-boxed F64 payloads (not packed i64).
+    /// True when this enum match uses heap-boxed payloads (F64 or DataTree ABI).
     fn enum_match_uses_f64_heap(&self, arms: &[TIR::TMatchArm]) -> bool {
         arms.iter().any(|arm| {
             let Some(variant) = arm.pattern.variant() else {
@@ -262,11 +262,130 @@ impl LowerCtx<'_, '_> {
             let Some(enum_name) = arm.pattern.enum_type.as_deref() else {
                 return false;
             };
+            if matches!(enum_name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv") {
+                return true;
+            }
             self.meta
                 .enum_variant_payload_types(enum_name, variant)
                 .and_then(|tys| tys.first())
                 .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32))
         })
+    }
+
+    fn is_datatree_value_ty(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Named(n) if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+        )
+    }
+
+    /// TIR `handle_method_return_ty` omits DataTree accessors (Unit fallback).
+    /// Recover the real `Result` ok payload for `??` / `?`.
+    fn datatree_handle_ok_ty(value: &TExpr) -> Option<Type> {
+        let TExprKind::HandleMethod { op, .. } = &value.kind else {
+            return None;
+        };
+        match op {
+            THandleOp::DataTreeField
+            | THandleOp::JsonField
+            | THandleOp::DataTreeAt
+            | THandleOp::JsonAt => Some(Type::Named("DataTree".into())),
+            THandleOp::DataTreeInt | THandleOp::JsonInt => Some(Type::Int),
+            THandleOp::DataTreeText | THandleOp::JsonText => Some(Type::String),
+            THandleOp::DataTreeBool | THandleOp::JsonBool => Some(Type::Bool),
+            THandleOp::DataTreeFloat | THandleOp::JsonFloat => Some(Type::Float),
+            _ => None,
+        }
+    }
+
+    fn datatree_variant_disc(variant: &str) -> Option<i64> {
+        match variant {
+            "Null" => Some(0),
+            "Bool" => Some(1),
+            "Int" => Some(2),
+            "Float" => Some(3),
+            "Text" => Some(4),
+            "Array" => Some(5),
+            "Object" => Some(6),
+            _ => None,
+        }
+    }
+
+    fn unpack_enum_heap_payload(
+        &mut self,
+        packed: Value,
+        payload_ty: &Type,
+    ) -> Result<Value, String> {
+        let one = self.b.ins().iconst(types::I64, 1);
+        match self.meta.clif_ty(payload_ty) {
+            Some(types::F64) => {
+                let get_f = self
+                    .module
+                    .declare_func_in_func(self.host.struct_get_f64, self.b.func);
+                let call = self.b.ins().call(get_f, &[packed, one]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            Some(types::I64) => {
+                let get_i = self
+                    .module
+                    .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+                let call = self.b.ins().call(get_i, &[packed, one]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            Some(types::I8) => {
+                let get_i = self
+                    .module
+                    .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+                let call = self.b.ins().call(get_i, &[packed, one]);
+                let raw = self.b.inst_results(call)[0];
+                Ok(self.b.ins().ireduce(types::I8, raw))
+            }
+            Some(types::I32) => {
+                let get_i = self
+                    .module
+                    .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+                let call = self.b.ins().call(get_i, &[packed, one]);
+                let raw = self.b.inst_results(call)[0];
+                Ok(self.b.ins().ireduce(types::I32, raw))
+            }
+            other => Err(format!(
+                "jit enum heap payload type unsupported: {payload_ty:?} ({other:?})"
+            )),
+        }
+    }
+
+    fn pack_datatree_enum(
+        &mut self,
+        disc: i64,
+        payload: Option<(Value, &Type)>,
+    ) -> Result<Value, String> {
+        let disc_v = self.b.ins().iconst(types::I64, disc);
+        let payload_bits = match payload {
+            None => self.b.ins().iconst(types::I64, 0),
+            Some((v, ty)) => match self.meta.clif_ty(ty) {
+                Some(types::F64) => {
+                    // Store as bits so `datatree_pack` can record_set_float.
+                    self.b.ins().bitcast(
+                        types::I64,
+                        Self::scalar_bitcast_memflags(),
+                        v,
+                    )
+                }
+                Some(types::I8) => self.b.ins().uextend(types::I64, v),
+                Some(types::I32) => self.b.ins().sextend(types::I64, v),
+                Some(types::I64) => v,
+                other => {
+                    return Err(format!(
+                        "jit DataTree payload type unsupported: {ty:?} ({other:?})"
+                    ))
+                }
+            },
+        };
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.encoding.datatree_pack, self.b.func);
+        let call = self.b.ins().call(host_ref, &[disc_v, payload_bits]);
+        Ok(self.b.inst_results(call)[0])
     }
 
     /// Erase `#Numeric` / unit-family distinct wrappers to Int/Float for arith,
@@ -306,9 +425,10 @@ impl LowerCtx<'_, '_> {
         let ok_ty = inner
             .ty
             .unwrap_result()
-            .map(|(ok, _)| ok)
+            .map(|(ok, _)| ok.clone())
+            .or_else(|| Self::datatree_handle_ok_ty(inner))
             .ok_or("jit try operand is not Result")?;
-        self.result_payload(handle, ok_ty)
+        self.result_payload(handle, &ok_ty)
     }
 
     fn loop_targets(&self, label: Option<&str>, kind: &str) -> Result<LoopTargets, String> {
@@ -770,7 +890,25 @@ impl LowerCtx<'_, '_> {
                 let cond_val = match cond {
                     TIfCond::Plain(e) => self.lower_expr(e)?,
                     TIfCond::IfLet { pattern, subj } => {
-                        self.lower_result_if_let(pattern, subj, then_body, else_body.as_deref())?;
+                        if matches!(
+                            &pattern.pattern,
+                            Pattern::Variant { .. }
+                        ) && Self::is_datatree_value_ty(&subj.ty)
+                        {
+                            self.lower_datatree_if_let(
+                                pattern,
+                                subj,
+                                then_body,
+                                else_body.as_deref(),
+                            )?;
+                        } else {
+                            self.lower_result_if_let(
+                                pattern,
+                                subj,
+                                then_body,
+                                else_body.as_deref(),
+                            )?;
+                        }
                         return Ok(());
                     }
                     // IfLet/IsNone/Matches lower to a pre-computed `matches!`/`is_none`
@@ -1488,7 +1626,11 @@ impl LowerCtx<'_, '_> {
                                     .and_then(|tys| tys.first())
                                     .cloned()
                                     .unwrap_or(Type::Int);
-                                let payload = self.unpack_enum_scalar(subj, &payload_ty)?;
+                                let payload = if f64_heap {
+                                    self.unpack_enum_heap_payload(subj, &payload_ty)?
+                                } else {
+                                    self.unpack_enum_scalar(subj, &payload_ty)?
+                                };
                                 let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
                                 let var = self.fresh_var(payload_clif);
                                 self.b.def_var(var, payload);
@@ -2737,6 +2879,90 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.encoding.json" {
+                    let datatree_ok = matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. }
+                            if matches!(
+                                ok.as_ref(),
+                                Type::Named(n)
+                                    if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                            )
+                    );
+                    let datatree_arg = args.first().is_some_and(|a| {
+                        matches!(
+                            &a.ty,
+                            Type::Named(n)
+                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                        )
+                    });
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "parse" if args.len() == 1 && datatree_ok => {
+                            (self.host.encoding.json_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        "decode" if args.len() == 1 && datatree_ok => {
+                            (self.host.encoding.json_decode, vec![self.lower_expr(&args[0])?])
+                        }
+                        "to_string" if args.len() == 1 && datatree_arg => (
+                            self.host.encoding.json_to_string,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "to_string_pretty" if args.len() == 1 && datatree_arg => (
+                            self.host.encoding.json_to_string_pretty,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!(
+                                "jit core call unsupported: core.encoding.json.{method}"
+                            ))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.encoding.toml" || module == "core.encoding.yaml" {
+                    let datatree_ok = matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. }
+                            if matches!(
+                                ok.as_ref(),
+                                Type::Named(n)
+                                    if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                            )
+                    );
+                    let datatree_arg = args.first().is_some_and(|a| {
+                        matches!(
+                            &a.ty,
+                            Type::Named(n)
+                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                        )
+                    });
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                        ("core.encoding.toml", "parse") if args.len() == 1 && datatree_ok => {
+                            (self.host.encoding.toml_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        ("core.encoding.toml", "to_string") if args.len() == 1 && datatree_arg => (
+                            self.host.encoding.toml_to_string,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.encoding.yaml", "parse") if args.len() == 1 && datatree_ok => {
+                            (self.host.encoding.yaml_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        ("core.encoding.yaml", "to_string") if args.len() == 1 && datatree_arg => (
+                            self.host.encoding.yaml_to_string,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!(
+                                "jit core call unsupported: {module}.{method}"
+                            ))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.uuid" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "v4" if args.is_empty() => (self.host.encoding.uuid_v4, Vec::new()),
@@ -3191,15 +3417,21 @@ impl LowerCtx<'_, '_> {
                     .ty
                     .unwrap_result()
                     .map(|(ok, _)| ok.clone())
+                    .or_else(|| Self::datatree_handle_ok_ty(value))
                     .ok_or_else(|| "jit result ?? operand is not Result".to_string())?;
-                let is_unit = matches!(&expr.ty, Type::Named(n) if n == "Unit" || n == "Void")
-                    || matches!(&ok_ty, Type::Named(n) if n == "Unit" || n == "Void");
+                let is_unit =
+                    matches!(&ok_ty, Type::Named(n) if n == "Unit" || n == "Void");
                 let ret_ty = if is_unit {
                     types::I8
                 } else {
-                    self.meta.clif_ty(&expr.ty).or_else(|| clif_ty(&expr.ty)).ok_or_else(|| {
-                        format!("jit result ?? type unsupported: {:?}", expr.ty)
-                    })?
+                    self.meta
+                        .clif_ty(&ok_ty)
+                        .or_else(|| clif_ty(&ok_ty))
+                        .or_else(|| self.meta.clif_ty(&expr.ty))
+                        .or_else(|| clif_ty(&expr.ty))
+                        .ok_or_else(|| {
+                            format!("jit result ?? type unsupported: ok={ok_ty:?} expr={:?}", expr.ty)
+                        })?
                 };
                 let status_ref = self
                     .module
@@ -3402,7 +3634,10 @@ impl LowerCtx<'_, '_> {
                 enum_type,
                 variant,
                 payload,
-            } => match payload {
+            } => {
+                let is_datatree =
+                    matches!(enum_type.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv");
+                match payload {
                 TEnumPayload::Unit => {
                     let disc = self
                         .meta
@@ -3415,7 +3650,11 @@ impl LowerCtx<'_, '_> {
                             _ => None,
                         })
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
-                    Ok(self.b.ins().iconst(types::I64, disc))
+                    if is_datatree {
+                        self.pack_datatree_enum(disc, None)
+                    } else {
+                        Ok(self.b.ins().iconst(types::I64, disc))
+                    }
                 }
                 TEnumPayload::Positional(values) if values.len() == 1 => {
                     let disc = self
@@ -3424,11 +3663,16 @@ impl LowerCtx<'_, '_> {
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     let payload_ty = values[0].value.ty.clone();
                     let payload = self.lower_expr(&values[0].value)?;
-                    self.pack_enum_scalar(disc, payload, &payload_ty)
+                    if is_datatree {
+                        self.pack_datatree_enum(disc, Some((payload, &payload_ty)))
+                    } else {
+                        self.pack_enum_scalar(disc, payload, &payload_ty)
+                    }
                 }
                 TEnumPayload::Positional(_) => Err("jit enum positional payload unsupported".to_string()),
                 TEnumPayload::Named(_) => Err("jit enum named payload unsupported".to_string()),
-            },
+            }
+            }
             TExprKind::Present(inner) => {
                 let v = self.lower_expr(inner)?;
                 // Encode optional Some as value+1 (0 = None elsewhere). Option ABI is
@@ -3464,7 +3708,10 @@ impl LowerCtx<'_, '_> {
                 Err("jit host/default/uninit/ct-lit unsupported".to_string())
             }
             TExprKind::ConstRef(_) => Err("jit const ref unsupported".to_string()),
-            TExprKind::DataEntriesToMap(_) => Err("jit data-entries-to-map unsupported".to_string()),
+            TExprKind::DataEntriesToMap(local) => {
+                // Object payload is already a Map handle in the JIT DataTree ABI.
+                self.load_local(local)
+            }
             TExprKind::PoolSlot { .. } => Err("jit pool slot unsupported".to_string()),
             TExprKind::RangeCheckedCtor { .. } => {
                 Err("jit range-checked ctor unsupported".to_string())
@@ -3512,7 +3759,21 @@ impl LowerCtx<'_, '_> {
             TExprKind::Deref(_) => Err("jit pointer deref unsupported".to_string()),
             TExprKind::RawOf(_) => Err("jit raw pointer address-of unsupported".to_string()),
             TExprKind::AllocNew { .. } => Err("jit allocator constructor unsupported".to_string()),
-            TExprKind::JsonLit { .. } => Err("jit JSON literal unsupported".to_string()),
+            TExprKind::JsonLit { variant, arg } => {
+                let disc = self
+                    .meta
+                    .enum_variant_index("DataTree", variant)
+                    .ok_or_else(|| format!("jit JSON lit `DataTree::{variant}`"))?;
+                match arg.as_ref() {
+                    None => self.pack_datatree_enum(disc, None),
+                    Some(boxed) => {
+                        let (expr, _) = boxed.as_ref();
+                        let payload_ty = expr.ty.clone();
+                        let payload = self.lower_expr(expr)?;
+                        self.pack_datatree_enum(disc, Some((payload, &payload_ty)))
+                    }
+                }
+            }
             TExprKind::DbValueLit { .. } => Err("jit DbValue literal unsupported".to_string()),
             TExprKind::ListSpread { .. } => Err("jit list spread unsupported".to_string()),
             TExprKind::ColumnarListLit { .. } => {
@@ -5064,18 +5325,51 @@ impl LowerCtx<'_, '_> {
             THandleOp::HttpServerMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpReqTrailers => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpRespTrailers => Err("jit handle method unsupported".to_string()),
-            THandleOp::DataTreeField => Err("jit handle method unsupported".to_string()),
-            THandleOp::DataTreeAt => Err("jit handle method unsupported".to_string()),
-            THandleOp::DataTreeInt => Err("jit handle method unsupported".to_string()),
-            THandleOp::DataTreeText => Err("jit handle method unsupported".to_string()),
-            THandleOp::DataTreeBool => Err("jit handle method unsupported".to_string()),
-            THandleOp::DataTreeFloat => Err("jit handle method unsupported".to_string()),
-            THandleOp::JsonField => Err("jit handle method unsupported".to_string()),
-            THandleOp::JsonAt => Err("jit handle method unsupported".to_string()),
-            THandleOp::JsonInt => Err("jit handle method unsupported".to_string()),
-            THandleOp::JsonText => Err("jit handle method unsupported".to_string()),
-            THandleOp::JsonBool => Err("jit handle method unsupported".to_string()),
-            THandleOp::JsonFloat => Err("jit handle method unsupported".to_string()),
+            THandleOp::DataTreeField | THandleOp::JsonField => {
+                let name = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_field, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, name]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DataTreeAt | THandleOp::JsonAt => {
+                let idx = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_at, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, idx]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DataTreeInt | THandleOp::JsonInt => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_int, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DataTreeText | THandleOp::JsonText => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_text, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DataTreeBool | THandleOp::JsonBool => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_bool, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DataTreeFloat | THandleOp::JsonFloat => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_float, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                // Result stores f64 bits; convert via result_get_f64 at use sites.
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::PathFrom => Err("jit handle method unsupported".to_string()),
             THandleOp::PathJoin => Err("jit handle method unsupported".to_string()),
             THandleOp::PathParent => Err("jit handle method unsupported".to_string()),
@@ -5383,6 +5677,9 @@ impl LowerCtx<'_, '_> {
                     return fb_ty;
                 }
             }
+            if let Some(ok) = Self::datatree_handle_ok_ty(value) {
+                return ok;
+            }
             // weighted_pick Option<String> when TIR erased the Option wrapper.
             if let TExprKind::CoreCall { module, method, .. } = &value.kind {
                 if module == "core.random" && method == "weighted_pick" {
@@ -5658,7 +5955,22 @@ impl LowerCtx<'_, '_> {
                     Type::Float => self.host.print_f64,
                     Type::Bool => self.host.print_bool,
                     Type::Char => self.host.print_char,
-                    _ => return Err("jit print type unsupported".to_string()),
+                    Type::Named(n) if n == "DataTree" || n == "Json" => {
+                        // JetShow DataTree/Json via shared encoding host (same as AOT).
+                        let host_ref = self
+                            .module
+                            .declare_func_in_func(self.host.encoding.json_to_string, self.b.func);
+                        let call = self.b.ins().call(host_ref, &[val]);
+                        let s = self.b.inst_results(call)[0];
+                        let print_ref = self
+                            .module
+                            .declare_func_in_func(self.host.print_str, self.b.func);
+                        self.b.ins().call(print_ref, &[s]);
+                        return Ok(());
+                    }
+                    _ => {
+                        return Err(format!("jit print type unsupported: {print_ty:?}"));
+                    }
                 };
                 let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                 self.b.ins().call(host_ref, &[val]);
@@ -5930,6 +6242,134 @@ impl LowerCtx<'_, '_> {
         }
         if let Some(t) = old_ty {
             self.var_tys.insert(place, t);
+        }
+        let then_reaches_merge = !self.dead;
+        if then_reaches_merge {
+            self.b.ins().jump(merge_block, &[]);
+        }
+
+        self.b.switch_to_block(else_block);
+        self.b.seal_block(else_block);
+        self.dead = false;
+        if let Some(body) = else_body {
+            self.lower_stmts(body)?;
+        }
+        let else_reaches_merge = !self.dead;
+        if else_reaches_merge {
+            self.b.ins().jump(merge_block, &[]);
+        }
+
+        if then_reaches_merge || else_reaches_merge {
+            self.b.switch_to_block(merge_block);
+            self.b.seal_block(merge_block);
+            self.dead = false;
+        } else {
+            self.dead = true;
+        }
+        Ok(())
+    }
+
+    /// `if data == .Object(entries)` / `.Int(n)` on DataTree heap records.
+    fn lower_datatree_if_let(
+        &mut self,
+        pattern: &TPattern,
+        subj: &TExpr,
+        then_body: &[TStmt],
+        else_body: Option<&[TStmt]>,
+    ) -> Result<(), String> {
+        let Pattern::Variant {
+            variant, bindings, ..
+        } = &pattern.pattern
+        else {
+            return Err("jit DataTree if-let needs a variant pattern".to_string());
+        };
+        let want_disc = Self::datatree_variant_disc(variant)
+            .ok_or_else(|| format!("jit DataTree variant `{variant}`"))?;
+        let payload_ty = self
+            .meta
+            .enum_variant_payload_types("DataTree", variant)
+            .and_then(|tys| tys.first())
+            .cloned();
+
+        let handle = self.lower_expr(subj)?;
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let get_i = self
+            .module
+            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+        let disc_call = self.b.ins().call(get_i, &[handle, zero]);
+        let actual_disc = self.b.inst_results(disc_call)[0];
+        let want = self.b.ins().iconst(types::I64, want_disc);
+        let cond = self.bool_from_icmp(IntCC::Equal, actual_disc, want);
+
+        let then_block = self.b.create_block();
+        let else_block = self.b.create_block();
+        let merge_block = self.b.create_block();
+        self.b
+            .ins()
+            .brif(cond, then_block, &[], else_block, &[]);
+
+        self.b.switch_to_block(then_block);
+        self.b.seal_block(then_block);
+
+        let mut bound_place: Option<String> = None;
+        let mut old_var = None;
+        let mut old_ty = None;
+        match &pattern.position {
+            TPatternPosition::DataEntries { temp } => {
+                // Object → bind temp to map payload; body prefix converts via DataEntriesToMap.
+                let payload = self.unpack_enum_heap_payload(
+                    handle,
+                    &payload_ty.clone().unwrap_or(Type::Map {
+                        key: Box::new(Type::String),
+                        key_span: None,
+                        value: Box::new(Type::Named("DataTree".into())),
+                    }),
+                )?;
+                let place = temp.clone();
+                old_var = self.vars.remove(&place);
+                old_ty = self.var_tys.remove(&place);
+                let var = self.fresh_var(types::I64);
+                self.b.def_var(var, payload);
+                self.vars.insert(place.clone(), var);
+                self.var_tys.insert(
+                    place.clone(),
+                    payload_ty.clone().unwrap_or(Type::Map {
+                        key: Box::new(Type::String),
+                        key_span: None,
+                        value: Box::new(Type::Named("DataTree".into())),
+                    }),
+                );
+                bound_place = Some(place);
+            }
+            _ => {
+                if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
+                    if name != "_" {
+                        let pty = payload_ty.clone().unwrap_or(Type::Int);
+                        let payload = self.unpack_enum_heap_payload(handle, &pty)?;
+                        let place = TIR::local_place(name);
+                        old_var = self.vars.remove(&place);
+                        old_ty = self.var_tys.remove(&place);
+                        let clif = self.meta.clif_ty(&pty).unwrap_or(types::I64);
+                        let var = self.fresh_var(clif);
+                        self.b.def_var(var, payload);
+                        self.vars.insert(place.clone(), var);
+                        self.var_tys.insert(place.clone(), pty);
+                        bound_place = Some(place);
+                    }
+                }
+            }
+        }
+
+        self.lower_stmts_scoped(then_body)?;
+        if let Some(place) = bound_place {
+            self.vars.remove(&place);
+            self.var_tys.remove(&place);
+            if let Some(v) = old_var {
+                self.vars.insert(place.clone(), v);
+            }
+            if let Some(t) = old_ty {
+                self.var_tys.insert(place, t);
+            }
         }
         let then_reaches_merge = !self.dead;
         if then_reaches_merge {
