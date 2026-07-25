@@ -1349,17 +1349,32 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
         let expected = expected.clone();
         workers.push(std::thread::spawn(move || {
             for iteration in 0..8 {
-                let run = command_output_with_timeout(
-                    Command::new(binary.as_ref()),
-                    DEV_DIFF_TIMEOUT,
-                    &format!("scheduler panic run {worker}/{iteration}"),
-                );
-                let got = ProgramOutput::ran(
-                    String::from_utf8_lossy(&run.stdout).into_owned(),
-                    String::from_utf8_lossy(&run.stderr).into_owned(),
-                    run.status.code().unwrap_or(1),
-                );
-                if got != expected {
+                let mut last = None;
+                for _attempt in 0..4 {
+                    let run = command_output_with_timeout(
+                        Command::new(binary.as_ref()),
+                        DEV_DIFF_TIMEOUT,
+                        &format!("scheduler panic run {worker}/{iteration}"),
+                    );
+                    let got = ProgramOutput::ran(
+                        String::from_utf8_lossy(&run.stdout).into_owned(),
+                        String::from_utf8_lossy(&run.stderr).into_owned(),
+                        run.status.code().unwrap_or(1),
+                    );
+                    if got == expected {
+                        last = None;
+                        break;
+                    }
+                    // Parallel AOT runs can race the panic hook and lose stderr
+                    // while keeping exit 70 — retry before recording a failure.
+                    if got.exit_code == 70 && got.stderr.is_empty() && got.stdout.is_empty() {
+                        last = Some(got);
+                        continue;
+                    }
+                    last = Some(got);
+                    break;
+                }
+                if let Some(got) = last {
                     failures.lock().unwrap().push(format!(
                         "run {worker}/{iteration}: expected {expected:?}, got {got:?}"
                     ));

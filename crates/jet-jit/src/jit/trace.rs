@@ -1,33 +1,35 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::cell::Cell;
 
-static JIT_EXECUTED: AtomicBool = AtomicBool::new(false);
-static FALLBACK_INVOKED: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn note_jit_execution() {
-    JIT_EXECUTED.store(true, Ordering::SeqCst);
+thread_local! {
+    static JIT_EXECUTED: Cell<bool> = const { Cell::new(false) };
+    static FALLBACK_INVOKED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Test-only: whether strict Cranelift executed in this process.
+pub(crate) fn note_jit_execution() {
+    JIT_EXECUTED.with(|flag| flag.set(true));
+}
+
+/// Test-only: whether strict Cranelift executed on this thread.
 #[doc(hidden)]
 pub fn jit_executed_for_test() -> bool {
-    JIT_EXECUTED.load(Ordering::SeqCst)
+    JIT_EXECUTED.with(Cell::get)
 }
 
 /// Test-only: reset JIT execution trace between assertions.
 #[doc(hidden)]
 pub fn reset_jit_trace_for_test() {
-    JIT_EXECUTED.store(false, Ordering::SeqCst);
-    FALLBACK_INVOKED.store(false, Ordering::SeqCst);
+    JIT_EXECUTED.with(|flag| flag.set(false));
+    FALLBACK_INVOKED.with(|flag| flag.set(false));
 }
 
 /// Test-only: record that a forbidden fallback backend was reached.
 #[doc(hidden)]
 pub fn note_fallback_invoked_for_test() {
-    FALLBACK_INVOKED.store(true, Ordering::SeqCst);
+    FALLBACK_INVOKED.with(|flag| flag.set(true));
 }
 
 /// Test-only: whether a forbidden fallback backend ran.
 #[doc(hidden)]
 pub fn fallback_invoked_for_test() -> bool {
-    FALLBACK_INVOKED.load(Ordering::SeqCst)
+    FALLBACK_INVOKED.with(Cell::get)
 }
