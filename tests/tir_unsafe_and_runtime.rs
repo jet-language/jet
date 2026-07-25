@@ -614,9 +614,8 @@ fn first_even(xs: [Int]) -> Int {
     return out.len()
 }
 fn run() {
-    nothing ::  None 
     print(describe(Val(7)))
-    print(describe(nothing))
+    print(describe(None))
     print(first_even([1, 2, 3]))
 }
 ";
@@ -624,3 +623,141 @@ fn run() {
     assert_eq!(code, 0);
     assert_eq!(stdout, "got 7\nnothing\n3\n");
 }
+
+/// D-FLOWTYPE1=A: stable immutable Optional narrows after `!= None` / else of `== None`.
+#[test]
+fn optional_flow_narrowing_after_none_check() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn from_ne(x: Int?) -> Int {
+    if x != None {
+        return x + 1
+    }
+    return 0
+}
+fn from_else(x: Int?) -> Int {
+    if x == None {
+        return 0
+    } else {
+        return x + 2
+    }
+}
+fn and_tail(x: Int?) -> Int {
+    if x != None && x > 0 {
+        return x
+    }
+    return -1
+}
+fn still_binds(x: Int?) -> Int {
+    if x == Val(n) {
+        return n * 10
+    }
+    return -2
+}
+fn text_ne(x: String?) -> String {
+    if x != None {
+        return x
+    }
+    return "?"
+}
+fn run() {
+    print(from_ne(Val(3)))
+    print(from_ne(None))
+    print(from_else(Val(5)))
+    print(from_else(None))
+    print(and_tail(Val(7)))
+    print(and_tail(Val(0)))
+    print(and_tail(None))
+    print(still_binds(Val(4)))
+    print(text_ne(Val("hi")))
+    print(text_ne(None))
+}
+";
+    let (code, stdout) = build_and_run("tir_opt_flow", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "4\n0\n7\n0\n7\n-1\n-1\n40\nhi\n?\n");
+}
+
+/// D-FLOWTYPE1=A negatives: mutable / field / call subjects do not narrow;
+/// facts end at the branch boundary and do not travel through `||`.
+#[test]
+fn optional_flow_narrowing_rejects_unstable_subjects() {
+    let mutable = jet::compile(
+        "\
+fn run() {
+    x := Val(1)
+    if x != None {
+        print(x + 1)
+    }
+}
+",
+    );
+    assert!(
+        mutable.is_err(),
+        "mutable Optional must not narrow after != None"
+    );
+
+    let field = jet::compile(
+        "\
+struct Box {
+    n: Int?
+}
+fn run() {
+    b :: Box.{ n: Val(1) }
+    if b.n != None {
+        print(b.n + 1)
+    }
+}
+",
+    );
+    assert!(
+        field.is_err(),
+        "field Optional must not narrow after != None"
+    );
+
+    let call = jet::compile(
+        "\
+fn get() -> Int? { return Val(1) }
+fn run() {
+    if get() != None {
+        print(get() + 1)
+    }
+}
+",
+    );
+    assert!(call.is_err(), "call Optional must not narrow after != None");
+
+    let after_branch = jet::compile(
+        "\
+fn run() {
+    x :: Val(1)
+    if x != None {
+        print(x)
+    }
+    print(x + 1)
+}
+",
+    );
+    assert!(
+        after_branch.is_err(),
+        "Optional narrowing must end at the branch boundary"
+    );
+
+    let through_or = jet::compile(
+        "\
+fn run() {
+    x :: Val(1)
+    if x != None || true {
+        print(x + 1)
+    }
+}
+",
+    );
+    assert!(
+        through_or.is_err(),
+        "Optional narrowing must not travel through ||"
+    );
+}
+
