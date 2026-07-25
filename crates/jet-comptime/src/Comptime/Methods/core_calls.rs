@@ -2171,6 +2171,18 @@ pub fn apply_impure_core_call(
                 CtValue::Int(n) => *n,
                 _ => 0,
             };
+            // In-process interpreter/deopt must not kill the host (cargo test,
+            // jet dev). Soft-exit via the sink; bare comptime keeps hard exit.
+            if let Some(s) = sink {
+                s.exit_code = Some(code as i32);
+                return Err(Diagnostic::error(
+                    "SOFT_EXIT",
+                    code.to_string(),
+                    "process.exit requested".to_string(),
+                    String::new(),
+                    Some(span),
+                ));
+            }
             std::process::exit(code as i32);
         }
         ("core.process", "run") => {
@@ -2236,6 +2248,12 @@ pub fn apply_impure_core_call(
                 .to_string(),
             Some(span),
         )),
+        // Pure compress/archive codecs live on apply_core_call; reuse them when
+        // the runtime evaluator has ambient impure depth open (#778 deopt).
+        ("core.compress.gzip", _)
+        | ("core.compress.zstd", _)
+        | ("core.archive", _)
+        | ("core.perf", _) => apply_core_call(module, method, args, span, repl_mode),
         _ => Err(unsupported(
             &format!("`{}.{}()` at comptime (impure tier)", module, method),
             span,

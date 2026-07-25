@@ -109,4 +109,5 @@ pub use tiers::{set_trace_tiers, take_last_trace, trace_tiers_enabled, Tier, Tie
 pub use trace::{
     fallback_invoked_for_test, jit_executed_for_test, note_fallback_invoked_for_test,
     note_deopt_invoked_for_test, deopt_invoked_for_test, reset_jit_trace_for_test,
+    jit_trace_flags_for_test, merge_jit_trace_flags_for_test, JitTraceFlags,
 };

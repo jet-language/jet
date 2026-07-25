@@ -54,6 +54,9 @@ pub(super) enum Flow {
 pub struct DevSink {
     pub stdout: String,
     pub stderr: String,
+    /// Soft `core.process.exit` — set instead of killing the host process
+    /// when a sink is present (interpreter / deopt / `jet run` in-process).
+    pub exit_code: Option<i32>,
 }
 
 impl DevSink {
@@ -61,6 +64,7 @@ impl DevSink {
         DevSink {
             stdout: String::new(),
             stderr: String::new(),
+            exit_code: None,
         }
     }
 }

@@ -3,6 +3,8 @@
 # Covered means TIR lowered and Cranelift compiled end-to-end; gaps list the first compile/unsupported reason.
 # Shrink-only perf ratchet (D-LENS-RUN2 / #778): gaps may only shrink; silent growth fails CI.
 # Covered/gap movement is intentional only; update this file in the same diff.
+# #778: lowlevel/target_profile_board is a new post-#239 example (typed target profiles);
+# added as a named gap (core call unsupported) — not silent growth.
 
 covered:
   basics/branches
@@ -90,7 +92,6 @@ covered:
   types/dot_construction
   types/enums
   types/external_methods
-  types/generic_constructor_inference
   types/inferred_new
   types/structs
   types/tags_and_traits
@@ -129,7 +130,6 @@ gaps:
   collections/wordcount: run: jit list get_opt status unsupported
   comptime/comptime_core: run: jit const ref unsupported
   comptime/comptime_if: run: jit inline comptime branch unsupported
-  comptime/comptime_table: run: jit const ref unsupported
   comptime/comptime_tiers: run: jit const ref unsupported
   concurrency/deadline_context: run: jit context block unsupported
   concurrency/detached_task: run: jit handle method unsupported
@@ -213,6 +213,7 @@ gaps:
   lowlevel/sized_floats: run: jit core call unsupported
   lowlevel/sized_integers: run: jit unary neg unsupported type: IntN { signed: true, bits: 8 }
   lowlevel/swizzle: run: jit math builtin unsupported
+  lowlevel/target_profile_board: run: jit core call unsupported
   lowlevel/unsafe_obligations: run: jit unsafe region unsupported
   math/math_audit: run: jit core call unsupported
   math/random_audit: run: jit core call unsupported
@@ -277,7 +278,6 @@ gaps:
   serde/encoding_xml_projection: run: jit core call unsupported
   serde/encoding_xml_stream: xml_name: jit JSON literal unsupported
   serde/hand_codec: Email::encode: jit JSON literal unsupported
-  serde/json: run: jit core call unsupported
   serde/json_coerce: run: jit core call unsupported
   serde/json_typed: run: jit core call unsupported
   serde/serde_derive: run: jit record field unsupported: List(String)
@@ -315,7 +315,6 @@ gaps:
   types/enum_dot_patterns: area: jit enum payload type unsupported: Float (Some(types::F64))
   types/generic_types: run: jit call to unknown function `make_pair`
   types/measurement: run: jit core call unsupported
-  types/nested_enum_groups: run: jit enum `Damage::Physical`
   types/no_any_alternatives: run: jit call to unknown function `echo`
   types/option: run: jit if-let condition unsupported
   types/option_combinators: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "has an invalid controlling type f64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: true, 4: true, 5: true, 6: true, 7: true }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "arg 1 (v7) has type i64, expected f64" }, VerifierError { location: inst9, context: Some("return v8"), message: "result 0 has type f64, must match function signature of i64" }])

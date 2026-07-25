@@ -316,8 +316,96 @@ impl EvalCtx<'_> {
             }
             TStmt::EnumMatch { .. } => Err(unsupported("enum match", self.span())),
             TStmt::RangeSwitch { .. } => Err(unsupported("range switch", self.span())),
-            TStmt::MixedSwitch { .. } => Err(unsupported("mixed switch", self.span())),
-            TStmt::IndexAssign { .. } => Err(unsupported("index assign", self.span())),
+            TStmt::MixedSwitch {
+                subject: _,
+                arms,
+                else_body,
+            } => {
+                // Subject is bound for AOT parity only; arm conditions are full exprs.
+                for (cond, body) in arms {
+                    let c = self.eval_expr(cond, scope)?;
+                    if as_bool(&c, self.span())? {
+                        return self.exec_stmts(body, scope);
+                    }
+                }
+                if let Some(body) = else_body {
+                    return self.exec_stmts(body, scope);
+                }
+                Ok(Flow::Normal)
+            }
+            TStmt::IndexAssign {
+                base,
+                index,
+                is_map,
+                value,
+            } => {
+                let base_name = match &base.kind {
+                    crate::Codegen::TIR::TExprKind::Local(local) => local.name.clone(),
+                    _ => return Err(unsupported("index assign base", self.span())),
+                };
+                let idx_v = self.eval_expr(index, scope)?;
+                let rhs = self.eval_expr(value, scope)?;
+                // Mutable place-window write-through (`&xs[a..b]` → `__JetViewMut`).
+                if let Some(CtValue::Struct {
+                    type_name,
+                    fields,
+                }) = scope.get(&base_name).cloned()
+                {
+                    if type_name == "__JetViewMut" {
+                        let mut base_s = None;
+                        let mut start = None;
+                        for (n, v) in &fields {
+                            match (n.as_str(), v) {
+                                ("base", CtValue::Str(s)) => base_s = Some(s.clone()),
+                                ("start", CtValue::Int(n)) => start = Some(*n),
+                                _ => {}
+                            }
+                        }
+                        let (owner, start) = match (base_s, start) {
+                            (Some(b), Some(s)) => (b, s),
+                            _ => return Err(unsupported("view-mut fields", self.span())),
+                        };
+                        let idx = as_int(&idx_v, self.span())?;
+                        if idx < 0 {
+                            return Err(unsupported("negative view index", self.span()));
+                        }
+                        let Some(CtValue::List(mut items)) = scope.get(&owner).cloned() else {
+                            return Err(unsupported("view-mut owner", self.span()));
+                        };
+                        let i = (start + idx) as usize;
+                        if i >= items.len() {
+                            return Err(unsupported("view-mut OOB", self.span()));
+                        }
+                        items[i] = rhs;
+                        scope.insert(owner, CtValue::List(items));
+                        return Ok(Flow::Normal);
+                    }
+                }
+                if *is_map {
+                    let Some(CtValue::Map(mut entries)) = scope.get(&base_name).cloned() else {
+                        return Err(unsupported("index assign map", self.span()));
+                    };
+                    let key = crate::AST::CtKey::from_value(idx_v)
+                        .ok_or_else(|| unsupported("index assign map key", self.span()))?;
+                    entries.insert(key, rhs);
+                    scope.insert(base_name, CtValue::Map(entries));
+                } else {
+                    let idx = as_int(&idx_v, self.span())?;
+                    if idx < 0 {
+                        return Err(unsupported("negative index assign", self.span()));
+                    }
+                    let Some(CtValue::List(mut items)) = scope.get(&base_name).cloned() else {
+                        return Err(unsupported("index assign list", self.span()));
+                    };
+                    let i = idx as usize;
+                    if i >= items.len() {
+                        return Err(unsupported("index assign OOB", self.span()));
+                    }
+                    items[i] = rhs;
+                    scope.insert(base_name, CtValue::List(items));
+                }
+                Ok(Flow::Normal)
+            }
             TStmt::IndexFieldAssign(assign) => {
                 if assign.is_map {
                     return Err(unsupported("index field assign on map", self.span()));

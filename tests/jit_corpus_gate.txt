@@ -5,14 +5,18 @@
 frontend_rejected:
   comptime/comptime_block: E0956: comparing these values can't run at compile time yet; E2713: there is no comptime value named `ratio`
   comptime/comptime_parse: E0956: the method `.parse` at compile time can't run at compile time yet; E0956: the method `.parse` at compile time can't run at compile time yet; E0956: the method `.parse` at compile time can't run at compile time yet; E0107: nothing named `a` exists here; E0107: nothing named `b` exists here; E0107: nothing named `c` exists here; E0107: nothing named `a` exists here; E0107: nothing named `c` exists here
+  comptime/comptime_table: E0956: expr `Todo` can't run at compile time yet; E0107: nothing named `table` exists here; E0107: nothing named `table` exists here
   comptime/embed: E0956: call `embed_file` can't run at compile time yet; E0956: unbound `motd` can't run at compile time yet; E0107: nothing named `motd` exists here
   comptime/embed_bytes: E0956: call `embed_bytes` can't run at compile time yet; E0956: unbound `logo` can't run at compile time yet; E0956: unbound `logo` can't run at compile time yet; E0956: unbound `logo` can't run at compile time yet; E0107: nothing named `size` exists here; E0107: nothing named `fifth` exists here
   comptime/find: E0956: call `find` can't run at compile time yet; E0107: nothing named `paths` exists here
   comptime/find_empty: E0956: call `find` can't run at compile time yet; E0107: nothing named `paths` exists here
   crypto/crypto_suite: E1004: `jet.crypto` has no item `constant_time_equal_bytes`; E1004: `jet.crypto` has no item `constant_time_equal_bytes`
-  modules/generic_modules: E0857: value argument for `mode` is not known at compile time; E0107: nothing named `values` exists here
+  modules/generic_modules: E0857: value argument for `mode` is not known at compile time; E0119: there's no type called `K`; E0963: this list has 1 element, but `[T#0]` expects exactly 0; E0113: `echo` promises to return [Int#3], but this returns [Int#capacity]; E0107: nothing named `values` exists here; E0963: this list has 1 element, but `[T#3]` expects exactly 3
+  serde/json: E0108: this map holds values of type `Json`, not `DataTree`; E0108: this map holds values of type `Json`, not `DataTree`; E0112: `Object` wants [String: DataTree] for argument 1, but this is [String: Json]
   tooling/data_core: E0915: `Float ? DataError` has no `Display` implementation; E0311: `len` isn't a method on this value
-  tooling/data_pipeline: E0302: `.count` only works on struct and tuple values; E0302: `.median` only works on struct and tuple values; E0505: only lists and maps can be indexed, not [Float] ? DataError
+  tooling/data_pipeline: E0308: bare `None` needs a known optional type here; E0504: this list started as `Float?` but item 2 is `Int`; E0504: this list started as `Float?` but item 4 is `Int`; E0302: `.count` only works on struct and tuple values; E0302: `.median` only works on struct and tuple values; E0505: only lists and maps can be indexed, not [Float] ? DataError
+  types/generic_constructor_inference: E0501: an empty list needs a type
+  types/nested_enum_groups: E0108: argument 1 to `.add()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.add()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.remove()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.count()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.has()` should be Int (a whole number), not `Damage`
 
 gate_excluded:
   game/raylib_window: interactive display required
@@ -35,12 +39,16 @@ expected_exit:
   collections/list_bounds: golden expects non-zero exit
   collections/list_remove_bounds: golden expects non-zero exit
   collections/map_key: golden expects non-zero exit
+  collections/set: AOT compile or run failed
   concurrency/all_failfast: golden expects non-zero exit
   concurrency/deadline_context: golden expects non-zero exit
   errors/error_context: golden expects non-zero exit
   errors/panic: golden expects non-zero exit
   io/archive: AOT compile or run failed
+  lowlevel/lowlevel: AOT compile or run failed
+  lowlevel/unsafe_obligations: AOT compile or run failed
   memory/pool_stale_id: golden expects non-zero exit
+  memory/rawptr: AOT compile or run failed
   net/email_dkim: AOT compile or run failed
   net/email_message: AOT compile or run failed
   net/http_client: AOT compile or run failed
@@ -140,113 +148,110 @@ resident_jit:
 deopt_interp:
   basics/bare_lambda_param: E0956: expr `Lambda` can't run at compile time yet
   basics/callbacks: E0956: expr `FnValue` can't run at compile time yet
-  basics/closures: E0956: expr `ClosureMethod` can't run at compile time yet
+  basics/closures
   basics/fan_out
-  basics/first_hour: E3410: `core.io.args()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  basics/first_hour
   basics/pattern_matching: E0956: enum match can't run at compile time yet
   basics/printable
   basics/range_step
   basics/tuples: E0956: field `x` can't run at compile time yet
   basics/variadics_spread: E0956: expr `ListSpread` can't run at compile time yet
   collections/deque: E0956: prelude static `std::collections::VecDeque.new` can't run at compile time yet
-  collections/dynamic-array-view: E0956: expr `ClosureMethod` can't run at compile time yet
-  collections/filter_map: E0956: expr `ClosureMethod` can't run at compile time yet
+  collections/dynamic-array-view: E0956: split views can't run at compile time yet
+  collections/filter_map: E0956: the method `.parse` at compile time can't run at compile time yet
   collections/fixed_arrays
   collections/index_hook: E0956: index hook assign can't run at compile time yet
   collections/iter_adapters: E0956: the method `.take` at compile time can't run at compile time yet
   collections/iter_hook: E0956: for-in method collection can't run at compile time yet
   collections/iter_tools_audit: E0956: the method `.sum` at compile time can't run at compile time yet
   collections/lists
-  collections/set: E0956: the method `.from` at compile time can't run at compile time yet
-  collections/sketch: E0956: handle `SketchMethod` can't run at compile time yet
-  collections/wordcount: E0956: index assign can't run at compile time yet
+  collections/sketch: E0956: `core.sketch.hll.new()` at comptime (impure tier) can't run at compile time yet
+  collections/wordcount
   comptime/comptime_core
   comptime/comptime_if
-  comptime/comptime_table
   comptime/comptime_tiers
   concurrency/detached_task: E0956: expr `CoreClosureCall` can't run at compile time yet
-  concurrency/parallel_iter: E0956: expr `ClosureMethod` can't run at compile time yet
-  concurrency/parallel_scan: E3410: `core.io.args()` is a Tier-2 comptime effect — it requires a `#Impure` gate
-  concurrency/protocol: E0956: static `Payment.Client.client` can't run at compile time yet
+  concurrency/parallel_iter: E0956: closure method variant can't run at compile time yet
+  concurrency/parallel_scan: E0956: `core.tasks.channel()` at comptime (impure tier) can't run at compile time yet
+  concurrency/protocol
   concurrency/task_controls: E0956: expr `CoreClosureCall` can't run at compile time yet
-  concurrency/task_runtime_audit: E0956: `core.tasks.channel()` at comptime can't run at compile time yet
-  crypto/auth_tokens: E0956: `core.auth.verify_jwt()` at comptime can't run at compile time yet
-  crypto/crypto_envelope: E0956: `jet.crypto.__x25519_generate()` at comptime can't run at compile time yet
-  crypto/crypto_migration: E0956: `jet.crypto.__x25519_generate()` at comptime can't run at compile time yet
-  crypto/crypto_sign: E0956: `jet.crypto.__signing_generate()` at comptime can't run at compile time yet
-  crypto/hash: E0956: `jet.crypto.sha256()` at comptime can't run at compile time yet
-  crypto/random_api_split: E0956: `core.crypto.random.bytes()` at comptime can't run at compile time yet
-  crypto/typed_crypto: E0956: `jet.crypto.__x25519_generate()` at comptime can't run at compile time yet
+  concurrency/task_runtime_audit: E0956: `core.tasks.channel()` at comptime (impure tier) can't run at compile time yet
+  crypto/auth_tokens: E0956: `core.auth.verify_jwt()` at comptime (impure tier) can't run at compile time yet
+  crypto/crypto_envelope: E0956: `jet.crypto.__x25519_generate()` at comptime (impure tier) can't run at compile time yet
+  crypto/crypto_migration: E0956: `jet.crypto.__x25519_generate()` at comptime (impure tier) can't run at compile time yet
+  crypto/crypto_sign: E0956: `jet.crypto.__signing_generate()` at comptime (impure tier) can't run at compile time yet
+  crypto/hash: E0956: `jet.crypto.sha256()` at comptime (impure tier) can't run at compile time yet
+  crypto/random_api_split: E0956: `core.random.bytes()` at comptime (impure tier) can't run at compile time yet
+  crypto/typed_crypto: E0956: `jet.crypto.__x25519_generate()` at comptime (impure tier) can't run at compile time yet
   crypto/vault_key_wrap
-  crypto/vault_keys: E0956: `core.vault.current()` at comptime can't run at compile time yet
+  crypto/vault_keys: E0956: `core.vault.current()` at comptime (impure tier) can't run at compile time yet
   crypto/vault_secret: E0953: your comptime code stopped the build
   devloop/persist: E0956: const `counter` can't run at compile time yet
   effects/all_sigils: E0956: complex assign place can't run at compile time yet
   effects/asset_pipeline: E0956: complex assign place can't run at compile time yet
   effects/capability_sigils: E0956: complex assign place can't run at compile time yet
   effects/determinism: E0956: expr `HostCall` can't run at compile time yet
-  effects/effect_grant: E3410: `core.files.write()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  effects/effect_grant
   effects/effect_higher_order: E0956: expr `FnValue` can't run at compile time yet
   effects/effect_levers: E0956: expr `FnValue` can't run at compile time yet
   effects/infer_capability: E0956: complex assign place can't run at compile time yet
-  effects/infer_receiver: E0956: method `damage` can't run at compile time yet
+  effects/infer_receiver: E0956: complex assign place can't run at compile time yet
   effects/mix_write_take: E0956: complex assign place can't run at compile time yet
   effects/move_no_uaf
   effects/single_use
   effects/single_use_discard
   effects/smart_context: E0956: expr `ResourceNew` can't run at compile time yet
-  effects/taint: E0956: `core.process.run()` at comptime can't run at compile time yet
-  errors/discard_fallible: E3410: `core.files.write()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  effects/taint
+  errors/discard_fallible
   errors/errors: E0956: enum match can't run at compile time yet
   errors/must_use: E0956: expr `CoreClosureCall` can't run at compile time yet
   errors/qq_control: E0956: the method `.parse` at compile time can't run at compile time yet
   errors/rollback_trait: E0956: statement `Transact` can't run at compile time yet
   errors/transact: E0956: statement `Transact` can't run at compile time yet
   errors/typed_error_families: E0956: enum match can't run at compile time yet
-  functions/lambda_bare_params: E0956: expr `ClosureMethod` can't run at compile time yet
-  functions/lambda_inference: E0956: expr `ClosureMethod` can't run at compile time yet
+  functions/lambda_bare_params
+  functions/lambda_inference
   game/core_game_headless: E0956: handle `GameSceneNew` can't run at compile time yet
-  io/args_audit: E0956: `core.args.spec()` at comptime can't run at compile time yet
-  io/args_spec: E0956: `core.args.spec()` at comptime can't run at compile time yet
-  io/cli: E3410: `core.io.args()` is a Tier-2 comptime effect — it requires a `#Impure` gate
-  io/cli_args: E3410: `core.io.args()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  io/args_audit: E0956: `core.args.spec()` at comptime (impure tier) can't run at compile time yet
+  io/args_spec: E0956: `core.args.spec()` at comptime (impure tier) can't run at compile time yet
+  io/cli
+  io/cli_args
   io/compress_gzip: E0956: enum match can't run at compile time yet
   io/compress_zstd: E0956: enum match can't run at compile time yet
   io/db: E0956: expr `ResourceNew` can't run at compile time yet
   io/db_checked_sql: E0956: expr `ResourceNew` can't run at compile time yet
   io/db_read_footprint: E0956: expr `ResourceNew` can't run at compile time yet
-  io/dir_entry: E3410: `core.files.create_dir()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  io/dir_entry: E0956: `core.path.join()` at comptime (impure tier) can't run at compile time yet
   io/env_overlay: E0956: expr `HostCall` can't run at compile time yet
-  io/files: E3410: `core.files.write()` is a Tier-2 comptime effect — it requires a `#Impure` gate
-  io/files_depth: E3410: `core.files.exists()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  io/files
+  io/files_depth: E0956: `core.path.join()` at comptime (impure tier) can't run at compile time yet
   io/io_prelude
-  io/log: E0956: `jet.log.set_level()` at comptime can't run at compile time yet
-  io/log_human: E0956: `jet.log.setup()` at comptime can't run at compile time yet
-  io/log_structured: E0956: `jet.log.setup()` at comptime can't run at compile time yet
-  io/no_prelude: E3410: `core.io.print()` is a Tier-2 comptime effect — it requires a `#Impure` gate
-  io/os_facts: E0956: `core.os.name()` at comptime can't run at compile time yet
+  io/log: E0956: `jet.log.set_level()` at comptime (impure tier) can't run at compile time yet
+  io/log_human: E0956: `jet.log.setup()` at comptime (impure tier) can't run at compile time yet
+  io/log_structured: E0956: `jet.log.setup()` at comptime (impure tier) can't run at compile time yet
+  io/no_prelude: E0956: `core.io.print()` at comptime (impure tier) can't run at compile time yet
+  io/os_facts: E0956: `core.os.name()` at comptime (impure tier) can't run at compile time yet
   io/path: E0956: handle `PathFrom` can't run at compile time yet
   io/process_builder: E0956: handle `DurationNew` can't run at compile time yet
   io/scope_guard: E0956: expr `CoreClosureCall` can't run at compile time yet
   io/stdin_filter: E0956: for-in method collection can't run at compile time yet
-  io/stream: E3410: `core.files.write()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  io/stream: E0956: `core.path.join()` at comptime (impure tier) can't run at compile time yet
   io/terminal: E0956: if-let can't run at compile time yet
   io/terminal_parity: E0956: expr `HostCall` can't run at compile time yet
   lowlevel/ffi: E0956: expr `ExternCall` can't run at compile time yet
-  lowlevel/freestanding
+  lowlevel/freestanding: E0956: `core.math.sqrt()` at comptime (impure tier) can't run at compile time yet
   lowlevel/inline_asm: E0956: expr `ExternCall` can't run at compile time yet
   lowlevel/inline_c: E0956: expr `ExternCall` can't run at compile time yet
   lowlevel/layout_columnar: E0956: expr `ColumnarListLit` can't run at compile time yet
   lowlevel/linalg_simd: E0956: `Vec3.new` can't run at compile time yet
-  lowlevel/lowlevel
-  lowlevel/os_target_gating: E0956: method `label` can't run at compile time yet
-  lowlevel/pointer_cast_deref: E0956: `core.mem.address_of()` at comptime can't run at compile time yet
-  lowlevel/sized_floats: E0956: expr `NumericMethod` can't run at compile time yet
+  lowlevel/os_target_gating: E0956: unbound `self` can't run at compile time yet
+  lowlevel/pointer_cast_deref: E0956: `core.mem.address_of()` at comptime (impure tier) can't run at compile time yet
+  lowlevel/sized_floats: E0956: `core.math.sqrt()` at comptime (impure tier) can't run at compile time yet
   lowlevel/sized_integers: E0956: expr `NumericMethod` can't run at compile time yet
   lowlevel/swizzle: E0956: `Vec3.new` can't run at compile time yet
-  lowlevel/unsafe_obligations: E0956: `core.mem.volatile_read()` at comptime can't run at compile time yet
-  math/math_audit
-  math/random_audit: E0956: handle `RngFloatRange` can't run at compile time yet
+  lowlevel/target_profile_board: E0956: `core.math.sqrt()` at comptime (impure tier) can't run at compile time yet
+  math/math_audit: E0956: `core.math.sin()` at comptime (impure tier) can't run at compile time yet
+  math/random_audit: E0956: `core.random.seed()` at comptime (impure tier) can't run at compile time yet
   memory/arena: E0956: expr `ResourceNew` can't run at compile time yet
   memory/arena_parse: E0956: expr `ResourceNew` can't run at compile time yet
   memory/arena_regions: E0956: expr `ResourceNew` can't run at compile time yet
@@ -258,8 +263,7 @@ deopt_interp:
   memory/no_alloc_policy: E0956: complex assign place can't run at compile time yet
   memory/ownership: E0956: expr `FnValue` can't run at compile time yet
   memory/parameter_modes: E0956: call `read_generic` can't run at compile time yet
-  memory/place_windows: E0956: index assign can't run at compile time yet
-  memory/rawptr
+  memory/place_windows
   memory/resource_close: E0956: expr `ResourceNew` can't run at compile time yet
   memory/returned_views
   memory/shared_config: E0956: prelude static `jet_std::JetShared.new` can't run at compile time yet
@@ -267,76 +271,73 @@ deopt_interp:
   memory/string_view
   memory/uninit
   memory/uninit_buffer
-  modules/library: E0956: method `greeting` can't run at compile time yet
-  net/http_server_limits: E3410: `core.net.tcp_listen()` is a Tier-2 comptime effect — it requires a `#Impure` gate
-  net/url_mime: E0956: handle `UrlMimeMethod` can't run at compile time yet
+  modules/library: E0956: unbound `self` can't run at compile time yet
+  net/http_server_limits: E3412: `core.net.tcp_listen()` is not available at comptime
+  net/url_mime: E0956: `core.url.parse()` at comptime (impure tier) can't run at compile time yet
   parsing/binary-reader: E0956: handle `ReaderOver` can't run at compile time yet
-  parsing/binary_pattern: E0956: mixed switch can't run at compile time yet
-  parsing/parse_interpolation: E0956: mixed switch can't run at compile time yet
+  parsing/binary_pattern: E0956: expr `HostCall` can't run at compile time yet
+  parsing/parse_interpolation: E0956: expr `HostCall` can't run at compile time yet
   parsing/text-cursor: E0956: handle `CursorOver` can't run at compile time yet
-  patterns/struct_destructure: E0956: mixed switch can't run at compile time yet
-  reflection/reflect-value: E0956: handle `ReflectValueTypeName` can't run at compile time yet
+  patterns/struct_destructure: E0956: expr `HostCall` can't run at compile time yet
+  reflection/reflect-value: E0956: `core.reflect.of()` at comptime (impure tier) can't run at compile time yet
   safety/sh_typed_text: E0956: expr `HostCall` can't run at compile time yet
   safety/typed_sql: E0956: expr `HostCall` can't run at compile time yet
-  serde/codable_default: E0956: JSON lenient decode coercion audit effects can't run at compile time yet
-  serde/csv
-  serde/csv_typed: E0956: `core.encoding.csv.decode()` at comptime can't run at compile time yet
-  serde/datatree_accessors: E0956: handle `DataTreeField` can't run at compile time yet
-  serde/decode_traced: E0956: `core.encoding.json.decode_traced()` at comptime can't run at compile time yet
-  serde/encoding
-  serde/encoding_base
-  serde/encoding_breadth
+  serde/codable_default: E0956: `core.encoding.json.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/csv: E0956: `core.encoding.csv.parse()` at comptime (impure tier) can't run at compile time yet
+  serde/csv_typed: E0956: `core.encoding.csv.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/datatree_accessors: E0956: `core.encoding.json.parse()` at comptime (impure tier) can't run at compile time yet
+  serde/decode_traced: E0956: `core.encoding.json.decode_traced()` at comptime (impure tier) can't run at compile time yet
+  serde/encoding: E0956: `core.encoding.json.parse()` at comptime (impure tier) can't run at compile time yet
+  serde/encoding_base: E0956: `core.encoding.base64.encode()` at comptime (impure tier) can't run at compile time yet
+  serde/encoding_breadth: E0956: `core.encoding.json.parse()` at comptime (impure tier) can't run at compile time yet
   serde/encoding_cbor_stream: E0956: expr `ResourceNew` can't run at compile time yet
   serde/encoding_csv_stream: E0956: expr `ResourceNew` can't run at compile time yet
   serde/encoding_json_stream: E0956: expr `ResourceNew` can't run at compile time yet
   serde/encoding_jsonl_stream: E0956: expr `ResourceNew` can't run at compile time yet
   serde/encoding_stream_types: E0956: prelude static `jet_std::EncodingLimits.safe` can't run at compile time yet
-  serde/encoding_xml_projection: E0956: `core.encoding.xml.root()` at comptime can't run at compile time yet
+  serde/encoding_xml_projection: E0956: `core.encoding.xml.parse()` at comptime (impure tier) can't run at compile time yet
   serde/encoding_xml_stream: E0956: expr `ResourceNew` can't run at compile time yet
-  serde/hand_codec: E0956: JSON lenient decode coercion audit effects can't run at compile time yet
-  serde/json: E0956: if-let can't run at compile time yet
-  serde/json_coerce: E0956: JSON lenient decode coercion audit effects can't run at compile time yet
-  serde/json_typed: E0956: JSON lenient decode coercion audit effects can't run at compile time yet
-  serde/serde_derive: E0956: JSON lenient decode coercion audit effects can't run at compile time yet
-  serde/serde_generic: E0956: JSON lenient decode coercion audit effects can't run at compile time yet
-  serde/toml: E0956: `core.encoding.toml.decode()` at comptime can't run at compile time yet
+  serde/hand_codec: E0956: `core.encoding.json.to_string()` at comptime (impure tier) can't run at compile time yet
+  serde/json_coerce: E0956: `core.encoding.json.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/json_typed: E0956: `core.encoding.json.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/serde_derive: E0956: `core.encoding.json.to_string()` at comptime (impure tier) can't run at compile time yet
+  serde/serde_generic: E0956: `core.encoding.json.to_string()` at comptime (impure tier) can't run at compile time yet
+  serde/toml: E0956: `core.encoding.toml.decode()` at comptime (impure tier) can't run at compile time yet
   serde/validate: E0956: enum match can't run at compile time yet
-  serde/yaml: E0956: `core.encoding.yaml.decode()` at comptime can't run at compile time yet
+  serde/yaml: E0956: `core.encoding.yaml.decode()` at comptime (impure tier) can't run at compile time yet
   streams/generators: E0956: expr `HostCall` can't run at compile time yet
   syntax/trailing_block: E0956: expr `Lambda` can't run at compile time yet
   text/bigint
-  text/dates: E0956: handle `CivilTimeMethod` can't run at compile time yet
-  text/datetime: E0956: handle `CivilTimeMethod` can't run at compile time yet
-  text/decimal
-  text/hex_base64: E0956: enum match can't run at compile time yet
-  text/human_format
-  text/regex: E0956: if-let can't run at compile time yet
+  text/dates: E0956: `core.time.date.new()` at comptime (impure tier) can't run at compile time yet
+  text/datetime: E0956: `core.time.datetime.from_timestamp()` at comptime (impure tier) can't run at compile time yet
+  text/decimal: E0956: `core.math.decimal()` at comptime (impure tier) can't run at compile time yet
+  text/hex_base64: E0956: `core.encoding.hex.encode()` at comptime (impure tier) can't run at compile time yet
+  text/human_format: E0956: `core.fmt.number()` at comptime (impure tier) can't run at compile time yet
+  text/regex: E0956: `jet.regex.is_match()` at comptime (impure tier) can't run at compile time yet
   text/runtime_duration: E0956: handle `DurationNew` can't run at compile time yet
-  text/time_calendar: E0956: handle `CivilTimeMethod` can't run at compile time yet
-  text/unicode_text
-  text/unicode_text_audit
-  text/uuid: E0956: `core.uuid.v4()` at comptime can't run at compile time yet
-  tooling/data_json: E0956: `core.data.json()` at comptime can't run at compile time yet
-  tooling/data_schema: E0956: `core.data.csv()` at comptime can't run at compile time yet
-  tooling/debug_native: E3410: `core.files.write()` is a Tier-2 comptime effect — it requires a `#Impure` gate
+  text/time_calendar: E0956: `core.time.parse_rfc3339()` at comptime (impure tier) can't run at compile time yet
+  text/unicode_text: E0956: `core.text.unicode.scalar_count()` at comptime (impure tier) can't run at compile time yet
+  text/unicode_text_audit: E0956: `core.text.byte_count()` at comptime (impure tier) can't run at compile time yet
+  text/uuid: E0956: `core.uuid.v4()` at comptime (impure tier) can't run at compile time yet
+  tooling/data_json: E0956: `core.data.json()` at comptime (impure tier) can't run at compile time yet
+  tooling/data_schema: E0956: `core.data.csv()` at comptime (impure tier) can't run at compile time yet
+  tooling/debug_native
   tooling/fuzz_demo: E0956: the method `.insert` at compile time can't run at compile time yet
   tooling/property_tests: E0956: the method `.insert` at compile time can't run at compile time yet
   tooling/provenance_track: E0956: expr `NumericMethod` can't run at compile time yet
   tooling/statement_attributes
-  tooling/testing_helpers: E0956: `core.testing.temp_dir()` at comptime can't run at compile time yet
+  tooling/testing_helpers: E0956: `core.testing.temp_dir()` at comptime (impure tier) can't run at compile time yet
   tooling/todo_hole
   types/capability_bundles: E0956: expr `DistinctConvert` can't run at compile time yet
   types/display_debug: E0956: unbound `self` can't run at compile time yet
   types/distinct_types: E0956: expr `DistinctConvert` can't run at compile time yet
   types/enum_dot: E0956: enum match can't run at compile time yet
   types/enum_dot_patterns: E0956: enum match can't run at compile time yet
-  types/generic_constructor_inference: E0956: static `Box.new` can't run at compile time yet
   types/generic_types: E0956: call `make_pair` can't run at compile time yet
-  types/measurement: E0956: handle `MeasurementMethod` can't run at compile time yet
-  types/nested_enum_groups: E0956: enum match can't run at compile time yet
+  types/measurement: E0956: `core.science.measurement.from()` at comptime (impure tier) can't run at compile time yet
   types/no_any_alternatives: E0956: enum match can't run at compile time yet
   types/option: E0956: if-let can't run at compile time yet
-  types/option_combinators: E0956: expr `ClosureMethod` can't run at compile time yet
+  types/option_combinators: E0956: expr `OptionLift2` can't run at compile time yet
   types/optional_result_variants: E0956: enum match can't run at compile time yet
   types/patchable: E0956: method `apply` can't run at compile time yet
   types/range_types: E0956: expr `DistinctConvert` can't run at compile time yet
@@ -345,26 +346,26 @@ deopt_interp:
   types/renderable-varargs: E0956: call `log_all__va4` can't run at compile time yet
   types/renderable-varargs-multi: E0956: call `announce__va1` can't run at compile time yet
   types/type_alias
-  types/typed_literal_head: E0956: index assign can't run at compile time yet
+  types/typed_literal_head
   types/unit_family: E0956: expr `DistinctConvert` can't run at compile time yet
   types/unit_literals: E0956: expr `DistinctConvert` can't run at compile time yet
   types/value_tag_type
-  ui/events: E0956: `core.event.scope()` at comptime can't run at compile time yet
+  ui/events: E0956: `core.event.scope()` at comptime (impure tier) can't run at compile time yet
   ui/layout_basic: E0956: statement `Layout` can't run at compile time yet
-  ui/loadable: E0956: handle `LoadableMethod` can't run at compile time yet
-  ui/reactive: E0956: `jet.reactive.signal()` at comptime can't run at compile time yet
-  ui/reactive_scope: E0956: `jet.reactive.signal()` at comptime can't run at compile time yet
-  ui/ui_a11y: E0956: `core.ui.null_backend()` at comptime can't run at compile time yet
-  ui/ui_component_kit: E0956: `core.ui.null_backend()` at comptime can't run at compile time yet
+  ui/loadable: E0956: `core.reactive.loadable.idle()` at comptime (impure tier) can't run at compile time yet
+  ui/reactive: E0956: `jet.reactive.signal()` at comptime (impure tier) can't run at compile time yet
+  ui/reactive_scope: E0956: `jet.reactive.signal()` at comptime (impure tier) can't run at compile time yet
+  ui/ui_a11y: E0956: `core.ui.null_backend()` at comptime (impure tier) can't run at compile time yet
+  ui/ui_component_kit: E0956: `core.ui.text()` at comptime (impure tier) can't run at compile time yet
   ui/ui_motion: E0956: expr `HostCall` can't run at compile time yet
-  ui/ui_null_backend: E0956: `core.ui.null_backend()` at comptime can't run at compile time yet
-  ui/ui_tui_reactive: E0956: `core.ui.tui_backend()` at comptime can't run at compile time yet
+  ui/ui_null_backend: E0956: `core.ui.null_backend()` at comptime (impure tier) can't run at compile time yet
+  ui/ui_tui_reactive: E0956: `core.ui.tui_backend()` at comptime (impure tier) can't run at compile time yet
   ui/ui_typed_style: E0956: expr `DistinctConvert` can't run at compile time yet
-  ui/ui_view_tree: E0956: `jet.reactive.signal()` at comptime can't run at compile time yet
-  web/ui_showcase: E0956: `core.ui.null_backend()` at comptime can't run at compile time yet
+  ui/ui_view_tree: E0956: `core.ui.text()` at comptime (impure tier) can't run at compile time yet
+  web/ui_showcase: E0956: `core.ui.text()` at comptime (impure tier) can't run at compile time yet
   web/ui_web_click: E0953: your comptime code stopped the build
-  web/ui_web_reactive: E0956: `core.ui.null_backend()` at comptime can't run at compile time yet
-  web/web_hello: E0956: `core.ui.null_backend()` at comptime can't run at compile time yet
+  web/ui_web_reactive: E0956: `core.ui.null_backend()` at comptime (impure tier) can't run at compile time yet
+  web/web_hello: E0956: `core.ui.null_backend()` at comptime (impure tier) can't run at compile time yet
   web/web_wasm_callback
   web/web_wasm_list
   web/web_wasm_list_string

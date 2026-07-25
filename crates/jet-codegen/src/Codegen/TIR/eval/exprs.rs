@@ -55,6 +55,9 @@ impl EvalCtx<'_> {
                 .ok_or_else(|| unsupported(&format!("const `{name}`"), self.span())),
             TExprKind::Print(inner) => {
                 let v = self.eval_expr(inner, scope)?;
+                if self.pending_return.is_some() {
+                    return Ok(CtValue::Unit);
+                }
                 self.write_print(&v.jet_show(), false)?;
                 Ok(CtValue::Unit)
             }
@@ -125,6 +128,38 @@ impl EvalCtx<'_> {
                 }
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
+                if matches!(op, crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }) {
+                    let base_name = match &recv.kind {
+                        TExprKind::Local(local) => local.name.clone(),
+                        TExprKind::Borrow { place, .. } => match &place.kind {
+                            TExprKind::Local(local) => local.name.clone(),
+                            _ => {
+                                return Err(unsupported("view-mut base", self.span()));
+                            }
+                        },
+                        _ => return Err(unsupported("view-mut base", self.span())),
+                    };
+                    let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
+                    let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
+                    let CtValue::List(xs) = scope
+                        .get(&base_name)
+                        .cloned()
+                        .ok_or_else(|| unsupported("view-mut unbound base", self.span()))?
+                    else {
+                        return Err(unsupported("view-mut list base", self.span()));
+                    };
+                    if start < 0 || end < start || end as usize >= xs.len() {
+                        return Err(unsupported("view-mut bounds", self.span()));
+                    }
+                    return Ok(CtValue::Struct {
+                        type_name: "__JetViewMut".into(),
+                        fields: vec![
+                            ("base".into(), CtValue::Str(base_name)),
+                            ("start".into(), CtValue::Int(start)),
+                            ("end".into(), CtValue::Int(end)),
+                        ],
+                    });
+                }
                 let mut r = self.eval_expr(recv, scope)?;
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
@@ -347,12 +382,40 @@ impl EvalCtx<'_> {
                 if method.mangled {
                     names.push(format!("user_{}", method.name));
                 }
+                if let CtValue::Struct { type_name, .. } = &r {
+                    names.push(format!("{type_name}::{}", method.name));
+                }
                 for name in names {
                     if let Some(func) = self.funcs.get(&name).copied() {
                         let mut child = HashMap::new();
-                        let mut full = vec![r.clone()];
-                        full.extend(argv);
-                        return self.run_func(func, full, &mut child);
+                        // Instance methods lower `self` into the env, not `params`.
+                        let argv_for_params = if matches!(
+                            &func.kind,
+                            crate::Codegen::TIR::TFuncKind::Method {
+                                self_conv: Some(_),
+                                ..
+                            }
+                        ) {
+                            child.insert("self".to_string(), r.clone());
+                            argv
+                        } else {
+                            let mut full = vec![r.clone()];
+                            full.extend(argv);
+                            full
+                        };
+                        let result = self.run_func(func, argv_for_params, &mut child)?;
+                        if matches!(
+                            &func.kind,
+                            crate::Codegen::TIR::TFuncKind::Method {
+                                self_conv: Some(crate::AST::AccessConvention::Write),
+                                ..
+                            }
+                        ) {
+                            if let Some(updated) = child.get("self") {
+                                self.write_back_place(recv, updated.clone(), scope)?;
+                            }
+                        }
+                        return Ok(result);
                     }
                 }
                 Err(unsupported(
@@ -570,6 +633,7 @@ impl EvalCtx<'_> {
                             return res;
                         }
                         let candidates = [
+                            format!("{type_name}::{}", method.name),
                             format!("{type_name}.{}", method.name),
                             method.name.clone(),
                             format!("user_{}", method.name),
@@ -723,6 +787,10 @@ impl EvalCtx<'_> {
         let mut argv = Vec::with_capacity(args.len());
         for a in args {
             argv.push(self.eval_expr(&a.value, scope)?);
+            // Try/`?` may set pending_return mid-arg; abort the call (don't print Unit).
+            if self.pending_return.is_some() {
+                return Ok(CtValue::Unit);
+            }
         }
         if name == "print" {
             let text = argv.first().map(|v| v.jet_show()).unwrap_or_default();
