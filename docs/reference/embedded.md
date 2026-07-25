@@ -53,9 +53,9 @@ jet build --freestanding --target=aarch64-unknown-linux-gnu 61_freestanding.jet
 
 ## Typed target profile facts
 
-Card #239 / D-TARGET-* adds the internal profile model used by the next
-embedded slices. Hosted builds keep hidden defaults. A no-OS profile carries
-these typed facts before codegen:
+Card #239 / D-TARGET-* makes freestanding and embedded builds use typed board
+profiles. Hosted Jet keeps hidden defaults. A selected no-OS profile carries
+these facts before codegen and into build artifacts:
 
 - target triple plus `no-os`
 - named memory regions: origin, size in bytes/KiB/MiB, kind (`flash`, `ram`,
@@ -64,19 +64,40 @@ these typed facts before codegen:
   `sha256:` hash
 - allocator policy: none, fixed region/size, or hosted default
 - panic policy: abort, report sink, or hosted default
+- execution honesty: no-OS profiles are AOT-only (`dev` / `jit` rejected)
 - audit requirements for build artifact plus dossier lens
 
-Validation is data-first in this slice. It reports missing flash/RAM,
-overlapping or overflowing memory, RAM budget overflow, heap use with no
-allocator, hosted Core APIs on a no-OS profile, MMIO outside declared regions,
-MMIO without an unsafe audit gate, missing panic policy, and missing linker
-provenance. Turning those data errors into new user diagnostics remains gated
-on exact diagnostic decisions.
+Validation is data-first. It reports missing flash/RAM, overlapping or
+overflowing memory, RAM budget overflow, heap use with no allocator, hosted
+Core APIs on a no-OS profile, MMIO outside declared regions, MMIO without an
+unsafe audit gate, missing panic policy, and missing linker provenance.
 
-The profile audit JSON is stable and contains memory layout, linker source,
-allocator, panic behavior, unavailable Core APIs, and MMIO unsafe reasons. The
-ratified user-facing shape is a `jet inspect dossier target` lens plus a build artifact;
-CLI/package wiring lands in the later surface slice.
+### Real firmware artifacts
+
+Selecting a typed profile builds deterministic firmware under
+`.jet/target/<name>/` (tests use a temp dir):
+
+- `memory.ld` — generated linker script from memory regions
+- `startup.c` / `startup.S` — reset or `_start` for the triple
+- `firmware.elf` — linked image (`clang` + `ld.lld`)
+- `firmware.map` — linker map
+- `<name>.target.json` — stable audit JSON plus size/budget fields
+
+Representative boards:
+
+| Profile | Triple | Proof |
+|---------|--------|-------|
+| `board.sensor_v1` | `thumbv7em-none-eabihf` | MCU ELF + map + audit + flash budget |
+| `board.virt_aarch64` | `aarch64-unknown-none` | QEMU `virt` boots and prints `OK` |
+
+```sh
+jet inspect dossier target board.sensor_v1
+jet inspect dossier target board.virt_aarch64 --json
+```
+
+Hostile profiles fail closed (overlap, missing panic, heap without allocator,
+MMIO outside regions). Unsupported Dev/JIT paths return
+`ExecutionTierUnsupported` for no-OS profiles.
 
 ## Running under QEMU (D-CROSS3 local harness)
 
@@ -89,16 +110,18 @@ Arch), then:
 qemu-aarch64-static ./build/61_freestanding
 ```
 
-For a bare-metal target that doesn't link std (future work), use QEMU
-system-mode:
+For a typed no-OS profile, QEMU system-mode is the live proof path. The
+`board.virt_aarch64` profile builds `firmware.elf` and boots under:
 
 ```sh
 qemu-system-aarch64 \
   -machine virt \
   -cpu cortex-a57 \
-  -kernel ./build/61_freestanding \
+  -kernel .jet/target/board.virt_aarch64/firmware.elf \
   -nographic
 ```
+
+The smoke harness expects the UART to print `OK` (see `tests/target_profiles.rs`).
 
 ## Checking target availability
 
@@ -114,8 +137,11 @@ Adds a `cross` section to the doctor report:
 ## Caveats (v1)
 
 - No board-support package or HAL library (use the low-level tier directly).
-- Only one target is proven in CI (aarch64-linux per D-CROSS1).
+- Jet module spelling for board profiles (`module board.sensor_v1 { … }` per
+  D-TARGET-SURFACE1) selects through typed profile builders today; package
+  `targets: { profile: … }` wiring stays on the existing `targets:` surface.
+- Profile validation errors remain data (`TargetProfileError`) until a follow-up
+  diagnostic ballot promotes them to registered codes.
 - WASM is deferred to post-epoch (no browser runtime in v1).
 - E3303 (missing global allocator in freestanding) is registered. The typed
-  profile model now catches the same fact as data; CLI/profile wiring will
-  promote it through the user diagnostic path once that surface slice lands.
+  profile model catches the same fact as data.

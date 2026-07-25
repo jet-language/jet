@@ -15,12 +15,36 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
         }
     }
 
+    // D-TARGET-AUDIT1=A: `jet inspect dossier target <profile>`
+    if positional.first().copied() == Some("target") {
+        let name = positional.get(1).copied().unwrap_or("board.sensor_v1");
+        match jet::Driver::target_profile_dossier_json(name) {
+            Ok(audit) => {
+                if json {
+                    println!("{audit}");
+                } else {
+                    println!("target profile: {name}");
+                    println!("{audit}");
+                }
+            }
+            Err(msg) => {
+                eprintln!("error: {msg}");
+                eprintln!(
+                    " Fix: jet inspect dossier target board.sensor_v1  (or board.virt_aarch64)"
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+        return;
+    }
+
     let (path, target) = match positional.as_slice() {
         [path] => (*path, None),
         [path, target] => (*path, Some(*target)),
         _ => {
             eprintln!("error: `jet inspect dossier` needs an entry file and optional symbol");
             eprintln!(" Fix: jet inspect dossier examples/features/basics/hello.jet run");
+            eprintln!(" Fix: jet inspect dossier target board.sensor_v1");
             exit(ExitCodes::USER_ERROR);
         }
     };
