@@ -6,6 +6,23 @@ fn error_codes(source: &str) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn architecture_states_datarace1_c_and_honest_bound() {
+    let architecture = include_str!("../docs/spec/architecture.md");
+    assert!(
+        architecture.contains("D-DATARACE1=C is law"),
+        "architecture must state the ratified D-DATARACE1=C guarantee"
+    );
+    assert!(
+        architecture.contains("must not claim that every safe program is data-race free"),
+        "architecture must keep the honest bound until the reactive upgrade ships"
+    );
+    assert!(
+        !architecture.contains("own the open choice"),
+        "architecture must not treat D-DATARACE1 as an open choice after ratification"
+    );
+}
+
 fn assert_rejected(source: &str, code: &str) {
     let codes = error_codes(source);
     assert!(
