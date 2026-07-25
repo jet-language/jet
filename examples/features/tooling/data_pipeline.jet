@@ -17,6 +17,10 @@ fn must_stay_deferred(ticket: Ticket) -> Bool {
     return false
 }
 
+fn no_minutes() -> (Float?) {
+    return None
+}
+
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
@@ -27,19 +31,18 @@ fn run() {
     deferred :: data.lazy_filter(lazy, (t) => must_stay_deferred(t))
     print("deferred: {data.plan(deferred)[1]}")
     planned :: data.lazy_sort_by(data.lazy_filter(lazy, (t) => t.minutes >= 4.0), (t) => t.team)
-    collected :: data.collect(planned)
+    collected :: data.collect(planned) ?? panic("collect")
     planned_rows :: data.rows(collected)
     focused :: data.filter(rows, (t) => t.minutes >= 4.0)
-    sorted :: data.sort_by(focused, (t) => t.team)
-    groups :: data.group_sum(sorted, (t) => t.team, (t) => t.minutes)
-    joined :: data.inner_join(sorted, budgets, (t) => t.team, (b) => b.team)
-    left :: data.left_join(rows, budgets, (t) => t.team, (b) => b.team)
-    pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 5.0 { "long" } else { "short" }, (t) => t.minutes)
+    sorted :: data.sort_by(focused, (t) => t.team) ?? panic("sort")
+    groups :: data.group_sum(sorted, (t) => t.team, (t) => t.minutes) ?? panic("group_sum")
+    joined :: data.inner_join(sorted, budgets, (t) => t.team, (b) => b.team) ?? panic("join")
+    left :: data.left_join(rows, budgets, (t) => t.team, (b) => b.team) ?? panic("left")
+    pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 5.0 { "long" } else { "short" }, (t) => t.minutes) ?? panic("pivot")
     values :: [4.0, 5.0, 8.0, 3.0]
-    summary :: data.describe(values)
-    rolling :: data.rolling_mean(values, 2)
-    none ::  None 
-    maybe_minutes :: [ Val(4.0), none, Val(8.0), none ]
+    summary :: data.describe(values) ?? panic("describe")
+    rolling :: data.rolling_mean(values, 2) ?? panic("rolling")
+    maybe_minutes :: [Val(4.0), no_minutes(), Val(8.0), no_minutes()]
     series :: data.series(maybe_minutes)
     print(data.count(sorted))
     print(data.count(table))
@@ -50,7 +53,7 @@ fn run() {
         print("planned: {ticket.team} {ticket.minutes}")
     }
     print(data.missing_count(series))
-    print(data.bar_text(groups))
+    print(data.bar_text(groups) ?? panic("bar"))
     loop pair; joined {
         print("join: {pair.left.team} -> {pair.right.owner}")
     }
@@ -60,7 +63,9 @@ fn run() {
             None -> print("left: {pair.left.team} -> none")
         }
     }
-    print(data.bar_text(pivot))
+    loop cell; pivot {
+        print("{cell.row_key}|{cell.column_key} count={cell.count} sum={cell.sum}")
+    }
     print(summary.count)
     print(summary.median)
     print(rolling[2])

@@ -878,13 +878,34 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", helper("jet_data_missing_count"), arg(0))
         }
         ("core.data", "lazy") => format!("{}(&({}))", helper("jet_data_lazy"), arg(0)),
-        ("core.data", "collect") => format!("{}(&({}))", helper("jet_data_collect"), arg(0)),
+        ("core.data", "collect") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), &({}jet_std::DataLimits::safe()))",
+                    helper("jet_data_collect_checked"),
+                    arg(0),
+                    cx.root_prefix
+                )
+            } else {
+                format!("{}(&({}))", helper("jet_data_collect"), arg(0))
+            }
+        }
         ("core.data", "plan") => format!("{}(&({}))", helper("jet_data_plan"), arg(0)),
         ("core.data", "filter") => {
             format!("{}(&({}), {})", helper("jet_data_filter"), arg(0), arg(1))
         }
         ("core.data", "sort_by") => {
-            format!("{}(&({}), {})", helper("jet_data_sort_by"), arg(0), arg(1))
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), {}, &({}jet_std::DataLimits::safe()))",
+                    helper("jet_data_sort_by_checked"),
+                    arg(0),
+                    arg(1),
+                    cx.root_prefix
+                )
+            } else {
+                format!("{}(&({}), {})", helper("jet_data_sort_by"), arg(0), arg(1))
+            }
         }
         ("core.data", "lazy_filter") => {
             format!("{}(&({}), {})", helper("jet_data_lazy_filter"), arg(0), arg(1))
@@ -892,67 +913,261 @@ pub(crate) fn emit_tir_core_call(
         ("core.data", "lazy_sort_by") => {
             format!("{}(&({}), {})", helper("jet_data_lazy_sort_by"), arg(0), arg(1))
         }
-        ("core.data", "group_count") => format!(
-            "{}(&({}), {})",
-            helper("jet_data_group_count"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.data", "group_sum") => format!(
-            "{}(&({}), {}, {})",
-            helper("jet_data_group_sum"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.data", "group_mean") => format!(
-            "{}(&({}), {}, {})",
-            helper("jet_data_group_mean"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.data", "inner_join") => format!(
-            "{}(&({}), &({}), {}, {})",
-            helper("jet_data_inner_join"),
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3)
-        ),
-        ("core.data", "left_join") => format!(
-            "{}(&({}), &({}), {}, {})",
-            helper("jet_data_left_join"),
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3)
-        ),
-        ("core.data", "pivot_sum") => format!(
-            "{}(&({}), {}, {}, {})",
-            helper("jet_data_pivot_sum"),
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3)
-        ),
-        ("core.data", "sum") => format!("{}(&({}))", helper("jet_data_sum"), arg(0)),
-        ("core.data", "mean") => format!("{}(&({}))", helper("jet_data_mean"), arg(0)),
-        ("core.data", "min") => format!("{}(&({}))", helper("jet_data_min"), arg(0)),
-        ("core.data", "max") => format!("{}(&({}))", helper("jet_data_max"), arg(0)),
-        ("core.data", "median") => format!("{}(&({}))", helper("jet_data_median"), arg(0)),
+        ("core.data", "group_count") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), {}, &({}jet_std::DataLimits::safe()))",
+                    helper("jet_data_group_count_checked"),
+                    arg(0),
+                    arg(1),
+                    cx.root_prefix
+                )
+            } else {
+                format!(
+                    "{}(&({}), {})",
+                    helper("jet_data_group_count"),
+                    arg(0),
+                    arg(1)
+                )
+            }
+        }
+        ("core.data", "group_sum") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), {}, {}, &({}jet_std::DataLimits::safe()))",
+                    helper("jet_data_group_sum_checked"),
+                    arg(0),
+                    arg(1),
+                    arg(2),
+                    cx.root_prefix
+                )
+            } else {
+                format!(
+                    "{}(&({}), {}, {})",
+                    helper("jet_data_group_sum"),
+                    arg(0),
+                    arg(1),
+                    arg(2)
+                )
+            }
+        }
+        ("core.data", "group_mean") => {
+            let stream = matches!(
+                args.first().map(|a| &a.ty),
+                Some(Type::Apply { name, .. }) if name == "DataStream"
+            );
+            if stream {
+                let row = match args.first().map(|a| &a.ty) {
+                    Some(Type::Apply { args: ta, .. }) => ta
+                        .first()
+                        .map(|t| cx.rust_type(t))
+                        .unwrap_or_else(|| "()".to_string()),
+                    _ => "()".to_string(),
+                };
+                format!(
+                    "{}::<{}, _, _>(&mut ({}), {}, {})",
+                    helper("jet_data_group_mean_stream"),
+                    row,
+                    arg(0),
+                    arg(1),
+                    arg(2)
+                )
+            } else if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), {}, {}, &({}jet_std::DataLimits::safe()))",
+                    helper("jet_data_group_mean_checked"),
+                    arg(0),
+                    arg(1),
+                    arg(2),
+                    cx.root_prefix
+                )
+            } else {
+                format!(
+                    "{}(&({}), {}, {})",
+                    helper("jet_data_group_mean"),
+                    arg(0),
+                    arg(1),
+                    arg(2)
+                )
+            }
+        }
+        ("core.data", "inner_join") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), &({}), {}, {}, &({}jet_std::DataLimits::safe()))",
+                    helper("jet_data_inner_join_checked"),
+                    arg(0),
+                    arg(1),
+                    arg(2),
+                    arg(3),
+                    cx.root_prefix
+                )
+            } else {
+                format!(
+                    "{}(&({}), &({}), {}, {})",
+                    helper("jet_data_inner_join"),
+                    arg(0),
+                    arg(1),
+                    arg(2),
+                    arg(3)
+                )
+            }
+        }
+        ("core.data", "left_join") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), &({}), {}, {}, &({}jet_std::DataLimits::safe()))",
+                    helper("jet_data_left_join_checked"),
+                    arg(0),
+                    arg(1),
+                    arg(2),
+                    arg(3),
+                    cx.root_prefix
+                )
+            } else {
+                format!(
+                    "{}(&({}), &({}), {}, {})",
+                    helper("jet_data_left_join"),
+                    arg(0),
+                    arg(1),
+                    arg(2),
+                    arg(3)
+                )
+            }
+        }
+        ("core.data", "pivot_sum") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), {}, {}, {}, &({}jet_std::DataLimits::safe()))",
+                    helper("jet_data_pivot_sum_checked"),
+                    arg(0),
+                    arg(1),
+                    arg(2),
+                    arg(3),
+                    cx.root_prefix
+                )
+            } else {
+                format!(
+                    "{}(&({}), {}, {}, {})",
+                    helper("jet_data_pivot_sum"),
+                    arg(0),
+                    arg(1),
+                    arg(2),
+                    arg(3)
+                )
+            }
+        }
+        ("core.data", "sum") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_sum_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_sum"), arg(0))
+            }
+        }
+        ("core.data", "mean") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_mean_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_mean"), arg(0))
+            }
+        }
+        ("core.data", "min") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_min_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_min"), arg(0))
+            }
+        }
+        ("core.data", "max") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_max_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_max"), arg(0))
+            }
+        }
+        ("core.data", "median") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_median_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_median"), arg(0))
+            }
+        }
         ("core.data", "quantile") => {
-            format!("{}(&({}), {})", helper("jet_data_quantile"), arg(0), arg(1))
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), {})",
+                    helper("jet_data_quantile_checked"),
+                    arg(0),
+                    arg(1)
+                )
+            } else {
+                format!("{}(&({}), {})", helper("jet_data_quantile"), arg(0), arg(1))
+            }
         }
-        ("core.data", "variance") => format!("{}(&({}))", helper("jet_data_variance"), arg(0)),
-        ("core.data", "stddev") => format!("{}(&({}))", helper("jet_data_stddev"), arg(0)),
+        ("core.data", "variance") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_variance_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_variance"), arg(0))
+            }
+        }
+        ("core.data", "stddev") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_stddev_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_stddev"), arg(0))
+            }
+        }
         ("core.data", "rolling_mean") => {
-            format!("{}(&({}), {})", helper("jet_data_rolling_mean"), arg(0), arg(1))
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!(
+                    "{}(&({}), {})",
+                    helper("jet_data_rolling_mean_checked"),
+                    arg(0),
+                    arg(1)
+                )
+            } else {
+                format!("{}(&({}), {})", helper("jet_data_rolling_mean"), arg(0), arg(1))
+            }
         }
-        ("core.data", "describe") => format!("{}(&({}))", helper("jet_data_describe"), arg(0)),
+        ("core.data", "describe") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_describe_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_describe"), arg(0))
+            }
+        }
         ("core.data", "status") => format!("{}()", helper("jet_data_status")),
-        ("core.data", "bar_text") => format!("{}(&({}))", helper("jet_data_bar_text"), arg(0)),
-        ("core.data", "bar_svg") => format!("{}(&({}))", helper("jet_data_bar_svg"), arg(0)),
+        ("core.data", "bar_text") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_bar_text_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_bar_text"), arg(0))
+            }
+        }
+        ("core.data", "bar_svg") => {
+            if matches!(ret_ty, Type::Result { .. }) {
+                format!("{}(&({}))", helper("jet_data_bar_svg_checked"), arg(0))
+            } else {
+                format!("{}(&({}))", helper("jet_data_bar_svg"), arg(0))
+            }
+        }
+        ("core.data", "csv_reader") => {
+            format!(
+                "{}({}, {})",
+                helper("jet_data_csv_reader"),
+                arg(0),
+                arg(1)
+            )
+        }
+        ("core.data", "json_reader") => {
+            format!(
+                "{}({}, {})",
+                helper("jet_data_json_reader"),
+                arg(0),
+                arg(1)
+            )
+        }
         ("core.fmt", "number") => format!("{}({})", helper("jet_fmt_number"), arg(0)),
         ("core.fmt", "decimal") => {
             format!("{}({}, {})", helper("jet_fmt_decimal"), arg(0), arg(1))

@@ -2,6 +2,7 @@
 
 mod builtins;
 mod closure_ops;
+mod data_calls;
 mod exprs;
 mod handles;
 mod stmts;
@@ -76,6 +77,8 @@ pub(super) struct EvalCtx<'a> {
     pub(super) emitted_fragments: Option<&'a mut Vec<String>>,
     /// `TypeName -> [(field, redact)]` for JetDebug formatting (D-DISPLAYDBG).
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
+    /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
+    pub(super) struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
 }
 
 impl EvalCtx<'_> {
@@ -227,6 +230,26 @@ fn collect_struct_fields(bundle: &ProgramBundle) -> HashMap<String, Vec<(String,
     out
 }
 
+fn collect_struct_field_types(
+    bundle: &ProgramBundle,
+) -> HashMap<String, Vec<(String, crate::AST::Type)>> {
+    let mut out = HashMap::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let crate::AST::Item::Struct(s) = item {
+                out.insert(
+                    s.name.clone(),
+                    s.fields
+                        .iter()
+                        .map(|f| (f.name.clone(), f.ty.clone()))
+                        .collect(),
+                );
+            }
+        }
+    }
+    out
+}
+
 pub fn run_program(
     program: &JitProgram,
     base_dir: &Path,
@@ -243,6 +266,7 @@ pub fn run_program(
         core_imports,
         allow_impure,
         HashMap::new(),
+        HashMap::new(),
     )
 }
 
@@ -254,6 +278,7 @@ pub fn run_program_with_structs(
     core_imports: &HashMap<String, String>,
     allow_impure: bool,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
+    struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
 ) -> Result<CtValue, Diagnostic> {
     let funcs = program_funcs(program);
     let entry = funcs.get(&program.entry).copied().ok_or_else(|| {
@@ -281,6 +306,7 @@ pub fn run_program_with_structs(
         call_depth: 0,
         emitted_fragments: None,
         struct_fields,
+        struct_field_types,
     };
     let mut scope = HashMap::new();
     ctx.run_func(entry, Vec::new(), &mut scope)
@@ -320,6 +346,7 @@ pub fn run_named_func(
         call_depth: 0,
         emitted_fragments: None,
         struct_fields: HashMap::new(),
+        struct_field_types: HashMap::new(),
     };
     let mut scope = HashMap::new();
     ctx.run_func(func, args, &mut scope)
@@ -377,6 +404,7 @@ fn run_bundle(
         &core_imports,
         allow_impure,
         collect_struct_fields(bundle),
+        collect_struct_field_types(bundle),
     )
 }
 
@@ -416,6 +444,7 @@ fn eval_expr_hook(
         call_depth: 0,
         emitted_fragments,
         struct_fields: HashMap::new(),
+        struct_field_types: HashMap::new(),
     };
     let mut scope = globals;
     ctx.eval_expr(&tir, &mut scope)
@@ -457,6 +486,7 @@ fn eval_block_hook(
         call_depth: 0,
         emitted_fragments,
         struct_fields: HashMap::new(),
+        struct_field_types: HashMap::new(),
     };
     let mut scope = globals;
     match ctx.exec_stmts(&tir, &mut scope)? {

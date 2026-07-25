@@ -204,6 +204,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("JSONLWriter", "flush", 0) => THandleOp::JSONLWriterFlush,
         ("JSONLWriter", "finish", 0) => THandleOp::JSONLWriterFinish,
         ("CSVReader", "next", 0) => THandleOp::CSVReaderNext,
+        ("DataStream", "next", 0) => THandleOp::DataStreamNext,
         ("CSVWriter", "write", 1) => THandleOp::CSVWriterWrite,
         ("CSVWriter", "flush", 0) => THandleOp::CSVWriterFlush,
         ("CSVWriter", "finish", 0) => THandleOp::CSVWriterFinish,

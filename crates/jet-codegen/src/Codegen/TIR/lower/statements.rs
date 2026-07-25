@@ -674,6 +674,12 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     || n == "TcpStream" || n == "UnixStream" || n == "HttpRouter"
                     || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
             )
+            // D-DATAFLOW1=A: DataStream.next / stream reducers take &mut.
+            || matches!(
+                &ty,
+                Type::Apply { name, .. }
+                    if name == "DataStream" && !cx.type_names.contains(name.as_str())
+            )
             // D-SHIFT1 (c7shift): `Reader`/`Cursor` bindings are usually
             // written without an annotation (`r :: Reader.over(bytes)`), so
             // test the resolved type; every read advances `pos` (`&mut self`).

@@ -243,7 +243,7 @@ impl EvalCtx<'_> {
         }
     }
 
-    fn apply_callable(
+    pub(super) fn apply_callable(
         &mut self,
         f: &TExpr,
         argv: Vec<CtValue>,

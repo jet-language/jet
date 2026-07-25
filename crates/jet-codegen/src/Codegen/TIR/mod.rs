@@ -375,6 +375,7 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
 /// c139 M3: lower every `tir_covers` top-level function in the entry module so the
 /// JIT can compile multi-function programs (calls between covered helpers).
 pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
+    jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
     LAST_JIT_LOWER_FAILURE.with(|failure| *failure.borrow_mut() = None);
     let module = bundle.modules.get(bundle.entry)?;
     let extern_funcs = bundle_extern_funcs(bundle);
@@ -699,6 +700,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         enum_variant_payload_types,
         int_constants,
         distinct_bases,
+    })
     })
 }
 
@@ -2938,6 +2940,8 @@ pub enum THandleOp {
     JSONLWriterFlush,
     JSONLWriterFinish,
     CSVReaderNext,
+    /// D-DATAFLOW1=A: typed pull `DataStream<T>.next()` → `T? ? DataError`.
+    DataStreamNext,
     XMLReaderNext,
     XMLWriterWrite,
     XMLWriterFlush,

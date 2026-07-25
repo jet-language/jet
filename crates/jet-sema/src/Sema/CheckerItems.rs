@@ -161,6 +161,21 @@ impl<'a> Checker<'a> {
             }
             return Some(Type::Named("Limits".to_string()));
         }
+        if type_name == "DataLimits" && method == "safe" {
+            if !args.is_empty() {
+                self.diags.push(Diagnostic::error(
+                    "E0101",
+                    format!("`DataLimits.safe` takes 0 arguments, got {}", args.len()),
+                    "safe typed-data limits are fixed defaults".to_string(),
+                    "remove the arguments".to_string(),
+                    Some(span),
+                ));
+                for arg in args {
+                    self.infer(&mut arg.expr);
+                }
+            }
+            return Some(Type::Named("DataLimits".to_string()));
+        }
         let Some((owner_mod, mut msig)) = self.resolve_method_sig(type_name, method) else {
             let builtin = crate::Sema::Diagnostics::builtin_type_from_ident(type_name).is_some();
             self.diags.push(Diagnostic::error(

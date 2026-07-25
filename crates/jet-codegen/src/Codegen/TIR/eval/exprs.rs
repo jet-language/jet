@@ -185,6 +185,9 @@ impl EvalCtx<'_> {
                 args,
                 ..
             } => {
+                if module == "core.data" {
+                    return self.eval_core_data_call(method, args, &expr.ty, scope);
+                }
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);

@@ -1,0 +1,40 @@
+// D-DATAFLOW1=A: bounded typed pull stream + typed DataError.
+use core.data as data
+use core.files as files
+
+#[Codable]
+struct Event {
+    service: String
+    latency_ms: Float
+}
+
+fn run() {
+    path :: "/tmp/jet_data_stream_bounds.csv"
+    files.write(path, "service,latency_ms\napi,10.0\napi,20.0\ndb,5.0\napi,30.0\n") ?? panic("write")
+    input :: files.open(path) ?? panic("open")
+    limits := data.DataLimits.safe()
+    limits.max_groups = 1
+    limits.max_output_rows = 10
+    reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
+    first :: reader.next() ?? panic("next")
+    if first == {
+        Val(row) -> print("first: {row.service} {row.latency_ms}")
+        None -> panic("expected row")
+    }
+    groups := data.group_mean(reader, (e) => e.service, (e) => e.latency_ms)
+    if groups == {
+        Ok(rows) -> print("unexpected ok {data.count(rows)}")
+        Err(error) -> print("{error}")
+    }
+    empty_vals :: [Float].{}
+    empty := data.mean(empty_vals)
+    if empty == {
+        Ok(v) -> print("unexpected mean {v}")
+        Err(error) -> print("{error}")
+    }
+    bad_q := data.quantile([1.0, 2.0], 1.5)
+    if bad_q == {
+        Ok(v) -> print("unexpected q {v}")
+        Err(error) -> print("{error}")
+    }
+}

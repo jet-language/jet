@@ -2898,10 +2898,11 @@ impl LowerCtx<'_, '_> {
                 Err("jit JSONL streaming falls back to the AOT executable TIR path".to_string())
             }
             THandleOp::CSVReaderNext
+            | THandleOp::DataStreamNext
             | THandleOp::CSVWriterWrite
             | THandleOp::CSVWriterFlush
             | THandleOp::CSVWriterFinish => {
-                Err("jit CSV streaming falls back to the AOT executable TIR path".to_string())
+                Err("jit CSV/data streaming falls back to the AOT executable TIR path".to_string())
             }
             THandleOp::XMLReaderNext
             | THandleOp::XMLWriterWrite

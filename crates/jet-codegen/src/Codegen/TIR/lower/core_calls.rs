@@ -49,6 +49,25 @@ pub(crate) fn lower_core_closure_call(
         Some(Expr::Lambda(lam)) => Some(lam),
         _ => None,
     };
+    let data_err = || Type::Named("DataError".to_string());
+    let data_checked = jet_foundation::PackageEdition::edition_at_least(&cx.package_edition, "2027");
+    let wrap_data = |ok: Type| -> Type {
+        if data_checked {
+            Type::Result {
+                ok: Box::new(ok),
+                err: Box::new(data_err()),
+            }
+        } else {
+            ok
+        }
+    };
+    let data_row_ty = |ty: &Type| -> Type {
+        match ty {
+            Type::List(inner) => (**inner).clone(),
+            Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => args[0].clone(),
+            _ => Type::Int,
+        }
+    };
     let kind = match (module, method) {
         ("core.tasks", "spawn") => {
             let lam = lam_at(0)?;
@@ -85,13 +104,11 @@ pub(crate) fn lower_core_closure_call(
         }
         ("core.data", "filter" | "sort_by") => {
             let rows = lower_expr(&args[0].expr, cx, env);
-            let row_ty = match &rows.ty {
-                Type::List(inner) => (**inner).clone(),
-                _ => Type::Int,
-            };
+            let row_ty = data_row_ty(&rows.ty);
             let pred = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
+            let list = Type::List(Box::new(row_ty));
             return Some(TExpr {
-                ty: Type::List(Box::new(row_ty)),
+                ty: if method == "sort_by" { wrap_data(list) } else { list },
                 kind: TExprKind::CoreCall {
                     module: module.to_string(),
                     method: method.to_string(),
@@ -108,13 +125,10 @@ pub(crate) fn lower_core_closure_call(
         }
         ("core.data", "group_count") => {
             let rows = lower_expr(&args[0].expr, cx, env);
-            let row_ty = match &rows.ty {
-                Type::List(inner) => (**inner).clone(),
-                _ => Type::Int,
-            };
+            let row_ty = data_row_ty(&rows.ty);
             let key = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty]);
             return Some(TExpr {
-                ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                ty: wrap_data(Type::List(Box::new(Type::Named("DataGroup".to_string())))),
                 kind: TExprKind::CoreCall {
                     module: module.to_string(),
                     method: method.to_string(),
@@ -131,14 +145,11 @@ pub(crate) fn lower_core_closure_call(
         }
         ("core.data", "group_sum" | "group_mean") => {
             let rows = lower_expr(&args[0].expr, cx, env);
-            let row_ty = match &rows.ty {
-                Type::List(inner) => (**inner).clone(),
-                _ => Type::Int,
-            };
+            let row_ty = data_row_ty(&rows.ty);
             let key = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
             let value = lower_lambda_expecting_value(lam_at(2)?, cx, env, &[row_ty]);
             return Some(TExpr {
-                ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                ty: wrap_data(Type::List(Box::new(Type::Named("DataGroup".to_string())))),
                 kind: TExprKind::CoreCall {
                     module: module.to_string(),
                     method: method.to_string(),
@@ -176,10 +187,10 @@ pub(crate) fn lower_core_closure_call(
                 right_ty
             };
             return Some(TExpr {
-                ty: Type::List(Box::new(Type::Apply {
+                ty: wrap_data(Type::List(Box::new(Type::Apply {
                     name: "DataJoin".to_string(),
                     args: vec![left_ty, joined_right],
-                })),
+                }))),
                 kind: TExprKind::CoreCall {
                     module: module.to_string(),
                     method: method.to_string(),
@@ -201,15 +212,17 @@ pub(crate) fn lower_core_closure_call(
         }
         ("core.data", "pivot_sum") => {
             let rows = lower_expr(&args[0].expr, cx, env);
-            let row_ty = match &rows.ty {
-                Type::List(inner) => (**inner).clone(),
-                _ => Type::Int,
-            };
+            let row_ty = data_row_ty(&rows.ty);
             let row_key = lower_lambda_expecting_value(lam_at(1)?, cx, env, &[row_ty.clone()]);
             let col_key = lower_lambda_expecting_value(lam_at(2)?, cx, env, &[row_ty.clone()]);
             let value = lower_lambda_expecting_value(lam_at(3)?, cx, env, &[row_ty]);
+            let cell = if data_checked {
+                Type::Named("DataPivotCell".to_string())
+            } else {
+                Type::Named("DataGroup".to_string())
+            };
             return Some(TExpr {
-                ty: Type::List(Box::new(Type::Named("DataGroup".to_string()))),
+                ty: wrap_data(Type::List(Box::new(cell))),
                 kind: TExprKind::CoreCall {
                     module: module.to_string(),
                     method: method.to_string(),
