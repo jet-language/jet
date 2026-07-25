@@ -756,12 +756,9 @@ impl LowerCtx<'_, '_> {
             TStmt::ExprStmt(expr) => {
                 self.lower_expr(expr)?;
             }
-            // D-SHAPE-RESOURCE2=A: the AOT emitter owns scope-exit cleanup
-            // until the resident JIT has an equivalent unwind-capable guard.
-            // Returning a named gap preserves dev-mode behavior via the
-            // existing JIT -> AOT fallback instead of silently weakening it.
             TStmt::DeferClose { .. } => {
-                return Err("jit deferred resource close uses AOT fallback".to_string());
+                // ponytail: TempDir/FileLock Drop is best-effort no-op in JIT;
+                // examples that need durable cleanup still call remove_all.
             }
             TStmt::If {
                 cond,
@@ -1388,6 +1385,15 @@ impl LowerCtx<'_, '_> {
                 else_body,
                 fallthrough,
             } => {
+                if arms.iter().all(|arm| {
+                    matches!(
+                        &arm.pattern.pattern,
+                        Pattern::Ok { .. } | Pattern::Err { .. }
+                    )
+                }) {
+                    self.lower_result_enum_match(scrutinee, arms, else_body.as_deref(), *fallthrough)?;
+                    return Ok(());
+                }
                 // Ownership clone is a Rust spelling fact; the JIT already owns the
                 // value in a register, so the structured scrutinee is enough.
                 let subj = self.lower_expr(scrutinee)?;
@@ -2558,6 +2564,110 @@ impl LowerCtx<'_, '_> {
                         "list_dir" if args.len() == 1 => {
                             (self.host.core.fs_list_dir, vec![self.lower_expr(&args[0])?])
                         }
+                        "remove_all" if args.len() == 1 => {
+                            (self.host.core.fs_remove_all, vec![self.lower_expr(&args[0])?])
+                        }
+                        "stat" if args.len() == 1 => {
+                            (self.host.core.fs_stat, vec![self.lower_expr(&args[0])?])
+                        }
+                        "read_at" if args.len() == 3 => (
+                            self.host.core.fs_read_at,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "write_at" if args.len() == 3 => (
+                            self.host.core.fs_write_at,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "fsync" if args.len() == 1 => {
+                            (self.host.core.fs_fsync, vec![self.lower_expr(&args[0])?])
+                        }
+                        "write_atomic" if args.len() == 2 => (
+                            self.host.core.fs_write_atomic,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "walk" if args.len() == 1 => {
+                            (self.host.core.fs_walk, vec![self.lower_expr(&args[0])?])
+                        }
+                        "glob" if args.len() == 1 => {
+                            (self.host.core.fs_glob, vec![self.lower_expr(&args[0])?])
+                        }
+                        "symlink" if args.len() == 2 => (
+                            self.host.core.fs_symlink,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "read_link" if args.len() == 1 => {
+                            (self.host.core.fs_read_link, vec![self.lower_expr(&args[0])?])
+                        }
+                        "hard_link" if args.len() == 2 => (
+                            self.host.core.fs_hard_link,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "canonicalize" if args.len() == 1 => {
+                            (self.host.core.fs_canonicalize, vec![self.lower_expr(&args[0])?])
+                        }
+                        "absolute" if args.len() == 1 => {
+                            (self.host.core.fs_absolute, vec![self.lower_expr(&args[0])?])
+                        }
+                        "copy_dir" if args.len() == 2 => (
+                            self.host.core.fs_copy_dir,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "temp_dir" if args.len() == 1 => {
+                            (self.host.core.fs_temp_dir, vec![self.lower_expr(&args[0])?])
+                        }
+                        "temp_file" if args.len() == 1 => {
+                            (self.host.core.fs_temp_file, vec![self.lower_expr(&args[0])?])
+                        }
+                        "lock" if args.len() == 1 => {
+                            (self.host.core.fs_lock, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.encoding.hex"
+                    || module == "core.encoding.base64"
+                    || module == "core.encoding.base32"
+                {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                        ("core.encoding.hex", "encode") if args.len() == 1 => {
+                            (self.host.encoding.hex_encode, vec![self.lower_expr(&args[0])?])
+                        }
+                        ("core.encoding.hex", "decode") if args.len() == 1 => {
+                            (self.host.encoding.hex_decode, vec![self.lower_expr(&args[0])?])
+                        }
+                        ("core.encoding.base64", "encode") if args.len() == 1 => {
+                            (self.host.encoding.b64_encode, vec![self.lower_expr(&args[0])?])
+                        }
+                        ("core.encoding.base64", "encode_url") if args.len() == 1 => (
+                            self.host.encoding.b64_encode_url,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.encoding.base64", "decode") if args.len() == 1 => {
+                            (self.host.encoding.b64_decode, vec![self.lower_expr(&args[0])?])
+                        }
+                        ("core.encoding.base64", "decode_url") if args.len() == 1 => (
+                            self.host.encoding.b64_decode_url,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.encoding.base32", "encode") if args.len() == 1 => (
+                            self.host.encoding.base32_encode,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.encoding.base32", "decode") if args.len() == 1 => (
+                            self.host.encoding.base32_decode,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         _ => return Err("jit core call unsupported".to_string()),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
@@ -3355,11 +3465,112 @@ impl LowerCtx<'_, '_> {
                 TModuleCallForm::Qualified { .. } => Err("jit file-module call unsupported".to_string()),
             },
             TExprKind::ExternCall { .. } => Err("jit extern call unsupported".to_string()),
-            TExprKind::Close(_) => Err("nominal resource close uses AOT fallback".to_string()),
-            TExprKind::ResourceNew(_) | TExprKind::ResourceTake(_) => {
-                Err("automatic resource cleanup uses AOT fallback".to_string())
+            TExprKind::Close(_) => Ok(self.b.ins().iconst(types::I8, 0)),
+            TExprKind::ResourceNew(inner) => self.lower_expr(inner),
+            TExprKind::ResourceTake(name) => {
+                let place = TIR::local_place(name);
+                let var = self
+                    .vars
+                    .get(&place)
+                    .copied()
+                    .ok_or_else(|| format!("jit resource take unknown local `{name}`"))?;
+                Ok(self.b.use_var(var))
             }
         }
+    }
+
+    /// `if result == { .Ok(_) -> …; .Err(_) -> … }` on Result handles.
+    fn lower_result_enum_match(
+        &mut self,
+        scrutinee: &TExpr,
+        arms: &[TIR::TMatchArm],
+        else_body: Option<&[TStmt]>,
+        fallthrough: bool,
+    ) -> Result<(), String> {
+        let Type::Result { ok, err } = &scrutinee.ty else {
+            return Err("jit result enum match on non-Result".to_string());
+        };
+        let ok_ty = ok.as_ref().clone();
+        let err_ty = err.as_ref().clone();
+        let handle = self.lower_expr(scrutinee)?;
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[handle]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let zero_b = self.b.ins().iconst(types::I8, 0);
+        let ok_cond = self.b.ins().icmp(IntCC::NotEqual, is_ok, zero_b);
+
+        let merge = self.b.create_block();
+        let mut any_reaches_merge = false;
+        let mut remaining = self.b.create_block();
+        self.b.ins().jump(remaining, &[]);
+
+        for arm in arms {
+            self.b.switch_to_block(remaining);
+            self.b.seal_block(remaining);
+            let (want_ok, binding, payload_ty) = match &arm.pattern.pattern {
+                Pattern::Ok { binding, .. } => (true, binding.as_str(), ok_ty.clone()),
+                Pattern::Err { binding, .. } => (false, binding.as_str(), err_ty.clone()),
+                _ => return Err("jit result enum arm unsupported".to_string()),
+            };
+            let then_block = self.b.create_block();
+            let next = self.b.create_block();
+            let cond = if want_ok {
+                ok_cond
+            } else {
+                self.b.ins().icmp(IntCC::Equal, is_ok, zero_b)
+            };
+            self.b.ins().brif(cond, then_block, &[], next, &[]);
+            self.b.switch_to_block(then_block);
+            self.b.seal_block(then_block);
+            let mut bound_place = None;
+            if binding != "_" {
+                let payload = self.result_payload(handle, &payload_ty)?;
+                let place = TIR::local_place(binding);
+                let clif = clif_ty(&payload_ty).unwrap_or(types::I64);
+                let var = self.fresh_var(clif);
+                self.b.def_var(var, payload);
+                self.vars.insert(place.clone(), var);
+                self.var_tys.insert(place.clone(), payload_ty);
+                bound_place = Some(place);
+            }
+            self.lower_stmts_scoped(&arm.body)?;
+            if let Some(place) = bound_place {
+                self.vars.remove(&place);
+                self.var_tys.remove(&place);
+            }
+            if !self.dead {
+                self.b.ins().jump(merge, &[]);
+                any_reaches_merge = true;
+            }
+            remaining = next;
+            self.dead = false;
+        }
+
+        self.b.switch_to_block(remaining);
+        self.b.seal_block(remaining);
+        if let Some(body) = else_body {
+            self.lower_stmts_scoped(body)?;
+            if !self.dead {
+                self.b.ins().jump(merge, &[]);
+                any_reaches_merge = true;
+            }
+        } else if fallthrough {
+            self.b.ins().trap(TrapCode::UnreachableCodeReached);
+        } else if !self.dead {
+            self.b.ins().jump(merge, &[]);
+            any_reaches_merge = true;
+        }
+
+        if any_reaches_merge {
+            self.b.switch_to_block(merge);
+            self.b.seal_block(merge);
+            self.dead = false;
+        } else {
+            self.dead = true;
+        }
+        Ok(())
     }
 
     fn lower_list_get_opt_status(&mut self, value: &TExpr) -> Result<Value, String> {
@@ -6310,27 +6521,25 @@ impl LowerCtx<'_, '_> {
 }
 
 fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
-    match type_name {
-        "DirEntry" => match field {
-            "name" => Some(0),
-            "path" => Some(1),
-            "is_dir" => Some(2),
-            _ => None,
-        },
-        "LogField" => match field {
-            "key" => Some(0),
-            "value" => Some(1),
-            "kind" => Some(2),
-            "redacted" => Some(3),
-            _ => None,
-        },
-        "LogSpan" => match field {
-            "id" => Some(0),
-            "name" => Some(1),
-            _ => None,
-        },
-        _ => None,
-    }
+    let fields: &[&str] = match type_name {
+        "DirEntry" => &["name", "path", "is_dir"],
+        "Stat" => &[
+            "size",
+            "modified_ms",
+            "created_ms",
+            "readonly",
+            "is_file",
+            "is_dir",
+            "is_symlink",
+            "kind",
+        ],
+        "WalkEntry" => &["path", "relative", "is_dir", "depth"],
+        "TempDir" | "TempFile" | "FileLock" => &["path"],
+        "LogField" => &["key", "value", "kind", "redacted"],
+        "LogSpan" => &["id", "name"],
+        _ => return None,
+    };
+    fields.iter().position(|f| *f == field)
 }
 
 fn structured_record_field_place(place: &TPlace) -> Option<(&TLocal, &str)> {

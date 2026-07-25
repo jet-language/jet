@@ -8,7 +8,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Collections, Concurrency, CoreHost, JitResultValue, Numeric, Random, Solver,
+    Collections, Concurrency, CoreHost, Encoding, JitResultValue, Numeric, Random, Solver,
     TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
@@ -918,6 +918,7 @@ pub(crate) struct HostFns {
     pub(crate) coll: Collections::CollectionsHostFns,
     pub(crate) conc: Concurrency::ConcurrencyHostFns,
     pub(crate) core: CoreHost::CoreHostFns,
+    pub(crate) encoding: Encoding::EncodingHostFns,
     pub(crate) num: Numeric::NumericHostFns,
     pub(crate) solver: Solver::SolverHostFns,
     pub(crate) random: Random::RandomHostFns,
@@ -1040,6 +1041,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     Collections::register_collections_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
     CoreHost::register_core_host_symbols(&mut builder);
+    Encoding::register_encoding_symbols(&mut builder);
     Numeric::register_numeric_symbols(&mut builder);
     Solver::register_solver_symbols(&mut builder);
     Random::register_random_symbols(&mut builder);
@@ -1047,10 +1049,11 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
     let core = CoreHost::declare_core_host_fns(&mut module)?;
+    let encoding = Encoding::declare_encoding_host_fns(&mut module)?;
     let num = Numeric::declare_numeric_host_fns(&mut module)?;
     let solver = Solver::declare_solver_host_fns(&mut module)?;
     let random = Random::declare_random_host_fns(&mut module)?;
-    let host = declare_host_fns(&mut module, coll, conc, core, num, solver, random)?;
+    let host = declare_host_fns(&mut module, coll, conc, core, encoding, num, solver, random)?;
     Ok((module, host))
 }
 
@@ -1059,6 +1062,7 @@ fn declare_host_fns(
     coll: Collections::CollectionsHostFns,
     conc: Concurrency::ConcurrencyHostFns,
     core: CoreHost::CoreHostFns,
+    encoding: Encoding::EncodingHostFns,
     num: Numeric::NumericHostFns,
     solver: Solver::SolverHostFns,
     random: Random::RandomHostFns,
@@ -1314,6 +1318,7 @@ fn declare_host_fns(
         coll,
         conc,
         core,
+        encoding,
         num,
         solver,
         random,

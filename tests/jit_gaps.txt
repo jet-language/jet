@@ -79,6 +79,7 @@ covered:
   io/cli_args
   io/dir_entry
   io/files
+  io/files_depth
   io/log
   io/log_human
   io/log_structured
@@ -92,6 +93,7 @@ covered:
   memory/gc_cyclic
   memory/place_windows
   memory/ref_field
+  memory/resource_close
   memory/uninit
   memory/uninit_buffer
   modules/inline_module
@@ -101,8 +103,10 @@ covered:
   modules/selective_imports
   operators/chained_comparison
   operators/user_defined
+  serde/encoding_base
   serde/user_derive
   syntax/maturity_tags
+  text/hex_base64
   text/runtime_duration
   text/string_parse
   text/strings
@@ -194,10 +198,10 @@ gaps:
   effects/infer_receiver: run: jit call arg wrapper unsupported
   effects/mix_write_take: run: jit call arg wrapper unsupported
   effects/single_use_discard: run: jit unsafe region unsupported
-  effects/smart_context: run: automatic resource cleanup uses AOT fallback
+  effects/smart_context: run: jit allocator constructor unsupported
   effects/taint: run: jit core call unsupported
   errors/error_context: load_config: jit host/default/uninit/ct-lit unsupported
-  errors/errors: run: jit enum arm is not a variant pattern
+  errors/errors: run: jit print type unsupported
   errors/must_use: run: jit scope guard closure unsupported
   errors/panic: run: jit require/panic stop unsupported
   errors/rollback_trait: transfer: jit transact block unsupported
@@ -211,17 +215,16 @@ gaps:
   io/cli: run: jit core call unsupported
   io/compress_gzip: run: jit core call unsupported
   io/compress_zstd: run: jit core call unsupported
-  io/db: run: automatic resource cleanup uses AOT fallback
-  io/db_checked_sql: run: automatic resource cleanup uses AOT fallback
+  io/db: run: jit core call unsupported
+  io/db_checked_sql: run: jit core call unsupported
   io/db_read_footprint: person_count: jit handle method unsupported
   io/env_overlay: run: jit host/default/uninit/ct-lit unsupported
-  io/files_depth: run: jit core call unsupported
   io/io_prelude: greet: jit ambient input unsupported
   io/path: run: jit handle method unsupported
   io/process_builder: run: jit core call unsupported
   io/scope_guard: with_guards: jit scope guard closure unsupported
   io/stdin_filter: run: jit for-in method-call collection unsupported
-  io/stream: count_lines: automatic resource cleanup uses AOT fallback
+  io/stream: count_lines: jit core call unsupported
   io/terminal: describe_key: jit if-let pattern unsupported
   io/terminal_parity: run: jit host/default/uninit/ct-lit unsupported
   io/watcher: run: jit core call unsupported
@@ -239,9 +242,9 @@ gaps:
   lowlevel/swizzle: run: jit math builtin unsupported
   lowlevel/target_profile_board: run: jit core call unsupported
   lowlevel/unsafe_obligations: run: jit unsafe region unsupported
-  memory/arena: run: automatic resource cleanup uses AOT fallback
-  memory/arena_parse: run: automatic resource cleanup uses AOT fallback
-  memory/arena_regions: run: automatic resource cleanup uses AOT fallback
+  memory/arena: run: jit allocator constructor unsupported
+  memory/arena_parse: run: jit allocator constructor unsupported
+  memory/arena_regions: run: jit allocator constructor unsupported
   memory/entity_tree: run: jit static `jet_std::JetPool::new`
   memory/entity_world: tick: jit host/default/uninit/ct-lit unsupported
   memory/expiring_secret: run: jit host/default/uninit/ct-lit unsupported
@@ -250,7 +253,6 @@ gaps:
   memory/parameter_modes: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
   memory/pool_stale_id: run: jit static `jet_std::JetPool::new`
   memory/rawptr: run: jit unsafe region unsupported
-  memory/resource_close: run: automatic resource cleanup uses AOT fallback
   memory/returned_views: domain: jit builtin method unsupported
   memory/shared_config: jit param type unsupported: Shared(Named("AppConfig"))
   memory/shared_transact: jit param type unsupported: Shared(Named("Account"))
@@ -284,12 +286,11 @@ gaps:
   serde/datatree_accessors: run: jit core call unsupported
   serde/decode_traced: run: jit core call unsupported
   serde/encoding: run: jit core call unsupported
-  serde/encoding_base: run: jit core call unsupported
   serde/encoding_breadth: run: jit core call unsupported
-  serde/encoding_cbor_stream: write_catalog: automatic resource cleanup uses AOT fallback
-  serde/encoding_csv_stream: write_catalog: automatic resource cleanup uses AOT fallback
-  serde/encoding_json_stream: write_catalog: automatic resource cleanup uses AOT fallback
-  serde/encoding_jsonl_stream: write_catalog: automatic resource cleanup uses AOT fallback
+  serde/encoding_cbor_stream: write_catalog: jit core call unsupported
+  serde/encoding_csv_stream: write_catalog: jit core call unsupported
+  serde/encoding_json_stream: write_catalog: jit core call unsupported
+  serde/encoding_jsonl_stream: write_catalog: jit core call unsupported
   serde/encoding_stream_types: run: jit static `jet_std::EncodingLimits::safe`
   serde/encoding_xml_projection: run: jit core call unsupported
   serde/encoding_xml_stream: xml_name: jit JSON literal unsupported
@@ -299,7 +300,7 @@ gaps:
   serde/serde_derive: run: jit core call unsupported
   serde/serde_generic: run: jit core call unsupported
   serde/toml: run: jit core call unsupported
-  serde/validate: report: jit enum arm is not a variant pattern
+  serde/validate: report: jit field `path` on `FieldError`
   serde/yaml: run: jit core call unsupported
   streams/generators: count: jit host/default/uninit/ct-lit unsupported
   syntax/trailing_block: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }
@@ -307,7 +308,6 @@ gaps:
   text/dates: run: jit core call unsupported
   text/datetime: run: jit core call unsupported
   text/decimal: run: jit precise numeric builtin unsupported
-  text/hex_base64: run: jit core call unsupported
   text/human_format: run: jit core call unsupported
   text/regex: run: jit core call unsupported
   text/time_calendar: run: jit core call unsupported
@@ -321,7 +321,7 @@ gaps:
   tooling/data_json: run: jit core call unsupported
   tooling/data_pipeline: must_stay_deferred: jit require/panic stop unsupported
   tooling/data_schema: run: jit core call unsupported
-  tooling/data_stream_bounds: run: automatic resource cleanup uses AOT fallback
+  tooling/data_stream_bounds: run: jit core call unsupported
   tooling/debug_native: run: jit core call unsupported
   tooling/fuzz_demo: reverse: jit builtin method unsupported
   tooling/panic_report: summarize: jit require/panic stop unsupported

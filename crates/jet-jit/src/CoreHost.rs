@@ -493,6 +493,417 @@ extern "C" fn jet_jit_fs_list_dir(path: i64) -> i64 {
     })
 }
 
+fn clone_heap_bytes(list: i64) -> Vec<u8> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        let mut out = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            out.push(rt.heap.list_get_int(list, i).unwrap_or(0) as u8);
+        }
+        out
+    })
+}
+
+fn alloc_byte_list(bytes: &[u8]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for &b in bytes {
+            let _ = rt.heap.list_push_int(list, b as i64);
+        }
+        list
+    })
+}
+
+fn system_time_ms(t: std::time::SystemTime) -> Option<i64> {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_millis() as i64)
+}
+
+fn glob_match(pattern: &str, text: &str) -> bool {
+    fn inner(p: &[u8], t: &[u8]) -> bool {
+        if p.is_empty() {
+            return t.is_empty();
+        }
+        match p[0] {
+            b'*' => inner(&p[1..], t) || (!t.is_empty() && inner(p, &t[1..])),
+            b'?' => !t.is_empty() && inner(&p[1..], &t[1..]),
+            c => !t.is_empty() && c == t[0] && inner(&p[1..], &t[1..]),
+        }
+    }
+    inner(pattern.as_bytes(), text.as_bytes())
+}
+
+fn walk_entries(root: &std::path::Path) -> Result<Vec<(String, String, bool, i64)>, String> {
+    let mut out = Vec::new();
+    fn walk_dir(
+        root: &std::path::Path,
+        dir: &std::path::Path,
+        depth: i64,
+        out: &mut Vec<(String, String, bool, i64)>,
+    ) -> Result<(), String> {
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+            entries.push(entry.map_err(|e| e.to_string())?);
+        }
+        entries.sort_by_key(|e| e.file_name());
+        for entry in entries {
+            let p = entry.path();
+            let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+            let relative = p
+                .strip_prefix(root)
+                .unwrap_or(&p)
+                .to_string_lossy()
+                .to_string();
+            out.push((p.to_string_lossy().to_string(), relative, is_dir, depth));
+            if is_dir {
+                walk_dir(root, &p, depth + 1, out)?;
+            }
+        }
+        Ok(())
+    }
+    walk_dir(root, root, 0, &mut out)?;
+    Ok(out)
+}
+
+fn path_record(path: String) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let rec = rt.heap.alloc_record(1);
+        let sid = rt.heap.alloc_string(path);
+        let _ = rt.heap.record_set_string(rec, 0, sid);
+        rec
+    })
+}
+
+fn jet_temp_path(prefix: &str) -> String {
+    let clean: String = prefix
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir()
+        .join(format!("{}_{}_{}", clean, std::process::id(), nanos))
+        .to_string_lossy()
+        .to_string()
+}
+
+extern "C" fn jet_jit_fs_remove_all(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    let path = std::path::Path::new(&p);
+    let res = if path.is_dir() {
+        std::fs::remove_dir_all(&p)
+    } else {
+        std::fs::remove_file(&p)
+    };
+    match res {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => result_err_msg(&format!("remove_all {p}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_stat(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    let meta = match std::fs::symlink_metadata(&p) {
+        Ok(m) => m,
+        Err(e) => return result_err_msg(&format!("stat {p}: {e}")),
+    };
+    let ft = meta.file_type();
+    let kind = if ft.is_symlink() {
+        "symlink"
+    } else if ft.is_dir() {
+        "dir"
+    } else if ft.is_file() {
+        "file"
+    } else {
+        "other"
+    };
+    let rec = Concurrency::with_runtime_mut(|rt| {
+        let rec = rt.heap.alloc_record(8);
+        let _ = rt.heap.record_set_int(rec, 0, meta.len() as i64);
+        let _ = rt
+            .heap
+            .record_set_int(rec, 1, meta.modified().ok().and_then(system_time_ms).unwrap_or(0));
+        let _ = rt
+            .heap
+            .record_set_int(rec, 2, meta.created().ok().and_then(system_time_ms).unwrap_or(0));
+        let _ = rt
+            .heap
+            .record_set_bool(rec, 3, meta.permissions().readonly());
+        let _ = rt.heap.record_set_bool(rec, 4, ft.is_file());
+        let _ = rt.heap.record_set_bool(rec, 5, ft.is_dir());
+        let _ = rt.heap.record_set_bool(rec, 6, ft.is_symlink());
+        let kid = rt.heap.alloc_string(kind.to_string());
+        let _ = rt.heap.record_set_string(rec, 7, kid);
+        rec
+    });
+    result_ok_bits(rec as u64)
+}
+
+extern "C" fn jet_jit_fs_read_at(path: i64, offset: i64, len: i64) -> i64 {
+    use std::io::{Read, Seek, SeekFrom};
+    let p = clone_heap_string(path);
+    let mut f = match std::fs::File::open(&p) {
+        Ok(f) => f,
+        Err(e) => return result_err_msg(&format!("read_at {p}: {e}")),
+    };
+    if let Err(e) = f.seek(SeekFrom::Start(offset.max(0) as u64)) {
+        return result_err_msg(&format!("read_at {p}: {e}"));
+    }
+    let mut buf = vec![0u8; len.max(0) as usize];
+    let n = match f.read(&mut buf) {
+        Ok(n) => n,
+        Err(e) => return result_err_msg(&format!("read_at {p}: {e}")),
+    };
+    buf.truncate(n);
+    result_ok_bits(alloc_byte_list(&buf) as u64)
+}
+
+extern "C" fn jet_jit_fs_write_at(path: i64, offset: i64, bytes: i64) -> i64 {
+    use std::io::{Seek, SeekFrom, Write};
+    let p = clone_heap_string(path);
+    let data = clone_heap_bytes(bytes);
+    let mut f = match std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&p)
+    {
+        Ok(f) => f,
+        Err(e) => return result_err_msg(&format!("write_at {p}: {e}")),
+    };
+    if let Err(e) = f.seek(SeekFrom::Start(offset.max(0) as u64)) {
+        return result_err_msg(&format!("write_at {p}: {e}"));
+    }
+    match f.write_all(&data) {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => result_err_msg(&format!("write_at {p}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_fsync(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    match std::fs::OpenOptions::new()
+        .read(true)
+        .open(&p)
+        .and_then(|f| f.sync_all())
+    {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => result_err_msg(&format!("fsync {p}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
+    let p = clone_heap_string(path);
+    let data = clone_heap_bytes(bytes);
+    let path = std::path::Path::new(&p);
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        Some(_) => std::path::Path::new("."),
+        None => return result_err_msg(&format!("write_atomic {p}: path has no parent")),
+    };
+    let tmp = parent.join(format!(
+        ".jet_atomic_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    if let Err(e) = std::fs::write(&tmp, &data) {
+        return result_err_msg(&format!("write_atomic {p}: {e}"));
+    }
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            result_err_msg(&format!("write_atomic {p}: {e}"))
+        }
+    }
+}
+
+extern "C" fn jet_jit_fs_walk(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    let entries = match walk_entries(std::path::Path::new(&p)) {
+        Ok(e) => e,
+        Err(e) => return result_err_msg(&format!("walk {p}: {e}")),
+    };
+    let list = Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for (path, relative, is_dir, depth) in entries {
+            let rec = rt.heap.alloc_record(4);
+            let ps = rt.heap.alloc_string(path);
+            let rs = rt.heap.alloc_string(relative);
+            let _ = rt.heap.record_set_string(rec, 0, ps);
+            let _ = rt.heap.record_set_string(rec, 1, rs);
+            let _ = rt.heap.record_set_bool(rec, 2, is_dir);
+            let _ = rt.heap.record_set_int(rec, 3, depth);
+            let _ = rt.heap.list_push_int(list, rec);
+        }
+        list
+    });
+    result_ok_bits(list as u64)
+}
+
+extern "C" fn jet_jit_fs_glob(pattern: i64) -> i64 {
+    let pat = clone_heap_string(pattern);
+    let split = pat.find(['*', '?']).unwrap_or(pat.len());
+    let base = pat[..split]
+        .rsplit_once(std::path::MAIN_SEPARATOR)
+        .map(|(dir, _)| if dir.is_empty() { "." } else { dir })
+        .unwrap_or(".");
+    let entries = match walk_entries(std::path::Path::new(base)) {
+        Ok(e) => e,
+        Err(e) => return result_err_msg(&format!("glob {pat}: {e}")),
+    };
+    let mut matches: Vec<String> = entries
+        .into_iter()
+        .map(|(path, _, _, _)| path)
+        .filter(|path| glob_match(&pat, path))
+        .collect();
+    matches.sort();
+    let list = Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for path in matches {
+            let sid = rt.heap.alloc_string(path);
+            let _ = rt.heap.list_push_int(list, sid);
+        }
+        list
+    });
+    result_ok_bits(list as u64)
+}
+
+extern "C" fn jet_jit_fs_symlink(from: i64, to: i64) -> i64 {
+    let src = clone_heap_string(from);
+    let dst = clone_heap_string(to);
+    #[cfg(unix)]
+    let res = std::os::unix::fs::symlink(&src, &dst);
+    #[cfg(windows)]
+    let res = {
+        let meta = std::fs::metadata(&src);
+        match meta {
+            Ok(m) if m.is_dir() => std::os::windows::fs::symlink_dir(&src, &dst),
+            _ => std::os::windows::fs::symlink_file(&src, &dst),
+        }
+    };
+    match res {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => result_err_msg(&format!("symlink {dst}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_read_link(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    match std::fs::read_link(&p) {
+        Ok(target) => {
+            let sid = Concurrency::with_runtime_mut(|rt| {
+                rt.heap
+                    .alloc_string(target.to_string_lossy().to_string())
+            });
+            result_ok_bits(sid as u64)
+        }
+        Err(e) => result_err_msg(&format!("read_link {p}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_hard_link(from: i64, to: i64) -> i64 {
+    let src = clone_heap_string(from);
+    let dst = clone_heap_string(to);
+    match std::fs::hard_link(&src, &dst) {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => result_err_msg(&format!("hard_link {dst}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_canonicalize(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    match std::fs::canonicalize(&p) {
+        Ok(abs) => {
+            let sid = Concurrency::with_runtime_mut(|rt| {
+                rt.heap.alloc_string(abs.to_string_lossy().to_string())
+            });
+            result_ok_bits(sid as u64)
+        }
+        Err(e) => result_err_msg(&format!("canonicalize {p}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_absolute(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    let path = std::path::Path::new(&p);
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => cwd.join(path),
+            Err(e) => return result_err_msg(&format!("absolute {p}: {e}")),
+        }
+    };
+    let sid = Concurrency::with_runtime_mut(|rt| {
+        rt.heap.alloc_string(abs.to_string_lossy().to_string())
+    });
+    result_ok_bits(sid as u64)
+}
+
+extern "C" fn jet_jit_fs_copy_dir(from: i64, to: i64) -> i64 {
+    let src = clone_heap_string(from);
+    let dst = clone_heap_string(to);
+    fn copy_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+        std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+        for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            let ft = entry.file_type().map_err(|e| e.to_string())?;
+            if ft.is_dir() {
+                copy_tree(&src_path, &dst_path)?;
+            } else if ft.is_file() {
+                std::fs::copy(&src_path, &dst_path).map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
+    match copy_tree(std::path::Path::new(&src), std::path::Path::new(&dst)) {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => result_err_msg(&format!("copy_dir {src}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_temp_dir(prefix: i64) -> i64 {
+    let pref = clone_heap_string(prefix);
+    let path = jet_temp_path(&pref);
+    match std::fs::create_dir(&path) {
+        Ok(()) => result_ok_bits(path_record(path) as u64),
+        Err(e) => result_err_msg(&format!("temp_dir {path}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_temp_file(prefix: i64) -> i64 {
+    let pref = clone_heap_string(prefix);
+    let path = jet_temp_path(&pref);
+    match std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&path)
+    {
+        Ok(_) => result_ok_bits(path_record(path) as u64),
+        Err(e) => result_err_msg(&format!("temp_file {path}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_lock(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    match std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&p)
+    {
+        Ok(_) => result_ok_bits(path_record(p) as u64),
+        Err(e) => result_err_msg(&format!("lock {p}: {e}")),
+    }
+}
+
 // ── core.math (mirrors jet_std_math_* / f64 methods in Process.rs emit) ───────
 
 extern "C" fn jet_jit_math_sin(x: f64) -> f64 {
@@ -605,6 +1016,23 @@ pub(crate) struct CoreHostFns {
     pub fs_write: cranelift_module::FuncId,
     pub fs_create_dir: cranelift_module::FuncId,
     pub fs_list_dir: cranelift_module::FuncId,
+    pub fs_remove_all: cranelift_module::FuncId,
+    pub fs_stat: cranelift_module::FuncId,
+    pub fs_read_at: cranelift_module::FuncId,
+    pub fs_write_at: cranelift_module::FuncId,
+    pub fs_fsync: cranelift_module::FuncId,
+    pub fs_write_atomic: cranelift_module::FuncId,
+    pub fs_walk: cranelift_module::FuncId,
+    pub fs_glob: cranelift_module::FuncId,
+    pub fs_symlink: cranelift_module::FuncId,
+    pub fs_read_link: cranelift_module::FuncId,
+    pub fs_hard_link: cranelift_module::FuncId,
+    pub fs_canonicalize: cranelift_module::FuncId,
+    pub fs_absolute: cranelift_module::FuncId,
+    pub fs_copy_dir: cranelift_module::FuncId,
+    pub fs_temp_dir: cranelift_module::FuncId,
+    pub fs_temp_file: cranelift_module::FuncId,
+    pub fs_lock: cranelift_module::FuncId,
     pub path_join: cranelift_module::FuncId,
     pub math_sin: cranelift_module::FuncId,
     pub math_cos: cranelift_module::FuncId,
@@ -659,6 +1087,23 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_fs_write", jet_jit_fs_write as *const u8);
     builder.symbol("jet_jit_fs_create_dir", jet_jit_fs_create_dir as *const u8);
     builder.symbol("jet_jit_fs_list_dir", jet_jit_fs_list_dir as *const u8);
+    builder.symbol("jet_jit_fs_remove_all", jet_jit_fs_remove_all as *const u8);
+    builder.symbol("jet_jit_fs_stat", jet_jit_fs_stat as *const u8);
+    builder.symbol("jet_jit_fs_read_at", jet_jit_fs_read_at as *const u8);
+    builder.symbol("jet_jit_fs_write_at", jet_jit_fs_write_at as *const u8);
+    builder.symbol("jet_jit_fs_fsync", jet_jit_fs_fsync as *const u8);
+    builder.symbol("jet_jit_fs_write_atomic", jet_jit_fs_write_atomic as *const u8);
+    builder.symbol("jet_jit_fs_walk", jet_jit_fs_walk as *const u8);
+    builder.symbol("jet_jit_fs_glob", jet_jit_fs_glob as *const u8);
+    builder.symbol("jet_jit_fs_symlink", jet_jit_fs_symlink as *const u8);
+    builder.symbol("jet_jit_fs_read_link", jet_jit_fs_read_link as *const u8);
+    builder.symbol("jet_jit_fs_hard_link", jet_jit_fs_hard_link as *const u8);
+    builder.symbol("jet_jit_fs_canonicalize", jet_jit_fs_canonicalize as *const u8);
+    builder.symbol("jet_jit_fs_absolute", jet_jit_fs_absolute as *const u8);
+    builder.symbol("jet_jit_fs_copy_dir", jet_jit_fs_copy_dir as *const u8);
+    builder.symbol("jet_jit_fs_temp_dir", jet_jit_fs_temp_dir as *const u8);
+    builder.symbol("jet_jit_fs_temp_file", jet_jit_fs_temp_file as *const u8);
+    builder.symbol("jet_jit_fs_lock", jet_jit_fs_lock as *const u8);
     builder.symbol("jet_jit_path_join", jet_jit_path_join as *const u8);
     builder.symbol("jet_jit_math_sin", jet_jit_math_sin as *const u8);
     builder.symbol("jet_jit_math_cos", jet_jit_math_cos as *const u8);
@@ -742,6 +1187,11 @@ pub(crate) fn declare_core_host_fns(
     sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
     sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
     sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_i64_i64_i64_i64 = Signature::new(cc);
+    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
 
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
@@ -778,6 +1228,23 @@ pub(crate) fn declare_core_host_fns(
         fs_write: import("jet_jit_fs_write", &sig_i64_i64_i64)?,
         fs_create_dir: import("jet_jit_fs_create_dir", &sig_unary_i64)?,
         fs_list_dir: import("jet_jit_fs_list_dir", &sig_unary_i64)?,
+        fs_remove_all: import("jet_jit_fs_remove_all", &sig_unary_i64)?,
+        fs_stat: import("jet_jit_fs_stat", &sig_unary_i64)?,
+        fs_read_at: import("jet_jit_fs_read_at", &sig_i64_i64_i64_i64)?,
+        fs_write_at: import("jet_jit_fs_write_at", &sig_i64_i64_i64_i64)?,
+        fs_fsync: import("jet_jit_fs_fsync", &sig_unary_i64)?,
+        fs_write_atomic: import("jet_jit_fs_write_atomic", &sig_i64_i64_i64)?,
+        fs_walk: import("jet_jit_fs_walk", &sig_unary_i64)?,
+        fs_glob: import("jet_jit_fs_glob", &sig_unary_i64)?,
+        fs_symlink: import("jet_jit_fs_symlink", &sig_i64_i64_i64)?,
+        fs_read_link: import("jet_jit_fs_read_link", &sig_unary_i64)?,
+        fs_hard_link: import("jet_jit_fs_hard_link", &sig_i64_i64_i64)?,
+        fs_canonicalize: import("jet_jit_fs_canonicalize", &sig_unary_i64)?,
+        fs_absolute: import("jet_jit_fs_absolute", &sig_unary_i64)?,
+        fs_copy_dir: import("jet_jit_fs_copy_dir", &sig_i64_i64_i64)?,
+        fs_temp_dir: import("jet_jit_fs_temp_dir", &sig_unary_i64)?,
+        fs_temp_file: import("jet_jit_fs_temp_file", &sig_unary_i64)?,
+        fs_lock: import("jet_jit_fs_lock", &sig_unary_i64)?,
         path_join: import("jet_jit_path_join", &sig_i64_i64_i64)?,
         math_sin: import("jet_jit_math_sin", &sig_f64_f64)?,
         math_cos: import("jet_jit_math_cos", &sig_f64_f64)?,

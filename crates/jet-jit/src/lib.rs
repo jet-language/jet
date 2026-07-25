@@ -14,6 +14,7 @@
 mod Collections;
 mod Concurrency;
 mod CoreHost;
+mod Encoding;
 mod Numeric;
 mod Random;
 mod Solver;
