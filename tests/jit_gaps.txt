@@ -1,6 +1,7 @@
-# Phase 3 JIT compile-gate ratchet baseline for Tower card #125.
+# Phase 3 JIT compile-gate ratchet baseline for Tower card #125 / #778.
 # Format consumed by tests/dev.rs::jit_coverage_audit.
 # Covered means TIR lowered and Cranelift compiled end-to-end; gaps list the first compile/unsupported reason.
+# Shrink-only perf ratchet (D-LENS-RUN2 / #778): gaps may only shrink; silent growth fails CI.
 # Covered/gap movement is intentional only; update this file in the same diff.
 
 covered:
@@ -27,8 +28,6 @@ covered:
   collections/list_bounds
   collections/map_key
   collections/struct_list_mutation
-  comptime/comptime_block
-  comptime/comptime_parse
   comptime/comptime_splice
   comptime/doctests
   comptime/reflect
@@ -63,7 +62,6 @@ covered:
   lowlevel/cross
   lowlevel/layout_c
   memory/ref_field
-  modules/generic_modules
   modules/inline_module
   modules/module_inline_sibling
   modules/pub_file
@@ -72,7 +70,6 @@ covered:
   operators/user_defined
   serde/user_derive
   syntax/maturity_tags
-  text/bigint
   text/string_parse
   text/strings
   tooling/bench
@@ -134,10 +131,6 @@ gaps:
   comptime/comptime_if: run: jit inline comptime branch unsupported
   comptime/comptime_table: run: jit const ref unsupported
   comptime/comptime_tiers: run: jit const ref unsupported
-  comptime/embed: check_nonempty: jit require/panic stop unsupported
-  comptime/embed_bytes: jit param type unsupported: List(IntN { signed: false, bits: 8 })
-  comptime/find: run: jit const ref unsupported
-  comptime/find_empty: run: jit const ref unsupported
   concurrency/deadline_context: run: jit context block unsupported
   concurrency/detached_task: run: jit handle method unsupported
   concurrency/parallel_iter: run: jit closure method unsupported
@@ -294,6 +287,7 @@ gaps:
   serde/yaml: run: jit core call unsupported
   streams/generators: count: jit host/default/uninit/ct-lit unsupported
   syntax/trailing_block: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }
+  text/bigint: run: jit precise numeric builtin unsupported: to_string
   text/dates: run: jit core call unsupported
   text/datetime: run: jit core call unsupported
   text/decimal: run: jit precise numeric builtin unsupported
@@ -334,6 +328,7 @@ gaps:
   types/renderable-varargs: run: jit call to unknown function `log_all__va4`
   types/traits: print_area: jit missing method `Shape::name`
   types/type_alias: run: jit result ?? operand is not Result
+  types/typed_literal_head: run: jit string interp type unsupported: IntN { signed: false, bits: 8 }
   types/unit_family: run: jit binary op unsupported
   types/unit_literals: run: jit binary op unsupported
   types/value_tag_type: jit param type unsupported: Tagged { marker: "Raw", inner: Int }
@@ -358,5 +353,3 @@ gaps:
   web/web_wasm_list: run: jit print type unsupported
   web/web_wasm_list_string: jit param type unsupported: List(String)
   web/web_wasm_map: echo_scores: jit clone unsupported type: Map { key: String, key_span: Some(Span { start: 202, end: 208 }), value: Int }, local scores
-
-parity_divergences:

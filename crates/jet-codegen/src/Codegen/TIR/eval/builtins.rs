@@ -113,7 +113,24 @@ pub(super) fn eval_builtin(
         TBuiltinOp::DequePeekFront => Err(unsupported("builtin `DequePeekFront`", span)),
         TBuiltinOp::DequePeekBack => Err(unsupported("builtin `DequePeekBack`", span)),
         TBuiltinOp::TryCollect => Err(unsupported("builtin `TryCollect`", span)),
-        TBuiltinOp::ViewNew { .. } => Err(unsupported("builtin `ViewNew`", span)),
-        TBuiltinOp::ViewMutNew { .. } => Err(unsupported("builtin `ViewMutNew`", span)),
+        // CtValue has no distinct View type — materialize the inclusive window as a List.
+        TBuiltinOp::ViewNew { .. } | TBuiltinOp::ViewMutNew { .. } => {
+            let CtValue::List(xs) = recv else {
+                return Err(unsupported("view receiver", span));
+            };
+            let mut it = args.into_iter();
+            let a = match it.next() {
+                Some(CtValue::Int(n)) => n,
+                _ => return Err(unsupported("view start", span)),
+            };
+            let z = match it.next() {
+                Some(CtValue::Int(n)) => n,
+                _ => return Err(unsupported("view end", span)),
+            };
+            if a < 0 || z < a || z as usize >= xs.len() {
+                return Err(unsupported("view bounds", span));
+            }
+            Ok(CtValue::List(xs[a as usize..=z as usize].to_vec()))
+        }
     }
 }

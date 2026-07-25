@@ -1,7 +1,8 @@
-//! E2-M4 / D-LENS-RUN1 — shared JIT-lens execution driver.
+//! E2-M4 / D-LENS-RUN2 — shared JIT-lens execution driver.
 //!
-//! Default `jet run` and `jet dev` execute through strict Cranelift. The
-//! tier-0 interpreter is explicit (`jet dev --interpret`) only.
+//! Default `jet run` and `jet dev` execute through tiered Cranelift with
+//! silent interpreter deopt on named coverage gaps. Explicit
+//! `jet dev --interpret` forces tier-0 only. Experts use `--trace-tiers`.
 
 use std::collections::HashMap;
 

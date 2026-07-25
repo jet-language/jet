@@ -552,6 +552,8 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--dry-run", help: "with fix: show changes without writing" },
     FlagSpec { long: "--edition", help: "with fix: apply edition migration rewrites --edition=<year>" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
+    FlagSpec { long: "--interpret", help: "with dev: force the tier-0 TIR interpreter" },
+    FlagSpec { long: "--trace-tiers", help: "with run/dev: print per-function Cranelift vs interpreter tier selection" },
     FlagSpec { long: "--restart", help: "with dev: always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "with dev: hot-swap compatible edits and restart after type changes" },
     FlagSpec { long: "--watch", help: "with run/dev: re-run on dependency changes; --watch=off runs once" },

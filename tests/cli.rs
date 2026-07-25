@@ -2125,13 +2125,12 @@ fn explain_e2211_golden() {
         .unwrap();
     assert!(out.status.success(), "jet explain E2211 should succeed");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    assert!(stdout.contains("Jet JIT has a compiler gap"), "{stdout}");
-    assert!(stdout.contains("jet build"), "{stdout}");
+    assert!(stdout.contains("This code is retired"), "{stdout}");
     check_snapshot("explain_E2211.txt", &stdout);
 }
 
 #[test]
-fn default_jet_run_reports_e2211_for_jit_gap() {
+fn default_jet_run_deopts_jit_gap_silently() {
     let dir = isolated_cwd("jit_gap_run");
     let file = dir.join("env.jet");
     fs::write(
@@ -2145,10 +2144,19 @@ fn default_jet_run_reports_e2211_for_jit_gap() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(output.status.code(), Some(101), "stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr={}\nstdout={}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Error [E2211]"), "{stderr}");
-    assert!(stderr.contains("JIT gap in run:"), "{stderr}");
+    assert!(!stderr.contains("E2211"), "E2211 retired: {stderr}");
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).is_empty(),
+        "deopted env.current_dir() should print a path"
+    );
 }
 
 #[test]

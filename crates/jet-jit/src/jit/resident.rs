@@ -1,8 +1,13 @@
 use jet_codegen::Codegen::TIR::JitProgram;
 use jet_foundation::{Diagnostics::Diagnostic, JitBackend::RunOutcome, AST::Type};
+use std::collections::HashMap;
 
-use super::functions_compile::compile_program;
+use super::deopt::{
+    clear_deopt_state, install_deopt_program, install_native_hook, register_native_fn,
+};
+use super::functions_compile::{compile_program, compile_program_tiered};
 use super::runtime_host::{jit_result, new_jit_module, ResidentModule};
+use super::tiers::TierPlan;
 use super::{Concurrency, JitRuntime, RESIDENT_MODULE, RESIDENT_RUNTIME};
 
 pub(crate) fn fresh_runtime() -> JitRuntime {
@@ -80,6 +85,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
 }
 
 pub(crate) fn resident_teardown() {
+    clear_deopt_state();
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = None);
     Concurrency::set_active_runtime(None);
@@ -204,6 +210,69 @@ pub(crate) fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, Str
     resident_teardown();
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
     ensure_resident_module(program)?;
+    resident_invoke()
+}
+
+/// Mixed-tier run: Cranelift for covered funcs, interpreter stubs for named gaps.
+pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Result<RunOutcome, String> {
+    use cranelift_module::Module;
+
+    jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
+    resident_teardown();
+    clear_deopt_state();
+    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
+
+    let mut deopt_index = HashMap::new();
+    let mut deopt_names = Vec::new();
+    for (name, _) in &plan.deopt {
+        let idx = deopt_names.len() as i64;
+        deopt_names.push(name.clone());
+        deopt_index.insert(name.clone(), idx);
+    }
+    // SAFETY: `program` outlives the invoke below (same stack frame).
+    install_deopt_program(program, &deopt_names);
+
+    let main_returns_result = program.funcs.iter().any(|func| {
+        func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
+    });
+    let (mut module, host) = new_jit_module()?;
+    let mut runtime = RESIDENT_RUNTIME
+        .with(|slot| slot.borrow_mut().take())
+        .unwrap_or_else(fresh_runtime);
+    let main_id = compile_program_tiered(
+        &mut module,
+        &host,
+        program,
+        &mut runtime,
+        None,
+        &deopt_index,
+    )?;
+
+    for f in &program.funcs {
+        if !plan.native.contains(&f.name) {
+            continue;
+        }
+        let sym = if f.name == program.entry {
+            "jet_jit_main".to_string()
+        } else {
+            super::types_meta::jit_fn_name(&f.name)
+        };
+        if let Some(cranelift_module::FuncOrDataId::Func(func_id)) = module.get_name(&sym) {
+            let code = module.get_finalized_function(func_id);
+            register_native_fn(f.name.clone(), code, f);
+        }
+    }
+    install_native_hook();
+
+    RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime));
+    RESIDENT_MODULE.with(|slot| {
+        *slot.borrow_mut() = Some(ResidentModule {
+            module,
+            host,
+            main_id,
+            main_returns_result,
+        });
+    });
     resident_invoke()
 }
 

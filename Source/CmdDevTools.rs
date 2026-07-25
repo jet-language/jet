@@ -365,10 +365,6 @@ fn render_dev_change(
         println!("\n— {} changed, re-running —", file);
         let outcome = jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter);
         render_dev_outcome(&outcome, file, mode);
-        if matches!(outcome, jet::Interpreter::RunOutcome::Problems(ref diags) if jet_jit::is_e2211(diags))
-        {
-            return None;
-        }
     }
 
     Some(new_bundle)
@@ -400,7 +396,7 @@ fn run_resident_swap(
         Err(diags) => {
             let src = fs::read_to_string(file).unwrap_or_default();
             report_problems(mode, file, &src, &diags);
-            !jet_jit::is_e2211(&diags)
+            false
         }
     }
 }
@@ -422,10 +418,7 @@ fn run_resident_restart(
         let mut b = CraneliftBackend::new();
         b.restart(bundle, try_anyway)
     };
-    let ok = match &outcome {
-        jet::Interpreter::RunOutcome::Problems(diags) => !jet_jit::is_e2211(diags),
-        jet::Interpreter::RunOutcome::Ran { .. } => true,
-    };
+    let ok = matches!(&outcome, jet::Interpreter::RunOutcome::Ran { .. });
     render_outcome(outcome, file, mode);
     ok
 }
@@ -498,10 +491,7 @@ fn render_dev_outcome(
 fn exit_dev_outcome(outcome: jet::Interpreter::RunOutcome) {
     match outcome {
         jet::Interpreter::RunOutcome::Ran { exit_code, .. } => exit(exit_code),
-        jet::Interpreter::RunOutcome::Problems(diags) => {
-            if jet_jit::is_e2211(&diags) {
-                exit(ExitCodes::ICE);
-            }
+        jet::Interpreter::RunOutcome::Problems(_) => {
             exit(ExitCodes::USER_ERROR);
         }
     }

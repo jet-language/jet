@@ -55,21 +55,8 @@ pub fn entry_run_span(bundle: &ProgramBundle) -> Option<Span> {
     })
 }
 
-/// E2211 — D-LENS-RUN1 / card #728 exact product copy.
-pub fn e2211_diagnostic(gap: &JitGap, bundle: &ProgramBundle) -> Diagnostic {
-    Diagnostic::error(
-        "E2211",
-        "Jet JIT has a compiler gap for this checked program.".to_string(),
-        format!(
-            "jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in {}: {}.",
-            gap.function, gap.reason
-        ),
-        "run `jet build <file>` and the binary for now, then report E2211 with the detail below."
-            .to_string(),
-        entry_run_span(bundle),
-    )
-}
-
+/// Retired E2211 detector — kept so tests can assert the code is never emitted
+/// after D-LENS-RUN2=A / #778 (silent interpreter deopt).
 pub fn is_e2211(diags: &[Diagnostic]) -> bool {
     diags.iter().any(|d| d.code == "E2211")
 }

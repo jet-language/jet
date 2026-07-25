@@ -488,3 +488,34 @@ impl<'a> Interp<'a> {
     }
 }
 
+
+
+thread_local! {
+    static RUNTIME_ARGV: std::cell::RefCell<Option<Vec<String>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+struct RuntimeArgvGuard(Option<Vec<String>>);
+
+impl Drop for RuntimeArgvGuard {
+    fn drop(&mut self) {
+        RUNTIME_ARGV.with(|slot| {
+            *slot.borrow_mut() = std::mem::take(&mut self.0);
+        });
+    }
+}
+
+/// Install argv for one interpreted / deopt run (`argv[0]` = entry path).
+/// When set, impure `core.io.args` uses this instead of the host process argv
+/// (so `cargo test` flags never leak into example output).
+pub fn with_runtime_argv<R>(args: &[String], run: impl FnOnce() -> R) -> R {
+    let previous = RUNTIME_ARGV.with(|slot| {
+        std::mem::replace(&mut *slot.borrow_mut(), Some(args.to_vec()))
+    });
+    let _guard = RuntimeArgvGuard(previous);
+    run()
+}
+
+pub(crate) fn runtime_argv() -> Option<Vec<String>> {
+    RUNTIME_ARGV.with(|slot| slot.borrow().clone())
+}

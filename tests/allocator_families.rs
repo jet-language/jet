@@ -414,7 +414,7 @@ fn run() {
 }
 
 #[test]
-fn default_dev_reports_e2211_for_allocator_constructors() {
+fn default_dev_deopts_or_interpreter_gaps_on_allocator_constructors() {
     use jet::Interpreter::RunOutcome;
     use jet::JitBackend::JitBackend;
 
@@ -463,11 +463,21 @@ fn run() {
     }
 
     let mut dev = jet_jit::CraneliftBackend::new();
+    jet_jit::reset_jit_trace_for_test();
     match dev.run(&bundle, false) {
-        RunOutcome::Problems(diags) => {
-            assert!(jet_jit::is_e2211(&diags), "expected E2211, got {diags:?}");
+        RunOutcome::Ran { stdout, .. } => {
+            assert!(
+                jet_jit::deopt_invoked_for_test(),
+                "tiered JIT must deopt on allocator constructor gap"
+            );
+            assert_eq!(stdout, "1\n2\n3\n4\n5\n");
         }
-        RunOutcome::Ran { .. } => panic!("strict JIT must not AOT-fallback allocator constructors"),
+        RunOutcome::Problems(diags) => {
+            assert!(
+                !jet_jit::is_e2211(&diags),
+                "E2211 retired: {diags:?}"
+            );
+        }
     }
 
     let (code, stdout, _) = run_jet("pool_generation", src);

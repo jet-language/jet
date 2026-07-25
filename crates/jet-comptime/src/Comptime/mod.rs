@@ -46,8 +46,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
-pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET};
-pub use Methods::apply_core_call;
+pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
+pub use Methods::{apply_core_call, apply_impure_core_call};
 pub use Methods::apply_dollar_splices;
 pub use Purity::walk_calls;
 pub use Reflect::{build_program_info, build_struct_type_info, ProgramSemanticFacts};
