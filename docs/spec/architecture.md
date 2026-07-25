@@ -73,7 +73,17 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 
 A data race is two tasks that access the same memory at the same time when at
 least one access writes and the accesses do not use a synchronization rule.
-Sema already closes these common paths:
+
+D-DATARACE1=C is law. Safe Jet must make a data race impossible to compile:
+every reactive box starts in the fast one-thread form; when a box crosses a
+task, task group, channel, task result, or parallel boundary, the compiler
+rebuilds that box in a lock-guarded form. `#Local` pins the fast form and turns
+a crossing into E1102. `#Shared` pins the synchronized form. `jet report` lists
+every upgraded box. Until that upgrade ships, the proved surface below is the
+honest bound.
+
+Sema already closes these non-reactive paths
+(`tests/concurrency_boundaries.rs` and the matching UI snapshots):
 
 - A task created by `tasks.spawn` or `g.task` owns or copies its captures.
   Sema rejects a mutable capture, a borrowed view, or another value that cannot
@@ -88,18 +98,14 @@ Sema already closes these common paths:
   closures use a lock-scoped view. `#Transact` uses the same handles and commits
   their changes atomically.
 
-These checks do not yet form a complete language guarantee.
-`Signal<T>`, `Derived<T>`, and `Computed<T>` are single-thread reactive handles
-backed by `Rc` and `RefCell`. The current capture rule can copy them into a task
-or task group, or move them through a channel. A native build then relies on
-rustc to reject the generated thread crossing. That is an I2/I3 violation even
-when no unsafe binary is produced, and JIT/dev parity is not proved.
+`Signal<T>`, `Derived<T>`, `Computed<T>`, and `Effect` are still single-thread
+handles backed by `Rc` and `RefCell`. Sema can still copy them into a task or
+channel today; a native build then leans on rustc `Send` and can ICE (I2/I3).
+Card #752 owns shipping D-DATARACE1=C for those handles. Until that lands, Jet
+must not claim that every safe program is data-race free.
 
-Card #752 and D-DATARACE1 own the open choice between a static sendability rule
-and a runtime detector. Until that decision ships, Jet must not claim that all
-safe programs are data-race free. Code inside an `#Unsafe("reason")` region, a
-foreign implementation, or a vetted runtime internal must also uphold its
-boundary contract.
+Code inside an `#Unsafe("reason")` region, a foreign implementation, or a
+vetted runtime internal must also uphold its boundary contract.
 
 ### Private traced collector substrate
 
