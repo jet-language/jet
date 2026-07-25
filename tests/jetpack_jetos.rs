@@ -3230,14 +3230,6 @@ fn nixos_migration_protects_stage_before_writing_inputs() {
         .iter()
         .position(|line| line.contains("mkdir(") && line.contains(marker) && line.contains("0700"))
         .unwrap_or_else(|| panic!("private 0700 mkdir missing:\n{trace}"));
-    let protected = lines
-        .iter()
-        .position(|line| {
-            line.contains(marker)
-                && line.contains("AT_SYMLINK_NOFOLLOW")
-                && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700"))
-        })
-        .unwrap_or_else(|| panic!("no-follow 0700 verification missing:\n{trace}"));
     let first_input = lines
         .iter()
         .position(|line| {
@@ -3247,16 +3239,283 @@ fn nixos_migration_protects_stage_before_writing_inputs() {
                     || line.contains("/input-facts.json"))
         })
         .unwrap_or_else(|| panic!("private input creation missing:\n{trace}"));
+    let protected = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            (index < first_input
+                && line.contains(marker)
+                && line.contains("AT_SYMLINK_NOFOLLOW")
+                && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")))
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        protected.len(),
+        2,
+        "expected post-mkdir and pre-write verification:\n{trace}"
+    );
     let insecure = lines.iter().find(|line| {
         line.contains(marker)
             && (line.contains("st_mode=S_IFDIR|") || line.contains("stx_mode=S_IFDIR|"))
             && !line.contains("S_IFDIR|0700")
     });
     assert!(insecure.is_none(), "stage mode widened: {insecure:?}");
-    assert!(mkdir < protected, "mode checked before mkdir:\n{trace}");
+    assert!(mkdir < protected[0], "mode checked before mkdir:\n{trace}");
     assert!(
-        protected < first_input,
+        protected[1] < first_input,
         "private input opened before mode/no-follow verification:\n{trace}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn build_nixos_migration_test_tools(root: &Path) -> (std::ffi::OsString, std::path::PathBuf) {
+    let tools = root.join("tools");
+    let outputs = root.join("tool-outputs");
+    fs::create_dir_all(&tools).unwrap();
+    fs::create_dir_all(&outputs).unwrap();
+    let source = root.join("migration-tool.c");
+    let binary = tools.join("migration-tool");
+    fs::write(
+        &source,
+        r##"#define _GNU_SOURCE
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+static void write_file(const char *path, const char *text) {
+    FILE *file = fopen(path, "w");
+    if (!file) exit(20);
+    fputs(text, file);
+    fclose(file);
+}
+
+static int run_nix(int argc, char **argv) {
+    const char *root = getenv("JET_TEST_TOOL_ROOT");
+    char dir[PATH_MAX], path[PATH_MAX];
+    int disk = 0;
+    for (int i = 1; i < argc; i++) if (strstr(argv[i], "#disk")) disk = 1;
+    if (disk) {
+        snprintf(dir, sizeof(dir), "%s/disk", root);
+        mkdir(dir, 0700);
+        snprintf(path, sizeof(path), "%s/system.qcow2", dir);
+        write_file(path, "qcow2");
+    } else {
+        snprintf(dir, sizeof(dir), "%s/firmware", root);
+        mkdir(dir, 0700);
+        snprintf(path, sizeof(path), "%s/FV", dir);
+        mkdir(path, 0700);
+        snprintf(path, sizeof(path), "%s/FV/OVMF_CODE.fd", dir);
+        write_file(path, "code");
+        snprintf(path, sizeof(path), "%s/FV/OVMF_VARS.fd", dir);
+        write_file(path, "vars");
+    }
+    printf("%s/%s\n", root, disk ? "disk" : "firmware");
+    return 0;
+}
+
+static int run_qemu(int argc, char **argv) {
+    const char *serial = NULL, *qmp = NULL;
+    for (int i = 1; i + 1 < argc; i++) {
+        if (!strcmp(argv[i], "-serial") && !strncmp(argv[i + 1], "file:", 5)) serial = argv[i + 1] + 5;
+        if (!strcmp(argv[i], "-qmp") && !strncmp(argv[i + 1], "unix:", 5)) qmp = argv[i + 1] + 5;
+    }
+    if (!serial || !qmp) return 21;
+    char socket_path[PATH_MAX];
+    snprintf(socket_path, sizeof(socket_path), "%s", qmp);
+    char *comma = strchr(socket_path, ',');
+    if (comma) *comma = '\0';
+
+    int server = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un address = { .sun_family = AF_UNIX };
+    snprintf(address.sun_path, sizeof(address.sun_path), "%s", socket_path);
+    unlink(socket_path);
+    if (bind(server, (struct sockaddr *)&address, sizeof(address)) || listen(server, 1)) return 22;
+
+    const char *collision = getenv("JET_TEST_COLLIDE_PUBLISH");
+    if (collision) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/.nixos-comparison-publish-halcyon-gnome-%d", collision, getppid());
+        mkdir(path, 0700);
+    }
+    write_file(serial, "NIXOS_COMPARISON_PROOF:{\"host\":\"halcyon-gnome\",\"os_release\":\"NixOS\",\"prompt\":\"NixOS comparison $ \",\"banner\":\"NixOS comparison guest\",\"proof\":\"live-desktop\"}\n");
+
+    int client = accept(server, NULL, NULL);
+    FILE *stream = fdopen(client, "r+");
+    fputs("{\"QMP\":{}}\n", stream);
+    fflush(stream);
+    char line[PATH_MAX * 2];
+    while (fgets(line, sizeof(line), stream)) {
+        char *filename = strstr(line, "\"filename\":\"");
+        if (filename) {
+            filename += strlen("\"filename\":\"");
+            char *end = strchr(filename, '"');
+            if (end) {
+                *end = '\0';
+                write_file(filename, "png");
+            }
+        }
+        fputs("{\"return\":{}}\n", stream);
+        fflush(stream);
+        if (strstr(line, "system_powerdown")) break;
+    }
+    fclose(stream);
+    close(server);
+    unlink(socket_path);
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    const char *name = strrchr(argv[0], '/');
+    name = name ? name + 1 : argv[0];
+    if (!strcmp(name, "nix")) return run_nix(argc, argv);
+    if (!strcmp(name, "qemu-system-x86_64")) return run_qemu(argc, argv);
+    return 0;
+}
+"##,
+    )
+    .unwrap();
+    let built = Command::new("cc")
+        .args(["-std=c11", "-O0"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "cc failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    for name in ["nix", "qemu-system-x86_64", "qemu-img"] {
+        fs::hard_link(&binary, tools.join(name)).unwrap();
+    }
+    let path = std::env::join_paths(
+        std::iter::once(tools).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )),
+    )
+    .unwrap();
+    (path, outputs)
+}
+
+#[cfg(target_os = "linux")]
+fn traced_nixos_migration(
+    root: &Scratch,
+    out_dir: &Path,
+    trace: &Path,
+    path: &std::ffi::OsStr,
+    outputs: &Path,
+    collide_publish: bool,
+) -> std::process::Output {
+    let jet_program = jet().get_program().to_owned();
+    let mut command = Command::new("strace");
+    command
+        .args(["-f", "-s", "4096", "-o"])
+        .arg(trace)
+        .args(["-e", "trace=%file", "--"])
+        .arg(jet_program)
+        .args([
+            "os",
+            "migrate",
+            "compare-nixos",
+            "halcyon-gnome",
+            "--out",
+            out_dir.to_str().unwrap(),
+            "--no-color",
+        ])
+        .current_dir(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
+        )
+        .env("JETPACK_ROOT", &root.path)
+        .env("JET_TEST_TOOL_ROOT", outputs)
+        .env("TMPDIR", "/tmp")
+        .env("PATH", path);
+    if collide_publish {
+        command.env("JET_TEST_COLLIDE_PUBLISH", &root.path);
+    }
+    command.output().unwrap()
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn nixos_migration_publish_stage_is_private_and_collision_safe() {
+    let root = Scratch::new("nixos-private-publish");
+    let (path, outputs) = build_nixos_migration_test_tools(&root.path);
+
+    let published = root.join("published");
+    let success_trace = root.join("publish-success.trace");
+    let out = traced_nixos_migration(
+        &root,
+        &published,
+        &success_trace,
+        &path,
+        &outputs,
+        false,
+    );
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let trace = fs::read_to_string(success_trace).unwrap();
+    let marker = "/.nixos-comparison-publish-halcyon-gnome-";
+    let lines = trace.lines().collect::<Vec<_>>();
+    let mkdir = lines
+        .iter()
+        .position(|line| line.contains("mkdir(") && line.contains(marker) && line.contains("0700"))
+        .unwrap_or_else(|| panic!("private publish mkdir missing:\n{trace}"));
+    let protected = lines
+        .iter()
+        .position(|line| {
+            line.contains(marker)
+                && line.contains("AT_SYMLINK_NOFOLLOW")
+                && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700"))
+        })
+        .unwrap_or_else(|| panic!("private publish verification missing:\n{trace}"));
+    let first_output = lines
+        .iter()
+        .position(|line| line.contains(marker) && line.contains("/system-image.qcow2"))
+        .unwrap_or_else(|| panic!("private publish output missing:\n{trace}"));
+    assert!(mkdir < protected && protected < first_output, "{trace}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&published).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+
+    let collision_out = root.join("collision-output");
+    let collision_trace = root.join("publish-collision.trace");
+    let out = traced_nixos_migration(
+        &root,
+        &collision_out,
+        &collision_trace,
+        &path,
+        &outputs,
+        true,
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!collision_out.exists());
+    let trace = fs::read_to_string(collision_trace).unwrap();
+    assert!(
+        trace.lines().any(|line| {
+            line.contains("mkdir(")
+                && line.contains(marker)
+                && line.contains("0700")
+                && line.contains("EEXIST")
+        }),
+        "preexisting publish leaf did not fail atomically:\n{trace}"
     );
 }
 
