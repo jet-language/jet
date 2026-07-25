@@ -2223,9 +2223,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
-        Expr::TypedLit { .. } => {
-            panic!("ICE: TypedLit must be elaborated in sema before TIR lowering");
-        }
+        // Residual TypedLit after incomplete elaboration: refuse with Todo so
+        // interpreter/deopt returns E0956 instead of aborting (I2 / #778).
+        Expr::TypedLit { .. } => TExpr {
+            ty: Type::Int,
+            kind: TExprKind::Todo {
+                line: 0,
+                expected_type: "typed literal not elaborated".into(),
+            },
+        },
         Expr::Paren(inner, _) => lower_expr(inner, cx, env),
         Expr::PatternTest {
             subject, pattern, ..

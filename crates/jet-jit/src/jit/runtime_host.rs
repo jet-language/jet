@@ -894,6 +894,7 @@ pub(crate) struct HostFns {
     pub(crate) perf_override_fidelity: FuncId,
     pub(crate) perf_reset_fidelity: FuncId,
     pub(crate) is_trapped: FuncId,
+    pub(crate) deopt_call: FuncId,
     pub(crate) coll: Collections::CollectionsHostFns,
     pub(crate) conc: Concurrency::ConcurrencyHostFns,
     pub(crate) num: Numeric::NumericHostFns,
@@ -1012,6 +1013,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         jet_jit_perf_reset_fidelity as *const u8,
     );
     builder.symbol("jet_jit_is_trapped", jet_jit_is_trapped as *const u8);
+    builder.symbol("jet_deopt_call", super::deopt::jet_deopt_call as *const u8);
     Collections::register_collections_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
     Numeric::register_numeric_symbols(&mut builder);
@@ -1193,6 +1195,12 @@ fn declare_host_fns(
     let mut sig_perf_override = Signature::new(cc);
     sig_perf_override.params.push(AbiParam::new(types::F64));
     sig_perf_override.returns.push(AbiParam::new(types::I64));
+    let mut sig_deopt = Signature::new(cc);
+    // fn_idx, argc, a0..a7
+    for _ in 0..10 {
+        sig_deopt.params.push(AbiParam::new(types::I64));
+    }
+    sig_deopt.returns.push(AbiParam::new(types::I64));
     let sig_noarg = Signature::new(cc);
 
     let mut import = |name: &str, sig: &Signature| -> Result<FuncId, String> {
@@ -1272,6 +1280,7 @@ fn declare_host_fns(
         perf_override_fidelity: import("jet_jit_perf_override_fidelity", &sig_perf_override)?,
         perf_reset_fidelity: import("jet_jit_perf_reset_fidelity", &sig_noarg)?,
         is_trapped: import("jet_jit_is_trapped", &sig_is_trapped)?,
+        deopt_call: import("jet_deopt_call", &sig_deopt)?,
         coll,
         conc,
         num,

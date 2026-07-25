@@ -240,6 +240,19 @@ pub(crate) fn compile_program(
     runtime: &mut JitRuntime,
     existing_main: Option<FuncId>,
 ) -> Result<FuncId, String> {
+    compile_program_tiered(module, host, program, runtime, existing_main, &HashMap::new())
+}
+
+/// Compile with optional per-function interpreter deopt stubs (#778).
+/// `deopt_index` maps function name → packed host index.
+pub(crate) fn compile_program_tiered(
+    module: &mut JITModule,
+    host: &HostFns,
+    program: &JitProgram,
+    runtime: &mut JitRuntime,
+    existing_main: Option<FuncId>,
+    deopt_index: &HashMap<String, i64>,
+) -> Result<FuncId, String> {
     runtime.source_file = program.source_file.clone();
     let meta = JitMeta::from_program(program);
 
@@ -289,19 +302,24 @@ pub(crate) fn compile_program(
     let mut spawn_site = 0usize;
     for f in &program.funcs {
         let id = func_ids[&f.name];
-        lower_function(
-            module,
-            host,
-            &meta,
-            f,
-            id,
-            &func_ids,
-            &spawn_func_ids,
-            spawn_lambdas,
-            &mut spawn_site,
-            runtime,
-        )
-        .map_err(|e| format!("{}: {e}", f.name))?;
+        if let Some(&idx) = deopt_index.get(&f.name) {
+            super::deopt::lower_deopt_stub(module, host, &meta, f, id, idx)
+                .map_err(|e| format!("{}: {e}", f.name))?;
+        } else {
+            lower_function(
+                module,
+                host,
+                &meta,
+                f,
+                id,
+                &func_ids,
+                &spawn_func_ids,
+                spawn_lambdas,
+                &mut spawn_site,
+                runtime,
+            )
+            .map_err(|e| format!("{}: {e}", f.name))?;
+        }
     }
 
     module.finalize_definitions().map_err(|e| e.to_string())?;

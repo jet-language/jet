@@ -2001,8 +2001,9 @@ fn regex_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
 }
 
 /// D-CTEFFECT1: execute a Tier-2 ambient comptime I/O effect (or REPL sandbox I/O).
-/// Only called from `eval_method` when `impure_depth > 0` and `allow_impure`.
-pub(super) fn apply_impure_core_call(
+/// Only called when `impure_depth > 0` and `allow_impure` (comptime) or from the
+/// runtime TIR evaluator used by `jet run` deopt (#778).
+pub fn apply_impure_core_call(
     module: &str,
     method: &str,
     args: Vec<CtValue>,
@@ -2135,12 +2136,13 @@ pub(super) fn apply_impure_core_call(
                 None => CtValue::None(crate::AST::Type::String),
             },
         ),
-        ("core.io", "args") => Ok(CtValue::List(
-            std::env::args()
-                .skip(1)
-                .map(CtValue::Str)
-                .collect::<Vec<_>>(),
-        )),
+        ("core.io", "args") => {
+            // Prefer argv installed for this jet run/deopt. Never fall back to
+            // the host process argv — `cargo test` flags would leak into output.
+            let argv = super::super::Interpreter::runtime_argv()
+                .unwrap_or_else(|| vec!["jet".to_string()]);
+            Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
+        }
         ("core.io", "eprint") => {
             let text = match args.first() {
                 Some(v) => v.jet_show(),
@@ -2169,6 +2171,18 @@ pub(super) fn apply_impure_core_call(
                 CtValue::Int(n) => *n,
                 _ => 0,
             };
+            // In-process interpreter/deopt must not kill the host (cargo test,
+            // jet dev). Soft-exit via the sink; bare comptime keeps hard exit.
+            if let Some(s) = sink {
+                s.exit_code = Some(code as i32);
+                return Err(Diagnostic::error(
+                    "SOFT_EXIT",
+                    code.to_string(),
+                    "process.exit requested".to_string(),
+                    String::new(),
+                    Some(span),
+                ));
+            }
             std::process::exit(code as i32);
         }
         ("core.process", "run") => {
@@ -2234,6 +2248,12 @@ pub(super) fn apply_impure_core_call(
                 .to_string(),
             Some(span),
         )),
+        // Pure compress/archive codecs live on apply_core_call; reuse them when
+        // the runtime evaluator has ambient impure depth open (#778 deopt).
+        ("core.compress.gzip", _)
+        | ("core.compress.zstd", _)
+        | ("core.archive", _)
+        | ("core.perf", _) => apply_core_call(module, method, args, span, repl_mode),
         _ => Err(unsupported(
             &format!("`{}.{}()` at comptime (impure tier)", module, method),
             span,

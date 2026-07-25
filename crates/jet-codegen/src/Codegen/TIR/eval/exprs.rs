@@ -1,16 +1,16 @@
 //! Exhaustive TExprKind evaluation (#777).
 use std::collections::HashMap;
-use crate::AST::{CtFloat, UnOp};
+use crate::AST::{CtFloat, Type, UnOp};
 use crate::Codegen::TIR::{TCallArg, TExpr, TExprKind, TPlace, TStrPart};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
-use crate::Comptime::{apply_core_call, CtValue};
+use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue};
 use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
 use super::{unsupported, EvalCtx, Flow};
 
 impl EvalCtx<'_> {
-    pub(super) fn eval_expr(
+    pub(crate) fn eval_expr(
         &mut self,
         expr: &TExpr,
         scope: &mut HashMap<String, CtValue>,
@@ -18,7 +18,10 @@ impl EvalCtx<'_> {
         self.burn()?;
         match &expr.kind {
             TExprKind::IntLit(n, _) => Ok(CtValue::Int(*n)),
-            TExprKind::FloatLit(v) => Ok(CtValue::Float(CtFloat::f64(*v))),
+            TExprKind::FloatLit(v) => {
+                let is_f32 = matches!(&expr.ty, Type::Float32);
+                Ok(CtValue::Float(CtFloat::literal(*v, is_f32)))
+            }
             TExprKind::BoolLit(b) => Ok(CtValue::Bool(*b)),
             TExprKind::CharLit(c) => Ok(CtValue::Char(*c)),
             TExprKind::StrLit(parts) => {
@@ -52,6 +55,9 @@ impl EvalCtx<'_> {
                 .ok_or_else(|| unsupported(&format!("const `{name}`"), self.span())),
             TExprKind::Print(inner) => {
                 let v = self.eval_expr(inner, scope)?;
+                if self.pending_return.is_some() {
+                    return Ok(CtValue::Unit);
+                }
                 self.write_print(&v.jet_show(), false)?;
                 Ok(CtValue::Unit)
             }
@@ -122,6 +128,38 @@ impl EvalCtx<'_> {
                 }
             }
             TExprKind::BuiltinMethod { recv, op, args } => {
+                if matches!(op, crate::Codegen::TIR::TBuiltinOp::ViewMutNew { .. }) {
+                    let base_name = match &recv.kind {
+                        TExprKind::Local(local) => local.name.clone(),
+                        TExprKind::Borrow { place, .. } => match &place.kind {
+                            TExprKind::Local(local) => local.name.clone(),
+                            _ => {
+                                return Err(unsupported("view-mut base", self.span()));
+                            }
+                        },
+                        _ => return Err(unsupported("view-mut base", self.span())),
+                    };
+                    let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
+                    let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
+                    let CtValue::List(xs) = scope
+                        .get(&base_name)
+                        .cloned()
+                        .ok_or_else(|| unsupported("view-mut unbound base", self.span()))?
+                    else {
+                        return Err(unsupported("view-mut list base", self.span()));
+                    };
+                    if start < 0 || end < start || end as usize >= xs.len() {
+                        return Err(unsupported("view-mut bounds", self.span()));
+                    }
+                    return Ok(CtValue::Struct {
+                        type_name: "__JetViewMut".into(),
+                        fields: vec![
+                            ("base".into(), CtValue::Str(base_name)),
+                            ("start".into(), CtValue::Int(start)),
+                            ("end".into(), CtValue::Int(end)),
+                        ],
+                    });
+                }
                 let mut r = self.eval_expr(recv, scope)?;
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
@@ -151,7 +189,24 @@ impl EvalCtx<'_> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
-                apply_core_call(module, method, argv, self.span(), self.repl_mode)
+                // Runtime deopt / `jet run` sets impure_depth>0 so Tier-2
+                // ambient I/O matches AOT (env/fs/process). Pure comptime
+                // keeps depth 0 and stays on apply_core_call (E3410).
+                if self.impure_depth > 0 {
+                    apply_impure_core_call(
+                        module,
+                        method,
+                        argv,
+                        self.span(),
+                        &self.base_dir,
+                        self.sink.as_deref_mut(),
+                        self.repl_mode,
+                        None,
+                        None,
+                    )
+                } else {
+                    apply_core_call(module, method, argv, self.span(), self.repl_mode)
+                }
             }
             TExprKind::StructLit { fields, .. } => {
                 let mut out = Vec::with_capacity(fields.len());
@@ -327,12 +382,40 @@ impl EvalCtx<'_> {
                 if method.mangled {
                     names.push(format!("user_{}", method.name));
                 }
+                if let CtValue::Struct { type_name, .. } = &r {
+                    names.push(format!("{type_name}::{}", method.name));
+                }
                 for name in names {
                     if let Some(func) = self.funcs.get(&name).copied() {
                         let mut child = HashMap::new();
-                        let mut full = vec![r.clone()];
-                        full.extend(argv);
-                        return self.run_func(func, full, &mut child);
+                        // Instance methods lower `self` into the env, not `params`.
+                        let argv_for_params = if matches!(
+                            &func.kind,
+                            crate::Codegen::TIR::TFuncKind::Method {
+                                self_conv: Some(_),
+                                ..
+                            }
+                        ) {
+                            child.insert("self".to_string(), r.clone());
+                            argv
+                        } else {
+                            let mut full = vec![r.clone()];
+                            full.extend(argv);
+                            full
+                        };
+                        let result = self.run_func(func, argv_for_params, &mut child)?;
+                        if matches!(
+                            &func.kind,
+                            crate::Codegen::TIR::TFuncKind::Method {
+                                self_conv: Some(crate::AST::AccessConvention::Write),
+                                ..
+                            }
+                        ) {
+                            if let Some(updated) = child.get("self") {
+                                self.write_back_place(recv, updated.clone(), scope)?;
+                            }
+                        }
+                        return Ok(result);
                     }
                 }
                 Err(unsupported(
@@ -550,6 +633,7 @@ impl EvalCtx<'_> {
                             return res;
                         }
                         let candidates = [
+                            format!("{type_name}::{}", method.name),
                             format!("{type_name}.{}", method.name),
                             method.name.clone(),
                             format!("user_{}", method.name),
@@ -629,10 +713,16 @@ impl EvalCtx<'_> {
             TExprKind::PatternMatches { .. } => {
                 Err(unsupported("expr `PatternMatches`", self.span()))
             }
-            TExprKind::FanOut { .. } => Err(unsupported("expr `FanOut`", self.span())),
+            TExprKind::FanOut { calls } => {
+                let mut out = Vec::with_capacity(calls.len());
+                for call in calls {
+                    out.push(self.eval_expr(call, scope)?);
+                }
+                Ok(CtValue::List(out))
+            }
             TExprKind::OptionLift2 { .. } => Err(unsupported("expr `OptionLift2`", self.span())),
-            TExprKind::ClosureMethod { .. } => {
-                Err(unsupported("expr `ClosureMethod`", self.span()))
+            TExprKind::ClosureMethod { recv, op, args } => {
+                self.eval_closure_method(recv, op, args, scope)
             }
             TExprKind::HostBorrowCallback { .. } => {
                 Err(unsupported("expr `HostBorrowCallback`", self.span()))
@@ -658,7 +748,7 @@ impl EvalCtx<'_> {
         }
     }
 
-    fn write_back_place(
+    pub(crate) fn write_back_place(
         &mut self,
         place: &TExpr,
         value: CtValue,
@@ -697,6 +787,10 @@ impl EvalCtx<'_> {
         let mut argv = Vec::with_capacity(args.len());
         for a in args {
             argv.push(self.eval_expr(&a.value, scope)?);
+            // Try/`?` may set pending_return mid-arg; abort the call (don't print Unit).
+            if self.pending_return.is_some() {
+                return Ok(CtValue::Unit);
+            }
         }
         if name == "print" {
             let text = argv.first().map(|v| v.jet_show()).unwrap_or_default();
@@ -718,6 +812,12 @@ impl EvalCtx<'_> {
                 out.push(fragment);
             }
             return Ok(CtValue::Unit);
+        }
+        // #778: prefer Cranelift-native callees when the deopt tier installed a hook.
+        if let Some(hook) = super::native_call_hook() {
+            if let Some(result) = hook(name, &argv) {
+                return result;
+            }
         }
         let Some(func) = self.funcs.get(name).copied() else {
             return Err(unsupported(&format!("call `{name}`"), self.span()));

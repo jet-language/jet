@@ -38,7 +38,8 @@ pub(crate) use super::*;
 mod emit;
 mod eval;
 pub use eval::{
-    install_comptime_bridge, lower_interp_program, run_program, run_program_with_structs,
+    install_comptime_bridge, lower_interp_program, run_named_func, run_program,
+    run_program_with_structs, set_native_call_hook, NativeCallHook,
 };
 mod lower;
 mod subset;

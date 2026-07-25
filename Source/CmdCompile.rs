@@ -259,13 +259,8 @@ pub(crate) fn run_compile_cmd(
                 exit(exit_code);
             }
             jet::Interpreter::RunOutcome::Problems(diags) => {
-                let lens_defect = jet_jit::is_e2211(&diags);
                 report_problems(mode, file, &src, &diags);
-                exit(if lens_defect {
-                    ExitCodes::ICE
-                } else {
-                    ExitCodes::USER_ERROR
-                });
+                exit(ExitCodes::USER_ERROR);
             }
         }
     }

@@ -1,7 +1,8 @@
-//! E2-M4 / D-LENS-RUN1 — shared JIT-lens execution driver.
+//! E2-M4 / D-LENS-RUN2 — shared JIT-lens execution driver.
 //!
-//! Default `jet run` and `jet dev` execute through strict Cranelift. The
-//! tier-0 interpreter is explicit (`jet dev --interpret`) only.
+//! Default `jet run` and `jet dev` execute through tiered Cranelift with
+//! silent interpreter deopt on named coverage gaps. Explicit
+//! `jet dev --interpret` forces tier-0 only. Experts use `--trace-tiers`.
 
 use std::collections::HashMap;
 
@@ -138,7 +139,14 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         Ok(_) => RunOutcome::Ran {
             stdout: sink.stdout,
             stderr: sink.stderr,
-            exit_code: 0,
+            exit_code: sink.exit_code.unwrap_or(0),
+        },
+        Err(d) if sink.exit_code.is_some() || d.code == "SOFT_EXIT" => RunOutcome::Ran {
+            stdout: sink.stdout,
+            stderr: sink.stderr,
+            exit_code: sink
+                .exit_code
+                .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
         },
         Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
     }

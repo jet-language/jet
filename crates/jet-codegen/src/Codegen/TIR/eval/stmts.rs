@@ -7,7 +7,7 @@ use crate::Diagnostics::Diagnostic;
 use super::{unsupported, EvalCtx, Flow};
 
 impl EvalCtx<'_> {
-    pub(super) fn exec_stmts(
+    pub(crate) fn exec_stmts(
         &mut self,
         stmts: &[TStmt],
         scope: &mut HashMap<String, CtValue>,
@@ -234,12 +234,232 @@ impl EvalCtx<'_> {
             }
             TStmt::LineMarker(_) => Ok(Flow::Normal),
             TStmt::DeferClose { .. } => Ok(Flow::Normal),
-            TStmt::ForIn { .. } => Err(unsupported("for-in", self.span())),
+            TStmt::ForIn {
+                label,
+                var,
+                var2,
+                source,
+                step,
+                method_kind,
+                body,
+                ..
+            } => {
+                if method_kind.is_some() {
+                    return Err(unsupported("for-in method collection", self.span()));
+                }
+                let coll = self.eval_expr(source, scope)?;
+                let stride = match step {
+                    Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
+                    None => 1,
+                };
+                if stride <= 0 {
+                    return Err(unsupported("for-in stride <= 0", self.span()));
+                }
+                match coll {
+                    CtValue::List(items) => {
+                        let mut i = 0usize;
+                        while i < items.len() {
+                            self.burn()?;
+                            scope.insert(var.clone(), items[i].clone());
+                            if let Some(v2) = var2 {
+                                scope.insert(v2.clone(), CtValue::Unit);
+                            }
+                            match self.exec_stmts(body, scope)? {
+                                Flow::Normal | Flow::Continue => {}
+                                Flow::Break => break,
+                                Flow::BreakLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) =>
+                                {
+                                    break
+                                }
+                                Flow::ContinueLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) => {}
+                                other => return Ok(other),
+                            }
+                            i = i.saturating_add(stride as usize);
+                        }
+                        Ok(Flow::Normal)
+                    }
+                    CtValue::Map(entries) => {
+                        let pairs: Vec<(CtValue, CtValue)> = entries
+                            .iter()
+                            .map(|(k, v)| (k.to_value(), v.clone()))
+                            .collect();
+                        let mut i = 0usize;
+                        while i < pairs.len() {
+                            self.burn()?;
+                            let (k, v) = &pairs[i];
+                            if let Some(v2) = var2 {
+                                scope.insert(var.clone(), k.clone());
+                                scope.insert(v2.clone(), v.clone());
+                            } else {
+                                scope.insert(var.clone(), k.clone());
+                            }
+                            match self.exec_stmts(body, scope)? {
+                                Flow::Normal | Flow::Continue => {}
+                                Flow::Break => break,
+                                Flow::BreakLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) =>
+                                {
+                                    break
+                                }
+                                Flow::ContinueLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) => {}
+                                other => return Ok(other),
+                            }
+                            i = i.saturating_add(stride as usize);
+                        }
+                        Ok(Flow::Normal)
+                    }
+                    _ => Err(unsupported("for-in collection", self.span())),
+                }
+            }
             TStmt::EnumMatch { .. } => Err(unsupported("enum match", self.span())),
             TStmt::RangeSwitch { .. } => Err(unsupported("range switch", self.span())),
-            TStmt::MixedSwitch { .. } => Err(unsupported("mixed switch", self.span())),
-            TStmt::IndexAssign { .. } => Err(unsupported("index assign", self.span())),
-            TStmt::IndexFieldAssign(_) => Err(unsupported("index field assign", self.span())),
+            TStmt::MixedSwitch {
+                subject: _,
+                arms,
+                else_body,
+            } => {
+                // Subject is bound for AOT parity only; arm conditions are full exprs.
+                for (cond, body) in arms {
+                    let c = self.eval_expr(cond, scope)?;
+                    if as_bool(&c, self.span())? {
+                        return self.exec_stmts(body, scope);
+                    }
+                }
+                if let Some(body) = else_body {
+                    return self.exec_stmts(body, scope);
+                }
+                Ok(Flow::Normal)
+            }
+            TStmt::IndexAssign {
+                base,
+                index,
+                is_map,
+                value,
+            } => {
+                let base_name = match &base.kind {
+                    crate::Codegen::TIR::TExprKind::Local(local) => local.name.clone(),
+                    _ => return Err(unsupported("index assign base", self.span())),
+                };
+                let idx_v = self.eval_expr(index, scope)?;
+                let rhs = self.eval_expr(value, scope)?;
+                // Mutable place-window write-through (`&xs[a..b]` → `__JetViewMut`).
+                if let Some(CtValue::Struct {
+                    type_name,
+                    fields,
+                }) = scope.get(&base_name).cloned()
+                {
+                    if type_name == "__JetViewMut" {
+                        let mut base_s = None;
+                        let mut start = None;
+                        for (n, v) in &fields {
+                            match (n.as_str(), v) {
+                                ("base", CtValue::Str(s)) => base_s = Some(s.clone()),
+                                ("start", CtValue::Int(n)) => start = Some(*n),
+                                _ => {}
+                            }
+                        }
+                        let (owner, start) = match (base_s, start) {
+                            (Some(b), Some(s)) => (b, s),
+                            _ => return Err(unsupported("view-mut fields", self.span())),
+                        };
+                        let idx = as_int(&idx_v, self.span())?;
+                        if idx < 0 {
+                            return Err(unsupported("negative view index", self.span()));
+                        }
+                        let Some(CtValue::List(mut items)) = scope.get(&owner).cloned() else {
+                            return Err(unsupported("view-mut owner", self.span()));
+                        };
+                        let i = (start + idx) as usize;
+                        if i >= items.len() {
+                            return Err(unsupported("view-mut OOB", self.span()));
+                        }
+                        items[i] = rhs;
+                        scope.insert(owner, CtValue::List(items));
+                        return Ok(Flow::Normal);
+                    }
+                }
+                if *is_map {
+                    let Some(CtValue::Map(mut entries)) = scope.get(&base_name).cloned() else {
+                        return Err(unsupported("index assign map", self.span()));
+                    };
+                    let key = crate::AST::CtKey::from_value(idx_v)
+                        .ok_or_else(|| unsupported("index assign map key", self.span()))?;
+                    entries.insert(key, rhs);
+                    scope.insert(base_name, CtValue::Map(entries));
+                } else {
+                    let idx = as_int(&idx_v, self.span())?;
+                    if idx < 0 {
+                        return Err(unsupported("negative index assign", self.span()));
+                    }
+                    let Some(CtValue::List(mut items)) = scope.get(&base_name).cloned() else {
+                        return Err(unsupported("index assign list", self.span()));
+                    };
+                    let i = idx as usize;
+                    if i >= items.len() {
+                        return Err(unsupported("index assign OOB", self.span()));
+                    }
+                    items[i] = rhs;
+                    scope.insert(base_name, CtValue::List(items));
+                }
+                Ok(Flow::Normal)
+            }
+            TStmt::IndexFieldAssign(assign) => {
+                if assign.is_map {
+                    return Err(unsupported("index field assign on map", self.span()));
+                }
+                let base_name = match &assign.base.kind {
+                    crate::Codegen::TIR::TExprKind::Local(local) => local.name.clone(),
+                    _ => {
+                        return Err(unsupported("index field assign base", self.span()));
+                    }
+                };
+                let idx = as_int(&self.eval_expr(&assign.index, scope)?, self.span())?;
+                if idx < 0 {
+                    return Err(unsupported("negative index field assign", self.span()));
+                }
+                let mut rhs = self.eval_expr(&assign.value, scope)?;
+                if assign.clone_value {
+                    rhs = rhs.clone();
+                }
+                let Some(CtValue::List(mut items)) = scope.get(&base_name).cloned() else {
+                    return Err(unsupported("index field assign list", self.span()));
+                };
+                let i = idx as usize;
+                if i >= items.len() {
+                    return Err(unsupported("index field assign OOB", self.span()));
+                }
+                let CtValue::Struct {
+                    type_name,
+                    mut fields,
+                } = items[i].clone()
+                else {
+                    return Err(unsupported("index field assign elem", self.span()));
+                };
+                let mut found = false;
+                for (name, val) in &mut fields {
+                    if name == &assign.field {
+                        if let Some(op) = assign.op {
+                            *val = eval_binop(op, val.clone(), rhs, self.span())?;
+                        } else {
+                            *val = rhs;
+                        }
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    return Err(unsupported(
+                        &format!("field `{}`", assign.field),
+                        self.span(),
+                    ));
+                }
+                items[i] = CtValue::Struct { type_name, fields };
+                scope.insert(base_name, CtValue::List(items));
+                Ok(Flow::Normal)
+            }
             TStmt::IndexHookAssign { .. } => Err(unsupported("index hook assign", self.span())),
             TStmt::MathSwizzleAssign { .. } => Err(unsupported("math swizzle assign", self.span())),
             TStmt::GcEdit { .. } => Err(unsupported("gc edit", self.span())),

@@ -3,9 +3,20 @@
 # Update only for intentional ratchet moves.
 
 frontend_rejected:
+  comptime/comptime_block: E0956: comparing these values can't run at compile time yet; E2713: there is no comptime value named `ratio`
+  comptime/comptime_parse: E0956: the method `.parse` at compile time can't run at compile time yet; E0956: the method `.parse` at compile time can't run at compile time yet; E0956: the method `.parse` at compile time can't run at compile time yet; E0107: nothing named `a` exists here; E0107: nothing named `b` exists here; E0107: nothing named `c` exists here; E0107: nothing named `a` exists here; E0107: nothing named `c` exists here
+  comptime/comptime_table: E0956: expr `Todo` can't run at compile time yet; E0107: nothing named `table` exists here; E0107: nothing named `table` exists here
+  comptime/embed: E0956: call `embed_file` can't run at compile time yet; E0956: unbound `motd` can't run at compile time yet; E0107: nothing named `motd` exists here
+  comptime/embed_bytes: E0956: call `embed_bytes` can't run at compile time yet; E0956: unbound `logo` can't run at compile time yet; E0956: unbound `logo` can't run at compile time yet; E0956: unbound `logo` can't run at compile time yet; E0107: nothing named `size` exists here; E0107: nothing named `fifth` exists here
+  comptime/find: E0956: call `find` can't run at compile time yet; E0107: nothing named `paths` exists here
+  comptime/find_empty: E0956: call `find` can't run at compile time yet; E0107: nothing named `paths` exists here
   crypto/crypto_suite: E1004: `jet.crypto` has no item `constant_time_equal_bytes`; E1004: `jet.crypto` has no item `constant_time_equal_bytes`
+  modules/generic_modules: E0857: value argument for `mode` is not known at compile time; E0119: there's no type called `K`; E0963: this list has 1 element, but `[T#0]` expects exactly 0; E0113: `echo` promises to return [Int#3], but this returns [Int#capacity]; E0107: nothing named `values` exists here; E0963: this list has 1 element, but `[T#3]` expects exactly 3
+  serde/json: E0108: this map holds values of type `Json`, not `DataTree`; E0108: this map holds values of type `Json`, not `DataTree`; E0112: `Object` wants [String: DataTree] for argument 1, but this is [String: Json]
   tooling/data_core: E0915: `Float ? DataError` has no `Display` implementation; E0311: `len` isn't a method on this value
-  tooling/data_pipeline: E0302: `.count` only works on struct and tuple values; E0302: `.median` only works on struct and tuple values; E0505: only lists and maps can be indexed, not [Float] ? DataError
+  tooling/data_pipeline: E0308: bare `None` needs a known optional type here; E0504: this list started as `Float?` but item 2 is `Int`; E0504: this list started as `Float?` but item 4 is `Int`; E0302: `.count` only works on struct and tuple values; E0302: `.median` only works on struct and tuple values; E0505: only lists and maps can be indexed, not [Float] ? DataError
+  types/generic_constructor_inference: E0501: an empty list needs a type
+  types/nested_enum_groups: E0108: argument 1 to `.add()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.add()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.remove()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.count()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.has()` should be Int (a whole number), not `Damage`
 
 gate_excluded:
   game/raylib_window: interactive display required
@@ -28,12 +39,16 @@ expected_exit:
   collections/list_bounds: golden expects non-zero exit
   collections/list_remove_bounds: golden expects non-zero exit
   collections/map_key: golden expects non-zero exit
+  collections/set: AOT compile or run failed
   concurrency/all_failfast: golden expects non-zero exit
   concurrency/deadline_context: golden expects non-zero exit
   errors/error_context: golden expects non-zero exit
   errors/panic: golden expects non-zero exit
   io/archive: AOT compile or run failed
+  lowlevel/lowlevel: AOT compile or run failed
+  lowlevel/unsafe_obligations: AOT compile or run failed
   memory/pool_stale_id: golden expects non-zero exit
+  memory/rawptr: AOT compile or run failed
   net/email_dkim: AOT compile or run failed
   net/email_message: AOT compile or run failed
   net/http_client: AOT compile or run failed
@@ -62,19 +77,15 @@ resident_jit:
   basics/multiline_string
   basics/named_args
   basics/numbers
-  basics/range_step
   basics/switch
   basics/values
   collections/struct_list_mutation
-  comptime/comptime_block
-  comptime/comptime_parse
   comptime/comptime_splice
   comptime/doctests
   comptime/reflect
   concurrency/cancel_cleanup
   concurrency/completion_order
   concurrency/pipeline
-  concurrency/protocol
   concurrency/race_cancel
   concurrency/scheduler_spawn
   concurrency/select_channel
@@ -91,16 +102,12 @@ resident_jit:
   effects/effect_tree
   effects/effects
   effects/method_receivers
-  effects/move_no_uaf
   effects/pure
   effects/self_mutation
   effects/share_boundary
-  effects/single_use
   errors/fallible_run
-  errors/qq_control
   lowlevel/layout_c
   memory/ref_field
-  modules/generic_modules
   modules/inline_module
   modules/module_inline_sibling
   modules/pub_file
@@ -109,7 +116,6 @@ resident_jit:
   operators/user_defined
   serde/user_derive
   syntax/maturity_tags
-  text/bigint
   text/string_parse
   text/strings
   tooling/bench
@@ -120,7 +126,6 @@ resident_jit:
   tooling/meta_attribute
   tooling/output_callable
   tooling/solve_puzzle
-  tooling/statement_attributes
   tooling/test_members
   tooling/tests
   types/affine_unit_types
@@ -130,7 +135,6 @@ resident_jit:
   types/dot_construction
   types/enums
   types/external_methods
-  types/generic_constructor_inference
   types/inferred_new
   types/structs
   types/tags_and_traits
@@ -141,231 +145,229 @@ resident_jit:
   web/web_wasm_string
   web/web_wasm_string_param
 
-e2211:
-  basics/bare_lambda_param: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [Int], ret: None, effect_bound: None }.
-  basics/callbacks: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }.
-  basics/closures: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
-  basics/fan_out: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit fan-out expression unsupported.
-  basics/first_hour: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  basics/pattern_matching: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: describe_conn: jit unknown local `id`.
-  basics/printable: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit string interp type unsupported: Named("Greeting").
-  basics/tuples: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit clone unsupported type: Tuple([("x", Int), ("y", Int)]), local p.
-  basics/variadics_spread: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(String).
-  collections/deque: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit static `std::collections::VecDeque::new`.
-  collections/dynamic-array-view: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit clone unsupported type: List(Named("Incident")), other expression.
-  collections/filter_map: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
-  collections/fixed_arrays: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit let type unsupported: FixedList { elem: IntN { signed: false, bits: 8 }, len: 3, len_symbol: None }.
-  collections/index_hook: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: Grid::get: jit field type unsupported: List(Named("Cell")).
-  collections/iter_adapters: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
-  collections/iter_hook: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: BagIter::next: jit place borrow unsupported.
-  collections/iter_tools_audit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
-  collections/lists: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
-  collections/set: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
-  collections/sketch: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  collections/wordcount: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit list get_opt status unsupported.
-  comptime/comptime_core: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
-  comptime/comptime_if: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit inline comptime branch unsupported.
-  comptime/comptime_table: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
-  comptime/comptime_tiers: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
-  comptime/embed: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: check_nonempty: jit require/panic stop unsupported.
-  comptime/embed_bytes: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(IntN { signed: false, bits: 8 }).
-  comptime/find: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
-  comptime/find_empty: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
-  concurrency/detached_task: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
-  concurrency/parallel_iter: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
-  concurrency/parallel_scan: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(String).
-  concurrency/task_controls: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
-  concurrency/task_runtime_audit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  crypto/auth_tokens: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  crypto/crypto_envelope: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  crypto/crypto_migration: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  crypto/crypto_sign: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  crypto/hash: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
-  crypto/random_api_split: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  crypto/typed_crypto: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  crypto/vault_key_wrap: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: recipient_surface: jit core call unsupported.
-  crypto/vault_keys: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: provision: jit core call unsupported.
-  crypto/vault_secret: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: handler: jit core call unsupported.
-  devloop/persist: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
-  effects/all_sigils: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
-  effects/asset_pipeline: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
-  effects/capability_sigils: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
-  effects/determinism: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: roll_at: jit handle method unsupported.
-  effects/effect_grant: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  effects/effect_higher_order: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }.
-  effects/effect_levers: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: Some([]) }.
-  effects/infer_capability: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
-  effects/infer_receiver: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
-  effects/mix_write_take: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
-  effects/single_use_discard: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit unsafe region unsupported.
-  effects/smart_context: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
-  effects/taint: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  errors/discard_fallible: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  errors/errors: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit enum arm is not a variant pattern.
-  errors/must_use: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit scope guard closure unsupported.
-  errors/rollback_trait: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: transfer: jit transact block unsupported.
-  errors/transact: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: place_order: jit transact block unsupported.
-  errors/typed_error_families: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: load: jit typed Result conversion unsupported.
-  functions/lambda_bare_params: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
-  functions/lambda_inference: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
-  game/core_game_headless: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
-  io/args_audit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/args_spec: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/cli: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/cli_args: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/compress_gzip: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/compress_zstd: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/db: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
-  io/db_checked_sql: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
-  io/db_read_footprint: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: person_count: jit handle method unsupported.
-  io/dir_entry: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/env_overlay: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  io/files: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/files_depth: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/io_prelude: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: greet: jit ambient input unsupported.
-  io/log: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/log_human: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/log_structured: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/no_prelude: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/os_facts: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/path: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
-  io/process_builder: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/scope_guard: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: with_guards: jit scope guard closure unsupported.
-  io/stdin_filter: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit for-in method-call collection unsupported.
-  io/stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: count_lines: automatic resource cleanup uses AOT fallback.
-  io/terminal: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: describe_key: jit if-let condition unsupported.
-  io/terminal_parity: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  lowlevel/ffi: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit extern call unsupported.
-  lowlevel/freestanding: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  lowlevel/inline_asm: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: add_registers: jit function missing return.
-  lowlevel/inline_c: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: add: jit function missing return.
-  lowlevel/layout_columnar: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(Named("Particle")).
-  lowlevel/linalg_simd: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit math builtin unsupported.
-  lowlevel/lowlevel: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit unsafe region unsupported.
-  lowlevel/os_target_gating: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit inline comptime branch unsupported.
-  lowlevel/pointer_cast_deref: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit unsafe region unsupported.
-  lowlevel/sized_floats: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  lowlevel/sized_integers: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit unary neg unsupported type: IntN { signed: true, bits: 8 }.
-  lowlevel/swizzle: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit math builtin unsupported.
-  lowlevel/unsafe_obligations: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit unsafe region unsupported.
-  math/math_audit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  math/random_audit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  memory/arena: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
-  memory/arena_parse: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
-  memory/arena_regions: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
-  memory/copy_verb: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit clone unsupported type: Named("Ticket"), local t.
-  memory/entity_tree: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit static `jet_std::JetPool::new`.
-  memory/entity_world: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: tick: jit for-in collection type unsupported: List(Apply { name: "Id", args: [Named("Player")] }).
-  memory/expiring_secret: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  memory/gc_cyclic: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: promoted_cycle: jit clone unsupported type: Named("Link"), other expression.
-  memory/no_alloc_policy: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
-  memory/ownership: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [String], ret: Some(Int), effect_bound: None }.
-  memory/parameter_modes: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }.
-  memory/place_windows: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
-  memory/rawptr: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit unsafe region unsupported.
-  memory/resource_close: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
-  memory/returned_views: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: first: jit builtin method unsupported.
-  memory/shared_config: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Shared(Named("AppConfig")).
-  memory/shared_transact: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Shared(Named("Account")).
-  memory/string_view: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
-  memory/uninit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  memory/uninit_buffer: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  modules/library: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: Person::greeting: jit place borrow unsupported.
-  net/http_server_limits: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit core call unsupported.
-  net/url_mime: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  parsing/binary-reader: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
-  parsing/binary_pattern: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  parsing/parse_interpolation: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  parsing/text-cursor: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
-  patterns/struct_destructure: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit struct destructure unsupported.
-  reflection/reflect-value: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  safety/sh_typed_text: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  safety/typed_sql: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run_query: jit host/default/uninit/ct-lit unsupported.
-  serde/codable_default: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/csv: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/csv_typed: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/datatree_accessors: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/decode_traced: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/encoding: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/encoding_base: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/encoding_breadth: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/encoding_cbor_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: write_catalog: automatic resource cleanup uses AOT fallback.
-  serde/encoding_csv_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: write_catalog: automatic resource cleanup uses AOT fallback.
-  serde/encoding_json_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: write_catalog: automatic resource cleanup uses AOT fallback.
-  serde/encoding_jsonl_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: write_catalog: automatic resource cleanup uses AOT fallback.
-  serde/encoding_stream_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit static `jet_std::EncodingLimits::safe`.
-  serde/encoding_xml_projection: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/encoding_xml_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: xml_name: jit JSON literal unsupported.
-  serde/hand_codec: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: Email::encode: jit JSON literal unsupported.
-  serde/json: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/json_coerce: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/json_typed: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/serde_derive: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit record field unsupported: List(String).
-  serde/serde_generic: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/toml: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/validate: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: report: jit enum arm is not a variant pattern.
-  serde/yaml: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  streams/generators: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: count: jit host/default/uninit/ct-lit unsupported.
-  syntax/trailing_block: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }.
-  text/dates: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  text/datetime: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  text/decimal: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit precise numeric builtin unsupported.
-  text/hex_base64: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  text/human_format: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  text/regex: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  text/runtime_duration: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit if-let condition unsupported.
-  text/time_calendar: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  text/unicode_text: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  text/unicode_text_audit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core.text call unsupported: byte_count.
-  text/uuid: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  tooling/data_json: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  tooling/data_schema: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  tooling/debug_native: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  tooling/fuzz_demo: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: reverse: jit builtin method unsupported.
-  tooling/property_tests: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: reverse: jit builtin method unsupported.
-  tooling/provenance_track: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit numeric origin unsupported.
-  tooling/testing_helpers: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  tooling/todo_hole: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: not_yet: jit todo expression unsupported.
-  types/capability_bundles: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
-  types/display_debug: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit string interp type unsupported: Named("User").
-  types/distinct_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
-  types/enum_dot: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: area: jit enum payload type unsupported: Float (Some(types::F64)).
-  types/enum_dot_patterns: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: area: jit enum payload type unsupported: Float (Some(types::F64)).
-  types/generic_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call to unknown function `make_pair`.
-  types/measurement: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  types/nested_enum_groups: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit enum `Damage::Physical`.
-  types/no_any_alternatives: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call to unknown function `echo`.
-  types/option: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit if-let condition unsupported.
-  types/option_combinators: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "has an invalid controlling type f64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: true, 4: true, 5: true, 6: true, 7: true }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "arg 1 (v7) has type i64, expected f64" }, VerifierError { location: inst9, context: Some("return v8"), message: "result 0 has type f64, must match function signature of i64" }]).
-  types/optional_result_variants: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit enum arm is not a variant pattern.
-  types/patchable: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit missing method `Employee::apply`.
-  types/range_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
-  types/recursive_enum: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit print type unsupported.
-  types/refinements: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: FixedList { elem: String, len: 4, len_symbol: None }.
-  types/renderable-varargs: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call to unknown function `log_all__va4`.
-  types/renderable-varargs-multi: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call to unknown function `announce__va1`.
-  types/type_alias: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result ?? operand is not Result.
-  types/unit_family: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
-  types/unit_literals: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
-  types/value_tag_type: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Tagged { marker: "Raw", inner: Int }.
-  ui/events: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: show_publish: jit enum `HookOutcome::Continue`.
-  ui/layout_basic: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit layout block unsupported.
-  ui/loadable: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  ui/reactive: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  ui/reactive_scope: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  ui/ui_a11y: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  ui/ui_component_kit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(Named("UiNode")).
-  ui/ui_motion: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: motion_node: jit core call unsupported.
-  ui/ui_null_backend: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  ui/ui_tui_reactive: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  ui/ui_typed_style: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: styled_text: jit core call unsupported.
-  ui/ui_view_tree: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(Named("UiNode")).
-  web/ui_showcase: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(Named("UiNode")).
-  web/ui_web_click: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: dev: jit core call unsupported.
-  web/ui_web_reactive: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  web/web_hello: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  web/web_wasm_callback: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: init: jit core call unsupported.
-  web/web_wasm_list: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit print type unsupported.
-  web/web_wasm_list_string: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(String).
-  web/web_wasm_map: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: echo_scores: jit clone unsupported type: Map { key: String, key_span: Some(Span { start: 202, end: 208 }), value: Int }, local scores.
+deopt_interp:
+  basics/bare_lambda_param: E0956: expr `Lambda` can't run at compile time yet
+  basics/callbacks: E0956: expr `FnValue` can't run at compile time yet
+  basics/closures
+  basics/fan_out
+  basics/first_hour
+  basics/pattern_matching: E0956: enum match can't run at compile time yet
+  basics/printable
+  basics/range_step
+  basics/tuples: E0956: field `x` can't run at compile time yet
+  basics/variadics_spread: E0956: expr `ListSpread` can't run at compile time yet
+  collections/deque: E0956: prelude static `std::collections::VecDeque.new` can't run at compile time yet
+  collections/dynamic-array-view: E0956: split views can't run at compile time yet
+  collections/filter_map: E0956: the method `.parse` at compile time can't run at compile time yet
+  collections/fixed_arrays
+  collections/index_hook: E0956: index hook assign can't run at compile time yet
+  collections/iter_adapters: E0956: the method `.take` at compile time can't run at compile time yet
+  collections/iter_hook: E0956: for-in method collection can't run at compile time yet
+  collections/iter_tools_audit: E0956: the method `.sum` at compile time can't run at compile time yet
+  collections/lists
+  collections/sketch: E0956: `core.sketch.hll.new()` at comptime (impure tier) can't run at compile time yet
+  collections/wordcount
+  comptime/comptime_core
+  comptime/comptime_if
+  comptime/comptime_tiers
+  concurrency/detached_task: E0956: expr `CoreClosureCall` can't run at compile time yet
+  concurrency/parallel_iter: E0956: closure method variant can't run at compile time yet
+  concurrency/parallel_scan: E0956: `core.tasks.channel()` at comptime (impure tier) can't run at compile time yet
+  concurrency/protocol
+  concurrency/task_controls: E0956: expr `CoreClosureCall` can't run at compile time yet
+  concurrency/task_runtime_audit: E0956: `core.tasks.channel()` at comptime (impure tier) can't run at compile time yet
+  crypto/auth_tokens: E0956: `core.auth.verify_jwt()` at comptime (impure tier) can't run at compile time yet
+  crypto/crypto_envelope: E0956: `jet.crypto.__x25519_generate()` at comptime (impure tier) can't run at compile time yet
+  crypto/crypto_migration: E0956: `jet.crypto.__x25519_generate()` at comptime (impure tier) can't run at compile time yet
+  crypto/crypto_sign: E0956: `jet.crypto.__signing_generate()` at comptime (impure tier) can't run at compile time yet
+  crypto/hash: E0956: `jet.crypto.sha256()` at comptime (impure tier) can't run at compile time yet
+  crypto/random_api_split: E0956: `core.random.bytes()` at comptime (impure tier) can't run at compile time yet
+  crypto/typed_crypto: E0956: `jet.crypto.__x25519_generate()` at comptime (impure tier) can't run at compile time yet
+  crypto/vault_key_wrap
+  crypto/vault_keys: E0956: `core.vault.current()` at comptime (impure tier) can't run at compile time yet
+  crypto/vault_secret: E0953: your comptime code stopped the build
+  devloop/persist: E0956: const `counter` can't run at compile time yet
+  effects/all_sigils: E0956: complex assign place can't run at compile time yet
+  effects/asset_pipeline: E0956: complex assign place can't run at compile time yet
+  effects/capability_sigils: E0956: complex assign place can't run at compile time yet
+  effects/determinism: E0956: expr `HostCall` can't run at compile time yet
+  effects/effect_grant
+  effects/effect_higher_order: E0956: expr `FnValue` can't run at compile time yet
+  effects/effect_levers: E0956: expr `FnValue` can't run at compile time yet
+  effects/infer_capability: E0956: complex assign place can't run at compile time yet
+  effects/infer_receiver: E0956: complex assign place can't run at compile time yet
+  effects/mix_write_take: E0956: complex assign place can't run at compile time yet
+  effects/move_no_uaf
+  effects/single_use
+  effects/single_use_discard
+  effects/smart_context: E0956: expr `ResourceNew` can't run at compile time yet
+  effects/taint
+  errors/discard_fallible
+  errors/errors: E0956: enum match can't run at compile time yet
+  errors/must_use: E0956: expr `CoreClosureCall` can't run at compile time yet
+  errors/qq_control: E0956: the method `.parse` at compile time can't run at compile time yet
+  errors/rollback_trait: E0956: statement `Transact` can't run at compile time yet
+  errors/transact: E0956: statement `Transact` can't run at compile time yet
+  errors/typed_error_families: E0956: enum match can't run at compile time yet
+  functions/lambda_bare_params
+  functions/lambda_inference
+  game/core_game_headless: E0956: handle `GameSceneNew` can't run at compile time yet
+  io/args_audit: E0956: `core.args.spec()` at comptime (impure tier) can't run at compile time yet
+  io/args_spec: E0956: `core.args.spec()` at comptime (impure tier) can't run at compile time yet
+  io/cli
+  io/cli_args
+  io/compress_gzip: E0956: enum match can't run at compile time yet
+  io/compress_zstd: E0956: enum match can't run at compile time yet
+  io/db: E0956: expr `ResourceNew` can't run at compile time yet
+  io/db_checked_sql: E0956: expr `ResourceNew` can't run at compile time yet
+  io/db_read_footprint: E0956: expr `ResourceNew` can't run at compile time yet
+  io/dir_entry: E0956: `core.path.join()` at comptime (impure tier) can't run at compile time yet
+  io/env_overlay: E0956: expr `HostCall` can't run at compile time yet
+  io/files
+  io/files_depth: E0956: `core.path.join()` at comptime (impure tier) can't run at compile time yet
+  io/io_prelude
+  io/log: E0956: `jet.log.set_level()` at comptime (impure tier) can't run at compile time yet
+  io/log_human: E0956: `jet.log.setup()` at comptime (impure tier) can't run at compile time yet
+  io/log_structured: E0956: `jet.log.setup()` at comptime (impure tier) can't run at compile time yet
+  io/no_prelude: E0956: `core.io.print()` at comptime (impure tier) can't run at compile time yet
+  io/os_facts: E0956: `core.os.name()` at comptime (impure tier) can't run at compile time yet
+  io/path: E0956: handle `PathFrom` can't run at compile time yet
+  io/process_builder: E0956: handle `DurationNew` can't run at compile time yet
+  io/scope_guard: E0956: expr `CoreClosureCall` can't run at compile time yet
+  io/stdin_filter: E0956: for-in method collection can't run at compile time yet
+  io/stream: E0956: `core.path.join()` at comptime (impure tier) can't run at compile time yet
+  io/terminal: E0956: if-let can't run at compile time yet
+  io/terminal_parity: E0956: expr `HostCall` can't run at compile time yet
+  lowlevel/ffi: E0956: expr `ExternCall` can't run at compile time yet
+  lowlevel/freestanding: E0956: `core.math.sqrt()` at comptime (impure tier) can't run at compile time yet
+  lowlevel/inline_asm: E0956: expr `ExternCall` can't run at compile time yet
+  lowlevel/inline_c: E0956: expr `ExternCall` can't run at compile time yet
+  lowlevel/layout_columnar: E0956: expr `ColumnarListLit` can't run at compile time yet
+  lowlevel/linalg_simd: E0956: `Vec3.new` can't run at compile time yet
+  lowlevel/os_target_gating: E0956: unbound `self` can't run at compile time yet
+  lowlevel/pointer_cast_deref: E0956: `core.mem.address_of()` at comptime (impure tier) can't run at compile time yet
+  lowlevel/sized_floats: E0956: `core.math.sqrt()` at comptime (impure tier) can't run at compile time yet
+  lowlevel/sized_integers: E0956: expr `NumericMethod` can't run at compile time yet
+  lowlevel/swizzle: E0956: `Vec3.new` can't run at compile time yet
+  lowlevel/target_profile_board: E0956: `core.math.sqrt()` at comptime (impure tier) can't run at compile time yet
+  math/math_audit: E0956: `core.math.sin()` at comptime (impure tier) can't run at compile time yet
+  math/random_audit: E0956: `core.random.seed()` at comptime (impure tier) can't run at compile time yet
+  memory/arena: E0956: expr `ResourceNew` can't run at compile time yet
+  memory/arena_parse: E0956: expr `ResourceNew` can't run at compile time yet
+  memory/arena_regions: E0956: expr `ResourceNew` can't run at compile time yet
+  memory/copy_verb
+  memory/entity_tree: E0956: prelude static `jet_std::JetPool.new` can't run at compile time yet
+  memory/entity_world: E0956: prelude static `jet_std::JetPool.new` can't run at compile time yet
+  memory/expiring_secret: E0956: expr `HostCall` can't run at compile time yet
+  memory/gc_cyclic: E0956: expr `HostCall` can't run at compile time yet
+  memory/no_alloc_policy: E0956: complex assign place can't run at compile time yet
+  memory/ownership: E0956: expr `FnValue` can't run at compile time yet
+  memory/parameter_modes: E0956: call `read_generic` can't run at compile time yet
+  memory/place_windows
+  memory/resource_close: E0956: expr `ResourceNew` can't run at compile time yet
+  memory/returned_views
+  memory/shared_config: E0956: prelude static `jet_std::JetShared.new` can't run at compile time yet
+  memory/shared_transact: E0956: prelude static `jet_std::JetShared.new` can't run at compile time yet
+  memory/string_view
+  memory/uninit
+  memory/uninit_buffer
+  modules/library: E0956: unbound `self` can't run at compile time yet
+  net/http_server_limits: E3412: `core.net.tcp_listen()` is not available at comptime
+  net/url_mime: E0956: `core.url.parse()` at comptime (impure tier) can't run at compile time yet
+  parsing/binary-reader: E0956: handle `ReaderOver` can't run at compile time yet
+  parsing/binary_pattern: E0956: expr `HostCall` can't run at compile time yet
+  parsing/parse_interpolation: E0956: expr `HostCall` can't run at compile time yet
+  parsing/text-cursor: E0956: handle `CursorOver` can't run at compile time yet
+  patterns/struct_destructure: E0956: expr `HostCall` can't run at compile time yet
+  reflection/reflect-value: E0956: `core.reflect.of()` at comptime (impure tier) can't run at compile time yet
+  safety/sh_typed_text: E0956: expr `HostCall` can't run at compile time yet
+  safety/typed_sql: E0956: expr `HostCall` can't run at compile time yet
+  serde/codable_default: E0956: `core.encoding.json.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/csv: E0956: `core.encoding.csv.parse()` at comptime (impure tier) can't run at compile time yet
+  serde/csv_typed: E0956: `core.encoding.csv.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/datatree_accessors: E0956: `core.encoding.json.parse()` at comptime (impure tier) can't run at compile time yet
+  serde/decode_traced: E0956: `core.encoding.json.decode_traced()` at comptime (impure tier) can't run at compile time yet
+  serde/encoding: E0956: `core.encoding.json.parse()` at comptime (impure tier) can't run at compile time yet
+  serde/encoding_base: E0956: `core.encoding.base64.encode()` at comptime (impure tier) can't run at compile time yet
+  serde/encoding_breadth: E0956: `core.encoding.json.parse()` at comptime (impure tier) can't run at compile time yet
+  serde/encoding_cbor_stream: E0956: expr `ResourceNew` can't run at compile time yet
+  serde/encoding_csv_stream: E0956: expr `ResourceNew` can't run at compile time yet
+  serde/encoding_json_stream: E0956: expr `ResourceNew` can't run at compile time yet
+  serde/encoding_jsonl_stream: E0956: expr `ResourceNew` can't run at compile time yet
+  serde/encoding_stream_types: E0956: prelude static `jet_std::EncodingLimits.safe` can't run at compile time yet
+  serde/encoding_xml_projection: E0956: `core.encoding.xml.parse()` at comptime (impure tier) can't run at compile time yet
+  serde/encoding_xml_stream: E0956: expr `ResourceNew` can't run at compile time yet
+  serde/hand_codec: E0956: `core.encoding.json.to_string()` at comptime (impure tier) can't run at compile time yet
+  serde/json_coerce: E0956: `core.encoding.json.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/json_typed: E0956: `core.encoding.json.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/serde_derive: E0956: `core.encoding.json.to_string()` at comptime (impure tier) can't run at compile time yet
+  serde/serde_generic: E0956: `core.encoding.json.to_string()` at comptime (impure tier) can't run at compile time yet
+  serde/toml: E0956: `core.encoding.toml.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/validate: E0956: enum match can't run at compile time yet
+  serde/yaml: E0956: `core.encoding.yaml.decode()` at comptime (impure tier) can't run at compile time yet
+  streams/generators: E0956: expr `HostCall` can't run at compile time yet
+  syntax/trailing_block: E0956: expr `Lambda` can't run at compile time yet
+  text/bigint
+  text/dates: E0956: `core.time.date.new()` at comptime (impure tier) can't run at compile time yet
+  text/datetime: E0956: `core.time.datetime.from_timestamp()` at comptime (impure tier) can't run at compile time yet
+  text/decimal: E0956: `core.math.decimal()` at comptime (impure tier) can't run at compile time yet
+  text/hex_base64: E0956: `core.encoding.hex.encode()` at comptime (impure tier) can't run at compile time yet
+  text/human_format: E0956: `core.fmt.number()` at comptime (impure tier) can't run at compile time yet
+  text/regex: E0956: `jet.regex.is_match()` at comptime (impure tier) can't run at compile time yet
+  text/runtime_duration: E0956: handle `DurationNew` can't run at compile time yet
+  text/time_calendar: E0956: `core.time.parse_rfc3339()` at comptime (impure tier) can't run at compile time yet
+  text/unicode_text: E0956: `core.text.unicode.scalar_count()` at comptime (impure tier) can't run at compile time yet
+  text/unicode_text_audit: E0956: `core.text.byte_count()` at comptime (impure tier) can't run at compile time yet
+  text/uuid: E0956: `core.uuid.v4()` at comptime (impure tier) can't run at compile time yet
+  tooling/data_json: E0956: `core.data.json()` at comptime (impure tier) can't run at compile time yet
+  tooling/data_schema: E0956: `core.data.csv()` at comptime (impure tier) can't run at compile time yet
+  tooling/debug_native
+  tooling/fuzz_demo: E0956: the method `.insert` at compile time can't run at compile time yet
+  tooling/property_tests: E0956: the method `.insert` at compile time can't run at compile time yet
+  tooling/provenance_track: E0956: expr `NumericMethod` can't run at compile time yet
+  tooling/statement_attributes
+  tooling/testing_helpers: E0956: `core.testing.temp_dir()` at comptime (impure tier) can't run at compile time yet
+  tooling/todo_hole
+  types/capability_bundles: E0956: expr `DistinctConvert` can't run at compile time yet
+  types/display_debug: E0956: unbound `self` can't run at compile time yet
+  types/distinct_types: E0956: expr `DistinctConvert` can't run at compile time yet
+  types/enum_dot: E0956: enum match can't run at compile time yet
+  types/enum_dot_patterns: E0956: enum match can't run at compile time yet
+  types/generic_types: E0956: call `make_pair` can't run at compile time yet
+  types/measurement: E0956: `core.science.measurement.from()` at comptime (impure tier) can't run at compile time yet
+  types/no_any_alternatives: E0956: enum match can't run at compile time yet
+  types/option: E0956: if-let can't run at compile time yet
+  types/option_combinators: E0956: expr `OptionLift2` can't run at compile time yet
+  types/optional_result_variants: E0956: enum match can't run at compile time yet
+  types/patchable: E0956: method `apply` can't run at compile time yet
+  types/range_types: E0956: expr `DistinctConvert` can't run at compile time yet
+  types/recursive_enum
+  types/refinements: E0956: expr `DistinctConvert` can't run at compile time yet
+  types/renderable-varargs: E0956: call `log_all__va4` can't run at compile time yet
+  types/renderable-varargs-multi: E0956: call `announce__va1` can't run at compile time yet
+  types/type_alias
+  types/typed_literal_head
+  types/unit_family: E0956: expr `DistinctConvert` can't run at compile time yet
+  types/unit_literals: E0956: expr `DistinctConvert` can't run at compile time yet
+  types/value_tag_type
+  ui/events: E0956: `core.event.scope()` at comptime (impure tier) can't run at compile time yet
+  ui/layout_basic: E0956: statement `Layout` can't run at compile time yet
+  ui/loadable: E0956: `core.reactive.loadable.idle()` at comptime (impure tier) can't run at compile time yet
+  ui/reactive: E0956: `jet.reactive.signal()` at comptime (impure tier) can't run at compile time yet
+  ui/reactive_scope: E0956: `jet.reactive.signal()` at comptime (impure tier) can't run at compile time yet
+  ui/ui_a11y: E0956: `core.ui.null_backend()` at comptime (impure tier) can't run at compile time yet
+  ui/ui_component_kit: E0956: `core.ui.text()` at comptime (impure tier) can't run at compile time yet
+  ui/ui_motion: E0956: expr `HostCall` can't run at compile time yet
+  ui/ui_null_backend: E0956: `core.ui.null_backend()` at comptime (impure tier) can't run at compile time yet
+  ui/ui_tui_reactive: E0956: `core.ui.tui_backend()` at comptime (impure tier) can't run at compile time yet
+  ui/ui_typed_style: E0956: expr `DistinctConvert` can't run at compile time yet
+  ui/ui_view_tree: E0956: `core.ui.text()` at comptime (impure tier) can't run at compile time yet
+  web/ui_showcase: E0956: `core.ui.text()` at comptime (impure tier) can't run at compile time yet
+  web/ui_web_click: E0953: your comptime code stopped the build
+  web/ui_web_reactive: E0956: `core.ui.null_backend()` at comptime (impure tier) can't run at compile time yet
+  web/web_hello: E0956: `core.ui.null_backend()` at comptime (impure tier) can't run at compile time yet
+  web/web_wasm_callback
+  web/web_wasm_list
+  web/web_wasm_list_string
+  web/web_wasm_map
 

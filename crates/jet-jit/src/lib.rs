@@ -1,7 +1,9 @@
 //! c139 (D-JITDEP1 / D-JIT2=A) — Cranelift JIT tier-1 backend.
 //!
-//! Architecture: strict `CraneliftBackend` for default `jet run` / `jet dev`.
-//! Missing resident coverage is E2211 (D-LENS-RUN1); no silent AOT fallback.
+//! Architecture: tiered `CraneliftBackend` for default `jet run` / `jet dev`
+//! (D-ONECORE1=A / D-LENS-RUN2=A). Covered functions run native; named gaps
+//! deopt to the canonical TIR interpreter. E2211 is retired — silent deopt,
+//! `--trace-tiers` for experts. No AOT fallback.
 //! M2 keeps a resident JIT module + live runtime heap across hot_swap.
 //! M3 widens native lowering: arithmetic, bindings, if/else, calls, loops,
 //! compound assign, &&/|| short-circuit.
@@ -47,7 +49,8 @@ pub fn with_program_args<R>(args: &[String], run: impl FnOnce() -> R) -> R {
     let previous =
         PROGRAM_ARGS.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), args.to_vec()));
     let _guard = ProgramArgsGuard(previous);
-    run()
+    // Keep impure `core.io.args` in lockstep for interpreter deopt (#778).
+    jet_codegen::Comptime::with_runtime_argv(args, run)
 }
 
 pub(crate) fn program_args() -> Vec<String> {
@@ -73,6 +76,10 @@ mod types_meta;
 mod lower_ctx;
 #[path = "jit/functions_compile.rs"]
 mod functions_compile;
+#[path = "jit/tiers.rs"]
+mod tiers;
+#[path = "jit/deopt.rs"]
+mod deopt;
 #[path = "jit/resident.rs"]
 mod resident;
 #[path = "jit/api_debug.rs"]
@@ -96,8 +103,11 @@ pub use api_debug::{
     tir_lowers_bundle, try_compile_bundle,
 };
 pub use backend::CraneliftBackend;
-pub use gap::{e2211_diagnostic, entry_run_name, is_e2211, JitGap};
+pub use backend::plan_bundle_tiers;
+pub use gap::{entry_run_name, is_e2211, JitGap};
+pub use tiers::{set_trace_tiers, take_last_trace, trace_tiers_enabled, Tier, TierPlan, TierRow};
 pub use trace::{
     fallback_invoked_for_test, jit_executed_for_test, note_fallback_invoked_for_test,
-    reset_jit_trace_for_test,
+    note_deopt_invoked_for_test, deopt_invoked_for_test, reset_jit_trace_for_test,
+    jit_trace_flags_for_test, merge_jit_trace_flags_for_test, JitTraceFlags,
 };

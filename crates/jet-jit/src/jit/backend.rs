@@ -4,29 +4,31 @@ use jet_foundation::{
 };
 
 use super::api_debug::{try_resident, try_resident_hot_swap, try_resident_restart};
-use super::gap::{e2211_diagnostic, JitGap};
+use super::deopt::run_whole_interp;
+use super::tiers::plan_tiers;
+use super::trace::note_deopt_invoked_for_test;
+use jet_codegen::Codegen::TIR;
 
-/// c139 tier-1 JIT backend — strict Cranelift lens (D-LENS-RUN1 / card #728).
-///
-/// Missing resident coverage is E2211 compiler debt. No AOT or interpreter
-/// fallback participates on default `jet run` / `jet dev` paths.
+/// c139 / #778 tiered JIT backend — Cranelift when covered, interpreter deopt
+/// on named gaps (D-ONECORE1=A / D-LENS-RUN2=A). E2211 retired; silent deopt.
 pub struct CraneliftBackend;
 
 impl CraneliftBackend {
     pub fn new() -> Self {
         CraneliftBackend
     }
-
-    fn gap_outcome(gap: JitGap, bundle: &ProgramBundle) -> RunOutcome {
-        RunOutcome::Problems(vec![e2211_diagnostic(&gap, bundle)])
-    }
 }
 
 impl JitBackend for CraneliftBackend {
-    fn run(&mut self, bundle: &ProgramBundle, _try_anyway: bool) -> RunOutcome {
+    fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
+        let _ = try_anyway;
+        TIR::install_comptime_bridge();
         match try_resident(bundle) {
             Ok(outcome) => outcome,
-            Err(gap) => Self::gap_outcome(gap, bundle),
+            Err(plan) => {
+                note_deopt_invoked_for_test();
+                run_whole_interp(bundle, &plan)
+            }
         }
     }
 
@@ -36,16 +38,42 @@ impl JitBackend for CraneliftBackend {
         bundle: &ProgramBundle,
         _try_anyway: bool,
     ) -> Result<RunOutcome, Vec<jet_foundation::Diagnostics::Diagnostic>> {
+        TIR::install_comptime_bridge();
         match try_resident_hot_swap(bundle) {
             Ok(outcome) => Ok(outcome),
-            Err(gap) => Err(vec![e2211_diagnostic(&gap, bundle)]),
+            Err(plan) => {
+                note_deopt_invoked_for_test();
+                match run_whole_interp(bundle, &plan) {
+                    RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code,
+                    } => Ok(RunOutcome::Ran {
+                        stdout,
+                        stderr,
+                        exit_code,
+                    }),
+                    RunOutcome::Problems(diags) => Err(diags),
+                }
+            }
         }
     }
 
     fn restart(&mut self, bundle: &ProgramBundle, _try_anyway: bool) -> RunOutcome {
+        TIR::install_comptime_bridge();
         match try_resident_restart(bundle) {
             Ok(outcome) => outcome,
-            Err(gap) => Self::gap_outcome(gap, bundle),
+            Err(plan) => {
+                note_deopt_invoked_for_test();
+                run_whole_interp(bundle, &plan)
+            }
         }
     }
+}
+
+/// Test helper: classify tiers without executing.
+#[doc(hidden)]
+pub fn plan_bundle_tiers(bundle: &ProgramBundle) -> super::tiers::TierPlan {
+    let program = TIR::lower_jit_program(bundle);
+    plan_tiers(bundle, program.as_ref())
 }

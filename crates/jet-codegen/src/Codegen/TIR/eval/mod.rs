@@ -1,10 +1,12 @@
 //! Canonical TIR evaluator — reference semantics (D-ONECORE1=A / #777).
 
 mod builtins;
+mod closure_ops;
 mod exprs;
 mod handles;
 mod stmts;
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -15,6 +17,21 @@ use crate::Codegen::TIR::{self, JitProgram, LowerEnv, TExpr, TFunc, TLocal, TStm
 use super::build_cx_items;
 use crate::Comptime::{self, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
+
+/// Cross-tier hook: Cranelift-native functions callable from the TIR evaluator (#778).
+pub type NativeCallHook = fn(&str, &[CtValue]) -> Option<Result<CtValue, Diagnostic>>;
+
+thread_local! {
+    static NATIVE_CALL_HOOK: Cell<Option<NativeCallHook>> = const { Cell::new(None) };
+}
+
+pub fn set_native_call_hook(hook: Option<NativeCallHook>) {
+    NATIVE_CALL_HOOK.with(|slot| slot.set(hook));
+}
+
+pub(super) fn native_call_hook() -> Option<NativeCallHook> {
+    NATIVE_CALL_HOOK.with(Cell::get)
+}
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
@@ -62,7 +79,7 @@ pub(super) struct EvalCtx<'a> {
 }
 
 impl EvalCtx<'_> {
-    pub(super) fn span(&self) -> Span {
+    pub(crate) fn span(&self) -> Span {
         Span::new(0, 0)
     }
 
@@ -93,7 +110,7 @@ impl EvalCtx<'_> {
         Ok(())
     }
 
-    pub(super) fn run_func(
+    pub(crate) fn run_func(
         &mut self,
         func: &TFunc,
         args: Vec<CtValue>,
@@ -256,7 +273,9 @@ pub fn run_program_with_structs(
         core_imports,
         globals,
         allow_impure,
-        impure_depth: 0,
+        // Runtime `run_bundle` / deopt: ambient Tier-2 I/O matches AOT `jet run`.
+        // Comptime purity still uses eval_expr/eval_block with explicit depths.
+        impure_depth: if allow_impure { 1 } else { 0 },
         repl_mode: false,
         pending_return: None,
         call_depth: 0,
@@ -265,6 +284,45 @@ pub fn run_program_with_structs(
     };
     let mut scope = HashMap::new();
     ctx.run_func(entry, Vec::new(), &mut scope)
+}
+
+/// Run one named function through the canonical TIR evaluator (#778 deopt).
+pub fn run_named_func(
+    program: &JitProgram,
+    name: &str,
+    args: Vec<CtValue>,
+    sink: &mut DevSink,
+) -> Result<CtValue, Diagnostic> {
+    let funcs = program_funcs(program);
+    let func = funcs.get(name).copied().ok_or_else(|| {
+        Diagnostic::error(
+            "E2201",
+            format!("function `{name}` missing from lowered TIR"),
+            "the deopt tier needs the named function in the TIR program".to_string(),
+            "report this as a compiler bug".to_string(),
+            None,
+        )
+    })?;
+    let core_imports = HashMap::new();
+    let mut ctx = EvalCtx {
+        funcs,
+        base_dir: PathBuf::from("."),
+        fuel: DEV_FUEL,
+        sink: Some(sink),
+        core_imports: &core_imports,
+        globals: HashMap::new(),
+        allow_impure: true,
+        // Runtime deopt is not comptime: open Tier-2 ambient I/O so `jet run`
+        // matches AOT for env/fs/process (D-LENS-RUN2 / #778).
+        impure_depth: 1,
+        repl_mode: false,
+        pending_return: None,
+        call_depth: 0,
+        emitted_fragments: None,
+        struct_fields: HashMap::new(),
+    };
+    let mut scope = HashMap::new();
+    ctx.run_func(func, args, &mut scope)
 }
 
 static INSTALLED: OnceLock<()> = OnceLock::new();

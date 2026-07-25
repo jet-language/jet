@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet_jit::{
-    fallback_invoked_for_test, is_e2211, jit_executed_for_test, reset_jit_trace_for_test,
-    resident_jit_safe_bundle, resident_jit_safe_bundle_detail,
+    deopt_invoked_for_test, fallback_invoked_for_test, jit_executed_for_test,
+    reset_jit_trace_for_test, resident_jit_safe_bundle, resident_jit_safe_bundle_detail,
 };
 
 mod common;
@@ -73,7 +73,7 @@ impl ProgramOutput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DevBackend {
     ResidentJit,
-    HonestE2211,
+    DeoptInterp,
 }
 
 fn run_aot(jet_path: &Path, cwd: &Path) -> ProgramOutput {
@@ -141,43 +141,38 @@ fn run_default_dev(path: &str) -> (DevBackend, ProgramOutput) {
             exit_code,
         } => {
             let jit = jit_executed_for_test();
+            let deopt = deopt_invoked_for_test();
             let fallback = fallback_invoked_for_test();
             assert!(
                 !fallback,
                 "default-dev must not silently fall back to interpreter/AOT for encoding probes"
             );
-            assert!(jit, "successful default-dev encoding probe must execute resident JIT");
-            assert!(
-                jit_safe,
-                "resident JIT run requires resident_jit_safe_bundle; detail: {}",
-                resident_jit_safe_bundle_detail(&bundle)
-            );
-            (
-                DevBackend::ResidentJit,
-                ProgramOutput::ran(stdout, stderr, exit_code),
-            )
+            if deopt {
+                (
+                    DevBackend::DeoptInterp,
+                    ProgramOutput::ran(stdout, stderr, exit_code),
+                )
+            } else {
+                assert!(jit, "successful default-dev encoding probe must execute resident JIT");
+                assert!(
+                    jit_safe,
+                    "resident JIT run requires resident_jit_safe_bundle; detail: {}",
+                    resident_jit_safe_bundle_detail(&bundle)
+                );
+                (
+                    DevBackend::ResidentJit,
+                    ProgramOutput::ran(stdout, stderr, exit_code),
+                )
+            }
         }
         RunOutcome::Problems(diags) => {
             assert!(
-                is_e2211(&diags),
-                "default-dev encoding gap must report E2211, not an unnamed boundary: {diags:?}"
-            );
-            assert!(
                 !fallback_invoked_for_test(),
-                "E2211 encoding probe must not invoke transparent fallback"
-            );
-            let detail = diags
-                .iter()
-                .map(|d| format!("{}: {}", d.code, d.why))
-                .collect::<Vec<_>>()
-                .join(" | ");
-            assert!(
-                detail.contains("JIT gap") || detail.contains("jit "),
-                "E2211 must name the JIT gap explicitly: {detail}"
+                "default-dev must not silently fall back when deopt hits an interpreter gap"
             );
             (
-                DevBackend::HonestE2211,
-                ProgramOutput::ran(String::new(), detail, 101),
+                DevBackend::DeoptInterp,
+                ProgramOutput::ran(String::new(), format!("interpreter gap: {diags:?}"), 101),
             )
         }
     }
@@ -235,12 +230,16 @@ fn assert_default_dev_matches_aot_or_honest_gap(
             assert_eq!(dev.stderr, aot.stderr, "{label} default-dev/JIT stderr drift");
             assert_eq!(dev.exit, aot.exit, "{label} default-dev/JIT exit drift");
         }
-        DevBackend::HonestE2211 => {
-            if interpreter_fallback {
+        DevBackend::DeoptInterp => {
+            if dev.exit == 0 {
+                assert_eq!(dev.stdout, aot.stdout, "{label} deopt-interp/JIT stdout drift");
+                assert_eq!(dev.stderr, aot.stderr, "{label} deopt-interp/JIT stderr drift");
+                assert_eq!(dev.exit, aot.exit, "{label} deopt-interp/JIT exit drift");
+            } else if interpreter_fallback {
                 let interp = run_forced_interpreter(jet_path.to_str().unwrap());
                 assert_eq!(
                     interp.stdout, aot.stdout,
-                    "{label} forced-interpreter must preserve AOT encoding semantics when default-dev reports E2211"
+                    "{label} forced-interpreter must preserve AOT encoding semantics when default-dev deopts"
                 );
                 assert_eq!(interp.exit, aot.exit, "{label} interpreter exit drift");
             }
@@ -596,9 +595,9 @@ fn default_dev_encoding_probes_record_backend_without_silent_fallback() {
     let (backend, _) = run_default_dev(path.to_str().unwrap());
     match backend {
         DevBackend::ResidentJit => assert!(jit_safe, "resident JIT run requires jit-safe bundle"),
-        DevBackend::HonestE2211 => assert!(
+        DevBackend::DeoptInterp => assert!(
             !jit_safe,
-            "E2211 probe should correlate with non-resident-safe bundle: {}",
+            "deopt-interp probe should correlate with non-resident-safe bundle: {}",
             resident_jit_safe_bundle_detail(&bundle)
         ),
     }

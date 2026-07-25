@@ -383,6 +383,7 @@ usage:
   {bin} run   <file.{ext}> a b      extra words become program arguments
   {bin} run   <file.{ext}> -- ...   everything after `--` is forwarded to the program (D-CLI1)
   {bin} run   <file.{ext}> --gc-trace   record bounded automatic-GC promotion evidence
+  {bin} run   <file.{ext}> --trace-tiers  expert: per-function tier, reason, timing
   {bin} test  <file|dir>            compile and run top-level test blocks (recurses into subdirs)
   {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
@@ -462,6 +463,7 @@ flags:
   --verbose, -v                with build: print the bridge steps
   --json                       emit machine-readable diagnostics
   --gc-trace                   with run/dev: record automatic-GC promotion evidence
+  --trace-tiers                with run/dev: print per-function tier, reason, timing
   --color=auto|always|never    control color (auto: only on a terminal)
   --filter=<substr>            with test: only run tests whose name contains it
   --shuffle, --shuffle=<seed>  with test: run tests in random (or given-seed) order
@@ -1104,6 +1106,9 @@ fn main() {
     }
     if raw.iter().any(|arg| arg == "--gc-trace") {
         CmdGc::configure_trace();
+    }
+    if raw.iter().any(|arg| arg == "--trace-tiers") {
+        jet_jit::set_trace_tiers(true);
     }
 
     // If the first word is not in the single CLI registry, try an external

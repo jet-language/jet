@@ -5,9 +5,10 @@ use std::collections::HashSet;
 use super::gap::{entry_run_name, JitGap};
 use super::resident::{
     ensure_resident_module, fresh_runtime, resident_hot_swap, resident_run_fresh,
-    resident_teardown,
+    resident_run_mixed, resident_teardown,
 };
 use super::runtime_host::catch_jit_panic;
+use super::tiers::{plan_tiers, record_trace};
 use super::trace::note_jit_execution;
 use super::safety::{
     collect_select_arms_jit, count_spawn_sites, jit_list_task_int_type, resident_safe_expr,
@@ -43,54 +44,108 @@ pub(crate) fn classify_jit_gap(bundle: &ProgramBundle) -> JitGap {
     )
 }
 
-pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, JitGap> {
+pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::tiers::TierPlan> {
     if !cranelift_host_supported() {
-        return Err(classify_jit_gap(bundle));
+        return Err(plan_tiers(bundle, None));
     }
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
-        None => return Err(classify_jit_gap(bundle)),
+        None => return Err(plan_tiers(bundle, None)),
     };
+    let plan = plan_tiers(bundle, Some(&program));
+    if plan.whole_interp {
+        return Err(plan);
+    }
     note_jit_execution();
-    match catch_jit_panic("resident run", || resident_run_fresh(&program)) {
-        Ok(outcome) => Ok(outcome),
-        Err(reason) => Err(JitGap::new(program.entry.clone(), reason)),
+    if plan.deopt.is_empty() {
+        match catch_jit_panic("resident run", || resident_run_fresh(&program)) {
+            Ok(outcome) => {
+                record_trace(plan.rows);
+                Ok(outcome)
+            }
+            Err(reason) => {
+                let mut plan = plan;
+                if let Some(gap) = plan.gap.as_mut() {
+                    gap.reason = reason;
+                }
+                Err(plan)
+            }
+        }
+    } else {
+        // Mixed: native entry + interpreter stubs for named gaps.
+        match catch_jit_panic("mixed tier run", || {
+            resident_run_mixed(&program, &plan)
+        }) {
+            Ok(outcome) => {
+                super::trace::note_deopt_invoked_for_test();
+                record_trace(plan.rows);
+                Ok(outcome)
+            }
+            Err(_) => Err(plan),
+        }
     }
 }
 
-pub(crate) fn try_resident_hot_swap(bundle: &ProgramBundle) -> Result<RunOutcome, JitGap> {
+pub(crate) fn try_resident_hot_swap(
+    bundle: &ProgramBundle,
+) -> Result<RunOutcome, super::tiers::TierPlan> {
     if !cranelift_host_supported() {
-        return Err(classify_jit_gap(bundle));
+        return Err(plan_tiers(bundle, None));
     }
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
-        None => return Err(classify_jit_gap(bundle)),
+        None => return Err(plan_tiers(bundle, None)),
     };
+    let plan = plan_tiers(bundle, Some(&program));
+    if plan.whole_interp || !plan.deopt.is_empty() {
+        // Hot-swap keeps the simple path: whole-program deopt when any gap.
+        return Err(plan);
+    }
     if !resident_safe_program(&program) {
-        return Err(classify_jit_gap(bundle));
+        return Err(plan);
     }
     note_jit_execution();
     match resident_hot_swap(&program) {
-        Ok(outcome) => Ok(outcome),
-        Err(reason) => Err(JitGap::new(program.entry.clone(), reason)),
+        Ok(outcome) => {
+            record_trace(plan.rows);
+            Ok(outcome)
+        }
+        Err(_) => Err(plan),
     }
 }
 
-pub(crate) fn try_resident_restart(bundle: &ProgramBundle) -> Result<RunOutcome, JitGap> {
+pub(crate) fn try_resident_restart(
+    bundle: &ProgramBundle,
+) -> Result<RunOutcome, super::tiers::TierPlan> {
     if !cranelift_host_supported() {
-        return Err(classify_jit_gap(bundle));
+        return Err(plan_tiers(bundle, None));
     }
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
-        None => return Err(classify_jit_gap(bundle)),
+        None => return Err(plan_tiers(bundle, None)),
     };
-    if !resident_safe_program(&program) {
-        return Err(classify_jit_gap(bundle));
+    let plan = plan_tiers(bundle, Some(&program));
+    if plan.whole_interp {
+        return Err(plan);
     }
     note_jit_execution();
-    match resident_run_fresh(&program) {
-        Ok(outcome) => Ok(outcome),
-        Err(reason) => Err(JitGap::new(program.entry.clone(), reason)),
+    if plan.deopt.is_empty() {
+        match resident_run_fresh(&program) {
+            Ok(outcome) => {
+                record_trace(plan.rows);
+                Ok(outcome)
+            }
+            Err(_) => Err(plan),
+        }
+    } else {
+        match resident_run_mixed(&program, &plan) {
+            Ok(outcome) => {
+                super::trace::note_deopt_invoked_for_test();
+                record_trace(plan.rows);
+                Ok(outcome)
+            }
+            Err(_) => Err(plan),
+        }
     }
 }
 

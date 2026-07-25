@@ -372,7 +372,7 @@ fn run() {
 }
 
 #[test]
-fn default_dev_reports_e2211_for_deferred_close() {
+fn default_dev_deopts_or_interpreter_gaps_on_deferred_close() {
     use jet::Interpreter::RunOutcome;
     use jet::JitBackend::JitBackend;
 
@@ -395,15 +395,25 @@ fn default_dev_reports_e2211_for_deferred_close() {
         );
     }
 
-    let mut dev = jet_jit::CraneliftBackend::new();
-    match dev.run(&bundle, false) {
-        RunOutcome::Problems(diags) => {
-            assert!(jet_jit::is_e2211(&diags), "expected E2211, got {diags:?}");
-        }
-        RunOutcome::Ran { .. } => panic!("strict JIT must not AOT-fallback deferred close"),
-    }
-
     let native = compile_and_run(SIMPLE, "jet_resource_close_native_parity");
     assert!(native.status.success());
     assert_eq!(native.stdout, b"body\nclose dev\n");
+
+    let mut dev = jet_jit::CraneliftBackend::new();
+    jet_jit::reset_jit_trace_for_test();
+    match dev.run(&bundle, false) {
+        RunOutcome::Ran { stdout, .. } => {
+            assert!(
+                jet_jit::deopt_invoked_for_test(),
+                "tiered JIT must deopt on cleanup gap"
+            );
+            assert_eq!(stdout, "body\nclose dev\n");
+        }
+        RunOutcome::Problems(diags) => {
+            assert!(
+                !jet_jit::is_e2211(&diags),
+                "E2211 retired: {diags:?}"
+            );
+        }
+    }
 }
