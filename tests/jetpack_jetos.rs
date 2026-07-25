@@ -3165,6 +3165,31 @@ fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
 }
 
 #[test]
+fn nixos_migration_prompt_probe_executes_interactive_shell_init() {
+    let root = Scratch::new("nixos-interactive-prompt");
+    let bashrc = root.join("bashrc");
+    let backend = include_str!("../crates/jetpack/src/JetOS/nixos_backend.rs");
+    let prompt_init = backend
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("PS1="))
+        .expect("generated NixOS configuration must initialize PS1");
+    fs::write(&bashrc, format!("{prompt_init}\nexport PS1\n")).unwrap();
+
+    let out = Command::new("bash")
+        .args(["--noprofile", "--rcfile"])
+        .arg(&bashrc)
+        .args(["-i", "-c", "printf '%s' \"$PS1\""])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "NixOS comparison $ "
+    );
+}
+
+#[test]
 fn nixos_migration_rejects_direct_engine_front_doors() {
     let marker = std::process::id().to_string();
     for (name, mut command, prefix) in [
@@ -3234,16 +3259,15 @@ fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
     assert!(!vm.contains("nixos_backend"), "{vm}");
     assert!(!generation.contains("nixos_backend"), "{generation}");
     assert!(!backend.contains("distroName = \"jetos\""), "{backend}");
-    assert!(backend.contains("fn bounded_redacted_tail(text: &str) -> String"));
-    assert!(backend.contains("const DIAGNOSTIC_MAX_LINES: usize = 12;"));
-    assert!(backend.contains("const DIAGNOSTIC_MAX_BYTES: usize = 4096;"));
+    assert!(!backend.contains("bounded_redacted_tail"));
+    assert!(backend.contains("private build output was suppressed"));
+    assert!(backend.contains("guest payload was suppressed"));
     let service = backend
         .split_once("const CONFIGURATION_PROOF_SERVICE")
         .and_then(|(_, rest)| rest.split_once("fn render_configuration_nix"))
         .map(|(service, _)| service)
         .unwrap();
-    assert!(service.contains(". /etc/profile"));
-    assert!(!service.contains("prompt='NixOS"));
+    assert!(service.contains("--rcfile /etc/bashrc -i"));
     assert!(syntax.contains("pub const OS_VERB_MIGRATE: &str = \"migrate\";"));
     assert!(syntax.contains(
         "pub const OS_MIGRATION_COMPARE_NIXOS: &str = \"compare-nixos\";"

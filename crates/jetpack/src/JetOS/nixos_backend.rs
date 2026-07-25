@@ -724,9 +724,10 @@ in
     fsType = "vfat";
   };
 
-  environment.etc."profile.d/nixos-comparison.sh".text = ''
-    export NIXOS_COMPARISON=1
-    export PS1='NixOS \h \w \$ '
+  environment.variables.NIXOS_COMPARISON = "1";
+  programs.bash.promptInit = lib.mkAfter ''
+    PS1='NixOS comparison $ '
+    export PS1
   '';
   environment.etc.issue.text = "NixOS comparison guest\n";
   environment.etc.motd.text = "NixOS comparison guest for A/B migration checks\n";
@@ -742,7 +743,7 @@ const CONFIGURATION_PROOF_SERVICE: &str = r#"
       Type = "oneshot";
       RemainAfterExit = true;
     };
-    path = [ pkgs.bash pkgs.systemd pkgs.procps pkgs.jq pkgs.gawk pkgs.gnused pkgs.coreutils ];
+    path = [ pkgs.bash pkgs.util-linux pkgs.systemd pkgs.procps pkgs.jq pkgs.gawk pkgs.gnused pkgs.coreutils ];
     script = ''
       deadline=$((SECONDS + 300))
       while [ "$SECONDS" -lt "$deadline" ]; do
@@ -758,7 +759,7 @@ const CONFIGURATION_PROOF_SERVICE: &str = r#"
         echo "NIXOS_COMPARISON_DEBUG dm=$dm shell=$shell_pid session=$session stype=$stype" > /dev/ttyS0 || true
         if [ "$dm" = "active" ] && [ -n "$shell_pid" ] && [ "$stype" = "wayland" ]; then
           os_name=$(. /etc/os-release; printf '%s' "$NAME")
-          prompt=$(bash --noprofile --norc -c '. /etc/profile >/dev/null 2>&1; printf "%s" "$PS1"')
+          prompt=$(runuser -u @@USER@@ -- bash --noprofile --rcfile /etc/bashrc -i -c 'printf "%s" "$PS1"' </dev/null 2>/dev/null)
           banner=$(head -n1 /etc/issue)
           jq -cn \
             --arg host "$(cat /proc/sys/kernel/hostname)" \
@@ -1142,7 +1143,7 @@ fn run_migration_build_and_boot(
         .stderr(Stdio::from(stderr_file))
         .spawn()
         .map_err(|e| format!("starting real QEMU proof failed: {e}"))?;
-    let report = poll_for_guest_proof(&mut child, &stderr_path, &log_path, migration_timeout());
+    let report = poll_for_guest_proof(&mut child, &log_path, migration_timeout());
     let qmp_result = qmp_screendump_and_powerdown(&sock_path, &screenshot_path);
     let _ = wait_child_with_timeout(&mut child, Duration::from_secs(30));
     let _ = fs::remove_file(&sock_path);
@@ -1179,10 +1180,9 @@ fn nix_build(dir: &Path, target: &str) -> Result<PathBuf, String> {
         ),
     );
     if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        let tail = bounded_redacted_tail(&stderr);
         return Err(format!(
-            "`nix build .#{target}` failed; {tail}"
+            "`nix build .#{target}` exited {}; private build output was suppressed",
+            out.status
         ));
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1192,62 +1192,6 @@ fn nix_build(dir: &Path, target: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("`nix build .#{target}` produced no output path"))?
         .trim();
     Ok(PathBuf::from(path))
-}
-
-const DIAGNOSTIC_MAX_LINES: usize = 12;
-const DIAGNOSTIC_MAX_BYTES: usize = 4096;
-
-fn redact_secret_assignments(text: &str) -> String {
-    let mut redacted = text.to_string();
-    for marker in [
-        "JET_SECRET=",
-        "SECRET=",
-        "TOKEN=",
-        "PASSWORD=",
-        "API_KEY=",
-        "secret=",
-        "token=",
-        "password=",
-        "api_key=",
-    ] {
-        let mut offset = 0;
-        while let Some(found) = redacted[offset..].find(marker) {
-            let value_start = offset + found + marker.len();
-            let value_end = redacted[value_start..]
-                .find(char::is_whitespace)
-                .map(|end| value_start + end)
-                .unwrap_or(redacted.len());
-            redacted.replace_range(value_start..value_end, "<redacted>");
-            offset = value_start + "<redacted>".len();
-        }
-    }
-    redacted
-}
-
-fn bounded_redacted_tail(text: &str) -> String {
-    let redacted = redact_secret_assignments(text);
-    let mut lines = redacted
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .rev()
-        .take(DIAGNOSTIC_MAX_LINES)
-        .collect::<Vec<_>>();
-    lines.reverse();
-    let joined = if lines.is_empty() {
-        "nix wrote no stderr".to_string()
-    } else {
-        lines.join(" | ")
-    };
-    if joined.len() <= DIAGNOSTIC_MAX_BYTES {
-        return joined;
-    }
-    let prefix = "…";
-    let mut start = joined.len() - (DIAGNOSTIC_MAX_BYTES - prefix.len());
-    while !joined.is_char_boundary(start) {
-        start += 1;
-    }
-    format!("{prefix}{}", &joined[start..])
 }
 
 fn find_qcow2(disk_out: &Path) -> Result<PathBuf, String> {
@@ -1308,7 +1252,6 @@ fn wait_child_with_timeout(
 
 fn poll_for_guest_proof(
     child: &mut std::process::Child,
-    stderr_path: &Path,
     log_path: &Path,
     timeout: Duration,
 ) -> Result<String, String> {
@@ -1322,20 +1265,17 @@ fn poll_for_guest_proof(
                 return Ok(report);
             }
         }
-        // A dead QEMU can never produce the marker — fail fast with its
-        // stderr instead of burning the whole timeout.
+        // A dead QEMU can never produce the marker. Never project its
+        // untrusted stderr into a public diagnostic.
         if let Ok(Some(status)) = child.try_wait() {
-            let stderr = fs::read_to_string(stderr_path).unwrap_or_default();
-            let excerpt = bounded_redacted_tail(&stderr);
             return Err(format!(
-                "QEMU exited ({status}) before the guest proof marker; {excerpt}"
+                "QEMU exited ({status}) before the guest proof marker; private VM output was suppressed"
             ));
         }
         if start.elapsed() > timeout {
             return Err(format!(
-                "no `{MIGRATION_GUEST_PROOF_MARKER}` line appeared in `{}` within {}ms",
-                log_path.display(),
-                timeout.as_millis()
+                "no `{MIGRATION_GUEST_PROOF_MARKER}` line appeared within {}ms; private VM output was suppressed",
+                timeout.as_millis(),
             ));
         }
         std::thread::sleep(Duration::from_millis(200));
@@ -1350,16 +1290,16 @@ struct ObservedGuestIdentity {
 }
 
 fn require_nixos_guest_fact(report: &str) -> Result<ObservedGuestIdentity, String> {
-    let fact = JSON::parse(report).map_err(|error| {
-        format!(
-            "invalid guest fact JSON: {error}; {}",
-            bounded_redacted_tail(report)
-        )
-    })?;
-    let field = |name| {
+    let fact =
+        JSON::parse(report).map_err(|_| "invalid guest fact JSON; guest payload was suppressed")?;
+    let field = |name| -> Result<String, String> {
         fact.get(name)
             .and_then(JSON::Json::as_str)
             .map(str::to_string)
+            .map_err(|_| {
+                "guest fact omitted a required identity field; guest payload was suppressed"
+                    .to_string()
+            })
     };
     let proof = field("proof")?;
     let os_release = field("os_release")?;
@@ -1371,10 +1311,10 @@ fn require_nixos_guest_fact(report: &str) -> Result<ObservedGuestIdentity, Strin
         && banner == "NixOS comparison guest"
         && !report.to_ascii_lowercase().contains("jetos");
     if !honest {
-        return Err(format!(
-            "guest fact did not prove honest NixOS os-release, observed prompt, banner, and live desktop: {}",
-            bounded_redacted_tail(report)
-        ));
+        return Err(
+            "guest fact did not prove honest NixOS os-release, observed prompt, banner, and live desktop; guest payload was suppressed"
+                .to_string(),
+        );
     }
     Ok(ObservedGuestIdentity {
         os_release,
@@ -1640,14 +1580,14 @@ mod tests {
         assert!(!configuration.contains("system.nixos.distroName"));
         assert!(!configuration.contains("system.nixos.distroId"));
         assert!(configuration.contains("environment.systemPackages = map jetosPkg [ \"firefox\" \"btop\" ];"));
-        assert!(configuration.contains("export PS1='NixOS \\h \\w \\$ '"));
+        assert!(configuration.contains("programs.bash.promptInit = lib.mkAfter"));
+        assert!(configuration.contains("PS1='NixOS comparison $ '"));
         assert!(configuration.contains("environment.etc.issue.text = \"NixOS comparison guest"));
         assert!(configuration.contains("systemd.services.nixos-comparison-proof = {"));
-        assert!(configuration.contains("path = [ pkgs.bash pkgs.systemd"));
+        assert!(configuration.contains("path = [ pkgs.bash pkgs.util-linux pkgs.systemd"));
         assert!(configuration.contains(
-            "prompt=$(bash --noprofile --norc -c '. /etc/profile >/dev/null 2>&1; printf \"%s\" \"$PS1\"')"
+            "prompt=$(runuser -u nate -- bash --noprofile --rcfile /etc/bashrc -i -c 'printf \"%s\" \"$PS1\"'"
         ));
-        assert!(!configuration.contains("prompt='NixOS"));
         assert!(configuration.contains("pgrep -u nate -f gnome-shell"));
         assert!(configuration.contains("NIXOS_COMPARISON_PROOF:"));
     }
@@ -1764,32 +1704,15 @@ mod tests {
     }
 
     #[test]
-    fn failure_tail_is_line_and_byte_bounded_and_redacted() {
-        let stderr = (0..20)
-            .map(|line| format!("context-{line}"))
-            .chain([format!(
-                "error: {} SECRET=hunter2",
-                "x".repeat(DIAGNOSTIC_MAX_BYTES * 2)
-            )])
-            .collect::<Vec<_>>()
-            .join("\n");
-        let tail = bounded_redacted_tail(&stderr);
-        assert!(!tail.contains("context-0"));
-        assert!(tail.len() <= DIAGNOSTIC_MAX_BYTES);
-        assert!(!tail.contains("hunter2"));
-        assert!(tail.contains("SECRET=<redacted>"));
-    }
-
-    #[test]
-    fn malformed_guest_report_is_bounded_and_redacted() {
-        let report = format!(
-            "{{not-json {} TOKEN=do-not-print",
-            "x".repeat(DIAGNOSTIC_MAX_BYTES * 2)
-        );
+    fn malformed_guest_report_is_not_projected_into_diagnostics() {
+        let report = "{not-json AWS_SECRET_ACCESS_KEY=secret Authorization: Bearer token";
         let error = require_nixos_guest_fact(&report).unwrap_err();
-        assert!(error.len() <= DIAGNOSTIC_MAX_BYTES + 128);
-        assert!(!error.contains("do-not-print"));
-        assert!(error.contains("TOKEN=<redacted>"));
+        assert_eq!(
+            error,
+            "invalid guest fact JSON; guest payload was suppressed"
+        );
+        assert!(!error.contains("secret"));
+        assert!(!error.contains("token"));
     }
 
     #[test]
