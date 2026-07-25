@@ -344,12 +344,17 @@ fn script_start_budget_fixtures_and_peers() {
         None,
     );
 
+    // D-SCRIPT-BUDGET1=B: warm Jet no-op median ≤ 2× fastest available peer median.
+    let fastest_peer = [bash, python, node].into_iter().flatten().min();
     eprintln!(
         "script-start budget evidence: {} warm_jet_noop_median_ms={} warm_jet_noop_p90_ms={} \
-         bash={:?} python={:?} node={:?} bash_file={:?} node_file={:?} bash_sub={:?} node_sub={:?}",
+         fastest_peer_ms={:?} budget_2x={:?} bash={:?} python={:?} node={:?} \
+         bash_file={:?} node_file={:?} bash_sub={:?} node_sub={:?}",
         machine_meta(),
         warm_median,
         warm_p90,
+        fastest_peer,
+        fastest_peer.map(|p| p.saturating_mul(2)),
         bash,
         python,
         node,
@@ -359,12 +364,15 @@ fn script_start_budget_fixtures_and_peers() {
         node_sub
     );
     assert!(
-        warm_median < 100,
-        "warm no-op median {warm_median}ms exceeds provisional 100ms sanity budget"
-    );
-    assert!(
         bash.is_some() || node.is_some() || python.is_some(),
         "need at least one peer runtime"
+    );
+    let peer = fastest_peer.expect("peer sample present");
+    // Floor 1ms: peer spawn that rounds to 0ms must not force a zero budget.
+    let budget = peer.max(1).saturating_mul(2);
+    assert!(
+        warm_median <= budget,
+        "warm no-op median {warm_median}ms exceeds D-SCRIPT-BUDGET1=B gate (2× fastest peer {peer}ms = {budget}ms)"
     );
     assert!(
         bash_sub.is_some() || node_sub.is_some(),
