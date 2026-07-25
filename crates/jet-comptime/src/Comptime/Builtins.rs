@@ -580,6 +580,186 @@ pub fn apply_method(
             let parts: Vec<String> = xs.iter().map(|x| x.jet_show()).collect();
             Ok(CtValue::Str(parts.join(&sep)))
         }
+        // D-ITERTOOLS1=A: Iter is List-shaped in comptime/TIR eval; materialize is
+        // identity. Non-closure adapters mirror SequenceParity so JIT deopt works.
+        (CtValue::List(xs), "to_list" | "collect") => Ok(CtValue::List(xs.clone())),
+        (CtValue::List(xs), "take") => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            Ok(CtValue::List(xs.iter().take(n).cloned().collect()))
+        }
+        (CtValue::List(xs), "skip") => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            Ok(CtValue::List(xs.iter().skip(n).cloned().collect()))
+        }
+        (CtValue::List(xs), "step_by") => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            Ok(CtValue::List(if n <= 0 {
+                Vec::new()
+            } else {
+                xs.iter().step_by(n as usize).cloned().collect()
+            }))
+        }
+        (CtValue::List(xs), "dedup") => {
+            let mut out = Vec::new();
+            for x in xs {
+                if out.last() != Some(x) {
+                    out.push(x.clone());
+                }
+            }
+            Ok(CtValue::List(out))
+        }
+        (CtValue::List(xs), "chunks") => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?.max(1) as usize;
+            Ok(CtValue::List(
+                xs.chunks(n)
+                    .map(|chunk| CtValue::List(chunk.to_vec()))
+                    .collect(),
+            ))
+        }
+        (CtValue::List(xs), "windows") => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?.max(1) as usize;
+            Ok(CtValue::List(
+                xs.windows(n)
+                    .map(|window| CtValue::List(window.to_vec()))
+                    .collect(),
+            ))
+        }
+        (CtValue::List(xs), "first") => Ok(match xs.first() {
+            Some(v) => CtValue::Some(Box::new(v.clone())),
+            None => CtValue::None(Type::Int),
+        }),
+        (CtValue::List(xs), "last") => Ok(match xs.last() {
+            Some(v) => CtValue::Some(Box::new(v.clone())),
+            None => CtValue::None(Type::Int),
+        }),
+        (CtValue::List(xs), "flatten") => {
+            let mut out = Vec::new();
+            for x in xs {
+                let CtValue::List(values) = x else {
+                    return Err(unsupported("flatten on a non-nested list", span));
+                };
+                out.extend(values.iter().cloned());
+            }
+            Ok(CtValue::List(out))
+        }
+        (CtValue::List(xs), "sum") => {
+            let mut total = 0i64;
+            for x in xs {
+                total = total
+                    .checked_add(as_int(x, span)?)
+                    .ok_or_else(|| overflow("sum", span))?;
+            }
+            Ok(CtValue::Int(total))
+        }
+        (CtValue::List(xs), "product") => {
+            let mut total = 1i64;
+            for x in xs {
+                total = total
+                    .checked_mul(as_int(x, span)?)
+                    .ok_or_else(|| overflow("product", span))?;
+            }
+            Ok(CtValue::Int(total))
+        }
+        (CtValue::List(xs), "min") => {
+            let Some(mut best) = xs.first().cloned() else {
+                return Ok(CtValue::None(Type::Int));
+            };
+            for candidate in xs.iter().skip(1) {
+                if cmp(best.clone(), candidate.clone(), span)? == std::cmp::Ordering::Greater {
+                    best = candidate.clone();
+                }
+            }
+            Ok(CtValue::Some(Box::new(best)))
+        }
+        (CtValue::List(xs), "max") => {
+            let Some(mut best) = xs.first().cloned() else {
+                return Ok(CtValue::None(Type::Int));
+            };
+            for candidate in xs.iter().skip(1) {
+                if cmp(best.clone(), candidate.clone(), span)? != std::cmp::Ordering::Greater {
+                    best = candidate.clone();
+                }
+            }
+            Ok(CtValue::Some(Box::new(best)))
+        }
+        (CtValue::List(xs), "intersperse") => {
+            let sep = args.into_iter().next().unwrap_or(CtValue::Unit);
+            let mut out = Vec::with_capacity(xs.len().saturating_mul(2).saturating_sub(1));
+            for (index, x) in xs.iter().enumerate() {
+                if index != 0 {
+                    out.push(sep.clone());
+                }
+                out.push(x.clone());
+            }
+            Ok(CtValue::List(out))
+        }
+        (CtValue::List(xs), "unzip") => {
+            let mut left = Vec::with_capacity(xs.len());
+            let mut right = Vec::with_capacity(xs.len());
+            for x in xs {
+                let CtValue::Struct { fields, .. } = x else {
+                    return Err(unsupported("unzip on a non-tuple list", span));
+                };
+                let a = fields
+                    .iter()
+                    .find(|(name, _)| name == "a")
+                    .map(|(_, v)| v.clone());
+                let b = fields
+                    .iter()
+                    .find(|(name, _)| name == "b")
+                    .map(|(_, v)| v.clone());
+                match (a, b) {
+                    (Some(a), Some(b)) => {
+                        left.push(a);
+                        right.push(b);
+                    }
+                    _ => return Err(unsupported("unzip on a tuple without `a` and `b`", span)),
+                }
+            }
+            Ok(CtValue::Struct {
+                type_name: "(a,b)".to_string(),
+                fields: vec![
+                    ("a".to_string(), CtValue::List(left)),
+                    ("b".to_string(), CtValue::List(right)),
+                ],
+            })
+        }
+        (CtValue::List(xs), "enumerate") => Ok(CtValue::List(
+            xs.iter()
+                .enumerate()
+                .map(|(idx, item)| CtValue::Struct {
+                    type_name: "(idx,item)".to_string(),
+                    fields: vec![
+                        ("idx".to_string(), CtValue::Int(idx as i64)),
+                        ("item".to_string(), item.clone()),
+                    ],
+                })
+                .collect(),
+        )),
+        (CtValue::List(xs), "zip") => {
+            let CtValue::List(other) = args.into_iter().next().unwrap_or(CtValue::Unit) else {
+                return Err(unsupported("zip with a non-list argument", span));
+            };
+            Ok(CtValue::List(
+                xs.iter()
+                    .zip(other)
+                    .map(|(a, b)| CtValue::Struct {
+                        type_name: "(a,b)".to_string(),
+                        fields: vec![
+                            ("a".to_string(), a.clone()),
+                            ("b".to_string(), b),
+                        ],
+                    })
+                    .collect(),
+            ))
+        }
+        (CtValue::List(xs), "index_of") => {
+            let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
+            Ok(match xs.iter().position(|x| *x == needle) {
+                Some(index) => CtValue::Some(Box::new(CtValue::Int(index as i64))),
+                None => CtValue::None(Type::Int),
+            })
+        }
         // Bytes (`[U8]` from `embed_bytes`) — same surface as List, u8 elements.
         (CtValue::Bytes(bs), "len") => Ok(CtValue::Int(bs.len() as i64)),
         (CtValue::Bytes(bs), "is_empty") => Ok(CtValue::Bool(bs.is_empty())),

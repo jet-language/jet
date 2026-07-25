@@ -2815,6 +2815,9 @@ pub enum TBuiltinOp {
     Take,
     /// `skip(n)` → `jet_list_skip((recv).clone(), a0)`.
     Skip,
+    /// D-ITERTOOLS1=A: `Iter.to_list()` / `.collect()` → owned `[T]`.
+    IterToList,
+    IterCollect,
     /// `step_by(n)` → `jet_list_step_by((recv).clone(), a0)`.
     StepBy,
     /// `dedup()` → `jet_list_dedup((recv).clone())`.

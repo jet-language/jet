@@ -11,7 +11,7 @@ use super::alloc_ptrs::{io_error_ty, result_ty};
 /// a phantom return from `on_commit`/`on_rollback` (registration is side-effect);
 /// those calls are intentionally ignorable. `Task` stays on L1101.
 pub(crate) fn core_must_use_type(name: &str) -> bool {
-    matches!(name, "ScopeGuard")
+    matches!(name, "ScopeGuard" | "Iter")
 }
 
 pub(crate) fn unit_ty() -> Type {

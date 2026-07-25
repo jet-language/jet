@@ -1387,6 +1387,11 @@ impl<'a> Checker<'a> {
                                 Some(Type::List(inner)) => {
                                     self.declare_loop_var(var.clone(), *var_span, inner);
                                 }
+                                Some(Type::Apply { name, args })
+                                    if name == Syntax::TYPE_ITER && args.len() == 1 =>
+                                {
+                                    self.declare_loop_var(var.clone(), *var_span, &args[0]);
+                                }
                                 Some(Type::Map { key, value, .. }) => {
                                     if let Some((v2, v2s)) = var2.as_ref() {
                                         self.declare_loop_var(var.clone(), *var_span, key);
@@ -1454,6 +1459,17 @@ impl<'a> Checker<'a> {
                                 Some(Type::Apply { name, args })
                                     if name == crate::Syntax::TYPE_STREAM && args.len() == 1 =>
                                 {
+                                    self.declare_loop_var(var.clone(), *var_span, &args[0]);
+                                }
+                                // D-ITERTOOLS1=A: `loop x; lazy_iter` — consume one item per
+                                // step from a lazy `Iter<T>` view (adapters / string split).
+                                Some(Type::Apply { name, args })
+                                    if name == crate::Syntax::TYPE_ITER && args.len() == 1 =>
+                                {
+                                    if let Some(root) = expr_root_ident(collection) {
+                                        self.consume_builtin_receiver(collection, "loop");
+                                        let _ = root;
+                                    }
                                     self.declare_loop_var(var.clone(), *var_span, &args[0]);
                                 }
                                 // D-DYNARRAY1: `loop x; window` — a `View<T>` iterates its

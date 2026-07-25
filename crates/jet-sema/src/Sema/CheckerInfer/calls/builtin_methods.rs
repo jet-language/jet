@@ -368,6 +368,11 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
+            // D-ITERTOOLS1=A: every method on `Iter<T>` consumes the view (move).
+            // Driving a consumed lazy value twice is E0121, not a runtime throw.
+            if Collections::is_iter_type(recv_ty) {
+                self.consume_builtin_receiver(receiver, method);
+            }
             // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is `Type::Shared`, not
             // `Type::Apply` (it predates this stage — see the type's own doc
             // comment) — a separate receiver match, same shape as the block above.
@@ -420,7 +425,7 @@ impl<'a> Checker<'a> {
                             *ret = Some(Box::new(seed_ty.clone()));
                         }
                         refined_ret = Some(if method == "scan" {
-                            Type::List(Box::new(seed_ty.clone()))
+                            Collections::iter_ty(seed_ty.clone())
                         } else {
                             seed_ty.clone()
                         });
@@ -468,16 +473,26 @@ impl<'a> Checker<'a> {
                             Type::List(inner) | Type::FixedList { elem: inner, .. } => {
                                 Some((**inner).clone())
                             }
+                            Type::Apply { name, args }
+                                if name == Syntax::TYPE_ITER && args.len() == 1 =>
+                            {
+                                Some(args[0].clone())
+                            }
                             _ => None,
                         };
                         let arg_elem = match &got {
                             Some(Type::List(inner)) | Some(Type::FixedList { elem: inner, .. }) => {
                                 Some((**inner).clone())
                             }
+                            Some(Type::Apply { name, args })
+                                if name == Syntax::TYPE_ITER && args.len() == 1 =>
+                            {
+                                Some(args[0].clone())
+                            }
                             _ => None,
                         };
                         if let (Some(a), Some(b)) = (recv_elem, arg_elem) {
-                            refined_ret = Some(Type::List(Box::new(Collections::zip_elem_ty(&a, &b))));
+                            refined_ret = Some(Collections::iter_ty(Collections::zip_elem_ty(&a, &b)));
                         }
                     }
                     if let (Some(et), Some(gt)) = (expected.get(i), got) {
@@ -488,8 +503,13 @@ impl<'a> Checker<'a> {
                             {
                                 match recv_ty {
                                     Type::List(inner) => {
-                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                        refined_ret = Some(Collections::iter_ty((**r).clone()));
                                         let _ = inner;
+                                    }
+                                    Type::Apply { name, .. }
+                                        if name == Syntax::TYPE_ITER =>
+                                    {
+                                        refined_ret = Some(Collections::iter_ty((**r).clone()));
                                     }
                                     // D-HOLE1: `opt.map(f: T -> R) -> R?`.
                                     Type::Option(_) => {
@@ -505,14 +525,14 @@ impl<'a> Checker<'a> {
                                 }
                             }
                         }
-                        // D-FAILCOMP1: filter_map(f: T->V?E) → [V]; refine from closure's ok type.
+                        // D-FAILCOMP1: filter_map(f: T->V?E) → Iter<V>; refine from closure's ok type.
                         if Collections::is_closure_method(method) && i == 0 && method == "filter_map" {
                             if let Type::Fn {
                                 ret: Some(ref r), ..
                             } = gt
                             {
                                 if let Type::Result { ok, .. } = r.as_ref() {
-                                    refined_ret = Some(Type::List(Box::new(*ok.clone())));
+                                    refined_ret = Some(Collections::iter_ty(*ok.clone()));
                                 }
                             }
                         }
@@ -527,7 +547,7 @@ impl<'a> Checker<'a> {
                                 if let Type::List(inner) | Type::FixedList { elem: inner, .. } =
                                     r.as_ref()
                                 {
-                                    refined_ret = Some(Type::List(inner.clone()));
+                                    refined_ret = Some(Collections::iter_ty((**inner).clone()));
                                 }
                             }
                         }

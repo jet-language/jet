@@ -1218,14 +1218,46 @@ pub(crate) fn lower_method_call(
             } else {
                 lower_expr(receiver, cx, env)
             };
+            // D-ITERTOOLS1=A: `tir_recv_jet_ty` is None for list literals, so a
+            // chain like `[…].flatten().to_list()` can mis-resolve `to_list` as
+            // SetToList. Prefer the lowered receiver type.
+            let op = match (&op, method) {
+                (
+                    TBuiltinOp::SetToList
+                    | TBuiltinOp::SortedSetToList
+                    | TBuiltinOp::BitSetToList,
+                    "to_list",
+                ) if crate::Collections::is_iter_type(&recv_t.ty) => TBuiltinOp::IterToList,
+                (_, "collect")
+                    if matches!(
+                        op,
+                        TBuiltinOp::SetToList
+                            | TBuiltinOp::SortedSetToList
+                            | TBuiltinOp::BitSetToList
+                    ) && crate::Collections::is_iter_type(&recv_t.ty) =>
+                {
+                    TBuiltinOp::IterCollect
+                }
+                _ => op,
+            };
+            // Prefer lowered Iter type when AST peek missed the chain.
+            let recv_for_result = recv_ast_ty.as_ref().unwrap_or(&recv_t.ty);
             // D-HOLE1: `Option.zip`'s `b` type is heterogeneous (arg-dependent), so
             // the generic single-receiver-type table (`builtin_result_ty`) can't
             // resolve it; `resolve_builtin_op` already worked it out for the tuple
             // struct name above — reuse it here instead of guessing a placeholder.
             let result_ty = match &op {
                 TBuiltinOp::OptionZip { elem_ty, .. } => Type::Option(Box::new(elem_ty.clone())),
+                TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
+                    crate::Collections::iter_elem(&recv_t.ty)
+                        .map(|e| Type::List(Box::new(e.clone())))
+                        .or_else(|| resolved_ret.cloned())
+                        .unwrap_or_else(unit_type)
+                }
                 _ if resolved_ret.is_some() => resolved_ret.cloned().unwrap_or_else(unit_type),
-                _ => builtin_result_ty(method, args.len(), recv_ast_ty.as_ref()),
+                // D-ITERTOOLS1=A: list-literal receivers leave `tir_recv` None;
+                // use the lowered receiver type so adapters still type as `Iter`.
+                _ => builtin_result_ty(method, args.len(), Some(recv_for_result)),
             };
             // Builtins that store an argument need an owned value. A borrowed
             // generic parameter is a dereferenced Rust place, so materialize a

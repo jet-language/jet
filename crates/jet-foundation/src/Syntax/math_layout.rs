@@ -138,6 +138,8 @@ pub const TYPE_PRIORITY_QUEUE: &str = "PriorityQueue";
 pub const TYPE_LRU: &str = "Lru";
 pub const TYPE_BIT_SET: &str = "BitSet";
 pub const TYPE_BYTE_BUFFER: &str = "ByteBuffer";
+/// D-ITERTOOLS1=A: lazy adapter view; materialize with `to_list`/`collect`/reducers.
+pub const TYPE_ITER: &str = "Iter";
 
 /// S41 (ratified M5): character type.
 pub const TYPE_CHAR: &str = "Char";

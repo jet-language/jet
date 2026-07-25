@@ -26,6 +26,10 @@ fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
 fn tuple_list_elem_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     match ty {
         Some(Type::List(inner)) => tuple_fields(Some(inner.as_ref())),
+        // D-ITERTOOLS1=A: zip/enumerate return `Iter<(…)>`, not `[…]`.
+        Some(ty) if crate::Collections::is_iter_type(ty) => {
+            crate::Collections::iter_elem(ty).and_then(|inner| tuple_fields(Some(inner)))
+        }
         _ => None,
     }
 }
@@ -129,10 +133,20 @@ pub(crate) fn resolve_builtin_op(
     let is_bit_set = matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BIT_SET);
     let is_byte_buffer =
         matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BYTE_BUFFER);
+    let is_iter = matches!(
+        &rty,
+        Some(ty) if crate::Collections::is_iter_type(ty)
+    );
     let is_float_sequence = matches!(
         &rty,
         Some(Type::List(elem) | Type::FixedList { elem, .. })
             if matches!(elem.as_ref(), Type::Float | Type::Float32)
+    ) || matches!(
+        &rty,
+        Some(Type::Apply { name, args })
+            if name == crate::Syntax::TYPE_ITER
+                && args.len() == 1
+                && matches!(args[0], Type::Float | Type::Float32)
     ) || matches!(
         resolved_ret,
         Some(Type::Option(elem)) if matches!(elem.as_ref(), Type::Float | Type::Float32)
@@ -256,6 +270,9 @@ pub(crate) fn resolve_builtin_op(
             let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| {
                 let elem_ty = match &rty {
                     Some(Type::List(inner)) => *inner.clone(),
+                    Some(ty) if crate::Collections::is_iter_type(ty) => crate::Collections::iter_elem(ty)
+                        .cloned()
+                        .unwrap_or(Type::Int),
                     _ => Type::Int,
                 };
                 vec![
@@ -296,10 +313,16 @@ pub(crate) fn resolve_builtin_op(
             let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| {
                 let a_ty = match &rty {
                     Some(Type::List(inner)) => *inner.clone(),
+                    Some(ty) if crate::Collections::is_iter_type(ty) => crate::Collections::iter_elem(ty)
+                        .cloned()
+                        .unwrap_or(Type::Int),
                     _ => Type::Int,
                 };
                 let b_ty = match tir_recv_jet_ty(&args[0].expr, env) {
                     Some(Type::List(inner)) => *inner,
+                    Some(ty) if crate::Collections::is_iter_type(&ty) => crate::Collections::iter_elem(&ty)
+                        .cloned()
+                        .unwrap_or(Type::Int),
                     _ => Type::Int,
                 };
                 vec![("a".to_string(), a_ty), ("b".to_string(), b_ty)]
@@ -309,23 +332,27 @@ pub(crate) fn resolve_builtin_op(
         }
         ("unzip", 0) => {
             let fields = tuple_fields(resolved_ret).unwrap_or_else(|| {
-                let (a_ty, b_ty) = match &rty {
-                    Some(Type::List(inner)) => match inner.as_ref() {
-                        Type::Tuple(fields) => {
-                            let a = fields
-                                .iter()
-                                .find(|(name, _)| name == "a")
-                                .map(|(_, ty)| (**ty).clone())
-                                .unwrap_or(Type::Int);
-                            let b = fields
-                                .iter()
-                                .find(|(name, _)| name == "b")
-                                .map(|(_, ty)| (**ty).clone())
-                                .unwrap_or(Type::Int);
-                            (a, b)
-                        }
-                        _ => (Type::Int, Type::Int),
-                    },
+                let pair_elem = match &rty {
+                    Some(Type::List(inner)) => Some(inner.as_ref()),
+                    Some(ty) if crate::Collections::is_iter_type(ty) => {
+                        crate::Collections::iter_elem(ty)
+                    }
+                    _ => None,
+                };
+                let (a_ty, b_ty) = match pair_elem {
+                    Some(Type::Tuple(fields)) => {
+                        let a = fields
+                            .iter()
+                            .find(|(name, _)| name == "a")
+                            .map(|(_, ty)| (**ty).clone())
+                            .unwrap_or(Type::Int);
+                        let b = fields
+                            .iter()
+                            .find(|(name, _)| name == "b")
+                            .map(|(_, ty)| (**ty).clone())
+                            .unwrap_or(Type::Int);
+                        (a, b)
+                    }
                     _ => (Type::Int, Type::Int),
                 };
                 vec![
@@ -345,6 +372,8 @@ pub(crate) fn resolve_builtin_op(
         ("add", 1) if is_bag => TBuiltinOp::BagAdd,
         ("peek", 0) if is_priority_queue => TBuiltinOp::PriorityQueuePeek,
         ("to_sorted_list", 0) if is_priority_queue => TBuiltinOp::PriorityQueueToSortedList,
+        ("to_list", 0) if is_iter => TBuiltinOp::IterToList,
+        ("collect", 0) if is_iter => TBuiltinOp::IterCollect,
         ("to_list", 0) if is_sorted_set => TBuiltinOp::SortedSetToList,
         ("to_list", 0) if is_bit_set => TBuiltinOp::BitSetToList,
         ("to_list", 0) => TBuiltinOp::SetToList,

@@ -1,5 +1,5 @@
 //! Exhaustive TBuiltinOp dispatch (#777).
-use crate::Comptime::Builtins::{apply_method, apply_mutating};
+use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_static_type_method};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::TBuiltinOp;
@@ -44,8 +44,13 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Trim => apply_method(recv, "trim", args, span),
         TBuiltinOp::Split => apply_method(recv, "split", args, span),
         TBuiltinOp::Lines => apply_method(recv, "lines", args, span),
-        TBuiltinOp::ParseInt => apply_method(recv, "parse", args, span),
-        TBuiltinOp::ParseFloat => apply_method(recv, "parse", args, span),
+        // D-STRPARSE1: text is the builtin receiver; parse is static on Int/Float.
+        TBuiltinOp::ParseInt => apply_static_type_method("Int", "parse", vec![recv.clone()], span)
+            .unwrap_or_else(|| Err(unsupported("Int.parse", span))),
+        TBuiltinOp::ParseFloat => {
+            apply_static_type_method("Float", "parse", vec![recv.clone()], span)
+                .unwrap_or_else(|| Err(unsupported("Float.parse", span)))
+        }
         TBuiltinOp::StartsWith => apply_method(recv, "starts_with", args, span),
         TBuiltinOp::EndsWith => apply_method(recv, "ends_with", args, span),
         TBuiltinOp::Replace => apply_method(recv, "replace", args, span),
@@ -72,6 +77,8 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Enumerate { .. } => apply_method(recv, "enumerate", args, span),
         TBuiltinOp::Zip { .. } => apply_method(recv, "zip", args, span),
         TBuiltinOp::OptionZip { .. } => apply_method(recv, "zip", args, span),
+        TBuiltinOp::IterToList => apply_method(recv, "to_list", args, span),
+        TBuiltinOp::IterCollect => apply_method(recv, "collect", args, span),
         TBuiltinOp::SetFrom => apply_method(recv, "from", args, span),
         TBuiltinOp::SetInsert => apply_mutating(recv, "add", args, span),
         TBuiltinOp::SetRemove => apply_mutating(recv, "remove", args, span),
@@ -112,7 +119,23 @@ pub(super) fn eval_builtin(
         TBuiltinOp::DequePopBack => Err(unsupported("builtin `DequePopBack`", span)),
         TBuiltinOp::DequePeekFront => Err(unsupported("builtin `DequePeekFront`", span)),
         TBuiltinOp::DequePeekBack => Err(unsupported("builtin `DequePeekBack`", span)),
-        TBuiltinOp::TryCollect => Err(unsupported("builtin `TryCollect`", span)),
+        // D-FAILCOMP1 / D-ITERTOOLS1: materialize Iter<T?E> / [T?E] → T?E.
+        TBuiltinOp::TryCollect => {
+            let CtValue::List(xs) = recv else {
+                return Err(unsupported("try_collect receiver", span));
+            };
+            let mut out = Vec::with_capacity(xs.len());
+            for x in xs {
+                match x {
+                    CtValue::ResOk(value) => out.push((**value).clone()),
+                    CtValue::ResErr(error) => {
+                        return Ok(CtValue::ResErr(Box::new((**error).clone())))
+                    }
+                    _ => return Err(unsupported("try_collect on a non-Result list", span)),
+                }
+            }
+            Ok(CtValue::ResOk(Box::new(CtValue::List(out))))
+        }
         // CtValue has no distinct View type — materialize the inclusive window as a List.
         TBuiltinOp::ViewNew { .. } | TBuiltinOp::ViewMutNew { .. } => {
             let CtValue::List(xs) = recv else {
