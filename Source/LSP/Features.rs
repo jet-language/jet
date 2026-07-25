@@ -899,21 +899,68 @@ fn is_total_pure_expr(db: &SymbolDB, tokens: &[Token], path: &str, span: Span) -
         }
     }
     if has_comparison {
-        return expr_operands_are_bool(db, tokens, path, span);
+        return expr_comparison_operands_are_scalar(db, tokens, path, span);
     }
     true
 }
 
-fn expr_operands_are_bool(db: &SymbolDB, tokens: &[Token], path: &str, span: Span) -> bool {
-    for token in tokens.iter().filter(|token| {
-        span.start <= token.span.start
-            && token.span.end <= span.end
-            && token.span.start < token.span.end
-    }) {
+/// `==`/`!=` are total for matching scalars. Bool ops (`&&`/`||`/`!`) may only
+/// combine Bool leaves. Pure scalar comparisons (no bool ops) allow any one
+/// matching scalar type: Bool, Char, Int, or Float.
+fn expr_comparison_operands_are_scalar(
+    db: &SymbolDB,
+    tokens: &[Token],
+    path: &str,
+    span: Span,
+) -> bool {
+    let enclosed: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| {
+            span.start <= token.span.start
+                && token.span.end <= span.end
+                && token.span.start < token.span.end
+        })
+        .collect();
+    let has_bool_op = enclosed.iter().any(|token| {
+        matches!(
+            token.kind,
+            TokKind::AndAnd | TokKind::OrOr | TokKind::Bang
+        )
+    });
+    let mut leaf: Option<String> = None;
+    for token in &enclosed {
         match &token.kind {
-            TokKind::KwTrue | TokKind::KwFalse => {}
+            TokKind::KwTrue | TokKind::KwFalse => {
+                if !agree_scalar_leaf(&mut leaf, "Bool") {
+                    return false;
+                }
+            }
+            TokKind::Int(_, _) => {
+                if has_bool_op || !agree_scalar_leaf(&mut leaf, "Int") {
+                    return false;
+                }
+            }
+            TokKind::Float(_) => {
+                if has_bool_op || !agree_scalar_leaf(&mut leaf, "Float") {
+                    return false;
+                }
+            }
+            TokKind::Char(_) => {
+                if has_bool_op || !agree_scalar_leaf(&mut leaf, "Char") {
+                    return false;
+                }
+            }
             TokKind::Ident(_) => {
-                if resolved_type_name(db, path, token.span).as_deref() != Some("Bool") {
+                let Some(name) = resolved_type_name(db, path, token.span) else {
+                    return false;
+                };
+                if !is_scalar_name(&name) {
+                    return false;
+                }
+                if has_bool_op && name != "Bool" {
+                    return false;
+                }
+                if !agree_scalar_leaf(&mut leaf, &name) {
                     return false;
                 }
             }
@@ -927,7 +974,17 @@ fn expr_operands_are_bool(db: &SymbolDB, tokens: &[Token], path: &str, span: Spa
             _ => return false,
         }
     }
-    true
+    leaf.as_deref().is_some_and(is_scalar_name)
+}
+
+fn agree_scalar_leaf(leaf: &mut Option<String>, name: &str) -> bool {
+    match leaf {
+        Some(existing) => existing == name,
+        None => {
+            *leaf = Some(name.to_string());
+            true
+        }
+    }
 }
 
 fn resolved_type_name(db: &SymbolDB, path: &str, span: Span) -> Option<String> {

@@ -2436,7 +2436,7 @@ mod project_part_tests {
     }
 
     #[test]
-    fn code_actions_extract_from_call_arg_and_bool_equality() {
+    fn code_actions_extract_from_call_arg_and_scalar_equality() {
         let call_src =
             "fn run(left: Bool, right: Bool) {\n    print(left && right)\n}\n";
         let call_root = std::env::temp_dir().join(format!(
@@ -2475,45 +2475,128 @@ mod project_part_tests {
         );
         let _ = std::fs::remove_dir_all(call_root);
 
-        let eq_src =
+        let bool_src =
             "fn run(left: Bool, right: Bool) {\n    same :: left == right\n    print(same)\n}\n";
-        let eq_root = std::env::temp_dir().join(format!(
+        let bool_root = std::env::temp_dir().join(format!(
             "jet-lsp-bool-eq-refactor-{}",
             std::process::id()
         ));
-        let _ = std::fs::remove_dir_all(&eq_root);
-        std::fs::create_dir_all(&eq_root).unwrap();
-        let eq_path = eq_root.join("main.jet").to_string_lossy().into_owned();
-        std::fs::write(&eq_path, eq_src).unwrap();
-        let eq_uri = path_to_uri(&eq_path);
-        let mut eq_server = Server::new();
-        eq_server
+        let _ = std::fs::remove_dir_all(&bool_root);
+        std::fs::create_dir_all(&bool_root).unwrap();
+        let bool_path = bool_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&bool_path, bool_src).unwrap();
+        let bool_uri = path_to_uri(&bool_path);
+        let mut bool_server = Server::new();
+        bool_server
             .workspace_roots
-            .push(eq_root.to_string_lossy().into_owned());
-        eq_server.docs.insert(
-            eq_uri.clone(),
-            Document::new(eq_path, eq_src.to_string(), 5),
+            .push(bool_root.to_string_lossy().into_owned());
+        bool_server.docs.insert(
+            bool_uri.clone(),
+            Document::new(bool_path, bool_src.to_string(), 5),
         );
-        let equality = eq_src.find("left == right").unwrap();
+        let bool_eq = bool_src.find("left == right").unwrap();
         let extracted = code_actions_for(
-            &eq_server,
-            &eq_uri,
-            eq_src,
-            equality,
-            equality + "left == right".len(),
+            &bool_server,
+            &bool_uri,
+            bool_src,
+            bool_eq,
+            bool_eq + "left == right".len(),
         );
         assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
         assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
-        let use_site = eq_src.rfind("same").unwrap();
+        let use_site = bool_src.rfind("same").unwrap();
         let inlined = code_actions_for(
-            &eq_server,
-            &eq_uri,
-            eq_src,
+            &bool_server,
+            &bool_uri,
+            bool_src,
             use_site,
             use_site + "same".len(),
         );
         assert!(inlined.contains("\"title\":\"Inline `same`\""), "{inlined}");
-        let _ = std::fs::remove_dir_all(eq_root);
+        let _ = std::fs::remove_dir_all(bool_root);
+
+        // Int == is total (no overflow trap); Int arithmetic stays rejected elsewhere.
+        let int_src =
+            "fn run(left: Int, right: Int) {\n    same :: left == right\n    print(same)\n}\n";
+        let int_root = std::env::temp_dir().join(format!(
+            "jet-lsp-int-eq-refactor-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&int_root);
+        std::fs::create_dir_all(&int_root).unwrap();
+        let int_path = int_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&int_path, int_src).unwrap();
+        let int_uri = path_to_uri(&int_path);
+        let mut int_server = Server::new();
+        int_server
+            .workspace_roots
+            .push(int_root.to_string_lossy().into_owned());
+        int_server.docs.insert(
+            int_uri.clone(),
+            Document::new(int_path, int_src.to_string(), 9),
+        );
+        let int_eq = int_src.find("left == right").unwrap();
+        let extracted = code_actions_for(
+            &int_server,
+            &int_uri,
+            int_src,
+            int_eq,
+            int_eq + "left == right".len(),
+        );
+        assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
+        assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
+        assert!(extracted.contains("-> Bool"), "{extracted}");
+        let use_site = int_src.rfind("same").unwrap();
+        let inlined = code_actions_for(
+            &int_server,
+            &int_uri,
+            int_src,
+            use_site,
+            use_site + "same".len(),
+        );
+        assert!(inlined.contains("\"title\":\"Inline `same`\""), "{inlined}");
+        let _ = std::fs::remove_dir_all(int_root);
+
+        // Int + still rejected (overflow traps).
+        let add_src =
+            "fn run(left: Int, right: Int) {\n    total :: left + right\n    print(total)\n}\n";
+        let add_root = std::env::temp_dir().join(format!(
+            "jet-lsp-int-add-refactor-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&add_root);
+        std::fs::create_dir_all(&add_root).unwrap();
+        let add_path = add_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&add_path, add_src).unwrap();
+        let add_uri = path_to_uri(&add_path);
+        let mut add_server = Server::new();
+        add_server
+            .workspace_roots
+            .push(add_root.to_string_lossy().into_owned());
+        add_server.docs.insert(
+            add_uri.clone(),
+            Document::new(add_path, add_src.to_string(), 1),
+        );
+        let addition = add_src.find("left + right").unwrap();
+        let extraction = code_actions_for(
+            &add_server,
+            &add_uri,
+            add_src,
+            addition,
+            addition + "left + right".len(),
+        );
+        assert!(!extraction.contains("Extract binding"), "{extraction}");
+        assert!(!extraction.contains("Extract function"), "{extraction}");
+        let use_site = add_src.rfind("total").unwrap();
+        let inlined = code_actions_for(
+            &add_server,
+            &add_uri,
+            add_src,
+            use_site,
+            use_site + "total".len(),
+        );
+        assert!(!inlined.contains("Inline `total`"), "{inlined}");
+        let _ = std::fs::remove_dir_all(add_root);
     }
 
     #[test]
@@ -2546,7 +2629,21 @@ mod project_part_tests {
         );
         assert!(inlined.contains("\"title\":\"Inline `flag`\""), "{inlined}");
         assert!(
-            inlined.matches("left && right").count() >= 2,
+            inlined.matches(r#""newText":"(left && right)""#).count() >= 2,
+            "expected every use substituted, got {inlined}"
+        );
+        // Binding line removed (empty newText spanning the whole `flag :: …` line).
+        assert!(
+            inlined.contains(
+                r#"{"range":{"start":{"line":1,"character":0},"end":{"line":2,"character":0}},"newText":""}"#
+            ),
+            "expected binding deletion, got {inlined}"
+        );
+        assert!(
+            inlined.contains(&format!(
+                r#""textDocument":{{"uri":"{}","version":6}}"#,
+                json_escape(&multi_uri)
+            )),
             "{inlined}"
         );
         let _ = std::fs::remove_dir_all(multi_root);
