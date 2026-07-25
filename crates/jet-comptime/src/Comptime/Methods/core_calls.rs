@@ -2248,12 +2248,17 @@ pub fn apply_impure_core_call(
                 .to_string(),
             Some(span),
         )),
-        // Pure compress/archive codecs live on apply_core_call; reuse them when
-        // the runtime evaluator has ambient impure depth open (#778 deopt).
+        // Pure compress/archive/encoding codecs live on apply_core_call; reuse
+        // them when the runtime evaluator has ambient impure depth open (#778
+        // deopt / #715 default-dev encoding parity). Whole-value encoding must
+        // not die as E0956 impure-tier after silent deopt.
         ("core.compress.gzip", _)
         | ("core.compress.zstd", _)
         | ("core.archive", _)
         | ("core.perf", _) => apply_core_call(module, method, args, span, repl_mode),
+        (module, _) if module.starts_with("core.encoding.") => {
+            apply_core_call(module, method, args, span, repl_mode)
+        }
         _ => Err(unsupported(
             &format!("`{}.{}()` at comptime (impure tier)", module, method),
             span,
