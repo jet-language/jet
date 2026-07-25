@@ -14,7 +14,8 @@ use std::collections::HashMap;
 use super::runtime_host::HostFns;
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_list_float_type, jit_list_int_type,
-    jit_list_iter_elem_type, jit_value_type, record_type_key, user_type_name,
+    jit_list_iter_elem_type, jit_list_of_int_list_type, jit_value_type,
+    record_type_key, user_type_name,
 };
 use super::types_meta::{clif_ty, init_clif_ty, JitMeta};
 use super::JitRuntime;
@@ -3640,6 +3641,21 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().call(host_ref, &[val, flag]);
                     return Ok(());
                 }
+                // `T?` — packed `0` / `value+1`; show matches AOT Option jet_show.
+                if let Type::Option(inner) = print_ty {
+                    if matches!(inner.as_ref(), Type::Int | Type::String) {
+                        let string_elems = matches!(inner.as_ref(), Type::String);
+                        let flag = self
+                            .b
+                            .ins()
+                            .iconst(types::I64, if string_elems { 1 } else { 0 });
+                        let host_ref = self
+                            .module
+                            .declare_func_in_func(self.host.coll.print_opt, self.b.func);
+                        self.b.ins().call(host_ref, &[val, flag]);
+                        return Ok(());
+                    }
+                }
                 let host_id = match print_ty {
                     Type::Int => self.host.print_i64,
                     Type::String => self.host.print_str,
@@ -3675,8 +3691,7 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.inst_results(call)[0])
     }
 
-    /// Native Map/Filter over Int list/Iter handles — lambda body inlined in
-    /// Cranelift (no host closure table). Other closure ops stay named gaps.
+    /// Native Iter/list closure adapters — lambda bodies inlined in Cranelift.
     fn lower_closure_method(
         &mut self,
         recv: &TExpr,
@@ -3686,8 +3701,65 @@ impl LowerCtx<'_, '_> {
         match op {
             TClosureOp::Map | TClosureOp::MapMut => self.lower_iter_map_filter(recv, args, false),
             TClosureOp::Filter => self.lower_iter_map_filter(recv, args, true),
+            TClosureOp::TakeWhile => self.lower_iter_take_skip_while(recv, args, false),
+            TClosureOp::SkipWhile => self.lower_iter_take_skip_while(recv, args, true),
+            TClosureOp::Fold | TClosureOp::Reduce => self.lower_iter_fold(recv, args),
+            TClosureOp::Position => self.lower_iter_position(recv, args),
+            TClosureOp::MinBy => self.lower_iter_min_max_by(recv, args, false),
+            TClosureOp::MaxBy => self.lower_iter_min_max_by(recv, args, true),
+            TClosureOp::FlatMap => self.lower_iter_flat_map(recv, args),
             _ => Err("jit closure method unsupported".to_string()),
         }
+    }
+
+    fn closure_unary_lambda<'a>(
+        &self,
+        args: &'a [TExpr],
+    ) -> Result<(String, &'a TExpr), String> {
+        let lam_expr = args
+            .first()
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        let TExprKind::Lambda(lam) = &lam_expr.kind else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        if !lam.prep.is_empty() || lam.source_params.len() != 1 {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let TLambdaBody::Expr(body) = &lam.executable else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        Ok((TIR::local_place(&lam.source_params[0]), body))
+    }
+
+    fn with_bound_local<R>(
+        &mut self,
+        place: &str,
+        ty: Type,
+        value: Value,
+        body: impl FnOnce(&mut Self) -> Result<R, String>,
+    ) -> Result<R, String> {
+        let old_var = self.vars.remove(place);
+        let old_ty = self.var_tys.remove(place);
+        let clif = match &ty {
+            Type::Float => types::F64,
+            Type::Bool => types::I8,
+            Type::Char => types::I32,
+            _ => types::I64,
+        };
+        let var = self.fresh_var(clif);
+        self.b.def_var(var, value);
+        self.vars.insert(place.to_string(), var);
+        self.var_tys.insert(place.to_string(), ty);
+        let result = body(self)?;
+        self.vars.remove(place);
+        self.var_tys.remove(place);
+        if let Some(v) = old_var {
+            self.vars.insert(place.to_string(), v);
+        }
+        if let Some(t) = old_ty {
+            self.var_tys.insert(place.to_string(), t);
+        }
+        Ok(result)
     }
 
     fn lower_iter_map_filter(
@@ -3701,19 +3773,7 @@ impl LowerCtx<'_, '_> {
         if !matches!(elem_ty, Type::Int) {
             return Err("jit closure method unsupported".to_string());
         }
-        let lam_expr = args
-            .first()
-            .ok_or_else(|| "jit closure method unsupported".to_string())?;
-        let TExprKind::Lambda(lam) = &lam_expr.kind else {
-            return Err("jit closure method unsupported".to_string());
-        };
-        if !lam.prep.is_empty() || lam.source_params.len() != 1 {
-            return Err("jit closure method unsupported".to_string());
-        }
-        let TLambdaBody::Expr(body_expr) = &lam.executable else {
-            return Err("jit closure method unsupported".to_string());
-        };
-        let param_place = TIR::local_place(&lam.source_params[0]);
+        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
         let recv_val = self.lower_expr(recv)?;
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
@@ -3759,23 +3819,7 @@ impl LowerCtx<'_, '_> {
         let elem = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
 
-        let old_var = self.vars.remove(&param_place);
-        let old_ty = self.var_tys.remove(&param_place);
-        let param_var = self.fresh_var(types::I64);
-        self.b.def_var(param_var, elem);
-        self.vars.insert(param_place.clone(), param_var);
-        self.var_tys.insert(param_place.clone(), Type::Int);
-
-        let pred_or_mapped = self.lower_expr(body_expr)?;
-
-        self.vars.remove(&param_place);
-        self.var_tys.remove(&param_place);
-        if let Some(v) = old_var {
-            self.vars.insert(param_place.clone(), v);
-        }
-        if let Some(t) = old_ty {
-            self.var_tys.insert(param_place, t);
-        }
+        let pred_or_mapped = self.with_bound_local(&param_place, Type::Int, elem, |this| this.lower_expr(body_expr))?;
 
         if is_filter {
             let keep_block = self.b.create_block();
@@ -3798,6 +3842,521 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(push_ref, &[out, pred_or_mapped]);
             self.b.ins().jump(step, &[]);
         }
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        Ok(self.b.use_var(out_var))
+    }
+
+    fn lower_iter_take_skip_while(
+        &mut self,
+        recv: &TExpr,
+        args: &[TExpr],
+        is_skip: bool,
+    ) -> Result<Value, String> {
+        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(elem_ty, Type::Int) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        let recv_val = self.lower_expr(recv)?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let out_call = self.b.ins().call(new_ref, &[]);
+        let out_init = self.b.inst_results(out_call)[0];
+        let out_var = self.fresh_var(types::I64);
+        self.b.def_var(out_var, out_init);
+
+        let flag_var = self.fresh_var(types::I8);
+        let one_b = self.b.ins().iconst(types::I8, 1);
+        self.b.def_var(flag_var, one_b);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let pred = self.with_bound_local(&param_place, Type::Int, elem, |this| this.lower_expr(body_expr))?;
+        let zero_b = self.b.ins().iconst(types::I8, 0);
+        let pred_true = self.b.ins().icmp(IntCC::NotEqual, pred, zero_b);
+
+        if !is_skip {
+            let keep = self.b.create_block();
+            self.b.ins().brif(pred_true, keep, &[], exit, &[]);
+            self.b.switch_to_block(keep);
+            self.b.seal_block(keep);
+            let out = self.b.use_var(out_var);
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.list_push, self.b.func);
+            self.b.ins().call(push_ref, &[out, elem]);
+            self.b.ins().jump(step, &[]);
+        } else {
+            let still_skip = self.b.create_block();
+            let take_rest = self.b.create_block();
+            let flag = self.b.use_var(flag_var);
+            let skipping = self.b.ins().icmp(IntCC::NotEqual, flag, zero_b);
+            self.b.ins().brif(skipping, still_skip, &[], take_rest, &[]);
+
+            self.b.switch_to_block(still_skip);
+            self.b.seal_block(still_skip);
+            let stop_skip = self.b.create_block();
+            self.b.ins().brif(pred_true, step, &[], stop_skip, &[]);
+            self.b.switch_to_block(stop_skip);
+            self.b.seal_block(stop_skip);
+            let zero_flag = self.b.ins().iconst(types::I8, 0);
+            self.b.def_var(flag_var, zero_flag);
+            let out = self.b.use_var(out_var);
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.list_push, self.b.func);
+            self.b.ins().call(push_ref, &[out, elem]);
+            self.b.ins().jump(step, &[]);
+
+            self.b.switch_to_block(take_rest);
+            self.b.seal_block(take_rest);
+            let out = self.b.use_var(out_var);
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.list_push, self.b.func);
+            self.b.ins().call(push_ref, &[out, elem]);
+            self.b.ins().jump(step, &[]);
+        }
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        Ok(self.b.use_var(out_var))
+    }
+
+    fn lower_iter_fold(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
+        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(elem_ty, Type::Int) || args.len() < 2 {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let seed = self.lower_expr(&args[0])?;
+        let TExprKind::Lambda(lam) = &args[1].kind else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        if !lam.prep.is_empty() || lam.source_params.len() != 2 {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let TLambdaBody::Expr(body_expr) = &lam.executable else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        let acc_place = TIR::local_place(&lam.source_params[0]);
+        let elem_place = TIR::local_place(&lam.source_params[1]);
+        let recv_val = self.lower_expr(recv)?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+        let acc_var = self.fresh_var(types::I64);
+        self.b.def_var(acc_var, seed);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let acc = self.b.use_var(acc_var);
+
+        let next_acc = self.with_bound_local(&acc_place, Type::Int, acc, |this| {
+
+            this.with_bound_local(&elem_place, Type::Int, elem, |inner| inner.lower_expr(body_expr))
+
+        })?;
+        self.b.def_var(acc_var, next_acc);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        Ok(self.b.use_var(acc_var))
+    }
+
+    fn lower_iter_position(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
+        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(elem_ty, Type::Int) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        let recv_val = self.lower_expr(recv)?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+        let result_var = self.fresh_var(types::I64);
+        let none = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(result_var, none);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let pred = self.with_bound_local(&param_place, Type::Int, elem, |this| this.lower_expr(body_expr))?;
+        let found = self.b.create_block();
+        let zero_b = self.b.ins().iconst(types::I8, 0);
+        let pred_true = self.b.ins().icmp(IntCC::NotEqual, pred, zero_b);
+        self.b.ins().brif(pred_true, found, &[], step, &[]);
+
+        self.b.switch_to_block(found);
+        self.b.seal_block(found);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let packed = self.b.ins().iadd(idx, one);
+        self.b.def_var(result_var, packed);
+        self.b.ins().jump(exit, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        Ok(self.b.use_var(result_var))
+    }
+
+    fn lower_iter_min_max_by(
+        &mut self,
+        recv: &TExpr,
+        args: &[TExpr],
+        is_max: bool,
+    ) -> Result<Value, String> {
+        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(elem_ty, Type::String) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        let recv_val = self.lower_expr(recv)?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+
+        let result_var = self.fresh_var(types::I64);
+        let none = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(result_var, none);
+        let best_key_var = self.fresh_var(types::I64);
+        let zero_key = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(best_key_var, zero_key);
+        let has_var = self.fresh_var(types::I8);
+        let zero_b0 = self.b.ins().iconst(types::I8, 0);
+        self.b.def_var(has_var, zero_b0);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let elem_var = self.fresh_var(types::I64);
+        self.b.def_var(elem_var, elem);
+        let key = self.with_bound_local(&param_place, elem_ty.clone(), elem, |this| this.lower_expr(body_expr))?;
+        let key_var = self.fresh_var(types::I64);
+        self.b.def_var(key_var, key);
+
+        let first = self.b.create_block();
+        let compare = self.b.create_block();
+        let zero_b = self.b.ins().iconst(types::I8, 0);
+        let has_flag = self.b.use_var(has_var);
+        let has = self.b.ins().icmp(IntCC::NotEqual, has_flag, zero_b);
+        self.b.ins().brif(has, compare, &[], first, &[]);
+
+        self.b.switch_to_block(first);
+        self.b.seal_block(first);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let elem_now = self.b.use_var(elem_var);
+        let packed = self.b.ins().iadd(elem_now, one);
+        self.b.def_var(result_var, packed);
+        let key_now = self.b.use_var(key_var);
+        self.b.def_var(best_key_var, key_now);
+        let one_b = self.b.ins().iconst(types::I8, 1);
+        self.b.def_var(has_var, one_b);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(compare);
+        self.b.seal_block(compare);
+        let key_now = self.b.use_var(key_var);
+        let best_key = self.b.use_var(best_key_var);
+        // Match Rust/AOT: min_by_key keeps first on ties; max_by_key keeps last.
+        let better = if is_max {
+            let gt = self
+                .b
+                .ins()
+                .icmp(IntCC::SignedGreaterThan, key_now, best_key);
+            let eq = self.b.ins().icmp(IntCC::Equal, key_now, best_key);
+            self.b.ins().bor(gt, eq)
+        } else {
+            self.b
+                .ins()
+                .icmp(IntCC::SignedLessThan, key_now, best_key)
+        };
+        let take = self.b.create_block();
+        self.b.ins().brif(better, take, &[], step, &[]);
+        self.b.switch_to_block(take);
+        self.b.seal_block(take);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let elem_now = self.b.use_var(elem_var);
+        let packed = self.b.ins().iadd(elem_now, one);
+        self.b.def_var(result_var, packed);
+        let key_now = self.b.use_var(key_var);
+        self.b.def_var(best_key_var, key_now);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        Ok(self.b.use_var(result_var))
+    }
+
+    fn lower_iter_flat_map(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
+        if !jit_list_of_int_list_type(&recv.ty) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        let recv_val = self.lower_expr(recv)?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let out_call = self.b.ins().call(new_ref, &[]);
+        let out_init = self.b.inst_results(out_call)[0];
+        let out_var = self.fresh_var(types::I64);
+        self.b.def_var(out_var, out_init);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let inner_list = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let list_ty = Type::List(Box::new(Type::Int));
+        let mapped = self.with_bound_local(&param_place, list_ty, inner_list, |this| this.lower_expr(body_expr))?;
+
+        let inner_header = self.b.create_block();
+        let inner_body = self.b.create_block();
+        let inner_step = self.b.create_block();
+        let inner_exit = self.b.create_block();
+        let j_var = self.fresh_var(types::I64);
+        let mapped_var = self.fresh_var(types::I64);
+        self.b.def_var(mapped_var, mapped);
+        let jz = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(j_var, jz);
+        self.b.ins().jump(inner_header, &[]);
+
+        self.b.switch_to_block(inner_header);
+        let j = self.b.use_var(j_var);
+        let mapped_list = self.b.use_var(mapped_var);
+        let inner_len_call = self.b.ins().call(len_ref, &[mapped_list]);
+        let inner_len = self.b.inst_results(inner_len_call)[0];
+        let inner_done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, j, inner_len);
+        self.b
+            .ins()
+            .brif(inner_done, inner_exit, &[], inner_body, &[]);
+
+        self.b.switch_to_block(inner_body);
+        self.b.seal_block(inner_body);
+        let get_call = self.b.ins().call(get_ref, &[mapped_list, j, line]);
+        let v = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let out = self.b.use_var(out_var);
+        let push_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        self.b.ins().call(push_ref, &[out, v]);
+        self.b.ins().jump(inner_step, &[]);
+
+        self.b.switch_to_block(inner_step);
+        self.b.seal_block(inner_step);
+        let j = self.b.use_var(j_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let jn = self.b.ins().iadd(j, one);
+        self.b.def_var(j_var, jn);
+        self.b.ins().jump(inner_header, &[]);
+
+        self.b.switch_to_block(inner_exit);
+        self.b.seal_block(inner_header);
+        self.b.seal_block(inner_exit);
+        self.b.ins().jump(step, &[]);
 
         self.b.switch_to_block(step);
         self.b.seal_block(step);

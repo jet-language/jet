@@ -358,6 +358,25 @@ extern "C" fn jet_jit_print_list(list: i64, string_elems: i64) {
     });
 }
 
+/// Print `T?` using JIT packed Option encoding (`0` = None, else `value + 1`).
+/// `string_elems != 0` → payload is a string handle; else i64.
+extern "C" fn jet_jit_print_opt(packed: i64, string_elems: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if packed == 0 {
+            rt.stdout.push_str("null\n");
+            return;
+        }
+        let payload = packed - 1;
+        if string_elems != 0 {
+            let text = rt.heap.clone_string(payload).unwrap_or_default();
+            rt.stdout.push_str(&text);
+        } else {
+            rt.stdout.push_str(&payload.to_string());
+        }
+        rt.stdout.push('\n');
+    });
+}
+
 pub(crate) struct CollectionsHostFns {
     pub list_new: cranelift_module::FuncId,
     pub list_push: cranelift_module::FuncId,
@@ -388,6 +407,7 @@ pub(crate) struct CollectionsHostFns {
     pub iter_windows: cranelift_module::FuncId,
     pub list_sum_i64: cranelift_module::FuncId,
     pub print_list: cranelift_module::FuncId,
+    pub print_opt: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -420,6 +440,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_iter_windows", jet_jit_iter_windows as *const u8);
     builder.symbol("jet_jit_list_sum_i64", jet_jit_list_sum_i64 as *const u8);
     builder.symbol("jet_jit_print_list", jet_jit_print_list as *const u8);
+    builder.symbol("jet_jit_print_opt", jet_jit_print_opt as *const u8);
 }
 
 pub(crate) fn declare_collections_host_fns(
@@ -503,5 +524,6 @@ pub(crate) fn declare_collections_host_fns(
         iter_windows: import("jet_jit_iter_windows", &sig_get_opt)?,
         list_sum_i64: import("jet_jit_list_sum_i64", &sig_len)?,
         print_list: import("jet_jit_print_list", &sig_print_list)?,
+        print_opt: import("jet_jit_print_opt", &sig_print_list)?,
     })
 }
