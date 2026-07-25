@@ -1,6 +1,6 @@
 use jet_codegen::Codegen::TIR::{
     self, JitProgram, JitSpawnCapture, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr,
-    TExprKind, TFunc, TFuncKind, THandleOp, TIfCond, TJitSpawnBody, TJitSpawnLambda, TModuleCallForm, TOrFallback,
+    TExprKind, TFunc, TFuncKind, THandleOp, THostCall, TIfCond, TJitSpawnBody, TJitSpawnLambda, TModuleCallForm, TOrFallback,
     TStmt, TStrPart,
     TNumericOp,
 };
@@ -265,6 +265,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     if matches!(method.as_str(), "lower" | "upper" | "trim")
                         && matches!(&arg.ty, Type::String)
                         && resident_safe_expr(arg, callees));
+            }
+            if module == "core.io" && method == "args" {
+                return args.is_empty();
             }
             if module == "core.tasks" && method == "channel" {
                 return false;
@@ -559,6 +562,22 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::SelectWait { builder } => {
             jit_value_type(&expr.ty) && resident_safe_select_wait(builder, callees)
         }
+        // D-OPTGC1: GcRead/GcEdit lower to Variable load/store of the payload
+        // handle — same value snapshots AOT clones out of AutomaticRoot.
+        TExprKind::HostCall(host) => match host.as_ref() {
+            THostCall::GcRead { .. } => true,
+            THostCall::GcEdit {
+                edit,
+                index_temp,
+                ..
+            } => {
+                resident_safe_expr(edit, callees)
+                    && index_temp
+                        .as_ref()
+                        .is_none_or(|(_, e)| resident_safe_expr(e, callees))
+            }
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -721,7 +740,7 @@ fn resident_safe_builtin_op(
                 && args.is_empty()
         }
         TBuiltinOp::GetList => {
-            jit_list_int_type(&recv.ty)
+            jit_list_native_type(&recv.ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
@@ -809,8 +828,11 @@ fn resident_safe_builtin_op(
 
 pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> bool {
     match stmt {
-        TStmt::Let { init, gc_promotion, gc_transferred, .. } => {
-            gc_promotion.is_none() && !*gc_transferred && resident_safe_expr(init, callees)
+        TStmt::Let { init, gc_promotion: _, gc_transferred: _, .. } => {
+            // Promotion/transfer only wraps the same payload handle for the
+            // collector; JIT stores the finite snapshot directly (D-OPTGC1).
+            // `gc_transferred` is a call result that is already a root handle.
+            resident_safe_expr(init, callees)
         }
         // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()` — the one
         // tuple-destructure shape this tier covers (general `TupleDestructure` /
@@ -1016,6 +1038,20 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         } => owner
             .as_ref()
             .is_none_or(|o| resident_safe_expr(o, callees)),
+        // Whole-value GC assign (`replace_all`): nested stmt is a plain assign
+        // of a finite payload snapshot into the root Variable.
+        TStmt::GcEdit {
+            replace_all,
+            index_temp,
+            stmt,
+            ..
+        } => {
+            *replace_all
+                && index_temp
+                    .as_ref()
+                    .is_none_or(|(_, e)| resident_safe_expr(e, callees))
+                && resident_safe_stmt(stmt, callees)
+        }
         _ => false,
     }
 }
@@ -1066,9 +1102,6 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
 
 pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    if program.funcs.iter().any(|function| function.gc_return) {
-        return false;
-    }
     let main_ok = program.funcs.iter().any(|f| {
         f.name == program.entry
             && f.params.is_empty()

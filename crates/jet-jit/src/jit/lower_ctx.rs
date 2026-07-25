@@ -5,7 +5,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
     self, TBuiltinOp, TCallArg, TClosureOp, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
-    TForInMethod, THandleOp, TIfCond, TJitSpawnLambda, TLambdaBody, TLocal, TMethodRef,
+    TForInMethod, THandleOp, THostCall, TIfCond, TJitSpawnLambda, TLambdaBody, TLocal, TMethodRef,
     TModuleCallForm, TNumericOp, TOrFallback, TPattern, TPlace, TStaticOwner, TStmt, TStrPart,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
@@ -1499,8 +1499,57 @@ impl LowerCtx<'_, '_> {
             TStmt::IndexHookAssign { .. } => {
                 return Err("jit index-hook assign unsupported".to_string());
             }
-            TStmt::GcEdit { .. } => {
-                return Err("jit automatic GC edit unsupported".to_string());
+            TStmt::GcEdit {
+                root,
+                replace_all,
+                index_temp,
+                stmt,
+                ..
+            } => {
+                // D-OPTGC1: AOT wraps the assign in AutomaticRoot::edit_*; JIT
+                // stores the same payload handle in the root Variable. Edge-slot
+                // bookkeeping is collector-only — print/value semantics use the
+                // finite snapshots already packed in the enum/list payload.
+                if let Some((temp, value)) = index_temp {
+                    let v = self.lower_expr(value)?;
+                    let ty = self.b.func.dfg.value_type(v);
+                    let var = self.fresh_var(ty);
+                    self.b.def_var(var, v);
+                    self.vars.insert(temp.clone(), var);
+                    self.var_tys.insert(temp.clone(), value.ty.clone());
+                }
+                if !*replace_all {
+                    return Err("jit automatic GC slot edit unsupported".to_string());
+                }
+                match stmt.as_ref() {
+                    TStmt::Assign {
+                        op: None,
+                        value,
+                        ..
+                    } => {
+                        let val = self.lower_expr(value)?;
+                        let root_var = self.vars.get(root).copied().ok_or_else(|| {
+                            format!("jit GcEdit unknown root `{root}`")
+                        })?;
+                        self.b.def_var(root_var, val);
+                    }
+                    _ => {
+                        let root_var = self.vars.get(root).copied().ok_or_else(|| {
+                            format!("jit GcEdit unknown root `{root}`")
+                        })?;
+                        let cur = self.b.use_var(root_var);
+                        let jv = self.fresh_var(types::I64);
+                        self.b.def_var(jv, cur);
+                        self.vars.insert("__jet_value".to_string(), jv);
+                        self.var_tys.insert(
+                            "__jet_value".to_string(),
+                            self.var_tys.get(root).cloned().unwrap_or(Type::Int),
+                        );
+                        self.lower_gc_edit_body(stmt)?;
+                        let new_val = self.b.use_var(jv);
+                        self.b.def_var(root_var, new_val);
+                    }
+                }
             }
             TStmt::MathSwizzleAssign { .. } => {
                 return Err("jit math swizzle assign unsupported".to_string());
@@ -1535,6 +1584,88 @@ impl LowerCtx<'_, '_> {
             TStmt::LineMarker(_) => return Err("jit line marker unsupported".to_string()),
         }
         Ok(())
+    }
+
+    /// Body of `TStmt::GcEdit` when the nested stmt is not a plain assign.
+    /// `__jet_value` is already seeded from the root; write-through deref
+    /// assigns update that Variable (not `struct_assign`).
+    fn lower_gc_edit_body(&mut self, stmt: &TStmt) -> Result<(), String> {
+        match stmt {
+            TStmt::Assign {
+                place,
+                op: None,
+                value,
+                ..
+            } => {
+                let local = place.as_local().ok_or("jit GcEdit assign to non-local")?;
+                let key = Self::local_key(local);
+                let var = self
+                    .vars
+                    .get(&key)
+                    .copied()
+                    .ok_or_else(|| format!("jit GcEdit assign unknown `{key}`"))?;
+                let val = self.lower_expr(value)?;
+                self.b.def_var(var, val);
+                Ok(())
+            }
+            TStmt::ExprStmt(expr) => {
+                self.lower_expr(expr)?;
+                Ok(())
+            }
+            other => {
+                // Fall back to normal stmt lowering for rare nested shapes.
+                self.lower_stmt(other)
+            }
+        }
+    }
+
+    /// `THostCall` forms that the resident JIT lowers. Other host forms stay
+    /// named-unsupported (same gap string as before for CtLit/DefaultLit).
+    fn lower_host_call(&mut self, host: &THostCall, ty: &Type) -> Result<Value, String> {
+        match host {
+            THostCall::GcRead { root } => {
+                let var = self
+                    .vars
+                    .get(root)
+                    .copied()
+                    .ok_or_else(|| format!("jit GcRead unknown root `{root}`"))?;
+                Ok(self.b.use_var(var))
+            }
+            THostCall::GcEdit {
+                root,
+                edit,
+                index_temp,
+                ..
+            } => {
+                if let Some((temp, value)) = index_temp {
+                    let v = self.lower_expr(value)?;
+                    let vty = self.b.func.dfg.value_type(v);
+                    let var = self.fresh_var(vty);
+                    self.b.def_var(var, v);
+                    self.vars.insert(temp.clone(), var);
+                    self.var_tys.insert(temp.clone(), value.ty.clone());
+                }
+                let root_var = self
+                    .vars
+                    .get(root)
+                    .copied()
+                    .ok_or_else(|| format!("jit GcEdit unknown root `{root}`"))?;
+                let cur = self.b.use_var(root_var);
+                let jv = self.fresh_var(types::I64);
+                self.b.def_var(jv, cur);
+                self.vars.insert("__jet_value".to_string(), jv);
+                self.var_tys.insert(
+                    "__jet_value".to_string(),
+                    self.var_tys.get(root).cloned().unwrap_or(Type::Int),
+                );
+                let result = self.lower_expr(edit)?;
+                let new_val = self.b.use_var(jv);
+                self.b.def_var(root_var, new_val);
+                let _ = ty;
+                Ok(result)
+            }
+            _ => Err("jit host/default/uninit/ct-lit unsupported".to_string()),
+        }
     }
 
     /// Compound-assign lowering for `TStmt::Assign { op: Some(op), .. }`. Keyed
@@ -2267,6 +2398,13 @@ impl LowerCtx<'_, '_> {
                 args,
                 ..
             } => {
+                if module == "core.io" && method == "args" && args.is_empty() {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.io_args, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.tasks" && method == "channel" && args.is_empty() {
                     let host_ref = self
                         .module
@@ -2755,7 +2893,8 @@ impl LowerCtx<'_, '_> {
                     None => Err(format!("jit uninit type unsupported: {:?}", expr.ty)),
                 }
             }
-            TExprKind::CtLit(_) | TExprKind::HostCall(_) | TExprKind::DefaultLit => {
+            TExprKind::HostCall(host) => self.lower_host_call(host.as_ref(), &expr.ty),
+            TExprKind::CtLit(_) | TExprKind::DefaultLit => {
                 Err("jit host/default/uninit/ct-lit unsupported".to_string())
             }
             TExprKind::ConstRef(_) => Err("jit const ref unsupported".to_string()),
