@@ -2,7 +2,7 @@
 
 use super::{
     build_cx_items, bundle_extern_funcs, populate_cx_from_bundle, register_foreign_enum_variants,
-    update_cloneability_with_foreign_types, mangle, Cx, TIR,
+    update_cloneability_with_foreign_types, mangle, user_type_rust, Cx, TIR,
 };
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
@@ -336,8 +336,10 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::Field { recv, field, boxed: false } => {
             let TIR::TExprKind::Local(local) = &recv.kind else { return false };
             reconstructions.iter().any(|r| {
-                r.local_rust == local.rust_name()
-                    && r.fields.iter().any(|(fname, _, _)| fname == field)
+                r.local.rust_name() == local.rust_name()
+                    && r.fields
+                        .iter()
+                        .any(|(fname, _, _)| web_recon_field_matches(fname, field))
             })
         }
         TIR::TExprKind::Index {
@@ -808,7 +810,7 @@ fn flattened_web_params(tir: &TIR::TFunc) -> Vec<(String, Type)> {
         if let Some(reconstruction) = tir
             .web_param_reconstructions
             .iter()
-            .find(|r| r.local_rust == *name)
+            .find(|r| r.local.rust_name() == *name)
         {
             out.extend(
                 reconstruction
@@ -821,6 +823,17 @@ fn flattened_web_params(tir: &TIR::TFunc) -> Vec<(String, Type)> {
         }
     }
     out
+}
+
+fn web_recon_rust_type(ty: &Type) -> String {
+    match ty {
+        Type::Named(name) => user_type_rust(name),
+        _ => mangle("AnonWebParam"),
+    }
+}
+
+fn web_recon_field_matches(fname: &str, field: &str) -> bool {
+    fname == field || fname == mangle(field) || field == mangle(fname)
 }
 
 fn js_abi_call_args(
@@ -1135,10 +1148,11 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     let mut emitted_structs = std::collections::HashSet::new();
     for f in &wasm_funcs {
         for reconstruction in &f.tir.web_param_reconstructions {
-            if !emitted_structs.insert(reconstruction.rust_type.clone()) {
+            let rust_type = web_recon_rust_type(&reconstruction.ty);
+            if !emitted_structs.insert(rust_type.clone()) {
                 continue;
             }
-            out.push_str(&format!("struct {} {{\n", reconstruction.rust_type));
+            out.push_str(&format!("struct {} {{\n", rust_type));
             for (field, _, ty) in &reconstruction.fields {
                 let rust_ty = wasm_ty(ty).ok_or_else(|| web_emit_error(f))?;
                 out.push_str(&format!("    {field}: {rust_ty},\n"));
@@ -1218,7 +1232,9 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
                 .join(", ");
             out.push_str(&format!(
                 "    let {} = {} {{ {} }};\n",
-                reconstruction.local_rust, reconstruction.rust_type, fields
+                reconstruction.local.rust_name(),
+                web_recon_rust_type(&reconstruction.ty),
+                fields
             ));
         }
         let args = f
@@ -1271,8 +1287,8 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
                 .tir
                 .web_param_reconstructions
                 .iter()
-                .find(|r| r.local_rust == *name)
-                .map(|r| r.rust_type.clone())
+                .find(|r| r.local.rust_name() == *name)
+                .map(|r| web_recon_rust_type(&r.ty))
                 .or_else(|| wasm_param_rust_ty(ty, *conv).map(str::to_string));
             rust_ty.map(|t| format!("{name}: {t}"))
         })
@@ -1517,8 +1533,10 @@ fn wasm_emit_expr(
         TIR::TExprKind::Field { recv, field, boxed: false } => {
             let TIR::TExprKind::Local(local) = &recv.kind else { return Err(()) };
             if !reconstructions.iter().any(|r| {
-                r.local_rust == local.rust_name()
-                    && r.fields.iter().any(|(fname, _, _)| fname == field)
+                r.local.rust_name() == local.rust_name()
+                    && r.fields
+                        .iter()
+                        .any(|(fname, _, _)| web_recon_field_matches(fname, field))
             }) {
                 return Err(());
             }

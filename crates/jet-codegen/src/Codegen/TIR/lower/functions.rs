@@ -142,8 +142,8 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
                         env.bind(&p.name, TLocal::user(&p.name), Some(param_ty.clone()));
                         params.push((rust_name.clone(), param_ty.clone(), p.convention));
                         web_param_reconstructions.push(TWebParamReconstruction {
-                            local_rust: rust_name,
-                            rust_type: cx.mangle_name(type_name),
+                            local: TLocal::user(&p.name),
+                            ty: Type::Named(type_name.to_string()),
                             fields: flat_fields,
                         });
                         continue;

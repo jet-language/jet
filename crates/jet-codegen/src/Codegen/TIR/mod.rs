@@ -811,10 +811,10 @@ pub struct TFunc {
 
 /// One typed parameter reconstructed by a flattened WebAssembly export wrapper.
 pub struct TWebParamReconstruction {
-    /// Mangled local consumed by the executable TIR body (`user_p`).
-    pub local_rust: String,
-    /// Resolved Rust struct head (`user_Point`).
-    pub rust_type: String,
+    /// Param slot the reconstructed value binds into (matches `TFunc.params`).
+    pub local: TLocal,
+    /// Struct type being rebuilt from flattened ABI scalars; emit spells Rust.
+    pub ty: Type,
     /// `(mangled field, flattened ABI parameter, resolved scalar type)`.
     pub fields: Vec<(String, String, Type)>,
 }
