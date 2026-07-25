@@ -2268,11 +2268,6 @@ pub enum TExprKind {
     /// wrappers. The whole thing is wrapped in `{ <prep> <closure> }` when `prep` is
     /// non-empty — byte-for-byte `emit_lambda` (Source/Codegen/Expression.rs).
     Lambda(Box<TLambda>),
-    /// c109 Phase 11: the fan-out operator `f.[a, b, c]` ≡ `[f(a), f(b), f(c)]`
-    /// (S75/S76 — result `[T#N]`, erased to `Vec`). `calls` are the already-lowered
-    /// per-item call expressions (a `Call`/`Print`/`CallValue` form, resolved at
-    /// lowering exactly as the AST path routes an `Ident` callee through `emit_call`
-    /// and any other callee through `(f)(item)`). Emit just wraps them in `vec![…]`.
     /// D-TAG1: a binding-free enum variant/group pattern test (`d == .Fire`,
     /// `d == .Fire.Burn` in expression position). Lowers to `matches!(&subj, pat)`
     /// where `pat` is the same Rust pattern string `emit_match_pattern` uses for
@@ -2280,9 +2275,6 @@ pub enum TExprKind {
     PatternMatches {
         subj: Box<TExpr>,
         pattern: TPattern,
-    },
-    FanOut {
-        calls: Vec<TExpr>,
     },
     /// D-HOLE1: `Option.lift2(f, a, b)` — apply `f` to both payloads only when both
     /// `a`/`b` are present; `null` otherwise. `f`/`a`/`b` are lowered plainly as

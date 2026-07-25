@@ -1,0 +1,13 @@
+// S75 / #779: fan-out inside a list literal flattens.
+// `[f.[a, b], c]` ≡ `[f(a), f(b), c]` — parser+sema+lowering only; no engine arms.
+
+fn double(n: Int) -> Int {
+    return (n * 2)
+}
+
+fn run() {
+    xs :: [double.[1, 2], 3]
+    print(xs[0])
+    print(xs[1])
+    print(xs[2])
+}

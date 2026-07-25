@@ -1449,12 +1449,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .join(", ");
             format!("{} {{ {} }}", struct_name, parts)
         }
-        // c109 Phase 5: `[k: v, …]` / `[:]`. Mirrors the AST `Expr::MapLit` exactly:
-        // empty → `BTreeMap::new()`; non-empty → the `_m.insert((k).clone(), v)` builder.
+        // #779: only empty map literals remain after lowering (`[:]` / desugar seed).
+        // Non-empty `[k: v, …]` becomes IfExpr + IndexAssign inserts.
         TExprKind::MapLit(entries) => {
             if entries.is_empty() {
                 "std::collections::BTreeMap::new()".to_string()
             } else {
+                // Defensive: should not appear after #779 lowering.
                 let mut s = String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
                 for (k, v) in entries {
                     s.push_str(&format!(
@@ -1693,17 +1694,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("move |{declarations}| ({callable})({arguments})")
-        }
-        // c109 Phase 11: fan-out `f.[a, b, c]` → `vec![f(a), f(b), f(c)]`. The
-        // per-item calls were lowered at lowering; emit only wraps them in `vec![…]`,
-        // D-FIXARR1: fan-out `f.[a, b, c]` produces `[T#N]` — a Rust array literal `[…]`.
-        TExprKind::FanOut { calls } => {
-            let elems = calls
-                .iter()
-                .map(|c| emit_tir_expr(c, cx))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("[{}]", elems)
         }
         // D-HOLE1: `Option.lift2(f, a, b)` — `a.zip(b).map(|(x, y)| f(x, y))`. `f` is
         // any lowered function value (lambda or fn ident), called via Rust's

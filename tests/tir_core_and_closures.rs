@@ -379,8 +379,8 @@ fn run() {
 }
 
 /// The fan-out operator `f.[a, b, c]` ≡ `[f(a), f(b), f(c)]` (S75/S76) over a
-/// plain top-level function. Routes through `TExprKind::FanOut` (each item a
-/// synthetic single-arg call, wrapped in `vec![…]`).
+/// plain top-level function. #779: lowers to `TExprKind::ListLit` of Calls
+/// (FixedList type) — no `FanOut` TIR node.
 #[test]
 fn fan_out_operator() {
     if !have_rustc() {
