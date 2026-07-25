@@ -63,6 +63,11 @@
 // D-HTTP-ROUTE-SYNTAX2=A owns the two route-pattern markers carried inside
 // ordinary String values. They are not lexer tokens; the HTTP router consumes
 // them after String evaluation.
+// D-FLOWTYPE1=A adds no token: after a stable immutable `T?` name is checked
+// with `x != None` (true) or `x == None` (false/else), sema refines that name
+// to `T` for the proven branch and records an S31 Present unwrap for TIR.
+// Mutable locals, fields, indexes, aliases, and calls stay `T?`; bind with
+// `x == Val(v)` instead. Facts reach the right side of `&&` only, not `||`.
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 

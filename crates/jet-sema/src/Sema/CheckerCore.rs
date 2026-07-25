@@ -4,7 +4,7 @@ mod blocks;
 mod statements;
 mod control_flow;
 mod switches;
-pub(crate) use switches::normalize_contextual_pattern;
+pub(crate) use switches::{atomic_absent_optional_subject, normalize_contextual_pattern};
 mod types;
 mod bindings;
 pub(crate) use bindings::*;

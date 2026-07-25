@@ -404,30 +404,43 @@ impl<'a> Checker<'a> {
                 let span = *span;
                 let before = self.moved.clone();
                 let mut after = before.clone();
+                // D-FLOWTYPE1=A: same Optional presence desugar as statement `if`.
+                self.rewrite_optional_flow_ne_none(cond);
+                // Value-if always has an else arm; invert atomic `== None` so the
+                // false branch (presence) becomes an S31 Present then-arm.
+                if let Some((name, name_span, cond_span)) =
+                    crate::Sema::CheckerCore::atomic_absent_optional_subject(cond)
+                {
+                    if self.flow_narrowable_optional_inner(&name).is_some() {
+                        std::mem::swap(then_body, else_body);
+                        std::mem::swap(then_value, else_value);
+                        **cond = Expr::PatternTest {
+                            subject: Box::new(Expr::Ident(name.clone(), name_span)),
+                            pattern: crate::AST::Pattern::Present {
+                                binding: name,
+                                binding_span: name_span,
+                                span: cond_span,
+                            },
+                            span: cond_span,
+                        };
+                    }
+                }
                 let bindings = self.check_condition_with_bindings(cond);
                 self.push_scope();
+                let mut restore_moved = Vec::new();
                 for (name, ty) in bindings {
-                    self.declare(
-                        &name,
-                        cond.span(),
-                        LocalInfo {
-                            def_span: cond.span(),
-                            ty,
-                            mutable: false,
-                            param_conv: None,
-                            decl_loop_depth: self.loop_depth,
-                            sendable: true,
-                            reactive_local: false,
-                            reactive_shared: false,
-                            task_lint_span: None,
-                            single_use_span: None,
-                            constant_value: None,
-                        },
-                    );
+                    if let Some(restored) =
+                        self.declare_condition_binding(&name, cond.span(), ty)
+                    {
+                        restore_moved.push(restored);
+                    }
                 }
                 self.check_block(then_body, false);
                 let then_ty = self.infer(then_value);
                 self.pop_scope();
+                for (name, at) in restore_moved {
+                    self.moved.insert(name, at);
+                }
                 for (k, v) in self.moved.drain() {
                     after.entry(k).or_insert(v);
                 }

@@ -1,7 +1,7 @@
 use crate::AST::{ElseBranch, IfStmt, Stmt, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::CheckerOwnership::e0141_unconsumed_branch;
-use crate::Sema::{Checker, LocalInfo};
+use crate::Sema::Checker;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
         pub(crate) fn check_if(&mut self, ifs: &mut IfStmt) {
@@ -13,26 +13,16 @@ impl<'a> Checker<'a> {
             // (or, with no `else`, on the fall-through).
             let before_u = self.uninit.clone();
             let mut after_u: HashMap<String, Span> = HashMap::new();
+            // D-FLOWTYPE1=A: desugar stable Optional presence checks into S31 Present
+            // bindings before binding extraction / TIR lower.
+            self.prepare_optional_flow_if(ifs);
             let bindings = self.check_condition_with_bindings(&mut ifs.cond);
             self.push_scope();
+            let mut restore_moved = Vec::new();
             for (name, ty) in bindings {
-                self.declare(
-                    &name,
-                    ifs.span,
-                    LocalInfo {
-                        def_span: ifs.span,
-                        ty,
-                        mutable: false,
-                        param_conv: None,
-                        decl_loop_depth: self.loop_depth,
-                        sendable: true,
-                        reactive_local: false,
-                        reactive_shared: false,
-                        task_lint_span: None,
-                        single_use_span: None,
-                        constant_value: None,
-                    },
-                );
+                if let Some(restored) = self.declare_condition_binding(&name, ifs.span, ty) {
+                    restore_moved.push(restored);
+                }
             }
             // D-LIN1: the `#SingleUse` bindings that outlive this `if` — declared in an
             // enclosing scope (not the `if`-cond scope just pushed) and not already
@@ -56,6 +46,9 @@ impl<'a> Checker<'a> {
     
             self.check_block(&mut ifs.then_body, false);
             self.pop_scope();
+            for (name, at) in restore_moved {
+                self.moved.insert(name, at);
+            }
             let then_moved = self.moved.clone();
             for (k, v) in self.moved.drain() {
                 after.entry(k).or_insert(v);
