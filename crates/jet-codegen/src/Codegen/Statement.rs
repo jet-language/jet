@@ -29,6 +29,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_email = etype.is_some_and(|t| matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError"));
     let is_auth = etype == Some("AuthError");
     let is_hook_outcome = etype == Some("HookOutcome");
+    // D-UNIONTYPE1=A: anonymous unions lower to `__JetUnion_*` with bare tags.
+    let is_anon_union = etype.is_some_and(|t| t.starts_with("__JetUnion_"));
     // D-TERM1: detect `Key` from the variant name when the type isn't resolved in etype.
     let is_key = {
         let from_etype = etype.map(|t| t == crate::Syntax::TYPE_KEY).unwrap_or(false);
@@ -43,6 +45,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
         .map(|t| {
             if is_json_type_name(t) {
                 format!("{}jet_std::DataTree", cx.root_prefix)
+            } else if t.starts_with("__JetUnion_") {
+                format!("user_{t}")
             } else if t == crate::Syntax::TYPE_KEY {
                 format!("{}JetKey", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_ERROR {
@@ -75,10 +79,10 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             }
             "user_TYPE".to_string()
         });
-    // Variant names are mangled for user enums, but JSON and Key variants keep
+    // Variant names are mangled for user enums, but JSON/Key/union tags keep
     // their original Rust name (defined as plain Rust identifiers in the prelude).
     let vname = |v: &str| -> String {
-        if is_json || is_key || is_io || is_http || is_email || is_auth || is_hook_outcome {
+        if is_json || is_key || is_io || is_http || is_email || is_auth || is_hook_outcome || is_anon_union {
             v.to_string()
         } else {
             mangle_variant(v)

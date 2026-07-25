@@ -51,6 +51,10 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError")) {
         return true;
     }
+    // D-UNIONTYPE1=A: anonymous unions are one generated enum of covered members.
+    if let Type::Union(members) = &ty {
+        return !members.is_empty() && members.iter().all(|m| is_subset_param_ty(m, cx));
+    }
     ty.is_scalar()
         || matches!(&ty, Type::Char | Type::String)
         || is_type_var_param_ty(&ty, cx)

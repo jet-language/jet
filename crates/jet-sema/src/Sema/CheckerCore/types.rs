@@ -182,6 +182,9 @@ impl<'a> Checker<'a> {
                     marker,
                     inner: Box::new(self.resolve_type(*inner)),
                 },
+                Type::Union(members) => crate::AST::canonicalize_union(
+                    members.into_iter().map(|m| self.resolve_type(m)).collect(),
+                ),
                 Type::Int => Type::Int,
                 Type::Float => Type::Float,
                 Type::Bool => Type::Bool,

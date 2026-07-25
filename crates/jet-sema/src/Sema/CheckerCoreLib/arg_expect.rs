@@ -206,9 +206,14 @@ impl<'a> Checker<'a> {
                     (param_ty, &got),
                     (Type::List(want), Type::FixedList { elem: actual, .. }) if want == actual
                 );
+                let union_widens = matches!(
+                    param_ty,
+                    Type::Union(members) if members.iter().any(|m| m == &got)
+                );
                 if !reported
                     && got != *param_ty
                     && !fixed_widens
+                    && !union_widens
                     && !reads_expiring_secret_loan
                 {
                     self.diags.push(Diagnostic::error(

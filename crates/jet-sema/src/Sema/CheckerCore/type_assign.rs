@@ -45,6 +45,11 @@ impl<'a> Checker<'a> {
                     self.warn_soft_public_type_tree(ok, span);
                     self.warn_soft_public_type_tree(err, span);
                 }
+                Type::Union(members) => {
+                    for m in members {
+                        self.warn_soft_public_type_tree(m, span);
+                    }
+                }
                 Type::Tuple(fields) => {
                     for (_, field) in fields {
                         self.warn_soft_public_type_tree(field, span);
@@ -381,6 +386,21 @@ impl<'a> Checker<'a> {
                     self.check_declared_type_rules(ok, span);
                     self.check_declared_type_rules(err, span);
                 }
+                Type::Union(members) => {
+                    // D-UNIONTYPE1=A: only concrete closed member types.
+                    for m in members {
+                        if matches!(m, Type::TraitObject(_) | Type::Fn { .. }) {
+                            self.diags.push(Diagnostic::error(
+                                "E0363",
+                                format!("`{}` can't be a union member", m.name()),
+                                "anonymous unions hold concrete closed types — not trait objects or function types".to_string(),
+                                "use a named enum when a member needs an open shape".to_string(),
+                                Some(span),
+                            ));
+                        }
+                        self.check_declared_type_rules(m, span);
+                    }
+                }
                 Type::Fn { params, ret, .. } => {
                     for p in params {
                         self.check_declared_type_rules(p, span);
@@ -476,6 +496,10 @@ impl<'a> Checker<'a> {
                 (Type::List(want_elem), Type::FixedList { elem: got_elem, .. })
                     if want_elem == got_elem =>
                 {
+                    return false;
+                }
+                // D-UNIONTYPE1=A: a member value widens into its union.
+                (Type::Union(members), got) if members.iter().any(|m| m == got) => {
                     return false;
                 }
                 (Type::TraitObject(trait_names), got) => {

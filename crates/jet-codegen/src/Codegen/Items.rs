@@ -853,6 +853,221 @@ fn emit_cli_subcommand_entry(
     ));
 }
 
+/// D-UNIONTYPE1=A: emit one compiler-generated enum per canonical anonymous
+/// union used in the program. Variant tags are member type names.
+pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
+    let mut seen = std::collections::BTreeSet::new();
+    fn walk(ty: &Type, seen: &mut std::collections::BTreeSet<String>, out_members: &mut Vec<Vec<Type>>) {
+        match ty {
+            Type::Union(members) => {
+                let name = crate::AST::union_enum_name(members);
+                if seen.insert(name) {
+                    out_members.push(members.clone());
+                }
+                for m in members {
+                    walk(m, seen, out_members);
+                }
+            }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner) | Type::Tagged { inner, .. } => {
+                walk(inner, seen, out_members)
+            }
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                walk(key, seen, out_members);
+                walk(value, seen, out_members);
+            }
+            Type::Fn { params, ret, .. } => {
+                for p in params {
+                    walk(p, seen, out_members);
+                }
+                if let Some(r) = ret {
+                    walk(r, seen, out_members);
+                }
+            }
+            Type::Apply { args, .. } => {
+                for a in args {
+                    walk(a, seen, out_members);
+                }
+            }
+            Type::Tuple(fields) => {
+                for (_, t) in fields {
+                    walk(t, seen, out_members);
+                }
+            }
+            Type::FixedList { elem, .. } => walk(elem, seen, out_members),
+            _ => {}
+        }
+    }
+    fn walk_item(item: &Item, seen: &mut std::collections::BTreeSet<String>, out_members: &mut Vec<Vec<Type>>) {
+        match item {
+            Item::Struct(s) => {
+                for f in &s.fields {
+                    walk(&f.ty, seen, out_members);
+                }
+            }
+            Item::Enum(e) => {
+                for v in &e.variants {
+                    match &v.payload {
+                        VariantPayload::Single(ty, _) => walk(ty, seen, out_members),
+                        VariantPayload::Named(fs) => {
+                            for f in fs {
+                                walk(&f.ty, seen, out_members);
+                            }
+                        }
+                        VariantPayload::Unit => {}
+                    }
+                }
+            }
+            Item::Func(f) => {
+                for p in &f.params {
+                    walk(&p.ty, seen, out_members);
+                }
+                if let Some(ret) = &f.return_type {
+                    walk(ret, seen, out_members);
+                }
+            }
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    for p in &m.params {
+                        walk(&p.ty, seen, out_members);
+                    }
+                    if let Some(ret) = &m.return_type {
+                        walk(ret, seen, out_members);
+                    }
+                }
+            }
+            Item::CodeModule(m) => {
+                if let Some(nested) = &m.body {
+                    for nested in nested {
+                        walk_item(nested, seen, out_members);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut unions = Vec::new();
+    for item in items {
+        walk_item(item, &mut seen, &mut unions);
+    }
+    let want_codec = program_wants_union_codec(items);
+    for members in unions {
+        let name = crate::AST::union_enum_name(&members);
+        let empty = std::collections::HashSet::new();
+        let hashable = members
+            .iter()
+            .all(|m| crate::Codegen::Context::field_type_hashable(m, &cx.hashable, &empty));
+        let mut derives = vec!["Debug", "Clone", "PartialEq"];
+        if hashable {
+            derives.push("Eq");
+            derives.push("Hash");
+        }
+        out.push_str(&format!(
+            "#[derive({})]\npub enum user_{name} {{\n",
+            derives.join(", ")
+        ));
+        for m in &members {
+            let tag = crate::AST::union_member_tag(m);
+            out.push_str(&format!("    {tag}({}),\n", cx.rust_type(m)));
+        }
+        out.push_str("}\n\n");
+        out.push_str(&format!(
+            "impl JetShow for user_{name} {{\n    fn jet_show(&self) -> String {{\n        match self {{\n"
+        ));
+        for m in &members {
+            let tag = crate::AST::union_member_tag(m);
+            out.push_str(&format!(
+                "            Self::{tag}(v) => v.jet_show(),\n"
+            ));
+        }
+        out.push_str("        }\n    }\n}\n\n");
+        out.push_str(&format!(
+            "impl JetDebug for user_{name} {{\n    fn jet_debug(&self) -> String {{\n        match self {{\n"
+        ));
+        for m in &members {
+            let tag = crate::AST::union_member_tag(m);
+            out.push_str(&format!(
+                "            Self::{tag}(v) => v.jet_debug(),\n"
+            ));
+        }
+        out.push_str("        }\n    }\n}\n\n");
+        out.push_str(&format!(
+            "impl JetDisplay for user_{name} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
+        ));
+        if !want_codec {
+            continue;
+        }
+        // D-UNIONTYPE1=A: Codable encode/decode by member wire shape.
+        out.push_str(&format!(
+            "impl user_Encode for user_{name} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n"
+        ));
+        for m in &members {
+            let tag = crate::AST::union_member_tag(m);
+            out.push_str(&format!(
+                "            Self::{tag}(v) => user_Encode::jet_encode(v),\n"
+            ));
+        }
+        out.push_str("        }\n    }\n}\n\n");
+        out.push_str(&format!(
+            "impl user_Decode for user_{name} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n        match __t {{\n"
+        ));
+        for m in &members {
+            let tag = crate::AST::union_member_tag(m);
+            let rust = cx.rust_type(m);
+            let shape_pat = match union_member_datatree_pat(m) {
+                Some(p) => p,
+                None => continue,
+            };
+            out.push_str(&format!(
+                "            {shape_pat} => Ok(Self::{tag}(<{rust} as user_Decode>::jet_decode(__t)?)),\n"
+            ));
+        }
+        out.push_str(
+            "            _ => Err(jet_std::DecodeError::new(\"no matching union member\")),\n        }\n    }\n}\n\n",
+        );
+    }
+}
+
+fn program_wants_union_codec(items: &[Item]) -> bool {
+    items.iter().any(|item| match item {
+        Item::Struct(s) => s.derives.iter().any(|(n, _)| {
+            matches!(
+                n.as_str(),
+                crate::Generics::ENCODE | crate::Generics::DECODE | "Codable"
+            )
+        }),
+        Item::Enum(e) => e.derives.iter().any(|(n, _)| {
+            matches!(
+                n.as_str(),
+                crate::Generics::ENCODE | crate::Generics::DECODE | "Codable"
+            )
+        }),
+        Item::Impl(i) => i.trait_name.as_deref().is_some_and(|n| {
+            matches!(n, crate::Generics::ENCODE | crate::Generics::DECODE)
+        }),
+        Item::CodeModule(m) => m
+            .body
+            .as_ref()
+            .is_some_and(|b| program_wants_union_codec(b)),
+        _ => false,
+    })
+}
+
+fn union_member_datatree_pat(ty: &Type) -> Option<&'static str> {
+    match ty {
+        Type::Int | Type::IntN { .. } => Some("jet_std::DataTree::Int(_)"),
+        Type::Float | Type::Float32 => Some("jet_std::DataTree::Float(_)"),
+        Type::Bool => Some("jet_std::DataTree::Bool(_)"),
+        Type::String | Type::Char => Some("jet_std::DataTree::Text(_)"),
+        Type::Named(n) if n == "Decimal" => Some("jet_std::DataTree::Text(_)"),
+        Type::List(_) | Type::FixedList { .. } => Some("jet_std::DataTree::Array(_)"),
+        Type::Map { .. } | Type::Named(_) | Type::Apply { .. } | Type::Tuple(_) => {
+            Some("jet_std::DataTree::Object(_)")
+        }
+        Type::Option(inner) => union_member_datatree_pat(inner),
+        _ => None,
+    }
+}
+
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
     let mut derives = vec!["Debug"];
     if cx.cloneable.contains(&e.name) {

@@ -1451,7 +1451,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .iter()
                 .map(|(n, _, fe)| {
                     let boxed = cx.boxed_edges.contains(&(type_name.clone(), n.clone()));
-                    let value = lower_owned_expr(fe, cx, env);
+                    let mut value = lower_owned_expr(fe, cx, env);
+                    // D-UNIONTYPE1=A: member → union inject at Codable/struct field sites.
+                    if let Some(fty) =
+                        struct_field_type(cx, &Type::Named(type_name.clone()), n)
+                    {
+                        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty);
+                    }
                     (n.clone(), value, boxed)
                 })
                 .collect();
@@ -2152,7 +2158,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // the inner's; the err type is unresolved here (Rust infers it from the
         // function return context, exactly as the AST path's bare `Ok(x)` does).
         Expr::Ok(inner, _) => {
-            let t = lower_expr(inner, cx, env);
+            let mut t = lower_expr(inner, cx, env);
+            if let Some(Type::Result { ok, .. }) = &env.ret_ty {
+                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok);
+            }
             TExpr {
                 ty: Type::Result {
                     ok: Box::new(t.ty.clone()),
@@ -2164,7 +2173,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // c109 Phase 8: `Err(e)` → `Err(e)`. The err type is the inner's; the ok type
         // is unresolved here (inferred from the function return context).
         Expr::Err(inner, _) => {
-            let t = lower_expr(inner, cx, env);
+            let mut t = lower_expr(inner, cx, env);
+            if let Some(Type::Result { err, .. }) = &env.ret_ty {
+                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, err);
+            }
             TExpr {
                 ty: Type::Result {
                     ok: Box::new(Type::Int),
@@ -2191,6 +2203,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 TryConvert::None => TTryConvert::None,
                 TryConvert::Fallible => TTryConvert::Fallible,
                 TryConvert::Typed(fn_name) => TTryConvert::Typed(fn_name.clone()),
+                TryConvert::WidenUnion { enum_name, tag } => TTryConvert::WidenUnion {
+                    enum_name: enum_name.clone(),
+                    tag: tag.clone(),
+                },
             };
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
             TExpr {
@@ -2311,6 +2327,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 arc_clone: false,
                                 fn_coerce: None,
                                 widen_to_vec: false,
+                                widen_to_union: None,
                             }],
                         },
                     }

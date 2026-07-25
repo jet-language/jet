@@ -779,6 +779,13 @@ fn type_full_key(ty: &Type) -> Vec<u8> {
             IntN { signed, bits } => { out.push(17); out.push(u8::from(*signed)); out.push(*bits); }
             Float32 => out.push(18),
             Tagged { inner, .. } => write(out, inner),
+            Union(members) => {
+                out.push(19);
+                out.extend_from_slice(&(members.len() as u64).to_be_bytes());
+                for m in members {
+                    write(out, m);
+                }
+            }
         }
     }
     let mut out = Vec::new();

@@ -1659,6 +1659,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "jet_trace_err({}.map_err({}), {}, {}, {})?",
                     v, conv_fn, file, line, fn_name
                 ),
+                // D-UNIONTYPE1=A: member error → anonymous union wrap.
+                TTryConvert::WidenUnion { enum_name, tag } => format!(
+                    "jet_trace_err({}.map_err(|e| user_{enum_name}::{tag}(e)), {}, {}, {})?",
+                    v, file, line, fn_name
+                ),
                 // Error types match — bare propagate.
                 TTryConvert::None => {
                     format!("jet_trace_err({}, {}, {}, {})?", v, file, line, fn_name)

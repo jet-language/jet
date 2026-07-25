@@ -74,6 +74,8 @@ impl<'a> Checker<'a> {
                         self.is_encodable(t)
                     })
                 }
+                // D-UNIONTYPE1=A: every member must encode; ambiguity is a separate check.
+                Type::Union(members) => members.iter().all(|m| self.is_encodable(m)),
                 _ => false,
             }
         }
@@ -102,6 +104,7 @@ impl<'a> Checker<'a> {
                         self.is_decodable(t)
                     })
                 }
+                Type::Union(members) => members.iter().all(|m| self.is_decodable(m)),
                 _ => false,
             }
         }

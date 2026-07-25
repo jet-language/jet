@@ -1126,7 +1126,15 @@ impl<'a> Checker<'a> {
                                             }
                                 );
                                 let string_view_compatible = string_view_return && et == Type::String;
-                                if et != rt && !http_handler_lambda && !string_view_compatible {
+                                let union_member_widen = matches!(
+                                    &rt,
+                                    Type::Union(members) if members.iter().any(|m| m == &et)
+                                );
+                                if et != rt
+                                    && !http_handler_lambda
+                                    && !string_view_compatible
+                                    && !union_member_widen
+                                {
                                     self.diags.push(Diagnostic::error(
                                         "E0113",
                                         format!(

@@ -21,6 +21,7 @@ pub(crate) fn clone_env(env: &LowerEnv) -> LowerEnv {
     LowerEnv {
         locals: env.locals.clone(),
         fn_name: env.fn_name.clone(),
+        ret_ty: env.ret_ty.clone(),
         self_owner: env.self_owner.clone(),
         string_view_locals: env.string_view_locals.clone(),
         borrowed_locals: env.borrowed_locals.clone(),

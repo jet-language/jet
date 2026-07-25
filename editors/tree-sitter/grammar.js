@@ -466,6 +466,7 @@ module.exports = grammar({
     _type: ($) =>
       choice(
         $.capability_type,
+        $.union_type,
         $.primitive_type,
         $.generic_type,
         $.type_identifier,
@@ -530,7 +531,11 @@ module.exports = grammar({
     option_type: ($) => prec(1, seq($._type, "?")),
 
     // `T ? E` fallible result (S34).
-    fallible_type: ($) => prec.left(seq($._type, "?", $._type)),
+    // Prec below `union_type` so `T ? E1 | E2` is `T ? (E1 | E2)` (D-UNIONTYPE1=A).
+    fallible_type: ($) => prec.left(1, seq($._type, "?", $._type)),
+
+    // D-UNIONTYPE1=A: closed structural sum `A | B | …`.
+    union_type: ($) => prec.left(2, seq($._type, "|", $._type)),
 
     // `[T]` list, `[T#N]` fixed-size (S65/S76).
     list_type: ($) =>

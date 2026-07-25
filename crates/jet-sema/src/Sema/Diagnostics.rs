@@ -265,6 +265,9 @@ fn is_cloneable_rec(
         Type::TraitObject(_) => false,
         Type::FixedList { elem, .. } => is_cloneable_rec(elem, registry, visiting),
         Type::Tagged { inner, .. } => is_cloneable_rec(inner, registry, visiting),
+        Type::Union(members) => members
+            .iter()
+            .all(|m| is_cloneable_rec(m, registry, visiting)),
     }
 }
 
@@ -377,6 +380,9 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         // heap allocation regardless of the element type.
         Type::FixedList { .. } => true,
         Type::Tagged { inner, .. } => type_owns_heap_rec(inner, registry, visiting),
+        Type::Union(members) => members
+            .iter()
+            .any(|m| type_owns_heap_rec(m, registry, visiting)),
     }
 }
 
@@ -544,6 +550,19 @@ pub(crate) fn missing_pattern_coverage(
                 Some(missing)
             }
         }
+        // D-UNIONTYPE1=A: each member type name is an arm head.
+        Type::Union(members) => {
+            let missing: Vec<String> = members
+                .iter()
+                .map(crate::AST::union_member_tag)
+                .filter(|tag| !covered.contains(tag))
+                .collect();
+            if missing.is_empty() {
+                None
+            } else {
+                Some(missing)
+            }
+        }
         _ => None,
     }
 }
@@ -625,6 +644,9 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
             marker,
             inner: Box::new(core_crypto_nominal(*inner)),
         },
+        Type::Union(members) => crate::AST::canonicalize_union(
+            members.into_iter().map(core_crypto_nominal).collect(),
+        ),
         Type::Int => Type::Int,
         Type::Float => Type::Float,
         Type::Bool => Type::Bool,
@@ -770,6 +792,7 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_printable(elem, registry),
         Type::Tagged { inner, .. } => is_printable(inner, registry),
+        Type::Union(members) => members.iter().all(|m| is_printable(m, registry)),
     }
 }
 
@@ -825,6 +848,9 @@ pub(crate) fn is_displayable(
         Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_displayable(elem, type_reg, trait_reg),
         Type::Tagged { inner, .. } => is_displayable(inner, type_reg, trait_reg),
+        Type::Union(members) => members
+            .iter()
+            .all(|m| is_displayable(m, type_reg, trait_reg)),
     }
 }
 
@@ -903,6 +929,9 @@ pub(crate) fn is_debuggable(
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => is_debuggable(elem, type_reg, trait_reg),
         Type::Tagged { inner, .. } => is_debuggable(inner, type_reg, trait_reg),
+        Type::Union(members) => members
+            .iter()
+            .all(|m| is_debuggable(m, type_reg, trait_reg)),
     }
 }
 
@@ -943,6 +972,7 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
         Type::FixedList { elem, .. } => types_comparable(elem, registry),
         Type::Tagged { inner, .. } => types_comparable(inner, registry),
+        Type::Union(members) => members.iter().all(|m| types_comparable(m, registry)),
     }
 }
 
@@ -1180,6 +1210,7 @@ mod tests {
                 usize::from(marker == CORE_CRYPTO_NOMINAL_MARKER)
                     + count_core_crypto_markers(inner)
             }
+            Type::Union(members) => members.iter().map(count_core_crypto_markers).sum(),
             Type::Int
             | Type::Float
             | Type::Bool

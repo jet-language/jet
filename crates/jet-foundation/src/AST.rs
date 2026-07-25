@@ -5,7 +5,8 @@
 mod types;
 pub use types::{
     AccessConvention, Dimension, Type, int_spelling, numeric_type_from_name, int_range,
-    canonicalize_tuple_fields, CORE_CRYPTO_NOMINAL_MARKER, CPP_CALLBACK_ABI_MARKER,
+    canonicalize_tuple_fields, canonicalize_union, union_member_tag, union_enum_name,
+    CORE_CRYPTO_NOMINAL_MARKER, CPP_CALLBACK_ABI_MARKER,
     DETERMINISTIC_CLOCK_MARKER, EXPIRING_SECRET_LOAN_MARKER, SYSTEM_CLOCK_MARKER,
 };
 

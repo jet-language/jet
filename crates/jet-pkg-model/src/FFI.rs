@@ -2342,6 +2342,7 @@ fn type_key(ty: &Type) -> String {
         ),
         Type::FixedList { elem, len, .. } => format!("List<{}#{}>", type_key(elem), len),
         Type::Tagged { marker, inner } => format!("#{marker}:{}", type_key(inner)),
+        Type::Union(members) => members.iter().map(type_key).collect::<Vec<_>>().join("|"),
     }
 }
 
@@ -3005,6 +3006,8 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         // D-FIXARR1: [T#N] lowers to a real Rust array [T; N] in FFI too.
         Type::FixedList { elem, len, .. } => format!("[{}; {}]", rust_type(elem, user_types), len),
         Type::Tagged { inner, .. } => rust_type(inner, user_types),
+        // D-UNIONTYPE1=A: anonymous unions are not a C-FFI surface type.
+        Type::Union(_) => "Box<dyn std::any::Any>".to_string(),
     }
 }
 

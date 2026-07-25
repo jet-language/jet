@@ -284,7 +284,11 @@ impl<'a> Checker<'a> {
             // D-FIXARR1: [T#N] widens to [T] at a call site.
             let fixed_widens = matches!((&want, &got),
                 (Type::List(pe), Type::FixedList { elem: ae, .. }) if pe == ae);
-            if !reported && got != want && !fixed_widens {
+            let union_widens = matches!(
+                &want,
+                Type::Union(members) if members.iter().any(|m| m == &got)
+            );
+            if !reported && got != want && !fixed_widens && !union_widens {
                 self.diags.push(Diagnostic::error(
                     "E0112",
                     format!(

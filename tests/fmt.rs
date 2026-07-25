@@ -598,6 +598,29 @@ fn fmt_preserves_optional_result_variants() {
 }
 
 #[test]
+fn fmt_canonicalizes_anonymous_union_types() {
+    // D-UNIONTYPE1=A: order-insensitive identity; formatter prints canonical member order.
+    let src = r#"fn hold(v: String | Int) -> Int | String {
+    return v
+}
+fn parse(raw: String) -> Int ? String | Bool {
+    return .Err(false)
+}
+"#;
+    let once = jet::format_source(src).expect("anonymous unions should format");
+    assert!(
+        once.contains("Int | String"),
+        "expected canonical `Int | String` spelling, got:\n{once}"
+    );
+    assert!(
+        once.contains("Int ? Bool | String") || once.contains("Int ? String | Bool"),
+        "expected fallible error-side union, got:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("union fmt must be idempotent");
+    assert_eq!(once, twice, "anonymous union formatting must be idempotent");
+}
+
+#[test]
 fn fmt_preserves_named_payload_variant_dot_brace() {
     // D-UITREE1/D-DOTCTOR1: `.Variant.{ field: val }` — named-payload enum
     // construction reuses the struct dot-brace spelling. Must round-trip

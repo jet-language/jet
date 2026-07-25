@@ -1586,6 +1586,9 @@ impl<'a> Checker<'a> {
             Type::Tagged { inner, .. } => {
                 self.sendability_problem_inner(inner, closure_taken, seen)
             }
+            Type::Union(members) => members
+                .iter()
+                .find_map(|m| self.sendability_problem_inner(m, closure_taken, seen)),
         }
     }
 

@@ -68,6 +68,8 @@
 // to `T` for the proven branch and records an S31 Present unwrap for TIR.
 // Mutable locals, fields, indexes, aliases, and calls stay `T?`; bind with
 // `x == Val(v)` instead. Facts reach the right side of `&&` only, not `||`.
+// D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
+// position as TYPE_UNION_SEP. `T ? E1 | E2` parses as `T ? (E1 | E2)`.
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 

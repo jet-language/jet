@@ -225,6 +225,17 @@ impl<'a> Fmt<'a> {
                 self.write(" ");
                 self.fmt_type(inner);
             }
+            // D-UNIONTYPE1=A: `A | B | …` (canonical order).
+            Type::Union(members) => {
+                for (i, m) in members.iter().enumerate() {
+                    if i > 0 {
+                        self.write(" ");
+                        self.write(Syntax::TYPE_UNION_SEP);
+                        self.write(" ");
+                    }
+                    self.fmt_type(m);
+                }
+            }
         }
     }
 
