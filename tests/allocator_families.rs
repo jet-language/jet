@@ -66,10 +66,6 @@ fn run_jet(label: &str, src: &str) -> (i32, String, String) {
         )
     });
     let user = common::strip_vetted_prelude_modules(&output.rust);
-    if label == "pool_generation" {
-        let _ = std::fs::write("/tmp/781-pool-user.rs", &user);
-        eprintln!("DUMP_POOL_USER bytes={} unsafe={}", user.len(), user.lines().filter(|l| l.contains("unsafe")).count());
-    }
     let unsafe_lines = user
         .lines()
         .filter(|line| {
