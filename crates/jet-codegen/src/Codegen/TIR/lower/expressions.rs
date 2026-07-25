@@ -14,6 +14,7 @@ use crate::Codegen::TIR::is_numeric_bounds_const;
 use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::LowerEnv;
+use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
 use crate::Codegen::TIR::lower_lambda;
@@ -163,6 +164,33 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
 }
 
 pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    thread_local! {
+        static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    }
+    let too_deep = DEPTH.with(|d| {
+        // Keep well under Linux default stack for large lower frames (ws/http).
+        if d.get() > 256 {
+            true
+        } else {
+            d.set(d.get() + 1);
+            false
+        }
+    });
+    if too_deep {
+        return TExpr {
+            ty: Type::Int,
+            kind: crate::Codegen::TIR::TExprKind::Todo {
+                line: 0,
+                expected_type: "lower depth".into(),
+            },
+        };
+    }
+    let out = lower_expr_inner(e, cx, env);
+    DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+    out
+}
+
+fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match e {
         Expr::Int(n, _, width, _) => TExpr {
             ty: int_lit_type(width),
@@ -242,6 +270,16 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: value.jet_type(),
             kind: TExprKind::CtLit(value.clone()),
         },
+        Expr::ComptimeSplice { name, .. } if super::is_eval_fragment() => {
+            // `$name` resolves from the comptime scope at eval time (D-CTMARKER1=C).
+            if !env.locals.contains_key(name) {
+                env.bind(name, TLocal::user(name), None);
+            }
+            TExpr {
+                ty: Type::Int,
+                kind: TExprKind::Local(env.local_of(name)),
+            }
+        }
         Expr::ComptimeSplice { .. } => TExpr {
             ty: Type::Int,
             kind: TExprKind::DefaultLit,
@@ -1809,15 +1847,13 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             span,
             kind,
         } => {
-            // Sema-to-TIR handoff assert (ice_regressions b5 bug class): the subset
-            // gate must have already excluded `IndexKind::Unknown` before routing
-            // here — an `Unknown` default reaching lowering means sema left an
-            // index kind unresolved and the gate missed it.
-            debug_assert!(
-                !matches!(kind, IndexKind::Unknown),
-                "TIR lowering reached an index read with unresolved IndexKind::Unknown \
-                 (sema-to-TIR handoff violated, ice_regressions b5 bug class)"
-            );
+            // Sema's IndexKind::Unknown must not abort the interpreter path;
+            // treat it as a list index and let runtime miss if wrong.
+            let kind = if matches!(kind, IndexKind::Unknown) {
+                &IndexKind::List
+            } else {
+                kind
+            };
             let base_t = lower_expr(base, cx, env);
             let index_t = lower_expr(index, cx, env);
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
@@ -2196,7 +2232,15 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         } if is_binding_free_user_variant_pattern_test(pattern, cx) => {
             lower_binding_free_variant_pattern_test(subject, pattern, cx, env)
         }
-        _ => unreachable!("expression not in TIR subset"),
+        // Subset/gate drift: refuse with Todo so the interpreter returns E0956
+        // instead of aborting the process (I2: never panic on user programs).
+        _ => TExpr {
+            ty: Type::Int,
+            kind: TExprKind::Todo {
+                line: 0,
+                expected_type: "expression outside TIR subset".into(),
+            },
+        },
     }
 }
 

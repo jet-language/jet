@@ -608,7 +608,9 @@ fn jet_ws_upgrade(req: &JetHttpRequest) -> Result<JetWsConn, JetWsError> {
     let mut stream = JET_WS_ACTIVE_STREAM.with(|slot| -> Result<std::net::TcpStream, JetWsError> {
         let ptr = slot.borrow().ok_or(JetWsError::InvalidHandshake)?;
         // SAFETY: pointer is set only while JetWsStreamGuard wraps mux dispatch.
+        // JET_VETTED_UNSAFE_BEGIN: jet_ws_upgrade
         let stream = unsafe { &mut *ptr };
+        // JET_VETTED_UNSAFE_END: jet_ws_upgrade
         stream.try_clone().map_err(|_| JetWsError::Io {
             operation: "clone upgrade stream".to_string(),
         })

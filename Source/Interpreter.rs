@@ -114,223 +114,18 @@ fn function_at(items: &[Item], definition: crate::Diagnostics::Span) -> Option<&
     })
 }
 
-/// c139 JIT/interpreter-parity: extend `collect_funcs` with everything else
-/// `jet dev` needs to run whole programs at parity with the real build —
-/// D-MOD2 code-module namespaced functions (both the real `alias__fn`
-/// mangling and, when unclaimed, the bare name — covers a private sibling
-/// call inside the module and a `use mod.item` selective import in one move,
-/// with `use mod.item as alias` handled explicitly below), user-written
-/// instance/associated methods, D-FIELDPOL1 computed fields, and
-/// D-RANGETYPE1/D-DIST1 distinct-type constructors. Consts/`comptime`
-/// bindings are pre-evaluated into `globals` from sema's own `ConstDef::ct`
-/// (I2: the exact value baked into the real build, not a re-derivation).
-fn collect_funcs_and_info<'a>(
-    bundle: &'a ProgramBundle,
-) -> (HashMap<String, &'a Func>, crate::Comptime::ProgramInfo<'a>) {
-    let mut funcs: HashMap<String, &Func> = HashMap::new();
-    let mut info = crate::Comptime::ProgramInfo::empty();
-    for module in &bundle.modules {
-        walk_items_for_interp(&module.items, &mut funcs, &mut info);
-    }
-    // D-SELIMPORT1=A: `use mod.item as alias` for a *local* code module (not
-    // `core`/`jet`) — the bare-name fallback above already covers an
-    // unaliased `use mod.item`.
-    for module in &bundle.modules {
-        for imp in &module.imports {
-            let crate::AST::ImportKind::Unqualified {
-                module_alias,
-                items,
-                ..
-            } = &imp.kind
-            else {
-                continue;
-            };
-            if module_alias == "core" || module_alias == "jet" {
-                continue;
-            }
-            for (orig, alias_opt) in items {
-                let Some(local) = alias_opt else { continue };
-                let qualified = format!("{}__{}", module_alias, orig);
-                if let Some(f) = funcs.get(qualified.as_str()).copied() {
-                    funcs.entry(local.clone()).or_insert(f);
-                }
-            }
-        }
-    }
-    // Core module aliases (`use core.math as math`, `use core.{sqrt}`),
-    // merged across every module the same way `funcs` already is — dev mode
-    // has no per-module scoping (see the doc comment on `collect_funcs`).
-    for module in &bundle.modules {
-        for imp in &module.imports {
-            if let Some(core_module) = imp.core_module_path() {
-                info.core_imports
-                    .entry(imp.import_alias())
-                    .or_insert(core_module);
-                continue;
-            }
-            if let crate::AST::ImportKind::Unqualified {
-                module_alias,
-                items,
-                ..
-            } = &imp.kind
-            {
-                if module_alias == "core" || module_alias == "jet" {
-                    for (orig, alias_opt) in items {
-                        let local = alias_opt.clone().unwrap_or_else(|| orig.clone());
-                        let full = format!("core.{}", orig);
-                        if crate::Syntax::is_known_core_module(&full) {
-                            info.core_imports.entry(local).or_insert(full);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    // Top-level `const`/`comptime` bindings: sema already evaluated every
-    // `comptime name = …` into `ConstDef::ct` while checking the program (the
-    // caller of `run_checked` guarantees the front end already ran) — reuse
-    // that value rather than re-evaluating, so a `jet dev` run of the const
-    // matches the real build bit-for-bit (I2).
-    for module in &bundle.modules {
-        for item in &module.items {
-            if let Item::Const(c) = item {
-                if let Some(v) = &c.ct {
-                    info.globals
-                        .entry(c.name.clone())
-                        .or_insert_with(|| v.clone());
-                }
-            }
-        }
-    }
-    (funcs, info)
-}
-
-/// One item-list pass for [`collect_funcs_and_info`]: top-level functions,
-/// `impl`/in-struct instance methods, computed fields, distinct-type
-/// constructors, and one level of D-MOD2 inline/generic-instantiated code
-/// modules (their own `Item::Func`s only — module-in-module nesting isn't a
-/// shape any current example produces, so it isn't walked recursively).
-fn walk_items_for_interp<'a>(
-    items: &'a [Item],
-    funcs: &mut HashMap<String, &'a Func>,
-    info: &mut crate::Comptime::ProgramInfo<'a>,
-) {
-    for item in items {
-        match item {
-            Item::Func(f) => {
-                funcs.entry(f.name.clone()).or_insert(f);
-            }
-            Item::Impl(i) => {
-                for m in &i.methods {
-                    info.methods
-                        .entry((i.type_name.clone(), m.name.clone()))
-                        .or_insert(m);
-                }
-            }
-            Item::Struct(s) => {
-                info.structs.entry(s.name.clone()).or_insert(s);
-                for m in &s.methods {
-                    info.methods
-                        .entry((s.name.clone(), m.name.clone()))
-                        .or_insert(m);
-                }
-                for blk in &s.trait_impls {
-                    for m in &blk.methods {
-                        info.methods
-                            .entry((s.name.clone(), m.name.clone()))
-                            .or_insert(m);
-                    }
-                }
-                for field in &s.fields {
-                    if let Some(expr) = &field.computed {
-                        info.computed_fields
-                            .entry((s.name.clone(), field.name.clone()))
-                            .or_insert(expr.as_ref());
-                    }
-                }
-            }
-            Item::Enum(e) => {
-                for m in &e.methods {
-                    info.methods
-                        .entry((e.name.clone(), m.name.clone()))
-                        .or_insert(m);
-                }
-                for blk in &e.trait_impls {
-                    for m in &blk.methods {
-                        info.methods
-                            .entry((e.name.clone(), m.name.clone()))
-                            .or_insert(m);
-                    }
-                }
-            }
-            Item::Distinct(d) => {
-                info.distinct_ranges
-                    .entry(d.name.clone())
-                    .or_insert(d.range.map(|(lo, hi, _)| (lo, hi)));
-                info.distinct_bases
-                    .entry(d.name.clone())
-                    .or_insert_with(|| d.base.clone());
-            }
-            // Card #392 pass 5: `migration TypeName { … }` blocks, for
-            // `decode_traced<T>`'s runtime chain-walker (`Interp::migrations`).
-            Item::Migration(m) => {
-                info.migrations.entry(m.type_name.clone()).or_default().push(m);
-            }
-            Item::UnitFamily(uf) => {
-                for d in uf.distinct_defs() {
-                    info.distinct_ranges
-                        .entry(d.name.clone())
-                        .or_insert(d.range.map(|(lo, hi, _)| (lo, hi)));
-                    info.distinct_bases
-                        .entry(d.name.clone())
-                        .or_insert(d.base);
-                }
-            }
-            Item::CodeModule(cm) => {
-                if let Some(body) = &cm.body {
-                    for it in body {
-                        if let Item::Func(f) = it {
-                            funcs.entry(format!("{}__{}", cm.name, f.name)).or_insert(f);
-                            // Bare-name fallback: a private sibling call inside
-                            // the module, or an unaliased `use mod.item`
-                            // selective import — see `collect_funcs_and_info`.
-                            funcs.entry(f.name.clone()).or_insert(f);
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 /// Run a *checked* bundle in the interpreter (E2-M4). The caller has already
 /// run the front end and confirmed there are no errors. `try_anyway` (D-DEV1)
 /// skips the E2201 boundary scan and attempts execution with no guarantees.
 pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
+    crate::boot_tir_eval();
     if !try_anyway {
         if let Some(diagnostic) = jet_driver::InterpreterBoundary::dev_boundary_scan(bundle) {
             return RunOutcome::Problems(vec![diagnostic]);
         }
     }
-    let (funcs, program) = collect_funcs_and_info(bundle);
-    let main = match selected_entry(bundle, &funcs) {
-        Some(f) => f,
-        None => {
-            return RunOutcome::Problems(vec![Diagnostic::error(
-                "E2201",
-                "`jet dev` needs a `run` function to run".to_string(),
-                "`jet dev` runs a program; a library with no `run` has nothing to execute"
-                    .to_string(),
-                "add `fn run() { … }`, or use `jet check <file>` to look for problems without running"
-                    .to_string(),
-                None,
-            )]);
-        }
-    };
-    let base_dir = &bundle.project_root;
     let mut sink = crate::Comptime::DevSink::new();
-    match crate::Comptime::run_main(main, &funcs, base_dir, &mut sink, &program) {
+    match crate::Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
         Ok(crate::Comptime::CtValue::ResErr(error)) => {
             sink.stderr.push_str(&error.jet_show());
             sink.stderr.push('\n');
@@ -356,13 +151,15 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
 /// fns pulled from this same checked bundle, so a missing name here is an
 /// internal-tooling mismatch, not a source error.
 pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> RunOutcome {
+    crate::boot_tir_eval();
     if !try_anyway {
         if let Some(diagnostic) = jet_driver::InterpreterBoundary::dev_boundary_scan(bundle) {
             return RunOutcome::Problems(vec![diagnostic]);
         }
     }
-    let (funcs, program) = collect_funcs_and_info(bundle);
-    let Some(task_fn) = funcs.get(name) else {
+    // Tasks share the same TIR program; re-entry is by temporarily selecting
+    // the named function as the program entry via a lowered copy.
+    let Some(mut program) = crate::Codegen::TIR::lower_interp_program(bundle) else {
         return RunOutcome::Problems(vec![Diagnostic::error(
             "E2201",
             format!("`{name}` isn't a task in this file"),
@@ -373,9 +170,62 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
             None,
         )]);
     };
-    let base_dir = &bundle.project_root;
+    if !program.funcs.iter().any(|f| f.name == name) {
+        return RunOutcome::Problems(vec![Diagnostic::error(
+            "E2201",
+            format!("`{name}` isn't a task in this file"),
+            "the dev loop's due-task tick looks up the task by name in the checked bundle."
+                .to_string(),
+            "this is an internal-tooling mismatch, not a source error — please report it."
+                .to_string(),
+            None,
+        )]);
+    }
+    program.entry = name.to_string();
     let mut sink = crate::Comptime::DevSink::new();
-    match crate::Comptime::run_main(task_fn, &funcs, base_dir, &mut sink, &program) {
+    let mut globals = std::collections::HashMap::new();
+    let mut core_imports = std::collections::HashMap::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let Item::Const(c) = item {
+                if let Some(v) = &c.ct {
+                    globals.entry(c.name.clone()).or_insert_with(|| v.clone());
+                }
+            }
+        }
+        for imp in &module.imports {
+            if let Some(core_module) = imp.core_module_path() {
+                core_imports
+                    .entry(imp.import_alias())
+                    .or_insert(core_module);
+            }
+        }
+    }
+    match crate::Codegen::TIR::run_program_with_structs(
+        &program,
+        &bundle.project_root,
+        &mut sink,
+        globals,
+        &core_imports,
+        true,
+        {
+            let mut fields = std::collections::HashMap::new();
+            for module in &bundle.modules {
+                for item in &module.items {
+                    if let Item::Struct(s) = item {
+                        fields.insert(
+                            s.name.clone(),
+                            s.fields
+                                .iter()
+                                .map(|f| (f.name.clone(), f.redact))
+                                .collect(),
+                        );
+                    }
+                }
+            }
+            fields
+        },
+    ) {
         Ok(crate::Comptime::CtValue::ResErr(error)) => {
             sink.stderr.push_str(&error.jet_show());
             sink.stderr.push('\n');

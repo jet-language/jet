@@ -880,6 +880,9 @@ fn is_executable(p: &Path) -> bool {
 }
 
 fn main() {
+    // Process-wide: any derive/comptime path may hit TirBridge before Loader.
+    jet::boot_tir_eval();
+
     let mut raw: Vec<String> = std::env::args().skip(1).collect();
 
     // c6vz465: bare `jet` starts the REPL (D-REPL4); `jet ?` is help sugar.

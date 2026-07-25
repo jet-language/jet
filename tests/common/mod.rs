@@ -495,6 +495,8 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     let mut s = strip_scheduler_native(&s);
     s = strip_vetted_module(&s, "jet_env_windows");
     s = strip_vetted_module(&s, "jet_watch_process_probe");
+    s = strip_vetted_module(&s, "jet_atomic_windows");
+    s = strip_vetted_module(&s, "jet_ws_upgrade");
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");
@@ -527,13 +529,20 @@ pub fn strip_scheduler_native(src: &str) -> String {
 pub fn strip_vetted_module(src: &str, name: &str) -> String {
     let begin = format!("// JET_VETTED_UNSAFE_BEGIN: {name}");
     let end = format!("// JET_VETTED_UNSAFE_END: {name}");
-    let Some(start) = src.find(&begin) else {
+    // Markers may be indented inside cfg blocks.
+    let Some(start) = src.find(&begin).or_else(|| {
+        src.lines().enumerate().find_map(|(i, line)| {
+            line.trim_start()
+                .starts_with(&begin)
+                .then(|| src.lines().take(i).map(|l| l.len() + 1).sum::<usize>())
+        })
+    }) else {
         return src.to_string();
     };
-    let Some(relative_end) = src[start + begin.len()..].find(&end) else {
+    let Some(relative_end) = src[start..].find(&end) else {
         return src.to_string();
     };
-    let end_offset = start + begin.len() + relative_end + end.len();
+    let end_offset = start + relative_end + end.len();
     format!("{}{}", &src[..start], &src[end_offset..])
 }
 

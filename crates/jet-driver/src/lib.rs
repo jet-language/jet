@@ -5,6 +5,13 @@ pub use jet_codegen::{
     CanonicalAST, Codegen, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser,
     Sema, Syntax, TargetProfile, Traits, AST, SHA256,
 };
+
+/// Install the canonical TIR evaluator into comptime/REPL/dev entry points.
+#[inline]
+pub fn boot_tir_eval() {
+    Codegen::TIR::install_comptime_bridge();
+}
+
 pub mod Compile;
 pub mod BudgetView;
 pub mod Driver;

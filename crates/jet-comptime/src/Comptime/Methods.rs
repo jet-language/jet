@@ -10,6 +10,9 @@ mod core_calls;
 mod pool;
 
 pub(super) use core_calls::{apply_core_pure_method, as_float, as_string};
+/// Public host entry for the TIR evaluator (#777).
+pub use core_calls::apply_core_call;
+pub use dispatch::apply_dollar_splices;
 
 #[cfg(test)]
 mod structure_tests {

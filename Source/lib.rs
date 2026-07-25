@@ -16,6 +16,7 @@
 pub use jet_driver::{
     // Top-level re-exports from Compile module:
     bundle_uses_unsafe,
+    boot_tir_eval,
     AdaBind,
     CBind,
     CppBind,

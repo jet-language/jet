@@ -1787,6 +1787,7 @@ fn compile_src_with_options_and_policy(
     options: CompileSrcOptions,
     generated: bool,
 ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
+    crate::boot_tir_eval();
     let (toks, lex_diags) = if generated {
         crate::Lexer::lex_generated(src)
     } else {

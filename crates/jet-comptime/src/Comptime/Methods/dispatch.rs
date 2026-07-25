@@ -491,7 +491,7 @@ fn class_matches(class: &[char], needle: char) -> bool {
 
 /// D-CTMARKER1=C: substitute `$name` splices in a string using values from the
 /// comptime scope. Unknown names are left as-is (`$unknown`). Used by `emit(…)`.
-fn apply_dollar_splices(s: &str, scope: &HashMap<String, CtValue>) -> String {
+pub fn apply_dollar_splices(s: &str, scope: &HashMap<String, CtValue>) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {

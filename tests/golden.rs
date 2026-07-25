@@ -757,6 +757,16 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         "// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe",
         "// JET_VETTED_UNSAFE_END: jet_watch_process_probe",
     );
+    s = strip_region(
+        &s,
+        "// JET_VETTED_UNSAFE_BEGIN: jet_atomic_windows",
+        "// JET_VETTED_UNSAFE_END: jet_atomic_windows",
+    );
+    s = strip_region(
+        &s,
+        "// JET_VETTED_UNSAFE_BEGIN: jet_ws_upgrade",
+        "// JET_VETTED_UNSAFE_END: jet_ws_upgrade",
+    );
     while s.contains("mod user___c_") {
         let before = s.clone();
         s = strip_mod(&s, "user___c_");

@@ -933,3 +933,4 @@ fn compile_and_run(src: &str) -> String {
     assert!(run.status.success(), "fixture panicked at runtime");
     String::from_utf8(run.stdout).unwrap()
 }
+

@@ -52,7 +52,7 @@ pub(crate) struct LowerEnv {
 
 impl LowerEnv {
     /// A fresh root env for a function/method body.
-    pub(super) fn new(fn_name: String) -> LowerEnv {
+    pub(crate) fn new(fn_name: String) -> LowerEnv {
         LowerEnv {
             locals: HashMap::new(),
             fn_name,
@@ -104,7 +104,7 @@ impl LowerEnv {
     /// Bind `name` to its resolved Rust place + type. The same lexical map drives
     /// expression resolution and rich-panic locals, so an out-of-scope branch binding
     /// can never be captured in generated Rust.
-    pub(super) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
+    pub(crate) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
         self.locals.insert(name.to_string(), (slot, ty));
     }
     /// The structured slot for `name`. This is the single fact every engine

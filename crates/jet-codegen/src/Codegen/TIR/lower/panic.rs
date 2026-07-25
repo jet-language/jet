@@ -36,6 +36,10 @@ pub(crate) fn fork_panic(env: &LowerEnv) -> LowerEnv {
 }
 
 pub(crate) fn tir_src_line_at(src: &str, offset: usize) -> (&str, u32, u32) {
+    if src.is_empty() {
+        return ("", 1, 1);
+    }
+    let offset = offset.min(src.len());
     let (line, col) = crate::Diagnostics::span_line_col(src, offset);
     let line_start = src[..offset].rfind('\n').map(|p| p + 1).unwrap_or(0);
     let line_end = src[offset..]
