@@ -204,7 +204,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             // integer expressions; the loop var `i` is an Int local in the body.
             // The two-binding `key, value` form is map iteration (a collection),
             // outside this phase.
-            ForKind::Range { start, end, step } if var2.is_none() => {
+            ForKind::Range { start, end, step, exclusive: _ } if var2.is_none() => {
                 if !expr_in_subset(start, cx, locals) || !expr_in_subset(end, cx, locals) {
                     return false;
                 }

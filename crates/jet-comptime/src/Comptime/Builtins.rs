@@ -863,7 +863,7 @@ pub fn apply_method(
                 ],
             })
         }
-        (CtValue::List(xs), "enumerate") => Ok(CtValue::List(
+        (CtValue::List(xs), "indexed") => Ok(CtValue::List(
             xs.iter()
                 .enumerate()
                 .map(|(idx, item)| CtValue::Struct {
@@ -874,6 +874,9 @@ pub fn apply_method(
                     ],
                 })
                 .collect(),
+        )),
+        (CtValue::List(xs), "indexes") => Ok(CtValue::List(
+            (0..xs.len() as i64).map(CtValue::Int).collect(),
         )),
         (CtValue::List(xs), "zip") => {
             let CtValue::List(other) = args.into_iter().next().unwrap_or(CtValue::Unit) else {

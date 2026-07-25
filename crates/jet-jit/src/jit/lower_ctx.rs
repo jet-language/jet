@@ -3350,7 +3350,7 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::Windows => {
                 self.lower_iter_adapter(self.host.coll.iter_windows, recv_val, Some(&args[0]), None)
             }
-            TBuiltinOp::Enumerate { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Indexed { .. } | TBuiltinOp::Indexes => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Zip { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::OptionZip { tuple_struct, elem_ty } => {
                 let other = args

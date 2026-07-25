@@ -156,7 +156,7 @@ the same model.
 
 | Type | Constructors | Main methods |
 | --- | --- | --- |
-| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`, `enumerate`, `zip`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `group_by`, `count_by`, `partition`, `flatten`, `intersperse` |
+| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`, `indexed`, `indexes`, `zip`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `group_by`, `count_by`, `partition`, `flatten`, `intersperse` |
 | `[K: V]` | map literal `["a": 1]` | `keys`, `values`, `has_key`, `get`, `add`, `add_new`, `remove`, `len`, `is_empty`, `clear` |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `to_list`, `len`, `is_empty`, `clear` |
 | `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `to_list`, `len`, `is_empty`, `clear` |

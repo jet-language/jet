@@ -34,7 +34,8 @@ pub(super) fn eval_sequence_method(
             | "chunks"
             | "count_by"
             | "dedup"
-            | "enumerate"
+            | "indexed"
+            | "indexes"
             | "filter_map"
             | "first"
             | "flat_map"
@@ -146,13 +147,18 @@ fn eval(
             }
             CtValue::List(out)
         }
-        ("enumerate", []) => CtValue::List(
+        ("indexed", []) => CtValue::List(
             xs.iter()
                 .enumerate()
                 .map(|(idx, item)| tuple(vec![
                     ("idx", CtValue::Int(idx as i64)),
                     ("item", item.clone()),
                 ]))
+                .collect(),
+        ),
+        ("indexes", []) => CtValue::List(
+            (0..xs.len())
+                .map(|idx| CtValue::Int(idx as i64))
                 .collect(),
         ),
         ("filter_map", [f]) => {

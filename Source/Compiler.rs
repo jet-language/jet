@@ -408,6 +408,7 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::Eq => "operator.assign",
         TokKind::Dot => "punctuation.dot",
         TokKind::DotDot => "operator.range",
+        TokKind::DotDotLt => "operator.range_exclusive",
         TokKind::DotDotDot => "operator.spread",
         TokKind::At => "punctuation.at",
         TokKind::Question => "operator.try",

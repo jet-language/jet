@@ -98,6 +98,8 @@ pub enum TokKind {
     Eq,
     Dot,
     DotDot,
+    /// D-RANGE-EXCL1=C: `..<` exclusive / half-open range in loop headers.
+    DotDotLt,
     /// D-VARIADIC1: `...` spread/rest sigil — variadic params, call spread, list spread.
     DotDotDot,
     At,
@@ -245,6 +247,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Eq => "`=`".to_string(),
         TokKind::Dot => "`.`".to_string(),
         TokKind::DotDot => "`..`".to_string(),
+        TokKind::DotDotLt => "`..<`".to_string(),
         TokKind::DotDotDot => "`...`".to_string(),
         TokKind::At => "`@`".to_string(),
         TokKind::Question => "`?`".to_string(),

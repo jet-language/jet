@@ -189,7 +189,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
             for a in args {
                 collect_tuple_shapes_from_expr(&a.expr, out);
             }
-            // D-ITER1: enumerate/zip/partition return named-tuple types. Sema stores
+            // D-ITER1: indexed/zip/partition return named-tuple types. Sema stores
             // the resolved return type in `resolved_ret`; collect any tuple shapes
             // it contains so the JetTup_ struct declarations are emitted.
             if let Some(ty) = resolved_ret {
@@ -312,7 +312,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
         }
         Stmt::For { kind, body, .. } => {
             match kind {
-                ForKind::Range { start, end, step } => {
+                ForKind::Range { start, end, step, exclusive: _ } => {
                     collect_tuple_shapes_from_expr(start, out);
                     collect_tuple_shapes_from_expr(end, out);
                     if let Some(s) = step {

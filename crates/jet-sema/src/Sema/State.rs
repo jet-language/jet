@@ -315,7 +315,7 @@ impl<'a> StateCtx<'a> {
                 self.check_block(body);
             }
             Stmt::For { kind, body, .. } => {
-                if let crate::AST::ForKind::Range { start, end, step } = kind {
+                if let crate::AST::ForKind::Range { start, end, step, exclusive: _ } = kind {
                     self.check_expr(start);
                     self.check_expr(end);
                     if let Some(s) = step {

@@ -622,7 +622,7 @@ fn collect_mmio_for_kind(
     out: &mut Vec<crate::TargetProfile::MmioAccess>,
 ) {
     match kind {
-        crate::AST::ForKind::Range { start, end, step } => {
+        crate::AST::ForKind::Range { start, end, step, exclusive: _ } => {
             collect_mmio_expr(start, core_aliases, ptrs, unsafe_reason, out);
             collect_mmio_expr(end, core_aliases, ptrs, unsafe_reason, out);
             if let Some(step) = step {

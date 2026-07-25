@@ -37,6 +37,40 @@ fn run() {
     assert_eq!(stdout, "10\n[20, 30]\n100\n");
 }
 
+/// D-RANGE-EXCL1=C: two-binding yields index then item; `indexes` is always in bounds.
+#[test]
+fn list_two_binding_and_indexes() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    xs := [10, 20, 30]
+    loop i, v; xs {
+        print(\"{i}:{v}\")
+    }
+    loop i; xs.indexes() {
+        print(i)
+    }
+    empty := [Int].{}
+    count := 0
+    loop i; empty.indexes() {
+        count = (count + 1)
+    }
+    print(count)
+    loop pair; xs.indexed() {
+        print(\"{pair.idx}:{pair.item}\")
+    }
+}
+";
+    let (code, stdout) = build_and_run("tir_list_index_idioms", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "0:10\n1:20\n2:30\n0\n1\n2\n0\n0:10\n1:20\n2:30\n"
+    );
+}
+
 /// Indexed assignment into a list (`xs[i] = v`) — the `LValue::Index` vec form.
 #[test]
 fn list_index_assignment() {

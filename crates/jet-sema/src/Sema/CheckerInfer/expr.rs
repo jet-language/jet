@@ -1221,6 +1221,34 @@ impl<'a> Checker<'a> {
                     unreachable!("matched Field above")
                 };
                 let member = member.clone();
+                // D-RANGE-EXCL1=C: bare `xs.indexes` is the ratified noun form
+                // (Swift `.indices` style). Rewrite to the zero-arg method so
+                // TIR/codegen reuse the existing member path; `indexes()` also
+                // remains valid.
+                if member == "indexes" {
+                    self.borrow_ctx = true;
+                    let base_ty = self.infer(inner)?;
+                    let is_seq = matches!(
+                        &base_ty,
+                        Type::List(_) | Type::FixedList { .. }
+                    ) || matches!(&base_ty, Type::Apply { name, .. } if name == "Iter");
+                    if is_seq {
+                        let receiver = std::mem::replace(
+                            inner,
+                            Box::new(Expr::Ident(String::new(), span)),
+                        );
+                        *e = Expr::MethodCall {
+                            receiver,
+                            method: "indexes".to_string(),
+                            method_span: span,
+                            type_args: Vec::new(),
+                            args: Vec::new(),
+                            recv_type: None,
+                            resolved_ret: None,
+                        };
+                        return self.infer(e);
+                    }
+                }
                 self.infer_field(inner, &member, span)
             }
             Expr::OptField {

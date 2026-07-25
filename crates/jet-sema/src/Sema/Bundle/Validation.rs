@@ -474,7 +474,7 @@ pub(crate) fn collect_core_stmts(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end, step } => {
+                    ForKind::Range { start, end, step, exclusive: _ } => {
                         collect_core_expr(start, imports, used, spans, ffi_cb);
                         collect_core_expr(end, imports, used, spans, ffi_cb);
                         if let Some(step) = step {

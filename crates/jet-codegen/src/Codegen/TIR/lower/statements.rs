@@ -1076,7 +1076,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             label,
             ..
         } => match kind {
-            ForKind::Range { start, end, step } => {
+            ForKind::Range { start, end, step, exclusive } => {
                 let start = lower_expr(start, cx, env);
                 let end = lower_expr(end, cx, env);
                 let step = step.as_ref().map(|s| lower_expr(s, cx, env));
@@ -1091,6 +1091,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     start,
                     end,
                     step,
+                    exclusive: *exclusive,
                     body: lowered_body,
                 }
             }
@@ -1154,15 +1155,26 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 let mut branch = clone_env(env);
                 branch.bind(var, TLocal::user(var), coll_elem_ty.clone());
                 if let Some((v2, _)) = var2 {
-                    // Two-binding map form: v2 gets the value type.
-                    let v2_ty = match &lowered_coll.ty {
-                        Type::Map { value, .. } => Some((**value).clone()),
-                        _ => None,
-                    };
-                    if let Type::Map { key, .. } = &lowered_coll.ty {
-                        branch.bind(var, TLocal::user(var), Some((**key).clone()));
+                    // Two-binding: map → key/value; sequence → index/item (D-RANGE-EXCL1=C).
+                    match &lowered_coll.ty {
+                        Type::Map { key, value, .. } => {
+                            branch.bind(var, TLocal::user(var), Some((**key).clone()));
+                            branch.bind(v2, TLocal::user(v2), Some((**value).clone()));
+                        }
+                        Type::List(inner) | Type::FixedList { elem: inner, .. } => {
+                            branch.bind(var, TLocal::user(var), Some(Type::Int));
+                            branch.bind(v2, TLocal::user(v2), Some((**inner).clone()));
+                        }
+                        Type::Apply { name, args }
+                            if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+                        {
+                            branch.bind(var, TLocal::user(var), Some(Type::Int));
+                            branch.bind(v2, TLocal::user(v2), Some(args[0].clone()));
+                        }
+                        _ => {
+                            branch.bind(v2, TLocal::user(v2), None);
+                        }
                     }
-                    branch.bind(v2, TLocal::user(v2), v2_ty);
                 }
                 // D-SOA1: a single-binding loop over a columnar list iterates the
                 // gathered AoS view (`iter_aos`), not `Vec::iter` (which the columns

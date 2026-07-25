@@ -1667,7 +1667,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
                 });
             }
             match kind {
-                AST::ForKind::Range { start, end, step } => {
+                AST::ForKind::Range { start, end, step, exclusive: _ } => {
                     structural_slot(ctx, "range_start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
                     structural_slot(ctx, "range_end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
                     if let Some(step) = step {

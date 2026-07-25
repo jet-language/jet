@@ -229,7 +229,7 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
                 snake(var, *var_span, "local", out);
                 if let Some((name, span)) = var2 { snake(name, *span, "local", out); }
                 match kind {
-                    ForKind::Range { start, end, step } => {
+                    ForKind::Range { start, end, step, exclusive: _ } => {
                         expr_names(start, out); expr_names(end, out);
                         if let Some(step) = step { expr_names(step, out); }
                     }

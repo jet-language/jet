@@ -1808,7 +1808,7 @@ the binding is rejected (**E0804**). Calling a non-function → **E0803**.
 `scan(init, f)`, `fold(init, f)`, `position(f)`, `min_by(f)`, `max_by(f)`, `group_by(f)`,
 `partition(f)` on `[T]`. No new grammar — all are library methods on the iterator
 protocol (D-EXT1 Tier 1). `take` is accepted in dot-method position even though `take`
-is also the lambda-capture keyword. `enumerate()` and `zip(other)` return named tuples
+is also the lambda-capture keyword. `indexed()` and `zip(other)` return named tuples
 `(idx: Int, item: T)` and `(a: T, b: U)` respectively; `partition(f)` returns
 `(false_: [T], true_: [T])`. All lazy (evaluated at call site, allocation deferred to
 result use).
