@@ -2187,6 +2187,9 @@ pub(crate) fn lower_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
+        Expr::TypedLit { .. } => {
+            panic!("ICE: TypedLit must be elaborated in sema before TIR lowering");
+        }
         Expr::Paren(inner, _) => lower_expr(inner, cx, env),
         Expr::PatternTest {
             subject, pattern, ..

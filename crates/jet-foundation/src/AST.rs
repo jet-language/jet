@@ -52,7 +52,7 @@ pub use lvalues::{Binding, ForKind, GcPromotion, GcPromotionEdge, IndexKind, LVa
 mod expressions;
 pub use expressions::{
     Call, CallArgFlags, CallArg, BinOp, UnOp, IncDecOp, StrFormat, StrPart, LambdaParam,
-    LambdaBody, LambdaMeta, Lambda, PlaceAccess, Expr,
+    LambdaBody, LambdaMeta, Lambda, PlaceAccess, Expr, TypedLitBody,
 };
 
 #[path = "AST/comptime.rs"]

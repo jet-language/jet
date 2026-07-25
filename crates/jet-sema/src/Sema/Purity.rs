@@ -481,6 +481,15 @@ fn check_pure_expr_with_path(
             }
             None
         }
+        Expr::TypedLit { body, .. } => {
+            let mut found = None;
+            body.for_each_expr(|v| {
+                if found.is_none() {
+                    found = rec!(v);
+                }
+            });
+            found
+        }
         Expr::EnumLit { args, .. } => {
             for arg in args {
                 let expr = match arg {
@@ -1015,6 +1024,13 @@ fn walk_expr_for_calls(
                     return;
                 }
             }
+        }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr(|v| {
+                if diags.is_empty() {
+                    walk_expr_for_calls(v, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                }
+            });
         }
         Expr::EnumLit { args, .. } => {
             for arg in args {

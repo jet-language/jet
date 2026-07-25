@@ -274,6 +274,7 @@ fn collect_expr_operations(expression: &Expr, out: &mut Vec<(&'static str, Span,
         Expr::Slice { base, start, end, .. } => { collect_expr_operations(base, out); collect_expr_operations(start, out); collect_expr_operations(end, out); }
         Expr::Unary(_, inner, _) | Expr::Copy(inner, _) | Expr::Place(inner, _, _) | Expr::Field(inner, _, _) | Expr::OptField { base: inner, .. } | Expr::Paren(inner, _) | Expr::Spread(inner, _) => collect_expr_operations(inner, out),
         Expr::StructLit { fields, .. } => for (_, _, value) in fields { collect_expr_operations(value, out); },
+        Expr::TypedLit { body, .. } => body.for_each_expr(|value| collect_expr_operations(value, out)),
         Expr::EnumLit { args, .. } => for argument in args { match argument { EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => collect_expr_operations(value, out) } },
         Expr::MapLit(entries, _) => for (key, value) in entries { collect_expr_operations(key, out); collect_expr_operations(value, out); },
         Expr::TupleLit(fields, _, _) => for (_, value) in fields { collect_expr_operations(value, out); },

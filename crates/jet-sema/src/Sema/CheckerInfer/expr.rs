@@ -8,7 +8,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::Sema::Diagnostics::soft_public_use;
 use crate::AST::{
-    AccessConvention, Call, CallArg, EnumLitArg, Expr, IndexKind, StrPart, Type, UnOp,
+    AccessConvention, Call, CallArg, EnumLitArg, Expr, IndexKind, StrPart, Type, TypedLitBody, UnOp,
 };
 use std::collections::HashSet;
 
@@ -326,7 +326,8 @@ impl<'a> Checker<'a> {
                     key,
                     key_span,
                     value,
-                }) = self.expected_type.clone() {
+                }) = self.expected_type.clone()
+                {
                     let span = *span;
                     *e = Expr::MapLit(Vec::new(), span);
                     return Some(Type::Map {
@@ -336,6 +337,12 @@ impl<'a> Checker<'a> {
                     });
                 }
             }
+        }
+
+        // D-DOTCTOR3=A: `Type.{ body }` elaborates against the head like an
+        // expected-type position, then rewrites to the ordinary literal shape.
+        if matches!(e, Expr::TypedLit { .. }) {
+            return self.elaborate_typed_lit(e);
         }
         match e {
             // S68 (D-SG2): `if` in expression position. Condition is Bool; each
@@ -1559,6 +1566,136 @@ impl<'a> Checker<'a> {
                 postfix,
                 span,
             } => self.check_incdec(*op, operand, *postfix, *span),
+            Expr::TypedLit { .. } => unreachable!("TypedLit elaborated before match"),
+        }
+    }
+
+    /// D-DOTCTOR3=A: elaborate `Type.{ body }` / inferred `.{ body }` against the
+    /// head (or expected type), rewrite to ListLit / MapLit / StructLit / value,
+    /// then re-infer. Never inserts a conversion.
+    pub(crate) fn elaborate_typed_lit(&mut self, e: &mut Expr) -> Option<Type> {
+        let Expr::TypedLit { head, body, span } = std::mem::replace(e, Expr::Absent(Span::new(0, 0)))
+        else {
+            unreachable!("elaborate_typed_lit only for TypedLit");
+        };
+        let span = span;
+        let head = match head.or_else(|| self.expected_type.clone()) {
+            Some(h) => h,
+            None => {
+                *e = Expr::TypedLit {
+                    head: None,
+                    body,
+                    span,
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    "`.{ … }` needs a known type here".to_string(),
+                    "an inferred typed literal needs an expected type from the surrounding context"
+                        .to_string(),
+                    "add a type head, e.g. `[U8].{ 1, 2 }`, or annotate the binding".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        };
+
+        match (head.clone(), body) {
+            (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
+                *e = Expr::ListLit(Vec::new(), span);
+            }
+            (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Elements(elems)) => {
+                *e = Expr::ListLit(elems, span);
+            }
+            (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Value(inner)) => {
+                *e = Expr::ListLit(vec![*inner], span);
+            }
+            (Type::Map { .. }, TypedLitBody::Empty) => {
+                *e = Expr::MapLit(Vec::new(), span);
+            }
+            (Type::Map { .. }, TypedLitBody::Entries(entries)) => {
+                *e = Expr::MapLit(entries, span);
+            }
+            (Type::Named(name), TypedLitBody::Fields(fields)) => {
+                *e = Expr::StructLit {
+                    type_name: name,
+                    type_args: Vec::new(),
+                    import_ns: None,
+                    as_trait: None,
+                    fields,
+                    inferred: false,
+                    span,
+                };
+            }
+            (Type::Apply { name, args }, TypedLitBody::Fields(fields)) => {
+                *e = Expr::StructLit {
+                    type_name: name,
+                    type_args: args,
+                    import_ns: None,
+                    as_trait: None,
+                    fields,
+                    inferred: false,
+                    span,
+                };
+            }
+            (Type::Named(name), TypedLitBody::Empty) => {
+                *e = Expr::StructLit {
+                    type_name: name,
+                    type_args: Vec::new(),
+                    import_ns: None,
+                    as_trait: None,
+                    fields: Vec::new(),
+                    inferred: false,
+                    span,
+                };
+            }
+            (Type::Apply { name, args }, TypedLitBody::Empty) => {
+                *e = Expr::StructLit {
+                    type_name: name,
+                    type_args: args,
+                    import_ns: None,
+                    as_trait: None,
+                    fields: Vec::new(),
+                    inferred: false,
+                    span,
+                };
+            }
+            (_, TypedLitBody::Value(inner)) => {
+                *e = *inner;
+            }
+            (_, TypedLitBody::Elements(elems)) if elems.len() == 1 => {
+                *e = elems.into_iter().next().unwrap();
+            }
+            (_, body) => {
+                *e = Expr::TypedLit {
+                    head: Some(head.clone()),
+                    body,
+                    span,
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    format!("this body doesn't match typed-literal head `{}`", head.name()),
+                    "a typed literal body uses the head type's own literal shape".to_string(),
+                    "use elements for lists, entries for maps, fields for records, or one expression for scalars"
+                        .to_string(),
+                    Some(span),
+                ));
+                return Some(head);
+            }
+        }
+
+        let saved = self.expected_type.replace(head.clone());
+        let ty = self.infer(e);
+        self.expected_type = saved;
+        // Head wins as the expression's type when inference produced something
+        // assignable; mismatches already diagnosed by infer/check_type_assignable.
+        match ty {
+            Some(got) => {
+                if got != head {
+                    self.check_type_assignable(&head, &got, e.span());
+                }
+                Some(head)
+            }
+            None => Some(head),
         }
     }
 
@@ -1672,20 +1809,52 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Type::List(expected_inner));
             }
-            // D-SG9: a list expected at a fixed width (`[U8]`, `[I32]`) elaborates
-            // each element to that width and range-checks it, so `[1, 2, 255]` is a
-            // `[U8]`. This is what binary/byte APIs (and `embed_bytes`, c75) need.
-            if matches!(expected_inner.as_ref(), Type::IntN { .. } | Type::Float32) {
-                let saved = self.expected_type.clone();
-                self.expected_type = Some(expected_inner.as_ref().clone());
-                for e in elems.iter_mut() {
-                    if let Some(t) = self.infer(e) {
-                        self.check_type_assignable(&expected_inner, &t, e.span());
+            // D-DOTCTOR2/3 + D-SG9: any expected element type elaborates each
+            // list element against it (nested `[U8]` lists, struct `.{}` forms,
+            // and fixed-width scalars with range checks).
+            let saved = self.expected_type.clone();
+            self.expected_type = Some(expected_inner.as_ref().clone());
+            for e in elems.iter_mut() {
+                match e {
+                    Expr::Spread(inner, spread_span) => {
+                        let t = self.infer(inner);
+                        match t {
+                            Some(Type::List(spread_elem)) => {
+                                self.check_type_assignable(&expected_inner, &spread_elem, *spread_span);
+                            }
+                            Some(other) => {
+                                self.diags.push(Diagnostic::error(
+                                    "E1311",
+                                    format!("spread needs a list, not `{}`", other.name()),
+                                    "list spread `[...xs, y]` expands a list's elements in place"
+                                        .to_string(),
+                                    "spread a `[T]` value here".to_string(),
+                                    Some(*spread_span),
+                                ));
+                            }
+                            None => {}
+                        }
+                    }
+                    _ => {
+                        if let Some(t) = self.infer(e) {
+                            if self.type_contains_view_boundary(&t) {
+                                self.diags.push(Diagnostic::error(
+                                    "E2305",
+                                    "a view cannot be stored in a list".to_string(),
+                                    "lists have no public owner-provenance slot, so moving the list could outlive the storage this element views"
+                                        .to_string(),
+                                    "store the view in a named struct field whose provenance sema can publish, or copy the viewed values into an owned list"
+                                        .to_string(),
+                                    Some(e.span()),
+                                ));
+                            }
+                            self.check_type_assignable(&expected_inner, &t, e.span());
+                        }
                     }
                 }
-                self.expected_type = saved;
-                return Some(Type::List(expected_inner));
             }
+            self.expected_type = saved;
+            return Some(Type::List(expected_inner));
         }
         let mut elem_types = Vec::new();
         for e in elems.iter_mut() {

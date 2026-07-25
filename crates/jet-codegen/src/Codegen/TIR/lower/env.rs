@@ -195,6 +195,15 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
         Expr::StructLit { fields, .. } => fields
             .iter()
             .any(|(_, _, value)| gc_expr_references_ident(value, name)),
+        Expr::TypedLit { body, .. } => {
+            let mut hit = false;
+            body.for_each_expr(|value| {
+                if gc_expr_references_ident(value, name) {
+                    hit = true;
+                }
+            });
+            hit
+        }
         Expr::TupleLit(fields, _, _) => fields
             .iter()
             .any(|(_, value)| gc_expr_references_ident(value, name)),

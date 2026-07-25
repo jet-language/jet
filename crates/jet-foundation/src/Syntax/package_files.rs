@@ -57,6 +57,11 @@ pub const JTOML_KEY_VERSION: &str = "version";
 /// enum variant — `.Variant.{ field: val }` / `Type.Variant.{ field: val }` (S30
 /// multi-field variants). No new token; `enum_lit_named_fields` in
 /// `Parser/Expressions.rs` reuses this `.{` adjacency after a leading-dot variant name.
+/// D-DOTCTOR3=A (ratified 2026-07-24): the same `Type.{ body }` head is universal —
+/// scalars (`U8.{ 250 }`), lists (`[U8].{ 1, 2 }`), fixed arrays (`[U8#3].{ … }`),
+/// maps (`[String: Int].{}`), and one-expression assertions (`Int.{ fetch_rows() }`).
+/// Body elaborates against the head; it never converts. Amends D-EMPTYLIT1:
+/// `[T].{}` is the explicit empty; bare `[]` stays contextual. No new token.
 pub const OP_NAMED_CTOR: &str = ".{";
 
 /// S75 (ratified 2026-06-16): the fan-out operator — `f.[a, b, c]` desugars to

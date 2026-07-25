@@ -670,6 +670,9 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
                 expr_uses(v, name, other);
             }
         }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr(|v| expr_uses(v, name, other));
+        }
         Expr::TupleLit(fields, _, _) => {
             for (_, v) in fields {
                 expr_uses(v, name, other);

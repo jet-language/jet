@@ -1504,6 +1504,15 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::StructLit { fields, .. } => {
             fields.iter().find_map(|(_, _, f)| expr_handle_escape(f, handle))
         }
+        Expr::TypedLit { body, .. } => {
+            let mut found = None;
+            body.for_each_expr(|f| {
+                if found.is_none() {
+                    found = expr_handle_escape(f, handle);
+                }
+            });
+            found
+        }
         Expr::EnumLit { args, .. } => args.iter().find_map(|a| match a {
             EnumLitArg::Positional(e) => expr_handle_escape(e, handle),
             EnumLitArg::Named { expr, .. } => expr_handle_escape(expr, handle),

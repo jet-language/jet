@@ -210,6 +210,12 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
                 collect_tuple_shapes_from_expr(e, out);
             }
         }
+        Expr::TypedLit { head, body, .. } => {
+            if let Some(h) = head {
+                collect_tuple_shapes_from_type(h, out);
+            }
+            body.for_each_expr(|e| collect_tuple_shapes_from_expr(e, out));
+        }
         Expr::EnumLit { args, .. } => {
             for a in args {
                 match a {

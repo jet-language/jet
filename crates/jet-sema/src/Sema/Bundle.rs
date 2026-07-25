@@ -405,6 +405,15 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
         Expr::StructLit { fields, .. } => fields
             .iter()
             .any(|(_, _, value)| expr_has_comptime_evaluation(value)),
+        Expr::TypedLit { body, .. } => {
+            let mut hit = false;
+            body.for_each_expr(|value| {
+                if expr_has_comptime_evaluation(value) {
+                    hit = true;
+                }
+            });
+            hit
+        }
         Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
             EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
                 expr_has_comptime_evaluation(value)
@@ -795,6 +804,9 @@ pub(crate) fn rewrite_inline_calls_expr(
             for (_, _, e) in fields.iter_mut() {
                 rewrite_inline_calls_expr(e, siblings, modname);
             }
+        }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr_mut(|e| rewrite_inline_calls_expr(e, siblings, modname));
         }
         Expr::EnumLit { args, .. } => {
             for a in args.iter_mut() {

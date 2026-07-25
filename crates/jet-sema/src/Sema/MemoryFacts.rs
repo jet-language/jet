@@ -598,6 +598,9 @@ fn collect_expr_idents(expr: &Expr, out: &mut HashSet<String>) {
                 collect_expr_idents(value, out);
             }
         }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr(|value| collect_expr_idents(value, out));
+        }
         Expr::TupleLit(fields, _, _) => {
             for (_, value) in fields {
                 collect_expr_idents(value, out);
@@ -643,6 +646,9 @@ fn promotion_edges(expr: &Expr) -> Vec<GcPromotionEdge> {
             for (field, _, value) in fields {
                 add(value, format!("field:{field}"), 0, &mut out);
             }
+        }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr(|value| add(value, "typed_lit".to_string(), 0, &mut out));
         }
         Expr::ListLit(items, _) => {
             for (index, item) in items.iter().enumerate() {
