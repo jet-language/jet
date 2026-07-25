@@ -20,7 +20,7 @@ case "$subagent_type" in
 esac
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-  echo "Dirty checkout: direct-tree write delegation blocked. Use a clean recorded worktree, or commit only this task's explicitly owned paths. Never use git add -A or include another task's changes. Retry from the isolated checkout." >&2
+  echo "Dirty checkout: direct-tree write delegation blocked. Use a clean recorded worktree under .claude/worktrees/<name> (never a sibling jet-* folder), or commit only this task's explicitly owned paths. Never use git add -A or include another task's changes. Retry from the isolated checkout." >&2
   exit 2
 fi
 exit 0

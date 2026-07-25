@@ -156,6 +156,23 @@ Worktrees are allowed for isolated or concurrent writes. Record ownership before
 the intended branch promptly, verify it there, then remove the worktree and temporary branch immediately. Never park
 finished work unmerged. Paused work keeps a named coherent handoff branch and resume note, not an orphaned worktree.
 
+Worktree location is absolute (no exceptions for cloud agents, Cursor, Claude, or temp names):
+
+- The only top-level Jet checkout is the main clone (e.g. `…/Github/jet`). Never create sibling
+  directories beside it (`jet-bd-*`, `jet-*`, random agent ids, or “helpful” parallel clones).
+- Every git worktree path MUST live under the main clone:
+  - preferred: `<repo>/.claude/worktrees/<short-name>`
+  - allowed: `<repo>/.agent-worktrees/<short-name>`
+- Create with an in-repo path only, e.g.
+  `git worktree add .claude/worktrees/<short-name> -b <branch>`.
+- If a tool drops a worktree outside the clone, stop and relocate immediately:
+  `git worktree move <bad-path> .claude/worktrees/<short-name>`, then continue only from the
+  in-repo path. Do not leave the sibling in place “for now.”
+- Canonical Tower board is only the main checkout’s `plugins/tower/.tower/`. Never treat a
+  worktree copy of `.tower` as source of truth, and never copy it over the main board.
+- Before finish: merge or hand off, `git worktree remove` the in-repo path, delete the temp
+  branch. Run `scripts/agent/check-worktree-layout.sh` if layout is unclear.
+
 ## Review and verification constraints
 
 Every completed change has one implementer and one fresh-context reviewer:

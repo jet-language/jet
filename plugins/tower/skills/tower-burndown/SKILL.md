@@ -51,6 +51,9 @@ rank/prep or invokes those skills.
 - Never hand-edit `plugins/tower/.tower/*.json`. Tower CLI only.
 - Never clobber other agents' claims, dirty paths, or worktrees. Inspect
   `git status`, `git worktree list`, and claims before dispatch.
+- Worktrees only under `<repo>/.claude/worktrees/<name>` (or
+  `.agent-worktrees/`). Never create sibling `jet-*` / `jet-bd-*` folders
+  beside the main clone. Relocate leaks immediately with `git worktree move`.
 
 ## Forced skills (every participant)
 
@@ -105,7 +108,7 @@ Workers get zero ambiguity. Each brief states:
 - **No nested subagents. No stubs, facades, placeholders, or fake-green.**
 - Exact targeted test commands (see **Command hygiene** below)
 - Tower update commands to run on progress (`criteria --meet`, `--log`, phase)
-- Worktree path/branch if used; merge + remove before reporting done
+- Worktree path/branch if used (must be under `.claude/worktrees/`); merge + remove before reporting done
 - Return shape: commits, tests run, criteria met, handoff, blockers
 
 Checkpoint the orchestrator's own dirty work before a write-capable worker
@@ -139,8 +142,9 @@ when scope is already an epoch/sidequest slice), run multiple concurrent card
 streams **only when write paths and tests are disjoint**.
 
 - Default **3** live workers. User `max N` may raise up to **10**.
-- Record ownership before creating worktrees. Prefer worktrees for concurrent
-  writers; one named close owner per stream.
+- Record ownership before creating worktrees. Prefer in-repo worktrees
+  (`.claude/worktrees/<name>`) for concurrent writers; one named close owner
+  per stream. Never sibling folders beside the clone.
 - Serialize (or contract) when streams share compiler seams, contend for build
   resources, or produce an integration backlog.
 - Never `git add -A`. Never stage, commit, overwrite, or touch another stream's
