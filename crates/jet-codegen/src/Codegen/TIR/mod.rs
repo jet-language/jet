@@ -2760,7 +2760,7 @@ pub enum TBuiltinOp {
     Bytes,
     /// `trim()` → pinned `jet_unicode_trim(&(recv))`.
     Trim,
-    /// `split(sep)` → `jet_string_split(&(recv), &a0)`.
+    /// `split(sep)` → `jet_iter_string_split(&(recv), &a0)` (lazy `JetIter<String>`).
     Split,
     /// c97/D-STRPARSE1: `lines()` → `{root}jet_string_lines(&(recv))`.
     Lines,

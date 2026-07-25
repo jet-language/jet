@@ -6,7 +6,7 @@ use crate::Comptime::Builtins::{as_bool, cmp};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
 
-use super::{unsupported, EvalCtx, Flow};
+use super::{materialize_view_mut_window, unsupported, EvalCtx, Flow};
 
 impl EvalCtx<'_> {
     pub(super) fn eval_closure_method(
@@ -16,7 +16,19 @@ impl EvalCtx<'_> {
         args: &[TExpr],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let recv_v = self.eval_expr(recv, scope)?;
+        let mut recv_v = self.eval_expr(recv, scope)?;
+        // ViewMut place-window → inclusive List for read-only map/fold.
+        if let CtValue::Struct {
+            type_name,
+            fields,
+        } = &recv_v
+        {
+            if type_name == "__JetViewMut"
+                && matches!(op, TClosureOp::ViewMap | TClosureOp::ViewFold)
+            {
+                recv_v = materialize_view_mut_window(fields, scope, self.span())?;
+            }
+        }
         let mut call1 = |this: &mut Self, item: CtValue| -> Result<CtValue, Diagnostic> {
             let f = args
                 .first()

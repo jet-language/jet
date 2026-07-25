@@ -701,6 +701,24 @@ fn run() {
     assert_eq!(stdout, "a-b\n");
 }
 
+/// `join(sep)` on an exclusive write window (`ViewMut`) — must not clone `&mut [T]`.
+#[test]
+fn view_mut_join_with_separator() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn run() {
+    words := [\"a\", \"b\", \"c\"]
+    middle := &words[0..1]
+    print(middle.join(\"-\"))
+}
+";
+    let (code, stdout) = build_and_run("tir_view_mut_join", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "a-b\n");
+}
+
 /// A `when` over a fallible value with `ok`/`err` patterns (Shape C). The subject
 /// is a user fallible fn call; the bound payload prints.
 #[test]

@@ -1626,6 +1626,8 @@ fn jet_list_remove<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> 
 fn jet_char_len(s: &String) -> i64 {
     s.chars().count() as i64
 }
+// Eager materialize of the same pieces as `jet_iter_string_split` (AOT `String.split`
+// emits the lazy helper; this Vec form remains for hosts that need a list handle).
 fn jet_string_split(s: &String, sep: &str) -> Vec<String> {
     s.split(sep).map(|x| x.to_string()).collect()
 }

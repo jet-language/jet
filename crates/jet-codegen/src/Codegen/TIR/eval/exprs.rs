@@ -7,7 +7,7 @@ use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue};
 use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
-use super::{unsupported, EvalCtx, Flow};
+use super::{materialize_view_mut_window, unsupported, EvalCtx, Flow};
 
 impl EvalCtx<'_> {
     pub(crate) fn eval_expr(
@@ -161,12 +161,40 @@ impl EvalCtx<'_> {
                     });
                 }
                 let mut r = self.eval_expr(recv, scope)?;
+                // `__JetViewMut` is a write-through handle; read builtins see the
+                // inclusive window as a List (same surface as View after ViewNew).
+                // Do not write the temporary List back over the ViewMut binding.
+                let mut skip_view_mut_wb = false;
+                if let CtValue::Struct {
+                    type_name,
+                    fields,
+                } = &r
+                {
+                    if type_name == "__JetViewMut"
+                        && matches!(
+                            *op,
+                            crate::Codegen::TIR::TBuiltinOp::LenList
+                                | crate::Codegen::TIR::TBuiltinOp::IsEmpty
+                                | crate::Codegen::TIR::TBuiltinOp::GetList
+                                | crate::Codegen::TIR::TBuiltinOp::First
+                                | crate::Codegen::TIR::TBuiltinOp::Last
+                                | crate::Codegen::TIR::TBuiltinOp::Contains
+                                | crate::Codegen::TIR::TBuiltinOp::IndexOf
+                                | crate::Codegen::TIR::TBuiltinOp::JoinSep
+                        )
+                    {
+                        r = materialize_view_mut_window(fields, scope, self.span())?;
+                        skip_view_mut_wb = true;
+                    }
+                }
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
                 let result = eval_builtin(op, &mut r, argv, self.span())?;
-                self.write_back_place(recv, r, scope)?;
+                if !skip_view_mut_wb {
+                    self.write_back_place(recv, r, scope)?;
+                }
                 Ok(result)
             }
             TExprKind::HandleMethod { recv, op, args } => {

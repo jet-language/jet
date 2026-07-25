@@ -62,9 +62,9 @@ const EXTRACTOR_ARTIFACTS: &[(&str, &str)] = &[
 /// broad module boundary and the asserted pure-pending count stayed zero
 /// while these rows were still open (card #721 / #392 criterion 3).
 /// Closed by #722: crypto.expert AEAD/sign/argon2id and encoding.xml projection
-/// ports. #722-owned PurePending remainder is View/ViewMut.join (string JoinSep;
-/// #743 coordination). Separately, D-ITERTOOLS1 discovery currently lists Iter.*
-/// rows as PurePending until #743 inventory closeout — not #722 crypto/xml gaps.
+/// ports. View/ViewMut.join closed here (string JoinSep; same List join semantics).
+/// Separately, D-ITERTOOLS1 discovery currently lists Iter.* rows as PurePending
+/// until inventory closeout — not #722 crypto/xml gaps.
 const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[];
 
 /// Calls with a production-compiled foundation that must remain private until
@@ -1039,7 +1039,7 @@ fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, V
     let ct_build_context = ct_build_context_methods();
     let sequence_methods = comptime_sequence_methods();
     let view_methods = [
-        "contains", "first", "fold", "get", "index_of", "is_empty", "last", "len", "map",
+        "contains", "first", "fold", "get", "index_of", "is_empty", "join", "last", "len", "map",
     ]
     .into_iter()
     .collect::<BTreeSet<_>>();
@@ -1314,7 +1314,8 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     }
     for owner in ["View", "ViewMut"] {
         for method in [
-            "contains", "first", "fold", "get", "index_of", "is_empty", "last", "len", "map",
+            "contains", "first", "fold", "get", "index_of", "is_empty", "join", "last", "len",
+            "map",
         ] {
             assert_eq!(record(&records, Surface::Value, owner, method).class, Class::Covered);
         }
@@ -1652,17 +1653,15 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             "{module}.{method} must remain PurePending (not swallowed by a module boundary)"
         );
     }
-    // #743 owns View/ViewMut.join (string JoinSep) and Iter.* inventory closeout.
-    // Leave join PurePending — do not pretend a partial port is Covered.
     assert_eq!(
         record(&records, Surface::Value, "View", "join").class,
-        Class::PurePending,
-        "View.join deferred to #743"
+        Class::Covered,
+        "View.join Covered (JoinSep)"
     );
     assert_eq!(
         record(&records, Surface::Value, "ViewMut", "join").class,
-        Class::PurePending,
-        "ViewMut.join deferred to #743"
+        Class::Covered,
+        "ViewMut.join Covered (JoinSep)"
     );
     assert_eq!(
         record(&records, Surface::Fixed, "core.crypto.random", "bytes").class,
@@ -1676,9 +1675,8 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    // #722 closed KNOWN_OPEN_GAPS (crypto.expert + encoding.xml). Remaining
-    // PurePending: View/ViewMut.join + Iter.* discovery rows (#743 follow-through).
-    assert_eq!((records.len(), covered, pending, boundaries), (1_248, 859, 42, 347));
+    // #722 closed View/ViewMut.join. Remaining PurePending: Iter.* discovery rows.
+    assert_eq!((records.len(), covered, pending, boundaries), (1_248, 861, 40, 347));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1686,7 +1684,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        15252890080749693386,
+        10025236603832194028,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

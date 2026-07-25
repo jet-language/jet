@@ -44,6 +44,36 @@ pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// Resolve a `__JetViewMut { base, start, end }` handle to the inclusive window List.
+pub(super) fn materialize_view_mut_window(
+    fields: &[(String, CtValue)],
+    scope: &HashMap<String, CtValue>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let mut base = None;
+    let mut start = None;
+    let mut end = None;
+    for (name, value) in fields {
+        match (name.as_str(), value) {
+            ("base", CtValue::Str(s)) => base = Some(s.clone()),
+            ("start", CtValue::Int(n)) => start = Some(*n),
+            ("end", CtValue::Int(n)) => end = Some(*n),
+            _ => {}
+        }
+    }
+    let (base, start, end) = match (base, start, end) {
+        (Some(b), Some(s), Some(e)) => (b, s, e),
+        _ => return Err(unsupported("view-mut fields", span)),
+    };
+    let Some(CtValue::List(items)) = scope.get(&base) else {
+        return Err(unsupported("view-mut owner", span));
+    };
+    if start < 0 || end < start || end as usize >= items.len() {
+        return Err(unsupported("view-mut bounds", span));
+    }
+    Ok(CtValue::List(items[start as usize..=end as usize].to_vec()))
+}
+
 #[derive(Debug)]
 pub(super) enum Flow {
     Normal,

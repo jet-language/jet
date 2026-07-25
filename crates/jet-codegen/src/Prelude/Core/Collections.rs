@@ -403,23 +403,34 @@ fn jet_iter_from_vec<T: 'static>(xs: Vec<T>) -> JetIter<T> {
 }
 
 /// Lazy `String.split` — yields owned pieces on pull (no intermediate Vec of parts).
+/// Empty `sep` matches `jet_string_split` / Rust `str::split("")`: leading empty,
+/// one Char string per scalar, trailing empty.
 fn jet_iter_string_split(s: &String, sep: &str) -> JetIter<String> {
     let s = s.clone();
     let sep = sep.to_string();
     if sep.is_empty() {
-        let chars: Vec<String> = s.chars().map(|c| c.to_string()).collect();
-        let mut i = 0usize;
-        let mut emitted_trail = false;
+        // Index into owned `s` — `s.chars()` would borrow and break `'static` JetIter.
+        let mut offset = 0usize;
+        // 0 = leading empty; 1 = chars; 2 = done after trailing empty.
+        let mut phase = 0u8;
         return JetIter(Box::new(std::iter::from_fn(move || {
-            if i < chars.len() {
-                let out = chars[i].clone();
-                i += 1;
-                Some(out)
-            } else if !emitted_trail {
-                emitted_trail = true;
-                Some(String::new())
-            } else {
-                None
+            match phase {
+                0 => {
+                    phase = 1;
+                    Some(String::new())
+                }
+                1 => {
+                    if offset >= s.len() {
+                        phase = 2;
+                        return Some(String::new());
+                    }
+                    let ch = s[offset..].chars().next().expect("offset in bounds");
+                    let len = ch.len_utf8();
+                    let out = s[offset..offset + len].to_string();
+                    offset += len;
+                    Some(out)
+                }
+                _ => None,
             }
         })));
     }

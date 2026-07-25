@@ -776,10 +776,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
                 TBuiltinOp::Reverse => format!("({}).reverse()", recv),
                 TBuiltinOp::Sort => format!("({}).sort()", recv),
-                TBuiltinOp::JoinSep => format!(
-                    "{vec_src}.into_iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
-                    a(0)
-                ),
+                // View/ViewMut are slices (`&[T]` / `&mut [T]`) — never `.clone()` the
+                // receiver (ViewMut is not Clone). Iter consumes; List/View borrow via `.iter()`.
+                TBuiltinOp::JoinSep => {
+                    if recv_is_iter {
+                        format!(
+                            "({recv}).into_iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
+                            a(0)
+                        )
+                    } else {
+                        format!(
+                            "({recv}).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
+                            a(0)
+                        )
+                    }
+                }
                 TBuiltinOp::Sum { float: true } => format!(
                     "{vec_src}.into_iter().fold(0.0, |__acc, __item| __acc + __item)"
                 ),
@@ -817,8 +828,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Split => {
                     format!("jet_iter_string_split(&({}), &{})", recv, a(0))
                 },
-                // c97/D-STRPARSE1: `lines()` → `jet_string_lines` (imported via MOD_USE,
-                // like `jet_string_split` — emitted bare, no root prefix).
+                // c97/D-STRPARSE1: `lines()` → `jet_string_lines` (imported via MOD_USE;
+                // same bare-call convention as `jet_iter_string_split`).
                 TBuiltinOp::Lines => format!("jet_string_lines(&({}))", recv),
                 TBuiltinOp::ParseInt => format!(
                     "{{ let __jet_text = &({recv}); __jet_text.trim().parse::<i64>()\
@@ -843,7 +854,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     line
                 ),
                 // D-STR-AFTER1: `after`/`before` — bare calls, no root prefix (same
-                // MOD_USE-imported convention as `jet_string_split`/`jet_string_lines`).
+                // MOD_USE-imported convention as `jet_iter_string_split`/`jet_string_lines`).
                 TBuiltinOp::After => format!("jet_string_after(&({}), &{})", recv, a(0)),
                 TBuiltinOp::Before => format!("jet_string_before(&({}), &{})", recv, a(0)),
                 // D-MEM1 stage S5: zero-copy siblings, `Stmt::Val` lowering only
