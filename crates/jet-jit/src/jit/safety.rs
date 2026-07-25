@@ -238,6 +238,13 @@ fn jit_compound_type(ty: &Type) -> bool {
         || jit_tuple_type(ty)
         || jit_enum_type(ty)
         || jit_optional_scalar_type(ty)
+        || matches!(
+            ty,
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "Set" | "Deque")
+                    && args.len() == 1
+                    && matches!(&args[0], Type::Int)
+        )
 }
 
 fn jit_concurrency_elem(ty: &Type) -> bool {
@@ -871,7 +878,8 @@ fn resident_safe_builtin_op(
             (matches!(&recv.ty, Type::String)
                 || jit_list_native_type(&recv.ty)
                 || jit_list_iter_elem_type(&recv.ty).is_some()
-                || jit_closure_elem_type(&recv.ty).is_some())
+                || jit_closure_elem_type(&recv.ty).is_some()
+                || matches!(&recv.ty, Type::Apply { name, .. } if matches!(name.as_str(), "Set" | "Deque")))
                 && args.is_empty()
         }
         TBuiltinOp::GetList => {
@@ -893,7 +901,9 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::IsEmpty => {
-            (jit_list_native_type(&recv.ty) || jit_list_iter_elem_type(&recv.ty).is_some())
+            (jit_list_native_type(&recv.ty)
+                || jit_list_iter_elem_type(&recv.ty).is_some()
+                || matches!(&recv.ty, Type::Apply { name, .. } if matches!(name.as_str(), "Set" | "Deque")))
                 && args.is_empty()
         }
         TBuiltinOp::ParseInt | TBuiltinOp::ParseFloat => {
@@ -963,6 +973,65 @@ fn resident_safe_builtin_op(
                 && matches!(&args[1].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
                 && resident_safe_expr(&args[1], callees)
+        }
+        // D-COLLBREADTH1=A: Set / Deque / list.remove — Int elems only.
+        TBuiltinOp::RemoveList { .. } => {
+            jit_list_int_type(&recv.ty)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::SetFrom => {
+            jit_list_int_type(&recv.ty) && args.is_empty()
+        }
+        TBuiltinOp::SetInsert | TBuiltinOp::SetRemove => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::SetToList => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && args.is_empty()
+        }
+        TBuiltinOp::SetUnion => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Apply { name, args: targs }
+                    if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Contains
+            if matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int)) =>
+        {
+            args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Contains => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::DequePushFront | TBuiltinOp::DequePushBack => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::DequePopFront
+        | TBuiltinOp::DequePopBack
+        | TBuiltinOp::DequePeekFront
+        | TBuiltinOp::DequePeekBack => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && args.is_empty()
         }
         _ => false,
     }

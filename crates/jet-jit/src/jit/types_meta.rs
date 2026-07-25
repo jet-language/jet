@@ -373,7 +373,8 @@ impl<'a> JitMeta<'a> {
     }
 
     /// Packed i64 enum ABI (disc in low byte, payload >> 8): every variant is
-    /// unit, `Int`, or another packed enum. Excludes F64-heap / multi-payload.
+    /// unit, `Int`, `String` handle, or another packed enum. Excludes F64-heap /
+    /// multi-payload.
     pub(crate) fn enum_packed_showable(&self, name: &str) -> bool {
         let Some(variants) = self.enum_variants.get(name) else {
             return false;
@@ -384,6 +385,7 @@ impl<'a> JitMeta<'a> {
             match payloads {
                 [] => {}
                 [Type::Int] => {}
+                [Type::String] => {}
                 [Type::Named(inner)] if self.is_enum(inner) => {}
                 _ => return false,
             }

@@ -87,6 +87,10 @@ pub(crate) struct JitRuntime {
     pub(crate) xml_writers: Vec<crate::enc_stream::XmlWriterSlot>,
     pub(crate) cbor_readers: Vec<crate::enc_stream::CborReaderSlot>,
     pub(crate) cbor_writers: Vec<crate::enc_stream::CborWriterSlot>,
+    /// `Set<T>` handles — 1-based indices (#729 collections/set). Int elems only.
+    pub(crate) sets: Vec<std::collections::HashSet<i64>>,
+    /// `Deque<T>` handles — 1-based indices (#729 collections/deque). Int elems only.
+    pub(crate) deques: Vec<std::collections::VecDeque<i64>>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,

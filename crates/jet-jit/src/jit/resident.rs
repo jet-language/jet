@@ -42,6 +42,8 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         xml_writers: Vec::new(),
         cbor_readers: Vec::new(),
         cbor_writers: Vec::new(),
+        sets: Vec::new(),
+        deques: Vec::new(),
         trapped: None,
         deadline_exceeded: None,
     }

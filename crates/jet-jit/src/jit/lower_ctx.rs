@@ -2978,6 +2978,32 @@ impl LowerCtx<'_, '_> {
                         continue;
                     }
                     let val = self.lower_expr(e)?;
+                    if let Some(elem) = jit_list_iter_elem_type(&push_ty).or_else(|| {
+                        match &push_ty {
+                            Type::List(inner)
+                                if matches!(inner.as_ref(), Type::Int | Type::String) =>
+                            {
+                                Some(inner.as_ref().clone())
+                            }
+                            _ => None,
+                        }
+                    }) {
+                        let string_elems = matches!(elem, Type::String);
+                        let flag = self
+                            .b
+                            .ins()
+                            .iconst(types::I64, if string_elems { 1 } else { 0 });
+                        let show_ref = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_show, self.b.func);
+                        let show_call = self.b.ins().call(show_ref, &[val, flag]);
+                        let text = self.b.inst_results(show_call)[0];
+                        let push_ref = self
+                            .module
+                            .declare_func_in_func(self.host.str_push_str, self.b.func);
+                        self.b.ins().call(push_ref, &[buf_id, text]);
+                        continue;
+                    }
                     let host_id = match &push_ty {
                         Type::Int => self.host.str_push_i64,
                         Type::Float => self.host.str_push_f64,
@@ -5208,6 +5234,23 @@ impl LowerCtx<'_, '_> {
                 method,
                 args,
             } => {
+                // D-COLLBREADTH1=A: `Deque.new()` → empty VecDeque handle.
+                let is_deque_new = method.name == "new"
+                    && args.is_empty()
+                    && matches!(
+                        owner,
+                        TStaticOwner::Prelude { path, .. }
+                            if path == "std::collections::VecDeque"
+                                || path.ends_with("::VecDeque")
+                                || path.ends_with(".VecDeque")
+                    );
+                if is_deque_new {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.deque_new, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 // D-ENCSTREAM-SURFACE1: `EncodingLimits.safe()` — fixed defaults, no host.
                 let is_encoding_limits_safe = method.name == "safe"
                     && args.is_empty()
@@ -5821,9 +5864,14 @@ impl LowerCtx<'_, '_> {
                     let span = self.b.ins().isub(end, start);
                     return Ok(self.b.ins().iadd(span, one));
                 }
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_len, self.b.func);
+                let host = if matches!(&recv.ty, Type::Apply { name, .. } if name == "Set") {
+                    self.host.coll.set_len
+                } else if matches!(&recv.ty, Type::Apply { name, .. } if name == "Deque") {
+                    self.host.coll.deque_len
+                } else {
+                    self.host.coll.list_len
+                };
+                let host_ref = self.module.declare_func_in_func(host, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
@@ -5850,9 +5898,14 @@ impl LowerCtx<'_, '_> {
             // the full set; the tier-0 interpreter covers it too since it re-runs the
             // AST directly. JIT falls through to that fallback ladder for all of these.
             TBuiltinOp::IsEmpty => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_len, self.b.func);
+                let host = if matches!(&recv.ty, Type::Apply { name, .. } if name == "Set") {
+                    self.host.coll.set_len
+                } else if matches!(&recv.ty, Type::Apply { name, .. } if name == "Deque") {
+                    self.host.coll.deque_len
+                } else {
+                    self.host.coll.list_len
+                };
+                let host_ref = self.module.declare_func_in_func(host, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 let len = self.b.inst_results(call)[0];
                 let zero = self.b.ins().iconst(types::I64, 0);
@@ -5863,7 +5916,16 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::AddNewMap => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::InsertList => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::RemoveMap => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::RemoveList { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::RemoveList { .. } => {
+                let idx = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_remove, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, idx]);
+                let removed = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(removed)
+            }
             TBuiltinOp::GetMap => {
                 let key = self.lower_expr(&args[0])?;
                 let host_ref = self
@@ -5875,6 +5937,15 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::First => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Last => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Contains => {
+                // Set.has(x) / SortedSet.has — Int elems.
+                if matches!(&recv.ty, Type::Apply { name, .. } if name == "Set") {
+                    let needle = self.lower_expr(&args[0])?;
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.set_has, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[recv_val, needle]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 // String.contains(needle) — list Contains stays unsupported.
                 let recv_is_str = matches!(&recv.ty, Type::String)
                     || matches!(
@@ -6045,11 +6116,44 @@ impl LowerCtx<'_, '_> {
                     .ok_or_else(|| "jit Option.zip needs one argument".to_string())?;
                 self.lower_option_zip(recv, other, tuple_struct, elem_ty)
             }
-            TBuiltinOp::SetFrom => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::SetInsert => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::SetRemove => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::SetToList => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::SetUnion => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::SetFrom => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_from_list, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::SetInsert => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_insert, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::SetRemove => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_remove, self.b.func);
+                self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            TBuiltinOp::SetToList => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_to_list, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::SetUnion => {
+                let other = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_union, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, other]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::SortedSetFrom => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::SortedSetInsert => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::SortedSetRemove => Err("jit builtin method unsupported".to_string()),
@@ -6077,12 +6181,50 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::BagHas => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::BagCount => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::BagLen => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::DequePushFront => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::DequePushBack => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::DequePopFront => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::DequePopBack => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::DequePeekFront => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::DequePeekBack => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::DequePushFront => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_push_front, self.b.func);
+                self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            TBuiltinOp::DequePushBack => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_push_back, self.b.func);
+                self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            TBuiltinOp::DequePopFront => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_pop_front, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::DequePopBack => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_pop_back, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::DequePeekFront => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_peek_front, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::DequePeekBack => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_peek_back, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::TryCollect => self.lower_try_collect(recv),
             TBuiltinOp::ViewNew { line } => {
                 // Inclusive window → exclusive list_slice end. Materialized list

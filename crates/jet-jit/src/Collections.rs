@@ -1,6 +1,7 @@
 //! M5: list/map host shims for the Cranelift JIT (`JetArena` handles).
 
 use super::Concurrency;
+use std::collections::{HashSet, VecDeque};
 
 /// Record an out-of-bounds trap. Returns normally; JIT code branches to its
 /// epilogue at the next `emit_trap_check` (I1 — no Rust panic ever unwinds
@@ -443,25 +444,36 @@ extern "C" fn jet_jit_list_sort_by_i64_keys(list: i64, keys: i64) {
 /// `string_elems != 0` → elements are string handles; else raw i64.
 extern "C" fn jet_jit_print_list(list: i64, string_elems: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let xs = rt
-            .heap
-            .clone_int_list(list)
-            .expect("jit print list: bad handle");
-        let mut parts = Vec::with_capacity(xs.len());
-        if string_elems != 0 {
-            for id in xs {
-                parts.push(rt.heap.clone_string(id).unwrap_or_default());
-            }
-        } else {
-            for v in xs {
-                parts.push(v.to_string());
-            }
-        }
-        rt.stdout.push('[');
-        rt.stdout.push_str(&parts.join(", "));
-        rt.stdout.push(']');
+        let text = list_show_text(rt, list, string_elems);
+        rt.stdout.push_str(&text);
         rt.stdout.push('\n');
     });
+}
+
+fn list_show_text(rt: &crate::JitRuntime, list: i64, string_elems: i64) -> String {
+    let xs = rt
+        .heap
+        .clone_int_list(list)
+        .unwrap_or_default();
+    let mut parts = Vec::with_capacity(xs.len());
+    if string_elems != 0 {
+        for id in xs {
+            parts.push(rt.heap.clone_string(id).unwrap_or_default());
+        }
+    } else {
+        for v in xs {
+            parts.push(v.to_string());
+        }
+    }
+    format!("[{}]", parts.join(", "))
+}
+
+/// JetShow `[T]` as a string handle for `{list}` interpolation.
+extern "C" fn jet_jit_list_show(list: i64, string_elems: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = list_show_text(rt, list, string_elems);
+        rt.heap.alloc_string(text)
+    })
 }
 
 /// Print `T?` using JIT packed Option encoding (`0` = None, else `value + 1`).
@@ -490,8 +502,182 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
     });
 }
 
+/// `list.remove(i)` — AOT `jet_list_remove` panic text on OOB; in-bounds mutates
+/// the `JetArena` list in place (same `Vec::remove` as AOT).
+///
+/// # ponytail: single-field `JetArena` layout = `Vec<JetVal>`; no public remove API yet.
+extern "C" fn jet_jit_list_remove(list: i64, idx: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        // SAFETY: JetArena is `{ values: Vec<JetVal> }` — one field, identical address.
+        let values: &mut Vec<jet_rt::JetVal> =
+            unsafe { &mut *(&mut rt.heap as *mut jet_rt::JetArena as *mut Vec<jet_rt::JetVal>) };
+        let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
+            jet_foundation::ice!(None, "jit list remove: bad handle");
+        };
+        let len = xs.len() as i64;
+        if idx < 0 || idx >= len {
+            rt.set_trap(&format!(
+                "the list has {len} items, so position {idx} doesn't exist"
+            ));
+            return 0;
+        }
+        match xs.remove(idx as usize) {
+            jet_rt::JetVal::Int(v) => v,
+            jet_rt::JetVal::Float(v) => v.to_bits() as i64,
+            _ => 0,
+        }
+    })
+}
+
+fn set_handle(rt: &mut crate::JitRuntime, set: HashSet<i64>) -> i64 {
+    rt.sets.push(set);
+    rt.sets.len() as i64
+}
+
+fn deque_handle(rt: &mut crate::JitRuntime, dq: VecDeque<i64>) -> i64 {
+    rt.deques.push(dq);
+    rt.deques.len() as i64
+}
+
+extern "C" fn jet_jit_set_from_list(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let xs = rt.heap.clone_int_list(list).unwrap_or_default();
+        set_handle(rt, xs.into_iter().collect())
+    })
+}
+
+extern "C" fn jet_jit_set_insert(set: i64, v: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(s) = rt.sets.get_mut((set as usize).wrapping_sub(1)) else {
+            return 0;
+        };
+        if s.insert(v) {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_set_remove(set: i64, v: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(s) = rt.sets.get_mut((set as usize).wrapping_sub(1)) {
+            s.remove(&v);
+        }
+    });
+}
+
+extern "C" fn jet_jit_set_has(set: i64, v: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        match rt.sets.get((set as usize).wrapping_sub(1)) {
+            Some(s) if s.contains(&v) => 1,
+            _ => 0,
+        }
+    })
+}
+
+extern "C" fn jet_jit_set_len(set: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.sets
+            .get((set as usize).wrapping_sub(1))
+            .map(|s| s.len() as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_set_to_list(set: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let xs: Vec<i64> = rt
+            .sets
+            .get((set as usize).wrapping_sub(1))
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default();
+        rt.heap.alloc_int_list(xs)
+    })
+}
+
+extern "C" fn jet_jit_set_union(a: i64, b: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let mut out = rt
+            .sets
+            .get((a as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        if let Some(other) = rt.sets.get((b as usize).wrapping_sub(1)) {
+            out.extend(other.iter().copied());
+        }
+        set_handle(rt, out)
+    })
+}
+
+extern "C" fn jet_jit_deque_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| deque_handle(rt, VecDeque::new()))
+}
+
+extern "C" fn jet_jit_deque_push_front(dq: i64, v: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
+            d.push_front(v);
+        }
+    });
+}
+
+extern "C" fn jet_jit_deque_push_back(dq: i64, v: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
+            d.push_back(v);
+        }
+    });
+}
+
+/// Packed Option: 0 = None, else value+1 (Int elems).
+extern "C" fn jet_jit_deque_pop_front(dq: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match rt.deques.get_mut((dq as usize).wrapping_sub(1)).and_then(|d| d.pop_front()) {
+            Some(v) => v + 1,
+            None => 0,
+        }
+    })
+}
+
+extern "C" fn jet_jit_deque_pop_back(dq: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match rt.deques.get_mut((dq as usize).wrapping_sub(1)).and_then(|d| d.pop_back()) {
+            Some(v) => v + 1,
+            None => 0,
+        }
+    })
+}
+
+extern "C" fn jet_jit_deque_peek_front(dq: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match rt.deques.get((dq as usize).wrapping_sub(1)).and_then(|d| d.front().copied()) {
+            Some(v) => v + 1,
+            None => 0,
+        }
+    })
+}
+
+extern "C" fn jet_jit_deque_peek_back(dq: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        match rt.deques.get((dq as usize).wrapping_sub(1)).and_then(|d| d.back().copied()) {
+            Some(v) => v + 1,
+            None => 0,
+        }
+    })
+}
+
+extern "C" fn jet_jit_deque_len(dq: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.deques
+            .get((dq as usize).wrapping_sub(1))
+            .map(|d| d.len() as i64)
+            .unwrap_or(0)
+    })
+}
+
 /// Packed-enum JetShow table: variant mangled names + payload kind codes.
-/// kind: 0 = unit, 1 = Int (>>8), 2 = nested packed enum (>>8, same table via name id).
+/// kind: 0 = unit, 1 = Int (>>8), 2 = nested packed enum (>>8), 3 = String handle (>>8).
 #[derive(Clone)]
 struct PackedEnumShow {
     variants: Vec<(String, u8, String)>, // (user_Variant, kind, nested_enum_name)
@@ -518,7 +704,7 @@ pub(crate) fn register_packed_enum_show(
     });
 }
 
-fn show_packed_enum(packed: i64, enum_name: &str) -> String {
+fn show_packed_enum(packed: i64, enum_name: &str, heap: &jet_rt::JetArena) -> String {
     PACKED_ENUM_SHOW.with(|t| {
         let table = t.borrow();
         let Some(def) = table.get(enum_name) else {
@@ -532,8 +718,13 @@ fn show_packed_enum(packed: i64, enum_name: &str) -> String {
             0 => vname.clone(),
             1 => format!("{vname}({})", packed >> 8),
             2 => {
-                let inner = show_packed_enum(packed >> 8, nested);
+                let inner = show_packed_enum(packed >> 8, nested, heap);
                 format!("{vname}({inner})")
+            }
+            // String handle in high bits — AOT JetShow uses Debug quotes.
+            3 => {
+                let text = heap.clone_string(packed >> 8).unwrap_or_default();
+                format!("{vname}({text:?})")
             }
             _ => format!("<{vname}?>"),
         }
@@ -552,7 +743,7 @@ extern "C" fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
             };
             String::from_utf8_lossy(slice).into_owned()
         };
-        let text = show_packed_enum(packed, &name);
+        let text = show_packed_enum(packed, &name, &rt.heap);
         rt.stdout.push_str(&text);
         rt.stdout.push('\n');
     });
@@ -595,6 +786,23 @@ pub(crate) struct CollectionsHostFns {
     pub print_list: cranelift_module::FuncId,
     pub print_opt: cranelift_module::FuncId,
     pub print_enum: cranelift_module::FuncId,
+    pub list_show: cranelift_module::FuncId,
+    pub list_remove: cranelift_module::FuncId,
+    pub set_from_list: cranelift_module::FuncId,
+    pub set_insert: cranelift_module::FuncId,
+    pub set_remove: cranelift_module::FuncId,
+    pub set_has: cranelift_module::FuncId,
+    pub set_len: cranelift_module::FuncId,
+    pub set_to_list: cranelift_module::FuncId,
+    pub set_union: cranelift_module::FuncId,
+    pub deque_new: cranelift_module::FuncId,
+    pub deque_push_front: cranelift_module::FuncId,
+    pub deque_push_back: cranelift_module::FuncId,
+    pub deque_pop_front: cranelift_module::FuncId,
+    pub deque_pop_back: cranelift_module::FuncId,
+    pub deque_peek_front: cranelift_module::FuncId,
+    pub deque_peek_back: cranelift_module::FuncId,
+    pub deque_len: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -637,6 +845,23 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_print_list", jet_jit_print_list as *const u8);
     builder.symbol("jet_jit_print_opt", jet_jit_print_opt as *const u8);
     builder.symbol("jet_jit_print_enum", jet_jit_print_enum as *const u8);
+    builder.symbol("jet_jit_list_show", jet_jit_list_show as *const u8);
+    builder.symbol("jet_jit_list_remove", jet_jit_list_remove as *const u8);
+    builder.symbol("jet_jit_set_from_list", jet_jit_set_from_list as *const u8);
+    builder.symbol("jet_jit_set_insert", jet_jit_set_insert as *const u8);
+    builder.symbol("jet_jit_set_remove", jet_jit_set_remove as *const u8);
+    builder.symbol("jet_jit_set_has", jet_jit_set_has as *const u8);
+    builder.symbol("jet_jit_set_len", jet_jit_set_len as *const u8);
+    builder.symbol("jet_jit_set_to_list", jet_jit_set_to_list as *const u8);
+    builder.symbol("jet_jit_set_union", jet_jit_set_union as *const u8);
+    builder.symbol("jet_jit_deque_new", jet_jit_deque_new as *const u8);
+    builder.symbol("jet_jit_deque_push_front", jet_jit_deque_push_front as *const u8);
+    builder.symbol("jet_jit_deque_push_back", jet_jit_deque_push_back as *const u8);
+    builder.symbol("jet_jit_deque_pop_front", jet_jit_deque_pop_front as *const u8);
+    builder.symbol("jet_jit_deque_pop_back", jet_jit_deque_pop_back as *const u8);
+    builder.symbol("jet_jit_deque_peek_front", jet_jit_deque_peek_front as *const u8);
+    builder.symbol("jet_jit_deque_peek_back", jet_jit_deque_peek_back as *const u8);
+    builder.symbol("jet_jit_deque_len", jet_jit_deque_len as *const u8);
 }
 
 pub(crate) fn declare_collections_host_fns(
@@ -751,5 +976,22 @@ pub(crate) fn declare_collections_host_fns(
         print_list: import("jet_jit_print_list", &sig_print_list)?,
         print_opt: import("jet_jit_print_opt", &sig_print_list)?,
         print_enum: import("jet_jit_print_enum", &sig_print_enum)?,
+        list_show: import("jet_jit_list_show", &sig_get_opt)?,
+        list_remove: import("jet_jit_list_remove", &sig_get_opt)?,
+        set_from_list: import("jet_jit_set_from_list", &sig_len)?,
+        set_insert: import("jet_jit_set_insert", &sig_list_eq)?,
+        set_remove: import("jet_jit_set_remove", &sig_push)?,
+        set_has: import("jet_jit_set_has", &sig_list_eq)?,
+        set_len: import("jet_jit_set_len", &sig_len)?,
+        set_to_list: import("jet_jit_set_to_list", &sig_len)?,
+        set_union: import("jet_jit_set_union", &sig_get_opt)?,
+        deque_new: import("jet_jit_deque_new", &sig_new)?,
+        deque_push_front: import("jet_jit_deque_push_front", &sig_push)?,
+        deque_push_back: import("jet_jit_deque_push_back", &sig_push)?,
+        deque_pop_front: import("jet_jit_deque_pop_front", &sig_len)?,
+        deque_pop_back: import("jet_jit_deque_pop_back", &sig_len)?,
+        deque_peek_front: import("jet_jit_deque_peek_front", &sig_len)?,
+        deque_peek_back: import("jet_jit_deque_peek_back", &sig_len)?,
+        deque_len: import("jet_jit_deque_len", &sig_len)?,
     })
 }

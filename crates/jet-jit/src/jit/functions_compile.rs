@@ -29,6 +29,7 @@ fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
                 [] => (0u8, String::new()),
                 [Type::Int] => (1u8, String::new()),
                 [Type::Named(inner)] => (2u8, inner.clone()),
+                [Type::String] => (3u8, String::new()),
                 _ => continue,
             };
             rows.push((variant.clone(), kind, nested));
