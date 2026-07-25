@@ -47,7 +47,19 @@ fn jet_std_b64_encode(bytes: &Vec<u8>) -> String {
 }
 
 fn jet_std_b64_decode(text: &String) -> Result<Vec<u8>, String> {
-    jet_xml_pull::base_encoding_2026::decode_base64(text)
+    jet_std_b64_decode_opts(text, false, false)
+}
+
+fn jet_std_b64_decode_opts(
+    text: &String,
+    allow_whitespace: bool,
+    allow_missing_padding: bool,
+) -> Result<Vec<u8>, String> {
+    if __JET_PACKAGE_EDITION >= 2027 {
+        jet_base_encoding_strict::decode_base64(text, allow_whitespace, allow_missing_padding)
+    } else {
+        jet_xml_pull::base_encoding_2026::decode_base64(text)
+    }
 }
 
 fn jet_std_b64url_encode(bytes: &Vec<u8>) -> String {
@@ -57,7 +69,19 @@ fn jet_std_b64url_encode(bytes: &Vec<u8>) -> String {
         .replace('/', "_")
 }
 fn jet_std_b64url_decode(text: &String) -> Result<Vec<u8>, String> {
-    jet_xml_pull::base_encoding_2026::decode_base64url(text)
+    jet_std_b64url_decode_opts(text, false, false)
+}
+
+fn jet_std_b64url_decode_opts(
+    text: &String,
+    allow_whitespace: bool,
+    allow_padding: bool,
+) -> Result<Vec<u8>, String> {
+    if __JET_PACKAGE_EDITION >= 2027 {
+        jet_base_encoding_strict::decode_base64url(text, allow_whitespace, allow_padding)
+    } else {
+        jet_xml_pull::base_encoding_2026::decode_base64url(text)
+    }
 }
 
 const JET_BASE32_CHARS: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -84,7 +108,25 @@ fn jet_std_base32_encode(bytes: &Vec<u8>) -> String {
     out
 }
 fn jet_std_base32_decode(text: &String) -> Result<Vec<u8>, String> {
-    jet_xml_pull::base_encoding_2026::decode_base32(text)
+    jet_std_base32_decode_opts(text, false, false, false)
+}
+
+fn jet_std_base32_decode_opts(
+    text: &String,
+    allow_whitespace: bool,
+    allow_missing_padding: bool,
+    allow_lowercase: bool,
+) -> Result<Vec<u8>, String> {
+    if __JET_PACKAGE_EDITION >= 2027 {
+        jet_base_encoding_strict::decode_base32(
+            text,
+            allow_whitespace,
+            allow_missing_padding,
+            allow_lowercase,
+        )
+    } else {
+        jet_xml_pull::base_encoding_2026::decode_base32(text)
+    }
 }
 
 fn jet_xml_to_data_tree(value: crate::jet_xml_pull::Value) -> jet_std::DataTree {
@@ -382,6 +424,16 @@ fn jet_enc_cbor_to_bytes_canonical<T: user_Encode>(value: &T) -> Result<Vec<u8>,
     let mut out = Vec::new();
     jet_cbor_encode_val(&value.jet_encode(), &mut out, true)?;
     Ok(out)
+}
+
+fn jet_enc_cbor_encode(value: &jet_std::DataTree) -> Vec<u8> {
+    jet_enc_cbor_to_bytes(value).unwrap_or_else(|error| {
+        panic!("cbor.encode failed: {}", error.reason)
+    })
+}
+
+fn jet_enc_cbor_decode_legacy(bytes: &Vec<u8>) -> Result<jet_std::DataTree, String> {
+    jet_enc_cbor_parse(bytes, jet_std::CBOROptions::safe()).map_err(|error| error.reason)
 }
 fn jet_cbor_read_len(input: &[u8], i: &mut usize, add: u8, start: usize, canonical: bool, path: &str) -> Result<u64, jet_std::CBORError> {
     let need = match add { n @ 0..=23 => return Ok(n as u64), 24 => 1, 25 => 2, 26 => 4, 27 => 8, _ => return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "indefinite/reserved CBOR length is unsupported by whole-value decoding")) };
