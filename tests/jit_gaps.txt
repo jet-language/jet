@@ -77,6 +77,7 @@ covered:
   functions/lambda_bare_params
   functions/lambda_inference
   io/archive
+  io/cli
   io/cli_args
   io/compress_gzip
   io/compress_zstd
@@ -106,6 +107,7 @@ covered:
   modules/selective_imports
   operators/chained_comparison
   operators/user_defined
+  serde/csv
   serde/encoding_base
   serde/user_derive
   syntax/maturity_tags
@@ -113,6 +115,7 @@ covered:
   text/runtime_duration
   text/string_parse
   text/strings
+  text/uuid
   tooling/bench
   tooling/canvas_blueprint_demo
   tooling/debug
@@ -169,7 +172,7 @@ gaps:
   collections/iter_tools_audit: run: jit builtin method unsupported
   collections/list_remove_bounds: run: jit builtin method unsupported
   collections/set: run: jit builtin method unsupported
-  collections/sketch: run: jit core call unsupported
+  collections/sketch: run: jit core call unsupported: core.sketch.hll.new
   comptime/comptime_core: run: jit const ref unsupported
   comptime/comptime_if: run: jit inline comptime branch unsupported
   comptime/comptime_table: run: jit const ref unsupported
@@ -179,17 +182,17 @@ gaps:
   concurrency/parallel_iter: run: jit closure method unsupported
   concurrency/parallel_scan: paths_from_args: jit if-let pattern unsupported
   concurrency/task_controls: run: jit handle method unsupported
-  concurrency/task_runtime_audit: run: jit core call unsupported
-  crypto/auth_tokens: run: jit core call unsupported
-  crypto/crypto_envelope: run: jit core call unsupported
-  crypto/crypto_migration: run: jit core call unsupported
-  crypto/crypto_sign: run: jit core call unsupported
+  concurrency/task_runtime_audit: run: jit core call unsupported: core.tasks.channel
+  crypto/auth_tokens: run: jit core call unsupported: core.auth.verify_jwt
+  crypto/crypto_envelope: run: jit core call unsupported: jet.crypto.__x25519_generate
+  crypto/crypto_migration: run: jit core call unsupported: jet.crypto.__x25519_generate
+  crypto/crypto_sign: run: jit core call unsupported: jet.crypto.__signing_generate
   crypto/hash: run: jit builtin method unsupported
-  crypto/random_api_split: run: jit core call unsupported
-  crypto/typed_crypto: run: jit core call unsupported
-  crypto/vault_key_wrap: recipient_surface: jit core call unsupported
-  crypto/vault_keys: provision: jit core call unsupported
-  crypto/vault_secret: handler: jit core call unsupported
+  crypto/random_api_split: run: jit core call unsupported: core.crypto.random.bytes
+  crypto/typed_crypto: run: jit core call unsupported: jet.crypto.__x25519_generate
+  crypto/vault_key_wrap: recipient_surface: jit core call unsupported: core.vault.prepare_generate
+  crypto/vault_keys: provision: jit core call unsupported: core.vault.prepare_generate
+  crypto/vault_secret: handler: jit core call unsupported: core.vault.get
   devloop/persist: run: jit const ref unsupported
   effects/all_sigils: run: jit call arg wrapper unsupported
   effects/asset_pipeline: run: jit call arg wrapper unsupported
@@ -202,7 +205,7 @@ gaps:
   effects/mix_write_take: run: jit call arg wrapper unsupported
   effects/single_use_discard: run: jit unsafe region unsupported
   effects/smart_context: run: jit allocator constructor unsupported
-  effects/taint: run: jit core call unsupported
+  effects/taint: run: jit core call unsupported: core.process.run
   errors/error_context: load_config: jit host/default/uninit/ct-lit unsupported
   errors/errors: run: jit print type unsupported
   errors/must_use: run: jit scope guard closure unsupported
@@ -211,23 +214,22 @@ gaps:
   errors/transact: place_order: jit transact block unsupported
   errors/typed_error_families: load: jit typed Result conversion unsupported
   game/core_game_headless: run: jit handle method unsupported
-  game/raylib_window: run: jit core call unsupported
-  io/args_audit: run: jit core call unsupported
-  io/args_spec: run: jit core call unsupported
-  io/cli: run: jit core call unsupported
-  io/db: run: jit core call unsupported
-  io/db_checked_sql: run: jit core call unsupported
+  game/raylib_window: run: jit core call unsupported: core.raylib.window_open
+  io/args_audit: run: jit core call unsupported: core.args.spec
+  io/args_spec: run: jit core call unsupported: core.args.spec
+  io/db: run: jit core call unsupported: jet.db.open_memory
+  io/db_checked_sql: run: jit core call unsupported: jet.db.open_memory
   io/db_read_footprint: person_count: jit handle method unsupported
   io/env_overlay: run: jit host/default/uninit/ct-lit unsupported
   io/io_prelude: greet: jit ambient input unsupported
   io/path: run: jit handle method unsupported
-  io/process_builder: run: jit core call unsupported
+  io/process_builder: run: jit core call unsupported: core.process.cmd
   io/scope_guard: with_guards: jit scope guard closure unsupported
   io/stdin_filter: run: jit for-in method-call collection unsupported
   io/stream: count_lines: jit core call unsupported
   io/terminal: describe_key: jit if-let pattern unsupported
   io/terminal_parity: run: jit host/default/uninit/ct-lit unsupported
-  io/watcher: run: jit core call unsupported
+  io/watcher: run: jit core call unsupported: core.event.scope
   lowlevel/ffi: run: jit extern call unsupported
   lowlevel/freestanding: run: jit core call unsupported
   lowlevel/inline_asm: add_registers: jit function missing return
@@ -257,82 +259,80 @@ gaps:
   memory/shared_config: jit param type unsupported: Shared(Named("AppConfig"))
   memory/shared_transact: jit param type unsupported: Shared(Named("Account"))
   memory/string_view: run: jit builtin method unsupported
-  net/email_dkim: run: jit core call unsupported
-  net/email_message: run: jit core call unsupported
-  net/http_client: jit core call unsupported
-  net/http_get: jit core call unsupported
-  net/http_rest_service: jit core call unsupported
-  net/http_routes: jit core call unsupported
-  net/http_server: run: jit core call unsupported
+  net/email_dkim: run: jit core call unsupported: jet.crypto.__secret_from_text
+  net/email_message: run: jit core call unsupported: core.email.address
+  net/http_client: jit core call unsupported: core.net.tcp_listen
+  net/http_get: jit core call unsupported: core.net.tcp_listen
+  net/http_rest_service: jit core call unsupported: core.http.server.serve_once_listener
+  net/http_routes: jit core call unsupported: core.http.server.serve_once_listener
+  net/http_server: run: jit core call unsupported: core.http.server.mux
   net/http_server_lifecycle: jit handle method unsupported
-  net/http_server_limits: jit core call unsupported
+  net/http_server_limits: jit core call unsupported: core.http.server.serve_once_listener
   net/http_server_middleware: jit handle method unsupported
-  net/http_server_tasks: jit core call unsupported
-  net/http_server_trailers: jit core call unsupported
-  net/socket_echo: jit core call unsupported
-  net/url_mime: run: jit core call unsupported
+  net/http_server_tasks: jit core call unsupported: core.http.server.serve_once_listener
+  net/http_server_trailers: jit core call unsupported: core.http.server.serve_once_listener
+  net/socket_echo: jit core call unsupported: core.net.socket_to_string
+  net/url_mime: run: jit core call unsupported: core.url.parse
   net/ws_echo: jit handle method unsupported
   parsing/binary-reader: run: jit handle method unsupported
   parsing/binary_pattern: run: jit host/default/uninit/ct-lit unsupported
   parsing/parse_interpolation: run: jit host/default/uninit/ct-lit unsupported
   parsing/text-cursor: run: jit handle method unsupported
   patterns/struct_destructure: run: jit struct destructure unsupported
-  reflection/reflect-value: run: jit core call unsupported
+  reflection/reflect-value: run: jit core call unsupported: core.reflect.of
   safety/sh_typed_text: run: jit host/default/uninit/ct-lit unsupported
   safety/typed_sql: run_query: jit host/default/uninit/ct-lit unsupported
-  serde/codable_default: run: jit core call unsupported
-  serde/csv: run: jit core call unsupported
+  serde/codable_default: run: jit core call unsupported: core.encoding.json.decode
   serde/csv_typed: run: jit core call unsupported
-  serde/datatree_accessors: run: jit core call unsupported
-  serde/decode_traced: run: jit core call unsupported
-  serde/encoding: run: jit core call unsupported
-  serde/encoding_breadth: run: jit core call unsupported
+  serde/datatree_accessors: run: jit core call unsupported: core.encoding.json.parse
+  serde/decode_traced: run: jit core call unsupported: core.encoding.json.decode_traced
+  serde/encoding: run: jit core call unsupported: core.encoding.json.parse
+  serde/encoding_breadth: run: jit core call unsupported: core.encoding.json.parse
   serde/encoding_cbor_stream: write_catalog: jit core call unsupported
   serde/encoding_csv_stream: write_catalog: jit core call unsupported
   serde/encoding_json_stream: write_catalog: jit core call unsupported
   serde/encoding_jsonl_stream: write_catalog: jit core call unsupported
   serde/encoding_stream_types: run: jit static `jet_std::EncodingLimits::safe`
-  serde/encoding_xml_projection: run: jit core call unsupported
+  serde/encoding_xml_projection: run: jit core call unsupported: core.encoding.xml.parse
   serde/encoding_xml_stream: xml_name: jit JSON literal unsupported
   serde/hand_codec: Email::encode: jit JSON literal unsupported
-  serde/json_coerce: run: jit core call unsupported
-  serde/json_typed: run: jit core call unsupported
-  serde/serde_derive: run: jit core call unsupported
-  serde/serde_generic: run: jit core call unsupported
-  serde/toml: run: jit core call unsupported
+  serde/json_coerce: run: jit core call unsupported: core.encoding.json.decode
+  serde/json_typed: run: jit core call unsupported: core.encoding.json.decode
+  serde/serde_derive: run: jit core call unsupported: core.encoding.json.to_string
+  serde/serde_generic: run: jit core call unsupported: core.encoding.json.to_string
+  serde/toml: run: jit core call unsupported: core.encoding.toml.decode
   serde/validate: report: jit field `path` on `FieldError`
-  serde/yaml: run: jit core call unsupported
+  serde/yaml: run: jit core call unsupported: core.encoding.yaml.decode
   streams/generators: count: jit host/default/uninit/ct-lit unsupported
   syntax/trailing_block: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }
   text/bigint: run: jit precise numeric builtin unsupported: to_string
-  text/dates: run: jit core call unsupported
-  text/datetime: run: jit core call unsupported
+  text/dates: run: jit core call unsupported: core.time.date.new
+  text/datetime: run: jit core call unsupported: core.time.datetime.from_timestamp
   text/decimal: run: jit precise numeric builtin unsupported
-  text/human_format: run: jit core call unsupported
-  text/regex: run: jit core call unsupported
-  text/time_calendar: run: jit core call unsupported
-  text/unicode_text: run: jit core call unsupported
+  text/human_format: run: jit core call unsupported: core.fmt.number
+  text/regex: run: jit core call unsupported: jet.regex.is_match
+  text/time_calendar: run: jit core call unsupported: core.time.parse_rfc3339
+  text/unicode_text: run: jit core call unsupported: core.text.unicode.scalar_count
   text/unicode_text_audit: run: jit core.text call unsupported: byte_count
-  text/uuid: run: jit core call unsupported
-  tooling/data_analysis: run: jit core call unsupported
-  tooling/data_bridges: show_bridge: jit core call unsupported
-  tooling/data_core: run: jit core call unsupported
-  tooling/data_hostile: run: jit core call unsupported
-  tooling/data_json: run: jit core call unsupported
+  tooling/data_analysis: run: jit core call unsupported: core.data.csv
+  tooling/data_bridges: show_bridge: jit core call unsupported: core.data.status
+  tooling/data_core: run: jit core call unsupported: core.data.csv
+  tooling/data_hostile: run: jit core call unsupported: core.data.mean
+  tooling/data_json: run: jit core call unsupported: core.data.json
   tooling/data_pipeline: must_stay_deferred: jit require/panic stop unsupported
-  tooling/data_schema: run: jit core call unsupported
+  tooling/data_schema: run: jit core call unsupported: core.data.csv
   tooling/data_stream_bounds: run: jit core call unsupported
   tooling/debug_native: run: jit core call unsupported
   tooling/fuzz_demo: reverse: jit builtin method unsupported
   tooling/panic_report: summarize: jit require/panic stop unsupported
   tooling/property_tests: reverse: jit builtin method unsupported
   tooling/provenance_track: run: jit numeric origin unsupported
-  tooling/testing_helpers: run: jit core call unsupported
+  tooling/testing_helpers: run: jit core call unsupported: core.testing.temp_dir
   tooling/todo_hole: not_yet: jit todo expression unsupported
   types/anonymous_unions: jit param type unsupported: Union([Int, String])
   types/display_debug: run: jit string interp Debug type unsupported: Named("User")
   types/generic_types: run: jit call to unknown function `make_pair`
-  types/measurement: run: jit core call unsupported
+  types/measurement: run: jit core call unsupported: core.science.measurement.from
   types/no_any_alternatives: run: jit call to unknown function `echo`
   types/option: describe: jit if-let pattern unsupported
   types/optional_result_variants: run: jit enum arm is not a variant pattern
@@ -346,20 +346,20 @@ gaps:
   types/value_tag_type: jit param type unsupported: Tagged { marker: "Raw", inner: Int }
   ui/events: show_publish: jit enum `HookOutcome::Continue`
   ui/layout_basic: run: jit layout block unsupported
-  ui/loadable: run: jit core call unsupported
-  ui/reactive: run: jit core call unsupported
-  ui/reactive_scope: run: jit core call unsupported
-  ui/ui_a11y: run: jit core call unsupported
-  ui/ui_component_kit: label_view: jit core call unsupported
-  ui/ui_motion: motion_node: jit core call unsupported
+  ui/loadable: run: jit core call unsupported: core.reactive.loadable.idle
+  ui/reactive: run: jit core call unsupported: jet.reactive.signal
+  ui/reactive_scope: run: jit core call unsupported: jet.reactive.signal
+  ui/ui_a11y: run: jit core call unsupported: core.ui.null_backend
+  ui/ui_component_kit: label_view: jit core call unsupported: core.ui.text
+  ui/ui_motion: motion_node: jit core call unsupported: core.ui.node_color
   ui/ui_native_linux: run: jit inline comptime branch unsupported
-  ui/ui_null_backend: run: jit core call unsupported
-  ui/ui_tui_reactive: run: jit core call unsupported
-  ui/ui_typed_style: styled_text: jit core call unsupported
-  ui/ui_view_tree: repaint: jit core call unsupported
-  web/ui_showcase: stat_line: jit core call unsupported
-  web/ui_web_click: dev: jit core call unsupported
-  web/ui_web_reactive: run: jit core call unsupported
-  web/web_app: dev: jit core call unsupported
-  web/web_hello: run: jit core call unsupported
-  web/web_wasm_callback: init: jit core call unsupported
+  ui/ui_null_backend: run: jit core call unsupported: core.ui.null_backend
+  ui/ui_tui_reactive: run: jit core call unsupported: core.ui.tui_backend
+  ui/ui_typed_style: styled_text: jit core call unsupported: core.ui.node_color
+  ui/ui_view_tree: repaint: jit core call unsupported: core.ui.null_backend
+  web/ui_showcase: stat_line: jit core call unsupported: core.ui.text
+  web/ui_web_click: dev: jit core call unsupported: core.web.devserver.app
+  web/ui_web_reactive: run: jit core call unsupported: core.ui.null_backend
+  web/web_app: dev: jit core call unsupported: core.web.devserver.app
+  web/web_hello: run: jit core call unsupported: core.ui.null_backend
+  web/web_wasm_callback: init: jit core call unsupported: core.web.on

@@ -76,6 +76,12 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         {
             Some(inner.as_ref().clone())
         }
+        // Nested list rows (`[[String]]` CSV, etc.) — outer iterates i64 handles.
+        Type::List(inner) | Type::FixedList { elem: inner, .. }
+            if jit_list_native_type(inner) =>
+        {
+            Some(inner.as_ref().clone())
+        }
         // JIT ABI: `Iter<T>` / `View<T>` / `ViewMut<T>` producers materialize list
         // handles — scalar elems share list for-in / join / len; record elems too.
         Type::Apply { name, args }

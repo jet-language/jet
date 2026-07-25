@@ -1,7 +1,8 @@
-//! Host shims for `core.os`, `jet.log`, `core.math`, `core.files`, and
-//! `core.path` CoreCalls (#729). Behavior mirrors AOT helpers in the CoreLib
-//! prelude (`jet_std_os_*`, `jet_ring_log_*`, `jet_std_math_*`, `jet_std_fs_*`,
-//! `jet_std_path_*`) — thin std wrappers, not a third algorithm.
+//! Host shims for `core.os`, `jet.log`, `core.math`, `core.files`,
+//! `core.path`, `core.env`, and `core.process` CoreCalls (#729). Behavior
+//! mirrors AOT helpers in the CoreLib prelude (`jet_std_os_*`, `jet_ring_log_*`,
+//! `jet_std_math_*`, `jet_std_fs_*`, `jet_std_path_*`, `jet_std_env_*`,
+//! `jet_std_process_*`) — thin std wrappers, not a third algorithm.
 
 use super::Concurrency;
 use std::cell::{Cell, RefCell};
@@ -987,6 +988,24 @@ extern "C" fn jet_jit_math_lcm(a: i64, b: i64) -> i64 {
     }
 }
 
+// ── core.env / core.process (mirrors jet_std_env_get / jet_std_process_exit) ─
+
+/// Option ABI: `0` = None, else string-handle+1 (same as list_get_opt).
+extern "C" fn jet_jit_env_get(name: i64) -> i64 {
+    let key = clone_heap_string(name);
+    match std::env::var(&key) {
+        Ok(v) => {
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(v));
+            sid.wrapping_add(1)
+        }
+        Err(_) => 0,
+    }
+}
+
+extern "C" fn jet_jit_process_exit(code: i64) {
+    std::process::exit(code as i32);
+}
+
 pub(crate) struct CoreHostFns {
     pub os_name: cranelift_module::FuncId,
     pub os_family: cranelift_module::FuncId,
@@ -1050,6 +1069,8 @@ pub(crate) struct CoreHostFns {
     pub math_int_pow: cranelift_module::FuncId,
     pub math_gcd: cranelift_module::FuncId,
     pub math_lcm: cranelift_module::FuncId,
+    pub env_get: cranelift_module::FuncId,
+    pub process_exit: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -1127,6 +1148,8 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_math_int_pow", jet_jit_math_int_pow as *const u8);
     builder.symbol("jet_jit_math_gcd", jet_jit_math_gcd as *const u8);
     builder.symbol("jet_jit_math_lcm", jet_jit_math_lcm as *const u8);
+    builder.symbol("jet_jit_env_get", jet_jit_env_get as *const u8);
+    builder.symbol("jet_jit_process_exit", jet_jit_process_exit as *const u8);
 }
 
 pub(crate) fn declare_core_host_fns(
@@ -1262,5 +1285,7 @@ pub(crate) fn declare_core_host_fns(
         math_int_pow: import("jet_jit_math_int_pow", &sig_i64_i64_i64)?,
         math_gcd: import("jet_jit_math_gcd", &sig_i64_i64_i64)?,
         math_lcm: import("jet_jit_math_lcm", &sig_i64_i64_i64)?,
+        env_get: import("jet_jit_env_get", &sig_unary_i64)?,
+        process_exit: import("jet_jit_process_exit", &sig_void_i64)?,
     })
 }

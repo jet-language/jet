@@ -24,6 +24,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         results: Vec::new(),
         solvers: Vec::new(),
         rngs: Vec::new(),
+        clocks: Vec::new(),
         trapped: None,
         deadline_exceeded: None,
     }

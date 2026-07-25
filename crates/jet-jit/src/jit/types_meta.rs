@@ -114,8 +114,10 @@ pub(crate) fn clif_ty_with_distinct(
     }
     // List/FixedList/Iter/View handles share the I64 arena ABI (string elems are
     // string-handle ints). Fn values stay unsupported until call/closure ABI lands.
+    // Nested lists (`[[String]]` CSV rows, etc.) are also arena handles.
     if jit_list_native_type(&ty)
         || jit_list_of_int_list_type(&ty)
+        || matches!(&ty, Type::List(inner) if jit_list_native_type(inner))
         || jit_list_task_int_type(&ty)
         || jit_list_record_type(&ty)
         || jit_list_iter_elem_type(&ty).is_some()

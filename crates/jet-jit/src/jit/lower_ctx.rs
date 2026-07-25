@@ -5,8 +5,9 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{
     self, TBuiltinOp, TCallArg, TClosureOp, TCoreClosureKind, TEnumPayload, TExpr, TExprKind,
-    TForInMethod, THandleOp, THostCall, TIfCond, TJitSpawnLambda, TLambdaBody, TLocal, TMethodRef,
-    TModuleCallForm, TNumericOp, TOrFallback, TPattern, TPlace, TStaticOwner, TStmt, TStrPart,
+    TForInMethod, THandleOp, THostArg, THostCall, TIfCond, TJitSpawnLambda, TLambdaBody, TLocal,
+    TMethodRef, TModuleCallForm, TNumericOp, TOrFallback, TPattern, TPlace, TStaticOwner, TStmt,
+    TStrPart,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
 use std::collections::HashMap;
@@ -1723,6 +1724,17 @@ impl LowerCtx<'_, '_> {
                 let _ = ty;
                 Ok(result)
             }
+            THostCall::Helper { helper, args } if helper.ends_with("jet_std_clock_new") => {
+                let ms = match args.first() {
+                    Some(THostArg::Expr(e) | THostArg::Borrow(e)) => self.lower_expr(e)?,
+                    _ => return Err("jit Clock.new args unsupported".to_string()),
+                };
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.clock_new, self.b.func);
+                let call = self.b.ins().call(host_ref, &[ms]);
+                Ok(self.b.inst_results(call)[0])
+            }
             _ => Err("jit host/default/uninit/ct-lit unsupported".to_string()),
         }
     }
@@ -2674,6 +2686,49 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.encoding.csv" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "parse" if args.len() == 1 => {
+                            (self.host.encoding.csv_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        "to_string" if args.len() == 1 => (
+                            self.host.encoding.csv_to_string,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.uuid" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "v4" if args.is_empty() => (self.host.encoding.uuid_v4, Vec::new()),
+                        "v7" if args.len() == 1 => {
+                            (self.host.encoding.uuid_v7, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.env" && method == "get" && args.len() == 1 {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.core.env_get, self.b.func);
+                    let a0 = self.lower_expr(&args[0])?;
+                    let call = self.b.ins().call(host_ref, &[a0]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.process" && method == "exit" && args.len() == 1 {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.core.process_exit, self.b.func);
+                    let a0 = self.lower_expr(&args[0])?;
+                    self.b.ins().call(host_ref, &[a0]);
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
                 if module == "core.compress.gzip" || module == "core.compress.zstd" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
                         ("core.compress.gzip", "compress") if args.len() == 1 => {
@@ -2895,7 +2950,7 @@ impl LowerCtx<'_, '_> {
                         .map(|_| self.b.inst_results(call)[0])
                         .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
                 }
-                Err("jit core call unsupported".to_string())
+                Err(format!("jit core call unsupported: {module}.{method}"))
             }
             TExprKind::CoreClosureCall { kind } => match kind {
                 TCoreClosureKind::Spawn { .. } => self.lower_spawn(),
@@ -3884,7 +3939,21 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::StartsWith => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::EndsWith => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Repeat => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Slice { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Slice { .. } => {
+                if !matches!(&recv.ty, Type::String) {
+                    return Err("jit builtin method unsupported".to_string());
+                }
+                if args.len() != 2 {
+                    return Err("jit string slice arity".to_string());
+                }
+                let start = self.lower_expr(&args[0])?;
+                let end = self.lower_expr(&args[1])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_slice, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, start, end]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::After => {
                 let sep = self.lower_expr(&args[0])?;
                 let host_ref = self

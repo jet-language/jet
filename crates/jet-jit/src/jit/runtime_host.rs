@@ -56,6 +56,8 @@ pub(crate) struct JitRuntime {
     pub(crate) results: Vec<JitResultValue>,
     pub(crate) solvers: Vec<Solver::SolverState>,
     pub(crate) rngs: Vec<crate::Random::RngState>,
+    /// Manual `Clock.new(ms)` handles — 1-based indices into this vec (#729 uuid).
+    pub(crate) clocks: Vec<i64>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -413,6 +415,31 @@ extern "C" fn jet_jit_str_before(id: i64, sep_id: i64) -> i64 {
         let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
         rt.heap
             .alloc_string(jet_rt::string_before(&text, &sep))
+    })
+}
+
+/// Inclusive string slice (`s.slice(lo, hi)`). Same start/end = one char.
+extern "C" fn jet_jit_str_slice(id: i64, start: i64, end: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let chars: Vec<char> = text.chars().collect();
+        let len = chars.len() as i64;
+        let lo = start.clamp(0, len) as usize;
+        let hi = end.clamp(0, len.saturating_sub(1).max(0)) as usize;
+        let sliced: String = if chars.is_empty() || start > end || lo >= chars.len() {
+            String::new()
+        } else {
+            chars[lo..=hi.min(chars.len() - 1)].iter().collect()
+        };
+        rt.heap.alloc_string(sliced)
+    })
+}
+
+/// `Clock.new(ms)` — manual clock handle (1-based index into `rt.clocks`).
+extern "C" fn jet_jit_clock_new(ms: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.clocks.push(ms);
+        rt.clocks.len() as i64
     })
 }
 
@@ -872,6 +899,8 @@ pub(crate) struct HostFns {
     pub(crate) str_chars: FuncId,
     pub(crate) str_after: FuncId,
     pub(crate) str_before: FuncId,
+    pub(crate) str_slice: FuncId,
+    pub(crate) clock_new: FuncId,
     pub(crate) parse_i64: FuncId,
     pub(crate) parse_f64: FuncId,
     pub(crate) numeric_try_i64: FuncId,
@@ -958,6 +987,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_chars", jet_jit_str_chars as *const u8);
     builder.symbol("jet_jit_str_after", jet_jit_str_after as *const u8);
     builder.symbol("jet_jit_str_before", jet_jit_str_before as *const u8);
+    builder.symbol("jet_jit_str_slice", jet_jit_str_slice as *const u8);
+    builder.symbol("jet_jit_clock_new", jet_jit_clock_new as *const u8);
     builder.symbol("jet_jit_trap_panic", jet_jit_trap_panic as *const u8);
     builder.symbol("jet_jit_parse_i64", jet_jit_parse_i64 as *const u8);
     builder.symbol("jet_jit_parse_f64", jet_jit_parse_f64 as *const u8);
@@ -1291,6 +1322,8 @@ fn declare_host_fns(
         str_chars: import("jet_jit_str_chars", &sig_str_unary_i64)?,
         str_after: import("jet_jit_str_after", &sig_str_binary_i64)?,
         str_before: import("jet_jit_str_before", &sig_str_binary_i64)?,
+        str_slice: import("jet_jit_str_slice", &sig_str_replace)?,
+        clock_new: import("jet_jit_clock_new", &sig_str_unary_i64)?,
         parse_i64: import("jet_jit_parse_i64", &sig_str_unary_i64)?,
         parse_f64: import("jet_jit_parse_f64", &sig_str_unary_i64)?,
         numeric_try_i64: import("jet_jit_numeric_try_i64", &sig_i64_i64_i64_i64)?,
