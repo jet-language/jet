@@ -204,6 +204,7 @@ fn report_rejects_hostile_local_links() {
 #[test]
 fn report_is_registered_in_cli_surfaces() {
     assert!(jet::CLI::is_builtin("report"));
+    assert!(!jet::CLI::is_builtin("telemetry"));
     assert!(jet::CLI::completions_bash().contains("report"));
     assert!(jet::CLI::completions_zsh().contains("report"));
     assert!(jet::CLI::completions_fish().contains("report"));
@@ -212,7 +213,7 @@ fn report_is_registered_in_cli_surfaces() {
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cli");
     for (name, exact) in [
-        ("completions_bash.txt", " budget report bench "),
+        ("completions_bash.txt", "perf report bench"),
         (
             "completions_zsh.txt",
             "'report:Write a private local report bundle'",
@@ -223,7 +224,7 @@ fn report_is_registered_in_cli_surfaces() {
         ),
         (
             "completions_powershell.txt",
-            "'budget','report','bench'",
+            "'budget','perf','report','bench'",
         ),
         (
             "man.txt",
@@ -232,7 +233,118 @@ fn report_is_registered_in_cli_surfaces() {
     ] {
         let golden = fs::read_to_string(root.join(name)).unwrap();
         assert!(golden.contains(exact), "{name} is missing `{exact}`");
+        assert!(
+            !golden.contains("report --send") && !golden.contains("telemetry"),
+            "{name} must not advertise report --send or telemetry"
+        );
     }
+}
+
+#[test]
+fn report_rejects_send_flag_without_writing_bundle() {
+    let root = scratch("reject-send");
+    for args in [
+        vec!["report", "--send"],
+        vec!["report", "--send=somewhere"],
+        vec!["report", "--send", ".jet/reports/x"],
+    ] {
+        let output = Command::new(jet())
+            .args(&args)
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success(),
+            "expected failure for {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("`jet report --send` is not available"),
+            "missing D-REPORT-SEND1 refusal for {args:?}: {stderr}"
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("wrote local report bundle"));
+        assert!(!root.join(".jet").exists(), "send attempt must write nothing");
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn zero_telemetry_policy_docs_and_source_audit() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let policy = fs::read_to_string(manifest.join("docs/reference/network-policy.md")).unwrap();
+    assert!(policy.contains("D-TELEMETRY1=A"));
+    assert!(policy.contains("D-REPORT-SEND1=A"));
+    assert!(policy.contains("Jet sends no telemetry"));
+    assert!(policy.contains("There is no `jet report --send` command"));
+    assert!(policy.contains("Inventory of toolchain network paths"));
+    assert!(!policy.contains("future send operation"));
+
+    let report_src = fs::read_to_string(manifest.join("Source/CmdReport.rs")).unwrap();
+    for forbidden in [
+        "std::net",
+        "TcpStream",
+        "UdpSocket",
+        "reqwest",
+        "ureq",
+        "curl",
+        "reports.jet-lang.org",
+    ] {
+        assert!(
+            !report_src.contains(forbidden),
+            "CmdReport.rs must stay offline; found `{forbidden}`"
+        );
+    }
+
+    let forbidden_endpoints = [
+        "reports.jet-lang.org",
+        "telemetry.jet-lang.org",
+        "/v1/telemetry",
+        "sentry.io",
+        "crashlytics",
+        "segment.io",
+        "gotelemetry",
+    ];
+    let roots = [
+        manifest.join("Source"),
+        manifest.join("crates/jet-cli"),
+        manifest.join("crates/jetpack/src"),
+    ];
+    for root in roots {
+        for entry in walkdir(&root) {
+            let path = entry.as_path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+                continue;
+            }
+            let text = fs::read_to_string(path).unwrap();
+            for needle in forbidden_endpoints {
+                assert!(
+                    !text.contains(needle),
+                    "{} must not name telemetry endpoint `{needle}`",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+fn walkdir(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    out
 }
 
 #[cfg(target_os = "linux")]
@@ -293,6 +405,7 @@ fn ordinary_build_and_report_open_no_network_connection() {
         .iter()
         .filter(|line| line.contains("recvfrom(") && line.ends_with("\", 8, 0, NULL, NULL) = 0"))
         .count();
+    // sendfile between local fds is process I/O; strace still labels it network.
     let unexpected = calls
         .iter()
         .filter(|line| {
@@ -300,6 +413,7 @@ fn ordinary_build_and_report_open_no_network_connection() {
                 && line.ends_with("= 0"))
                 && !(line.contains("recvfrom(")
                     && line.ends_with("\", 8, 0, NULL, NULL) = 0"))
+                && !line.contains("sendfile(")
         })
         .collect::<Vec<_>>();
     assert!(

@@ -25,6 +25,20 @@ snapshot, or unrelated package data.
 Ordinary local commands such as `jet check`, `jet build`, and `jet fmt` do not
 open a network connection.
 
+## Inventory of toolchain network paths
+
+These are the only Jet/jetpack paths that may dial out, and only when the user
+asks for that operation:
+
+| Path | Trigger | What it may send |
+|---|---|---|
+| `jetpack` / `jet` registry fetch (`Provider/fetch`, sparse index, script registries) | user-requested add/update/fetch/vendor | package name, version constraint, HTTPS URL for that artifact, protocol headers the fetch needs |
+| `jetpack doctor` / `jet self doctor --online` | explicit `--online` | TCP reachability probe to the configured registry host |
+| Recipe `fetch(url, sha256:)` during a build | declared locked fetch in the recipe | the named URL bytes |
+| Build/`--allow-net` and user program network effects | user opt-in or program code | only what that build step or program declares |
+
+There is no background usage, crash, or analytics sender in `jet` or `jetpack`.
+
 ## Local reports
 
 `jet report` creates a private bundle under:
@@ -53,6 +67,9 @@ directory first. The content-hash path becomes visible only after both files
 are complete. Jet rejects linked directories, linked bundle files, and changed
 existing bundles instead of following or overwriting them.
 
-No report upload command is shipped. A future send operation needs a separate
-ratified decision for its destination, transport, authentication, and exact
-privacy boundary.
+## Sharing stays outside Jet
+
+Ratified `D-REPORT-SEND1=A` keeps sharing outside Jet. There is no `jet report --send` command.
+After you inspect the bundle, attach the two text files through a support
+channel you already trust. Jet never chooses a destination, account, or
+retention policy for a report.
