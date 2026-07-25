@@ -1659,19 +1659,11 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(render_inventory(&reversed), rendered, "inventory rendering must be order-stable");
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
-    for record in records.iter().filter(|record| record.class == Class::PurePending) {
-        eprintln!(
-            "PURE_PENDING {} {}.{}",
-            record.entry.surface.name(),
-            record.entry.owner,
-            record.entry.method
-        );
-    }
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
     // Honest pending count includes the twelve explicit KNOWN_OPEN_GAPS rows
-    // (six crypto.expert + six encoding.xml) plus any remaining value/static
-    // pure ports. Prior false-green asserted pending=0 while crypto rows sat
-    // under a broad Boundary match.
+    // (six crypto.expert + six encoding.xml) plus View/ViewMut.join value ports.
+    // Prior false-green asserted pending=0 while crypto rows sat under a broad
+    // Boundary match.
     assert_eq!((records.len(), covered, pending, boundaries), (1_208, 843, 14, 351));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
