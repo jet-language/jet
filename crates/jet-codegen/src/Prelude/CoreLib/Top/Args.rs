@@ -90,16 +90,26 @@ impl JetArgsSpec {
             .collect();
         s.push_str("Usage: ");
         s.push_str(&prog);
-        if has_opts {
-            s.push_str(" [options]");
-        }
         for p in &positionals {
             if let JetArgKind::Positional { name, .. } = p {
                 s.push(' ');
                 s.push_str(name);
             }
         }
+        if has_opts {
+            s.push_str(" [options]");
+        }
         s.push('\n');
+        // D-CLI-POS1: Arguments (positionals) before Options (flags).
+        if !positionals.is_empty() {
+            s.push('\n');
+            s.push_str("Arguments:\n");
+            for p in &positionals {
+                if let JetArgKind::Positional { name, help } = p {
+                    s.push_str(&format!("  {:<22} {}\n", name, help));
+                }
+            }
+        }
         // flags and options
         let flags_opts: Vec<&JetArgKind> = self
             .entries
@@ -156,16 +166,6 @@ impl JetArgsSpec {
             s.push_str(&format!("  {:<24} {}\n", "--help", "show this help"));
             if self.version.is_some() {
                 s.push_str(&format!("  {:<24} {}\n", "--version", "show version"));
-            }
-        }
-        // positionals
-        if !positionals.is_empty() {
-            s.push('\n');
-            s.push_str("Arguments:\n");
-            for p in positionals {
-                if let JetArgKind::Positional { name, help } = p {
-                    s.push_str(&format!("  {:<22} {}\n", name, help));
-                }
             }
         }
         s
@@ -473,7 +473,7 @@ fn jet_args_completion(spec: &JetArgsSpec, shell: &String) -> String {
                 }
             }
             JetArgKind::Subcommand { name, .. } => words.push(name.clone()),
-            JetArgKind::Positional { .. } => {}
+            JetArgKind::Positional { name, .. } => words.push(name.clone()),
         }
     }
     format!("{} completion: {}", shell, words.join(" "))
@@ -613,25 +613,34 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
         i += 1;
     }
 
-    // Check required positionals.
-    let required_count = spec
-        .entries
-        .iter()
-        .filter(|e| matches!(e, JetArgKind::Positional { .. }))
-        .count();
-    if positionals.len() < required_count {
-        let missing: Vec<&str> = spec
-            .entries
-            .iter()
-            .filter_map(|e| {
-                if let JetArgKind::Positional { name, .. } = e {
-                    Some(name.as_str())
-                } else {
-                    None
-                }
-            })
-            .skip(positionals.len())
-            .collect();
+    // D-CLI-POS1=A named-wins: a positional whose name matches an already-set
+    // option is satisfied by the named form and does not consume a bare arg.
+    // Remaining bare args fill unsatisfied positionals in declaration order
+    // by copying into `options` under the positional name so decode can read
+    // one path (`jet_parsed_option`) for both forms.
+    let mut bare_i = 0usize;
+    let mut missing: Vec<&str> = Vec::new();
+    for e in &spec.entries {
+        let JetArgKind::Positional { name, .. } = e else {
+            continue;
+        };
+        if options.contains_key(name) {
+            continue;
+        }
+        if bare_i < positionals.len() {
+            let value = &positionals[bare_i];
+            // Prefer typed store when a same-named option exists (derive pairing).
+            if let Some(entry) = jet_args_find_option(spec, name) {
+                jet_args_store_option(&mut options, entry, value)?;
+            } else {
+                options.insert(name.clone(), vec![value.clone()]);
+            }
+            bare_i += 1;
+        } else {
+            missing.push(name.as_str());
+        }
+    }
+    if !missing.is_empty() && !flags.get("help").copied().unwrap_or(false) {
         return Err(format!(
             "missing required argument{}: {}\n\n{}",
             if missing.len() == 1 { "" } else { "s" },
@@ -641,7 +650,10 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
     }
     for e in &spec.entries {
         if let JetArgKind::Option { name, required, .. } = e {
-            if *required && !options.contains_key(name) {
+            if *required
+                && !options.contains_key(name)
+                && !flags.get("help").copied().unwrap_or(false)
+            {
                 return Err(format!("missing required option `--{}`\n\n{}", name, spec.help()));
             }
         }

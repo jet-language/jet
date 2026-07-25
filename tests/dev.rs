@@ -3940,7 +3940,7 @@ fn classify_corpus_stem(
 
     if !jet_jit::resident_jit_safe_bundle(&bundle)
         && jet_jit::try_compile_bundle(&bundle).is_err()
-        && matches!(stem, "cli/subcommands" | "cli/typed_entry_args")
+        && matches!(stem, "cli/subcommands" | "cli/typed_entry_args" | "cli/positionals")
     {
         return CorpusGateRecord {
             stem: stem.to_string(),

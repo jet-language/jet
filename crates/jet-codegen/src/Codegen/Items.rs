@@ -507,9 +507,17 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
             } => {
                 let ty = &f.ty;
                 let metavar = input.metavar.as_deref().unwrap_or("VALUE");
+                // Named `--flag` always accepted. Required values without a
+                // default also register a same-named positional (D-CLI-POS1=A)
+                // unless schema.positional is None (`#[Flag]` opt-out).
                 spec_body.push_str(&format!(
                     "    let __s = {root}jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
                 ));
+                if input.positional.is_some() {
+                    spec_body.push_str(&format!(
+                        "    let __s = {root}jet_args_positional(__s, &{flag:?}.to_string(), &{help:?}.to_string());\n"
+                    ));
+                }
                 let rust = cx.rust_type(ty);
                 let conv = cli_scalar_from_string(ty, "__v", &flag, root);
                 let absent = match default {
@@ -522,10 +530,15 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     Some(jet_foundation::CliSchema::CliDefault::Recorded(_)) => {
                         unreachable!("recorded defaults are read from artifacts, never sema input")
                     }
+                    None if input.positional.is_some() => format!(
+                        "return Err(format!(\"missing required argument {{}}\\n\\n{{}}\", {flag:?}, __spec.help()))"
+                    ),
                     None => format!(
                         "return Err(format!(\"missing required flag --{{}}\\n\\n{{}}\", {flag:?}, __spec.help()))"
                     ),
                 };
+                // Named wins: ArgsSpec merges bare positionals into options under
+                // the same name when the named form is absent, so one decode path.
                 decode_lines.push_str(&format!(
                     "    let {m}: {rust} = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => {conv}, None => {absent} }};\n"
                 ));

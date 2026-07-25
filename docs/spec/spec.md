@@ -2965,14 +2965,16 @@ no explicit address, legacy `fn run` wins; otherwise a sole compatible
 Executable is selected. Multiple candidates produce E1321 with a sorted list.
 
 **Pinned field-mapping rule** — every `#[Cli]` struct field maps to exactly
-one flag, by this rule (checked top to bottom, first match wins):
+one named `--flag`, by this rule (checked top to bottom, first match wins).
+D-CLI-POS1=A adds positional filling for required value fields:
 
-| Field shape | Flag | Absent at runtime |
-|---|---|---|
-| `Bool` | `--name` (boolean flag) | `false` |
-| `T?` (`T` a supported scalar) | `--name VALUE` (optional) | `None` |
-| scalar with `#[Default(expr)]` | `--name VALUE` (optional) | `expr` |
-| any other supported scalar | `--name VALUE` (**required**) | runtime error, `core.args` voice — no new diagnostic code |
+| Field shape | Named form | Bare form | Absent at runtime |
+|---|---|---|---|
+| `Bool` | `--name` (boolean flag) | — | `false` |
+| `T?` (`T` a supported scalar) | `--name VALUE` (optional) | — | `None` |
+| scalar with `#[Default(expr)]` | `--name VALUE` (optional) | — | `expr` |
+| required scalar with `#[Flag]` | `--name VALUE` only | rejected on purpose | runtime error, `core.args` voice |
+| any other supported scalar | `--name VALUE` | fills by declaration order | runtime error, `core.args` voice — no new diagnostic code |
 
 Supported scalars: `Int`, `Float`, `Bool`, `String`, `Path`. Any other field
 type (a `[K: V]`, a closure, a `[T]`, a nested struct that isn't itself
@@ -2983,10 +2985,12 @@ defaults, S61, a different grammar slot; reusing `#[Default(...)]` here is
 I8: one mechanism for "this field has a default", not two). Field name
 `snake_case` → flag `--snake-case` (underscores become dashes); no
 casing-style menu (that's a wire-format concern, D-SERDE3, not a CLI-flag
-one). No positionals are derived from struct fields in v1 — `core.args`'s
-`.positional(...)` builder is the escape hatch for that shape, used
-directly (not through the typed layer).
-
+one). Every field always accepts its named `--field` spelling; when both a
+named value and a bare positional appear for the same field, the named value
+wins. `#[Flag]` on a Bool / optional / defaulted field is **E1309** (nothing
+to opt out of). Declaration order of required value fields is part of the
+command interface; reordering them is a breaking shape change reported through
+the checked `CliSchema` / dossier / embedded command metadata.
 Every generated CLI spec also registers `--help` automatically (rendering
 the struct's fields/types/`#[Doc]` text); a field named `help` collides
 with it and is **E1306**.
@@ -3061,7 +3065,8 @@ stderr.
 **Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
 including the reserved `--help`), E1307 (subcommand payload isn't
 `#[Cli]`), E1308 (`run`'s one parameter isn't a `#[Cli]` struct or an enum
-of `#[Cli]` payloads). See docs/spec/diagnostics.md.
+of `#[Cli]` payloads), E1309 (`#[Flag]` on a field that is already flag-only).
+See docs/spec/diagnostics.md.
 
 The public `#[Cli]` struct or subcommand enum may be declared in the entry file
 or in one directly imported module. Its generated parser/decode helpers remain

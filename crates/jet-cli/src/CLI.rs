@@ -940,15 +940,52 @@ pub fn completion_command_name(program: &str) -> Result<String, &'static str> {
 
 fn input_words(inputs: &[jet_foundation::CliSchema::CliInputSchema]) -> Vec<String> {
     let mut words = vec!["--help".to_string()];
+    let mut positionals: Vec<&jet_foundation::CliSchema::CliInputSchema> = inputs
+        .iter()
+        .filter(|input| input.positional.is_some())
+        .collect();
+    positionals.sort_by_key(|input| input.positional.unwrap());
+    for input in positionals {
+        words.push(input.flag.clone());
+    }
     words.extend(inputs.iter().map(|input| format!("--{}", input.flag)));
     words
 }
 
 fn zsh_input_specs(inputs: &[jet_foundation::CliSchema::CliInputSchema]) -> Vec<String> {
-    inputs.iter().map(|input| {
-        let value = input.metavar.as_deref().map(|name| format!(":{}:", name.to_lowercase())).unwrap_or_default();
-        format!("    '{}[{}]{}'", zsh_single(&format!("--{}", input.flag)), zsh_bracket(&input.help), value)
-    }).chain(std::iter::once("    '--help[show help]'".to_string())).collect()
+    let mut specs = Vec::new();
+    let mut positionals: Vec<&jet_foundation::CliSchema::CliInputSchema> = inputs
+        .iter()
+        .filter(|input| input.positional.is_some())
+        .collect();
+    positionals.sort_by_key(|input| input.positional.unwrap());
+    for input in positionals {
+        let meta = input
+            .metavar
+            .as_deref()
+            .unwrap_or(input.flag.as_str())
+            .to_lowercase();
+        specs.push(format!(
+            "    ':{}:{}'",
+            zsh_single(&meta),
+            zsh_bracket(&input.help)
+        ));
+    }
+    specs.extend(inputs.iter().map(|input| {
+        let value = input
+            .metavar
+            .as_deref()
+            .map(|name| format!(":{}:", name.to_lowercase()))
+            .unwrap_or_default();
+        format!(
+            "    '{}[{}]{}'",
+            zsh_single(&format!("--{}", input.flag)),
+            zsh_bracket(&input.help),
+            value
+        )
+    }));
+    specs.push("    '--help[show help]'".to_string());
+    specs
 }
 
 fn shell_single_quote(value: &str) -> String { format!("'{}'", value.replace('\'', "'\\''")) }

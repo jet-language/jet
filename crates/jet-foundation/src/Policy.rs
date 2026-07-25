@@ -201,7 +201,7 @@ pub fn applied_rule_registry() -> Vec<AppliedRule> {
             "RenameAll" | "DenyUnknownFields" | "Tag" | "Untagged" => (NO_POLICY_SCOPES, TYPE_SITE, false),
             "Persist" | "Track" => (NO_POLICY_SCOPES, DECLARATION_SITE, false),
             "Meta" => (NO_POLICY_SCOPES, &[RuleSite::Function, RuleSite::Declaration, RuleSite::Constant][..], false),
-            "Doc" => (NO_POLICY_SCOPES, FIELD_SITE, false),
+            "Doc" | "Flag" => (NO_POLICY_SCOPES, FIELD_SITE, false),
             "Todo" => (NO_POLICY_SCOPES, EXPR_SITE, false),
             "Shield" | "Impure" | "Caps" | "Transact" | "Region" | "Live" | "Nondeterministic" | "Context" => (NO_POLICY_SCOPES, BLOCK_SITE, false),
             "Reactive" => (NO_POLICY_SCOPES, &[RuleSite::Function, RuleSite::Block][..], false),

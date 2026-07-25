@@ -2,8 +2,10 @@
 // parameter IS the CLI spec. `#[Cli]` derives one `--flag`/`--option`
 // registration per field (see docs/spec/spec.md "Typed entry-signature CLI
 // parsing" for the pinned field-mapping rule); `#[Doc("...")]` supplies that
-// flag's `--help` text. `fn run(args: T)` replaces `fn run()` as the entry
-// point and parses `io.args()` before calling the user body.
+// flag's `--help` text. `fn run(args: T)` opts this program into typed shell
+// inputs and parses `io.args()` before calling the user body; plain `fn run()`
+// remains the complete zero-ceremony entry when typed inputs are not wanted
+// (D-SHAPE-CLI1).
 //
 // Run with extra flags:  jet run examples/features/cli/typed_entry_args.jet -- --port 8080 --verbose --config prod.toml
 // Run --help:            jet run examples/features/cli/typed_entry_args.jet -- --help
@@ -20,5 +22,5 @@ struct ServeArgs {
 fn run(args: ServeArgs) {
     print(args.port)
     print(args.verbose)
-    print(args.config ?? "(none)")
+    print((~args.config) ?? "(none)")
 }

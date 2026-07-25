@@ -233,11 +233,42 @@ fn format_fn_sig(
 }
 
 fn format_struct_sig(s: &crate::AST::StructDef, dimensions: &crate::Sema::ApiFreeze::ApiUnitDimensions) -> String {
+    let is_cli = s
+        .derives
+        .iter()
+        .any(|(name, _)| name == crate::Syntax::CONTRACT_CLI);
+    let mut positional_order = 0u16;
     let fields: Vec<String> = s
         .fields
         .iter()
         .filter(|f| supported_public_name(&f.name))
-        .map(|f| format!("{}: {}", f.name, crate::Sema::ApiFreeze::canonical_api_type_name(&f.ty, dimensions)))
+        .map(|f| {
+            let ty = crate::Sema::ApiFreeze::canonical_api_type_name(&f.ty, dimensions);
+            if !is_cli {
+                return format!("{}: {}", f.name, ty);
+            }
+            // D-CLI-POS1: publish API diff sees positional order and #[Flag]
+            // opt-outs as part of the public command shape.
+            let flag_only = f
+                .serde_markers
+                .iter()
+                .any(|m| m.name == crate::Syntax::CONTRACT_FLAG);
+            let has_default = f
+                .serde_markers
+                .iter()
+                .any(|m| m.name == crate::Syntax::ATTR_DEFAULT);
+            let is_bool = matches!(f.ty, crate::AST::Type::Bool);
+            let is_optional = matches!(f.ty, crate::AST::Type::Option(_));
+            if !is_bool && !is_optional && !has_default && !flag_only {
+                let order = positional_order;
+                positional_order = positional_order.saturating_add(1);
+                format!("{}: {} [positional {order}]", f.name, ty)
+            } else if flag_only {
+                format!("{}: {} [flag]", f.name, ty)
+            } else {
+                format!("{}: {}", f.name, ty)
+            }
+        })
         .collect();
     format!("struct {} {{ {} }}", s.name, fields.join("; "))
 }
