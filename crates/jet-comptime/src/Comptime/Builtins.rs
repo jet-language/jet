@@ -7,14 +7,14 @@ use crate::AST::{BinOp, CtFloat, Type};
 use super::Diagnostics::{comptime_panic, divide_by_zero, index_oob, overflow, unsupported};
 use super::Value::{CtKey, CtValue};
 
-pub(super) fn as_bool(v: &CtValue, span: Span) -> Result<bool, Diagnostic> {
+pub fn as_bool(v: &CtValue, span: Span) -> Result<bool, Diagnostic> {
     match v {
         CtValue::Bool(b) => Ok(*b),
         _ => Err(unsupported("a non-Bool used as a condition", span)),
     }
 }
 
-pub(super) fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+pub fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     match v {
         CtValue::Int(n) => Ok(*n),
         _ => Err(unsupported("a non-Int used as a number", span)),
@@ -23,7 +23,7 @@ pub(super) fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
 
 /// Binary operators with runtime-identical semantics (i64 wrapping is
 /// rejected: debug-profile rustc panics on overflow, so comptime does too).
-pub(super) fn eval_binop(
+pub fn eval_binop(
     op: BinOp,
     l: CtValue,
     r: CtValue,
@@ -116,11 +116,13 @@ pub(super) fn eval_binop(
         (BinOp::Gt, a, b) => cmp(a, b, span).map(|o| Bool(o == std::cmp::Ordering::Greater)),
         (BinOp::Le, a, b) => cmp(a, b, span).map(|o| Bool(o != std::cmp::Ordering::Greater)),
         (BinOp::Ge, a, b) => cmp(a, b, span).map(|o| Bool(o != std::cmp::Ordering::Less)),
+        (BinOp::And, Bool(a), Bool(b)) => Ok(Bool(a && b)),
+        (BinOp::Or, Bool(a), Bool(b)) => Ok(Bool(a || b)),
         _ => Err(unsupported("this operation", span)),
     }
 }
 
-pub(super) fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
+pub fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Ordering, Diagnostic> {
     use CtValue::*;
     match (a, b) {
         (Int(a), Int(b)) => Ok(a.cmp(&b)),
@@ -138,7 +140,7 @@ pub(super) fn cmp(a: CtValue, b: CtValue, span: Span) -> Result<std::cmp::Orderi
 /// c97/D-STRPARSE1: static method dispatch for built-in types (`Int.parse`,
 /// `Float.parse`). Returns `None` when the receiver is not a recognised
 /// built-in type name; the caller falls through to user-defined methods.
-pub(super) fn apply_static_type_method(
+pub fn apply_static_type_method(
     type_name: &str,
     method: &str,
     args: Vec<CtValue>,
@@ -297,7 +299,7 @@ pub(super) fn apply_static_type_method(
 }
 
 /// Mutating list/map methods (`push`, `pop`, …). Returns the method's value.
-pub(super) fn apply_mutating(
+pub fn apply_mutating(
     recv: &mut CtValue,
     method: &str,
     args: Vec<CtValue>,
@@ -395,7 +397,7 @@ fn ctvalue_type_name(v: &CtValue) -> String {
     }
 }
 
-pub(super) fn apply_method(
+pub fn apply_method(
     recv: &CtValue,
     method: &str,
     args: Vec<CtValue>,
@@ -506,6 +508,11 @@ pub(super) fn apply_method(
             Ok(match super::JsonInterp::json_payload(v, "Object") {
                 Some(CtValue::Map(m)) => match m.get(&CtKey::Str(key)) {
                     Some(found) => CtValue::Some(Box::new(found.clone())),
+                    None => CtValue::None(Type::Named("Json".to_string())),
+                },
+                Some(CtValue::Struct { fields, .. }) => match fields.iter().find(|(n, _)| n == &key)
+                {
+                    Some((_, found)) => CtValue::Some(Box::new(found.clone())),
                     None => CtValue::None(Type::Named("Json".to_string())),
                 },
                 _ => CtValue::None(Type::Named("Json".to_string())),

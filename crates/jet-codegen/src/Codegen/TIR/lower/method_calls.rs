@@ -2268,6 +2268,40 @@ pub(crate) fn lower_method_call(
             },
         };
     }
+    // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics → the same
+    // `PreciseBuiltin` nodes as constructors/binops (emit uses jet_bigint_* /
+    // jet_decimal_*). Fragment lowers (empty Cx) never see method_sigs, so this
+    // must not fall through to the user-method Todo path.
+    if let Some(handle) = recv_type {
+        if (handle == Syntax::TYPE_BIGINT || handle == Syntax::TYPE_DECIMAL)
+            && !cx.type_names.contains(handle)
+        {
+            let known = matches!(
+                (handle.as_str(), method, args.len()),
+                ("BigInt", "add" | "sub" | "mul", 1)
+                    | ("BigInt", "neg" | "to_string", 0)
+                    | ("Decimal", "add" | "sub" | "mul", 1)
+                    | ("Decimal", "to_string", 0)
+            );
+            if known {
+                let recv_t = lower_expr(receiver, cx, env);
+                let mut value_args = vec![recv_t];
+                value_args.extend(args.iter().map(|a| lower_expr(&a.expr, cx, env)));
+                let ty = match method {
+                    "to_string" => Type::String,
+                    _ => Type::Named(handle.clone()),
+                };
+                return TExpr {
+                    ty: resolved_ret.cloned().unwrap_or(ty),
+                    kind: TExprKind::PreciseBuiltin {
+                        type_name: handle.clone(),
+                        func: method.to_string(),
+                        args: value_args,
+                    },
+                };
+            }
+        }
+    }
     // c109 Phase 13: a method ON a handle. The gate proved `recv_type ==
     // Some(<handle>)` + a covered handle op. Resolve the handle-receiver branch HERE
     // into a total `THandleOp` (reproducing the handle arms of `emit_builtin_method`),
@@ -3208,7 +3242,65 @@ pub(crate) fn lower_method_call(
     // A user instance method on a covered type. `recv_type` is total (gate proved
     // `Some`). Resolve the param conventions from `method_sigs` and the Rust method
     // name (trait-impl methods keep their bare name; others get the `user_` mangle).
-    let ty_name = recv_type.clone().expect("gate proved recv_type is Some");
+    let Some(ty_name) = recv_type.clone() else {
+        // Comptime may evaluate before sema writes `recv_type`; recover precise
+        // numeric methods from the lowered receiver type.
+        let recv_lowered = lower_expr(receiver, cx, env);
+        if let Type::Named(n) = &recv_lowered.ty {
+            if (n == Syntax::TYPE_BIGINT || n == Syntax::TYPE_DECIMAL)
+                && !cx.type_names.contains(n)
+            {
+                let known = matches!(
+                    (n.as_str(), method, args.len()),
+                    ("BigInt", "add" | "sub" | "mul", 1)
+                        | ("BigInt", "neg" | "to_string", 0)
+                        | ("Decimal", "add" | "sub" | "mul", 1)
+                        | ("Decimal", "to_string", 0)
+                );
+                if known {
+                    let type_name = n.clone();
+                    let mut value_args = vec![recv_lowered];
+                    value_args.extend(args.iter().map(|a| lower_expr(&a.expr, cx, env)));
+                    let ty = match method {
+                        "to_string" => Type::String,
+                        _ => Type::Named(type_name.clone()),
+                    };
+                    return TExpr {
+                        ty: resolved_ret.cloned().unwrap_or(ty),
+                        kind: TExprKind::PreciseBuiltin {
+                            type_name,
+                            func: method.to_string(),
+                            args: value_args,
+                        },
+                    };
+                }
+            }
+        }
+        // Comptime/REPL fragment eval (#777): keep MethodCall so the TIR
+        // evaluator can dispatch via Builtins/host surface without sema facts.
+        if super::is_eval_fragment() {
+            let targs = args
+                .iter()
+                .map(|a| lower_one_call_arg(a, None, env, cx))
+                .collect();
+            return TExpr {
+                ty: resolved_ret.cloned().unwrap_or(recv_lowered.ty.clone()),
+                kind: TExprKind::MethodCall {
+                    recv: Box::new(recv_lowered),
+                    method: TMethodRef::bare(method),
+                    args: targs,
+                    operator_line: None,
+                },
+            };
+        }
+        return TExpr {
+            ty: resolved_ret.cloned().unwrap_or(Type::Int),
+            kind: TExprKind::Todo {
+                line: method_span.start,
+                expected_type: format!("method `{method}` receiver type"),
+            },
+        };
+    };
     let sig = cx
         .method_sigs
         .get(&(ty_name.clone(), method.to_string()))

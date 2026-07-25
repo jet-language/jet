@@ -379,6 +379,36 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
                 .collect();
             format!("{{\n{}\n{}}}", parts.join(",\n"), end)
         }
+        // EncodingLite Object payload: insertion-ordered `Struct` (AOT DataTree).
+        // Sort keys so `json.canonical` matches BTreeMap / AOT sorted form.
+        CtValue::Struct {
+            type_name,
+            fields,
+        } if type_name == "JsonObject" => {
+            let mut fields = fields.clone();
+            fields.sort_by(|a, b| a.0.cmp(&b.0));
+            if fields.is_empty() {
+                return "{}".to_string();
+            }
+            if !pretty {
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(k, v)| {
+                        format!("{}:{}", quote_json(k), render_json_pretty(v, false, depth))
+                    })
+                    .collect();
+                return format!("{{{}}}", parts.join(","));
+            }
+            let pad = "  ".repeat(depth + 1);
+            let end = "  ".repeat(depth);
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|(k, v)| {
+                    format!("{}{}: {}", pad, quote_json(k), render_json_pretty(v, true, depth + 1))
+                })
+                .collect();
+            format!("{{\n{}\n{}}}", parts.join(",\n"), end)
+        }
         other => other.to_json(),
     }
 }

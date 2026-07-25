@@ -617,20 +617,28 @@ fn text_width_policy_flags(policy: &CtValue) -> (bool, bool) {
     let CtValue::Struct { fields, .. } = policy else {
         return (false, false);
     };
+    let is_var = |v: &CtValue, name: &str| match v {
+        CtValue::Enum { variant, .. } => variant == name,
+        // Legacy Struct-shaped enum lit (`Type.Variant`) — accept either.
+        CtValue::Struct { type_name, .. } => {
+            type_name == name || type_name.ends_with(&format!(".{name}"))
+        }
+        _ => false,
+    };
     let ambiguous_wide = fields
         .iter()
         .find(|(n, _)| n == "ambiguous")
-        .is_some_and(|(_, v)| matches!(v, CtValue::Enum { variant, .. } if variant == "Wide"));
+        .is_some_and(|(_, v)| is_var(v, "Wide"));
     let controls_reject = fields
         .iter()
         .find(|(n, _)| n == "controls")
-        .is_some_and(|(_, v)| matches!(v, CtValue::Enum { variant, .. } if variant == "Reject"));
+        .is_some_and(|(_, v)| is_var(v, "Reject"));
     (ambiguous_wide, controls_reject)
 }
 
 /// Evaluate a whitelisted pure Core call at comptime / in the REPL.
 /// `module` is the full path (e.g. `"core.math"`, `"jet.regex"`).
-pub(super) fn apply_core_call(
+pub fn apply_core_call(
     module: &str,
     method: &str,
     args: Vec<CtValue>,

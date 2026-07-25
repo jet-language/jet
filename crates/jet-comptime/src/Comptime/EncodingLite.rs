@@ -185,18 +185,24 @@ pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
     Ok(toml_assemble(items))
 }
 
-// A tagged `Json` `Object` node whose payload is a sorted `Map` — mirrors
-// `json_variant("Object", CtValue::Map(...))` used throughout `JsonInterp`.
+// A tagged `Json` `Object` whose payload keeps insertion order — AOT's
+// `DataTree::Object(Vec<…>)` does the same; a sorted `BTreeMap` reordered
+// TOML keys (e.g. `port` before `title`) and broke #777 corpus differential.
 fn json_object(entries: Vec<(String, CtValue)>) -> CtValue {
-    let map: BTreeMap<CtKey, CtValue> =
-        entries.into_iter().map(|(k, v)| (CtKey::Str(k), v)).collect();
-    json_variant("Object", Some(CtValue::Map(map)))
+    json_variant(
+        "Object",
+        Some(CtValue::Struct {
+            type_name: "JsonObject".into(),
+            fields: entries,
+        }),
+    )
 }
 fn json_array(items: Vec<CtValue>) -> CtValue {
     json_variant("Array", Some(CtValue::List(items)))
 }
 fn json_object_entries(v: &CtValue) -> Option<Vec<(String, CtValue)>> {
     match json_payload(v, "Object") {
+        Some(CtValue::Struct { fields, .. }) => Some(fields.clone()),
         Some(CtValue::Map(m)) => Some(
             m.iter()
                 .map(|(k, v)| {
@@ -434,19 +440,13 @@ fn toml_render_value(v: &CtValue) -> String {
                     let parts: Vec<String> = items.iter().map(toml_render_value).collect();
                     format!("[{}]", parts.join(", "))
                 }
-                ("Object", Some((_, CtValue::Map(m)))) => {
-                    let parts: Vec<String> = m
+                ("Object", _) => {
+                    let Some(entries) = json_object_entries(v) else {
+                        return "\"\"".to_string();
+                    };
+                    let parts: Vec<String> = entries
                         .iter()
-                        .map(|(k, val)| {
-                            format!(
-                                "{} = {}",
-                                match k {
-                                    CtKey::Str(s) => s.clone(),
-                                    other => format!("{:?}", other),
-                                },
-                                toml_render_value(val)
-                            )
-                        })
+                        .map(|(k, val)| format!("{} = {}", k, toml_render_value(val)))
                         .collect();
                     format!("{{ {} }}", parts.join(", "))
                 }
@@ -1668,16 +1668,12 @@ pub(super) fn xml_from_ct(
             values.iter().map(xml_from_ct).collect::<Result<Vec<_>, _>>()?,
         ));
     }
-    if let Some(CtValue::Map(entries)) = json_payload(value, "Object") {
-        return Ok(Value::Object(restore_xml_snapshot_order(
-            entries
-                .iter()
-                .map(|(key, value)| match key {
-                    CtKey::Str(key) => Ok((key.clone(), xml_from_ct(value)?)),
-                    _ => Err("XML object key must be text".to_string()),
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        )));
+    if let Some(entries) = json_object_entries(value) {
+        let converted: Result<Vec<_>, String> = entries
+            .into_iter()
+            .map(|(key, value)| Ok((key, xml_from_ct(&value)?)))
+            .collect();
+        return Ok(Value::Object(restore_xml_snapshot_order(converted?)));
     }
     Err("XML tree contains a non-DataTree value".to_string())
 }

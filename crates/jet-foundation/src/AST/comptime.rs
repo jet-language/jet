@@ -559,19 +559,23 @@ impl CtValue {
             CtValue::ResOk(v) => v.jet_show(),
             CtValue::ResErr(_) => "err".to_string(),
             CtValue::Struct { type_name, fields } => {
-                // Comptime `Table`/`Series`/`LazyFrame` keep an internal
-                // `elem_type` string for empty-schema parity; AOT's
-                // DataTable/DataSeries/DataLazyFrame have no such field, so
-                // omit it from user-visible echo (I2 / AOT↔REPL shape).
-                let parts: Vec<String> = fields
+                // AOT `JetShow` for user structs is `format!("{:?}", self)`
+                // (`Codegen::Items`) → `user_Name { user_field: … }`. Match that
+                // here (I2 / #777 corpus differential). Table/Series/LazyFrame
+                // hide the internal `elem_type` schema tag AOT never prints.
+                let filtered: Vec<(String, CtValue)> = fields
                     .iter()
                     .filter(|(n, _)| {
                         !(matches!(type_name.as_str(), "Table" | "Series" | "LazyFrame")
                             && n == "elem_type")
                     })
-                    .map(|(n, v)| format!("{}: {}", n, v.jet_show()))
+                    .cloned()
                     .collect();
-                format!("{}({})", type_name, parts.join(", "))
+                CtValue::Struct {
+                    type_name: type_name.clone(),
+                    fields: filtered,
+                }
+                .debug_rust()
             }
             CtValue::Enum {
                 type_name,
@@ -643,13 +647,17 @@ impl CtValue {
             CtValue::ResOk(v) => format!("Ok({})", v.debug_rust()),
             CtValue::ResErr(v) => format!("Err({})", v.debug_rust()),
             CtValue::Struct { type_name, fields } => {
-                let mangled = format!("user_{}", type_name.replace('.', "__"));
+                let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
+                let mangled = format!("user_{}", ty.replace('.', "__"));
                 if fields.is_empty() {
                     mangled
                 } else {
                     let parts: Vec<String> = fields
                         .iter()
-                        .map(|(n, v)| format!("{}: {}", n, v.debug_rust()))
+                        .map(|(n, v)| {
+                            let field = n.strip_prefix("user_").unwrap_or(n);
+                            format!("{}: {}", ct_mangle(field), v.debug_rust())
+                        })
                         .collect();
                     format!("{} {{ {} }}", mangled, parts.join(", "))
                 }

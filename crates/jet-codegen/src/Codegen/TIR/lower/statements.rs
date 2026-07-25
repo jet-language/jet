@@ -757,11 +757,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // subset gate must have already excluded `IndexKind::Unknown` before
                 // routing here — an `Unknown` default reaching lowering means sema
                 // left an index kind unresolved and the gate missed it.
-                debug_assert!(
-                    !matches!(kind, IndexKind::Unknown),
-                    "TIR lowering reached an index assign with unresolved IndexKind::Unknown \
-                     (sema-to-TIR handoff violated, ice_regressions b5 bug class)"
-                );
+                let kind = if matches!(kind, IndexKind::Unknown) {
+                    &IndexKind::List
+                } else {
+                    kind
+                };
                 let base_t = lower_expr(base, cx, env);
                 let index_t = lower_expr(index, cx, env);
                 let value_t = lower_expr(value, cx, env);

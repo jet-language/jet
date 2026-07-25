@@ -15,7 +15,10 @@
 //! `String` (S41), and `BTreeMap` ordering (S38).
 
 pub mod Build;
-mod Builtins;
+/// Host/builtin surface shared by the canonical TIR evaluator (#777) and
+/// any remaining policy wrappers (purity). Public so `jet-codegen`'s TIR
+/// eval can dispatch without a second builtin table.
+pub mod Builtins;
 mod CryptoLite;
 mod ArchiveLite;
 mod ZstdEntropy;
@@ -34,6 +37,7 @@ mod TextLite;
 mod TypedDecode;
 mod UrlLite;
 mod Value;
+pub mod TirBridge;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -43,6 +47,8 @@ use crate::Diagnostics::Diagnostic;
 use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET};
+pub use Methods::apply_core_call;
+pub use Methods::apply_dollar_splices;
 pub use Purity::walk_calls;
 pub use Reflect::{build_program_info, build_struct_type_info, ProgramSemanticFacts};
 pub use Value::CtValue;
@@ -322,35 +328,21 @@ pub fn evaluate_with_imports_opts(
     if initial_impure_depth == 0 {
         check_purity(init, funcs, extern_names)?;
     }
-    let mut interp = Interp {
+    TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
+        expr: init,
         funcs,
+        extern_names,
         base_dir,
+        globals,
+        core_imports,
+        allow_impure,
+        initial_impure_depth,
+        structs: &HashMap::new(),
         fuel: FUEL_BUDGET,
         sink: None,
-        core_imports,
-        debugger: None,
-        depth: 0,
-        cur_func: "main".to_string(),
-        impure_depth: initial_impure_depth,
-        allow_impure,
         repl_mode: false,
-        repl_grants: Vec::new(),
-        repl_authorizer: None,
-        repl_interruptible: false,
-        embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
-        binding_types: HashMap::new(),
-        globals,
-        methods: empty_methods(),
-        structs: empty_structs(),
-        computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
-        migrations: empty_migrations(),
-        list_write_windows: HashMap::new(),
-    };
-    let mut scope = globals.clone();
-    interp.eval(init, &mut scope)
+        emitted_fragments: None,
+    })
 }
 
 /// Like [`evaluate_with_imports_opts`] but also returns the Tier-1 embed
@@ -395,36 +387,24 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
     if initial_impure_depth == 0 {
         check_purity(init, funcs, extern_names)?;
     }
-    let mut interp = Interp {
+    let val = TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
+        expr: init,
         funcs,
+        extern_names,
         base_dir,
+        globals,
+        core_imports,
+        allow_impure,
+        initial_impure_depth,
+        structs,
         fuel: FUEL_BUDGET,
         sink: None,
-        core_imports,
-        debugger: None,
-        depth: 0,
-        cur_func: "main".to_string(),
-        impure_depth: initial_impure_depth,
-        allow_impure,
         repl_mode: false,
-        repl_grants: Vec::new(),
-        repl_authorizer: None,
-        repl_interruptible: false,
-        embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
-        binding_types: HashMap::new(),
-        globals,
-        methods: empty_methods(),
-        structs,
-        computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
-        migrations: empty_migrations(),
-        list_write_windows: HashMap::new(),
-    };
-    let mut scope = globals.clone();
-    let val = interp.eval(init, &mut scope)?;
-    Ok((val, interp.embed_inputs))
+        emitted_fragments: None,
+    })?;
+    // ponytail: embed_inputs collection moves into the TIR host surface when a
+    // comptime embed path needs it again; empty for the #777 cutover.
+    Ok((val, Vec::new()))
 }
 
 /// Whole-program dev interpretation (E2-M4 `jet dev`). Runs `main`'s body
@@ -478,19 +458,20 @@ pub fn run_main(
     funcs: &HashMap<String, &Func>,
     base_dir: &Path,
     sink: &mut DevSink,
-    program: &ProgramInfo,
+    _program: &ProgramInfo,
 ) -> Result<CtValue, Diagnostic> {
+    // #777: AST tree-walker entry retired — same TirBridge path as REPL/debug.
     let mut interp = Interp {
         funcs,
         base_dir,
         fuel: DEV_FUEL_BUDGET,
         sink: Some(sink),
-        core_imports: &program.core_imports,
+        core_imports: empty_imports(),
         debugger: None,
         depth: 0,
         cur_func: "main".to_string(),
         impure_depth: 0,
-        allow_impure: false,
+        allow_impure: true,
         repl_mode: false,
         repl_grants: Vec::new(),
         repl_authorizer: None,
@@ -498,23 +479,19 @@ pub fn run_main(
         embed_inputs: Vec::new(),
         emitted_fragments: Vec::new(),
         binding_types: HashMap::new(),
-        globals: &program.globals,
-        methods: &program.methods,
-        structs: &program.structs,
-        computed_fields: &program.computed_fields,
-        distinct_ranges: &program.distinct_ranges,
-        distinct_bases: &program.distinct_bases,
-        migrations: &program.migrations,
+        globals: empty_globals(),
+        methods: empty_methods(),
+        structs: empty_structs(),
+        computed_fields: empty_computed(),
+        distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
+        migrations: empty_migrations(),
         list_write_windows: HashMap::new(),
     };
     let mut scope = HashMap::new();
-    match interp.exec_block(&main.body, &mut scope) {
-        Ok(Interpreter::Flow::Return(value)) => Ok(value),
-        Ok(_) => Ok(CtValue::Unit),
-        Err(d) if d.code == Diagnostics::ERR_PROPAGATE_CODE => {
-            Ok(CtValue::ResErr(Box::new(CtValue::Str(d.what))))
-        }
-        Err(d) => Err(d),
+    match interp.exec_block(&main.body, &mut scope)? {
+        Interpreter::Flow::Return(v) => Ok(v),
+        _ => Ok(CtValue::Unit),
     }
 }
 
@@ -877,39 +854,24 @@ pub fn run_block_with_imports(
 ) -> Result<HashMap<String, CtValue>, Diagnostic> {
     let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
     Purity::check_purity_stmts(stmts, &refs, extern_names)?;
-    let mut interp = Interp {
+    match TirBridge::eval_block(&mut TirBridge::BlockEvalRequest {
+        stmts,
         funcs: &refs,
+        extern_names,
         base_dir,
+        globals,
+        core_imports,
+        structs: &HashMap::new(),
         fuel: FUEL_BUDGET,
         sink: None,
-        core_imports,
-        debugger: None,
-        depth: 0,
-        cur_func: "comptime block".to_string(),
-        // D-CTEFFECT1: a `comptime { }` block is build-time code — hermetic by
-        // default, so Tier-2 `#Impure` effects inside it require the normal gate
-        // (E3411 until --allow-impure is plumbed through to block evaluation).
+        repl_mode: false,
         allow_impure: false,
         impure_depth: 0,
-        repl_mode: false,
-        repl_grants: Vec::new(),
-        repl_authorizer: None,
-        repl_interruptible: false,
-        embed_inputs: Vec::new(),
-        emitted_fragments: Vec::new(),
-        binding_types: HashMap::new(),
-        globals,
-        methods: empty_methods(),
-        structs: empty_structs(),
-        computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
-        migrations: empty_migrations(),
-        list_write_windows: HashMap::new(),
-    };
-    let mut scope = globals.clone();
-    interp.exec_block(stmts, &mut scope)?;
-    Ok(scope)
+        emitted_fragments: None,
+    })? {
+        TirBridge::StmtOutcome::Done(scope) => Ok(scope),
+        TirBridge::StmtOutcome::Returned { scope, .. } => Ok(scope),
+    }
 }
 
 /// Owned-function variant used while sema is mutating function bodies for

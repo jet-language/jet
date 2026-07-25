@@ -95,6 +95,7 @@ fn collect_pkg_resolution(raw: &str) -> PkgResolution {
 }
 
 pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    crate::boot_tir_eval();
     load_entry_with_overlay(entry_path, None, false)
 }
 
@@ -105,6 +106,7 @@ pub fn load_entry_with_overlay(
     overlay: Option<(&Path, &str)>,
     for_check: bool,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    crate::boot_tir_eval();
     let overlays: Vec<(&Path, &str)> = overlay.into_iter().collect();
     load_entry_with_overlays(entry_path, &overlays, for_check)
 }
@@ -165,6 +167,8 @@ fn load_entry_with_overlays_mode(
     load_adjacent_unqualified: bool,
     dependencies: &mut Vec<PathBuf>,
 ) -> Result<ProgramBundle, Vec<Diagnostic>> {
+    // Check/LSP overlays skip `load_entry`; still need TirBridge before derive/comptime.
+    crate::boot_tir_eval();
     let entry = PathBuf::from(entry_path);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let entry_abs = if entry.is_absolute() {
