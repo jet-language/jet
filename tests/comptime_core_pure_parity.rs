@@ -393,12 +393,12 @@ fn add_bag(values: &Bag<Int>, value: Int) -> Bool {
 }
 fn counted_bag(hits: &Int) -> Bag<Int> {
     hits += 1
-    values := Bag.new()
+    values := Bag<Int>.new()
     values.add(6)
     return values
 }
 fn bag_view() -> String {
-    values := Bag.new()
+    values := Bag<Int>.new()
     empty_before :: values.is_empty()
     added_four :: values.add(4)
     duplicate_four :: values.add(4)
@@ -412,14 +412,14 @@ fn bag_view() -> String {
     count_four_after_one :: values.count(4)
     values.remove(4)
     values.remove(99)
-    words := Bag.new()
+    words := Bag<String>.new()
     words.add("a")
     words.add("z")
     words.add("a")
-    tokens := Bag.new()
+    tokens := Bag<BagToken>.new()
     tokens.add(BagToken.Red)
     tokens.add(BagToken.Red)
-    empty := Bag.new()
+    empty := Bag<Int>.new()
     return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) => value == "z")}|{tokens.count(BagToken.Red)}|{tokens.has(BagToken.Blue)}|{empty.any((value) => value == 0)}"
 }"#;
 const BAG_EXPECTED: &str = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";

@@ -19,6 +19,8 @@ pub mod Build;
 /// any remaining policy wrappers (purity). Public so `jet-codegen`'s TIR
 /// eval can dispatch without a second builtin table.
 pub mod Builtins;
+/// Shared collection CtValue ops for TirBridge (#722 / #777).
+pub mod CollectionEval;
 mod CryptoLite;
 mod ArchiveLite;
 mod ZstdEntropy;

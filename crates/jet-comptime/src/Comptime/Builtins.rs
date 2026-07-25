@@ -146,6 +146,11 @@ pub fn apply_static_type_method(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if method == "new" {
+        if let Some(result) = super::CollectionEval::prelude_new(type_name, args.clone(), span) {
+            return Some(result);
+        }
+    }
     if let Some(result) = super::MathLayout::apply_static(type_name, method, args.clone(), span) {
         return Some(result);
     }
@@ -339,6 +344,9 @@ pub fn apply_mutating(
     args: Vec<CtValue>,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(result) = super::CollectionEval::apply_mutating(recv, method, args.clone(), span) {
+        return result;
+    }
     match (recv, method) {
         (CtValue::List(xs), "push") => {
             xs.push(args.into_iter().next().unwrap_or(CtValue::Unit));
@@ -441,6 +449,9 @@ pub fn apply_method(
         return result;
     }
     if let Some(result) = super::Methods::apply_core_pure_method(recv, method, &args, span) {
+        return result;
+    }
+    if let Some(result) = super::CollectionEval::apply_method(recv, method, &args, span) {
         return result;
     }
     match (recv, method) {

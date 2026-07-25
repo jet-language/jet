@@ -756,6 +756,22 @@ impl EvalCtx<'_> {
                 Ok(())
             }
             TExprKind::Borrow { place, .. } => self.write_back_place(place, value, scope),
+            TExprKind::Field { recv, field, .. } => {
+                let mut base_val = self.eval_expr(recv, scope)?;
+                match &mut base_val {
+                    CtValue::Struct { fields, .. } => {
+                        if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| n == field) {
+                            *slot = value;
+                        } else {
+                            fields.push((field.clone(), value));
+                        }
+                    }
+                    _ => {
+                        return Err(unsupported("field write-back on a non-struct", self.span()));
+                    }
+                }
+                self.write_back_place(recv, base_val, scope)
+            }
             _ => Ok(()),
         }
     }
@@ -819,7 +835,25 @@ impl EvalCtx<'_> {
             return Err(unsupported(&format!("call `{name}`"), self.span()));
         };
         let mut child = HashMap::new();
-        self.run_func(func, argv, &mut child)
+        let result = self.run_func(func, argv, &mut child)?;
+        // CtValue params are copy-in/copy-out. Fragment lowering often lacks
+        // `cx.sigs`, so call-site `borrow`/`mut_borrow` flags may be false —
+        // use the callee's own param conventions instead (#722).
+        for ((pname, pty, conv), carg) in func.params.iter().zip(args.iter()) {
+            let needs_wb = match conv {
+                crate::AST::AccessConvention::Write => true,
+                crate::AST::AccessConvention::Read if !pty.is_scalar() => true,
+                _ => false,
+            };
+            if !needs_wb {
+                continue;
+            }
+            let jet = pname.strip_prefix("user_").unwrap_or(pname.as_str());
+            if let Some(updated) = child.get(jet) {
+                self.write_back_place(&carg.value, updated.clone(), scope)?;
+            }
+        }
+        Ok(result)
     }
 
     pub(super) fn show_value(
