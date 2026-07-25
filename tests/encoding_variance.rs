@@ -294,40 +294,9 @@ fn run() {{
     )
 }
 
-fn json_limit_writer_src(max_total: u64) -> String {
-    format!(
-        r#"
-use core.encoding as encoding
-use core.encoding.json as json
-use core.files as files
-
-fn run() {{
-    limits := encoding.EncodingLimits.safe()
-    limits.max_total_bytes = Val({max_total})
-    out :: files.create("limit_out.json") ?? panic("create")
-    writer :: json.writer(^out, limits, false) ?? panic("writer")
-    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
-    result :: writer.write(encoding.DataEvent.Text("abcd"))
-    if result == {{
-        Ok(_) -> {{
-            writer.finish() ?? panic("finish")
-            print("ok")
-        }}
-        Err(first) -> {{
-            print(first.kind == encoding.EncodingErrorKind.Limit)
-            again :: writer.finish()
-            if again == {{
-                Err(second) -> print(first.reason == second.reason)
-                Ok(_) -> print("finish-missed")
-            }}
-        }}
-    }}
-}}
-"#
-    )
-}
-
 fn json_limit_reader_src(input_rel: &str, max_total: u64) -> String {
+    // Drain the full stream: first next() alone can return ObjectStart before
+    // max_total_bytes is crossed.
     format!(
         r#"
 use core.encoding as encoding
@@ -339,20 +308,26 @@ fn run() {{
     limits.max_total_bytes = Val({max_total})
     input :: files.open("{input_rel}") ?? panic("open")
     reader :: json.reader(^input, limits) ?? panic("reader")
-    result :: reader.next()
-    if result == {{
-        Ok(maybe) -> {{
-            if maybe == {{
-                Val(_) -> print("ok")
-                None -> print("eof")
+    loop {{
+        result :: reader.next()
+        if result == {{
+            Ok(maybe) -> {{
+                if maybe == {{
+                    None -> {{
+                        print("eof")
+                        break
+                    }}
+                    Val(_) -> {{}}
+                }}
             }}
-        }}
-        Err(error) -> {{
-            print(error.kind == encoding.EncodingErrorKind.Limit)
-            again :: reader.next()
-            if again == {{
-                Err(second) -> print(error.reason == second.reason)
-                Ok(_) -> print("not-latched")
+            Err(error) -> {{
+                print(error.kind == encoding.EncodingErrorKind.Limit)
+                again :: reader.next()
+                if again == {{
+                    Err(second) -> print(error.reason == second.reason)
+                    Ok(_) -> print("not-latched")
+                }}
+                break
             }}
         }}
     }}
@@ -600,7 +575,7 @@ fn encoding_variance_every_split_chunk_plans_limits_and_reps() {
         (1_000_000, "ok"),                     // huge budget → accept
     ];
     for (max_total, expect_kind) in limit_cases {
-        let src = json_limit_src("limit.in", max_total);
+        let src = json_limit_reader_src("limit.in", max_total);
         let bin = compile_aot(dir, &format!("limit_{max_total}"), &src);
         let mut last: Option<RunResult> = None;
         for rep in 0..CLEAN_REPS {
