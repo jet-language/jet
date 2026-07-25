@@ -39,18 +39,31 @@ pub(crate) fn jit_list_float_type(ty: &Type) -> bool {
         || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Float))
 }
 
+pub(crate) fn jit_list_string_type(ty: &Type) -> bool {
+    matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::String))
+        || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::String))
+}
+
 fn jit_list_native_type(ty: &Type) -> bool {
-    jit_list_int_type(ty) || jit_list_float_type(ty)
+    jit_list_int_type(ty) || jit_list_float_type(ty) || jit_list_string_type(ty)
 }
 
 pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
     match ty {
         Type::List(inner) | Type::FixedList { elem: inner, .. }
-            if matches!(inner.as_ref(), Type::Int | Type::Float) => {
+            if matches!(
+                inner.as_ref(),
+                Type::Int | Type::Float | Type::String | Type::Char
+            ) =>
+        {
             Some(inner.as_ref().clone())
         }
         _ => None,
     }
+}
+
+pub(crate) fn jit_map_string_type(ty: &Type) -> bool {
+    matches!(ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String))
 }
 
 pub(crate) fn jit_list_task_int_type(ty: &Type) -> bool {
@@ -105,6 +118,7 @@ fn jit_compound_type(ty: &Type) -> bool {
     jit_list_native_type(ty)
         || jit_list_task_int_type(ty)
         || jit_list_record_type(ty)
+        || jit_map_string_type(ty)
         || jit_struct_type(ty)
         || jit_tuple_type(ty)
         || jit_enum_type(ty)
@@ -215,17 +229,27 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                             | TOrFallback::ContinueLabel(_)
                     )
             } else {
-                !is_option
-                    && resident_safe_expr(value, callees)
-                    && matches!(
-                        fallback,
+                resident_safe_expr(value, callees)
+                    && match fallback {
+                        TOrFallback::Value(e) => resident_safe_expr(e, callees),
+                        TOrFallback::Return(None) => true,
+                        TOrFallback::Return(Some(e)) => resident_safe_expr(e, callees),
                         TOrFallback::Panic { .. }
-                            | TOrFallback::Break
-                            | TOrFallback::Continue
-                            | TOrFallback::BreakLabel(_)
-                            | TOrFallback::ContinueLabel(_)
-                    )
+                        | TOrFallback::Break
+                        | TOrFallback::Continue
+                        | TOrFallback::BreakLabel(_)
+                        | TOrFallback::ContinueLabel(_) => true,
+                    }
             }
+        }
+        TExprKind::MapLit(entries) => {
+            jit_map_string_type(&expr.ty)
+                && entries.iter().all(|(k, v)| {
+                    matches!(&k.ty, Type::String)
+                        && jit_value_type(&v.ty)
+                        && resident_safe_expr(k, callees)
+                        && resident_safe_expr(v, callees)
+                })
         }
         TExprKind::ListLit(elems) => {
             (jit_list_native_type(&expr.ty)
@@ -243,11 +267,17 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             is_map,
             ..
         } => {
-            !is_map
-                && jit_list_native_type(&base.ty)
-                && matches!(&index.ty, Type::Int)
-                && resident_safe_expr(base, callees)
-                && resident_safe_expr(index, callees)
+            if *is_map {
+                jit_map_string_type(&base.ty)
+                    && matches!(&index.ty, Type::String)
+                    && resident_safe_expr(base, callees)
+                    && resident_safe_expr(index, callees)
+            } else {
+                jit_list_native_type(&base.ty)
+                    && matches!(&index.ty, Type::Int)
+                    && resident_safe_expr(base, callees)
+                    && resident_safe_expr(index, callees)
+            }
         }
         TExprKind::Slice {
             base, start, end, ..
@@ -509,6 +539,20 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
                 && resident_safe_expr(&args[1], callees)
         }
+        TBuiltinOp::Lines => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::Split => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Chars => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::After | TBuiltinOp::Before => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
         _ => false,
     }
 }
@@ -615,13 +659,21 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             is_map,
             value,
         } => {
-            !is_map
-                && jit_list_native_type(&base.ty)
-                && matches!(&index.ty, Type::Int)
-                && matches!(&value.ty, Type::Int | Type::Float)
-                && resident_safe_expr(base, callees)
-                && resident_safe_expr(index, callees)
-                && resident_safe_expr(value, callees)
+            if *is_map {
+                jit_map_string_type(&base.ty)
+                    && matches!(&index.ty, Type::String)
+                    && jit_value_type(&value.ty)
+                    && resident_safe_expr(base, callees)
+                    && resident_safe_expr(index, callees)
+                    && resident_safe_expr(value, callees)
+            } else {
+                jit_list_native_type(&base.ty)
+                    && matches!(&index.ty, Type::Int)
+                    && matches!(&value.ty, Type::Int | Type::Float | Type::String | Type::Char)
+                    && resident_safe_expr(base, callees)
+                    && resident_safe_expr(index, callees)
+                    && resident_safe_expr(value, callees)
+            }
         }
         TStmt::IndexFieldAssign(assign) => {
             !assign.is_map
@@ -637,15 +689,29 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         }
         TStmt::ForIn {
             var2,
+            source,
+            collection,
             method_kind,
             columnar,
+            by_value,
             step,
             body,
             ..
         } => {
-            var2.is_none()
-                && method_kind.is_none()
+            use jet_codegen::Codegen::TIR::TForInMethod;
+            let chars_ok = matches!(method_kind, Some(TForInMethod::Chars))
+                && matches!(&source.ty, Type::String);
+            let list_ok = method_kind.is_none()
+                && var2.is_none()
+                && jit_list_iter_elem_type(&collection.ty).is_some();
+            let map_ok = method_kind.is_none()
+                && var2.is_some()
+                && jit_map_string_type(&collection.ty);
+            (chars_ok || list_ok || map_ok)
                 && !columnar
+                && !by_value
+                && resident_safe_expr(source, callees)
+                && resident_safe_expr(collection, callees)
                 && step.as_ref().is_none_or(|step| resident_safe_expr(step, callees))
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }

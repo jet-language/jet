@@ -45,7 +45,7 @@ pub(crate) use emit::*;
 pub(crate) use lower::*;
 pub(crate) use subset::*;
 
-use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp};
+use crate::AST::{AccessConvention, BinOp, Item, ProgramBundle, Type, UnOp, VariantPayload};
 
 thread_local! {
     static LAST_JIT_LOWER_FAILURE: std::cell::RefCell<Option<String>> =
@@ -94,6 +94,8 @@ pub struct JitProgram {
     pub struct_field_types: std::collections::HashMap<String, Vec<Type>>,
     /// M5: mangled variant names per enum type (discriminant order).
     pub enum_variants: std::collections::HashMap<String, Vec<String>>,
+    /// M5: payload field types per `user_Type::user_Variant` pattern prefix.
+    pub enum_variant_payload_types: std::collections::HashMap<String, Vec<Type>>,
     pub int_constants: std::collections::HashMap<String, i64>,
     pub distinct_bases: std::collections::HashMap<String, Type>,
 }
@@ -115,6 +117,33 @@ pub fn instance_provenance(bundle: &ProgramBundle) -> Vec<InstanceProvenance> {
             full_key_hex: identity.full_key.iter().map(|byte| format!("{byte:02x}")).collect(),
         })
     })).collect()
+}
+
+fn payload_types_for_variant(payload: &VariantPayload) -> Vec<Type> {
+    match payload {
+        VariantPayload::Unit => Vec::new(),
+        VariantPayload::Single(ty, _) => vec![ty.clone()],
+        VariantPayload::Named(fields) => fields.iter().map(|field| field.ty.clone()).collect(),
+    }
+}
+
+fn register_enum_variants(
+    enum_name: &str,
+    variants: &[crate::AST::Variant],
+    enum_variants: &mut std::collections::HashMap<String, Vec<String>>,
+    enum_variant_payload_types: &mut std::collections::HashMap<String, Vec<Type>>,
+) {
+    enum_variants.insert(
+        enum_name.to_string(),
+        variants
+            .iter()
+            .map(|variant| format!("user_{}", variant.name))
+            .collect(),
+    );
+    for variant in variants {
+        let pattern = format!("user_{enum_name}::user_{}", variant.name);
+        enum_variant_payload_types.insert(pattern, payload_types_for_variant(&variant.payload));
+    }
 }
 
 /// c139 M3: every lowered function the JIT may compile from the entry module.
@@ -524,6 +553,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     let mut struct_fields = std::collections::HashMap::new();
     let mut struct_field_types = std::collections::HashMap::new();
     let mut enum_variants = std::collections::HashMap::new();
+    let mut enum_variant_payload_types = std::collections::HashMap::new();
     enum_variants.insert(
         crate::Syntax::TYPE_ORDERING.to_string(),
         ["user_Less", "user_Equal", "user_Greater"]
@@ -548,12 +578,11 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 );
             }
             Item::Enum(e) if e.type_params.is_empty() => {
-                enum_variants.insert(
-                    e.name.clone(),
-                    e.variants
-                        .iter()
-                        .map(|v| format!("user_{}", v.name))
-                        .collect(),
+                register_enum_variants(
+                    &e.name,
+                    &e.variants,
+                    &mut enum_variants,
+                    &mut enum_variant_payload_types,
                 );
             }
             Item::Const(c) => {
@@ -593,12 +622,11 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 } else {
                                     format!("{}__{}", cm.name, e.name)
                                 };
-                                enum_variants.insert(
-                                    name,
-                                    e.variants
-                                        .iter()
-                                        .map(|v| format!("user_{}", v.name))
-                                        .collect(),
+                                register_enum_variants(
+                                    &name,
+                                    &e.variants,
+                                    &mut enum_variants,
+                                    &mut enum_variant_payload_types,
                                 );
                             }
                             Item::Const(c) => {
@@ -663,6 +691,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         struct_fields,
         struct_field_types,
         enum_variants,
+        enum_variant_payload_types,
         int_constants,
         distinct_bases,
     })

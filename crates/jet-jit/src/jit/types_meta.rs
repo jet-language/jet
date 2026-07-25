@@ -14,7 +14,9 @@ use super::safety::{
 
 pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Type, String> {
     if let TExprKind::DistinctCtor { base, .. } = &init.kind {
-        return clif_ty(base).ok_or_else(|| format!("jit distinct base unsupported: {base:?}"));
+        return meta
+            .clif_ty(base)
+            .ok_or_else(|| format!("jit distinct base unsupported: {base:?}"));
     }
     if let TExprKind::DistinctConvert {
         arg,
@@ -40,7 +42,7 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
             _ => Err("jit distinct conversion operation unsupported".to_string()),
         };
     }
-    if let Some(t) = clif_ty(&init.ty) {
+    if let Some(t) = clif_ty_with_distinct(&init.ty, meta.distinct_bases) {
         return Ok(t);
     }
     if matches!(&init.ty, Type::List(_)) {
@@ -49,42 +51,57 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
     if let Type::Named(name) = &init.ty {
         return Ok(meta
             .distinct_base(name)
-            .and_then(clif_ty)
+            .and_then(|base| meta.clif_ty(base))
             .unwrap_or(types::I64));
     }
     Err(format!("jit let type unsupported: {:?}", init.ty))
 }
 
 pub(crate) fn clif_ty(ty: &Type) -> Option<types::Type> {
-    if let Some((base, _)) = ty.quantity_parts() {
-        return clif_ty(base);
+    clif_ty_with_distinct(ty, &HashMap::new())
+}
+
+pub(crate) fn clif_ty_with_distinct(
+    ty: &Type,
+    distinct_bases: &HashMap<String, Type>,
+) -> Option<types::Type> {
+    let ty = ty
+        .quantity_parts()
+        .map_or_else(|| ty.clone(), |(base, _)| base.clone());
+    if let Type::Named(name) = &ty {
+        if let Some(base) = distinct_bases.get(name) {
+            return clif_ty_with_distinct(base, distinct_bases);
+        }
     }
-    if matches!(ty, Type::Named(n) if n == "Unit") {
+    if matches!(&ty, Type::Named(n) if n == "Unit") {
         return None;
     }
-    if matches!(ty, Type::Named(n) if matches!(n.as_str(), "Duration" | "DurationUnit" | "RangeError" | "ParseError")) {
+    if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "Duration" | "DurationUnit" | "RangeError" | "ParseError")) {
         return Some(types::I64);
     }
-    if jit_concurrency_type(ty) {
+    if jit_concurrency_type(&ty) {
         return Some(types::I64);
     }
-    if jit_list_int_type(ty)
-        || jit_list_task_int_type(ty)
-        || jit_struct_type(ty)
-        || jit_tuple_type(ty)
-        || jit_enum_type(ty)
+    if jit_list_int_type(&ty)
+        || jit_list_task_int_type(&ty)
+        || (jit_struct_type(&ty) && !distinct_bases.contains_key(ty.name().as_str()))
+        || jit_tuple_type(&ty)
+        || jit_enum_type(&ty)
     {
         return Some(types::I64);
     }
-    if jit_optional_scalar_type(ty) {
+    if matches!(&ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String)) {
         return Some(types::I64);
     }
-    if matches!(ty, Type::Result { ok, err }
+    if jit_optional_scalar_type(&ty) {
+        return Some(types::I64);
+    }
+    if matches!(&ty, Type::Result { ok, err }
         if jit_result_payload_type(ok.as_ref()) && jit_result_payload_type(err.as_ref()))
     {
         return Some(types::I64);
     }
-    match ty {
+    match &ty {
         Type::Int | Type::IntN { .. } | Type::String => Some(types::I64),
         Type::Float | Type::Float32 => Some(types::F64),
         Type::Bool => Some(types::I8),
@@ -93,7 +110,11 @@ pub(crate) fn clif_ty(ty: &Type) -> Option<types::Type> {
     }
 }
 
-pub(crate) fn func_signature(module: &JITModule, tir: &TFunc) -> Result<Signature, String> {
+pub(crate) fn func_signature(
+    module: &JITModule,
+    tir: &TFunc,
+    meta: &JitMeta<'_>,
+) -> Result<Signature, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig = Signature::new(cc);
     if func_has_receiver(tir) {
@@ -101,11 +122,12 @@ pub(crate) fn func_signature(module: &JITModule, tir: &TFunc) -> Result<Signatur
     }
     for (_, ty, _) in &tir.params {
         sig.params.push(AbiParam::new(
-            clif_ty(ty).ok_or_else(|| format!("jit param type unsupported: {ty:?}"))?,
+            meta.clif_ty(ty)
+                .ok_or_else(|| format!("jit param type unsupported: {ty:?}"))?,
         ));
     }
     if let Some(ret) = &tir.ret {
-        if let Some(clif) = clif_ty(ret) {
+        if let Some(clif) = meta.clif_ty(ret) {
             sig.returns.push(AbiParam::new(clif));
         }
     }
@@ -127,6 +149,7 @@ pub(crate) fn jit_fn_name(name: &str) -> String {
 pub(crate) struct JitMeta<'a> {
     struct_fields: &'a HashMap<String, Vec<String>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
+    enum_variant_payload_types: &'a HashMap<String, Vec<Type>>,
     int_constants: &'a HashMap<String, i64>,
     has_generic_instances: bool,
     distinct_bases: &'a HashMap<String, Type>,
@@ -137,10 +160,32 @@ impl<'a> JitMeta<'a> {
         JitMeta {
             struct_fields: &program.struct_fields,
             enum_variants: &program.enum_variants,
+            enum_variant_payload_types: &program.enum_variant_payload_types,
             int_constants: &program.int_constants,
             has_generic_instances: !program.instance_provenance.is_empty(),
             distinct_bases: &program.distinct_bases,
         }
+    }
+
+    pub(crate) fn clif_ty(&self, ty: &Type) -> Option<types::Type> {
+        clif_ty_with_distinct(ty, self.distinct_bases)
+    }
+
+    pub(crate) fn enum_variant_payload_types(
+        &self,
+        enum_name: &str,
+        variant: &str,
+    ) -> Option<&[Type]> {
+        let key = format!("user_{enum_name}::user_{variant}");
+        self.enum_variant_payload_types
+            .get(&key)
+            .map(|types| types.as_slice())
+            .or_else(|| {
+                let alt = format!("{enum_name}::{variant}");
+                self.enum_variant_payload_types
+                    .get(&alt)
+                    .map(|types| types.as_slice())
+            })
     }
 
     pub(crate) fn int_constant(&self, rust_name: &str) -> Option<i64> {

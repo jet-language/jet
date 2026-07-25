@@ -4,6 +4,8 @@
 
 frontend_rejected:
   crypto/crypto_suite: E1004: `jet.crypto` has no item `constant_time_equal_bytes`; E1004: `jet.crypto` has no item `constant_time_equal_bytes`
+  tooling/data_core: E0915: `Float ? DataError` has no `Display` implementation; E0311: `len` isn't a method on this value
+  tooling/data_pipeline: E0302: `.count` only works on struct and tuple values; E0302: `.median` only works on struct and tuple values; E0505: only lists and maps can be indexed, not [Float] ? DataError
 
 gate_excluded:
   game/raylib_window: interactive display required
@@ -55,6 +57,7 @@ resident_jit:
   basics/if_universal
   basics/increment
   basics/labeled_loops
+  basics/loop_forms
   basics/method_chain
   basics/multiline_string
   basics/named_args
@@ -64,12 +67,14 @@ resident_jit:
   basics/values
   collections/struct_list_mutation
   comptime/comptime_block
+  comptime/comptime_parse
   comptime/comptime_splice
   comptime/doctests
   comptime/reflect
   concurrency/cancel_cleanup
   concurrency/completion_order
   concurrency/pipeline
+  concurrency/protocol
   concurrency/race_cancel
   concurrency/scheduler_spawn
   concurrency/select_channel
@@ -92,6 +97,7 @@ resident_jit:
   effects/share_boundary
   effects/single_use
   errors/fallible_run
+  errors/qq_control
   lowlevel/layout_c
   memory/ref_field
   modules/generic_modules
@@ -104,6 +110,8 @@ resident_jit:
   serde/user_derive
   syntax/maturity_tags
   text/bigint
+  text/string_parse
+  text/strings
   tooling/bench
   tooling/canvas_blueprint_demo
   tooling/debug
@@ -115,6 +123,7 @@ resident_jit:
   tooling/statement_attributes
   tooling/test_members
   tooling/tests
+  types/affine_unit_types
   types/associated_types
   types/computed_field
   types/dimensional_quantities
@@ -138,14 +147,13 @@ e2211:
   basics/closures: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
   basics/fan_out: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit fan-out expression unsupported.
   basics/first_hour: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  basics/loop_forms: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit map literal unsupported.
   basics/pattern_matching: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: describe_conn: jit unknown local `id`.
   basics/printable: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit string interp type unsupported: Named("Greeting").
   basics/tuples: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit clone unsupported type: Tuple([("x", Int), ("y", Int)]), local p.
   basics/variadics_spread: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(String).
   collections/deque: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit static `std::collections::VecDeque::new`.
   collections/dynamic-array-view: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit clone unsupported type: List(Named("Incident")), other expression.
-  collections/filter_map: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: parse_int: jit result status unsupported.
+  collections/filter_map: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
   collections/fixed_arrays: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit let type unsupported: FixedList { elem: IntN { signed: false, bits: 8 }, len: 3, len_symbol: None }.
   collections/index_hook: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: Grid::get: jit field type unsupported: List(Named("Cell")).
   collections/iter_adapters: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
@@ -154,10 +162,9 @@ e2211:
   collections/lists: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
   collections/set: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
   collections/sketch: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  collections/wordcount: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit map literal unsupported.
+  collections/wordcount: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit list get_opt status unsupported.
   comptime/comptime_core: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
   comptime/comptime_if: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit inline comptime branch unsupported.
-  comptime/comptime_parse: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: safe_int: jit result status unsupported.
   comptime/comptime_table: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
   comptime/comptime_tiers: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
   comptime/embed: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: check_nonempty: jit require/panic stop unsupported.
@@ -167,25 +174,24 @@ e2211:
   concurrency/detached_task: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
   concurrency/parallel_iter: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
   concurrency/parallel_scan: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(String).
-  concurrency/protocol: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: drive: jit result status unsupported.
   concurrency/task_controls: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
   concurrency/task_runtime_audit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  crypto/auth_tokens: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  crypto/crypto_envelope: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  crypto/crypto_migration: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  crypto/crypto_sign: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  crypto/auth_tokens: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  crypto/crypto_envelope: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  crypto/crypto_migration: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  crypto/crypto_sign: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   crypto/hash: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit builtin method unsupported.
   crypto/random_api_split: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  crypto/typed_crypto: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  crypto/vault_key_wrap: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: recipient_surface: jit result status unsupported.
-  crypto/vault_keys: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: provision: jit result status unsupported.
+  crypto/typed_crypto: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  crypto/vault_key_wrap: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: recipient_surface: jit core call unsupported.
+  crypto/vault_keys: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: provision: jit core call unsupported.
   crypto/vault_secret: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: handler: jit core call unsupported.
   devloop/persist: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit const ref unsupported.
   effects/all_sigils: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
   effects/asset_pipeline: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
   effects/capability_sigils: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
   effects/determinism: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: roll_at: jit handle method unsupported.
-  effects/effect_grant: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  effects/effect_grant: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   effects/effect_higher_order: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }.
   effects/effect_levers: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: Some([]) }.
   effects/infer_capability: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
@@ -193,14 +199,13 @@ e2211:
   effects/mix_write_take: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
   effects/single_use_discard: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit unsafe region unsupported.
   effects/smart_context: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
-  effects/taint: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: shell_arg: jit builtin method unsupported.
+  effects/taint: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   errors/discard_fallible: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  errors/errors: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: parse_age: jit enum positional payload unsupported.
+  errors/errors: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit enum arm is not a variant pattern.
   errors/must_use: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit scope guard closure unsupported.
-  errors/qq_control: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit for-in collection type unsupported: List(String).
   errors/rollback_trait: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: transfer: jit transact block unsupported.
   errors/transact: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: place_order: jit transact block unsupported.
-  errors/typed_error_families: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: read_file: jit enum positional payload unsupported.
+  errors/typed_error_families: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: load: jit typed Result conversion unsupported.
   functions/lambda_bare_params: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
   functions/lambda_inference: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit closure method unsupported.
   game/core_game_headless: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
@@ -212,19 +217,19 @@ e2211:
   io/compress_zstd: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   io/db: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
   io/db_checked_sql: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: automatic resource cleanup uses AOT fallback.
-  io/db_read_footprint: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: person_count: jit result status unsupported.
-  io/dir_entry: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  io/db_read_footprint: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: person_count: jit handle method unsupported.
+  io/dir_entry: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   io/env_overlay: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  io/files: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  io/files: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   io/files_depth: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  io/io_prelude: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: greet: jit result status unsupported.
+  io/io_prelude: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: greet: jit ambient input unsupported.
   io/log: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   io/log_human: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   io/log_structured: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   io/no_prelude: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   io/os_facts: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   io/path: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
-  io/process_builder: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  io/process_builder: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   io/scope_guard: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: with_guards: jit scope guard closure unsupported.
   io/stdin_filter: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit for-in method-call collection unsupported.
   io/stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: count_lines: automatic resource cleanup uses AOT fallback.
@@ -252,7 +257,7 @@ e2211:
   memory/entity_tree: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit static `jet_std::JetPool::new`.
   memory/entity_world: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: tick: jit for-in collection type unsupported: List(Apply { name: "Id", args: [Named("Player")] }).
   memory/expiring_secret: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
-  memory/gc_cyclic: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: promoted_cycle: jit enum positional payload unsupported.
+  memory/gc_cyclic: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: promoted_cycle: jit clone unsupported type: Named("Link"), other expression.
   memory/no_alloc_policy: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call arg wrapper unsupported.
   memory/ownership: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [String], ret: Some(Int), effect_bound: None }.
   memory/parameter_modes: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }.
@@ -266,8 +271,8 @@ e2211:
   memory/uninit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
   memory/uninit_buffer: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
   modules/library: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: Person::greeting: jit place borrow unsupported.
-  net/http_server_limits: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit result status unsupported.
-  net/url_mime: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  net/http_server_limits: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit core call unsupported.
+  net/url_mime: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   parsing/binary-reader: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit handle method unsupported.
   parsing/binary_pattern: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
   parsing/parse_interpolation: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
@@ -276,30 +281,30 @@ e2211:
   reflection/reflect-value: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   safety/sh_typed_text: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit host/default/uninit/ct-lit unsupported.
   safety/typed_sql: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run_query: jit host/default/uninit/ct-lit unsupported.
-  serde/codable_default: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  serde/csv: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  serde/csv_typed: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  serde/datatree_accessors: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  serde/decode_traced: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  serde/encoding: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  serde/codable_default: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  serde/csv: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  serde/csv_typed: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  serde/datatree_accessors: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  serde/decode_traced: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  serde/encoding: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   serde/encoding_base: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/encoding_breadth: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  serde/encoding_breadth: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   serde/encoding_cbor_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: write_catalog: automatic resource cleanup uses AOT fallback.
   serde/encoding_csv_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: write_catalog: automatic resource cleanup uses AOT fallback.
   serde/encoding_json_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: write_catalog: automatic resource cleanup uses AOT fallback.
   serde/encoding_jsonl_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: write_catalog: automatic resource cleanup uses AOT fallback.
   serde/encoding_stream_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit static `jet_std::EncodingLimits::safe`.
-  serde/encoding_xml_projection: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  serde/encoding_xml_projection: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   serde/encoding_xml_stream: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: xml_name: jit JSON literal unsupported.
   serde/hand_codec: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: Email::encode: jit JSON literal unsupported.
-  serde/json: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  serde/json_coerce: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  serde/json_typed: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  serde/json: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  serde/json_coerce: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  serde/json_typed: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   serde/serde_derive: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit record field unsupported: List(String).
   serde/serde_generic: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  serde/toml: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  serde/toml: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   serde/validate: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: report: jit enum arm is not a variant pattern.
-  serde/yaml: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  serde/yaml: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   streams/generators: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: count: jit host/default/uninit/ct-lit unsupported.
   syntax/trailing_block: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }.
   text/dates: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
@@ -307,30 +312,25 @@ e2211:
   text/decimal: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit precise numeric builtin unsupported.
   text/hex_base64: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   text/human_format: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  text/regex: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  text/runtime_duration: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  text/string_parse: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  text/strings: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit for-in method-call collection unsupported.
-  text/time_calendar: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
+  text/regex: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  text/runtime_duration: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit if-let condition unsupported.
+  text/time_calendar: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   text/unicode_text: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   text/unicode_text_audit: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core.text call unsupported: byte_count.
   text/uuid: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
-  tooling/data_core: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  tooling/data_json: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  tooling/data_pipeline: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: must_stay_deferred: jit require/panic stop unsupported.
-  tooling/data_schema: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  tooling/debug_native: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: word_count: jit for-in collection type unsupported: List(String).
+  tooling/data_json: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  tooling/data_schema: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
+  tooling/debug_native: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   tooling/fuzz_demo: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: reverse: jit builtin method unsupported.
   tooling/property_tests: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: reverse: jit builtin method unsupported.
   tooling/provenance_track: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit numeric origin unsupported.
   tooling/testing_helpers: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   tooling/todo_hole: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: not_yet: jit todo expression unsupported.
-  types/affine_unit_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
   types/capability_bundles: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
   types/display_debug: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit string interp type unsupported: Named("User").
   types/distinct_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
-  types/enum_dot: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: area: area: verifier: VerifierErrors([VerifierError { location: inst11, context: Some("v10 = fmul.f64 v9, v8  ; v9 = 0x1.921f9f01b866ep1"), message: "arg 1 (v8) has type i64, expected f64" }, VerifierError { location: inst12, context: Some("v11 = fmul.f64 v10, v8"), message: "arg 1 (v8) has type i64, expected f64" }, VerifierError { location: inst23, context: Some("v20 = fmul.i64 v19, v19"), message: "has an invalid controlling type i64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: true, 5: true, 6: true, 7: true }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst24, context: Some("return v20"), message: "result 0 has type i64, must match function signature of f64" }]).
-  types/enum_dot_patterns: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: area: area: verifier: VerifierErrors([VerifierError { location: inst10, context: Some("v9 = fmul.i64 v8, v8"), message: "has an invalid controlling type i64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: true, 5: true, 6: true, 7: true }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst11, context: Some("return v9"), message: "result 0 has type i64, must match function signature of f64" }, VerifierError { location: inst21, context: Some("v18 = fmul.i64 v17, v17"), message: "has an invalid controlling type i64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: true, 5: true, 6: true, 7: true }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst22, context: Some("return v18"), message: "result 0 has type i64, must match function signature of f64" }]).
+  types/enum_dot: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: area: jit enum payload type unsupported: Float (Some(types::F64)).
+  types/enum_dot_patterns: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: area: jit enum payload type unsupported: Float (Some(types::F64)).
   types/generic_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call to unknown function `make_pair`.
   types/measurement: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit core call unsupported.
   types/nested_enum_groups: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit enum `Damage::Physical`.
@@ -339,13 +339,13 @@ e2211:
   types/option_combinators: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "has an invalid controlling type f64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: true, 4: true, 5: true, 6: true, 7: true }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "arg 1 (v7) has type i64, expected f64" }, VerifierError { location: inst9, context: Some("return v8"), message: "result 0 has type f64, must match function signature of i64" }]).
   types/optional_result_variants: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit enum arm is not a variant pattern.
   types/patchable: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit missing method `Employee::apply`.
-  types/range_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  types/recursive_enum: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit enum positional payload unsupported.
+  types/range_types: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
+  types/recursive_enum: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit print type unsupported.
   types/refinements: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: FixedList { elem: String, len: 4, len_symbol: None }.
   types/renderable-varargs: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call to unknown function `log_all__va4`.
   types/renderable-varargs-multi: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit call to unknown function `announce__va1`.
-  types/type_alias: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result status unsupported.
-  types/unit_family: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: subtotal: subtotal: verifier: VerifierErrors([VerifierError { location: inst1, context: Some("v3 = fmul.i64 v0, v2"), message: "has an invalid controlling type i64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: true, 5: true, 6: true, 7: true }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst1, context: Some("v3 = fmul.i64 v0, v2"), message: "arg 1 (v2) has type f64, expected i64" }]).
+  types/type_alias: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit result ?? operand is not Result.
+  types/unit_family: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
   types/unit_literals: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit binary op unsupported.
   types/value_tag_type: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Tagged { marker: "Raw", inner: Int }.
   ui/events: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: show_publish: jit enum `HookOutcome::Continue`.
@@ -367,5 +367,5 @@ e2211:
   web/web_wasm_callback: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: init: jit core call unsupported.
   web/web_wasm_list: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: run: jit print type unsupported.
   web/web_wasm_list_string: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: List(String).
-  web/web_wasm_map: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: jit param type unsupported: Map { key: String, key_span: Some(Span { start: 202, end: 208 }), value: Int }.
+  web/web_wasm_map: jet run uses the JIT lens and does not hide a JIT compiler gap by running AOT. JIT gap in run: echo_scores: jit clone unsupported type: Map { key: String, key_span: Some(Span { start: 202, end: 208 }), value: Int }, local scores.
 

@@ -1,4 +1,4 @@
-//! M5: list host shims for the Cranelift JIT (`JetArena` list handles).
+//! M5: list/map host shims for the Cranelift JIT (`JetArena` handles).
 
 use super::Concurrency;
 
@@ -145,6 +145,61 @@ extern "C" fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_map_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_map())
+}
+
+extern "C" fn jet_jit_map_insert(map: i64, key: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .map_insert(map, key, value)
+            .expect("jit map insert: bad handle");
+    });
+}
+
+extern "C" fn jet_jit_map_get(map: i64, key: i64, _line: u32) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.map_get(map, key) {
+        Some(value) => value,
+        None => {
+            if rt.heap.map_len(map).is_none() {
+                jet_foundation::ice!(None, "jit map get: bad handle");
+            }
+            rt.set_trap("the map has no entry for this key");
+            0
+        }
+    })
+}
+
+/// `0` = absent; otherwise `value + 1` (Option Int encoding).
+extern "C" fn jet_jit_map_get_opt(map: i64, key: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_none() {
+            jet_foundation::ice!(None, "jit map get_opt: bad handle");
+        }
+        rt.heap.map_get(map, key).map(|v| v + 1).unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_map_len(map: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.map_len(map).expect("jit map len: bad handle"))
+}
+
+extern "C" fn jet_jit_map_key_at(map: i64, idx: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .map_key_at(map, idx)
+            .expect("jit map key_at: bad handle")
+    })
+}
+
+extern "C" fn jet_jit_map_value_at(map: i64, idx: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .map_value_at(map, idx)
+            .expect("jit map value_at: bad handle")
+    })
+}
+
 pub(crate) struct CollectionsHostFns {
     pub list_new: cranelift_module::FuncId,
     pub list_push: cranelift_module::FuncId,
@@ -160,6 +215,13 @@ pub(crate) struct CollectionsHostFns {
     pub list_slice: cranelift_module::FuncId,
     pub list_join_str: cranelift_module::FuncId,
     pub loop_stride_check: cranelift_module::FuncId,
+    pub map_new: cranelift_module::FuncId,
+    pub map_insert: cranelift_module::FuncId,
+    pub map_get: cranelift_module::FuncId,
+    pub map_get_opt: cranelift_module::FuncId,
+    pub map_len: cranelift_module::FuncId,
+    pub map_key_at: cranelift_module::FuncId,
+    pub map_value_at: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -177,6 +239,13 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_slice", jet_jit_list_slice as *const u8);
     builder.symbol("jet_jit_list_join_str", jet_jit_list_join_str as *const u8);
     builder.symbol("jet_jit_loop_stride_check", jet_jit_loop_stride_check as *const u8);
+    builder.symbol("jet_jit_map_new", jet_jit_map_new as *const u8);
+    builder.symbol("jet_jit_map_insert", jet_jit_map_insert as *const u8);
+    builder.symbol("jet_jit_map_get", jet_jit_map_get as *const u8);
+    builder.symbol("jet_jit_map_get_opt", jet_jit_map_get_opt as *const u8);
+    builder.symbol("jet_jit_map_len", jet_jit_map_len as *const u8);
+    builder.symbol("jet_jit_map_key_at", jet_jit_map_key_at as *const u8);
+    builder.symbol("jet_jit_map_value_at", jet_jit_map_value_at as *const u8);
 }
 
 pub(crate) fn declare_collections_host_fns(
@@ -214,6 +283,13 @@ pub(crate) fn declare_collections_host_fns(
     sig_slice.returns.push(AbiParam::new(types::I64));
     let mut sig_join = sig_len.clone();
     sig_join.params.push(AbiParam::new(types::I64));
+    let mut sig_map_insert = Signature::new(cc);
+    sig_map_insert.params.push(AbiParam::new(types::I64));
+    sig_map_insert.params.push(AbiParam::new(types::I64));
+    sig_map_insert.params.push(AbiParam::new(types::I64));
+    let sig_map_get = sig_get.clone();
+    let sig_map_get_opt = sig_get_opt.clone();
+    let sig_map_at = sig_get_opt.clone();
 
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
@@ -236,5 +312,12 @@ pub(crate) fn declare_collections_host_fns(
         list_slice: import("jet_jit_list_slice", &sig_slice)?,
         list_join_str: import("jet_jit_list_join_str", &sig_join)?,
         loop_stride_check: import("jet_jit_loop_stride_check", &sig_len)?,
+        map_new: import("jet_jit_map_new", &sig_new)?,
+        map_insert: import("jet_jit_map_insert", &sig_map_insert)?,
+        map_get: import("jet_jit_map_get", &sig_map_get)?,
+        map_get_opt: import("jet_jit_map_get_opt", &sig_map_get_opt)?,
+        map_len: import("jet_jit_map_len", &sig_len)?,
+        map_key_at: import("jet_jit_map_key_at", &sig_map_at)?,
+        map_value_at: import("jet_jit_map_value_at", &sig_map_at)?,
     })
 }
