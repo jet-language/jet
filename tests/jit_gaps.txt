@@ -6,6 +6,7 @@
 
 covered:
   basics/branches
+  basics/closures
   basics/compound
   basics/counted_loop
   basics/default_refs
@@ -26,6 +27,7 @@ covered:
   basics/range_step
   basics/switch
   basics/values
+  collections/filter_map
   collections/iter_adapters
   collections/lazy_iter
   collections/list_bounds
@@ -64,6 +66,7 @@ covered:
   effects/single_use
   errors/fallible_run
   errors/qq_control
+  functions/lambda_bare_params
   functions/lambda_inference
   lowlevel/cross
   lowlevel/layout_c
@@ -76,6 +79,7 @@ covered:
   operators/user_defined
   serde/user_derive
   syntax/maturity_tags
+  text/runtime_duration
   text/string_parse
   text/strings
   tooling/bench
@@ -111,7 +115,6 @@ covered:
 gaps:
   basics/bare_lambda_param: jit param type unsupported: Fn { params: [Int], ret: None, effect_bound: None }
   basics/callbacks: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
-  basics/closures: run: jit closure method unsupported
   basics/fan_out: run: jit list destructure unsupported
   basics/first_hour: run: jit core call unsupported
   basics/pattern_matching: describe_conn: jit unknown local `id`
@@ -123,7 +126,6 @@ gaps:
   cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
   collections/deque: run: jit static `std::collections::VecDeque::new`
   collections/dynamic-array-view: run: jit clone unsupported type: List(Named("Incident")), other expression
-  collections/filter_map: run: jit closure method unsupported
   collections/fixed_arrays: run: jit let type unsupported: FixedList { elem: IntN { signed: false, bits: 8 }, len: 3, len_symbol: None }
   collections/index_hook: Grid::get: jit field type unsupported: List(Named("Cell"))
   collections/iter_hook: BagIter::next: jit place borrow unsupported
@@ -174,7 +176,6 @@ gaps:
   errors/rollback_trait: transfer: jit transact block unsupported
   errors/transact: place_order: jit transact block unsupported
   errors/typed_error_families: load: jit typed Result conversion unsupported
-  functions/lambda_bare_params: run: jit closure method unsupported
   game/core_game_headless: run: jit handle method unsupported
   game/raylib_window: run: jit core call unsupported
   io/archive: run: jit core call unsupported
@@ -202,7 +203,7 @@ gaps:
   io/scope_guard: with_guards: jit scope guard closure unsupported
   io/stdin_filter: run: jit for-in method-call collection unsupported
   io/stream: count_lines: automatic resource cleanup uses AOT fallback
-  io/terminal: describe_key: jit if-let condition unsupported
+  io/terminal: describe_key: jit if-let pattern unsupported
   io/terminal_parity: run: jit host/default/uninit/ct-lit unsupported
   io/watcher: run: jit core call unsupported
   lowlevel/ffi: run: jit extern call unsupported
@@ -298,7 +299,6 @@ gaps:
   text/hex_base64: run: jit core call unsupported
   text/human_format: run: jit core call unsupported
   text/regex: run: jit core call unsupported
-  text/runtime_duration: run: jit if-let condition unsupported
   text/time_calendar: run: jit core call unsupported
   text/unicode_text: run: jit core call unsupported
   text/unicode_text_audit: run: jit core.text call unsupported: byte_count
@@ -326,7 +326,7 @@ gaps:
   types/generic_types: run: jit call to unknown function `make_pair`
   types/measurement: run: jit core call unsupported
   types/no_any_alternatives: run: jit call to unknown function `echo`
-  types/option: run: jit if-let condition unsupported
+  types/option: run: jit if-let pattern unsupported
   types/option_combinators: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "has an invalid controlling type f64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: true, 4: true, 5: true, 6: true, 7: true }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "arg 1 (v7) has type i64, expected f64" }, VerifierError { location: inst9, context: Some("return v8"), message: "result 0 has type f64, must match function signature of i64" }])
   types/optional_result_variants: run: jit enum arm is not a variant pattern
   types/patchable: run: jit missing method `Employee::apply`

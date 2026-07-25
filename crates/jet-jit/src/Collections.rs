@@ -333,6 +333,28 @@ extern "C" fn jet_jit_list_sum_i64(list: i64) -> i64 {
     clone_list_ints(list).into_iter().sum()
 }
 
+/// Stable sort `list` in place by parallel i64 `keys` (same length).
+extern "C" fn jet_jit_list_sort_by_i64_keys(list: i64, keys: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let xs = rt
+            .heap
+            .clone_int_list(list)
+            .expect("jit sort_by: bad list handle");
+        let keys = rt
+            .heap
+            .clone_int_list(keys)
+            .expect("jit sort_by: bad keys handle");
+        debug_assert_eq!(xs.len(), keys.len());
+        let mut order: Vec<usize> = (0..xs.len()).collect();
+        order.sort_by_key(|&i| keys[i]);
+        for (dst, src) in order.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, dst as i64, xs[src])
+                .expect("jit sort_by: set");
+        }
+    });
+}
+
 /// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
 /// `string_elems != 0` → elements are string handles; else raw i64.
 extern "C" fn jet_jit_print_list(list: i64, string_elems: i64) {
@@ -406,6 +428,7 @@ pub(crate) struct CollectionsHostFns {
     pub iter_chunks: cranelift_module::FuncId,
     pub iter_windows: cranelift_module::FuncId,
     pub list_sum_i64: cranelift_module::FuncId,
+    pub list_sort_by_i64_keys: cranelift_module::FuncId,
     pub print_list: cranelift_module::FuncId,
     pub print_opt: cranelift_module::FuncId,
 }
@@ -439,6 +462,10 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_iter_chunks", jet_jit_iter_chunks as *const u8);
     builder.symbol("jet_jit_iter_windows", jet_jit_iter_windows as *const u8);
     builder.symbol("jet_jit_list_sum_i64", jet_jit_list_sum_i64 as *const u8);
+    builder.symbol(
+        "jet_jit_list_sort_by_i64_keys",
+        jet_jit_list_sort_by_i64_keys as *const u8,
+    );
     builder.symbol("jet_jit_print_list", jet_jit_print_list as *const u8);
     builder.symbol("jet_jit_print_opt", jet_jit_print_opt as *const u8);
 }
@@ -487,6 +514,8 @@ pub(crate) fn declare_collections_host_fns(
     let sig_map_at = sig_get_opt.clone();
     let mut sig_print_list = sig_get_opt.clone();
     sig_print_list.returns.clear();
+    let mut sig_sort_by_keys = sig_get_opt.clone();
+    sig_sort_by_keys.returns.clear();
 
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
@@ -523,6 +552,7 @@ pub(crate) fn declare_collections_host_fns(
         iter_chunks: import("jet_jit_iter_chunks", &sig_get_opt)?,
         iter_windows: import("jet_jit_iter_windows", &sig_get_opt)?,
         list_sum_i64: import("jet_jit_list_sum_i64", &sig_len)?,
+        list_sort_by_i64_keys: import("jet_jit_list_sort_by_i64_keys", &sig_sort_by_keys)?,
         print_list: import("jet_jit_print_list", &sig_print_list)?,
         print_opt: import("jet_jit_print_opt", &sig_print_list)?,
     })

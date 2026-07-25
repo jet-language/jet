@@ -4,7 +4,7 @@ use jet_codegen::Codegen::TIR::{
     TStmt, TStrPart,
     TNumericOp,
 };
-use jet_foundation::AST::{BinOp, Type, UnOp};
+use jet_foundation::AST::{BinOp, Pattern, Type, UnOp};
 use std::collections::HashSet;
 
 pub(crate) fn flatten_string(parts: &[TStrPart]) -> Option<String> {
@@ -81,6 +81,49 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
                 ) =>
         {
             Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+/// Closure adapter receivers: scalar list/Iter elems, or user struct handles.
+pub(crate) fn jit_closure_elem_type(ty: &Type) -> Option<Type> {
+    if let Some(elem) = jit_list_iter_elem_type(ty) {
+        return Some(elem);
+    }
+    match ty {
+        Type::List(inner) | Type::FixedList { elem: inner, .. }
+            if record_type_key(inner).is_some() =>
+        {
+            Some(inner.as_ref().clone())
+        }
+        Type::Apply { name, args }
+            if name == jet_foundation::Syntax::TYPE_ITER
+                && args.len() == 1
+                && record_type_key(&args[0]).is_some() =>
+        {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+/// `[T?E]` / `Iter<T?E>` with JIT-representable payloads.
+pub(crate) fn jit_result_list_elem(ty: &Type) -> Option<(Type, Type)> {
+    let elem = match ty {
+        Type::List(inner) | Type::FixedList { elem: inner, .. } => inner.as_ref(),
+        Type::Apply { name, args }
+            if name == jet_foundation::Syntax::TYPE_ITER && args.len() == 1 =>
+        {
+            &args[0]
+        }
+        _ => return None,
+    };
+    match elem {
+        Type::Result { ok, err }
+            if jit_result_payload_type(ok) && jit_result_payload_type(err) =>
+        {
+            Some((ok.as_ref().clone(), err.as_ref().clone()))
         }
         _ => None,
     }
@@ -546,11 +589,21 @@ fn resident_safe_closure_method(
     }
     match op {
         TIR::TClosureOp::Map | TIR::TClosureOp::MapMut => {
-            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
-                && resident_safe_unary_lambda(args, callees)
+            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+                matches!(elem, Type::Int | Type::String | Type::Named(_))
+            }) && resident_safe_unary_lambda(args, callees)
         }
         TIR::TClosureOp::Filter => {
-            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+                matches!(elem, Type::Int | Type::String | Type::Named(_))
+            }) && resident_safe_unary_lambda(args, callees)
+        }
+        TIR::TClosureOp::FilterMap => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
+                && resident_safe_unary_lambda(args, callees)
+        }
+        TIR::TClosureOp::SortBy => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
                 && resident_safe_unary_lambda(args, callees)
         }
         TIR::TClosureOp::TakeWhile
@@ -621,7 +674,9 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::Sort => jit_list_int_type(&recv.ty) && args.is_empty(),
         TBuiltinOp::LenList => {
-            (jit_list_native_type(&recv.ty) || jit_list_iter_elem_type(&recv.ty).is_some())
+            (jit_list_native_type(&recv.ty)
+                || jit_list_iter_elem_type(&recv.ty).is_some()
+                || jit_closure_elem_type(&recv.ty).is_some())
                 && args.is_empty()
         }
         TBuiltinOp::GetList => {
@@ -669,7 +724,9 @@ fn resident_safe_builtin_op(
         }
         // JIT ABI: Iter producers already materialize list handles.
         TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
-            jit_list_iter_elem_type(&recv.ty).is_some() && args.is_empty()
+            (jit_list_iter_elem_type(&recv.ty).is_some()
+                || jit_closure_elem_type(&recv.ty).is_some())
+                && args.is_empty()
         }
         TBuiltinOp::Take | TBuiltinOp::Skip | TBuiltinOp::StepBy | TBuiltinOp::Chunks
         | TBuiltinOp::Windows => {
@@ -681,6 +738,9 @@ fn resident_safe_builtin_op(
         TBuiltinOp::Dedup => jit_list_iter_elem_type(&recv.ty).is_some() && args.is_empty(),
         TBuiltinOp::Sum { float: false } => {
             matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) && args.is_empty()
+        }
+        TBuiltinOp::TryCollect => {
+            jit_result_list_elem(&recv.ty).is_some() && args.is_empty()
         }
         _ => false,
     }
@@ -739,8 +799,15 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         } => {
             let cond_ok = match cond {
                 TIfCond::Plain(e) => matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees),
+                TIfCond::IfLet { pattern, subj } => {
+                    matches!(
+                        &pattern.pattern,
+                        Pattern::Ok { .. } | Pattern::Err { .. }
+                    ) && matches!(&subj.ty, Type::Result { .. })
+                        && resident_safe_expr(subj, callees)
+                }
                 TIfCond::Matches { .. } => false,
-                TIfCond::And { .. } | TIfCond::IfLet { .. } | TIfCond::IsNone { .. } => false,
+                TIfCond::And { .. } | TIfCond::IsNone { .. } => false,
             };
             cond_ok
                 && then_body.iter().all(|s| resident_safe_stmt(s, callees))
