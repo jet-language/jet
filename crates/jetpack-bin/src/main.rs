@@ -21,6 +21,7 @@
 mod CompilerExtensionHost;
 
 fn main() {
+    jetpack::Codegen::TIR::install_comptime_bridge();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str)
         == Some(jet_pkg_model::CompilerExtension::HOST_SUBCOMMAND)

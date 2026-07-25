@@ -1155,14 +1155,9 @@ fn nix_build(dir: &Path, target: &str) -> Result<PathBuf, String> {
     );
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        let line = stderr
-            .lines()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .unwrap_or("");
+        let tail = nix_error_tail(&stderr);
         return Err(format!(
-            "`nix build .#{target}` failed; see `{}`; {line}",
-            log.display()
+            "`nix build .#{target}` failed; {tail}"
         ));
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -1172,6 +1167,22 @@ fn nix_build(dir: &Path, target: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("`nix build .#{target}` produced no output path"))?
         .trim();
     Ok(PathBuf::from(path))
+}
+
+fn nix_error_tail(stderr: &str) -> String {
+    let mut lines = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .rev()
+        .take(12)
+        .collect::<Vec<_>>();
+    lines.reverse();
+    if lines.is_empty() {
+        "nix wrote no stderr".to_string()
+    } else {
+        lines.join(" | ")
+    }
 }
 
 fn find_qcow2(disk_out: &Path) -> Result<PathBuf, String> {
@@ -1663,5 +1674,19 @@ mod tests {
         assert!(out.join("boot-proof.json").is_file());
         assert!(out.join("receipt.json").is_file());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn nix_failure_tail_is_bounded_and_keeps_the_root_error() {
+        let stderr = (0..20)
+            .map(|line| format!("context-{line}"))
+            .chain(["error: generated Nix option is invalid".to_string()])
+            .collect::<Vec<_>>()
+            .join("\n");
+        let tail = nix_error_tail(&stderr);
+        assert!(!tail.contains("context-0"));
+        assert!(tail.contains("context-19"));
+        assert!(tail.contains("error: generated Nix option is invalid"));
+        assert_eq!(tail.split(" | ").count(), 12);
     }
 }

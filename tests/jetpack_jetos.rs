@@ -3165,6 +3165,28 @@ fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
 }
 
 #[test]
+fn direct_os_engines_install_the_config_eval_bridge() {
+    for (mut command, args) in [
+        (jetpack(), &["os", "check", "halcyon", "--no-color"][..]),
+        (jetos(), &["check", "halcyon", "--no-color"][..]),
+    ] {
+        let root = Scratch::new("os-direct-engine-bridge");
+        let out = command
+            .args(args)
+            .current_dir(config_example_dir())
+            .env("JETPACK_ROOT", &root.path)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
 fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
     let vm = fs::read_to_string("crates/jetpack/src/JetOS/vm_commands.rs").unwrap();
     let generation = fs::read_to_string("crates/jetpack/src/JetOS/generation.rs").unwrap();
@@ -3175,6 +3197,9 @@ fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
     assert!(!vm.contains("nixos_backend"), "{vm}");
     assert!(!generation.contains("nixos_backend"), "{generation}");
     assert!(!backend.contains("distroName = \"jetos\""), "{backend}");
+    assert!(backend.contains("fn nix_error_tail(stderr: &str) -> String"));
+    assert!(backend.contains(".take(12)"));
+    assert!(backend.contains("let _ = fs::remove_dir_all(&stage);"));
     assert!(syntax.contains("pub const OS_VERB_MIGRATE: &str = \"migrate\";"));
     assert!(syntax.contains(
         "pub const OS_MIGRATION_COMPARE_NIXOS: &str = \"compare-nixos\";"
