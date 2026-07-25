@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 794,
-    "rev": 14027,
+    "rev": 14042,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23861,6 +23861,16 @@
       "log": [
         {
           "at": "2026-07-25",
+          "by": "e3-729-w21",
+          "text": "[handoff] Owner stop: burndown cancelled; abandon WIP."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-729-w4",
+          "text": "Recovery e3-729c: worktree jet-bd-729c GONE; branch burndown-e3-729c absent. View/ViewMut JIT landed on master via b3b7d1ea4 (emit_view_mut_window present; collections/dynamic-array-view covered). jit_gaps 186 covered / 170 gaps. No merge needed. Checkpoint 58e04c398 tower-only."
+        },
+        {
+          "at": "2026-07-25",
           "by": "e3-729-w2",
           "text": "e3-729-w2 closeout (already merged): 6fcf2a6af + eb76f2b6d. Closed 10 stems (distinct/unit/range/capability arith, F64 enum heap pack, List(String)/Map/Tuple clone). At land: covered 107→117 gaps 248→238. Proof then: jit_coverage_audit + cranelift_three_way_differential_battery (33/111) + jet run smokes. Worktree jet-bd-729 removed. Later workers advanced further; do not re-claim."
         },
@@ -25711,8 +25721,18 @@
       "priority": "P1",
       "plan": "Implement ratified D-UNIONTYPE1=A as structural enum sugar, not a second sum mechanism. Add Type::Union with one canonicalizer that recursively flattens members, removes exact duplicates, and sorts by canonical source spelling; define parser precedence so T ? E1 | E2 places the union on the error side. Extend formatting, type traversal, equality/display, API snapshots, semantic index, and LSP to use that canonical form. In sema, allow only concrete closed member types, add implicit member-to-union widening at binding, argument, return, field, and error-propagation boundaries, and preserve exact union identity elsewhere. Extend union match heads to resolve an exact member type and feed the existing enum exhaustiveness and binding checks. Lower each canonical union to one deterministic compiler-generated enum emitted once per resolved union, with injection and match operations carried explicitly in TIR so codegen remains mechanical and native/web/dev agree. Extend Codable synthesis so each member encodes normally and decode selects a unique compatible wire shape; reject ambiguous or unsupported shapes in sema with registered UI diagnostics. Keep named-enum crossings explicit through ordinary match-based conversion functions and add no Any or cast escape. Update the syntax decision log and examples, regenerate grammar/tooling artifacts, bless snapshots, and run focused parser/formatter/sema/serde/golden plus AOT/dev/web parity checks.",
       "blockedBy": [],
-      "assignee": "e3-744-union",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "e3-744-union",
+          "text": "[handoff] Owner stop: stale reopen claim; shipped on master."
+        },
+        {
+          "at": "2026-07-25",
+          "by": "e3-744-union",
+          "text": "Impl landed on master (00e27be63 + follow-up fixes). Criteria 1–10 met with evidence; needs independent --verify then --phase done. Worktree jet-bd-744 smoke green."
+        },
         {
           "at": "2026-07-24",
           "by": "e3-plan-reconcile",
@@ -25728,92 +25748,92 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-23T18:28:44.822Z"
+          "evidence": "Syntax.rs comment + Syntax/core_surface.rs TYPE_UNION_SEP='|' (D-UNIONTYPE1=A); commit 00e27be63",
+          "at": "2026-07-25T20:01:58.529Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-23T18:28:44.822Z"
+          "evidence": "docs/spec/syntax-decisions.md D-UNIONTYPE1=A summary + 2026-07-25 log; commit 00e27be63",
+          "at": "2026-07-25T20:01:58.715Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-23T18:28:44.822Z"
+          "evidence": "jet self devtools grammars → editors/tree-sitter/grammar.js union type arm; commit 00e27be63",
+          "at": "2026-07-25T20:01:58.880Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-23T18:28:44.822Z"
+          "evidence": "tests/ui/union_codable_ambiguous.stderr (E2415); golden expected/types/anonymous_unions.out; diagnostic_snapshots + JET_GOLDEN_FILTER=anonymous_unions green",
+          "at": "2026-07-25T20:01:59.016Z"
         },
         {
           "n": 5,
           "text": "D-UNIONTYPE1=A adds A | B in every type position as a closed structural sum; nested unions flatten, duplicate members disappear, and identity is order-insensitive with deterministic canonical spelling and codegen identity.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T02:07:43.766Z"
+          "evidence": "Type::Union + canonicalize_union flatten/dedupe/sort; parser Types.rs A|B and T?E1|E2; codegen user___JetUnion_*; 00e27be63",
+          "at": "2026-07-25T20:01:59.188Z"
         },
         {
           "n": 6,
           "text": "A member value widens implicitly into its union at binding, argument, return, Codable field, and ? error-propagation boundaries; T ? E1 | E2 parses as T ? (E1 | E2). Other implicit union-to-union or union-to-named-enum conversions are not introduced.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T02:07:43.893Z"
+          "evidence": "sema check_type_assignable member→Union; return E0113 widen; TIR maybe_widen at bind/arg/return/field; ? WidenUnion; eval call-arg inject; example hold/describe/Box.value",
+          "at": "2026-07-25T20:01:59.346Z"
         },
         {
           "n": 7,
           "text": "Matching names each member type as the arm head, binds the member value, rejects unknown or repeated member arms, and reuses the existing exhaustiveness mechanism so every normalized member is covered.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T02:07:44.023Z"
+          "evidence": "CheckerItems union Variant arms + Diagnostics missing_pattern_coverage; example Int(n)/String(s); jet run anonymous_unions → n=7 s=hi n=3 s=x box=9",
+          "at": "2026-07-25T20:01:59.478Z"
         },
         {
           "n": 8,
           "text": "#[Codable] encode/decode supports union fields when every member supports the operation; decoding dispatches by wire shape and sema rejects ambiguous member shapes with a registered diagnostic instead of choosing by declaration order.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T02:07:44.154Z"
+          "evidence": "serde_diags e2415 + validate_serde_items; emit_anonymous_unions Encode/Decode by DataTree shape; tests/ui/union_codable_ambiguous.jet/.stderr",
+          "at": "2026-07-25T20:01:59.625Z"
         },
         {
           "n": 9,
           "text": "Named enums remain the stable public documenting form. Crossing between a union and a named enum is never implicit; docs demonstrate explicit match-based conversion functions in both directions under the existing destination-owned conversion law.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T02:07:44.283Z"
+          "evidence": "examples/features/types/anonymous_unions.jet as_named/from_named explicit match conversion; named Payload enum kept",
+          "at": "2026-07-25T20:01:59.761Z"
         },
         {
           "n": 10,
           "text": "D-ANY-JAI1 remains intact: no Any/top type or unchecked cast path is added. Parser/formatter, sema, TIR/codegen, web/dev, semantic index/LSP, API snapshots, examples, UI/golden, and AOT/dev parity cover unions and diagnostics.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-744-union",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-24T02:07:44.416Z"
+          "evidence": "no Any path; E0363 rejects trait-object/fn members; AOT+dev parity jet run/build anonymous_unions; FFI rejects Union; D-ANY-JAI1 untouched",
+          "at": "2026-07-25T20:01:59.899Z"
         }
       ],
       "refs": [
@@ -25845,8 +25865,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:45:54.472Z",
-      "updated": "2026-07-25",
-      "claimedAt": "2026-07-25T20:01:49.099Z"
+      "updated": "2026-07-25"
     },
     {
       "id": "c0gprkh8",
@@ -26573,6 +26592,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "e3-751-lsp",
+          "text": "[handoff] Owner stop: card already shipped; release stale claim."
+        },
         {
           "at": "2026-07-25",
           "by": "e3-751-lsp",
@@ -45599,6 +45623,111 @@
   ],
   "events": [
     {
+      "at": "2026-07-25T20:02:23.790Z",
+      "by": "e3-751-lsp",
+      "action": "card.release",
+      "ref": "c04x8v2l",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T20:02:23.638Z",
+      "by": "e3-744-union",
+      "action": "card.release",
+      "ref": "c0e61zyf",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T20:02:23.478Z",
+      "by": "e3-729-w21",
+      "action": "card.release",
+      "ref": "c0xdsvm9",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-25T20:02:00.148Z",
+      "by": "e3-744-union",
+      "action": "card.update",
+      "ref": "c0e61zyf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T20:01:59.900Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#10"
+    },
+    {
+      "at": "2026-07-25T20:01:59.761Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#9"
+    },
+    {
+      "at": "2026-07-25T20:01:59.625Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#8"
+    },
+    {
+      "at": "2026-07-25T20:01:59.478Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-25T20:01:59.347Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-25T20:01:59.188Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-25T20:01:59.016Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-25T20:01:58.880Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-25T20:01:58.715Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-25T20:01:58.529Z",
+      "by": "e3-744-union",
+      "action": "card.criteria-meet",
+      "ref": "c0e61zyf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-25T20:01:55.980Z",
+      "by": "e3-729-w4",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-25T20:01:49.099Z",
       "by": "e3-744-union",
       "action": "card.update",
@@ -48992,111 +49121,6 @@
       "action": "card.criteria-meet",
       "ref": "c03jshb5",
       "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:55:14.274Z",
-      "by": "e3-782-grok",
-      "action": "card.update",
-      "ref": "c03jshb5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T02:55:14.112Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-25T02:55:13.976Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-25T02:55:13.842Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T02:55:13.702Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T02:55:13.566Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T02:55:13.429Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T02:55:13.297Z",
-      "by": "e3-782-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03jshb5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:50:21.749Z",
-      "by": "e3-782-grok",
-      "action": "card.update",
-      "ref": "c03jshb5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T02:49:22.626Z",
-      "by": "e3-782-grok",
-      "action": "card.update",
-      "ref": "c03jshb5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T02:49:22.457Z",
-      "by": "e3-782-grok",
-      "action": "card.claim",
-      "ref": "c03jshb5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-25T02:49:22.300Z",
-      "by": "e3-781-grok",
-      "action": "card.release",
-      "ref": "c03jshb5",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-25T02:49:11.826Z",
-      "by": "e3-782-grok",
-      "action": "card.update",
-      "ref": "c03jshb5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T02:48:56.747Z",
-      "by": "one-core-orch",
-      "action": "card.update",
-      "ref": "c0182sm1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-25T02:48:56.534Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0182sm1",
-      "note": "#7"
     }
   ],
   "nextNum": 368,
