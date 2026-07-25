@@ -325,6 +325,10 @@
       button.addEventListener("click", () => {
         const id = button.getAttribute("data-inline-promote");
         const name = window.prompt("Binding name", "value");
+        if (name && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+          showToast("Binding name must be a Jet identifier");
+          return;
+        }
         if (name) postTransaction({ schema_version: 1, op: "promote_to_binding", revision: latestDoc.revision, inline_expr_id: id, name });
       });
     });

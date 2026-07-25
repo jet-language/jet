@@ -366,6 +366,41 @@ fn inline_edit_values() {
 }
 
 #[test]
+fn promote_pin_keyboard_gesture() {
+    run_canvas_scenario("promote-pin-keyboard-gesture");
+}
+
+#[test]
+fn conversion_keyboard_gesture() {
+    run_canvas_scenario("conversion-keyboard-gesture");
+}
+
+#[test]
+fn math_expression_keyboard_edit() {
+    run_canvas_scenario("math-expression-keyboard-edit");
+}
+
+#[test]
+fn collapse_expand_pointer_gesture() {
+    run_canvas_scenario("collapse-expand-pointer-gesture");
+}
+
+#[test]
+fn source_comment_keyboard_reload() {
+    run_canvas_scenario("source-comment-keyboard-reload");
+}
+
+#[test]
+fn workspace_keyboard_view_state() {
+    run_canvas_scenario("workspace-keyboard-view-state");
+}
+
+#[test]
+fn node_docs_pointer_hover() {
+    run_canvas_scenario("node-docs-pointer-hover");
+}
+
+#[test]
 fn rename_variable_sidebar() {
     run_canvas_scenario("rename-variable-sidebar");
 }

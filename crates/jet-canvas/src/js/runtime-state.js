@@ -111,6 +111,7 @@
   let nodeOffsets = new Map();
   let autoNodeOffsets = new Map();
   let hoverPin = null;
+  let hoverNode = null;
   let hoverDiagnostic = null;
   let pendingPin = null;
   let spaceDown = false;

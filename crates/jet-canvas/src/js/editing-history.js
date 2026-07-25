@@ -118,10 +118,37 @@
     if (!graph) return graph;
     const staged = graphStagedNodes(graph);
     const stagedPins = staged.flatMap((node) => node.pins || []);
+    const collapsed = (graph.regions || []).filter((region) => region.kind === "collapse");
+    const hiddenIds = new Set();
+    const collapsedNodes = [];
+    for (const region of collapsed) {
+      const inside = (graph.nodes || []).filter((node) =>
+        node.node_id !== graph.entry_node
+        && node.source_span
+        && region.source_span
+        && node.source_span.start >= region.source_span.start
+        && node.source_span.end <= region.source_span.end);
+      if (!inside.length) continue;
+      inside.forEach((node) => hiddenIds.add(node.node_id));
+      const first = inside.slice().sort((a, b) => a.source_span.start - b.source_span.start)[0];
+      collapsedNodes.push({
+        node_id: region.region_id,
+        title: region.title || "Collapsed",
+        kind: "collapse",
+        archetype: "control",
+        source_span: region.source_span,
+        layout: first.layout,
+        collapsed_region_id: region.region_id,
+        edit_affordances: ["expand_collapsed_region"]
+      });
+    }
+    const hiddenPins = new Set((graph.pins || [])
+      .filter((pin) => hiddenIds.has(pin.node_id))
+      .map((pin) => pin.pin_id));
     return Object.assign({}, graph, {
-      nodes: (graph.nodes || []).concat(staged),
-      pins: (graph.pins || []).concat(stagedPins),
-      wires: (graph.wires || []).concat(graphStagedWires(graph))
+      nodes: (graph.nodes || []).filter((node) => !hiddenIds.has(node.node_id)).concat(collapsedNodes, staged),
+      pins: (graph.pins || []).filter((pin) => !hiddenPins.has(pin.pin_id)).concat(stagedPins),
+      wires: (graph.wires || []).filter((wire) => !hiddenPins.has(wire.from_pin) && !hiddenPins.has(wire.to_pin)).concat(graphStagedWires(graph))
     });
   }
 

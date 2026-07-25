@@ -834,7 +834,17 @@
     if (hoverDiagnostic && hoverDiagnostic.entries && hoverDiagnostic.entries[0]) {
       const entry = hoverDiagnostic.entries[0];
       syncWireStatus({ title: entry.code, detail: diagnosticFullText(entry), color: entry.severity === "error" ? "#ef4444" : "#f59e0b" });
-    } else if (!pendingPin && (!drag || drag.mode !== "pin")) syncWireStatus(null);
+    } else if (!pendingPin && (!drag || drag.mode !== "pin")) {
+      if (hoverNode) {
+        syncWireStatus({
+          title: hoverNode.title,
+          detail: nodeDescription(hoverNode, graph),
+          color: nodeStyle(hoverNode, graph).accent
+        });
+      } else {
+        syncWireStatus(null);
+      }
+    }
     const selectedNode = nodes.get(selectedNodeId);
     if (selectedVariableName) {
       renderVariableDetails(graph, selectedVariableName);
@@ -920,6 +930,8 @@
       redoDepth: redoStack.length,
       undoLimit: UNDO_DEPTH,
       lastToast: toast ? toast.textContent : "",
+      hoveredNodeTitle: hoverNode && hoverNode.title || "",
+      hoveredNodeDescription: hoverNode ? nodeDescription(hoverNode, graph) : "",
       loadCoreCatalog: (query) => loadCoreCatalogActions(query || "").then(() => window.__jetCanvasCoreCatalogPalette || actionEntries.length),
       openCoreCatalogPalette: (query) => { openCoreCatalogPalette(query || ""); return true; },
       openGraphActionPalette: (query) => { openGraphActionPalette(window.innerWidth / 2 - 210, 72, query || "", viewportCenterGraphPoint()); return true; },
@@ -1162,7 +1174,26 @@
   function addCommentAroundSelection() {
     const graph = currentGraphOrNull();
     if (!graph) return;
-    createCommentBox(commentBoundsAroundSelection(graph), "Comment", COMMENT_TINTS[0], true);
+    const selected = selectedGraphNodes(graphWithViewState(graph)).filter((node) => node.source_span);
+    if (!selected.length) {
+      createCommentBox(commentBoundsAroundSelection(graph), "Comment", COMMENT_TINTS[0], true);
+      return;
+    }
+    const bounds = commentBoundsAroundSelection(graph);
+    const title = window.prompt("Comment title", "Comment");
+    if (!title) return;
+    postTransaction({
+      schema_version: 1,
+      op: "create_comment_region",
+      revision: latestDoc.revision,
+      graph_id: graph.graph_id,
+      start: Math.min(...selected.map((node) => node.source_span.start)),
+      end: Math.max(...selected.map((node) => node.source_span.end)),
+      title,
+      color: COMMENT_TINTS[0],
+      alpha: "0.18",
+      bounds: [bounds.x, bounds.y, bounds.w, bounds.h].map((value) => Math.round(value)).join(",")
+    });
   }
 
   function hitCommentAt(x, y) {

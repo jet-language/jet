@@ -791,6 +791,12 @@ pub(super) fn apply_create_collapse_region(
     {
         return Err(edit_error("not_found", "Canvas graph no longer exists"));
     }
+    if start >= end || end > src.len() {
+        return Err(edit_error(
+            "bad_request",
+            "Canvas collapse needs one valid source span",
+        ));
+    }
     let insert_at = line_after(src, end.min(src.len()));
     let indent = indentation_at(src, insert_at.min(src.len()));
     let comment = format!(

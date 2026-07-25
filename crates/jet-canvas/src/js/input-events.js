@@ -111,9 +111,17 @@
       const y = ev.clientY - rect.top;
       const nextDiagnostic = hitDiagnosticAt(x, y);
       const nextHover = nextDiagnostic ? null : hitPinAt(x, y);
-      if (nextDiagnostic !== hoverDiagnostic || (nextHover && !hoverPin) || (!nextHover && hoverPin) || (nextHover && hoverPin && nextHover.pin_id !== hoverPin.pin_id)) {
+      const nextNode = nextDiagnostic || nextHover ? null : (hitNodeAt(x, y) || {}).node || null;
+      if (nextDiagnostic !== hoverDiagnostic
+        || (nextHover && !hoverPin)
+        || (!nextHover && hoverPin)
+        || (nextHover && hoverPin && nextHover.pin_id !== hoverPin.pin_id)
+        || (nextNode && !hoverNode)
+        || (!nextNode && hoverNode)
+        || (nextNode && hoverNode && nextNode.node_id !== hoverNode.node_id)) {
         hoverDiagnostic = nextDiagnostic;
         hoverPin = nextHover;
+        hoverNode = nextNode;
         if (latestDoc) drawGraph(latestDoc);
       }
       return;

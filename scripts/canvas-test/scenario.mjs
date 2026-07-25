@@ -530,6 +530,14 @@ async function assertSourceSync(ctx, opLog) {
   }
 }
 
+async function assertCleanSourceSync(ctx, opLog) {
+  await assertSourceSync(ctx, opLog);
+  const problems = await ctx.problems();
+  if (problems.length) {
+    throw new Error(`source write left Jet diagnostics after ops:\n${opLog.join("\n")}\n${JSON.stringify(problems)}`);
+  }
+}
+
 function graphByTitle(doc, title) {
   const graph = (doc.graphs || []).find((g) => g.title === title || String(g.title || "").includes(title));
   if (!graph) throw new Error(`graph missing: ${title}`);
@@ -652,6 +660,131 @@ async function failScratchLimit(ctx) {
   if (result.ok) throw new Error(`diagnostic transaction unexpectedly passed: ${JSON.stringify(result.json)}`);
   await ctx.expectProblem("E0107");
   return result;
+}
+
+async function elementCenter(ctx, expression, label) {
+  const point = await ctx.driver.evaluate(`(() => {
+    const element = ${expression};
+    if (!element) return null;
+    element.scrollIntoView({ block: "center", inline: "center" });
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  if (!point) throw new Error(`element missing: ${label}`);
+  return point;
+}
+
+async function clickElement(ctx, expression, label) {
+  const point = await elementCenter(ctx, expression, label);
+  await ctx.driver.click(point.x, point.y);
+  await sleep(160);
+}
+
+async function clickAttribute(ctx, attribute, value, label) {
+  await clickElement(
+    ctx,
+    `Array.from(document.querySelectorAll("[${attribute}]")).find((element) => element.getAttribute(${JSON.stringify(attribute)}) === ${JSON.stringify(value)})`,
+    label
+  );
+}
+
+async function pressAttribute(ctx, attribute, value, label) {
+  const focused = await ctx.driver.evaluate(`(() => {
+    const element = Array.from(document.querySelectorAll("[${attribute}]")).find((candidate) => candidate.getAttribute(${JSON.stringify(attribute)}) === ${JSON.stringify(value)});
+    if (!element) return { ok: false, reason: "missing" };
+    element.focus();
+    const rect = element.getBoundingClientRect();
+    return {
+      ok: document.activeElement === element,
+      tag: element.tagName,
+      disabled: !!element.disabled,
+      connected: element.isConnected,
+      rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+      display: getComputedStyle(element).display,
+      visibility: getComputedStyle(element).visibility,
+      active: document.activeElement && document.activeElement.tagName
+    };
+  })()`);
+  if (!focused.ok) throw new Error(`element could not receive keyboard focus: ${label}: ${JSON.stringify(focused)}`);
+  await ctx.driver.send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Enter",
+    code: "Enter",
+    text: "\r",
+    unmodifiedText: "\r",
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13,
+  }, ctx.driver.pageSession);
+  await ctx.driver.send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Enter",
+    code: "Enter",
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13,
+  }, ctx.driver.pageSession);
+  await sleep(160);
+}
+
+async function selectInlineExpression(ctx, graphTitle, predicate, label) {
+  await ctx.driver.send("Emulation.setDeviceMetricsOverride", {
+    width: 1440,
+    height: 900,
+    deviceScaleFactor: 1,
+    mobile: false,
+  }, ctx.driver.pageSession);
+  await sleep(120);
+  await ctx.switchGraph(graphTitle);
+  const doc = await ctx.graph();
+  const graph = graphByTitle(doc, graphTitle);
+  const expr = firstInline(graph, predicate, label);
+  const node = (graph.nodes || []).find((candidate) => candidate.node_id === expr.node_id);
+  if (!node) throw new Error(`inline expression node missing: ${label}`);
+  await ctx.click(node.title);
+  await ctx.waitFor(async () => {
+    return await ctx.driver.evaluate(`Array.from(document.querySelectorAll("[data-inline-id]")).some((element) => element.getAttribute("data-inline-id") === ${JSON.stringify(expr.inline_expr_id)})`);
+  }, `${label} details`);
+  await ctx.driver.evaluate(`(() => {
+    const types = document.querySelector('[data-detail-toggle="types"]');
+    if (types && !types.checked) {
+      types.checked = true;
+      types.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    const drawer = document.getElementById("right-drawer");
+    drawer.classList.add("is-drawer-open");
+    drawer.style.display = "block";
+    drawer.style.position = "fixed";
+    drawer.style.right = "0";
+    drawer.style.top = "0";
+    drawer.style.bottom = "0";
+    drawer.style.width = "326px";
+    drawer.style.zIndex = "40";
+    document.getElementById("dock-details").classList.add("is-active");
+  })()`);
+  const detailsVisible = await ctx.driver.evaluate(`(() => {
+    const element = Array.from(document.querySelectorAll("[data-inline-id]")).find((candidate) => candidate.getAttribute("data-inline-id") === ${JSON.stringify(expr.inline_expr_id)});
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.right > 0 && rect.left < window.innerWidth && rect.bottom > 0 && rect.top < window.innerHeight;
+  })()`);
+  if (!detailsVisible) {
+    await clickElement(ctx, `document.getElementById("dock-details")`, "details drawer");
+  }
+  return { doc, graph, expr, node };
+}
+
+async function expectVisibleRefusal(ctx, text, label) {
+  await ctx.waitFor(async () => {
+    const toast = await ctx.driver.evaluate(`document.getElementById("toast").textContent`);
+    const problems = await ctx.problems();
+    return String(toast || "").toLowerCase().includes(text.toLowerCase())
+      || problems.some((problem) => String(problem.rendered || problem.what || "").toLowerCase().includes(text.toLowerCase()));
+  }, label);
+}
+
+async function assertSourceUnchangedAfterReload(ctx, before, label) {
+  if (await ctx.source() !== before) throw new Error(`${label} changed Jet source bytes`);
+  await ctx.openCanvas();
+  if (await ctx.source() !== before) throw new Error(`${label} reload changed Jet source bytes`);
 }
 
 export const scenarios = {
@@ -1051,6 +1184,224 @@ fn run() {
     const { doc, graph, expr } = await scratchLimitInline(ctx);
     await uiEdit(ctx, { schema_version: 1, op: "edit_inline_expr", revision: doc.revision, inline_expr_id: expr.inline_expr_id, new_expr: "limit + 2" }, "inline value edit");
     await ctx.expectSourceContains("print(limit + 2)");
+  },
+
+  "promote-pin-keyboard-gesture": async (ctx) => {
+    await ctx.openCanvas();
+    const base = await ctx.source();
+    let selected = await selectInlineExpression(ctx, "scratch", (expr) => expr.source === "limit", "promote limit");
+    await ctx.driver.evaluate(`window.prompt = () => "promoted_limit"`);
+    await pressAttribute(ctx, "data-inline-promote", selected.expr.inline_expr_id, "Promote to binding");
+    await sleep(500);
+    if (!(await ctx.source()).includes("promoted_limit :: limit")) {
+      const state = await ctx.driver.evaluate(`JSON.stringify({
+        tx: window.__jetCanvasLastTx,
+        result: window.__jetCanvasLastTxResult,
+        toast: window.__jetCanvasTest && window.__jetCanvasTest.lastToast
+      })`);
+      throw new Error(`promotion gesture did not write source: ${state}`);
+    }
+    await ctx.waitFor(async () => (await ctx.source()).includes("promoted_limit :: limit"), "promoted binding source");
+    await ctx.expectSourceContains("print(promoted_limit)");
+    await assertCleanSourceSync(ctx, ["keyboard promote"]);
+
+    await ctx.replaceSource(base);
+    await ctx.openCanvas();
+    selected = await selectInlineExpression(ctx, "scratch", (expr) => expr.source === "limit", "invalid promote limit");
+    const beforeInvalid = await ctx.source();
+    await ctx.driver.evaluate(`window.prompt = () => "bad name"`);
+    await pressAttribute(ctx, "data-inline-promote", selected.expr.inline_expr_id, "invalid Promote to binding");
+    await expectVisibleRefusal(ctx, "identifier", "invalid promotion refusal");
+    if (await ctx.source() !== beforeInvalid) throw new Error("invalid promotion partially changed source");
+
+    await ctx.driver.evaluate(`(() => {
+      const originalFetch = window.fetch.bind(window);
+      let staleOnce = true;
+      window.fetch = (input, init = {}) => {
+        if (staleOnce && String(input).includes("/canvas/transaction") && init.body) {
+          const body = JSON.parse(init.body);
+          if (body.op === "promote_to_binding") {
+            staleOnce = false;
+            body.revision = "sha256-stale-revision";
+            init = Object.assign({}, init, { body: JSON.stringify(body) });
+          }
+        }
+        return originalFetch(input, init);
+      };
+    })()`);
+    await ctx.driver.evaluate(`window.prompt = () => "stale_value"`);
+    await pressAttribute(ctx, "data-inline-promote", selected.expr.inline_expr_id, "stale Promote to binding");
+    await expectVisibleRefusal(ctx, "source changed", "stale promotion refusal");
+    if (await ctx.source() !== beforeInvalid) throw new Error("stale promotion partially changed source");
+  },
+
+  "conversion-keyboard-gesture": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn to_int(n: Int) -> Int {
+    return n
+}
+
+fn convert(limit: Int) {
+    print(limit)
+}
+
+fn run() {
+    convert(3)
+}
+`);
+    await ctx.openCanvas();
+    let selected = await selectInlineExpression(ctx, "convert", (expr) => expr.source === "limit", "convert limit");
+    await ctx.driver.evaluate(`window.prompt = () => "to_int"`);
+    await pressAttribute(ctx, "data-inline-convert", selected.expr.inline_expr_id, "Insert conversion");
+    await ctx.waitFor(async () => (await ctx.source()).includes("print(to_int(limit))"), "visible conversion source");
+    await assertCleanSourceSync(ctx, ["keyboard conversion"]);
+
+    const valid = await ctx.source();
+    selected = await selectInlineExpression(ctx, "convert", (expr) => expr.source === "limit", "invalid conversion");
+    await ctx.driver.evaluate(`window.prompt = () => "missing_conversion"`);
+    await pressAttribute(ctx, "data-inline-convert", selected.expr.inline_expr_id, "invalid Insert conversion");
+    await expectVisibleRefusal(ctx, "missing_conversion", "invalid conversion refusal");
+    if (await ctx.source() !== valid) throw new Error("invalid conversion partially changed source");
+  },
+
+  "math-expression-keyboard-edit": async (ctx) => {
+    await ctx.openCanvas();
+    let selected = await selectInlineExpression(ctx, "scratch", (expr) => expr.source === "limit", "math expression");
+    const inputExpression = `Array.from(document.querySelectorAll("[data-inline-id]")).find((element) => element.getAttribute("data-inline-id") === ${JSON.stringify(selected.expr.inline_expr_id)})`;
+    await ctx.driver.evaluate(`(() => {
+      const input = ${inputExpression};
+      input.focus();
+      input.setSelectionRange(0, input.value.length);
+    })()`);
+    await ctx.type("limit * limit + 1");
+    await pressAttribute(ctx, "data-inline-apply", selected.expr.inline_expr_id, "Apply expression");
+    await ctx.waitFor(async () => (await ctx.source()).includes("print(limit * limit + 1)"), "math expression source");
+    await assertCleanSourceSync(ctx, ["keyboard math edit"]);
+
+    const valid = await ctx.source();
+    selected = await selectInlineExpression(ctx, "scratch", (expr) => String(expr.source || "").includes("limit * limit"), "invalid math expression");
+    const invalidInput = `Array.from(document.querySelectorAll("[data-inline-id]")).find((element) => element.getAttribute("data-inline-id") === ${JSON.stringify(selected.expr.inline_expr_id)})`;
+    await ctx.driver.evaluate(`(() => {
+      const input = ${invalidInput};
+      input.focus();
+      input.setSelectionRange(0, input.value.length);
+    })()`);
+    await ctx.type("missing_value");
+    await pressAttribute(ctx, "data-inline-apply", selected.expr.inline_expr_id, "Apply invalid expression");
+    await ctx.expectProblem("E0107");
+    if (await ctx.source() !== valid) throw new Error("invalid math edit partially changed source");
+  },
+
+  "collapse-expand-pointer-gesture": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.replaceSource(`fn compute(x: Int) {
+    a :: x + 1
+    b :: a * 2
+    print(b)
+}
+
+fn run() {
+    compute(3)
+}
+`);
+    await ctx.openCanvas();
+    await ctx.switchGraph("compute");
+    const before = await ctx.source();
+    await ctx.driver.evaluate(`window.prompt = () => "Compute value"`);
+    const a = await ctx.node("a");
+    await ctx.driver.rightClick(a.x, a.y);
+    await ctx.expectMenu("Collapse selection");
+    await ctx.pickEntry("Collapse selection");
+    await ctx.waitFor(async () => (await ctx.source()).includes("canvas:collapse"), "collapse source hint");
+    await assertCleanSourceSync(ctx, ["pointer collapse"]);
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      return Object.values(state.nodeBounds || {}).some((node) => node.title === "Compute value");
+    }, "collapsed node");
+
+    const collapsed = await ctx.node("Compute value");
+    await ctx.driver.rightClick(collapsed.x, collapsed.y);
+    await ctx.expectMenu("Expand collapsed region");
+    await ctx.pickEntry("Expand collapsed region");
+    await ctx.waitFor(async () => !(await ctx.source()).includes("canvas:collapse"), "expanded source");
+    if (await ctx.source() !== before) throw new Error("collapse/expand did not restore exact source");
+    await assertCleanSourceSync(ctx, ["pointer collapse", "pointer expand"]);
+
+    await ctx.replaceSource(`fn cross(x: Int) {
+    if x > 0 {
+        print(x)
+    }
+}
+
+fn run() {
+    cross(1)
+}
+`);
+    await ctx.openCanvas();
+    await ctx.switchGraph("cross");
+    const crossBefore = await ctx.source();
+    await ctx.driver.evaluate(`window.prompt = () => "Invalid block"`);
+    const branch = await ctx.node("if");
+    await ctx.driver.rightClick(branch.x, branch.y);
+    await ctx.expectMenu("Collapse selection");
+    await ctx.pickEntry("Collapse selection");
+    await expectVisibleRefusal(ctx, "block boundary", "cross-block collapse refusal");
+    if (await ctx.source() !== crossBefore) throw new Error("cross-block collapse partially changed source");
+  },
+
+  "source-comment-keyboard-reload": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("scratch");
+    await ctx.click("print");
+    const before = await ctx.source();
+    await ctx.driver.evaluate(`window.prompt = () => "Scratch note"`);
+    await ctx.driver.press("c");
+    await ctx.waitFor(async () => (await ctx.source()).includes("canvas:comment"), "source-backed comment");
+    await assertCleanSourceSync(ctx, ["keyboard source comment"]);
+    const changed = await ctx.source();
+    if (changed === before) throw new Error("keyboard source comment did not write source");
+    await ctx.openCanvas();
+    const graph = graphByTitle(await ctx.graph(), "scratch");
+    if (!(graph.regions || []).some((region) => region.kind === "comment" && region.title === "Scratch note")) {
+      throw new Error("source-backed comment did not reproject after reload");
+    }
+  },
+
+  "workspace-keyboard-view-state": async (ctx) => {
+    await ctx.openCanvas();
+    await ctx.switchGraph("summarize");
+    const before = await ctx.source();
+    await ctx.click("total");
+    const first = (await ctx.state()).selectedNodeId;
+    const beforeNudge = (await ctx.state()).nodeBounds[first];
+    await ctx.driver.press("ArrowRight");
+    const afterNudge = (await ctx.state()).nodeBounds[first];
+    if (!afterNudge || afterNudge.x <= beforeNudge.x) throw new Error("keyboard nudge did not move selected node");
+    await ctx.driver.shortcut(["Alt", "b"]);
+    await expectVisibleRefusal(ctx, "bookmark saved", "bookmark keyboard status");
+    await ctx.driver.shortcut(["Alt", "t"]);
+    await expectVisibleRefusal(ctx, "graph tidied", "tidy keyboard status");
+    await ctx.driver.shortcut(["Alt", "a"]);
+    await expectVisibleRefusal(ctx, "select nodes to align", "align refusal status");
+    await clickElement(ctx, `Array.from(document.querySelectorAll("[data-graph-tab]")).find((button) => button.textContent.includes("scratch"))`, "scratch graph tab");
+    await ctx.driver.shortcut(["Alt", "g"]);
+    await ctx.waitFor(async () => (await ctx.state()).graphId && (await ctx.state()).graphId.includes("summarize"), "bookmark keyboard jump");
+    await clickElement(ctx, `document.getElementById("favorite-action")`, "favorite action");
+    await assertSourceUnchangedAfterReload(ctx, before, "workspace keyboard view state");
+  },
+
+  "node-docs-pointer-hover": async (ctx) => {
+    await ctx.openCanvas();
+    const before = await ctx.source();
+    const target = await ctx.node("square");
+    await ctx.driver.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: target.x, y: target.y }, ctx.driver.pageSession);
+    await ctx.waitFor(async () => {
+      const state = await ctx.state();
+      return state.hoveredNodeTitle === "square" && String(state.hoveredNodeDescription || "").length > 0;
+    }, "node hover documentation");
+    const visible = await ctx.driver.evaluate(`document.getElementById("wire-status").textContent`);
+    if (!visible.includes("square")) throw new Error(`node hover docs not visible: ${visible}`);
+    await assertSourceUnchangedAfterReload(ctx, before, "node docs hover");
   },
 
   "rename-variable-sidebar": async (ctx) => {
