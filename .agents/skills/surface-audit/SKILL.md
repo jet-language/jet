@@ -8,8 +8,8 @@ description: >-
 # Surface Audit
 
 Find outliers and gaps in language shape, uniformity, and consistency. Compose
-output quality from `docs/proposals/language-shape-constitution.md` and
-`docs/proposals/uniformity-paradigm.md`. End with concrete next actions (ballot
+output quality from `docs/spec/philosophy.md` and
+`docs/spec/syntax-decisions.md`. End with concrete next actions (ballot
 titles or card ids only — do not create cards unless asked).
 
 Search live specs, examples, stdlib, and CLI surfaces. Prefer
