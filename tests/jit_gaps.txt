@@ -109,11 +109,16 @@ covered:
   modules/selective_imports
   operators/chained_comparison
   operators/user_defined
+  serde/codable_default
   serde/csv
+  serde/csv_typed
   serde/datatree_accessors
   serde/encoding
   serde/encoding_base
+  serde/hand_codec
   serde/json_coerce
+  serde/json_typed
+  serde/serde_derive
   serde/user_derive
   syntax/maturity_tags
   text/hex_base64
@@ -185,7 +190,7 @@ gaps:
   concurrency/deadline_context: run: jit context block unsupported
   concurrency/detached_task: run: jit handle method unsupported
   concurrency/parallel_iter: run: jit closure method unsupported
-  concurrency/parallel_scan: paths_from_args: jit if-let pattern unsupported
+  concurrency/parallel_scan: paths_from_prompt: jit core call unsupported: core.io.input
   concurrency/task_controls: run: jit handle method unsupported
   concurrency/task_runtime_audit: run: jit core call unsupported: core.tasks.channel
   crypto/auth_tokens: run: jit core call unsupported: core.auth.verify_jwt
@@ -285,10 +290,8 @@ gaps:
   reflection/reflect-value: run: jit core call unsupported: core.reflect.of
   safety/sh_typed_text: run: jit host/default/uninit/ct-lit unsupported
   safety/typed_sql: run_query: jit host/default/uninit/ct-lit unsupported
-  serde/codable_default: run: jit core call unsupported: core.encoding.json.decode
-  serde/csv_typed: run: jit core call unsupported
   serde/decode_traced: run: jit core call unsupported: core.encoding.json.decode_traced
-  serde/encoding_breadth: run: jit core call unsupported: core.encoding.json.canonical
+  serde/encoding_breadth: run: jit core call unsupported: core.encoding.json.events
   serde/encoding_cbor_stream: write_catalog: jit core call unsupported
   serde/encoding_csv_stream: write_catalog: jit core call unsupported
   serde/encoding_json_stream: write_catalog: jit core call unsupported
@@ -296,10 +299,7 @@ gaps:
   serde/encoding_stream_types: run: jit static `jet_std::EncodingLimits::safe`
   serde/encoding_xml_projection: run: jit core call unsupported: core.encoding.xml.parse
   serde/encoding_xml_stream: write_catalog: jit core call unsupported
-  serde/hand_codec: run: jit core call unsupported: core.encoding.json.to_string
-  serde/json_typed: run: jit core call unsupported: core.encoding.json.decode
-  serde/serde_derive: run: jit core call unsupported: core.encoding.json.to_string
-  serde/serde_generic: run: jit core call unsupported: core.encoding.json.to_string
+  serde/serde_generic: run: jit SerdeEncode unsupported: Apply { name: "Wrap", args: [Int] }
   serde/toml: run: jit core call unsupported: core.encoding.toml.decode
   serde/validate: report: jit field `path` on `FieldError`
   serde/yaml: run: jit core call unsupported: core.encoding.yaml.decode
@@ -334,7 +334,7 @@ gaps:
   types/generic_types: run: jit call to unknown function `make_pair`
   types/measurement: run: jit core call unsupported: core.science.measurement.from
   types/no_any_alternatives: run: jit call to unknown function `echo`
-  types/option: describe: jit if-let pattern unsupported
+  types/option: run: jit is-none condition unsupported
   types/optional_result_variants: run: jit enum arm is not a variant pattern
   types/patchable: run: jit missing method `Employee::apply`
   types/refinements: pick: jit host/default/uninit/ct-lit unsupported

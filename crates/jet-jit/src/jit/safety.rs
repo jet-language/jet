@@ -925,11 +925,19 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             let cond_ok = match cond {
                 TIfCond::Plain(e) => matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees),
                 TIfCond::IfLet { pattern, subj } => {
-                    matches!(
+                    let result_ok = matches!(
                         &pattern.pattern,
                         Pattern::Ok { .. } | Pattern::Err { .. }
-                    ) && matches!(&subj.ty, Type::Result { .. })
-                        && resident_safe_expr(subj, callees)
+                    ) && matches!(&subj.ty, Type::Result { .. });
+                    let option_ok = matches!(&pattern.pattern, Pattern::Present { .. })
+                        && matches!(&subj.ty, Type::Option(_));
+                    let datatree_ok = matches!(&pattern.pattern, Pattern::Variant { .. })
+                        && matches!(
+                            &subj.ty,
+                            Type::Named(n)
+                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                        );
+                    (result_ok || option_ok || datatree_ok) && resident_safe_expr(subj, callees)
                 }
                 TIfCond::Matches { .. } => false,
                 TIfCond::And { .. } | TIfCond::IsNone { .. } => false,
@@ -1480,6 +1488,20 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::ProcessChildMethod { method } => {
             method == "wait" && args.is_empty()
         }
+        THandleOp::DataTreeField
+        | THandleOp::JsonField
+        | THandleOp::DataTreeAt
+        | THandleOp::JsonAt => args.len() == 1,
+        THandleOp::DataTreeInt
+        | THandleOp::JsonInt
+        | THandleOp::DataTreeText
+        | THandleOp::JsonText
+        | THandleOp::DataTreeBool
+        | THandleOp::JsonBool
+        | THandleOp::DataTreeFloat
+        | THandleOp::JsonFloat => args.is_empty(),
+        THandleOp::SerdeEncode => args.is_empty(),
+        THandleOp::DataTreeDecode(_) => args.is_empty(),
         _ => false,
     }
 }

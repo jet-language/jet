@@ -760,6 +760,71 @@ extern "C" fn jet_jit_json_to_string_pretty(tree: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
+/// `core.encoding.json.canonical` — same sort+render as `jet_std_json_render_canonical`.
+fn render_canonical(t: &json_rt::DataTree) -> String {
+    fn sort_tree(t: &json_rt::DataTree) -> json_rt::DataTree {
+        match t {
+            json_rt::DataTree::Object(entries) => {
+                let mut sorted = entries.clone();
+                sorted.sort_by(|a, b| a.0.cmp(&b.0));
+                json_rt::DataTree::Object(
+                    sorted
+                        .into_iter()
+                        .map(|(k, v)| (k, sort_tree(&v)))
+                        .collect(),
+                )
+            }
+            json_rt::DataTree::Array(items) => {
+                json_rt::DataTree::Array(items.iter().map(sort_tree).collect())
+            }
+            other => other.clone(),
+        }
+    }
+    json_rt::render_datatree_json(&sort_tree(t), false, 0)
+}
+
+extern "C" fn jet_jit_json_canonical(tree: i64) -> i64 {
+    let rendered = read_datatree(tree)
+        .map(|t| render_canonical(&t))
+        .unwrap_or_else(|| "null".to_string());
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+}
+
+/// CSV typed decode front half: header+rows → `[DataTree]` of Text-cell objects
+/// (mirrors `jet_enc_csv_decode` before `T::jet_decode`).
+extern "C" fn jet_jit_csv_decode_trees(text: i64) -> i64 {
+    match csv_parse(&clone_heap_string(text)) {
+        Ok(rows) => {
+            let mut it = rows.into_iter();
+            let Some(header) = it.next() else {
+                let empty = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
+                return result_ok_bits(empty as u64);
+            };
+            let mut handles = Vec::new();
+            for row in it {
+                let obj: Vec<(String, json_rt::DataTree)> = header
+                    .iter()
+                    .enumerate()
+                    .map(|(c, name)| {
+                        let cell = row.get(c).cloned().unwrap_or_default();
+                        (name.clone(), json_rt::DataTree::Text(cell))
+                    })
+                    .collect();
+                handles.push(alloc_datatree(&json_rt::DataTree::Object(obj)));
+            }
+            let list = Concurrency::with_runtime_mut(|rt| {
+                let list = rt.heap.alloc_empty_list();
+                for h in handles {
+                    let _ = rt.heap.list_push_int(list, h);
+                }
+                list
+            });
+            result_ok_bits(list as u64)
+        }
+        Err(e) => result_err_msg(&e),
+    }
+}
+
 extern "C" fn jet_jit_datatree_field(tree: i64, name: i64) -> i64 {
     let key = clone_heap_string(name);
     match read_datatree(tree) {
@@ -899,6 +964,8 @@ pub(crate) struct EncodingHostFns {
     pub json_decode: cranelift_module::FuncId,
     pub json_to_string: cranelift_module::FuncId,
     pub json_to_string_pretty: cranelift_module::FuncId,
+    pub json_canonical: cranelift_module::FuncId,
+    pub csv_decode_trees: cranelift_module::FuncId,
     pub datatree_field: cranelift_module::FuncId,
     pub datatree_at: cranelift_module::FuncId,
     pub datatree_int: cranelift_module::FuncId,
@@ -932,6 +999,8 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
         "jet_jit_json_to_string_pretty",
         jet_jit_json_to_string_pretty as *const u8,
     );
+    builder.symbol("jet_jit_json_canonical", jet_jit_json_canonical as *const u8);
+    builder.symbol("jet_jit_csv_decode_trees", jet_jit_csv_decode_trees as *const u8);
     builder.symbol("jet_jit_datatree_field", jet_jit_datatree_field as *const u8);
     builder.symbol("jet_jit_datatree_at", jet_jit_datatree_at as *const u8);
     builder.symbol("jet_jit_datatree_int", jet_jit_datatree_int as *const u8);
@@ -987,6 +1056,8 @@ pub(crate) fn declare_encoding_host_fns(
         json_decode: import("jet_jit_json_decode", &sig_unary)?,
         json_to_string: import("jet_jit_json_to_string", &sig_unary)?,
         json_to_string_pretty: import("jet_jit_json_to_string_pretty", &sig_unary)?,
+        json_canonical: import("jet_jit_json_canonical", &sig_unary)?,
+        csv_decode_trees: import("jet_jit_csv_decode_trees", &sig_unary)?,
         datatree_field: import("jet_jit_datatree_field", &sig_binary)?,
         datatree_at: import("jet_jit_datatree_at", &sig_binary)?,
         datatree_int: import("jet_jit_datatree_int", &sig_unary)?,

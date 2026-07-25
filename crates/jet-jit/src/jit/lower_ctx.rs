@@ -388,6 +388,515 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.inst_results(call)[0])
     }
 
+    /// Primitive / container / user `Encode` → DataTree handle (D-SERDE2).
+    fn lower_serde_encode_value(&mut self, val: Value, ty: &Type) -> Result<Value, String> {
+        let ty = self.erase_distinct_ty(ty);
+        if Self::is_datatree_value_ty(&ty) {
+            return Ok(val);
+        }
+        match &ty {
+            Type::Int | Type::IntN { .. } => self.pack_datatree_enum(2, Some((val, &Type::Int))),
+            Type::Bool => {
+                let wide = self.b.ins().uextend(types::I64, val);
+                self.pack_datatree_enum(1, Some((wide, &Type::Int)))
+            }
+            Type::Float | Type::Float32 => {
+                self.pack_datatree_enum(3, Some((val, &Type::Float)))
+            }
+            Type::String => self.pack_datatree_enum(4, Some((val, &Type::String))),
+            Type::Char => {
+                return Err("jit SerdeEncode Char unsupported".to_string());
+            }
+            Type::Option(inner) => {
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let is_none = self.b.ins().icmp(IntCC::Equal, val, zero);
+                let none_block = self.b.create_block();
+                let some_block = self.b.create_block();
+                let merge = self.b.create_block();
+                self.b.append_block_param(merge, types::I64);
+                self.b
+                    .ins()
+                    .brif(is_none, none_block, &[], some_block, &[]);
+
+                self.b.switch_to_block(none_block);
+                self.b.seal_block(none_block);
+                let null_tree = self.pack_datatree_enum(0, None)?;
+                self.b.ins().jump(merge, &[null_tree]);
+
+                self.b.switch_to_block(some_block);
+                self.b.seal_block(some_block);
+                let one = self.b.ins().iconst(types::I64, 1);
+                let payload = self.b.ins().isub(val, one);
+                let encoded = self.lower_serde_encode_value(payload, inner)?;
+                self.b.ins().jump(merge, &[encoded]);
+
+                self.b.switch_to_block(merge);
+                self.b.seal_block(merge);
+                Ok(self.b.block_params(merge)[0])
+            }
+            Type::List(elem) | Type::FixedList { elem, .. } => {
+                self.lower_serde_encode_list(val, elem)
+            }
+            Type::Named(name) => {
+                let key = format!("{name}::encode");
+                let func_id = self
+                    .func_ids
+                    .get(&key)
+                    .copied()
+                    .ok_or_else(|| format!("jit missing encode `{key}`"))?;
+                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                let call = self.b.ins().call(func_ref, &[val]);
+                let result = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(result)
+            }
+            other => Err(format!("jit SerdeEncode unsupported: {other:?}")),
+        }
+    }
+
+    fn lower_serde_encode_list(&mut self, list: Value, elem_ty: &Type) -> Result<Value, String> {
+        let list_var = self.fresh_var(types::I64);
+        self.b.def_var(list_var, list);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let out_call = self.b.ins().call(new_ref, &[]);
+        let out_var = self.fresh_var(types::I64);
+        self.b.def_var(out_var, self.b.inst_results(out_call)[0]);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(list_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let encoded = self.lower_serde_encode_value(elem, elem_ty)?;
+        let out = self.b.use_var(out_var);
+        let push_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        self.b.ins().call(push_ref, &[out, encoded]);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        let out = self.b.use_var(out_var);
+        self.pack_datatree_enum(5, Some((out, &Type::List(Box::new(Type::Named("DataTree".into()))))))
+    }
+
+    fn lower_serde_encode(&mut self, recv: &TExpr) -> Result<Value, String> {
+        let val = self.lower_expr(recv)?;
+        self.lower_serde_encode_value(val, &recv.ty)
+    }
+
+    /// `DataTree` → typed value Result (primitives via hosts; user types via `T::decode`).
+    fn lower_datatree_decode(&mut self, tree: Value, target: &Type) -> Result<Value, String> {
+        let target = self.erase_distinct_ty(target);
+        if Self::is_datatree_value_ty(&target) {
+            let tag = self.b.ins().iconst(types::I8, 1);
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.result_new_i64, self.b.func);
+            let call = self.b.ins().call(host_ref, &[tag, tree]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        match &target {
+            Type::Int | Type::IntN { .. } => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_int, self.b.func);
+                let call = self.b.ins().call(host_ref, &[tree]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            Type::String => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_text, self.b.func);
+                let call = self.b.ins().call(host_ref, &[tree]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            Type::Bool => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_bool, self.b.func);
+                let call = self.b.ins().call(host_ref, &[tree]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            Type::Float | Type::Float32 => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.datatree_float, self.b.func);
+                let call = self.b.ins().call(host_ref, &[tree]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            Type::Option(inner) => self.lower_datatree_decode_option(tree, inner),
+            Type::List(elem) | Type::FixedList { elem, .. } => {
+                self.lower_datatree_decode_list(tree, elem)
+            }
+            Type::Named(name) => {
+                let key = format!("{name}::decode");
+                let func_id = self
+                    .func_ids
+                    .get(&key)
+                    .copied()
+                    .ok_or_else(|| format!("jit missing decode `{key}`"))?;
+                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                let call = self.b.ins().call(func_ref, &[tree]);
+                let result = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(result)
+            }
+            other => Err(format!("jit DataTreeDecode unsupported: {other:?}")),
+        }
+    }
+
+    fn lower_datatree_decode_option(
+        &mut self,
+        tree: Value,
+        inner: &Type,
+    ) -> Result<Value, String> {
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let get_i = self
+            .module
+            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+        let disc_call = self.b.ins().call(get_i, &[tree, zero]);
+        let disc = self.b.inst_results(disc_call)[0];
+        let is_null = self.b.ins().icmp(IntCC::Equal, disc, zero);
+        let none_block = self.b.create_block();
+        let some_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b
+            .ins()
+            .brif(is_null, none_block, &[], some_block, &[]);
+
+        self.b.switch_to_block(none_block);
+        self.b.seal_block(none_block);
+        let tag = self.b.ins().iconst(types::I8, 1);
+        let none_val = self.b.ins().iconst(types::I64, 0);
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.result_new_i64, self.b.func);
+        let ok_none = self.b.ins().call(host_ref, &[tag, none_val]);
+        let ok_none = self.b.inst_results(ok_none)[0];
+        self.b.ins().jump(merge, &[ok_none]);
+
+        self.b.switch_to_block(some_block);
+        self.b.seal_block(some_block);
+        let inner_r = self.lower_datatree_decode(tree, inner)?;
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[inner_r]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.b.ins().jump(merge, &[inner_r]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let payload = self.result_payload(inner_r, inner)?;
+        let bits = match clif_ty(inner) {
+            Some(ty) if ty == types::F64 => self.b.ins().bitcast(
+                types::I64,
+                Self::scalar_bitcast_memflags(),
+                payload,
+            ),
+            Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, payload),
+            Some(ty) if ty == types::I32 => self.b.ins().uextend(types::I64, payload),
+            _ => payload,
+        };
+        let one = self.b.ins().iconst(types::I64, 1);
+        let present = self.b.ins().iadd(bits, one);
+        let tag = self.b.ins().iconst(types::I8, 1);
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.result_new_i64, self.b.func);
+        let ok_some = self.b.ins().call(host_ref, &[tag, present]);
+        let ok_some = self.b.inst_results(ok_some)[0];
+        self.b.ins().jump(merge, &[ok_some]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_datatree_decode_list(
+        &mut self,
+        tree: Value,
+        elem_ty: &Type,
+    ) -> Result<Value, String> {
+        // Expect Array; reuse `.at` path via host disc check + payload list.
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let get_i = self
+            .module
+            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+        let disc_call = self.b.ins().call(get_i, &[tree, zero]);
+        let disc = self.b.inst_results(disc_call)[0];
+        let want = self.b.ins().iconst(types::I64, 5); // Array
+        let is_arr = self.b.ins().icmp(IntCC::Equal, disc, want);
+        let bad_block = self.b.create_block();
+        let good_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b
+            .ins()
+            .brif(is_arr, good_block, &[], bad_block, &[]);
+
+        self.b.switch_to_block(bad_block);
+        self.b.seal_block(bad_block);
+        let sid = self.runtime.heap.alloc_string("expected array".to_string());
+        let msg = self.b.ins().iconst(types::I64, sid);
+        let tag = self.b.ins().iconst(types::I8, 0);
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.result_new_i64, self.b.func);
+        let err = self.b.ins().call(host_ref, &[tag, msg]);
+        let err = self.b.inst_results(err)[0];
+        self.b.ins().jump(merge, &[err]);
+
+        self.b.switch_to_block(good_block);
+        self.b.seal_block(good_block);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let payload_call = self.b.ins().call(get_i, &[tree, one]);
+        let src_list = self.b.inst_results(payload_call)[0];
+        let decoded = self.lower_datatree_decode_list_items(src_list, elem_ty)?;
+        self.b.ins().jump(merge, &[decoded]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_datatree_decode_list_items(
+        &mut self,
+        src_list: Value,
+        elem_ty: &Type,
+    ) -> Result<Value, String> {
+        let list_var = self.fresh_var(types::I64);
+        self.b.def_var(list_var, src_list);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let out_call = self.b.ins().call(new_ref, &[]);
+        let out_var = self.fresh_var(types::I64);
+        self.b.def_var(out_var, self.b.inst_results(out_call)[0]);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let fail = self.b.create_block();
+        self.b.append_block_param(fail, types::I64);
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(list_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem_tree = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let decoded_r = self.lower_datatree_decode(elem_tree, elem_ty)?;
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[decoded_r]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let ok_block = self.b.create_block();
+        self.b.ins().brif(is_ok, ok_block, &[], fail, &[decoded_r]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let payload = self.result_payload(decoded_r, elem_ty)?;
+        let out = self.b.use_var(out_var);
+        let push_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        self.b.ins().call(push_ref, &[out, payload]);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        let out = self.b.use_var(out_var);
+        let tag = self.b.ins().iconst(types::I8, 1);
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.result_new_i64, self.b.func);
+        let ok = self.b.ins().call(host_ref, &[tag, out]);
+        let ok = self.b.inst_results(ok)[0];
+        self.b.ins().jump(merge, &[ok]);
+
+        self.b.switch_to_block(fail);
+        self.b.seal_block(fail);
+        let err = self.b.block_params(fail)[0];
+        self.b.ins().jump(merge, &[err]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_typed_json_decode(&mut self, text: &TExpr, ok_ty: &Type) -> Result<Value, String> {
+        let text_v = self.lower_expr(text)?;
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.encoding.json_parse, self.b.func);
+        let parse_call = self.b.ins().call(host_ref, &[text_v]);
+        let parsed = self.b.inst_results(parse_call)[0];
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[parsed]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        // Propagate parse Err (string bits); `??` only needs the ok flag.
+        self.b.ins().jump(merge, &[parsed]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let tree = self.result_payload(parsed, &Type::Named("DataTree".into()))?;
+        let decoded = self.lower_datatree_decode(tree, ok_ty)?;
+        self.b.ins().jump(merge, &[decoded]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_typed_json_to_string(
+        &mut self,
+        arg: &TExpr,
+        pretty: bool,
+    ) -> Result<Value, String> {
+        let tree = self.lower_serde_encode(arg)?;
+        let host_id = if pretty {
+            self.host.encoding.json_to_string_pretty
+        } else {
+            self.host.encoding.json_to_string
+        };
+        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = self.b.ins().call(host_ref, &[tree]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn lower_typed_csv_decode(
+        &mut self,
+        text: &TExpr,
+        elem_ty: &Type,
+    ) -> Result<Value, String> {
+        let text_v = self.lower_expr(text)?;
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.encoding.csv_decode_trees, self.b.func);
+        let trees_call = self.b.ins().call(host_ref, &[text_v]);
+        let trees_r = self.b.inst_results(trees_call)[0];
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[trees_r]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.b.ins().jump(merge, &[trees_r]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let list = self.result_payload(
+            trees_r,
+            &Type::List(Box::new(Type::Named("DataTree".into()))),
+        )?;
+        let decoded = self.lower_datatree_decode_list_items(list, elem_ty)?;
+        self.b.ins().jump(merge, &[decoded]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
     /// Erase `#Numeric` / unit-family distinct wrappers to Int/Float for arith,
     /// print, and string interp — values already live as the base ABI.
     fn erase_distinct_ty(&self, ty: &Type) -> Type {
@@ -2865,6 +3374,14 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.encoding.csv" {
+                    // Typed `csv.decode<T>` → Result[[T], …]
+                    if method == "decode" && args.len() == 1 {
+                        if let Type::Result { ok, .. } = &expr.ty {
+                            if let Type::List(elem) = ok.as_ref() {
+                                return self.lower_typed_csv_decode(&args[0], elem);
+                            }
+                        }
+                    }
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "parse" if args.len() == 1 => {
                             (self.host.encoding.csv_parse, vec![self.lower_expr(&args[0])?])
@@ -2896,6 +3413,21 @@ impl LowerCtx<'_, '_> {
                                 if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
                         )
                     });
+                    // Typed Codable decode/to_string (Encode-type path).
+                    if method == "decode" && args.len() == 1 && !datatree_ok {
+                        if let Type::Result { ok, .. } = &expr.ty {
+                            return self.lower_typed_json_decode(&args[0], ok);
+                        }
+                    }
+                    if matches!(method.as_str(), "to_string" | "to_string_pretty")
+                        && args.len() == 1
+                        && !datatree_arg
+                    {
+                        return self.lower_typed_json_to_string(
+                            &args[0],
+                            method == "to_string_pretty",
+                        );
+                    }
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "parse" if args.len() == 1 && datatree_ok => {
                             (self.host.encoding.json_parse, vec![self.lower_expr(&args[0])?])
@@ -2909,6 +3441,10 @@ impl LowerCtx<'_, '_> {
                         ),
                         "to_string_pretty" if args.len() == 1 && datatree_arg => (
                             self.host.encoding.json_to_string_pretty,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "canonical" if args.len() == 1 && datatree_arg => (
+                            self.host.encoding.json_canonical,
                             vec![self.lower_expr(&args[0])?],
                         ),
                         _ => {
@@ -5410,11 +5946,14 @@ impl LowerCtx<'_, '_> {
             THandleOp::CursorTakeUntil => Err("jit handle method unsupported".to_string()),
             THandleOp::CursorSkipWs => Err("jit handle method unsupported".to_string()),
             THandleOp::CursorTakePattern { .. }
-            | THandleOp::ReaderTakePattern { .. }
-            | THandleOp::DataTreeDecode(_)
-            | THandleOp::SerdeEncode => {
+            | THandleOp::ReaderTakePattern { .. } => {
                 Err("jit handle method unsupported".to_string())
             }
+            THandleOp::DataTreeDecode(target) => {
+                let tree = self.lower_expr(recv)?;
+                self.lower_datatree_decode(tree, target)
+            }
+            THandleOp::SerdeEncode => self.lower_serde_encode(recv),
         }
     }
 
@@ -6180,7 +6719,7 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.use_var(out_var))
     }
 
-    /// `if x == .Ok(v)` / `.Err(e)` on Result handles — bind payload in then.
+    /// `if x == .Ok(v)` / `.Err(e)` on Result, or `if opt == Val(v)` on Option.
     fn lower_result_if_let(
         &mut self,
         pattern: &TPattern,
@@ -6188,6 +6727,9 @@ impl LowerCtx<'_, '_> {
         then_body: &[TStmt],
         else_body: Option<&[TStmt]>,
     ) -> Result<(), String> {
+        if matches!(&pattern.pattern, Pattern::Present { .. }) {
+            return self.lower_option_present_if_let(pattern, subj, then_body, else_body);
+        }
         let (want_ok, binding, payload_ty) = match &pattern.pattern {
             Pattern::Ok { binding, .. } => {
                 let Type::Result { ok, .. } = &subj.ty else {
@@ -6243,8 +6785,8 @@ impl LowerCtx<'_, '_> {
         if let Some(t) = old_ty {
             self.var_tys.insert(place, t);
         }
-        let then_reaches_merge = !self.dead;
-        if then_reaches_merge {
+        let then_reaches = !self.dead;
+        if then_reaches {
             self.b.ins().jump(merge_block, &[]);
         }
 
@@ -6254,12 +6796,95 @@ impl LowerCtx<'_, '_> {
         if let Some(body) = else_body {
             self.lower_stmts(body)?;
         }
-        let else_reaches_merge = !self.dead;
-        if else_reaches_merge {
+        let else_reaches = !self.dead;
+        if else_reaches {
             self.b.ins().jump(merge_block, &[]);
         }
 
-        if then_reaches_merge || else_reaches_merge {
+        if then_reaches || else_reaches {
+            self.b.switch_to_block(merge_block);
+            self.b.seal_block(merge_block);
+            self.dead = false;
+        } else {
+            self.dead = true;
+        }
+        Ok(())
+    }
+
+    /// `if opt == Val(x)` — Option ABI is 0 = None, value+1 = Some.
+    fn lower_option_present_if_let(
+        &mut self,
+        pattern: &TPattern,
+        subj: &TExpr,
+        then_body: &[TStmt],
+        else_body: Option<&[TStmt]>,
+    ) -> Result<(), String> {
+        let Pattern::Present { binding, .. } = &pattern.pattern else {
+            return Err("jit option if-let needs Present".to_string());
+        };
+        let Type::Option(inner) = &subj.ty else {
+            return Err("jit if-let Val on non-Option".to_string());
+        };
+        let inner_ty = inner.as_ref().clone();
+        let packed = self.lower_expr(subj)?;
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let is_some = self.b.ins().icmp(IntCC::NotEqual, packed, zero);
+
+        let then_block = self.b.create_block();
+        let else_block = self.b.create_block();
+        let merge_block = self.b.create_block();
+        self.b
+            .ins()
+            .brif(is_some, then_block, &[], else_block, &[]);
+
+        self.b.switch_to_block(then_block);
+        self.b.seal_block(then_block);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let bits = self.b.ins().isub(packed, one);
+        let payload = match clif_ty(&inner_ty) {
+            Some(ty) if ty == types::F64 => self.b.ins().bitcast(
+                types::F64,
+                Self::scalar_bitcast_memflags(),
+                bits,
+            ),
+            Some(ty) if ty == types::I8 => self.b.ins().ireduce(types::I8, bits),
+            Some(ty) if ty == types::I32 => self.b.ins().ireduce(types::I32, bits),
+            _ => bits,
+        };
+        let place = TIR::local_place(binding);
+        let clif = clif_ty(&inner_ty).unwrap_or(types::I64);
+        let old_var = self.vars.remove(&place);
+        let old_ty = self.var_tys.remove(&place);
+        let var = self.fresh_var(clif);
+        self.b.def_var(var, payload);
+        self.vars.insert(place.clone(), var);
+        self.var_tys.insert(place.clone(), inner_ty);
+        self.lower_stmts_scoped(then_body)?;
+        self.vars.remove(&place);
+        self.var_tys.remove(&place);
+        if let Some(v) = old_var {
+            self.vars.insert(place.clone(), v);
+        }
+        if let Some(t) = old_ty {
+            self.var_tys.insert(place, t);
+        }
+        let then_reaches = !self.dead;
+        if then_reaches {
+            self.b.ins().jump(merge_block, &[]);
+        }
+
+        self.b.switch_to_block(else_block);
+        self.b.seal_block(else_block);
+        self.dead = false;
+        if let Some(body) = else_body {
+            self.lower_stmts(body)?;
+        }
+        let else_reaches = !self.dead;
+        if else_reaches {
+            self.b.ins().jump(merge_block, &[]);
+        }
+
+        if then_reaches || else_reaches {
             self.b.switch_to_block(merge_block);
             self.b.seal_block(merge_block);
             self.dead = false;
