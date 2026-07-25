@@ -353,37 +353,45 @@ pub(crate) fn compute_refactor_actions(
         actions.extend(inline_actions(db, tokens, src, path, requested));
         return actions;
     };
-    let Some(initializer) = exact_initializer(db, path, selected) else {
-        actions.extend(inline_actions(db, tokens, src, path, selected));
-        return actions;
-    };
-    let Some(binding) = binding_for_initializer(db, src, path, initializer) else {
-        return actions;
-    };
-    let Some(expression) = src.get(selected.start..selected.end) else {
-        return actions;
-    };
-    let line_start = line_start(src, binding.def_span.start);
-    let indent = &src[line_start..binding.def_span.start];
-    if indent.chars().all(char::is_whitespace) && is_total_pure_expr(tokens, selected) {
-        let name = fresh_name(db, "extracted_value");
-        actions.push(RefactorAction {
-            title: "Extract binding".to_string(),
-            kind: "refactor.extract",
-            edits: vec![
-                TextEdit {
-                    span: Span::new(line_start, line_start),
-                    new_text: format!("{indent}{name} :: {expression}\n"),
-                },
-                TextEdit {
-                    span: selected,
-                    new_text: name,
-                },
-            ],
-        });
+    let mut extracted = false;
+    if let Some(selected) = extractable_expr(db, src, path, selected)
+        .filter(|span| !is_trivial_extract(tokens, *span))
+        .filter(|span| is_total_pure_expr(db, tokens, path, *span))
+    {
+        if let Some(insert_at) = extract_insert_point(db, src, path, selected) {
+            if let Some(expression) = src.get(selected.start..selected.end) {
+                let indent_len = src[insert_at..]
+                    .chars()
+                    .take_while(|c| *c == ' ' || *c == '\t')
+                    .map(char::len_utf8)
+                    .sum::<usize>();
+                let indent = &src[insert_at..insert_at + indent_len];
+                let name = fresh_name(db, "extracted_value");
+                actions.push(RefactorAction {
+                    title: "Extract binding".to_string(),
+                    kind: "refactor.extract",
+                    edits: vec![
+                        TextEdit {
+                            span: Span::new(insert_at, insert_at),
+                            new_text: format!("{indent}{name} :: {expression}\n"),
+                        },
+                        TextEdit {
+                            span: selected,
+                            new_text: name,
+                        },
+                    ],
+                });
+                if let Some(action) =
+                    extract_function_action(db, tokens, src, path, selected, expression)
+                {
+                    actions.push(action);
+                }
+                extracted = true;
+            }
+        }
     }
-    if let Some(action) = extract_function_action(db, tokens, src, path, selected, binding) {
-        actions.push(action);
+    if !extracted {
+        actions.extend(inline_actions(db, tokens, src, path, selected));
     }
     actions
 }
@@ -464,19 +472,13 @@ fn extract_function_action(
     src: &str,
     path: &str,
     selected: Span,
-    binding: &jet_semindex::SymDef,
+    expression: &str,
 ) -> Option<RefactorAction> {
-    if !is_total_pure_expr(tokens, selected) {
+    if !is_total_pure_expr(db, tokens, path, selected) {
         return None;
     }
-    let SymKind::Local {
-        mutable: false,
-        ty: Some(return_type),
-    } = &binding.kind
-    else {
-        return None;
-    };
-    if !is_scalar_type(return_type) {
+    let return_type = infer_total_pure_return_type(db, tokens, path, selected)?;
+    if !is_scalar_name(&return_type) {
         return None;
     }
     let function = db
@@ -489,8 +491,7 @@ fn extract_function_action(
                 && definition.span.start <= selected.start
                 && selected.end <= definition.span.end
         })
-        .min_by_key(|definition| definition.span.end - definition.span.start);
-    let function = function?;
+        .min_by_key(|definition| definition.span.end - definition.span.start)?;
 
     let mut inputs: Vec<(&jet_semindex::SymDef, usize)> = Vec::new();
     for reference in db.refs.iter().filter(|reference| {
@@ -526,7 +527,7 @@ fn extract_function_action(
         }
     }
     inputs.sort_by_key(|(_, first)| *first);
-    let function_name = fresh_name(db, &format!("extracted_{}", binding.name));
+    let function_name = fresh_name(db, "extracted_fn");
     let params = inputs
         .iter()
         .map(|(definition, _)| {
@@ -544,7 +545,6 @@ fn extract_function_action(
         .collect::<Vec<_>>()
         .join(", ");
     let insert = line_start(src, function.span.start);
-    let expression = src.get(selected.start..selected.end)?;
     Some(RefactorAction {
         title: "Extract function".to_string(),
         kind: "refactor.extract",
@@ -552,8 +552,7 @@ fn extract_function_action(
             TextEdit {
                 span: Span::new(insert, insert),
                 new_text: format!(
-                    "fn {function_name}({params}) -> {} {{ return {expression} }}\n\n",
-                    return_type.name()
+                    "fn {function_name}({params}) -> {return_type} {{ return {expression} }}\n\n"
                 ),
             },
             TextEdit {
@@ -591,25 +590,25 @@ fn inline_actions(
     ) {
         return Vec::new();
     }
-    if db
+    let uses: Vec<_> = db
         .refs
         .iter()
         .filter(|candidate| {
-            candidate
-                .target
-                .as_ref()
-                .is_some_and(|anchor| same_anchor(anchor, target))
+            candidate.module_path == path
+                && candidate
+                    .target
+                    .as_ref()
+                    .is_some_and(|anchor| same_anchor(anchor, target))
         })
-        .count()
-        != 1
-    {
+        .collect();
+    if uses.is_empty() {
         return Vec::new();
     }
     let Some(initializer) = initializer_for_binding(db, src, path, binding) else {
         return Vec::new();
     };
     let initializer_span = Span::new(initializer.span.start, initializer.span.end);
-    if !is_total_pure_expr(tokens, initializer_span)
+    if !is_total_pure_expr(db, tokens, path, initializer_span)
         || !initializer_refs_are_stable(db, path, initializer_span)
     {
         return Vec::new();
@@ -624,26 +623,28 @@ fn inline_actions(
         .trim();
     if !prefix.chars().all(char::is_whitespace)
         || !suffix.trim_end_matches(';').trim().is_empty()
-        || end > reference.span.start
+        || uses.iter().any(|use_site| end > use_site.span.start)
     {
         return Vec::new();
     }
     let Some(expression) = src.get(initializer_span.start..initializer_span.end) else {
         return Vec::new();
     };
+    let mut edits: Vec<TextEdit> = uses
+        .iter()
+        .map(|use_site| TextEdit {
+            span: use_site.span,
+            new_text: format!("({expression})"),
+        })
+        .collect();
+    edits.push(TextEdit {
+        span: Span::new(start, end),
+        new_text: String::new(),
+    });
     vec![RefactorAction {
         title: format!("Inline `{}`", binding.name),
         kind: "refactor.inline",
-        edits: vec![
-            TextEdit {
-                span: reference.span,
-                new_text: format!("({expression})"),
-            },
-            TextEdit {
-                span: Span::new(start, end),
-                new_text: String::new(),
-            },
-        ],
+        edits,
     }]
 }
 
@@ -689,7 +690,7 @@ fn source_symbol_is_exported(
         })
 }
 
-fn exact_initializer<'a>(
+fn exact_expr<'a>(
     db: &'a SymbolDB,
     path: &str,
     selected: Span,
@@ -697,10 +698,52 @@ fn exact_initializer<'a>(
     db.nodes.iter().find(|node| {
         node.module_path == path
             && node.class == "expr"
-            && node.slot == "initializer"
             && node.span.start == selected.start
             && node.span.end == selected.end
     })
+}
+
+/// Exact expr node, or a single outer `(…)` group around one.
+fn extractable_expr(
+    db: &SymbolDB,
+    src: &str,
+    path: &str,
+    selected: Span,
+) -> Option<Span> {
+    if exact_expr(db, path, selected).is_some() {
+        return Some(selected);
+    }
+    let text = src.get(selected.start..selected.end)?;
+    let start_ws = text.len() - text.trim_start().len();
+    let end_ws = text.len() - text.trim_end().len();
+    let core = text.trim();
+    if core.len() < 2 || !core.starts_with('(') || !core.ends_with(')') {
+        return None;
+    }
+    let inner = Span::new(
+        selected.start + start_ws + 1,
+        selected.end - end_ws - 1,
+    );
+    let inner = trim_span(src, inner)?;
+    exact_expr(db, path, inner).map(|_| selected)
+}
+
+fn extract_insert_point(db: &SymbolDB, src: &str, path: &str, selected: Span) -> Option<usize> {
+    if let Some(initializer) = db.nodes.iter().find(|node| {
+        node.module_path == path
+            && node.class == "expr"
+            && node.slot == "initializer"
+            && node.span.start == selected.start
+            && node.span.end == selected.end
+    }) {
+        if let Some(binding) = binding_for_initializer(db, src, path, initializer) {
+            return Some(line_start(src, binding.def_span.start));
+        }
+    }
+    // Call expr-stmts currently record a narrow callee-name stmt span, so
+    // enclosure checks against stmt nodes miss argument subexpressions.
+    // Insert on the line that holds the selection.
+    Some(line_start(src, selected.start))
 }
 
 fn binding_for_initializer<'a>(
@@ -772,18 +815,64 @@ fn same_anchor(
 }
 
 fn is_scalar_type(ty: &crate::AST::Type) -> bool {
-    matches!(ty.name().as_str(), "Bool" | "Char" | "Int" | "Float")
+    is_scalar_name(&ty.name())
 }
 
-fn is_total_pure_expr(tokens: &[Token], span: Span) -> bool {
-    let mut any = false;
-    for token in tokens.iter().filter(|token| {
-        span.start <= token.span.start
-            && token.span.end <= span.end
-            && token.span.start < token.span.end
-            && !matches!(token.kind, TokKind::Eof)
-    }) {
-        any = true;
+fn is_scalar_name(name: &str) -> bool {
+    matches!(name, "Bool" | "Char" | "Int" | "Float")
+}
+
+fn is_trivial_extract(tokens: &[Token], span: Span) -> bool {
+    let significant: Vec<_> = tokens
+        .iter()
+        .filter(|token| {
+            span.start <= token.span.start
+                && token.span.end <= span.end
+                && token.span.start < token.span.end
+                && !matches!(
+                    token.kind,
+                    TokKind::Eof | TokKind::LParen | TokKind::RParen
+                )
+        })
+        .collect();
+    matches!(
+        significant.as_slice(),
+        [token]
+            if matches!(
+                token.kind,
+                TokKind::Ident(_)
+                    | TokKind::Int(_, _)
+                    | TokKind::Float(_)
+                    | TokKind::Char(_)
+                    | TokKind::KwTrue
+                    | TokKind::KwFalse
+                    | TokKind::Str(_)
+            )
+    )
+}
+
+fn is_total_pure_expr(db: &SymbolDB, tokens: &[Token], path: &str, span: Span) -> bool {
+    let enclosed: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| {
+            span.start <= token.span.start
+                && token.span.end <= span.end
+                && token.span.start < token.span.end
+                && !matches!(token.kind, TokKind::Eof)
+        })
+        .collect();
+    if enclosed.is_empty() {
+        return false;
+    }
+    // `name()` / `name(args)` are effect-unknown calls even when parens are otherwise
+    // allowed for grouping. Reject any Ident immediately followed by `(`.
+    for pair in enclosed.windows(2) {
+        if matches!(pair[0].kind, TokKind::Ident(_)) && matches!(pair[1].kind, TokKind::LParen) {
+            return false;
+        }
+    }
+    let mut has_comparison = false;
+    for token in &enclosed {
         let safe = match &token.kind {
             TokKind::Ident(_)
             | TokKind::Int(_, _)
@@ -793,7 +882,13 @@ fn is_total_pure_expr(tokens: &[Token], span: Span) -> bool {
             | TokKind::KwFalse
             | TokKind::AndAnd
             | TokKind::OrOr
-            | TokKind::Bang => true,
+            | TokKind::Bang
+            | TokKind::LParen
+            | TokKind::RParen => true,
+            TokKind::EqEq | TokKind::NotEq => {
+                has_comparison = true;
+                true
+            }
             TokKind::Str(parts) => parts
                 .iter()
                 .all(|part| matches!(part, crate::Lexer::StrTokPart::Lit(_))),
@@ -803,7 +898,119 @@ fn is_total_pure_expr(tokens: &[Token], span: Span) -> bool {
             return false;
         }
     }
-    any
+    if has_comparison {
+        return expr_operands_are_bool(db, tokens, path, span);
+    }
+    true
+}
+
+fn expr_operands_are_bool(db: &SymbolDB, tokens: &[Token], path: &str, span: Span) -> bool {
+    for token in tokens.iter().filter(|token| {
+        span.start <= token.span.start
+            && token.span.end <= span.end
+            && token.span.start < token.span.end
+    }) {
+        match &token.kind {
+            TokKind::KwTrue | TokKind::KwFalse => {}
+            TokKind::Ident(_) => {
+                if resolved_type_name(db, path, token.span).as_deref() != Some("Bool") {
+                    return false;
+                }
+            }
+            TokKind::AndAnd
+            | TokKind::OrOr
+            | TokKind::Bang
+            | TokKind::EqEq
+            | TokKind::NotEq
+            | TokKind::LParen
+            | TokKind::RParen => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn resolved_type_name(db: &SymbolDB, path: &str, span: Span) -> Option<String> {
+    let reference = db.refs.iter().find(|reference| {
+        reference.module_path == path
+            && reference.span.start == span.start
+            && reference.span.end == span.end
+    })?;
+    let target = reference.target.as_ref()?;
+    let definition = definition_for_anchor(db, target)?;
+    match &definition.kind {
+        SymKind::Param { ty } => Some(ty.name()),
+        SymKind::Local { ty: Some(ty), .. } => Some(ty.name()),
+        _ => None,
+    }
+}
+
+fn infer_total_pure_return_type(
+    db: &SymbolDB,
+    tokens: &[Token],
+    path: &str,
+    span: Span,
+) -> Option<String> {
+    let mut saw_bool_op = false;
+    let mut saw_comparison = false;
+    let mut literal: Option<&str> = None;
+    let mut from_ident: Option<String> = None;
+    for token in tokens.iter().filter(|token| {
+        span.start <= token.span.start
+            && token.span.end <= span.end
+            && token.span.start < token.span.end
+            && !matches!(token.kind, TokKind::Eof)
+    }) {
+        match &token.kind {
+            TokKind::AndAnd | TokKind::OrOr | TokKind::Bang | TokKind::KwTrue | TokKind::KwFalse => {
+                saw_bool_op = true;
+            }
+            TokKind::EqEq | TokKind::NotEq => saw_comparison = true,
+            TokKind::Int(_, _) => {
+                if literal.is_some_and(|existing| existing != "Int") {
+                    return None;
+                }
+                literal = Some("Int");
+            }
+            TokKind::Float(_) => {
+                if literal.is_some_and(|existing| existing != "Float") {
+                    return None;
+                }
+                literal = Some("Float");
+            }
+            TokKind::Char(_) => {
+                if literal.is_some_and(|existing| existing != "Char") {
+                    return None;
+                }
+                literal = Some("Char");
+            }
+            TokKind::Ident(_) => {
+                let name = resolved_type_name(db, path, token.span)?;
+                if !is_scalar_name(&name) {
+                    return None;
+                }
+                match &from_ident {
+                    Some(existing) if existing != &name => {
+                        if !saw_bool_op && !saw_comparison {
+                            return None;
+                        }
+                    }
+                    None => from_ident = Some(name),
+                    _ => {}
+                }
+            }
+            TokKind::LParen | TokKind::RParen => {}
+            TokKind::Str(_) => return None,
+            _ => return None,
+        }
+    }
+    if saw_bool_op || saw_comparison {
+        return Some("Bool".to_string());
+    }
+    if let Some(name) = literal {
+        return Some(name.to_string());
+    }
+    from_ident.filter(|name| is_scalar_name(name))
 }
 
 fn trim_span(src: &str, span: Span) -> Option<Span> {
