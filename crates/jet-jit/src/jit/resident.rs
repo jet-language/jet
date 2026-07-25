@@ -133,7 +133,7 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
     })
 }
 
-fn resident_invoke() -> Result<RunOutcome, String> {
+pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
     let (code, main_returns_result) = RESIDENT_MODULE
         .with(|slot| {
             slot.borrow()
@@ -209,8 +209,19 @@ pub(crate) fn resident_run_fresh(program: &JitProgram) -> Result<RunOutcome, Str
     jet_rt::__gc::initialize_trace().map_err(|error| error.to_string())?;
     resident_teardown();
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
-    ensure_resident_module(program)?;
-    resident_invoke()
+    super::tier_cache::begin_capture();
+    let compiled = ensure_resident_module(program);
+    if compiled.is_err() {
+        super::tier_cache::abort_capture();
+    }
+    compiled?;
+    let outcome = resident_invoke();
+    if outcome.is_ok() {
+        super::tier_cache::publish_capture();
+    } else {
+        super::tier_cache::abort_capture();
+    }
+    outcome
 }
 
 /// Mixed-tier run: Cranelift for covered funcs, interpreter stubs for named gaps.
