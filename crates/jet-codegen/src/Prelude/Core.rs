@@ -1718,12 +1718,13 @@ where
 {
     xs.into_iter().filter(|x| f(x)).collect()
 }
-fn jet_list_each<T, F>(xs: Vec<T>, f: F)
+fn jet_list_each<T, F, I>(xs: I, f: F)
 where
+    I: IntoIterator<Item = T>,
     F: Fn(&T),
 {
-    for x in &xs {
-        f(x);
+    for x in xs {
+        f(&x);
     }
 }
 fn jet_list_each_ref<T, F>(xs: &Vec<T>, mut f: F)
@@ -1734,31 +1735,35 @@ where
         f(x);
     }
 }
-fn jet_list_each_mut<T, F>(xs: Vec<T>, mut f: F)
+fn jet_list_each_mut<T, F, I>(xs: I, mut f: F)
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T),
 {
-    for x in &xs {
-        f(x);
+    for x in xs {
+        f(&x);
     }
 }
-fn jet_list_find<T, F>(xs: Vec<T>, mut f: F) -> Option<T>
+fn jet_list_find<T, F, I>(xs: I, mut f: F) -> Option<T>
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T) -> bool,
 {
     xs.into_iter().find(|x| f(x))
 }
-fn jet_list_any<T, F>(xs: Vec<T>, f: F) -> bool
+fn jet_list_any<T, F, I>(xs: I, mut f: F) -> bool
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T) -> bool,
 {
-    xs.iter().any(f)
+    xs.into_iter().any(|x| f(&x))
 }
-fn jet_list_all<T, F>(xs: Vec<T>, f: F) -> bool
+fn jet_list_all<T, F, I>(xs: I, mut f: F) -> bool
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&T) -> bool,
 {
-    xs.iter().all(f)
+    xs.into_iter().all(|x| f(&x))
 }
 fn jet_list_sort_by<T, K: Ord, F>(xs: &mut Vec<T>, f: F)
 where
@@ -1766,11 +1771,12 @@ where
 {
     xs.sort_by_key(f);
 }
-fn jet_list_reduce<T, U, F>(xs: Vec<T>, init: U, mut f: F) -> U
+fn jet_list_reduce<T, U, F, I>(xs: I, init: U, mut f: F) -> U
 where
+    I: IntoIterator<Item = T>,
     F: FnMut(&U, &T) -> U,
 {
-    xs.iter().fold(init, |acc, x| f(&acc, x))
+    xs.into_iter().fold(init, |acc, x| f(&acc, &x))
 }
 fn jet_map_each<K: Ord, V, F>(m: std::collections::BTreeMap<K, V>, mut f: F)
 where
