@@ -454,6 +454,91 @@ extern "C" fn jet_jit_path_join(base: i64, part: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(joined))
 }
 
+extern "C" fn jet_jit_path_from(path: i64) -> i64 {
+    path_record(clone_heap_string(path))
+}
+
+extern "C" fn jet_jit_path_join_handle(rec: i64, part: i64) -> i64 {
+    let base = path_string_from_record(rec);
+    let p = clone_heap_string(part);
+    path_record(
+        std::path::Path::new(&base)
+            .join(p)
+            .to_string_lossy()
+            .to_string(),
+    )
+}
+
+extern "C" fn jet_jit_path_parent(rec: i64) -> i64 {
+    let s = path_string_from_record(rec);
+    match std::path::Path::new(&s).parent() {
+        None => 0,
+        Some(par) => path_record(par.to_string_lossy().to_string()).wrapping_add(1),
+    }
+}
+
+extern "C" fn jet_jit_path_extension(rec: i64) -> i64 {
+    let s = path_string_from_record(rec);
+    option_string_bits(
+        std::path::Path::new(&s)
+            .extension()
+            .map(|e| e.to_string_lossy().to_string()),
+    )
+}
+
+extern "C" fn jet_jit_path_stem(rec: i64) -> i64 {
+    let s = path_string_from_record(rec);
+    option_string_bits(
+        std::path::Path::new(&s)
+            .file_stem()
+            .map(|e| e.to_string_lossy().to_string()),
+    )
+}
+
+extern "C" fn jet_jit_path_to_string(rec: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path_string_from_record(rec)))
+}
+
+extern "C" fn jet_jit_path_walk(rec: i64) -> i64 {
+    let root_s = path_string_from_record(rec);
+    let root = std::path::PathBuf::from(root_s);
+    let mut result_paths = Vec::new();
+    let mut stack = vec![root];
+    let mut visited = std::collections::HashSet::new();
+    while let Some(dir) = stack.pop() {
+        let canonical = match std::fs::canonicalize(&dir) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !visited.insert(canonical) {
+            continue;
+        }
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        for entry in rd {
+            let Ok(entry) = entry else { continue };
+            let path = entry.path();
+            result_paths.push(path.to_string_lossy().to_string());
+            if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    let list = Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for path in result_paths {
+            let rec = rt.heap.alloc_record(1);
+            let sid = rt.heap.alloc_string(path);
+            let _ = rt.heap.record_set_string(rec, 0, sid);
+            let _ = rt.heap.list_push_int(list, rec);
+        }
+        list
+    });
+    result_ok_bits(list as u64)
+}
+
 extern "C" fn jet_jit_fs_list_dir(path: i64) -> i64 {
     let p = clone_heap_string(path);
     let rd = match std::fs::read_dir(&p) {
@@ -574,6 +659,40 @@ fn path_record(path: String) -> i64 {
         let _ = rt.heap.record_set_string(rec, 0, sid);
         rec
     })
+}
+
+fn path_string_from_record(rec: i64) -> String {
+    Concurrency::with_runtime_mut(|rt| {
+        let sid = rt.heap.record_get_string(rec, 0).unwrap_or(0);
+        rt.heap.clone_string(sid).unwrap_or_default()
+    })
+}
+
+fn option_string_bits(s: Option<String>) -> i64 {
+    match s {
+        None => 0,
+        Some(v) => {
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(v));
+            sid.wrapping_add(1)
+        }
+    }
+}
+
+fn env_validate_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("empty name".into());
+    }
+    if name.contains('\0') {
+        return Err("name contains NUL".into());
+    }
+    Ok(())
+}
+
+fn env_validate_value(value: &str) -> Result<(), String> {
+    if value.contains('\0') {
+        return Err("value contains NUL".into());
+    }
+    Ok(())
 }
 
 fn jet_temp_path(prefix: &str) -> String {
@@ -1002,11 +1121,51 @@ extern "C" fn jet_jit_env_get(name: i64) -> i64 {
     }
 }
 
-extern "C" fn jet_jit_process_exit(code: i64) {
-    std::process::exit(code as i32);
+extern "C" fn jet_jit_env_set(name: i64, value: i64) -> i64 {
+    let key = clone_heap_string(name);
+    let val = clone_heap_string(value);
+    if let Err(e) = env_validate_name(&key) {
+        return result_err_msg(&format!("env set: {e}"));
+    }
+    if let Err(e) = env_validate_value(&val) {
+        return result_err_msg(&format!("env set: {e}"));
+    }
+    std::env::set_var(key, val);
+    result_ok_bits(0)
 }
 
-// ── core.io.input / ambient input() — mirrors jet_std_io_input ───────────────
+extern "C" fn jet_jit_env_unset(name: i64) -> i64 {
+    let key = clone_heap_string(name);
+    if let Err(e) = env_validate_name(&key) {
+        return result_err_msg(&format!("env unset: {e}"));
+    }
+    let existed = std::env::var_os(&key).is_some();
+    std::env::remove_var(&key);
+    result_ok_bits(u64::from(existed))
+}
+
+extern "C" fn jet_jit_env_vars() -> i64 {
+    let mut names = Vec::new();
+    for (name, value) in std::env::vars_os() {
+        let Some(decoded) = name.to_str() else {
+            return result_err_msg("environment is not Unicode");
+        };
+        if value.to_str().is_none() {
+            return result_err_msg("environment is not Unicode");
+        }
+        names.push(decoded.to_string());
+    }
+    names.sort();
+    let list = Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for name in names {
+            let sid = rt.heap.alloc_string(name);
+            let _ = rt.heap.list_push_int(list, sid);
+        }
+        list
+    });
+    result_ok_bits(list as u64)
+}
 
 extern "C" fn jet_jit_io_input(has_prompt: i8, prompt: i64) -> i64 {
     use std::io::Write;
@@ -1026,6 +1185,10 @@ extern "C" fn jet_jit_io_input(has_prompt: i8, prompt: i64) -> i64 {
     }
     let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
     result_ok_bits(sid as u64)
+}
+
+extern "C" fn jet_jit_process_exit(code: i64) {
+    std::process::exit(code as i32);
 }
 
 pub(crate) struct CoreHostFns {
@@ -1075,6 +1238,13 @@ pub(crate) struct CoreHostFns {
     pub fs_temp_file: cranelift_module::FuncId,
     pub fs_lock: cranelift_module::FuncId,
     pub path_join: cranelift_module::FuncId,
+    pub path_from: cranelift_module::FuncId,
+    pub path_join_handle: cranelift_module::FuncId,
+    pub path_parent: cranelift_module::FuncId,
+    pub path_extension: cranelift_module::FuncId,
+    pub path_stem: cranelift_module::FuncId,
+    pub path_to_string: cranelift_module::FuncId,
+    pub path_walk: cranelift_module::FuncId,
     pub math_sin: cranelift_module::FuncId,
     pub math_cos: cranelift_module::FuncId,
     pub math_exp: cranelift_module::FuncId,
@@ -1092,8 +1262,11 @@ pub(crate) struct CoreHostFns {
     pub math_gcd: cranelift_module::FuncId,
     pub math_lcm: cranelift_module::FuncId,
     pub env_get: cranelift_module::FuncId,
-    pub process_exit: cranelift_module::FuncId,
+    pub env_set: cranelift_module::FuncId,
+    pub env_unset: cranelift_module::FuncId,
+    pub env_vars: cranelift_module::FuncId,
     pub io_input: cranelift_module::FuncId,
+    pub process_exit: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -1149,6 +1322,13 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_fs_temp_file", jet_jit_fs_temp_file as *const u8);
     builder.symbol("jet_jit_fs_lock", jet_jit_fs_lock as *const u8);
     builder.symbol("jet_jit_path_join", jet_jit_path_join as *const u8);
+    builder.symbol("jet_jit_path_from", jet_jit_path_from as *const u8);
+    builder.symbol("jet_jit_path_join_handle", jet_jit_path_join_handle as *const u8);
+    builder.symbol("jet_jit_path_parent", jet_jit_path_parent as *const u8);
+    builder.symbol("jet_jit_path_extension", jet_jit_path_extension as *const u8);
+    builder.symbol("jet_jit_path_stem", jet_jit_path_stem as *const u8);
+    builder.symbol("jet_jit_path_to_string", jet_jit_path_to_string as *const u8);
+    builder.symbol("jet_jit_path_walk", jet_jit_path_walk as *const u8);
     builder.symbol("jet_jit_math_sin", jet_jit_math_sin as *const u8);
     builder.symbol("jet_jit_math_cos", jet_jit_math_cos as *const u8);
     builder.symbol("jet_jit_math_exp", jet_jit_math_exp as *const u8);
@@ -1172,8 +1352,11 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_math_gcd", jet_jit_math_gcd as *const u8);
     builder.symbol("jet_jit_math_lcm", jet_jit_math_lcm as *const u8);
     builder.symbol("jet_jit_env_get", jet_jit_env_get as *const u8);
-    builder.symbol("jet_jit_process_exit", jet_jit_process_exit as *const u8);
+    builder.symbol("jet_jit_env_set", jet_jit_env_set as *const u8);
+    builder.symbol("jet_jit_env_unset", jet_jit_env_unset as *const u8);
+    builder.symbol("jet_jit_env_vars", jet_jit_env_vars as *const u8);
     builder.symbol("jet_jit_io_input", jet_jit_io_input as *const u8);
+    builder.symbol("jet_jit_process_exit", jet_jit_process_exit as *const u8);
 }
 
 pub(crate) fn declare_core_host_fns(
@@ -1298,6 +1481,13 @@ pub(crate) fn declare_core_host_fns(
         fs_temp_file: import("jet_jit_fs_temp_file", &sig_unary_i64)?,
         fs_lock: import("jet_jit_fs_lock", &sig_unary_i64)?,
         path_join: import("jet_jit_path_join", &sig_i64_i64_i64)?,
+        path_from: import("jet_jit_path_from", &sig_unary_i64)?,
+        path_join_handle: import("jet_jit_path_join_handle", &sig_i64_i64_i64)?,
+        path_parent: import("jet_jit_path_parent", &sig_unary_i64)?,
+        path_extension: import("jet_jit_path_extension", &sig_unary_i64)?,
+        path_stem: import("jet_jit_path_stem", &sig_unary_i64)?,
+        path_to_string: import("jet_jit_path_to_string", &sig_unary_i64)?,
+        path_walk: import("jet_jit_path_walk", &sig_unary_i64)?,
         math_sin: import("jet_jit_math_sin", &sig_f64_f64)?,
         math_cos: import("jet_jit_math_cos", &sig_f64_f64)?,
         math_exp: import("jet_jit_math_exp", &sig_f64_f64)?,
@@ -1315,7 +1505,10 @@ pub(crate) fn declare_core_host_fns(
         math_gcd: import("jet_jit_math_gcd", &sig_i64_i64_i64)?,
         math_lcm: import("jet_jit_math_lcm", &sig_i64_i64_i64)?,
         env_get: import("jet_jit_env_get", &sig_unary_i64)?,
-        process_exit: import("jet_jit_process_exit", &sig_void_i64)?,
+        env_set: import("jet_jit_env_set", &sig_i64_i64_i64)?,
+        env_unset: import("jet_jit_env_unset", &sig_unary_i64)?,
+        env_vars: import("jet_jit_env_vars", &sig_i64)?,
         io_input: import("jet_jit_io_input", &sig_i8_i64_i64)?,
+        process_exit: import("jet_jit_process_exit", &sig_void_i64)?,
     })
 }

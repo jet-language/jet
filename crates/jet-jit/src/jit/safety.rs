@@ -685,6 +685,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::SelectWait { builder } => {
             jit_value_type(&expr.ty) && resident_safe_select_wait(builder, callees)
         }
+        TExprKind::AmbientInput { prompt } => {
+            prompt.as_ref().is_none_or(|p| resident_safe_expr(p, callees))
+        }
         // D-OPTGC1: GcRead/GcEdit lower to Variable load/store of the payload
         // handle — same value snapshots AOT clones out of AutomaticRoot.
         TExprKind::HostCall(host) => match host.as_ref() {
@@ -698,6 +701,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && index_temp
                         .as_ref()
                         .is_none_or(|(_, e)| resident_safe_expr(e, callees))
+            }
+            THostCall::EnvSet { name, value, .. } => {
+                resident_safe_expr(name, callees) && resident_safe_expr(value, callees)
             }
             _ => false,
         },
@@ -1054,6 +1060,13 @@ fn resident_safe_builtin_op(
         {
             args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Contains
+            if matches!(&recv.ty, Type::List(inner) if **inner == Type::String) =>
+        {
+            args.len() == 1
+                && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Contains => {
@@ -1791,6 +1804,13 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::CSVWriterWrite
         | THandleOp::XMLWriterWrite
         | THandleOp::CBORWriterWrite => args.len() == 1,
+        THandleOp::PathFrom => matches!(&recv.ty, Type::String) && args.is_empty(),
+        THandleOp::PathJoin => args.len() == 1 && matches!(&args[0].ty, Type::String),
+        THandleOp::PathParent
+        | THandleOp::PathExtension
+        | THandleOp::PathStem
+        | THandleOp::PathToString
+        | THandleOp::PathWalk => args.is_empty(),
         _ => false,
     }
 }

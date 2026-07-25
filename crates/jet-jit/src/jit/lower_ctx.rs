@@ -2874,6 +2874,18 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[ms]);
                 Ok(self.b.inst_results(call)[0])
             }
+            THostCall::EnvSet { name, value, .. } => {
+                let name_v = self.lower_expr(name)?;
+                let value_v = self.lower_expr(value)?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.env_set, self.b.func);
+                let call = self.b.ins().call(host_ref, &[name_v, value_v]);
+                let _ = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                let _ = ty;
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
             _ => Err("jit host/default/uninit/ct-lit unsupported".to_string()),
         }
     }
@@ -4498,6 +4510,32 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &[a0]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.env" && method == "set" && args.len() == 2 {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.core.env_set, self.b.func);
+                    let a0 = self.lower_expr(&args[0])?;
+                    let a1 = self.lower_expr(&args[1])?;
+                    let call = self.b.ins().call(host_ref, &[a0, a1]);
+                    let handle = self.b.inst_results(call)[0];
+                    self.emit_trap_check()?;
+                    return Ok(handle);
+                }
+                if module == "core.env" && method == "unset" && args.len() == 1 {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.core.env_unset, self.b.func);
+                    let a0 = self.lower_expr(&args[0])?;
+                    let call = self.b.ins().call(host_ref, &[a0]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.env" && method == "vars" && args.is_empty() {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.core.env_vars, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.process" && method == "exit" && args.len() == 1 {
                     let host_ref = self
                         .module
@@ -6111,7 +6149,15 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &[recv_val, needle]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                // String.contains(needle) — list Contains stays unsupported.
+                if matches!(&recv.ty, Type::List(inner) if **inner == Type::String) {
+                    let needle = self.lower_expr(&args[0])?;
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_contains_str, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[recv_val, needle]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                // String.contains(needle) — other list Contains stays unsupported.
                 let recv_is_str = matches!(&recv.ty, Type::String)
                     || matches!(
                         Self::recover_core_return_ty(recv),
@@ -7690,14 +7736,57 @@ impl LowerCtx<'_, '_> {
                 // Result stores f64 bits; convert via result_get_f64 at use sites.
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::PathFrom => Err("jit handle method unsupported".to_string()),
-            THandleOp::PathJoin => Err("jit handle method unsupported".to_string()),
-            THandleOp::PathParent => Err("jit handle method unsupported".to_string()),
-            THandleOp::PathExtension => Err("jit handle method unsupported".to_string()),
-            THandleOp::PathStem => Err("jit handle method unsupported".to_string()),
-            THandleOp::PathToString => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathFrom => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.path_from, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::PathJoin => {
+                let part = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.path_join_handle, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, part]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::PathParent => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.path_parent, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::PathExtension => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.path_extension, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::PathStem => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.path_stem, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::PathToString => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.path_to_string, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::PathWalk => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.path_walk, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::PathWriteAtomic => Err("jit handle method unsupported".to_string()),
-            THandleOp::PathWalk => Err("jit handle method unsupported".to_string()),
             THandleOp::UiBackendMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::DevServerMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::WebAppMethod { .. } => Err("jit handle method unsupported".to_string()),

@@ -60,6 +60,22 @@ extern "C" fn jet_jit_list_len(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).expect("jit list len: bad handle"))
 }
 
+extern "C" fn jet_jit_list_contains_str(list: i64, needle: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let needle = rt.heap.clone_string(needle).unwrap_or_default();
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        for i in 0..len {
+            let Some(sid) = rt.heap.list_get_int(list, i) else {
+                continue;
+            };
+            if rt.heap.clone_string(sid).as_deref() == Some(needle.as_str()) {
+                return 1;
+            }
+        }
+        0
+    })
+}
+
 /// Element-wise list equality for `[T]` / fixed lists (int/byte elements).
 extern "C" fn jet_jit_list_eq(a: i64, b: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
@@ -760,6 +776,7 @@ pub(crate) struct CollectionsHostFns {
     pub list_set: cranelift_module::FuncId,
     pub list_set_f64: cranelift_module::FuncId,
     pub list_len: cranelift_module::FuncId,
+    pub list_contains_str: cranelift_module::FuncId,
     pub list_eq: cranelift_module::FuncId,
     pub list_indexes: cranelift_module::FuncId,
     pub list_sort: cranelift_module::FuncId,
@@ -816,6 +833,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_set", jet_jit_list_set as *const u8);
     builder.symbol("jet_jit_list_set_f64", jet_jit_list_set_f64 as *const u8);
     builder.symbol("jet_jit_list_len", jet_jit_list_len as *const u8);
+    builder.symbol("jet_jit_list_contains_str", jet_jit_list_contains_str as *const u8);
     builder.symbol("jet_jit_list_eq", jet_jit_list_eq as *const u8);
     builder.symbol("jet_jit_list_indexes", jet_jit_list_indexes as *const u8);
     builder.symbol("jet_jit_list_sort", jet_jit_list_sort as *const u8);
@@ -950,6 +968,7 @@ pub(crate) fn declare_collections_host_fns(
         list_set: import("jet_jit_list_set", &sig_set)?,
         list_set_f64: import("jet_jit_list_set_f64", &sig_set_f64)?,
         list_len: import("jet_jit_list_len", &sig_len)?,
+        list_contains_str: import("jet_jit_list_contains_str", &sig_list_eq)?,
         list_eq: import("jet_jit_list_eq", &sig_list_eq)?,
         list_indexes: import("jet_jit_list_indexes", &sig_len)?,
         list_sort: import("jet_jit_list_sort", &sig_sort)?,
