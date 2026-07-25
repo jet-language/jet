@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 794,
-    "rev": 14011,
+    "rev": 14027,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -14676,7 +14676,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-universal-product-parity",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implement D-NOTEBOOK-SURFACE1=D as one shared first-party client plus enforcing Jupyter adapter over the existing REPL session; Canvas notebook view is a lens, not another evaluator. D-NOTEBOOK-DOC1=D makes .jetnb canonical with closure-keyed cache, stable cell IDs, merge-by-ID, faithful ipynb IDs, and explicit-loss exports. D-NOTEBOOK-TRUST1=D gives passive-equivalent zero-capability rendering and hash/environment/policy-bound grants through unified jet trust. Prove rich MIME, interrupt/stdin/debug/perf, stale-turn replay, invalidation, import quarantine, protocol/headless tests, and AOT-equivalent semantics.",
       "blockedBy": [
@@ -14721,43 +14721,43 @@
         }
       ],
       "created": "2026-07-09T23:22:09.459Z",
-      "updated": "2026-07-23",
+      "updated": "2026-07-25",
       "criteria": [
         {
           "n": 1,
           "text": "First-party, Canvas lens, and Jupyter adapter observe one REPL session and enforce identical stale-turn/replay rules.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:25:49.732Z"
+          "status": "verified",
+          "metBy": "e3-442-nb",
+          "verifiedBy": "e3-442-verify",
+          "evidence": "Re-ran scoped tests: notebook 4/4 incl shared_session; kernel.rs boot_tir_eval; no second evaluator",
+          "at": "2026-07-25T20:01:31.820Z"
         },
         {
           "n": 2,
           "text": ".jetnb IDs, dependency-closure cache, merge, ipynb round-trip, and .jet export never display stale output or hide loss.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:25:49.733Z"
+          "status": "verified",
+          "metBy": "e3-442-nb",
+          "verifiedBy": "cursor-e3-442-v",
+          "evidence": "Independent re-read: tests/notebook.rs jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss passed 4/4 suite",
+          "at": "2026-07-25T20:01:36.488Z"
         },
         {
           "n": 3,
           "text": "Rich output trust uses passive-equivalent sandbox plus hash/environment/policy-bound unified grants; imported output starts quarantined.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:25:49.733Z"
+          "status": "verified",
+          "metBy": "e3-442-nb",
+          "verifiedBy": "cursor-e3-442-v",
+          "evidence": "Independent re-read: rich_output_trust test + jet-repl Notebook trust 3/3 passed",
+          "at": "2026-07-25T20:01:36.624Z"
         },
         {
           "n": 4,
           "text": "Headless protocol, rich display, interrupt/stdin/debug/perf, trust, merge, independent review, and scoped verification.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-16T00:25:49.733Z"
+          "status": "verified",
+          "metBy": "e3-442-nb",
+          "verifiedBy": "cursor-e3-442-v",
+          "evidence": "Independent re-read: headless_protocol test + notebook integration 4/4 passed on master cf139e019",
+          "at": "2026-07-25T20:01:36.790Z"
         }
       ],
       "needsAcceptance": false,
@@ -23861,6 +23861,11 @@
       "log": [
         {
           "at": "2026-07-25",
+          "by": "e3-729-w2",
+          "text": "e3-729-w2 closeout (already merged): 6fcf2a6af + eb76f2b6d. Closed 10 stems (distinct/unit/range/capability arith, F64 enum heap pack, List(String)/Map/Tuple clone). At land: covered 107→117 gaps 248→238. Proof then: jit_coverage_audit + cranelift_three_way_differential_battery (33/111) + jet run smokes. Worktree jet-bd-729 removed. Later workers advanced further; do not re-claim."
+        },
+        {
+          "at": "2026-07-25",
           "by": "e3-729-w5",
           "text": "[handoff] w5 slice shipped in 050787a5b: gc_cyclic+first_hour+cli_args (127→130). Board now further ahead under later workers; w18 holds claim."
         },
@@ -25702,11 +25707,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Implement ratified D-UNIONTYPE1=A as structural enum sugar, not a second sum mechanism. Add Type::Union with one canonicalizer that recursively flattens members, removes exact duplicates, and sorts by canonical source spelling; define parser precedence so T ? E1 | E2 places the union on the error side. Extend formatting, type traversal, equality/display, API snapshots, semantic index, and LSP to use that canonical form. In sema, allow only concrete closed member types, add implicit member-to-union widening at binding, argument, return, field, and error-propagation boundaries, and preserve exact union identity elsewhere. Extend union match heads to resolve an exact member type and feed the existing enum exhaustiveness and binding checks. Lower each canonical union to one deterministic compiler-generated enum emitted once per resolved union, with injection and match operations carried explicitly in TIR so codegen remains mechanical and native/web/dev agree. Extend Codable synthesis so each member encodes normally and decode selects a unique compatible wire shape; reject ambiguous or unsupported shapes in sema with registered UI diagnostics. Keep named-enum crossings explicit through ordinary match-based conversion functions and add no Any or cast escape. Update the syntax decision log and examples, regenerate grammar/tooling artifacts, bless snapshots, and run focused parser/formatter/sema/serde/golden plus AOT/dev/web parity checks.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-744-union",
       "log": [
         {
           "at": "2026-07-24",
@@ -25840,7 +25845,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T16:45:54.472Z",
-      "updated": "2026-07-24"
+      "updated": "2026-07-25",
+      "claimedAt": "2026-07-25T20:01:49.099Z"
     },
     {
       "id": "c0gprkh8",
@@ -26567,6 +26573,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-25",
+          "by": "e3-751-lsp",
+          "text": "Worker return: commits 61b546b7b + aa630f5d4 on master (merges already integrated). Criterion #2 met (scalar ==/!=). Open: #1 non-scalar ownership extract; #3 docs/integration. Claim released. Independent verifier should --verify #2; next builder claims for #1/#3."
+        },
         {
           "at": "2026-07-25",
           "by": "e3-751-lsp",
@@ -33604,171 +33615,6 @@
       "rec": "D",
       "status": "ratified",
       "created": "2026-07-09T23:45:22.263Z",
-      "outcome": "D",
-      "ratifiedAt": "2026-07-10",
-      "draft": false
-    },
-    {
-      "id": "D-NOTEBOOK-SURFACE1",
-      "cardId": "c0ok76h1",
-      "group": "tooling",
-      "title": "Notebook client and Jupyter interoperability surface",
-      "gist": "Choose the user-facing notebook clients over the already-ratified REPL session, addressable-turn, and effect-confirmed rerun semantics.",
-      "explainer": "Every option uses the same REPL engine, typed state, rollback, interrupt, DAP, and D-FE-REPL-RERUN1 dependency replay. No option permits stale Jupyter-only state. This decision depends on D-NOTEBOOK-DOC1 and D-NOTEBOOK-TRUST1 for persistence and rich-output safety.\n\nFable hybrid review: A builds a third first-party UI stack when ratified law (D-FE-CANVAS1=E, D-STUDIO-CANVASBRIDGE1=C) already mandates shared renderer/trust/proof components — duplicated sanitizer and sandbox code is duplicated attack surface. B demotes stale-turn and effect-confirmation truth to 'may be less discoverable' protocol extensions, an enforcement hole in exactly the clients most people use; C amputates live Jupyter interop entirely. The hybrid keeps A's surface and token law, reuses the Canvas component stack, folds in C's view as a lens of the same session, and converts B's weakness into a stated enforcement floor (stdin_request confirmation, no stale display in any client).",
-      "story": "Nia opens an analysis with one command, edits an upstream cell, sees exactly which downstream turns are stale, confirms effectful reruns, then sends the same document to a teammate who uses JupyterLab.",
-      "inWild": "$ jet notebook analysis.jetnb\nserving http://127.0.0.1:43127/#token=...\nsession: typed; stale turns: none; environment: workspace lock 8c2f...",
-      "detail": "Option A's exact surface is `jet notebook PATH`, which launches a loopback-only first-party browser client and one REPL session. A random bearer token is placed in the URL fragment, not logs. Non-loopback bind requires explicit `--bind` plus `--auth-file` authority. The Jupyter kernelspec command is `jet notebook kernel --connection {connection_file}` and uses the same session engine. All options define rich MIME, completion, inspect, stdin, interrupt rollback, debug, profile, package/workspace environment, side-effect receipts, disconnect/reconnect, and headless protocol tests.",
-      "options": [
-        {
-          "key": "A",
-          "name": "First-party notebook client plus Jupyter adapter",
-          "detail": "Jet owns an ergonomic, source-truthful client and also installs a Jupyter kernelspec. Both are projections of one session. The first-party client can surface typed values, stale dependency edges, effect receipts, diagnostics, debugger, profiler, and trusted output state without protocol compromise.",
-          "code": "jet notebook analysis.jetnb\njet notebook install-jupyter\n# kernelspec argv: jet notebook kernel --connection {connection_file}\njet notebook analysis.jetnb --bind 0.0.0.0 --auth-file ./token  # explicit remote authority"
-        },
-        {
-          "key": "B",
-          "name": "Jupyter clients only",
-          "detail": "Jet ships the kernelspec and protocol server over the same REPL engine but no first-party notebook UI. JupyterLab and compatible clients own rendering; Jet-specific stale/effect/debug facts use protocol extensions and may be less discoverable.",
-          "code": "jet notebook install-jupyter\njupyter lab analysis.ipynb\n# kernel still enforces typed addressable-turn replay and effect confirmation"
-        },
-        {
-          "key": "C",
-          "name": "Canvas notebook view only",
-          "detail": "Canvas becomes the only first-party client over the same REPL engine; Jet may export/import Jupyter documents but does not install a live Jupyter kernel. This unifies Jet UI but weakens existing notebook ecosystem reach.",
-          "code": "jet canvas analysis.jetnb --view=notebook\njet notebook export analysis.jetnb --ipynb"
-        },
-        {
-          "key": "D",
-          "name": "One shared first-party client plus enforcing Jupyter adapter (hybrid)",
-          "detail": "`jet notebook PATH` keeps Option A's exact surface — loopback-only serve, bearer token in the URL fragment, non-loopback only via explicit `--bind` plus `--auth-file` — but the first-party client is assembled from the shared Canvas/Studio protocol components (rich renderer, D-NOTEBOOK-TRUST1 sandbox, receipt and proof widgets) under D-STUDIO-CANVASBRIDGE1's strict boundary, so Jet ships one renderer and one trust engine, and `jet canvas PATH --view=notebook` opens the same live session as a lens, never a second truth. The kernelspec `jet notebook kernel --connection {connection_file}` is an enforcing projection, not best-effort: in foreign clients stale turns are recomputed per D-FE-REPL-RERUN1 before display, effectful replays confirm through `stdin_request`, and an output that would be stale renders as an explicit staleness notice, never a cached value. Headless protocol tests cover both projections; a Jupyter client can never observe session state the first-party client would refuse to show.",
-          "code": "jet notebook analysis.jetnb                 # loopback + fragment token\njet canvas analysis.jetnb --view=notebook   # same session, Canvas lens\njet notebook install-jupyter\n# foreign client: effect confirm via stdin_request; stale output never displays"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Jupyter",
-          "note": "The kernel protocol and ecosystem are essential interoperability targets, but traditional notebooks allow hidden stale state. Jet's adapter must preserve addressable-turn truth.",
-          "code": "execute_request / complete_request / inspect_request / interrupt_request"
-        },
-        {
-          "lang": "Pluto.jl",
-          "note": "Reactive dependency execution prevents stale cells. Jet can combine that truth with explicit side-effect confirmation and its typed REPL state.",
-          "code": "editing an upstream cell recomputes dependent cells"
-        }
-      ],
-      "rec": "D",
-      "status": "ratified",
-      "created": "2026-07-09T23:45:22.709Z",
-      "outcome": "D",
-      "ratifiedAt": "2026-07-10",
-      "draft": false
-    },
-    {
-      "id": "D-NOTEBOOK-DOC1",
-      "cardId": "c0ok76h1",
-      "group": "tooling",
-      "title": "Canonical notebook document, output cache, merge, and ipynb round-trip",
-      "gist": "Choose the source of truth for ordered Jet and Markdown cells and define exactly where outputs and foreign notebook facts live.",
-      "explainer": "Notebook code cells always contain ordinary Jet source; the container is data, not a second language. Stable cell identity drives dependency replay, merge, output cache, diagnostics, and Jupyter interop. Ambient packages or interpreter state are never embedded as invisible environment truth.\n\nFable hybrid review: A's per-cell `source+environment` cache key omits the upstream dependency closure, so editing cell 1 leaves cell 9's cached output presentable — directly contradicting its own 'no stale output displays' law and D-FE-REPL-RERUN1; its import 'generates stable IDs' non-deterministically, churning identity on every re-import, and says nothing about duplicated-cell ID collisions. B inherits ipynb's JSON merge pain and embedded-output staleness; C splits review truth across two files and cannot interleave Markdown freely. The hybrid keeps A's architecture and fixes all three holes with concrete key, ID, and round-trip law.",
-      "story": "Leah reviews a notebook diff, reorders two cells without losing identity, resolves a branch conflict, opens it offline against the pinned workspace, and exports an ipynb whose losses are explicit rather than silent.",
-      "inWild": "format: 1\nnotebook_id: \"sales-q3\"\nenvironment: { kind: \"workspace\", root: \".\", lock: \"sha256-8c2f...\" }\n\ncell: {\n  id: \"01J4Q7M6B8Y9P0K2D3F4G5H6J7\"\n  kind: \"markdown\"\n  source: \"\"\"\n# Q3 sales\nThis report is source-reviewed.\n\"\"\"\n}\n\ncell: {\n  id: \"01J4Q7P1M2N3R4S5T6V7W8X9Y0\"\n  kind: \"jet\"\n  source: \"\"\"\nuse core.data\nuse core.files\ncsv_text :: files.read(\"sales.csv\") ?? panic(\"can't read sales.csv\")\nsales :: data.csv<Sale>(csv_text) ?? panic(\"bad csv\")\nsales.group_by(.region).sum(.revenue)\n\"\"\"\n}",
-      "detail": "Option A defines `.jetnb` v1 as the bytes shown above: a versioned Jet-data envelope, not executable Jet. Strings use Jet triple-string escaping; a literal triple delimiter is written `\\\"\\\"\\\"` and backslash is escaped. New cells receive a 128-bit OS-CSPRNG ID stored in the file; reorder preserves it. A same-ID divergent edit is a merge conflict; `jet notebook merge` aligns by ID, emits both source spans, and refuses execution until resolved. The environment references a relative workspace/package root plus semantic lock digest; a standalone notebook receives an explicit notebook lock. Outputs never enter canonical source: `.jet/notebooks/<notebook-id>/<cell-id>/<source+environment-hash>.jnbout`, ignored by default. Cache miss says `not run for this source and environment`; no stale output displays. `jet notebook export PATH --ipynb [--with-outputs]` embeds only matching cache entries. Import preserves safe opaque metadata, quarantines outputs under D-NOTEBOOK-TRUST1, maps Markdown/code cells, generates stable IDs, and writes an exact loss report for unsupported widgets, attachments, magics, metadata, or MIME. Re-export reports any fact that cannot round-trip.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Mergeable `.jetnb` source plus detachable output cache",
-          "detail": "The readable container above is canonical. It stores ordered ordinary-Jet/Markdown source, stable IDs, and exact environment identity. Outputs are reproducible ignored cache; committed publication is an explicit export artifact. Cell-aware merge and ipynb import/export always report losses.",
-          "code": "jet notebook analysis.jetnb\njet notebook merge base.jetnb ours.jetnb theirs.jetnb\njet notebook export analysis.jetnb --ipynb --with-outputs\n# output cache: .jet/notebooks/analysis/<cell>/<hash>.jnbout"
-        },
-        {
-          "key": "B",
-          "name": "`.ipynb` is canonical",
-          "detail": "Standard Jupyter JSON stores source, IDs, metadata, and outputs. Jet adds environment and dependency metadata under a namespaced key. Interoperability is maximal, but diffs/merges and active-output trust inherit ipynb complexity; first-party tooling must still reject stale outputs.",
-          "code": "{\n  \"nbformat\": 4,\n  \"metadata\": { \"jet\": { \"lock\": \"sha256-8c2f...\" } },\n  \"cells\": [{ \"id\": \"01J...\", \"cell_type\": \"code\", \"source\": [\"x :: 1\\n\"] }]\n}"
-        },
-        {
-          "key": "C",
-          "name": "Ordinary `.jet` source plus notebook layout sidecar",
-          "detail": "A `.jet` module is canonical executable code. Top-level semantic items/expressions become code cells; doc comments become attached Markdown. A `.jetnb.layout` sidecar stores stable cell IDs, order, free-standing Markdown, environment identity, and output-cache links. This preserves ordinary source but splits review truth and cannot represent arbitrary interleaving in one file.",
-          "code": "// analysis.jet\n/// # Q3 sales\nuse core.data\nuse core.files\ncsv_text :: files.read(\"sales.csv\") ?? panic(\"can't read sales.csv\")\nsales :: data.csv<Sale>(csv_text) ?? panic(\"bad csv\")\n\n// analysis.jetnb.layout stores IDs/order/free Markdown; source remains analysis.jet"
-        },
-        {
-          "key": "D",
-          "name": "Mergeable `.jetnb` with closure-keyed cache and ID-faithful ipynb (hybrid)",
-          "detail": "The canonical `.jetnb` v1 container, environment identity, CSPRNG cell IDs, and merge-by-ID law are Option A's, with the output-cache key hardened to source + environment + transitive dependency-closure hash: an upstream cell edit invalidates every downstream entry, so no stale output can ever display or export and the cache is exactly D-FE-REPL-RERUN1's replay truth materialized. Paste or duplicate always mints a fresh ID; ipynb import derives cell IDs deterministically from nbformat 4.5+ cell ids and export writes Jet IDs back, so round-trips preserve identity instead of churning it, with exact loss reports in both directions. `jet notebook merge` registers as an opt-in Git merge/textconv driver per D-MERGE-VCS1, and `jet notebook export --jet` projects cells to an ordinary reviewable `.jet` module as a stated-loss export (C's virtue), never a second truth.",
-          "code": "jet notebook merge base.jetnb ours.jetnb theirs.jetnb\n# cache: .jet/notebooks/analysis/<cell>/<source+env+deps-hash>.jnbout\njet notebook export analysis.jetnb --ipynb --with-outputs  # only closure-fresh entries embed\njet notebook import report.ipynb   # deterministic IDs from nbformat ids + loss report"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Jupyter ipynb",
-          "note": "Universal support and rich outputs are valuable, but embedded outputs and JSON diffs invite stale state and merge pain. Option A treats ipynb as a loss-reported interchange format.",
-          "code": "nbformat 4 JSON with cells and outputs"
-        },
-        {
-          "lang": "Jupytext and Pluto",
-          "note": "Text-first notebooks improve review and reactive identity. Jet adds an exact environment reference and separates reproducible output cache from source truth.",
-          "code": "text source paired with notebook metadata"
-        }
-      ],
-      "rec": "D",
-      "status": "ratified",
-      "created": "2026-07-09T23:45:22.872Z",
-      "outcome": "D",
-      "ratifiedAt": "2026-07-10",
-      "draft": false
-    },
-    {
-      "id": "D-NOTEBOOK-TRUST1",
-      "cardId": "c0ok76h1",
-      "group": "tooling",
-      "title": "Notebook rich-output trust and active-content authority",
-      "gist": "Choose how HTML, SVG, Markdown, CSS, widgets, and JavaScript outputs render without turning an imported notebook into ambient code execution.",
-      "explainer": "Plain text is always available. Sanitized passive MIME is the default. Active content never inherits parent page, kernel, filesystem, storage, cookie, credential, or network authority. Trust is local authority, not source metadata, and cannot travel with a notebook.\n\nFable hybrid review: A's per-payload prompts are the right key with the wrong ergonomics: Jupyter's core lesson is trust fatigue, and A even blocks zero-capability widgets the user just executed locally — beginner-hostile for `display(widget)` — while its `jet notebook trust` forks a second grant surface against the ratified one-authority-graph law (D-JPK-GRANTCMD1=A, D-WD1=B). C institutionalizes fatigue into notebook-wide grants (Jupyter's `trust` mistake with better hashes); B amputates interactive notebooks. The hybrid makes empty-sandbox active content promptless, collapses remaining prompts by intent with a full-audit drawer, and homes grants in the ratified trust graph.",
-      "story": "Chen opens a notebook from a pull request containing a plot, SVG, links, and a custom widget. The report should render safely; the widget should remain inert until Chen reviews and grants its exact capabilities.",
-      "inWild": "$ jet notebook report.jetnb\nactive output blocked: cell 01J... requests JavaScript and network\nplain-text fallback shown\n$ jet notebook trust report.jetnb --cell 01J... --allow-widget sales.chart --allow-origin https://data.example",
-      "detail": "Recommended passive sanitization covers HTML, SVG, Markdown links, CSS, data/blob URLs, dimensions, recursion, decompression, and total output size. Active output runs only in an opaque-origin sandbox iframe with strict CSP; forms, navigation, workers, objects, parent access, kernel access, storage, cookies, credentials, and external URLs are blocked by default. The trust key is notebook source hash + active payload/renderer hash + locked environment identity + policy version. Trust state lives only in per-user local state and is never imported, exported, committed, or synced. Any source/payload/renderer/environment/policy edit or import revokes it. Expert widgets require an origin/capability allowlist and a typed message bridge; network defaults to none. When any renderer fails policy, Jet shows safe `text/plain`.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Sanitized passive output plus hash-bound capability trust",
-          "detail": "Passive MIME renders after strict sanitization and size limits. Active widgets/JavaScript require a local grant bound to exact source, payload, renderer, environment, and policy hashes. They run in an opaque sandbox with only explicitly granted typed messages and origins. Changes revoke trust automatically.",
-          "code": "jet notebook trust report.jetnb --cell 01J... \\\n  --allow-widget sales.chart \\\n  --allow-message SelectionChanged \\\n  --allow-origin https://data.example\n# no parent/kernel/storage/cookie authority; source or lock edit revokes"
-        },
-        {
-          "key": "B",
-          "name": "Passive rich output only",
-          "detail": "HTML, SVG, Markdown, images, tables, and plots render through the sanitizer, but JavaScript, active widgets, forms, and network are never executed. This is simplest and safest but excludes interactive notebook applications.",
-          "code": "display(plot)       // sanitized SVG/PNG works\ndisplay(widget)     // blocked; text/plain fallback and export hint"
-        },
-        {
-          "key": "C",
-          "name": "Trust the whole local notebook environment",
-          "detail": "A user may mark a notebook and locked environment trusted; all its active outputs run until source or lock changes. Sandboxing and CSP remain, but capability review is notebook-wide rather than payload-specific. This is more convenient and grants substantially broader authority.",
-          "code": "jet notebook trust report.jetnb --all-active\n# local only; source/renderer/lock/policy change revokes the notebook-wide grant"
-        },
-        {
-          "key": "D",
-          "name": "Passive-equivalent sandbox default plus unified intent-card trust (hybrid)",
-          "detail": "Passive sanitization, the opaque-origin empty-capability sandbox, hash-bound grant keys, local-only non-traveling trust, and revoke-on-any-change are Option A's, with one beginner fix: active content that requests no capability beyond the empty sandbox — first-party plots, tables, zero-capability widgets — renders without any prompt, because a sandbox with no messages, origins, storage, kernel, or parent reach is passive-equivalent by construction. Capability-requesting widgets keep the full key (source + payload + renderer + locked environment + policy version), but grants live in the unified `jet trust` authority graph (D-WD1, D-JPK-GRANTCMD1) and prompt as one per-notebook intent card with an expert drawer expanding exact per-cell hashes, origins, and typed messages (D-CANVAS-ACTIONAUTH1) — C's one-review convenience without notebook-wide authority. Imported ipynb outputs always quarantine; any source, payload, renderer, lock, or policy change revokes to safe `text/plain` fallback.",
-          "code": "display(sales.chart)   # zero-capability widget: sandboxed, renders, no prompt\njet trust notebook report.jetnb --cell 01J... \\\n  --allow-widget sales.chart --allow-origin https://data.example\n# intent card: \"sales.chart wants network: data.example\" — drawer shows hashes/messages\n# grants live locally in the jet trust graph; any edit or import revokes"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Jupyter",
-          "note": "Notebook trust historically signs cells to permit active output. Jet tightens the key, isolates origin, strips ambient authority, and grants explicit capabilities.",
-          "code": "jupyter trust notebook.ipynb"
-        },
-        {
-          "lang": "Browser sandboxing",
-          "note": "Opaque-origin iframes plus CSP and typed postMessage-style bridges provide a strong containment base when default capabilities are empty.",
-          "code": "sandbox iframe; default-src 'none'"
-        }
-      ],
-      "rec": "D",
-      "status": "ratified",
-      "created": "2026-07-09T23:45:23.025Z",
       "outcome": "D",
       "ratifiedAt": "2026-07-10",
       "draft": false
@@ -45753,6 +45599,118 @@
   ],
   "events": [
     {
+      "at": "2026-07-25T20:01:49.099Z",
+      "by": "e3-744-union",
+      "action": "card.update",
+      "ref": "c0e61zyf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-25T20:01:48.950Z",
+      "by": "e3-744-union",
+      "action": "card.claim",
+      "ref": "c0e61zyf",
+      "note": ""
+    },
+    {
+      "at": "2026-07-25T20:01:40.653Z",
+      "by": "cursor-e3-442-v",
+      "action": "card.update",
+      "ref": "c0ok76h1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-25T20:01:36.790Z",
+      "by": "cursor-e3-442-v",
+      "action": "card.criteria-verify",
+      "ref": "c0ok76h1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-25T20:01:36.624Z",
+      "by": "cursor-e3-442-v",
+      "action": "card.criteria-verify",
+      "ref": "c0ok76h1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-25T20:01:36.488Z",
+      "by": "cursor-e3-442-v",
+      "action": "card.criteria-verify",
+      "ref": "c0ok76h1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-25T20:01:32.266Z",
+      "by": "e3-442-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ok76h1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-25T20:01:32.135Z",
+      "by": "e3-442-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ok76h1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-25T20:01:31.970Z",
+      "by": "e3-442-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ok76h1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-25T20:01:31.820Z",
+      "by": "e3-442-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ok76h1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-25T20:01:27.885Z",
+      "by": "e3-442-nb",
+      "action": "card.criteria-meet",
+      "ref": "c0ok76h1",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-25T20:01:27.735Z",
+      "by": "e3-442-nb",
+      "action": "card.criteria-meet",
+      "ref": "c0ok76h1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-25T20:01:27.558Z",
+      "by": "e3-442-nb",
+      "action": "card.criteria-meet",
+      "ref": "c0ok76h1",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-25T20:01:27.394Z",
+      "by": "e3-442-nb",
+      "action": "card.criteria-meet",
+      "ref": "c0ok76h1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-25T20:01:07.280Z",
+      "by": "e3-729-w2",
+      "action": "card.update",
+      "ref": "c0xdsvm9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-25T20:00:47.159Z",
+      "by": "e3-751-lsp",
+      "action": "card.update",
+      "ref": "c04x8v2l",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-25T20:00:33.124Z",
       "by": "e3-751-lsp",
       "action": "card.criteria-meet",
@@ -49139,118 +49097,6 @@
       "action": "card.criteria-verify",
       "ref": "c0182sm1",
       "note": "#7"
-    },
-    {
-      "at": "2026-07-25T02:48:56.368Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0182sm1",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-25T02:48:56.184Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0182sm1",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T02:48:55.995Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0182sm1",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T02:48:55.795Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0182sm1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T02:48:55.611Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0182sm1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T02:48:55.425Z",
-      "by": "one-core-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0182sm1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:48:55.229Z",
-      "by": "e3-781-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0182sm1",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-25T02:48:54.999Z",
-      "by": "e3-781-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0182sm1",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-25T02:48:54.729Z",
-      "by": "e3-781-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0182sm1",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-25T02:48:54.492Z",
-      "by": "e3-781-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0182sm1",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-25T02:48:54.240Z",
-      "by": "e3-781-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0182sm1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-25T02:48:54.087Z",
-      "by": "e3-781-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0182sm1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-25T02:48:53.950Z",
-      "by": "e3-781-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0182sm1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-25T02:47:39.180Z",
-      "by": "e3-781-grok",
-      "action": "card.update",
-      "ref": "c0182sm1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T02:45:16.949Z",
-      "by": "e3-781-grok",
-      "action": "card.update",
-      "ref": "c0182sm1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-25T02:44:53.176Z",
-      "by": "e3-781-grok",
-      "action": "card.update",
-      "ref": "c0182sm1",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
