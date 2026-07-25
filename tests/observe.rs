@@ -476,3 +476,84 @@ fn run() {
     );
     assert!(stderr.contains("via ?"), "missing `via ?` suffix: {stderr}");
 }
+
+#[test]
+fn uncaught_err_prints_propagation_chain() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        return;
+    }
+
+    // D-ERRCTX1=D criterion 1: uncaught Err at `fn run() -> Void ?` prints the
+    // `?` chain (file:line per frame) then the error text, exit 1.
+    let src = r#"
+fn read_raw() -> String ? {
+    return Err("file not found")
+}
+fn parse_config() -> String ? {
+    raw :: read_raw()?
+    return Ok(raw)
+}
+fn load_config() -> String ? {
+    cfg :: parse_config().context("loading config")?
+    return Ok(cfg)
+}
+fn run() -> Void ? {
+    _ :: load_config()?
+}
+"#;
+    let (code, _stdout, stderr) = build_and_run_debug("error_trace_uncaught", src);
+    assert_eq!(code, 1, "uncaught Err must exit 1: {stderr}");
+    assert!(
+        stderr.contains("error propagated from: parse_config"),
+        "missing parse_config frame: {stderr}"
+    );
+    assert!(
+        stderr.contains("error propagated from: load_config"),
+        "missing load_config frame: {stderr}"
+    );
+    assert!(
+        stderr.contains("via ?"),
+        "missing `via ?` suffix: {stderr}"
+    );
+    assert!(
+        stderr.contains("loading config: file not found"),
+        "missing .context frame in uncaught Err text: {stderr}"
+    );
+}
+
+#[test]
+fn propagation_trace_collapses_repeated_frames() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        return;
+    }
+
+    // Same `?` site hit repeatedly via recursion → one frame, not N copies.
+    let src = r#"
+fn dive(n: Int) -> Int ? {
+    if n <= 0 {
+        return Err("bottom")
+    }
+    v :: dive((n - 1))?
+    return Ok(v)
+}
+fn run() {
+    if dive(4) == {
+        Ok(v) -> { print(v) }
+        Err(e) -> { print("failed") }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run_debug("error_trace_collapse", src);
+    assert_eq!(code, 0, "program should exit 0: {stderr}");
+    assert!(stdout.contains("failed"), "error not caught: {stdout}");
+    let dive_frames = stderr
+        .lines()
+        .filter(|l| l.contains("error propagated from: dive"))
+        .count();
+    assert_eq!(
+        dive_frames, 1,
+        "repeated dive frames must collapse to 1, got {dive_frames}:\n{stderr}"
+    );
+}

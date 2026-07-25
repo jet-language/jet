@@ -1443,16 +1443,40 @@ fn jet_panic_rich(
     }
     jet_runtime_exit();
 }
-/// E3002 (E2-M12, D-OBS1): error-return trace frame. In debug builds, when a `?`
-/// actually propagates an `Err`, print one Zig-style frame to stderr, then hand
-/// the `Result` back unchanged so the caller's `?` proceeds (incl. any
-/// `From`/`to_error` conversion). In release builds this is a no-op.
+/// E3002 / D-ERRCTX1=D: `?`-propagation trace in **dev** builds.
+///
+/// Gate is `not(jet_release)` (set by `--release` / `--profile=release`), not
+/// `debug_assertions`: the default `jet run` profile passes `-O`, which turns
+/// debug assertions off while still being a daily-driver /dev/ build.
+///
+/// Consecutive identical frames (same fn + file + line) collapse — Go wrap-noise
+/// lesson — while each distinct site keeps its identity (Elixir lesson).
+thread_local! {
+    static JET_ERR_TRACE_LAST: std::cell::RefCell<Option<(String, String, u32)>> =
+        const { std::cell::RefCell::new(None) };
+}
 fn jet_trace_err<T, E>(r: Result<T, E>, file: &str, line: u32, fn_name: &str) -> Result<T, E> {
-    if cfg!(debug_assertions) && r.is_err() {
-        eprintln!(
-            "error propagated from: {} ({}:{}) via ?",
-            fn_name, file, line
-        );
+    if cfg!(not(jet_release)) {
+        if r.is_err() {
+            let site = (fn_name.to_string(), file.to_string(), line);
+            let fresh = JET_ERR_TRACE_LAST.with(|last| {
+                let mut slot = last.borrow_mut();
+                if slot.as_ref() == Some(&site) {
+                    false
+                } else {
+                    *slot = Some(site);
+                    true
+                }
+            });
+            if fresh {
+                eprintln!(
+                    "error propagated from: {} ({}:{}) via ?",
+                    fn_name, file, line
+                );
+            }
+        } else {
+            JET_ERR_TRACE_LAST.with(|last| *last.borrow_mut() = None);
+        }
     }
     r
 }

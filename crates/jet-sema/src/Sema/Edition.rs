@@ -8,15 +8,20 @@ pub(crate) fn with_package_edition<R>(edition: &str, f: impl FnOnce() -> R) -> R
     jet_foundation::PackageEdition::with_package_edition(edition, f)
 }
 
+// Scaffolding for edition-gated core deprecations (D-REL*). Manifest owns the
+// live L2001/E2002 path today; keep these helpers for the sema wiring card.
+#[allow(dead_code)]
 pub(crate) fn package_edition() -> String {
     jet_foundation::PackageEdition::package_edition()
 }
 
+#[allow(dead_code)]
 pub(crate) fn edition_at_least(baseline: &str) -> bool {
     jet_foundation::PackageEdition::package_edition_at_least(baseline)
 }
 
 /// Mirrors `jet_pkg_model::Manifest::Deprecation` — keep in sync with `DEPRECATIONS` there.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Deprecation {
     pub(crate) item: &'static str,
@@ -25,6 +30,7 @@ pub(crate) struct Deprecation {
     pub(crate) removed_in_edition: &'static str,
 }
 
+#[allow(dead_code)]
 const DEPRECATIONS: &[Deprecation] = &[
     Deprecation {
         item: "cbor.encode",
@@ -40,10 +46,12 @@ const DEPRECATIONS: &[Deprecation] = &[
     },
 ];
 
+#[allow(dead_code)]
 fn lookup_deprecation(item: &str) -> Option<&'static Deprecation> {
     DEPRECATIONS.iter().find(|dep| dep.item == item)
 }
 
+#[allow(dead_code)]
 pub(crate) fn check_core_deprecation(module: &str, name: &str) -> Option<Deprecation> {
     let short = crate::Syntax::normalize_core_module(module)
         .and_then(|m| m.strip_prefix("core.encoding.").map(|rest| rest.to_string()))
@@ -52,6 +60,7 @@ pub(crate) fn check_core_deprecation(module: &str, name: &str) -> Option<Depreca
     lookup_deprecation(&item).copied()
 }
 
+#[allow(dead_code)]
 pub(crate) fn deprecation_phase(dep: &Deprecation) -> DeprecationPhase {
     let edition = package_edition();
     if jet_foundation::PackageEdition::edition_at_least(&edition, dep.removed_in_edition) {
@@ -63,6 +72,7 @@ pub(crate) fn deprecation_phase(dep: &Deprecation) -> DeprecationPhase {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeprecationPhase {
     Active,
@@ -70,6 +80,7 @@ pub(crate) enum DeprecationPhase {
     Removed,
 }
 
+#[allow(dead_code)]
 pub(crate) fn e2002(dep: &Deprecation, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E2002",
@@ -90,6 +101,7 @@ pub(crate) fn e2002(dep: &Deprecation, span: Option<Span>) -> Diagnostic {
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn l2001(dep: &Deprecation, span: Option<Span>) -> Diagnostic {
     Diagnostic::lint(
         "L2001",
