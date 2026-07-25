@@ -1426,16 +1426,16 @@ pub enum TStmt {
         step: Option<Box<TStmt>>,
         body: Vec<TStmt>,
     },
-    /// `loop i; start..end [step k]` — a numeric range loop (`ForKind::Range`).
-    /// Jet's `..` is inclusive (S22 / D-SG8), so this lowers to `start..=end`,
-    /// optionally `.step_by((k) as usize)`. The loop variable `var` is an `Int`
-    /// local bound inside the body; its type is resolved here, not in emit.
+    /// `loop i; start..end [; stride]` — a numeric range loop (`ForKind::Range`).
+    /// Inclusive `..` (S22) lowers to `start..=end`; exclusive `..<`
+    /// (D-RANGE-EXCL1=C) lowers to `start..end`. Optional stride uses `.step_by`.
     Range {
         label: Option<String>,
         var: String,
         start: TExpr,
         end: TExpr,
         step: Option<TExpr>,
+        exclusive: bool,
         body: Vec<TStmt>,
     },
     /// `break` / `name.break()` (label resolved at lowering).
@@ -2830,11 +2830,13 @@ pub enum TBuiltinOp {
     Chunks,
     /// `windows(n)` → `jet_list_windows((recv).clone(), a0)`.
     Windows,
-    /// `enumerate()` → inline emit building `JetTup_<hash>` struct. The struct name
+    /// `indexed()` → inline emit building `JetTup_<hash>` struct. The struct name
     /// is embedded here at lowering so emit is a pure formatter.
-    Enumerate {
+    Indexed {
         tuple_struct: String,
     },
+    /// D-RANGE-EXCL1=C: `indexes()` → `Iter<Int>` of every valid index.
+    Indexes,
     /// `zip([U])` → inline emit building `JetTup_<hash>` struct.
     Zip {
         tuple_struct: String,

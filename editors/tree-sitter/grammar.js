@@ -21,7 +21,7 @@ const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Bud
 const JET_HIGHLIGHT_BUILTIN = ["check", "input", "print"];
 const JET_HIGHLIGHT_MARKER_RULE = ["Abi", "Add", "Bench", "Bindgen", "Caps", "Cli", "Codable", "CodableAsBase", "Comparable", "Context", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Doc", "Encode", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "Html", "Impure", "Inline", "InlineAlways", "Invariant", "Layout", "Live", "Local", "Max", "Meta", "Min", "Mul", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Pure", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Sanitizer", "Shared", "Shield", "SingleUse", "Skip", "Sql", "State", "Summarize", "Tag", "Tainted", "Target", "Task", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "inline", "static"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "^", "~"];
-const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", ".[", ".{", "/", "/=", "<", "<<", "<<=", "<=", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||"];
+const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", "..<", ".[", ".{", "/", "/=", "<", "<<", "<<=", "<=", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||"];
 // END GENERATED JET SYNTAX HIGHLIGHTS
 
 module.exports = grammar({
@@ -1052,9 +1052,9 @@ module.exports = grammar({
       );
     },
 
-    // `lo..hi` inclusive range (S22).
+    // `lo..hi` inclusive (S22); `lo..<hi` exclusive (D-RANGE-EXCL1).
     range_expr: ($) =>
-      prec.left(5, seq($._expr, "..", $._expr)),
+      prec.left(5, seq($._expr, choice("..<", ".."), $._expr)),
 
     unary_expr: ($) => prec.right(9, seq(choice("-", "!"), $._expr)),
 

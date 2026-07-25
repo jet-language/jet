@@ -134,11 +134,14 @@ impl MetaAttr {
 /// `for i in 1..10` vs `for x in xs` (M5).
 #[derive(Debug, Clone)]
 pub enum ForKind {
-    /// S22 (D-SG8): `start..end` inclusive, with an optional `step n` stride.
+    /// S22 (D-SG8): `start..end` inclusive by default.
+    /// D-RANGE-EXCL1=C: `start..<end` is half-open (`exclusive: true`).
+    /// Optional third-clause stride is unchanged.
     Range {
         start: Expr,
         end: Expr,
         step: Option<Expr>,
+        exclusive: bool,
     },
     In {
         collection: Expr,

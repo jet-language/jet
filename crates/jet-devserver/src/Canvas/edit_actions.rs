@@ -1670,7 +1670,7 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option
         }
         Stmt::For { kind, body, .. } => {
             match kind {
-                AST::ForKind::Range { start, end, step } => {
+                AST::ForKind::Range { start, end, step, exclusive: _ } => {
                     find_multi_input_in_expr(start, node_span, out);
                     find_multi_input_in_expr(end, node_span, out);
                     if let Some(step) = step { find_multi_input_in_expr(step, node_span, out); }
@@ -1915,7 +1915,7 @@ fn find_multi_input_element_in_stmt(
         }
         Stmt::For { kind, body, .. } => {
             match kind {
-                AST::ForKind::Range { start, end, step } => {
+                AST::ForKind::Range { start, end, step, exclusive: _ } => {
                     find_multi_input_element_in_expr(start, node_span, element_span, found);
                     find_multi_input_element_in_expr(end, node_span, element_span, found);
                     if let Some(step) = step { find_multi_input_element_in_expr(step, node_span, element_span, found); }

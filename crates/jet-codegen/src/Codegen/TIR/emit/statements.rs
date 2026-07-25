@@ -664,12 +664,14 @@ fn emit_tir_stmt(
             start,
             end,
             step,
+            exclusive,
             body,
         } => {
             let lbl = tir_label_prefix(label);
             let s = emit_expr_with_cleanups(start, cx, active_deferred_closes);
             let e = emit_expr_with_cleanups(end, cx, active_deferred_closes);
-            // S22 (D-SG8): `..` is inclusive → `..=`; `step` becomes `.step_by`.
+            // S22: `..` → `..=`; D-RANGE-EXCL1=C: `..<` → `..`.
+            let range_op = if *exclusive { ".." } else { "..=" };
             match step {
                 Some(step) => {
                     let st = emit_expr_with_cleanups(step, cx, active_deferred_closes);
@@ -678,7 +680,7 @@ fn emit_tir_stmt(
                     out.push_str(&format!("{}    let _jet_loop_stride = {};\n", pad, st));
                     out.push_str(&format!("{}    if _jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n", pad, cx.root_prefix, cx.file));
                     out.push_str(&format!(
-                        "{}{}for {} in (_jet_loop_start..=_jet_loop_end).step_by(_jet_loop_stride as usize) {{\n",
+                        "{}{}for {} in (_jet_loop_start{range_op}_jet_loop_end).step_by(_jet_loop_stride as usize) {{\n",
                         pad,
                         lbl,
                         mangle(var)
@@ -686,7 +688,7 @@ fn emit_tir_stmt(
                 }
                 None => {
                     out.push_str(&format!(
-                        "{}{}for {} in ({})..=({}) {{\n",
+                        "{}{}for {} in ({}){range_op}({}) {{\n",
                         pad,
                         lbl,
                         mangle(var),
@@ -1019,20 +1021,51 @@ fn emit_tir_stmt(
                 }
                 None => match var2 {
                     Some(v2) => {
-                        out.push_str(&format!(
-                            "{}{}for (_jet_k, _jet_v) in ({}).iter(){} {{\n",
-                            pad, lbl, collection_str, stride_suffix
-                        ));
-                        out.push_str(&format!(
-                            "{}    let {} = _jet_k.clone();\n",
-                            pad,
-                            mangle(var)
-                        ));
-                        out.push_str(&format!(
-                            "{}    let {} = _jet_v.clone();\n",
-                            pad,
-                            mangle(v2)
-                        ));
+                        if matches!(&collection.ty, Type::List(_) | Type::FixedList { .. })
+                            || matches!(
+                                &collection.ty,
+                                Type::Apply { name, args }
+                                    if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1
+                            )
+                        {
+                            // D-RANGE-EXCL1=C: sequence two-binding → index then item.
+                            let iter_form = if *by_value {
+                                format!("({})", collection_str)
+                            } else if *columnar {
+                                format!("({}).iter_aos()", collection_str)
+                            } else {
+                                format!("({}).iter().cloned()", collection_str)
+                            };
+                            out.push_str(&format!(
+                                "{}{}for (_jet_i, _jet_item) in {}{} .enumerate() {{\n",
+                                pad, lbl, iter_form, stride_suffix
+                            ));
+                            out.push_str(&format!(
+                                "{}    let {} = _jet_i as i64;\n",
+                                pad,
+                                mangle(var)
+                            ));
+                            out.push_str(&format!(
+                                "{}    let {} = _jet_item;\n",
+                                pad,
+                                mangle(v2)
+                            ));
+                        } else {
+                            out.push_str(&format!(
+                                "{}{}for (_jet_k, _jet_v) in ({}).iter(){} {{\n",
+                                pad, lbl, collection_str, stride_suffix
+                            ));
+                            out.push_str(&format!(
+                                "{}    let {} = _jet_k.clone();\n",
+                                pad,
+                                mangle(var)
+                            ));
+                            out.push_str(&format!(
+                                "{}    let {} = _jet_v.clone();\n",
+                                pad,
+                                mangle(v2)
+                            ));
+                        }
                     }
                     None => {
                         if let Type::Map { key, value, .. } = &collection.ty {

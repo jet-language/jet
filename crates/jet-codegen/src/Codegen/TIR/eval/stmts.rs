@@ -145,6 +145,7 @@ impl EvalCtx<'_> {
                 start,
                 end,
                 step,
+                exclusive,
                 body,
                 label,
             } => {
@@ -157,7 +158,17 @@ impl EvalCtx<'_> {
                 if step_v == 0 {
                     return Err(unsupported("range step 0", self.span()));
                 }
-                while if step_v > 0 { i <= end_v } else { i >= end_v } {
+                // D-RANGE-EXCL1=C: exclusive `..<` stops before end; inclusive `..` includes it.
+                let in_range = |cur: i64| {
+                    if *exclusive {
+                        if step_v > 0 { cur < end_v } else { cur > end_v }
+                    } else if step_v > 0 {
+                        cur <= end_v
+                    } else {
+                        cur >= end_v
+                    }
+                };
+                while in_range(i) {
                     self.burn()?;
                     scope.insert(var.clone(), CtValue::Int(i));
                     match self.exec_stmts(body, scope)? {
@@ -260,9 +271,13 @@ impl EvalCtx<'_> {
                         let mut i = 0usize;
                         while i < items.len() {
                             self.burn()?;
-                            scope.insert(var.clone(), items[i].clone());
+                            // D-RANGE-EXCL1=C: two bindings are index then item;
+                            // one binding stays item-only.
                             if let Some(v2) = var2 {
-                                scope.insert(v2.clone(), CtValue::Unit);
+                                scope.insert(var.clone(), CtValue::Int(i as i64));
+                                scope.insert(v2.clone(), items[i].clone());
+                            } else {
+                                scope.insert(var.clone(), items[i].clone());
                             }
                             match self.exec_stmts(body, scope)? {
                                 Flow::Normal | Flow::Continue => {}

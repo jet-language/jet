@@ -150,7 +150,7 @@ pub(crate) fn check_pure_stmt(
         Stmt::For { kind, body, .. } => {
             use crate::AST::ForKind;
             match kind {
-                ForKind::Range { start, end, step } => {
+                ForKind::Range { start, end, step, exclusive: _ } => {
                     if let Some(d) = check_pure_expr(start, pure_fn, funcs) {
                         return Some(d);
                     }
@@ -596,7 +596,7 @@ fn check_pure_stmt_with_path(
         Stmt::For { kind, body, .. } => {
             use crate::AST::ForKind;
             match kind {
-                ForKind::Range { start, end, step } => {
+                ForKind::Range { start, end, step, exclusive: _ } => {
                     if let Some(d) = rec!(start) {
                         return Some(d);
                     }
@@ -1145,7 +1145,7 @@ fn walk_stmt_for_calls(
         Stmt::For { kind, body, .. } => {
             use crate::AST::ForKind;
             match kind {
-                ForKind::Range { start, end, step } => {
+                ForKind::Range { start, end, step, exclusive: _ } => {
                     walk_expr_for_calls(start, root_fn, funcs_sig, ast_funcs, path, visited, diags);
                     if diags.is_empty() {
                         walk_expr_for_calls(

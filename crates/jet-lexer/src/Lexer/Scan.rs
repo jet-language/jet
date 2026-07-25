@@ -172,6 +172,10 @@ impl<'a> Lexer<'a> {
                 '.' if next == '.' && next2 == '.' => {
                     toks.push(simple(self, TokKind::DotDotDot, 3))
                 }
+                // D-RANGE-EXCL1=C: `..<` before plain `..` (longest match).
+                '.' if next == '.' && next2 == '<' => {
+                    toks.push(simple(self, TokKind::DotDotLt, 3))
+                }
                 '.' if next == '.' => toks.push(simple(self, TokKind::DotDot, 2)),
                 '.' => toks.push(simple(self, TokKind::Dot, 1)),
                 '=' if next == '=' => toks.push(simple(self, TokKind::EqEq, 2)),

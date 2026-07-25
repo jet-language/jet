@@ -1278,7 +1278,7 @@ impl<'a> Checker<'a> {
                     // count as initializing after the loop.
                     let saved_u = self.uninit.clone();
                     match kind {
-                        ForKind::Range { start, end, step } => {
+                        ForKind::Range { start, end, step, exclusive } => {
                             for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
                                 let t = self.infer(e);
                                 if let Some(t) = t {
@@ -1291,9 +1291,9 @@ impl<'a> Checker<'a> {
                                                 Type::Int.show(),
                                                 t.show()
                                             ),
-                                            "`for` counts whole numbers between two ends (both included, S22)"
+                                            "`loop` counts whole numbers between two ends (inclusive `..` includes both, S22; exclusive `..<` stops before the end)"
                                                 .to_string(),
-                                            "use Int values for both ends, like `1..10`".to_string(),
+                                            "use Int values for both ends, like `1..10` or `0..<n`".to_string(),
                                             Some(e.span()),
                                         ));
                                     }
@@ -1358,6 +1358,28 @@ impl<'a> Checker<'a> {
                             for s in body.iter_mut() {
                                 self.check_stmt(s);
                             }
+                            // D-RANGE-EXCL1=C: teach when inclusive `….xs.len()` indexes that same xs
+                            // with this loop's index name (the provable 0..len trap).
+                            if !*exclusive {
+                                if let Some(root) = range_end_len_root(end) {
+                                    if stmts_index_root_with(body, &root, var) {
+                                        let end_span = end.span();
+                                        self.diags.push(Diagnostic::error(
+                                            "E0364",
+                                            format!(
+                                                "this range includes `{root}.len()`, one past the last index"
+                                            ),
+                                            format!(
+                                                "`{root}.len()` is the count of items, so inclusive `..` runs one step too far when the body indexes `{root}`"
+                                            ),
+                                            format!(
+                                                "write `loop i, item; {root}` — or `loop i; {root}.indexes` — or `0..<{root}.len()`"
+                                            ),
+                                            Some(end_span),
+                                        ));
+                                    }
+                                }
+                            }
                             self.pop_scope();
                             self.loop_depth -= 1;
                         }
@@ -1392,8 +1414,14 @@ impl<'a> Checker<'a> {
                             }
                             self.push_scope();
                             match &coll_ty {
-                                Some(Type::List(inner)) => {
-                                    self.declare_loop_var(var.clone(), *var_span, inner);
+                                Some(Type::List(inner)) | Some(Type::FixedList { elem: inner, .. }) => {
+                                    // D-RANGE-EXCL1=C: two bindings are index then item; one binding stays item-only.
+                                    if let Some((v2, v2s)) = var2.as_ref() {
+                                        self.declare_loop_var(var.clone(), *var_span, &Type::Int);
+                                        self.declare_loop_var(v2.clone(), *v2s, inner);
+                                    } else {
+                                        self.declare_loop_var(var.clone(), *var_span, inner);
+                                    }
                                 }
                                 Some(Type::Apply { name, args })
                                     if name == Syntax::TYPE_ITER && args.len() == 1 =>
@@ -1480,12 +1508,17 @@ impl<'a> Checker<'a> {
                                     }
                                     self.declare_loop_var(var.clone(), *var_span, &args[0]);
                                 }
-                                // D-DYNARRAY1: `loop x; window` — a `View<T>` iterates its
-                                // elements read-only, same shape as `loop x; a_list`.
+                                // D-DYNARRAY1 / D-RANGE-EXCL1=C: `loop x; window` — View iterates
+                                // elements; two bindings are index then item.
                                 Some(Type::Apply { name, args })
                                     if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
                                 {
-                                    self.declare_loop_var(var.clone(), *var_span, &args[0]);
+                                    if let Some((v2, v2s)) = var2.as_ref() {
+                                        self.declare_loop_var(var.clone(), *var_span, &Type::Int);
+                                        self.declare_loop_var(v2.clone(), *v2s, &args[0]);
+                                    } else {
+                                        self.declare_loop_var(var.clone(), *var_span, &args[0]);
+                                    }
                                 }
                                 Some(other) => {
                                     self.diags.push(Diagnostic::error(
@@ -2145,7 +2178,7 @@ impl<'a> Checker<'a> {
 
 fn statically_bounded_for_iterations(kind: &ForKind) -> Option<u64> {
     match kind {
-        ForKind::Range { start, end, step } => {
+        ForKind::Range { start, end, step, exclusive } => {
             let Expr::Int(start, _, _, _) = start else { return None };
             let Expr::Int(end, _, _, _) = end else { return None };
             let step = match step {
@@ -2153,6 +2186,14 @@ fn statically_bounded_for_iterations(kind: &ForKind) -> Option<u64> {
                 None => 1,
                 _ => return None,
             };
+            // Inclusive `a..b` is empty when b < a; exclusive `a..<b` when a >= b.
+            if *exclusive {
+                if *end <= *start {
+                    return Some(0);
+                }
+                let iterations = ((*end as i128 - *start as i128) + step - 1) / step;
+                return u64::try_from(iterations).ok();
+            }
             if end < start {
                 return Some(0);
             }
@@ -2169,5 +2210,196 @@ fn statically_bounded_for_iterations(kind: &ForKind) -> Option<u64> {
             Some(len.div_ceil(stride))
         }
         ForKind::In { .. } => None,
+    }
+}
+
+/// D-RANGE-EXCL1=C: only the exact shape `….len()` (no args) ends a range.
+fn range_end_len_root(end: &Expr) -> Option<String> {
+    match end {
+        Expr::MethodCall {
+            receiver,
+            method,
+            args,
+            ..
+        } if method == "len" && args.is_empty() => collection_root_name(receiver)
+            .or_else(|| expr_root_ident(receiver).map(str::to_string)),
+        _ => None,
+    }
+}
+
+/// True when any statement in `body` indexes the named root with `index_var`.
+fn stmts_index_root_with(body: &[Stmt], root: &str, index_var: &str) -> bool {
+    body.iter().any(|s| stmt_indexes_root_with(s, root, index_var))
+}
+
+fn else_indexes_root_with(branch: &Option<crate::AST::ElseBranch>, root: &str, index_var: &str) -> bool {
+    match branch {
+        Some(crate::AST::ElseBranch::ElseIf(inner)) => {
+            expr_indexes_root_with(&inner.cond, root, index_var)
+                || stmts_index_root_with(&inner.then_body, root, index_var)
+                || else_indexes_root_with(&inner.else_branch, root, index_var)
+        }
+        Some(crate::AST::ElseBranch::Else(body)) => stmts_index_root_with(body, root, index_var),
+        None => false,
+    }
+}
+
+fn stmt_indexes_root_with(stmt: &Stmt, root: &str, index_var: &str) -> bool {
+    match stmt {
+        Stmt::Expr(e) | Stmt::Return(Some(e), _) => expr_indexes_root_with(e, root, index_var),
+        Stmt::Val(b) => expr_indexes_root_with(&b.init, root, index_var),
+        Stmt::Assign { target, value, .. } => {
+            lvalue_indexes_root_with(target, root, index_var)
+                || expr_indexes_root_with(value, root, index_var)
+        }
+        Stmt::If(iff) => {
+            expr_indexes_root_with(&iff.cond, root, index_var)
+                || stmts_index_root_with(&iff.then_body, root, index_var)
+                || else_indexes_root_with(&iff.else_branch, root, index_var)
+        }
+        Stmt::While { cond, body, .. } => {
+            expr_indexes_root_with(cond, root, index_var) || stmts_index_root_with(body, root, index_var)
+        }
+        Stmt::For { kind, body, .. } => {
+            let kind_hits = match kind {
+                ForKind::Range { start, end, step, .. } => {
+                    expr_indexes_root_with(start, root, index_var)
+                        || expr_indexes_root_with(end, root, index_var)
+                        || step
+                            .as_ref()
+                            .is_some_and(|s| expr_indexes_root_with(s, root, index_var))
+                }
+                ForKind::In { collection, step } => {
+                    expr_indexes_root_with(collection, root, index_var)
+                        || step
+                            .as_ref()
+                            .is_some_and(|s| expr_indexes_root_with(s, root, index_var))
+                }
+            };
+            kind_hits || stmts_index_root_with(body, root, index_var)
+        }
+        Stmt::Loop { body, .. } | Stmt::Unsafe { body, .. } | Stmt::Region { body, .. } => {
+            stmts_index_root_with(body, root, index_var)
+        }
+        Stmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
+            expr_indexes_root_with(&init.init, root, index_var)
+                || expr_indexes_root_with(cond, root, index_var)
+                || step
+                    .as_ref()
+                    .is_some_and(|s| stmt_indexes_root_with(s, root, index_var))
+                || stmts_index_root_with(body, root, index_var)
+        }
+        Stmt::Switch { subject, arms, else_body, .. }
+        | Stmt::ComptimeSwitch {
+            subject,
+            arms,
+            else_body,
+            ..
+        } => {
+            expr_indexes_root_with(subject, root, index_var)
+                || arms.iter().any(|a| {
+                    expr_indexes_root_with(&a.cond, root, index_var)
+                        || stmts_index_root_with(&a.body, root, index_var)
+                })
+                || else_body
+                    .as_ref()
+                    .is_some_and(|b| stmts_index_root_with(b, root, index_var))
+        }
+        _ => false,
+    }
+}
+
+fn lvalue_indexes_root_with(lv: &LValue, root: &str, index_var: &str) -> bool {
+    match lv {
+        LValue::Index { base, index, .. } => {
+            (expr_root_ident(base) == Some(root) && expr_is_ident(index, index_var))
+                || expr_indexes_root_with(base, root, index_var)
+                || expr_indexes_root_with(index, root, index_var)
+        }
+        LValue::Local { .. } => false,
+        _ => false,
+    }
+}
+
+fn expr_is_ident(expr: &Expr, name: &str) -> bool {
+    matches!(expr, Expr::Ident(n, _) if n == name)
+}
+
+fn expr_indexes_root_with(expr: &Expr, root: &str, index_var: &str) -> bool {
+    match expr {
+        Expr::Index { base, index, .. } => {
+            (expr_root_ident(base) == Some(root) && expr_is_ident(index, index_var))
+                || expr_indexes_root_with(base, root, index_var)
+                || expr_indexes_root_with(index, root, index_var)
+        }
+        Expr::Str(parts, _) => parts.iter().any(|p| match p {
+            StrPart::Interp(inner, _) => expr_indexes_root_with(inner, root, index_var),
+            StrPart::Lit(_) => false,
+        }),
+        Expr::Call(c) => c
+            .args
+            .iter()
+            .any(|a| expr_indexes_root_with(&a.expr, root, index_var)),
+        Expr::CallValue { callee, args, .. } => {
+            expr_indexes_root_with(callee, root, index_var)
+                || args
+                    .iter()
+                    .any(|a| expr_indexes_root_with(&a.expr, root, index_var))
+        }
+        Expr::MethodCall {
+            receiver, args, ..
+        } => {
+            expr_indexes_root_with(receiver, root, index_var)
+                || args
+                    .iter()
+                    .any(|a| expr_indexes_root_with(&a.expr, root, index_var))
+        }
+        Expr::Field(inner, _, _)
+        | Expr::Spread(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Place(inner, _, _)
+        | Expr::Present(inner, _)
+        | Expr::Tainted(inner, _, _)
+        | Expr::Ok(inner, _)
+        | Expr::Err(inner, _) => expr_indexes_root_with(inner, root, index_var),
+        Expr::Try(inner, _, _) => expr_indexes_root_with(inner, root, index_var),
+        Expr::Binary(_, left, right, _) => {
+            expr_indexes_root_with(left, root, index_var)
+                || expr_indexes_root_with(right, root, index_var)
+        }
+        Expr::ListLit(items, _) => items
+            .iter()
+            .any(|e| expr_indexes_root_with(e, root, index_var)),
+        Expr::TupleLit(items, _, _) => items
+            .iter()
+            .any(|(_, e)| expr_indexes_root_with(e, root, index_var)),
+        Expr::Slice { base, start, end, .. } => {
+            expr_indexes_root_with(base, root, index_var)
+                || expr_indexes_root_with(start, root, index_var)
+                || expr_indexes_root_with(end, root, index_var)
+        }
+        Expr::OrFallback { value, .. } => expr_indexes_root_with(value, root, index_var),
+        Expr::If {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            ..
+        } => {
+            expr_indexes_root_with(cond, root, index_var)
+                || stmts_index_root_with(then_body, root, index_var)
+                || expr_indexes_root_with(then_value, root, index_var)
+                || stmts_index_root_with(else_body, root, index_var)
+                || expr_indexes_root_with(else_value, root, index_var)
+        }
+        _ => false,
     }
 }

@@ -42,7 +42,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // D-ITER1: non-closure lazy adapters.
         | ("take", 1) | ("skip", 1) | ("step_by", 1)
         | ("dedup", 0) | ("chunks", 1) | ("windows", 1)
-        | ("enumerate", 0) | ("zip", 1)
+        | ("indexed", 0) | ("indexes", 0) | ("zip", 1)
         | ("sum", 0) | ("product", 0) | ("min", 0) | ("max", 0)
         | ("flatten", 0) | ("intersperse", 1) | ("unzip", 0)
         // D-COLLBREADTH1=A: Set<T> instance methods.

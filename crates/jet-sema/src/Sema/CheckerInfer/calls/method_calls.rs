@@ -3275,6 +3275,7 @@ impl<'a> Checker<'a> {
                     let refinement_capable = matches!(
                         method,
                         "zip"
+                            | "indexed"
                             | "map"
                             | "reduce"
                             | "flat_map"

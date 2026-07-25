@@ -283,7 +283,7 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
         }
         Stmt::For { kind, body, .. } => {
             let kind_hit = match kind {
-                ForKind::Range { start, end, step } => {
+                ForKind::Range { start, end, step, exclusive: _ } => {
                     expr_references_ident(start, name)
                         || expr_references_ident(end, name)
                         || step

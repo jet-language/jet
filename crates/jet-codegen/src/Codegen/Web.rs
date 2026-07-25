@@ -419,10 +419,9 @@ fn web_wasm_stmts_supported(
                     .unwrap_or(true)
                 && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
         }
-        // Plain `loop x; xs` over a list/local (JS already emits `for…of`).
-        // Keep method/map/stride/columnar forms on the honest unsupported path.
+        // Plain `loop x; xs` / `loop i, x; xs` over a list/local (JS already emits
+        // `for…of` / `.entries()`). Keep method/map/stride/columnar forms unsupported.
         TIR::TStmt::ForIn {
-            var2: None,
             step: None,
             method_kind: None,
             columnar: false,
@@ -504,7 +503,7 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
         TIR::TStmt::Assign { value, .. } => web_expr_supported(value),
         TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => web_expr_supported(cond) && web_stmts_supported(then_body) && else_body.as_deref().map(web_stmts_supported).unwrap_or(true),
         TIR::TStmt::Range { start, end, step, body, .. } => web_expr_supported(start) && web_expr_supported(end) && step.as_ref().map(web_expr_supported).unwrap_or(true) && web_stmts_supported(body),
-        TIR::TStmt::ForIn { var2: None, collection, body, .. } => web_expr_supported(collection) && web_stmts_supported(body),
+        TIR::TStmt::ForIn { collection, body, .. } => web_expr_supported(collection) && web_stmts_supported(body),
         TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => web_stmts_supported(body),
         _ => false,
     })
@@ -1580,10 +1579,11 @@ fn emit_wasm_body(
                 }
                 out.push_str(&format!("{pad}}}\n"));
             }
-            TIR::TStmt::Range { var, start, end, step, body, .. } => {
+            TIR::TStmt::Range { var, start, end, step, exclusive, body, .. } => {
                 let start = wasm_emit_expr(start, funcs, file_prefix, reconstructions)?;
                 let end = wasm_emit_expr(end, funcs, file_prefix, reconstructions)?;
                 let loop_var = mangle(var);
+                let range_op = if *exclusive { ".." } else { "..=" };
                 match step {
                     Some(step) => {
                         let step = wasm_emit_expr(step, funcs, file_prefix, reconstructions)?;
@@ -1595,7 +1595,7 @@ fn emit_wasm_body(
                             "{pad}    assert!(_jet_loop_stride > 0, \"E0123: loop stride must be positive\");\n"
                         ));
                         out.push_str(&format!(
-                            "{pad}    for {loop_var} in (_jet_loop_start..=_jet_loop_end).step_by(_jet_loop_stride as usize) {{\n"
+                            "{pad}    for {loop_var} in (_jet_loop_start{range_op}_jet_loop_end).step_by(_jet_loop_stride as usize) {{\n"
                         ));
                         emit_wasm_body(body, out, indent + 2, funcs, file_prefix, reconstructions)?;
                         out.push_str(&format!("{pad}    }}\n"));
@@ -1603,7 +1603,7 @@ fn emit_wasm_body(
                     }
                     None => {
                         out.push_str(&format!(
-                            "{pad}for {loop_var} in ({start})..=({end}) {{\n"
+                            "{pad}for {loop_var} in ({start}){range_op}({end}) {{\n"
                         ));
                         emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
                         out.push_str(&format!("{pad}}}\n"));
@@ -1611,9 +1611,10 @@ fn emit_wasm_body(
                 }
             }
             // Plain list/local ForIn — mirror native `.iter().cloned()` (or by-value).
+            // D-RANGE-EXCL1=C: two-binding is index then item via `.enumerate()`.
             TIR::TStmt::ForIn {
                 var,
-                var2: None,
+                var2,
                 step: None,
                 method_kind: None,
                 columnar: false,
@@ -1623,15 +1624,34 @@ fn emit_wasm_body(
                 ..
             } => {
                 let collection = wasm_emit_expr(collection, funcs, file_prefix, reconstructions)?;
-                let loop_var = mangle(var);
                 let iter = if *by_value {
                     format!("({collection})")
                 } else {
                     format!("({collection}).iter().cloned()")
                 };
-                out.push_str(&format!("{pad}for {loop_var} in {iter} {{\n"));
-                emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
-                out.push_str(&format!("{pad}}}\n"));
+                match var2 {
+                    Some(v2) => {
+                        out.push_str(&format!(
+                            "{pad}for (_jet_i, _jet_item) in {iter}.enumerate() {{\n"
+                        ));
+                        out.push_str(&format!(
+                            "{pad}    let {} = _jet_i as i64;\n",
+                            mangle(var)
+                        ));
+                        out.push_str(&format!(
+                            "{pad}    let {} = _jet_item;\n",
+                            mangle(v2)
+                        ));
+                        emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                        out.push_str(&format!("{pad}}}\n"));
+                    }
+                    None => {
+                        let loop_var = mangle(var);
+                        out.push_str(&format!("{pad}for {loop_var} in {iter} {{\n"));
+                        emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                        out.push_str(&format!("{pad}}}\n"));
+                    }
+                }
             }
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
             TIR::TStmt::LineMarker(line) => {
@@ -2124,14 +2144,32 @@ fn emit_tir_js_body(
                 }
                 out.push_str(&format!("{pad}}}\n"));
             }
-            TIR::TStmt::Range { var, start, end, step, body, .. } => {
+            TIR::TStmt::Range { var, start, end, step, exclusive, body, .. } => {
                 let step = match step { Some(e) => tir_js_expr(e, funcs, file_prefix)?, None => "1".to_string() };
-                out.push_str(&format!("{pad}for (let {} = {}; {} <= {}; {} += {step}) {{\n", web_name(var), tir_js_expr(start, funcs, file_prefix)?, web_name(var), tir_js_expr(end, funcs, file_prefix)?, web_name(var)));
+                let cmp = if *exclusive { "<" } else { "<=" };
+                out.push_str(&format!("{pad}for (let {} = {}; {} {cmp} {}; {} += {step}) {{\n", web_name(var), tir_js_expr(start, funcs, file_prefix)?, web_name(var), tir_js_expr(end, funcs, file_prefix)?, web_name(var)));
                 emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
                 out.push_str(&format!("{pad}}}\n"));
             }
-            TIR::TStmt::ForIn { var, var2: None, collection, body, .. } => {
-                out.push_str(&format!("{pad}for (const {} of {}) {{\n", web_name(var), tir_js_expr(collection, funcs, file_prefix)?));
+            TIR::TStmt::ForIn { var, var2, collection, body, .. } => {
+                match var2 {
+                    Some(v2) => {
+                        // D-RANGE-EXCL1=C: sequence two-binding → index then item.
+                        out.push_str(&format!(
+                            "{pad}for (const [{}, {}] of {}.entries()) {{\n",
+                            web_name(var),
+                            web_name(v2),
+                            tir_js_expr(collection, funcs, file_prefix)?
+                        ));
+                    }
+                    None => {
+                        out.push_str(&format!(
+                            "{pad}for (const {} of {}) {{\n",
+                            web_name(var),
+                            tir_js_expr(collection, funcs, file_prefix)?
+                        ));
+                    }
+                }
                 emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
                 out.push_str(&format!("{pad}}}\n"));
             }

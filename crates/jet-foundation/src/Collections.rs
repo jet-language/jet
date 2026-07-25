@@ -96,7 +96,8 @@ pub fn is_lazy_adapter(method: &str) -> bool {
             | "windows"
             | "flatten"
             | "intersperse"
-            | "enumerate"
+            | "indexed"
+            | "indexes"
             | "zip"
             | "take_while"
             | "skip_while"
@@ -507,9 +508,9 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
     }
 }
 
-/// D-ITER1: the named-tuple element type for `enumerate` — `(idx: Int, item: T)`.
-/// Fields are canonical (alpha-sorted by name): `idx` < `item`.
-pub fn enumerate_elem_ty(inner: &Type) -> Type {
+/// D-ITER1 / D-RANGE-EXCL1=C: named-tuple element type for `indexed` —
+/// `(idx: Int, item: T)`. Fields are canonical (alpha-sorted by name): `idx` < `item`.
+pub fn indexed_elem_ty(inner: &Type) -> Type {
     Type::Tuple(vec![
         ("idx".to_string(), Box::new(Type::Int)),
         ("item".to_string(), Box::new(inner.clone())),
@@ -563,8 +564,10 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             _ => Some(Some(iter_ty(Type::Int))),
         },
         ("intersperse", 1) => Some(Some(iter_ty(inner.clone()))),
-        // D-ITER1: enumerate → Iter<(idx: Int, item: T)>.
-        ("enumerate", 0) => Some(Some(iter_ty(enumerate_elem_ty(inner)))),
+        // D-ITER1 / D-RANGE-EXCL1=C: indexed → Iter<(idx: Int, item: T)>.
+        ("indexed", 0) => Some(Some(iter_ty(indexed_elem_ty(inner)))),
+        // D-RANGE-EXCL1=C: every valid Int index for this sequence.
+        ("indexes", 0) => Some(Some(iter_ty(Type::Int))),
         // D-ITER1: zip([U]) → Iter<(a: T, b: U)>; sema refines `b` from arg type.
         ("zip", 1) => {
             // placeholder element type (Int for `b`); sema will correct via resolved_ret.
@@ -672,7 +675,8 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             _ => Some(Some(iter_ty(Type::Int))),
         },
         ("intersperse", 1) => Some(Some(iter_ty(inner.clone()))),
-        ("enumerate", 0) => Some(Some(iter_ty(enumerate_elem_ty(inner)))),
+        ("indexed", 0) => Some(Some(iter_ty(indexed_elem_ty(inner)))),
+        ("indexes", 0) => Some(Some(iter_ty(Type::Int))),
         ("zip", 1) => Some(Some(iter_ty(zip_elem_ty(inner, &Type::Int)))),
         ("unzip", 0) => list_method_return(inner, "unzip", 0),
         ("partition", 1) => Some(Some(partition_ret_ty(inner))),
@@ -1431,7 +1435,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "take" | "skip" | "step_by" | "chunks" | "windows" => Some(vec![Type::Int]),
             "intersperse" => Some(vec![(**inner).clone()]),
             "zip" => Some(vec![]),
-            "dedup" | "enumerate" | "sum" | "product" | "min" | "max" | "flatten" | "unzip" => {
+            "dedup" | "indexed" | "indexes" | "sum" | "product" | "min" | "max" | "flatten" | "unzip" => {
                 Some(vec![])
             }
             // D-DYNARRAY1: `.view(a..b)` — both range ends are Int (parsed

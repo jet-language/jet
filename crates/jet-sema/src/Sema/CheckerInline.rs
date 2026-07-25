@@ -160,7 +160,7 @@ impl<'a> InlineAlwaysScan<'a> {
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    crate::AST::ForKind::Range { start, end, step } => {
+                    crate::AST::ForKind::Range { start, end, step, exclusive: _ } => {
                         self.scan_expr(start);
                         self.scan_expr(end);
                         if let Some(step) = step {

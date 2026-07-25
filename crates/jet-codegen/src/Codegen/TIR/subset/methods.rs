@@ -1265,7 +1265,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "sort_by" | "reduce"
         // D-ITER1: lazy iterator adapters.
         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
-        | "enumerate" | "zip"
+        | "indexed" | "indexes" | "zip"
         | "take_while" | "skip_while" | "flat_map" | "scan"
         | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "partition"
         | "para_map" | "para_filter" | "para_partition" | "para_fold"

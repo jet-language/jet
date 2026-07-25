@@ -26,7 +26,7 @@ fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
 fn tuple_list_elem_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     match ty {
         Some(Type::List(inner)) => tuple_fields(Some(inner.as_ref())),
-        // D-ITERTOOLS1=A: zip/enumerate return `Iter<(…)>`, not `[…]`.
+        // D-ITERTOOLS1=A: zip/indexed return `Iter<(…)>`, not `[…]`.
         Some(ty) if crate::Collections::is_iter_type(ty) => {
             crate::Collections::iter_elem(ty).and_then(|inner| tuple_fields(Some(inner)))
         }
@@ -264,7 +264,7 @@ pub(crate) fn resolve_builtin_op(
         ("dedup", 0) => TBuiltinOp::Dedup,
         ("chunks", 1) => TBuiltinOp::Chunks,
         ("windows", 1) => TBuiltinOp::Windows,
-        ("enumerate", 0) => {
+        ("indexed", 0) => {
             // Build the tuple struct name for `(idx: Int, item: T)`.
             // Fields are alpha-sorted: idx < item.
             let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| {
@@ -281,8 +281,9 @@ pub(crate) fn resolve_builtin_op(
                 ]
             });
             let ts = crate::Codegen::Tuples::tuple_struct_name(&fields);
-            TBuiltinOp::Enumerate { tuple_struct: ts }
+            TBuiltinOp::Indexed { tuple_struct: ts }
         }
+        ("indexes", 0) => TBuiltinOp::Indexes,
         ("zip", 1) if is_option => {
             // D-HOLE1: `a: T?`.zip(`b: U?`) -> `(a: T, b: U)?` — heterogeneous, so
             // (unlike list zip below) the real `b` type is read from the argument.

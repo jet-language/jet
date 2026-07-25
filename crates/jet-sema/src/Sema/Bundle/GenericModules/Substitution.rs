@@ -316,7 +316,7 @@ pub(super) fn substitute_stmts(
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
-                    ForKind::Range { start, end, step } => {
+                    ForKind::Range { start, end, step, exclusive: _ } => {
                         substitute_expr(start, types, values);
                         substitute_expr(end, types, values);
                         if let Some(step) = step {
