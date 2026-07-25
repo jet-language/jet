@@ -8,7 +8,14 @@ use std::path::{Path, PathBuf};
 pub mod Canvas;
 pub mod BrowserTrace;
 pub mod LiveInspect;
+pub mod WatchService;
 pub mod WebHost;
+
+pub use WatchService::{
+    any_stamp_changed, within_budget, ChangeKind, HotReplaceTxn, InvalidationReceipt,
+    PersistEntry, PersistOutcome, PersistStore, RootKind, SessionSnapshot, WatchGraph,
+    WatchSession, EDIT_TO_VISIBLE_BUDGET_MS,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum WatchPolicy { Auto, Restart, Swap, Once }

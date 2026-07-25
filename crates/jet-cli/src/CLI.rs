@@ -554,7 +554,7 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
     FlagSpec { long: "--restart", help: "with dev: always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "with dev: hot-swap compatible edits and restart after type changes" },
-    FlagSpec { long: "--watch", help: "with dev: use --watch=off to run once and exit" },
+    FlagSpec { long: "--watch", help: "with run/dev: re-run on dependency changes; --watch=off runs once" },
     // E2-M18 REPL flags.
     FlagSpec { long: "--project", help: "with repl: load package settings and imports from this directory" },
     // E2-M16 flags.

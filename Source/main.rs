@@ -1929,6 +1929,18 @@ fn main() {
                                 } else {
                                     args.iter().skip(1).copied().collect()
                                 };
+                                if cmd == "run" && run_wants_watch(&raw) {
+                                    let try_anyway = raw.iter().any(|a| a == "--try-anyway");
+                                    let use_interpreter = raw.iter().any(|a| a == "--interpret");
+                                    run_dev(
+                                        &entry_str,
+                                        try_anyway,
+                                        WatchPolicy::Restart,
+                                        mode,
+                                        use_interpreter,
+                                    );
+                                    return;
+                                }
                                 let effective =
                                     effective_target(cmd, &entry_str, cross_target.as_deref());
                                 run_compile_cmd(
@@ -2176,6 +2188,20 @@ fn main() {
                     run_task_entry(&resolved, task, &program_args, mode);
                     return;
                 }
+                // #439 / E3-UL6: `jet run --watch` uses the shared dependency-
+                // aware engine; `jet dev` keeps the richer swap/overlay surface.
+                if run_wants_watch(&raw) {
+                    let try_anyway = raw.iter().any(|a| a == "--try-anyway");
+                    let use_interpreter = raw.iter().any(|a| a == "--interpret");
+                    run_dev(
+                        &resolved,
+                        try_anyway,
+                        WatchPolicy::Restart,
+                        mode,
+                        use_interpreter,
+                    );
+                    return;
+                }
             }
             let effective = effective_target(cmd, &resolved, cross_target.as_deref());
             run_compile_cmd(
@@ -2199,6 +2225,21 @@ fn main() {
             );
         }
     }
+}
+
+/// #439 / E3-UL6: `jet run --watch` enters the shared dependency-aware
+/// watch engine. `--watch=off` (and a bare one-shot `jet run`) stay one-shot.
+fn run_wants_watch(raw: &[String]) -> bool {
+    let off = raw.iter().any(|a| a == "--watch=off");
+    if off {
+        return false;
+    }
+    raw.iter().any(|a| {
+        a == "--watch"
+            || a == "--watch=on"
+            || a == "--watch=true"
+            || a.starts_with("--watch=") && a != "--watch=off"
+    })
 }
 
 /// Resolve a source-path argument, allowing the `.jet` extension to be omitted

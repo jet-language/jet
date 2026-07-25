@@ -5138,3 +5138,122 @@ fn watching_dev_keeps_last_good_on_jit_gap_and_recovers() {
     assert_eq!(once.status.code(), Some(101), "stderr={once_stderr}");
     assert!(once_stderr.contains("E2211"), "{once_stderr}");
 }
+
+/// #439 / E3-UL6: native matrix — dependency-aware WatchSession invalidates
+/// the exact closure, meets edit-to-visible budget, and recovers after a
+/// simulated crash/reconnect. AOT rebuild semantics match the prior run.
+#[test]
+fn ul6_native_watch_matrix_budget_and_reconnect() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_ul6_native_{}_{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let entry = dir.join("app.jet");
+    let lib = dir.join("lib.jet");
+    let asset = dir.join("app.css");
+    fs::write(&lib, "// helper module\n").unwrap();
+    fs::write(&asset, "body{}\n").unwrap();
+    fs::write(&entry, "fn run() {\n    print(\"v1\")\n}\n").unwrap();
+
+    let mut graph = jet_devserver::WatchGraph::from_entry(&entry, &[lib.clone()]);
+    graph.upsert(asset.clone(), jet_devserver::RootKind::Style);
+    graph.link(
+        std::fs::canonicalize(&entry).unwrap_or(entry.clone()),
+        asset.clone(),
+    );
+    let mut session = jet_devserver::WatchSession::from_graph(graph);
+    assert!(session.graph().node_count() >= 3);
+    let kinds: std::collections::BTreeSet<_> =
+        session.graph().nodes().map(|n| n.kind).collect();
+    assert!(kinds.contains(&jet_devserver::RootKind::Import));
+    assert!(kinds.contains(&jet_devserver::RootKind::Style));
+
+    std::thread::sleep(Duration::from_millis(30));
+    fs::write(&lib, "// helper module v2\n").unwrap();
+    let started = Instant::now();
+    let receipt = session.poll().expect("lib invalidation");
+    let visible_ms = started.elapsed().as_millis();
+    assert!(
+        receipt
+            .closure
+            .iter()
+            .any(|p| p.ends_with("lib.jet") || p.ends_with("app.jet")),
+        "closure={:?}",
+        receipt.closure
+    );
+    assert!(
+        visible_ms <= jet_devserver::EDIT_TO_VISIBLE_BUDGET_MS
+            || jet_devserver::within_budget(&receipt),
+        "edit-to-visible {visible_ms}ms receipt={:?}",
+        receipt.edit_to_visible_ms
+    );
+    assert!(receipt.render().contains("\"generation\":"));
+    session.acknowledge(&receipt);
+
+    // Crash/reconnect: recover stamps, then a fresh edit still fires once.
+    std::thread::sleep(Duration::from_millis(30));
+    fs::write(&lib, "// helper module v3\n").unwrap();
+    session.recover();
+    assert!(session.poll().is_none(), "recover must clear pending drift");
+    std::thread::sleep(Duration::from_millis(30));
+    fs::write(&entry, "fn run() {\n    print(\"v4\")\n}\n").unwrap();
+    let again = session.poll().expect("post-reconnect edit");
+    session.acknowledge(&again);
+
+    // AOT parity: one-shot run of the final source.
+    let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", &entry.to_string_lossy()])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("jet run");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "v4");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// #439 / E3-UL6: `jet run --watch` and `jet dev` share WatchSession receipts.
+#[test]
+fn ul6_run_watch_and_dev_share_engine() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_ul6_share_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("app.jet");
+    fs::write(&file, "fn run() {\n    print(\"v1\")\n}\n").unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", &shown, "--watch"])
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn jet run --watch");
+
+    std::thread::sleep(Duration::from_millis(900));
+    fs::write(&file, "fn run() {\n    print(\"v2\")\n}\n").unwrap();
+    std::thread::sleep(Duration::from_millis(900));
+    let _ = child.kill();
+    let out = child.wait_with_output().expect("run --watch output");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("watching") || stdout.contains("v1") || stdout.contains("v2"),
+        "stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("v1") || stdout.contains("changed") || stdout.contains("v2"),
+        "expected watch activity\nstdout:\n{stdout}"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}

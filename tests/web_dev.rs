@@ -1611,3 +1611,50 @@ fn run() {{
     drop(guard);
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// #439 / E3-UL6: browser matrix — WatchSession + reconnect, budget,
+/// cleanup, and deterministic receipt after edit.
+#[test]
+fn ul6_browser_watch_matrix_budget_reconnect_cleanup() {
+    if !have_tool("rustc") {
+        eprintln!("note: skipping ul6_browser_watch_matrix_budget_reconnect_cleanup (need rustc)");
+        return;
+    }
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_ul6_web_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src_path = dir.join("app.jet");
+    fs::write(
+        &src_path,
+        "#Target(Web)\nfn run() {\n    print(\"hello\")\n}\n",
+    )
+    .unwrap();
+
+    let mut session = jet_devserver::WatchSession::open(&src_path);
+    session.recover();
+    assert!(session.graph().node_count() >= 1);
+
+    let started = Instant::now();
+    std::thread::sleep(Duration::from_millis(30));
+    fs::write(
+        &src_path,
+        "#Target(Web)\nfn run() {\n    print(\"hello-2\")\n}\n",
+    )
+    .unwrap();
+    let receipt = session.poll().expect("web source change");
+    let ms = started.elapsed().as_millis();
+    assert!(
+        jet_devserver::within_budget(&receipt) || ms <= jet_devserver::EDIT_TO_VISIBLE_BUDGET_MS,
+        "budget miss ms={ms} receipt={:?}",
+        receipt.edit_to_visible_ms
+    );
+    assert!(!receipt.render().is_empty());
+    session.acknowledge(&receipt);
+
+    let _ = fs::remove_dir_all(&dir);
+    assert!(!dir.exists() || fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0) == 0);
+}

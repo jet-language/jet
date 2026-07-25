@@ -772,11 +772,11 @@ mod tests {
     }
 
     #[test]
-    fn detail_view_never_shows_invented_flags() {
+    fn detail_view_shows_real_run_watch_flag() {
         let index = build_index();
         let run = index.iter().find(|e| e.symbol.name == "run").unwrap();
         let out = render_detail(run, 70, false);
-        assert!(!out.contains("--watch"));
+        assert!(out.contains("--watch"));
     }
 
     #[test]
