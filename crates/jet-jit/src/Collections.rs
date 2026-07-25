@@ -15,6 +15,30 @@ extern "C" fn jet_jit_list_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list())
 }
 
+/// `core.io.args()` — List(String) matching AOT `jet_std_io_args`, fed by the
+/// `with_program_args` argv installed for this JIT run (falls back to
+/// `std::env::args` when unset, same as a bare host process).
+extern "C" fn jet_jit_io_args() -> i64 {
+    let args = {
+        let installed = crate::program_args();
+        if installed.is_empty() {
+            std::env::args().collect::<Vec<_>>()
+        } else {
+            installed
+        }
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for arg in args {
+            let sid = rt.heap.alloc_string(arg);
+            rt.heap
+                .list_push_int(list, sid)
+                .expect("jit io.args push");
+        }
+        list
+    })
+}
+
 extern "C" fn jet_jit_list_push(list: i64, v: i64) {
     Concurrency::with_runtime_mut(|rt| {
         rt.heap
@@ -499,6 +523,7 @@ extern "C" fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
 }
 
 pub(crate) struct CollectionsHostFns {
+    pub io_args: cranelift_module::FuncId,
     pub list_new: cranelift_module::FuncId,
     pub list_push: cranelift_module::FuncId,
     pub list_push_f64: cranelift_module::FuncId,
@@ -535,6 +560,7 @@ pub(crate) struct CollectionsHostFns {
 }
 
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
+    builder.symbol("jet_jit_io_args", jet_jit_io_args as *const u8);
     builder.symbol("jet_jit_list_new", jet_jit_list_new as *const u8);
     builder.symbol("jet_jit_list_push", jet_jit_list_push as *const u8);
     builder.symbol("jet_jit_list_push_f64", jet_jit_list_push_f64 as *const u8);
@@ -645,6 +671,7 @@ pub(crate) fn declare_collections_host_fns(
     };
 
     Ok(CollectionsHostFns {
+        io_args: import("jet_jit_io_args", &sig_new)?,
         list_new: import("jet_jit_list_new", &sig_new)?,
         list_push: import("jet_jit_list_push", &sig_push)?,
         list_push_f64: import("jet_jit_list_push_f64", &sig_push_f64)?,
