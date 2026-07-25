@@ -330,6 +330,12 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "DataColumn" => Some("DataColumn"),
         "DataStatus" => Some("DataStatus"),
         "DataSummary" => Some("DataSummary"),
+        // D-DATAFLOW1=A: typed streaming + invalid-data policy values.
+        "DataLimits" => Some("DataLimits"),
+        "DataError" => Some("DataError"),
+        "DataErrorKind" => Some("DataErrorKind"),
+        "DataPivotCell" => Some("DataPivotCell"),
+        "DataStream" => Some("DataStream"),
         // D-LOGTRACE1=A: structured logging values.
         "LogField" => Some("LogField"),
         "LogSpan" => Some("LogSpan"),
@@ -1479,6 +1485,12 @@ impl Cx {
                     self.root_prefix,
                     self.rust_type(&args[0])
                 )
+            }
+            // D-DATAFLOW1=A: pull stream is one opaque Rust handle; Jet keeps T.
+            Type::Apply { name, args }
+                if name == "DataStream" && !args.is_empty() && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::DataStream", self.root_prefix)
             }
             Type::Apply { name, args }
                 if name == "DataJoin" && args.len() == 2 && !self.type_names.contains(name) =>

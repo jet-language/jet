@@ -233,6 +233,23 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
             }
             fields
         },
+        {
+            let mut fields = std::collections::HashMap::new();
+            for module in &bundle.modules {
+                for item in &module.items {
+                    if let Item::Struct(s) = item {
+                        fields.insert(
+                            s.name.clone(),
+                            s.fields
+                                .iter()
+                                .map(|f| (f.name.clone(), f.ty.clone()))
+                                .collect(),
+                        );
+                    }
+                }
+            }
+            fields
+        },
     ) {
         Ok(crate::Comptime::CtValue::ResErr(error)) => {
             sink.stderr.push_str(&error.jet_show());

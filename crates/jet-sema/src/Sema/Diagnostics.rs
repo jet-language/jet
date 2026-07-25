@@ -928,6 +928,9 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
                     | "EncodingCause"
                     | "EncodingError"
                     | "EncodingLimits"
+                    | "DataError"
+                    | "DataErrorKind"
+                    | "DataLimits"
             ) =>
         {
             true

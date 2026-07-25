@@ -2019,6 +2019,9 @@ pub fn emit_bundle_dbg(
     debug_linemap: bool,
     active_os: Syntax::OsTarget,
 ) -> String {
+    // D-DATAFLOW1 / D-REL3: fixed_sigs and edition-gated helpers read the TLS
+    // package edition. Keep codegen on the same edition sema checked.
+    jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
     let entry = &bundle.modules[bundle.entry];
     let mut out = String::new();
     out.push_str(&format!(
@@ -2128,6 +2131,7 @@ pub fn emit_bundle_dbg(
     strip_unused_os_signal_prelude(strip_unused_raylib_prelude(strip_unused_term_prelude(strip_unused_gc_prelude(
         strip_unused_txn_prelude(strip_unused_mem_prelude(out)),
     ))))
+    })
 }
 
 pub fn emit_bundle_tests(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {

@@ -1826,6 +1826,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `emit_builtin_method` (Source/Codegen/Expression.rs) byte-for-byte. Args are
         // emitted PLAINLY (raw `arg(i)`). `cx.root_prefix` is program-level.
         TExprKind::HandleMethod { recv, op, args } => {
+            let recv_ty_for_stream = recv.ty.clone();
             let recv = emit_tir_expr(recv, cx);
             let a = |i: usize| {
                 args.get(i)
@@ -1885,6 +1886,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_enc_jsonl_writer_finish(&mut ({}))", root, recv)
                 }
                 THandleOp::CSVReaderNext => format!("{}jet_enc_csv_reader_next(&mut ({}))", root, recv),
+                THandleOp::DataStreamNext => {
+                    let row = match &recv_ty_for_stream {
+                        Type::Apply { name, args } if name == "DataStream" => args
+                            .first()
+                            .map(|t| cx.rust_type(t))
+                            .unwrap_or_else(|| "()".to_string()),
+                        _ => "()".to_string(),
+                    };
+                    format!(
+                        "{}jet_data_stream_next::<{}>(&mut ({}))",
+                        root, row, recv
+                    )
+                }
                 THandleOp::XMLReaderNext => format!("{}jet_enc_xml_reader_next(&mut ({}))", root, recv),
                 THandleOp::XMLWriterWrite => format!("{}jet_enc_xml_writer_write(&mut ({}), {})", root, recv, a(0)),
                 THandleOp::XMLWriterFlush => format!("{}jet_enc_xml_writer_flush(&mut ({}))", root, recv),

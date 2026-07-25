@@ -1146,12 +1146,18 @@ impl TraitRegistry {
         // projection law; Format/Kind/Cause/Error compare by value.
         self.trait_impls
             .insert(("EncodingError".to_string(), DISPLAY.to_string()));
+        // D-DATAFLOW1=A: DataError Display is the typed analytics/stream error law.
+        self.trait_impls
+            .insert(("DataError".to_string(), DISPLAY.to_string()));
         for ty in [
             "EncodingFormat",
             "EncodingErrorKind",
             "EncodingCause",
             "EncodingError",
             "EncodingLimits",
+            "DataError",
+            "DataErrorKind",
+            "DataLimits",
         ] {
             self.auto_equatable.insert(ty.to_string());
             self.auto_debug.insert(ty.to_string());

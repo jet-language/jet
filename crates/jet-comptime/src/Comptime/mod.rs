@@ -48,6 +48,12 @@ use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
 pub use Methods::{apply_core_call, apply_impure_core_call};
+
+/// D-DATAFLOW1=A / #778: TIR deopt path for `core.data.csv` reuses the same
+/// EncodingLite CSV splitter as comptime typed decode (no second codec).
+pub fn runtime_csv_parse(text: &str) -> Result<Vec<Vec<String>>, String> {
+    EncodingLite::csv_parse(text)
+}
 pub use Methods::apply_dollar_splices;
 pub use Purity::walk_calls;
 pub use Reflect::{build_program_info, build_struct_type_info, ProgramSemanticFacts};

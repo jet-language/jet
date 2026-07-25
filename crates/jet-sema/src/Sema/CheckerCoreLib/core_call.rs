@@ -959,6 +959,26 @@ impl<'a> Checker<'a> {
                     self.check_decodable(&t, span);
                     return Some(result_ty(Type::List(Box::new(t)), decode_error_ty()));
                 }
+                ("core.data", "csv_reader" | "json_reader") if !type_args.is_empty() => {
+                    if args.len() != 2 {
+                        self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(name, 0, &Type::Named("FileReader".to_string()), arg);
+                    }
+                    if let Some(arg) = args.get_mut(1) {
+                        self.expect_core_arg(name, 1, &Type::Named("DataLimits".to_string()), arg);
+                    }
+                    let t = type_args[0].clone();
+                    self.check_decodable(&t, span);
+                    return Some(result_ty(
+                        Type::Apply {
+                            name: "DataStream".to_string(),
+                            args: vec![t],
+                        },
+                        Type::Named("DataError".to_string()),
+                    ));
+                }
                 ("core.data", "count") => {
                     if args.len() != 1 {
                         self.diags.push(wrong_core_arity(name, 1, args.len(), span));
@@ -1159,9 +1179,14 @@ impl<'a> Checker<'a> {
                         None => Type::Int,
                     };
                     return Some(if name == "collect" {
-                        Type::Apply {
+                        let table = Type::Apply {
                             name: "Table".to_string(),
                             args: vec![elem],
+                        };
+                        if super::super::Edition::edition_at_least("2027") {
+                            result_ty(table, Type::Named("DataError".to_string()))
+                        } else {
+                            table
                         }
                     } else {
                         Type::List(Box::new(Type::String))
@@ -1247,7 +1272,15 @@ impl<'a> Checker<'a> {
                         };
                         self.expect_core_arg(name, 1, &fn_ty, fn_arg);
                     }
-                    return Some(Type::List(Box::new(row_ty)));
+                    return Some(if name == "sort_by" && super::super::Edition::edition_at_least("2027")
+                    {
+                        result_ty(
+                            Type::List(Box::new(row_ty)),
+                            Type::Named("DataError".to_string()),
+                        )
+                    } else {
+                        Type::List(Box::new(row_ty))
+                    });
                 }
                 ("core.data", "group_count" | "group_sum" | "group_mean") => {
                     let want = if name == "group_count" { 2 } else { 3 };
@@ -1261,6 +1294,11 @@ impl<'a> Checker<'a> {
                     let rows_ty = self.infer(&mut rows_arg.expr);
                     let row_ty = match rows_ty {
                         Some(Type::List(inner)) => *inner,
+                        Some(Type::Apply { name: ref an, args: ref ta })
+                            if an == "DataStream" && ta.len() == 1 =>
+                        {
+                            ta[0].clone()
+                        }
                         Some(other) => {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
@@ -1291,7 +1329,12 @@ impl<'a> Checker<'a> {
                             self.expect_core_arg(name, 2, &value_fn, value_arg);
                         }
                     }
-                    return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
+                    let groups = Type::List(Box::new(Type::Named("DataGroup".to_string())));
+                    return Some(if super::super::Edition::edition_at_least("2027") {
+                        result_ty(groups, Type::Named("DataError".to_string()))
+                    } else {
+                        groups
+                    });
                 }
                 ("core.data", "inner_join" | "left_join") => {
                     if args.len() != 4 {
@@ -1352,10 +1395,15 @@ impl<'a> Checker<'a> {
                     } else {
                         right_row
                     };
-                    return Some(Type::List(Box::new(Type::Apply {
+                    let joined = Type::List(Box::new(Type::Apply {
                         name: "DataJoin".to_string(),
                         args: vec![left_row, joined_right],
-                    })));
+                    }));
+                    return Some(if super::super::Edition::edition_at_least("2027") {
+                        result_ty(joined, Type::Named("DataError".to_string()))
+                    } else {
+                        joined
+                    });
                 }
                 ("core.data", "pivot_sum") => {
                     if args.len() != 4 {
@@ -1397,7 +1445,17 @@ impl<'a> Checker<'a> {
                         };
                         self.expect_core_arg(name, 3, &value_fn, value_arg);
                     }
-                    return Some(Type::List(Box::new(Type::Named("DataGroup".to_string()))));
+                    let cell = if super::super::Edition::edition_at_least("2027") {
+                        Type::Named("DataPivotCell".to_string())
+                    } else {
+                        Type::Named("DataGroup".to_string())
+                    };
+                    let cells = Type::List(Box::new(cell));
+                    return Some(if super::super::Edition::edition_at_least("2027") {
+                        result_ty(cells, Type::Named("DataError".to_string()))
+                    } else {
+                        cells
+                    });
                 }
                 ("core.mem", "volatile_read") => {
                     if !self.in_unsafe {

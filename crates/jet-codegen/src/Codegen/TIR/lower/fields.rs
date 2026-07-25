@@ -86,6 +86,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             | "UiNode"
             | "MigrationStatus"
             | "DataGroup"
+            | "DataPivotCell"
+            | "DataLimits"
+            | "DataError"
             | "DataColumn"
             | "DataStatus"
             | "DataSummary"
@@ -130,6 +133,15 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         ),
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data fields use plain Rust names.
         "DataGroup" => matches!(member, "key" | "count" | "sum" | "mean"),
+        "DataPivotCell" => matches!(member, "row_key" | "column_key" | "count" | "sum" | "mean"),
+        "DataLimits" => matches!(
+            member,
+            "encoding" | "max_groups" | "max_sort_rows" | "max_join_rows" | "max_output_rows"
+        ),
+        "DataError" => matches!(
+            member,
+            "kind" | "operation" | "row" | "column" | "index" | "reason" | "cause"
+        ),
         "DataColumn" => matches!(member, "name" | "type_name"),
         "DataStatus" => matches!(member, "step" | "path" | "replacement"),
         "DataSummary" => matches!(
@@ -386,6 +398,34 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "key" => Some(Type::String),
             "count" => Some(Type::Int),
             "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if name == "DataPivotCell" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "row_key" | "column_key" => Some(Type::String),
+            "count" => Some(Type::Int),
+            "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if name == "DataLimits" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "encoding" => Some(Type::Named("EncodingLimits".to_string())),
+            "max_groups" | "max_sort_rows" | "max_join_rows" | "max_output_rows" => {
+                Some(Type::Int)
+            }
+            _ => None,
+        };
+    }
+    if name == "DataError" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "kind" => Some(Type::Named("DataErrorKind".to_string())),
+            "operation" | "reason" => Some(Type::String),
+            "row" | "column" | "index" => Some(Type::Option(Box::new(Type::Int))),
+            "cause" => Some(Type::Option(Box::new(Type::Named(
+                "EncodingError".to_string(),
+            )))),
             _ => None,
         };
     }

@@ -6923,7 +6923,7 @@ fn run() {
     deferred :: data.lazy_filter(lazy, (t) => must_stay_deferred(t))
     print(data.plan(deferred)[1])
     planned :: data.lazy_sort_by(data.lazy_filter(lazy, (t) => t.minutes >= 6.0), (t) => t.team)
-    collected :: data.collect(planned)
+    collected :: data.collect(planned) ?? panic("collect")
     print(data.count(table))
     print(data.count(planned))
     print(data.count(data.rows(collected)))
@@ -6931,36 +6931,38 @@ fn run() {
     loop ticket; data.rows(collected) {
         print("planned:{ticket.team}:{ticket.minutes}")
     }
-    none ::  None 
+    none :: Float? = None
     maybe_minutes :: [ Val(2.0), none, Val(6.0), none ]
     series :: data.series(maybe_minutes)
     print(data.count(series))
     print(data.missing_count(series))
-    groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes)
+    groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes) ?? panic("group")
     loop g; groups {
         print("{g.key}:{g.count}:{g.sum}:{g.mean}")
     }
     values :: [2.0, 4.0, 6.0]
-    print(data.sum(values))
-    print(data.mean(values))
-    joined :: data.inner_join(rows, budgets, (t) => t.team, (b) => b.team)
+    print(data.sum(values) ?? panic("sum"))
+    print(data.mean(values) ?? panic("mean"))
+    joined :: data.inner_join(rows, budgets, (t) => t.team, (b) => b.team) ?? panic("join")
     loop pair; joined {
         print("{pair.left.team}:{pair.right.owner}")
     }
-    left :: data.left_join(rows, [budgets[0]], (t) => t.team, (b) => b.team)
+    left :: data.left_join(rows, [budgets[0]], (t) => t.team, (b) => b.team) ?? panic("left")
     loop pair; left {
         if pair.right == {
             Val(budget) -> print("{pair.left.team}:{budget.owner}")
             None -> print("{pair.left.team}:none")
         }
     }
-    pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 6.0 { "long" } else { "short" }, (t) => t.minutes)
-    print(data.bar_text(pivot))
-    rolling :: data.rolling_mean([2.0, 4.0, 6.0], 2)
+    pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 6.0 { "long" } else { "short" }, (t) => t.minutes) ?? panic("pivot")
+    loop cell; pivot {
+        print("{cell.row_key}|{cell.column_key}:{cell.count}")
+    }
+    rolling :: data.rolling_mean([2.0, 4.0, 6.0], 2) ?? panic("rolling")
     print(rolling[2])
-    counts :: data.group_count(rows, (t) => t.team)
-    print(data.bar_text(counts))
-    print(data.bar_svg(counts).len())
+    counts :: data.group_count(rows, (t) => t.team) ?? panic("count")
+    print(data.bar_text(counts) ?? panic("bar"))
+    print((data.bar_svg(counts) ?? panic("svg")).len())
     status :: data.status()
     print("{status[0].step}:{status[0].path}")
 }
@@ -6971,7 +6973,73 @@ fn run() {
     assert_eq!(code, 0, "core.data program failed: {stderr}");
     assert_eq!(
         stdout,
-        "4\nfilter\n4\n2\n2\nsort_by\nplanned:Core:8.0\nplanned:Tools:7.0\n4\n2\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nTools:none\nCore:Ada\nTools:none\nCore|long | # 1\nCore|short | # 1\nTools|long | # 1\nTools|short | # 1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
+        "4\nfilter\n4\n2\n2\nsort_by\nplanned:Core:8.0\nplanned:Tools:7.0\n4\n2\nCore:2:12.0:6.0\nTools:2:12.0:6.0\n12.0\n4.0\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nCore:Lin\nTools:Grace\nCore:Ada\nTools:none\nCore:Ada\nTools:none\nCore|long:1\nCore|short:1\nTools|long:1\nTools|short:1\n5.0\nCore | ## 2\nTools | ## 2\n531\ncore.data.csv:native\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_data_stream_limits_and_typed_errors() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping core.data stream test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_data_stream_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let csv_path = dir.join("events.csv");
+    fs::write(&csv_path, "service,latency_ms\napi,10.0\napi,20.0\ndb,5.0\napi,30.0\n").unwrap();
+    let path_lit = csv_path.to_string_lossy().replace('\\', "\\\\");
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "data_stream",
+        &format!(
+            r#"
+use core.data as data
+use core.files as files
+
+#Codable
+struct Event {{
+    service: String
+    latency_ms: Float
+}}
+
+fn run() {{
+    input :: files.open("{path_lit}") ?? panic("open")
+    limits := data.DataLimits.safe()
+    limits.max_groups = 1
+    reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
+    first :: reader.next() ?? panic("next")
+    if first == {{
+        Val(row) -> print("first:{{row.service}}")
+        None -> panic("eof")
+    }}
+    groups := data.group_mean(reader, (e) => e.service, (e) => e.latency_ms)
+    if groups == {{
+        Ok(_) -> print("unexpected ok")
+        Err(error) -> print("{{error.kind}} {{error.operation}}")
+    }}
+    empty := data.mean([Float].{{}})
+    if empty == {{
+        Ok(_) -> print("unexpected mean")
+        Err(error) -> print("{{error.kind}} {{error.operation}}")
+    }}
+    bad := data.quantile([1.0, 2.0], 1.5)
+    if bad == {{
+        Ok(_) -> print("unexpected q")
+        Err(error) -> print("{{error.kind}} {{error.operation}}")
+    }}
+}}
+"#
+        ),
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "core.data stream program failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "first:api\nLimit group_mean\nEmpty mean\nInvalidArgument quantile\n"
     );
     let _ = fs::remove_dir_all(&dir);
 }

@@ -2467,6 +2467,12 @@ pub(crate) fn lower_method_call(
                     .map(|a| a.ty.clone())
                     .unwrap_or_else(unit_type),
                 THandleOp::AllocReset => unit_type(),
+                THandleOp::DataStreamNext => resolved_ret.cloned().unwrap_or_else(|| {
+                    Type::Result {
+                        ok: Box::new(Type::Option(Box::new(Type::Named("Unknown".to_string())))),
+                        err: Box::new(Type::Named("DataError".to_string())),
+                    }
+                }),
                 _ => handle_method_return_ty(handle, method, args.len()),
             };
             return TExpr {
@@ -2489,6 +2495,32 @@ pub(crate) fn lower_method_call(
                     ty: Type::Named("EncodingLimits".to_string()),
                     kind: TExprKind::StaticCall {
                         owner: rooted_owner("jet_std::EncodingLimits"),
+                        owner_type: None,
+                        method: TMethodRef::bare("safe"),
+                        args: vec![],
+                    },
+                };
+            }
+            if leaf == "DataLimits"
+                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.data")
+            {
+                return TExpr {
+                    ty: Type::Named("DataLimits".to_string()),
+                    kind: TExprKind::StaticCall {
+                        owner: rooted_owner("jet_std::DataLimits"),
+                        owner_type: None,
+                        method: TMethodRef::bare("safe"),
+                        args: vec![],
+                    },
+                };
+            }
+            if leaf == "DataLimits"
+                && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.data")
+            {
+                return TExpr {
+                    ty: Type::Named("DataLimits".to_string()),
+                    kind: TExprKind::StaticCall {
+                        owner: rooted_owner("jet_std::DataLimits"),
                         owner_type: None,
                         method: TMethodRef::bare("safe"),
                         args: vec![],

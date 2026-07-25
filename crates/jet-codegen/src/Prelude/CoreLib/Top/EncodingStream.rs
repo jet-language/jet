@@ -1897,7 +1897,8 @@ impl jet_std::CSVReader {
                             if b == b'"' { after_quote = false; if let Err(e) = jet_csv_push_byte(&budget, &mut field, b'"', &mut decoded, &self.limits, self.record_index, field_index, self.offset, self.line, self.column) { return self.fail(e); } }
                             else if b == b',' { quoted = false; after_quote = false; if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line, self.column.saturating_sub(1)) { return self.fail(e); } }
                             else if b == b'\r' { quoted = false; after_quote = false; match self.byte(field_index) { Ok(Some(b'\n')) => {}, Ok(None) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Truncated, self.offset, self.line, self.column, jet_csv_path(self.record_index, field_index), "CSV CR record ending is missing LF")), Ok(Some(_)) => return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "CSV records use CRLF; bare CR is not a record ending")), Err(e) => return self.fail(e) }; if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); } self.record_index += 1; return Ok(Some(row)); }
-                            else { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "only quote, comma, CRLF, or EOF may follow a closing CSV quote")); }
+                            else if b == b'\n' { quoted = false; after_quote = false; if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); } self.record_index += 1; return Ok(Some(row)); }
+                            else { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line, self.column.saturating_sub(1), jet_csv_path(self.record_index, field_index), "only quote, comma, CRLF, LF, or EOF may follow a closing CSV quote")); }
                         } else if b == b'"' { after_quote = true; }
                         else if let Err(e) = jet_csv_push_byte(&budget, &mut field, b, &mut decoded, &self.limits, self.record_index, field_index, self.offset, self.line, self.column) { return self.fail(e); }
                     } else if b == b'"' {
@@ -1909,8 +1910,12 @@ impl jet_std::CSVReader {
                         if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); }
                         self.record_index += 1;
                         return Ok(Some(row));
-                    } else if b == b'\n' { return self.fail(jet_csv_error(jet_std::EncodingErrorKind::Syntax, self.offset - 1, self.line.saturating_sub(1), 1, jet_csv_path(self.record_index, field_index), "CSV records use CRLF; bare LF is not a record ending")); }
-                    else if let Err(e) = jet_csv_push_byte(&budget, &mut field, b, &mut decoded, &self.limits, self.record_index, field_index, self.offset, self.line, self.column) { return self.fail(e); }
+                    } else if b == b'\n' {
+                        // D-DATAFLOW1=A / EncodingLite parity: accept LF as well as CRLF.
+                        if let Err(e) = jet_csv_finish_field(&budget, &mut row, &mut field, &mut decoded, &self.limits, self.record_index, self.offset - 1, self.line.saturating_sub(1), 1) { return self.fail(e); }
+                        self.record_index += 1;
+                        return Ok(Some(row));
+                    } else if let Err(e) = jet_csv_push_byte(&budget, &mut field, b, &mut decoded, &self.limits, self.record_index, field_index, self.offset, self.line, self.column) { return self.fail(e); }
                 }
             }
         }

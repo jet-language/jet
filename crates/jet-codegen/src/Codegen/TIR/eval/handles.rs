@@ -25,6 +25,7 @@ pub(super) fn eval_handle(
         THandleOp::JSONLWriterFlush => Err(unsupported("handle `JSONLWriterFlush`", span)),
         THandleOp::JSONLWriterFinish => Err(unsupported("handle `JSONLWriterFinish`", span)),
         THandleOp::CSVReaderNext => Err(unsupported("handle `CSVReaderNext`", span)),
+        THandleOp::DataStreamNext => Err(unsupported("handle `DataStreamNext`", span)),
         THandleOp::XMLReaderNext => Err(unsupported("handle `XMLReaderNext`", span)),
         THandleOp::XMLWriterWrite => Err(unsupported("handle `XMLWriterWrite`", span)),
         THandleOp::XMLWriterFlush => Err(unsupported("handle `XMLWriterFlush`", span)),

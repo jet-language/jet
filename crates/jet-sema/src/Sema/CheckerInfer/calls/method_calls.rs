@@ -564,6 +564,9 @@ impl<'a> Checker<'a> {
                         if ns == "core.email" && leaf == "Limits" && method == "safe" {
                             return self.check_static_method("Limits", method, span, type_args, args);
                         }
+                        if ns == "core.data" && leaf == "DataLimits" && method == "safe" {
+                            return self.check_static_method("DataLimits", method, span, type_args, args);
+                        }
                         if ns == "core.encoding" && leaf == "DataEvent" {
                             let saved: Vec<Expr> = args
                                 .iter_mut()
@@ -802,7 +805,7 @@ impl<'a> Checker<'a> {
                         return Some(ty);
                     }
                 }
-                if ((type_name == "EncodingLimits" || type_name == "CBOROptions" || type_name == "XMLLimits" || type_name == "XMLParseOptions" || type_name == "Limits") && method == "safe")
+                if ((type_name == "EncodingLimits" || type_name == "CBOROptions" || type_name == "XMLLimits" || type_name == "XMLParseOptions" || type_name == "Limits" || type_name == "DataLimits") && method == "safe")
                     || self.resolve_method_sig(type_name, method).is_some() {
                     return self.check_static_method(type_name, method, span, type_args, args);
                 }
@@ -1914,6 +1917,26 @@ impl<'a> Checker<'a> {
                     }
                     *recv_type_out = Some(handle_ty.clone());
                     return ret;
+                }
+            }
+            // D-DATAFLOW1=A: DataStream<T>.next() → T? ? DataError
+            if let Type::Apply { name, args: type_args } = &recv_ty {
+                if name == "DataStream" && method == "next" {
+                    if !args.is_empty() {
+                        self.diags.push(wrong_core_arity("DataStream.next", 0, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                    }
+                    let row = type_args
+                        .first()
+                        .cloned()
+                        .unwrap_or(Type::Named("Unknown".to_string()));
+                    *recv_type_out = Some("DataStream".to_string());
+                    return Some(result_ty(
+                        Type::Option(Box::new(row)),
+                        Type::Named("DataError".to_string()),
+                    ));
                 }
             }
             // E2-M7: method calls on streaming file handles (D-IO2).

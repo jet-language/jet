@@ -813,6 +813,13 @@ pub(crate) fn method_call_in_subset(
                     }
                 }
             }
+            if leaf == "DataLimits" {
+                if let Expr::Ident(alias, _) = base.as_ref() {
+                    if cx.core_imports.get(alias).map(String::as_str) == Some("core.data") {
+                        return true;
+                    }
+                }
+            }
             if leaf == "CBOROptions" {
                 if let Expr::Ident(alias, _) = base.as_ref() {
                     if cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor") {

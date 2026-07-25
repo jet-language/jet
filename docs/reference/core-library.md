@@ -1648,7 +1648,14 @@ abstraction, `T?` for absence, and `DataTree` for parsed dynamic input. Writing
 ### `core.data` — typed tables, series, status, plots
 
 D-DATA-SURFACE1 makes `core.data` the beginner facade for typed tables,
-series, stats, CSV/JSON ingest, and plots. The first slice is in-memory and deterministic:
+series, stats, CSV/JSON ingest, and plots. D-DATAFLOW1=A adds bounded typed
+pull streams (`csv_reader`/`json_reader`), `DataLimits`, and `DataError` for
+the current edition: filters and scalar reducers stay streaming, while group,
+sort, join, pivot, and collect enforce named ceilings. Invalid analytics
+(empty mean, bad quantile, non-finite input, overflow) return `DataError`
+instead of silent zeros or clamps. Pivot cells use distinct `DataPivotCell`
+row/column keys.
+
 `data.csv<T>(text)` decodes CSV into `[T]` using the same `#[Codable]` model as
 `core.encoding.csv.decode<T>`. `data.json<T>(text)` decodes a JSON array of objects
 into `[T]` via the same Decode path as `core.encoding.json.decode<[T]>`. Selectors are typed
@@ -1658,27 +1665,33 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 |----------|---------|--------------|
 | `csv<T>(text)` | `[T] ? DecodeError` | Header-mapped typed CSV rows |
 | `json<T>(text)` | `[T] ? DecodeError` | Typed rows from a JSON array of objects |
+| `csv_reader<T>(file, limits)` / `json_reader<T>(file, limits)` | `DataStream<T> ? DataError` | Bounded pull over `core.encoding` readers |
+| `DataLimits.safe()` | `DataLimits` | Default group/sort/join/output ceilings + `EncodingLimits.safe()` |
 | `table(rows)` / `rows(table)` | `Table<T>` / `[T]` | Wrap and unwrap the typed in-memory table model |
 | `series(values)` / `values(series)` | `Series<T>` / `[T]` | Wrap and unwrap typed series values |
 | `schema(table_or_series)` | `[DataColumn]` | Column names and Jet type names for the row/value model |
 | `missing_count(series)` | `Int` | Count absent `T?` values in a typed series |
-| `lazy(table)` / `collect(plan)` | `LazyFrame<T>` / `Table<T>` | Build a typed plan; execute it only when materialized |
+| `lazy(table)` / `collect(plan)` | `LazyFrame<T>` / `Table<T> ? DataError` | Build a typed plan; execute it only when materialized |
 | `lazy_filter(plan, row => ok)` / `lazy_sort_by(plan, row => key)` | `LazyFrame<T>` | Append deferred typed operations without visiting rows |
 | `plan(frame)` | `[String]` | Deterministic plan-step names for audit/test output |
 | `count(value)` | `Int` | Count rows/values in `[T]`, `Table<T>`, `Series<T>`, or `LazyFrame<T>` |
-| `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float` | Numeric series stats over `[Float]` |
-| `median(values)` / `quantile(values, q)` | `Float` | Sorted numeric quantiles |
-| `variance(values)` / `stddev(values)` / `describe(values)` | `Float` / `Float` / `DataSummary` | Numeric distribution summary |
-| `rolling_mean(values, width)` | `[Float]` | Prefix-safe rolling window mean |
-| `group_count(rows, row => row.key)` | `[DataGroup]` | Count rows by a `String` key |
-| `group_sum(rows, row => row.key, row => row.value)` | `[DataGroup]` | Sum a `Float` selector per key |
-| `group_mean(rows, row => row.key, row => row.value)` | `[DataGroup]` | Mean a `Float` selector per key |
-| `filter(rows, row => ok)` / `sort_by(rows, row => key)` | `[T]` | Typed in-memory row pipeline |
-| `inner_join(left, right, l => key, r => key)` | `[DataJoin<L, R>]` | Stable matching row pairs with SQL join multiplicity |
-| `left_join(left, right, l => key, r => key)` | `[DataJoin<L, R?>]` | Stable row pairs; unmatched left rows carry `None` |
-| `pivot_sum(rows, row => row_key, row => col_key, row => value)` | `[DataGroup]` | Deterministic row/column sum cells as `row|col` keys |
+| `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float ? DataError` | Numeric series stats over `[Float]` (empty mean/min/max are `Empty`) |
+| `median(values)` / `quantile(values, q)` | `Float ? DataError` | Sorted numeric quantiles; `q` must be finite in `0.0..=1.0` |
+| `variance(values)` / `stddev(values)` / `describe(values)` | `Float ? DataError` / `DataSummary ? DataError` | Numeric distribution summary |
+| `rolling_mean(values, width)` | `[Float] ? DataError` | Rolling window mean; width must be positive |
+| `group_count(rows, row => row.key)` | `[DataGroup] ? DataError` | Count rows by a `String` key |
+| `group_sum(rows, row => row.key, row => row.value)` | `[DataGroup] ? DataError` | Sum a `Float` selector per key |
+| `group_mean(rows\|stream, row => row.key, row => row.value)` | `[DataGroup] ? DataError` | Mean a `Float` selector per key; streams reuse pull limits |
+| `filter(rows, row => ok)` / `sort_by(rows, row => key)` | `[T]` / `[T] ? DataError` | Typed in-memory row pipeline |
+| `inner_join(left, right, l => key, r => key)` | `[DataJoin<L, R>] ? DataError` | Stable matching row pairs with SQL join multiplicity |
+| `left_join(left, right, l => key, r => key)` | `[DataJoin<L, R?>] ? DataError` | Stable row pairs; unmatched left rows carry `None` |
+| `pivot_sum(rows, row => row_key, row => col_key, row => value)` | `[DataPivotCell] ? DataError` | Distinct row/column sum cells |
 | `status()` | `[DataStatus]` | Native/bridge replacement facts for data workflows |
-| `bar_text(groups)` / `bar_svg(groups)` | `String` | Deterministic text/SVG bar output |
+| `bar_text(groups)` / `bar_svg(groups)` | `String ? DataError` | Deterministic text/SVG bar output; reject negative/non-finite geometry |
+
+`DataStream<T>.next()` returns `T? ? DataError`: clean EOF is stable `None`,
+terminal errors latch, and complete rows already returned stay valid. Edition
+2026 keeps the prior non-fallible signatures frozen.
 
 `Table<T>` and `LazyFrame<T>` keep typed rows; `Series<T>` keeps typed values.
 `data.schema` returns `[DataColumn]` with `.name` and `.type_name` for each
