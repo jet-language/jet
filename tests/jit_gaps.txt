@@ -30,10 +30,12 @@ covered:
   basics/switch
   basics/tuples
   basics/values
+  collections/dynamic-array-view
   collections/filter_map
   collections/iter_adapters
   collections/lazy_iter
   collections/list_bounds
+  collections/lists
   collections/map_key
   collections/struct_list_mutation
   collections/wordcount
@@ -74,8 +76,12 @@ covered:
   lowlevel/cross
   lowlevel/layout_c
   memory/copy_verb
+  memory/place_windows
   memory/ref_field
+  memory/uninit
+  memory/uninit_buffer
   modules/inline_module
+  modules/library
   modules/module_inline_sibling
   modules/pub_file
   modules/selective_imports
@@ -111,6 +117,7 @@ covered:
   types/inferred_new
   types/option_combinators
   types/range_types
+  types/recursive_enum
   types/structs
   types/tags_and_traits
   types/typestate
@@ -136,13 +143,11 @@ gaps:
   cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
   collections/deque: run: jit static `std::collections::VecDeque::new`
-  collections/dynamic-array-view: run: jit builtin method unsupported
   collections/fixed_arrays: run: jit let type unsupported: FixedList { elem: IntN { signed: false, bits: 8 }, len: 3, len_symbol: None }
   collections/index_hook: Grid::get: jit field type unsupported: List(Named("Cell"))
-  collections/iter_hook: BagIter::next: jit place borrow unsupported
+  collections/iter_hook: run: jit for-in method-call collection unsupported
   collections/iter_tools_audit: run: jit builtin method unsupported
   collections/list_remove_bounds: run: jit builtin method unsupported
-  collections/lists: run: jit builtin method unsupported
   collections/set: run: jit builtin method unsupported
   collections/sketch: run: jit core call unsupported
   comptime/comptime_core: run: jit const ref unsupported
@@ -237,23 +242,19 @@ gaps:
   memory/arena_parse: run: automatic resource cleanup uses AOT fallback
   memory/arena_regions: run: automatic resource cleanup uses AOT fallback
   memory/entity_tree: run: jit static `jet_std::JetPool::new`
-  memory/entity_world: tick: jit for-in collection type unsupported: List(Apply { name: "Id", args: [Named("Player")] })
+  memory/entity_world: tick: jit host/default/uninit/ct-lit unsupported
   memory/expiring_secret: run: jit host/default/uninit/ct-lit unsupported
-  memory/gc_cyclic: promoted_cycle: jit clone unsupported type: Named("Link")
+  memory/gc_cyclic: promoted_cycle: jit host/default/uninit/ct-lit unsupported
   memory/no_alloc_policy: run: jit call arg wrapper unsupported
   memory/ownership: jit param type unsupported: Fn { params: [String], ret: Some(Int), effect_bound: None }
   memory/parameter_modes: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
-  memory/place_windows: run: jit builtin method unsupported
   memory/pool_stale_id: run: jit static `jet_std::JetPool::new`
   memory/rawptr: run: jit unsafe region unsupported
   memory/resource_close: run: automatic resource cleanup uses AOT fallback
-  memory/returned_views: first: jit builtin method unsupported
+  memory/returned_views: domain: jit builtin method unsupported
   memory/shared_config: jit param type unsupported: Shared(Named("AppConfig"))
   memory/shared_transact: jit param type unsupported: Shared(Named("Account"))
   memory/string_view: run: jit builtin method unsupported
-  memory/uninit: run: jit host/default/uninit/ct-lit unsupported
-  memory/uninit_buffer: run: jit host/default/uninit/ct-lit unsupported
-  modules/library: Person::greeting: jit place borrow unsupported
   net/email_dkim: run: jit core call unsupported
   net/email_message: run: jit core call unsupported
   net/http_client: jit core call unsupported
@@ -323,7 +324,7 @@ gaps:
   tooling/data_stream_bounds: run: jit core call unsupported
   tooling/debug_native: run: jit core call unsupported
   tooling/fuzz_demo: reverse: jit builtin method unsupported
-  tooling/panic_report: summarize: jit place borrow unsupported
+  tooling/panic_report: summarize: jit require/panic stop unsupported
   tooling/property_tests: reverse: jit builtin method unsupported
   tooling/provenance_track: run: jit numeric origin unsupported
   tooling/testing_helpers: run: jit core call unsupported
@@ -332,10 +333,9 @@ gaps:
   types/generic_types: run: jit call to unknown function `make_pair`
   types/measurement: run: jit core call unsupported
   types/no_any_alternatives: run: jit call to unknown function `echo`
-  types/option: run: jit if-let pattern unsupported
+  types/option: describe: jit if-let pattern unsupported
   types/optional_result_variants: run: jit enum arm is not a variant pattern
   types/patchable: run: jit missing method `Employee::apply`
-  types/recursive_enum: run: jit print type unsupported
   types/refinements: pick: jit host/default/uninit/ct-lit unsupported
   types/renderable-varargs-multi: run: jit call to unknown function `announce__va1`
   types/renderable-varargs: run: jit call to unknown function `log_all__va4`

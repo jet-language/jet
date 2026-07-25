@@ -71,15 +71,15 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
             Some(inner.as_ref().clone())
         }
         // JIT ABI: `Iter<T>` / `View<T>` / `ViewMut<T>` producers materialize list
-        // handles — same scalar elems as list for-in / join / len.
+        // handles — scalar elems share list for-in / join / len; record elems too.
         Type::Apply { name, args }
             if (name == jet_foundation::Syntax::TYPE_ITER
                 || matches!(name.as_str(), "View" | "ViewMut"))
                 && args.len() == 1
-                && matches!(
+                && (matches!(
                     &args[0],
                     Type::Int | Type::Float | Type::String | Type::Char
-                ) =>
+                ) || record_type_key(&args[0]).is_some()) =>
         {
             Some(args[0].clone())
         }
@@ -87,7 +87,7 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
     }
 }
 
-/// Closure adapter receivers: scalar list/Iter elems, or user struct handles.
+/// Closure adapter receivers: scalar list/Iter/View elems, or user struct handles.
 pub(crate) fn jit_closure_elem_type(ty: &Type) -> Option<Type> {
     if let Some(elem) = jit_list_iter_elem_type(ty) {
         return Some(elem);
@@ -99,7 +99,8 @@ pub(crate) fn jit_closure_elem_type(ty: &Type) -> Option<Type> {
             Some(inner.as_ref().clone())
         }
         Type::Apply { name, args }
-            if name == jet_foundation::Syntax::TYPE_ITER
+            if (name == jet_foundation::Syntax::TYPE_ITER
+                || matches!(name.as_str(), "View" | "ViewMut"))
                 && args.len() == 1
                 && record_type_key(&args[0]).is_some() =>
         {
@@ -345,7 +346,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
             } else {
-                jit_list_native_type(&base.ty)
+                (jit_list_native_type(&base.ty)
+                    || jit_list_record_type(&base.ty)
+                    || jit_list_iter_elem_type(&base.ty).is_some()
+                    || jit_closure_elem_type(&base.ty).is_some())
                     && matches!(&index.ty, Type::Int)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
@@ -354,7 +358,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::Slice {
             base, start, end, ..
         } => {
-            jit_list_native_type(&base.ty)
+            (jit_list_native_type(&base.ty) || jit_list_record_type(&base.ty))
                 && matches!(&start.ty, Type::Int)
                 && matches!(&end.ty, Type::Int)
                 && resident_safe_expr(base, callees)
@@ -419,7 +423,14 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 ..
             } => {
                 !is_map
-                    && jit_list_record_type(&base.ty)
+                    && (jit_list_record_type(&base.ty)
+                        || matches!(
+                            &base.ty,
+                            Type::Apply { name, args }
+                                if matches!(name.as_str(), "View" | "ViewMut")
+                                    && args.len() == 1
+                                    && record_type_key(&args[0]).is_some()
+                        ))
                     && matches!(&index.ty, Type::Int)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
@@ -502,6 +513,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && resident_safe_expr(else_value, callees)
         }
         TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
+        TExprKind::Borrow { place, .. } => resident_safe_expr(place, callees),
         TExprKind::OptionLift2 { f, a, b } => {
             matches!(
                 &f.kind,
@@ -603,7 +615,7 @@ fn resident_safe_closure_method(
         return false;
     }
     match op {
-        TIR::TClosureOp::Map | TIR::TClosureOp::MapMut => {
+        TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::ViewMap => {
             jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
@@ -636,8 +648,10 @@ fn resident_safe_closure_method(
             matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
                 && resident_safe_unary_lambda(args, callees)
         }
-        TIR::TClosureOp::Fold | TIR::TClosureOp::Reduce => {
-            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+        TIR::TClosureOp::Fold | TIR::TClosureOp::Reduce | TIR::TClosureOp::ViewFold => {
+            jit_closure_elem_type(&recv.ty)
+                .or_else(|| jit_list_iter_elem_type(&recv.ty))
+                .is_some_and(|elem| matches!(elem, Type::Int | Type::Named(_)))
                 && resident_safe_fold_lambda(args, callees)
         }
         TIR::TClosureOp::MinBy | TIR::TClosureOp::MaxBy => {
@@ -655,7 +669,10 @@ fn resident_safe_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>)
     match payload {
         TEnumPayload::Unit => true,
         TEnumPayload::Positional(vals) => vals.len() == 1
-            && matches!(vals[0].value.ty, Type::Int | Type::Float | Type::Float32)
+            && matches!(
+                vals[0].value.ty,
+                Type::Int | Type::Float | Type::Float32 | Type::Named(_)
+            )
             && resident_safe_expr(&vals[0].value, callees),
         TEnumPayload::Named(fields) => fields
             .iter()
@@ -776,6 +793,15 @@ fn resident_safe_builtin_op(
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Option(_))
                 && resident_safe_expr(&args[0], callees)
+        }
+        // JIT ABI: View/ViewMut materialize as owned list handles (inclusive slice).
+        TBuiltinOp::ViewNew { .. } | TBuiltinOp::ViewMutNew { .. } => {
+            (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
+                && args.len() == 2
+                && matches!(&args[0].ty, Type::Int)
+                && matches!(&args[1].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+                && resident_safe_expr(&args[1], callees)
         }
         _ => false,
     }
@@ -903,7 +929,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     && resident_safe_expr(index, callees)
                     && resident_safe_expr(value, callees)
             } else {
-                jit_list_native_type(&base.ty)
+                (jit_list_native_type(&base.ty)
+                    || jit_list_iter_elem_type(&base.ty).is_some()
+                    || jit_closure_elem_type(&base.ty).is_some())
                     && matches!(&index.ty, Type::Int)
                     && matches!(&value.ty, Type::Int | Type::Float | Type::String | Type::Char)
                     && resident_safe_expr(base, callees)
@@ -939,7 +967,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && matches!(&source.ty, Type::String);
             let list_ok = method_kind.is_none()
                 && var2.is_none()
-                && jit_list_iter_elem_type(&collection.ty).is_some();
+                && (jit_list_iter_elem_type(&collection.ty).is_some()
+                    || jit_closure_elem_type(&collection.ty).is_some()
+                    || jit_list_record_type(&collection.ty));
             let map_ok = method_kind.is_none()
                 && var2.is_some()
                 && jit_map_string_type(&collection.ty);
@@ -976,6 +1006,16 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         TStmt::Region(body) | TStmt::Shield { body } => {
             body.iter().all(|s| resident_safe_stmt(s, callees))
         }
+        // JIT materializes split views as independent list slices / element copies.
+        TStmt::SplitViews {
+            owner,
+            start: _,
+            end: _,
+            single: _,
+            ..
+        } => owner
+            .as_ref()
+            .is_none_or(|o| resident_safe_expr(o, callees)),
         _ => false,
     }
 }

@@ -231,4 +231,35 @@ impl<'a> JitMeta<'a> {
             .map(|i| i as i64)
     }
 
+    pub(crate) fn is_enum(&self, name: &str) -> bool {
+        self.enum_variants.contains_key(name)
+    }
+
+    /// Packed i64 enum ABI (disc in low byte, payload >> 8): every variant is
+    /// unit, `Int`, or another packed enum. Excludes F64-heap / multi-payload.
+    pub(crate) fn enum_packed_showable(&self, name: &str) -> bool {
+        let Some(variants) = self.enum_variants.get(name) else {
+            return false;
+        };
+        for variant in variants {
+            let vname = variant.strip_prefix("user_").unwrap_or(variant.as_str());
+            let payloads = self.enum_variant_payload_types(name, vname).unwrap_or(&[]);
+            match payloads {
+                [] => {}
+                [Type::Int] => {}
+                [Type::Named(inner)] if self.is_enum(inner) => {}
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    pub(crate) fn enum_variant_names(&self, name: &str) -> Option<&[String]> {
+        self.enum_variants.get(name).map(|v| v.as_slice())
+    }
+
+    pub(crate) fn enum_names(&self) -> impl Iterator<Item = &String> {
+        self.enum_variants.keys()
+    }
+
 }
