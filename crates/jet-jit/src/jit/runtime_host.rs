@@ -8,7 +8,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Archive, Collections, Compress, Concurrency, CoreHost, Encoding, JitResultValue, Numeric,
+    Archive, Collections, Compress, Concurrency, CoreHost, Encoding, Fmt, JitResultValue, Numeric,
     Process, Random, Solver, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
@@ -952,6 +952,7 @@ pub(crate) struct HostFns {
     pub(crate) conc: Concurrency::ConcurrencyHostFns,
     pub(crate) core: CoreHost::CoreHostFns,
     pub(crate) encoding: Encoding::EncodingHostFns,
+    pub(crate) fmt: Fmt::FmtHostFns,
     pub(crate) compress: Compress::CompressHostFns,
     pub(crate) archive: Archive::ArchiveHostFns,
     pub(crate) process: Process::ProcessHostFns,
@@ -1080,6 +1081,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     Concurrency::register_concurrency_symbols(&mut builder);
     CoreHost::register_core_host_symbols(&mut builder);
     Encoding::register_encoding_symbols(&mut builder);
+    Fmt::register_fmt_symbols(&mut builder);
     Compress::register_compress_symbols(&mut builder);
     Archive::register_archive_symbols(&mut builder);
     Process::register_process_symbols(&mut builder);
@@ -1091,6 +1093,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
     let core = CoreHost::declare_core_host_fns(&mut module)?;
     let encoding = Encoding::declare_encoding_host_fns(&mut module)?;
+    let fmt = Fmt::declare_fmt_host_fns(&mut module)?;
     let compress = Compress::declare_compress_host_fns(&mut module)?;
     let archive = Archive::declare_archive_host_fns(&mut module)?;
     let process = Process::declare_process_host_fns(&mut module)?;
@@ -1103,6 +1106,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         conc,
         core,
         encoding,
+        fmt,
         compress,
         archive,
         process,
@@ -1119,6 +1123,7 @@ fn declare_host_fns(
     conc: Concurrency::ConcurrencyHostFns,
     core: CoreHost::CoreHostFns,
     encoding: Encoding::EncodingHostFns,
+    fmt: Fmt::FmtHostFns,
     compress: Compress::CompressHostFns,
     archive: Archive::ArchiveHostFns,
     process: Process::ProcessHostFns,
@@ -1380,6 +1385,7 @@ fn declare_host_fns(
         conc,
         core,
         encoding,
+        fmt,
         compress,
         archive,
         process,

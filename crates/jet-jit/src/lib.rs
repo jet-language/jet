@@ -17,6 +17,7 @@ mod Compress;
 mod Concurrency;
 mod CoreHost;
 mod Encoding;
+mod Fmt;
 mod Numeric;
 mod Process;
 mod Random;

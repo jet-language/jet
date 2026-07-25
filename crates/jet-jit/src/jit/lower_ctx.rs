@@ -811,6 +811,297 @@ impl LowerCtx<'_, '_> {
         self.lower_typed_tree_decode(text, ok_ty, self.host.encoding.json_parse)
     }
 
+    fn lower_typed_json_decode_traced(
+        &mut self,
+        text: &TExpr,
+        result_ok_ty: &Type,
+    ) -> Result<Value, String> {
+        // result_ok_ty = DecodeResult<T>
+        let inner_ty = match result_ok_ty {
+            Type::Apply { name, args } if name == "DecodeResult" => args
+                .first()
+                .cloned()
+                .ok_or_else(|| "jit decode_traced missing DecodeResult arg".to_string())?,
+            Type::Named(n) if n == "DecodeResult" => {
+                return Err("jit decode_traced DecodeResult needs type arg".into());
+            }
+            other => {
+                return Err(format!(
+                    "jit decode_traced expected DecodeResult, got {other:?}"
+                ));
+            }
+        };
+        let text_v = self.lower_expr(text)?;
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.encoding.json_parse, self.b.func);
+        let parse_call = self.b.ins().call(host_ref, &[text_v]);
+        let parsed = self.b.inst_results(parse_call)[0];
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[parsed]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.b.ins().jump(merge, &[parsed]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let tree = self.result_payload(parsed, &Type::Named("DataTree".into()))?;
+        let wrapped = self.lower_datatree_decode_traced(tree, &inner_ty)?;
+        self.b.ins().jump(merge, &[wrapped]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    /// Decode DataTree → T, applying registered migrations on failure (D-MIGRATE4).
+    fn lower_datatree_decode_migrating(
+        &mut self,
+        tree: Value,
+        target: &Type,
+    ) -> Result<Value, String> {
+        let decoded = self.lower_datatree_decode(tree, target)?;
+        let Type::Named(type_name) = target else {
+            return Ok(decoded);
+        };
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[decoded]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let done = self.b.create_block();
+        let try_mig = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(is_ok, done, &[], try_mig, &[]);
+
+        self.b.switch_to_block(done);
+        self.b.seal_block(done);
+        self.b.ins().jump(merge, &[decoded]);
+
+        self.b.switch_to_block(try_mig);
+        self.b.seal_block(try_mig);
+        let name_id = self.runtime.heap.alloc_string(type_name.clone());
+        let name_v = self.b.ins().iconst(types::I64, name_id);
+        let mig_ref = self
+            .module
+            .declare_func_in_func(self.host.encoding.datatree_migrate, self.b.func);
+        let mig_call = self.b.ins().call(mig_ref, &[name_v, tree]);
+        let mig_r = self.b.inst_results(mig_call)[0];
+        let mig_ok_call = self.b.ins().call(status_ref, &[mig_r]);
+        let mig_ok = self.b.inst_results(mig_ok_call)[0];
+        let mig_yes = self.b.create_block();
+        let mig_no = self.b.create_block();
+        self.b.ins().brif(mig_ok, mig_yes, &[], mig_no, &[]);
+
+        self.b.switch_to_block(mig_no);
+        self.b.seal_block(mig_no);
+        // Keep the original decode Err.
+        self.b.ins().jump(merge, &[decoded]);
+
+        self.b.switch_to_block(mig_yes);
+        self.b.seal_block(mig_yes);
+        let mig_rec = self.result_payload(mig_r, &Type::Named("MigrationProbe".into()))?;
+        // Migration probe record: [tree, from, steps]
+        let get_i = self
+            .module
+            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let new_tree_call = self.b.ins().call(get_i, &[mig_rec, zero]);
+        let new_tree = self.b.inst_results(new_tree_call)[0];
+        let decoded2 = self.lower_datatree_decode(new_tree, target)?;
+        self.b.ins().jump(merge, &[decoded2]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_migration_status_fresh(&mut self) -> Result<Value, String> {
+        let n = self.b.ins().iconst(types::I64, 3);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let new_call = self.b.ins().call(new_ref, &[n]);
+        let handle = self.b.inst_results(new_call)[0];
+        let set_b = self
+            .module
+            .declare_func_in_func(self.host.struct_set_bool, self.b.func);
+        let set_s = self
+            .module
+            .declare_func_in_func(self.host.struct_set_str, self.b.func);
+        let set_i = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let idx0 = self.b.ins().iconst(types::I64, 0);
+        let fals = self.b.ins().iconst(types::I8, 0);
+        self.b.ins().call(set_b, &[handle, idx0, fals]);
+        let empty = self.runtime.heap.alloc_string(String::new());
+        let empty_v = self.b.ins().iconst(types::I64, empty);
+        let idx1 = self.b.ins().iconst(types::I64, 1);
+        self.b.ins().call(set_s, &[handle, idx1, empty_v]);
+        let list_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let list_call = self.b.ins().call(list_ref, &[]);
+        let empty_list = self.b.inst_results(list_call)[0];
+        let idx2 = self.b.ins().iconst(types::I64, 2);
+        self.b.ins().call(set_i, &[handle, idx2, empty_list]);
+        Ok(handle)
+    }
+
+    fn lower_migration_status_from_probe(&mut self, mig_rec: Value) -> Result<Value, String> {
+        let get_i = self
+            .module
+            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let two = self.b.ins().iconst(types::I64, 2);
+        let from_call = self.b.ins().call(get_i, &[mig_rec, one]);
+        let from = self.b.inst_results(from_call)[0];
+        let steps_call = self.b.ins().call(get_i, &[mig_rec, two]);
+        let steps = self.b.inst_results(steps_call)[0];
+        let n = self.b.ins().iconst(types::I64, 3);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let new_call = self.b.ins().call(new_ref, &[n]);
+        let handle = self.b.inst_results(new_call)[0];
+        let set_b = self
+            .module
+            .declare_func_in_func(self.host.struct_set_bool, self.b.func);
+        let set_s = self
+            .module
+            .declare_func_in_func(self.host.struct_set_str, self.b.func);
+        let set_i = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let idx0 = self.b.ins().iconst(types::I64, 0);
+        let tru = self.b.ins().iconst(types::I8, 1);
+        self.b.ins().call(set_b, &[handle, idx0, tru]);
+        let idx1 = self.b.ins().iconst(types::I64, 1);
+        self.b.ins().call(set_s, &[handle, idx1, from]);
+        let idx2 = self.b.ins().iconst(types::I64, 2);
+        self.b.ins().call(set_i, &[handle, idx2, steps]);
+        Ok(handle)
+    }
+
+    fn lower_decode_result_wrap(
+        &mut self,
+        value: Value,
+        migration: Value,
+    ) -> Result<Value, String> {
+        let n = self.b.ins().iconst(types::I64, 2);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let new_call = self.b.ins().call(new_ref, &[n]);
+        let handle = self.b.inst_results(new_call)[0];
+        let set_i = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let idx0 = self.b.ins().iconst(types::I64, 0);
+        let idx1 = self.b.ins().iconst(types::I64, 1);
+        self.b.ins().call(set_i, &[handle, idx0, value]);
+        self.b.ins().call(set_i, &[handle, idx1, migration]);
+        let tag = self.b.ins().iconst(types::I8, 1);
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.result_new_i64, self.b.func);
+        let call = self.b.ins().call(host_ref, &[tag, handle]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn lower_datatree_decode_traced(
+        &mut self,
+        tree: Value,
+        inner_ty: &Type,
+    ) -> Result<Value, String> {
+        let decoded = self.lower_datatree_decode(tree, inner_ty)?;
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[decoded]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let fresh_b = self.b.create_block();
+        let try_mig = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(is_ok, fresh_b, &[], try_mig, &[]);
+
+        self.b.switch_to_block(fresh_b);
+        self.b.seal_block(fresh_b);
+        let value = self.result_payload(decoded, inner_ty)?;
+        let mig = self.lower_migration_status_fresh()?;
+        let wrapped = self.lower_decode_result_wrap(value, mig)?;
+        self.b.ins().jump(merge, &[wrapped]);
+
+        self.b.switch_to_block(try_mig);
+        self.b.seal_block(try_mig);
+        let Type::Named(type_name) = inner_ty else {
+            // Non-named: no migration path; propagate decode Err.
+            self.b.ins().jump(merge, &[decoded]);
+            self.b.switch_to_block(merge);
+            self.b.seal_block(merge);
+            return Ok(self.b.block_params(merge)[0]);
+        };
+        let name_id = self.runtime.heap.alloc_string(type_name.clone());
+        let name_v = self.b.ins().iconst(types::I64, name_id);
+        let mig_ref = self
+            .module
+            .declare_func_in_func(self.host.encoding.datatree_migrate, self.b.func);
+        let mig_call = self.b.ins().call(mig_ref, &[name_v, tree]);
+        let mig_r = self.b.inst_results(mig_call)[0];
+        let mig_ok_call = self.b.ins().call(status_ref, &[mig_r]);
+        let mig_ok = self.b.inst_results(mig_ok_call)[0];
+        let mig_yes = self.b.create_block();
+        let mig_no = self.b.create_block();
+        self.b.ins().brif(mig_ok, mig_yes, &[], mig_no, &[]);
+
+        self.b.switch_to_block(mig_no);
+        self.b.seal_block(mig_no);
+        self.b.ins().jump(merge, &[decoded]);
+
+        self.b.switch_to_block(mig_yes);
+        self.b.seal_block(mig_yes);
+        let mig_rec = self.result_payload(mig_r, &Type::Named("MigrationProbe".into()))?;
+        let get_i = self
+            .module
+            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let new_tree_call = self.b.ins().call(get_i, &[mig_rec, zero]);
+        let new_tree = self.b.inst_results(new_tree_call)[0];
+        let decoded2 = self.lower_datatree_decode(new_tree, inner_ty)?;
+        let d2_ok_call = self.b.ins().call(status_ref, &[decoded2]);
+        let d2_ok = self.b.inst_results(d2_ok_call)[0];
+        let d2_yes = self.b.create_block();
+        let d2_no = self.b.create_block();
+        self.b.ins().brif(d2_ok, d2_yes, &[], d2_no, &[]);
+
+        self.b.switch_to_block(d2_no);
+        self.b.seal_block(d2_no);
+        self.b.ins().jump(merge, &[decoded2]);
+
+        self.b.switch_to_block(d2_yes);
+        self.b.seal_block(d2_yes);
+        let value2 = self.result_payload(decoded2, inner_ty)?;
+        let status = self.lower_migration_status_from_probe(mig_rec)?;
+        let wrapped2 = self.lower_decode_result_wrap(value2, status)?;
+        self.b.ins().jump(merge, &[wrapped2]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
     fn lower_typed_tree_decode(
         &mut self,
         text: &TExpr,
@@ -840,7 +1131,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
         let tree = self.result_payload(parsed, &Type::Named("DataTree".into()))?;
-        let decoded = self.lower_datatree_decode(tree, ok_ty)?;
+        let decoded = self.lower_datatree_decode_migrating(tree, ok_ty)?;
         self.b.ins().jump(merge, &[decoded]);
 
         self.b.switch_to_block(merge);
@@ -3473,6 +3764,11 @@ impl LowerCtx<'_, '_> {
                             return self.lower_typed_json_decode(&args[0], ok);
                         }
                     }
+                    if method == "decode_traced" && args.len() == 1 {
+                        if let Type::Result { ok, .. } = &expr.ty {
+                            return self.lower_typed_json_decode_traced(&args[0], ok);
+                        }
+                    }
                     if matches!(method.as_str(), "to_string" | "to_string_pretty")
                         && args.len() == 1
                         && !datatree_arg
@@ -4030,6 +4326,59 @@ impl LowerCtx<'_, '_> {
                     let text = self.lower_expr(&args[0])?;
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                     let call = self.b.ins().call(host_ref, &[text]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.fmt" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "number" | "bytes" | "duration" | "ordinal" if args.len() == 1 => {
+                            let host = match method.as_str() {
+                                "number" => self.host.fmt.number,
+                                "bytes" => self.host.fmt.bytes,
+                                "duration" => self.host.fmt.duration,
+                                _ => self.host.fmt.ordinal,
+                            };
+                            (host, vec![self.lower_expr(&args[0])?])
+                        }
+                        "decimal" | "percent" if args.len() == 2 => {
+                            let host = if method == "decimal" {
+                                self.host.fmt.decimal
+                            } else {
+                                self.host.fmt.percent
+                            };
+                            (
+                                host,
+                                vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                            )
+                        }
+                        "plural" if args.len() == 3 => (
+                            self.host.fmt.plural,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "pad_left" | "pad_right" | "pad_center" if args.len() == 3 => {
+                            let host = match method.as_str() {
+                                "pad_left" => self.host.fmt.pad_left,
+                                "pad_right" => self.host.fmt.pad_right,
+                                _ => self.host.fmt.pad_center,
+                            };
+                            (
+                                host,
+                                vec![
+                                    self.lower_expr(&args[0])?,
+                                    self.lower_expr(&args[1])?,
+                                    self.lower_expr(&args[2])?,
+                                ],
+                            )
+                        }
+                        _ => {
+                            return Err(format!("jit core call unsupported: core.fmt.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.perf" {
@@ -8200,6 +8549,9 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "reason",
             "cause",
         ],
+        "FieldError" | "DecodeError" => &["path", "reason"],
+        "MigrationStatus" => &["migrated", "from", "steps"],
+        "DecodeResult" => &["value", "migration"],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)

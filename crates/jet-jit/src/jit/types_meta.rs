@@ -419,6 +419,11 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "reason",
             "cause",
         ],
+        // D-VALIDATE1 / D-SERDE2 — path+reason records.
+        "FieldError" | "DecodeError" => &["path", "reason"],
+        // D-MIGRATE3=A.
+        "MigrationStatus" => &["migrated", "from", "steps"],
+        "DecodeResult" => &["value", "migration"],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)
@@ -454,6 +459,22 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
             "path" | "reason" => Some(Type::String),
             "cause" => Some(Type::Option(Box::new(Type::Named("EncodingCause".into())))),
+            _ => None,
+        },
+        "FieldError" | "DecodeError" => match field {
+            "path" | "reason" => Some(Type::String),
+            _ => None,
+        },
+        "MigrationStatus" => match field {
+            "migrated" => Some(Type::Bool),
+            "from" => Some(Type::String),
+            "steps" => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        },
+        "DecodeResult" => match field {
+            // `.value` type is the Apply arg; callers pass expr.ty.
+            "value" => None,
+            "migration" => Some(Type::Named("MigrationStatus".into())),
             _ => None,
         },
         _ => None,

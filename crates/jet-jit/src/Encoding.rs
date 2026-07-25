@@ -7,6 +7,9 @@
 use super::Concurrency;
 use jet_foundation::base_encoding_dispatch;
 use jet_foundation::PackageEdition;
+use jet_foundation::AST::{Expr, Item, MigrationOp, ProgramBundle, StrPart};
+use std::cell::RefCell;
+use std::collections::{BTreeSet, HashMap};
 
 /// Canonical `jet_std` JSON/DataTree runtime — types stubbed, algorithm via include!
 mod json_rt {
@@ -1545,6 +1548,7 @@ pub(crate) struct EncodingHostFns {
     pub datatree_bool: cranelift_module::FuncId,
     pub datatree_float: cranelift_module::FuncId,
     pub datatree_pack: cranelift_module::FuncId,
+    pub datatree_migrate: cranelift_module::FuncId,
     pub toml_parse: cranelift_module::FuncId,
     pub toml_to_string: cranelift_module::FuncId,
     pub yaml_parse: cranelift_module::FuncId,
@@ -1595,6 +1599,7 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol("jet_jit_datatree_bool", jet_jit_datatree_bool as *const u8);
     builder.symbol("jet_jit_datatree_float", jet_jit_datatree_float as *const u8);
     builder.symbol("jet_jit_datatree_pack", jet_jit_datatree_pack as *const u8);
+    builder.symbol("jet_jit_datatree_migrate", jet_jit_datatree_migrate as *const u8);
     builder.symbol("jet_jit_toml_parse", jet_jit_toml_parse as *const u8);
     builder.symbol("jet_jit_toml_to_string", jet_jit_toml_to_string as *const u8);
     builder.symbol("jet_jit_yaml_parse", jet_jit_yaml_parse as *const u8);
@@ -1607,6 +1612,238 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
 
 extern "C" fn jet_jit_datatree_pack(disc: i64, payload: i64) -> i64 {
     alloc_dt_record(disc, payload)
+}
+
+// ── D-MIGRATE3/4: decode_traced + silent migrate for plain decode ────────────
+// Mirrors codegen `emit_migration_chain_walker` / step fns using registered
+// MigrationDecl metadata (no per-type Rust emit). Literal `add` defaults only.
+
+#[derive(Clone)]
+enum MigrateStepOp {
+    Rename { from: String, to: String },
+    Remove { field: String },
+    Add { field: String, value: json_rt::DataTree },
+}
+
+#[derive(Clone)]
+struct TypeMigration {
+    /// Historical shapes oldest-first (v1..vK); current is not included.
+    shapes: Vec<BTreeSet<String>>,
+    blocks: Vec<Vec<MigrateStepOp>>,
+}
+
+thread_local! {
+    static TYPE_MIGRATIONS: RefCell<HashMap<String, TypeMigration>> =
+        RefCell::new(HashMap::new());
+}
+
+fn literal_datatree(expr: &Expr) -> Option<json_rt::DataTree> {
+    match expr {
+        Expr::Bool(b, _) => Some(json_rt::DataTree::Bool(*b)),
+        Expr::Int(n, _, _, _) => Some(json_rt::DataTree::Int(*n)),
+        Expr::Float(f, _, _) => Some(json_rt::DataTree::Float(*f)),
+        Expr::Char(c, _) => Some(json_rt::DataTree::Text(c.to_string())),
+        Expr::Str(parts, _) => {
+            let mut s = String::new();
+            for p in parts {
+                match p {
+                    StrPart::Lit(t) => s.push_str(t),
+                    StrPart::Interp(_, _) => return None,
+                }
+            }
+            Some(json_rt::DataTree::Text(s))
+        }
+        _ => None,
+    }
+}
+
+fn invert_shape(mut shape: BTreeSet<String>, ops: &[MigrateStepOp]) -> BTreeSet<String> {
+    // Undo one forward step (codegen migration_shapes order).
+    for op in ops {
+        match op {
+            MigrateStepOp::Rename { from, to } => {
+                shape.remove(to);
+                shape.insert(from.clone());
+            }
+            MigrateStepOp::Remove { field } => {
+                shape.insert(field.clone());
+            }
+            MigrateStepOp::Add { field, .. } => {
+                shape.remove(field);
+            }
+        }
+    }
+    shape
+}
+
+/// Collect `#PublishedSchema` migration chains from a checked bundle.
+pub fn register_migrations(bundle: &ProgramBundle) {
+    let mut by_type: HashMap<String, TypeMigration> = HashMap::new();
+    let mut current_fields: HashMap<String, BTreeSet<String>> = HashMap::new();
+    for module in &bundle.modules {
+        for item in &module.items {
+            if let Item::Struct(s) = item {
+                let fields: BTreeSet<String> = s.fields.iter().map(|f| f.name.clone()).collect();
+                current_fields.insert(s.name.clone(), fields);
+            }
+        }
+    }
+    for module in &bundle.modules {
+        for item in &module.items {
+            let Item::Migration(m) = item else { continue };
+            let mut ops = Vec::new();
+            let mut ok = true;
+            for op in &m.ops {
+                match op {
+                    MigrationOp::Rename { from, to, .. } => {
+                        ops.push(MigrateStepOp::Rename {
+                            from: from.clone(),
+                            to: to.clone(),
+                        });
+                    }
+                    MigrationOp::Remove { field, .. } => {
+                        ops.push(MigrateStepOp::Remove {
+                            field: field.clone(),
+                        });
+                    }
+                    MigrationOp::Add { field, default, .. } => {
+                        let Some(value) = literal_datatree(default) else {
+                            ok = false;
+                            break;
+                        };
+                        ops.push(MigrateStepOp::Add {
+                            field: field.clone(),
+                            value,
+                        });
+                    }
+                    MigrationOp::Change { .. } => {
+                        // Needs converter call — leave type unregistered.
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if !ok {
+                by_type.remove(&m.type_name);
+                continue;
+            }
+            by_type
+                .entry(m.type_name.clone())
+                .or_insert_with(|| TypeMigration {
+                    shapes: Vec::new(),
+                    blocks: Vec::new(),
+                })
+                .blocks
+                .push(ops);
+        }
+    }
+    // Derive historical shapes (same invert walk as codegen migration_shapes).
+    for (name, mig) in by_type.iter_mut() {
+        let Some(mut shape) = current_fields.get(name).cloned() else {
+            mig.shapes.clear();
+            continue;
+        };
+        let mut shapes = Vec::with_capacity(mig.blocks.len());
+        for block in mig.blocks.iter().rev() {
+            shape = invert_shape(shape, block);
+            shapes.push(shape.clone());
+        }
+        shapes.reverse(); // oldest first
+        mig.shapes = shapes;
+    }
+    TYPE_MIGRATIONS.with(|slot| {
+        *slot.borrow_mut() = by_type;
+    });
+}
+
+pub fn clear_migrations() {
+    TYPE_MIGRATIONS.with(|slot| slot.borrow_mut().clear());
+}
+
+fn key_set(tree: &json_rt::DataTree) -> BTreeSet<String> {
+    match tree {
+        json_rt::DataTree::Object(pairs) => pairs.iter().map(|(k, _)| k.clone()).collect(),
+        _ => BTreeSet::new(),
+    }
+}
+
+fn apply_step(pairs: &mut Vec<(String, json_rt::DataTree)>, ops: &[MigrateStepOp]) {
+    for op in ops {
+        match op {
+            MigrateStepOp::Rename { from, to } => {
+                for p in pairs.iter_mut() {
+                    if p.0 == *from {
+                        p.0 = to.clone();
+                    }
+                }
+            }
+            MigrateStepOp::Remove { field } => {
+                pairs.retain(|p| p.0 != *field);
+            }
+            MigrateStepOp::Add { field, value } => {
+                pairs.push((field.clone(), value.clone()));
+            }
+        }
+    }
+}
+
+/// Try walking an older shape forward. Ok payload = record `[tree, from, steps]`.
+extern "C" fn jet_jit_datatree_migrate(type_name: i64, tree: i64) -> i64 {
+    let name = clone_heap_string(type_name);
+    let Some(src) = read_datatree(tree) else {
+        return result_err_msg("invalid DataTree");
+    };
+    let outcome = TYPE_MIGRATIONS.with(|slot| {
+        let guard = slot.borrow();
+        let Some(mig) = guard.get(&name) else {
+            return Err("no migration");
+        };
+        if mig.blocks.is_empty() || mig.shapes.len() != mig.blocks.len() {
+            return Err("no migration");
+        }
+        let keys = key_set(&src);
+        let k = mig.shapes.len();
+        // Newest historical shape first (prefer newest matching version).
+        for j in (0..k).rev() {
+            if mig.shapes[j] != keys {
+                continue;
+            }
+            let json_rt::DataTree::Object(mut pairs) = src.clone() else {
+                return Err("migration needs object");
+            };
+            let mut steps: Vec<String> = Vec::new();
+            for i in j..k {
+                apply_step(&mut pairs, &mig.blocks[i]);
+                steps.push(format!("v{}->v{}", i + 1, i + 2));
+            }
+            let migrated = json_rt::DataTree::Object(pairs);
+            return Ok((migrated, format!("v{}", j + 1), steps));
+        }
+        Err("no matching shape")
+    });
+    match outcome {
+        Ok((migrated, from, steps)) => {
+            let tree_h = alloc_datatree(&migrated);
+            let from_h = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(from));
+            let steps_h = Concurrency::with_runtime_mut(|rt| {
+                let list = rt.heap.alloc_empty_list();
+                for s in steps {
+                    let sid = rt.heap.alloc_string(s);
+                    let _ = rt.heap.list_push_int(list, sid);
+                }
+                list
+            });
+            let rec = Concurrency::with_runtime_mut(|rt| {
+                let h = rt.heap.alloc_record(3);
+                let _ = rt.heap.record_set_int(h, 0, tree_h);
+                let _ = rt.heap.record_set_int(h, 1, from_h);
+                let _ = rt.heap.record_set_int(h, 2, steps_h);
+                h
+            });
+            result_ok_bits(rec as u64)
+        }
+        Err(msg) => result_err_msg(msg),
+    }
 }
 
 pub(crate) fn declare_encoding_host_fns(
@@ -1670,6 +1907,7 @@ pub(crate) fn declare_encoding_host_fns(
         datatree_bool: import("jet_jit_datatree_bool", &sig_unary)?,
         datatree_float: import("jet_jit_datatree_float", &sig_unary)?,
         datatree_pack: import("jet_jit_datatree_pack", &sig_binary)?,
+        datatree_migrate: import("jet_jit_datatree_migrate", &sig_binary)?,
         toml_parse: import("jet_jit_toml_parse", &sig_unary)?,
         toml_to_string: import("jet_jit_toml_to_string", &sig_unary)?,
         yaml_parse: import("jet_jit_yaml_parse", &sig_unary)?,

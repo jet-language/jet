@@ -625,6 +625,14 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
             _ => false,
         },
+        // Codable encode lowers to `JsonLit` (DataTree/Json foreign enum).
+        TExprKind::JsonLit { arg, .. } => match arg.as_ref() {
+            None => true,
+            Some(boxed) => {
+                let (inner, _) = boxed.as_ref();
+                enum_payload_value_type(&inner.ty) && resident_safe_expr(inner, callees)
+            }
+        },
         _ => false,
     }
 }
@@ -734,16 +742,31 @@ fn resident_safe_closure_method(
 fn resident_safe_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>) -> bool {
     match payload {
         TEnumPayload::Unit => true,
-        TEnumPayload::Positional(vals) => vals.len() == 1
-            && matches!(
-                vals[0].value.ty,
-                Type::Int | Type::Float | Type::Float32 | Type::Named(_)
-            )
-            && resident_safe_expr(&vals[0].value, callees),
+        TEnumPayload::Positional(vals) => {
+            vals.len() == 1
+                && enum_payload_value_type(&vals[0].value.ty)
+                && resident_safe_expr(&vals[0].value, callees)
+        }
         TEnumPayload::Named(fields) => fields
             .iter()
             .all(|(_, a)| resident_safe_expr(&a.value, callees)),
     }
+}
+
+/// DataTree/Json Object/Array payloads are Map/List handles; scalars stay as before.
+fn enum_payload_value_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Int
+            | Type::Float
+            | Type::Float32
+            | Type::Bool
+            | Type::String
+            | Type::Named(_)
+    ) || jit_map_string_type(ty)
+        || jit_list_native_type(ty)
+        || jit_list_record_type(ty)
+        || matches!(ty, Type::List(elem) if matches!(elem.as_ref(), Type::Named(_)))
 }
 
 fn resident_safe_tuple_fields(fields: &[(String, TExpr)], callees: &HashSet<String>) -> bool {
