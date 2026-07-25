@@ -1431,6 +1431,31 @@ fn crypto_values_match_aot_comptime_forced_interpreter_and_default_dev() {
     check_dev_tiers_with_boundary("crypto-expert-pure-values", &source, CRYPTO_EXPECTED, true);
 }
 
+#[test]
+fn crypto_expert_aead_sign_argon_aot_stdout_matches_known_answers() {
+    // New #722 ports: AOT path (no comptime expected= — TIR still Todo for
+    // Signature.bytes / AEAD in some shapes). REPL transcripts cover tier-0.
+    let source = r#"use core.crypto.expert as expert
+fn run() {
+    ed_seed :: [U8].{ 157, 97, 177, 157, 239, 253, 90, 96, 186, 132, 74, 244, 146, 236, 44, 196, 68, 73, 197, 105, 123, 50, 105, 25, 112, 59, 172, 3, 28, 174, 127, 96 }
+    ed_public :: [U8].{ 215, 90, 152, 1, 130, 177, 10, 183, 213, 75, 254, 211, 201, 100, 7, 58, 14, 225, 114, 243, 218, 166, 35, 37, 175, 2, 26, 104, 247, 7, 81, 26 }
+    key :: [U8].{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    nonce :: [U8].{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+    msg :: [U8].{ 97, 98, 99 }
+    #Unsafe("fixed RFC interop vectors") {
+        signed :: expert.ed25519_sign(ed_seed, []) ?? panic("sign")
+        sealed :: expert.aes256gcm_seal(key, nonce, msg, []) ?? panic("seal")
+        plain :: expert.aes256gcm_open(key, nonce, sealed, []) ?? panic("open")
+        password :: expert.hkdf_sha256([112], [], [], 4) ?? panic("pw")
+        derived :: expert.argon2id(password, [0, 1, 2, 3, 4, 5, 6, 7], 8192, 1, 1, 16) ?? panic("argon")
+        print("{expert.ed25519_verify_strict(ed_public, [], signed.bytes()) ?? false}|{plain}|{expert.secret_bytes(derived).len()}")
+    }
+}
+"#;
+    let output = rustc_aot_stdout("crypto/expert-aead-sign-argon", source);
+    assert_eq!(output.trim(), "true|[97, 98, 99]|16");
+}
+
 const NET_STYLE_DECLS: &str = r#"use core.io as io
 use core.net as net
 fn net_style_view() -> String {

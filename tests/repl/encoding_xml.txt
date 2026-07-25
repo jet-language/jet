@@ -1,0 +1,19 @@
+# Tower #722: encoding.xml projection helpers in tier-0.
+> use core.encoding.xml as xml
+ok
+> doc :: xml.parse("<catalog><book id=\"7\"><title>Hi</title></book></catalog>") ?? panic("parse")
+> root :: xml.root(doc) ?? panic("root")
+> name :: xml.expanded_name(root) ?? panic("name")
+> name.local
+"catalog" : String
+> (xml.attribute(root, "id") ?? panic("attr")) ?? "missing"
+"missing" : String
+> children :: xml.content(root) ?? panic("content")
+> children.len()
+1 : Int
+> book :: children[0]
+> book_name :: xml.expanded_name(book) ?? panic("book")
+> book_name.local
+"book" : String
+> (xml.attribute(book, "id") ?? panic("attr")) ?? "missing"
+"7" : String

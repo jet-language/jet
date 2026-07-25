@@ -294,6 +294,40 @@ pub fn apply_static_type_method(
                 })),
             }))
         }
+        ("Secret", "from_bytes") => {
+            let bytes = match args.into_iter().next() {
+                Some(CtValue::Bytes(bytes)) => bytes,
+                Some(CtValue::List(items)) => {
+                    let mut bytes = Vec::with_capacity(items.len());
+                    for item in items {
+                        let CtValue::Int(n) = item else {
+                            return Some(Err(unsupported(
+                                "Secret.from_bytes expects a [U8] byte list",
+                                span,
+                            )));
+                        };
+                        if !(0..=255).contains(&n) {
+                            return Some(Err(unsupported(
+                                "Secret.from_bytes expects bytes in 0..255",
+                                span,
+                            )));
+                        }
+                        bytes.push(n as u8);
+                    }
+                    bytes
+                }
+                _ => {
+                    return Some(Err(unsupported(
+                        "Secret.from_bytes with a non-bytes argument",
+                        span,
+                    )))
+                }
+            };
+            Some(Ok(CtValue::Struct {
+                type_name: "Secret".to_string(),
+                fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+            }))
+        }
         _ => None,
     }
 }

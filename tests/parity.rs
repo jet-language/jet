@@ -61,27 +61,10 @@ const EXTRACTOR_ARTIFACTS: &[(&str, &str)] = &[
 /// boundary row here used to false-green: `classify_inventory` preferred the
 /// broad module boundary and the asserted pure-pending count stayed zero
 /// while these rows were still open (card #721 / #392 criterion 3).
-const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[
-    // core.crypto.expert AEAD / KDF / sign: deterministic given inputs, but
-    // security-sensitive — needs a careful, independently-reviewed port, not
-    // a quick approximation that could silently diverge from audited AOT.
-    // (ed25519_verify_strict / hkdf_sha256 / x25519 / *_bytes are already
-    // Covered via CorePureParity; open_v1 / migrate_v1 are named boundaries.)
-    ("core.crypto.expert", "aes256gcm_open"),
-    ("core.crypto.expert", "aes256gcm_seal"),
-    ("core.crypto.expert", "argon2id"),
-    ("core.crypto.expert", "ed25519_sign"),
-    ("core.crypto.expert", "xchacha20poly1305_open"),
-    ("core.crypto.expert", "xchacha20poly1305_seal"),
-    // core.encoding.xml tree projection / typed decode: parse+to_string+
-    // canonical are Covered; these pure DataTree helpers are still AOT-only.
-    ("core.encoding.xml", "attribute"),
-    ("core.encoding.xml", "content"),
-    ("core.encoding.xml", "decode"),
-    ("core.encoding.xml", "decode_bytes"),
-    ("core.encoding.xml", "expanded_name"),
-    ("core.encoding.xml", "root"),
-];
+/// Closed by #722: crypto.expert AEAD/sign/argon2id and encoding.xml projection
+/// ports. Remaining PurePending rows are View/ViewMut.join (value-surface string
+/// JoinSep; deferred to #743 itertools coordination — not listed here).
+const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[];
 
 /// Calls with a production-compiled foundation that must remain private until
 /// the complete AOT contract is resident. A public comptime arm is a false
@@ -1272,7 +1255,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     }
     assert_eq!(record(&records, Surface::DirectStatic, "Bag", "new").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_text").class, Class::Boundary);
-    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_bytes").class, Class::Boundary);
+    assert_eq!(record(&records, Surface::DirectStatic, "Secret", "from_bytes").class, Class::Covered);
     assert_eq!(record(&records, Surface::DirectStatic, "WrappedVaultKey", "from_bytes").class, Class::Boundary);
     assert_eq!(record(&records, Surface::Value, "WrappedVaultKey", "bytes").class, Class::Boundary);
     assert_eq!(record(&records, Surface::DirectStatic, "String", "from_bytes").class, Class::Covered);
@@ -1628,8 +1611,14 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Fixed, "core.raylib", "color").class, Class::Covered);
     for method in [
         "ed25519_verify_strict",
+        "ed25519_sign",
         "hkdf_sha256",
         "x25519",
+        "xchacha20poly1305_seal",
+        "xchacha20poly1305_open",
+        "aes256gcm_seal",
+        "aes256gcm_open",
+        "argon2id",
         "secret_bytes",
         "signing_key_bytes",
         "x25519_secret_bytes",
@@ -1641,6 +1630,20 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             "core.crypto.expert.{method}"
         );
     }
+    for method in [
+        "attribute",
+        "content",
+        "decode",
+        "decode_bytes",
+        "expanded_name",
+        "root",
+    ] {
+        assert_eq!(
+            record(&records, Surface::Fixed, "core.encoding.xml", method).class,
+            Class::Covered,
+            "core.encoding.xml.{method}"
+        );
+    }
     for &(module, method) in KNOWN_OPEN_GAPS {
         assert_eq!(
             record(&records, Surface::Fixed, module, method).class,
@@ -1648,6 +1651,18 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
             "{module}.{method} must remain PurePending (not swallowed by a module boundary)"
         );
     }
+    // #743 owns View/ViewMut.join (string JoinSep); leave PurePending until
+    // itertools protocol lands — do not pretend a partial port is Covered.
+    assert_eq!(
+        record(&records, Surface::Value, "View", "join").class,
+        Class::PurePending,
+        "View.join deferred to #743"
+    );
+    assert_eq!(
+        record(&records, Surface::Value, "ViewMut", "join").class,
+        Class::PurePending,
+        "ViewMut.join deferred to #743"
+    );
     assert_eq!(
         record(&records, Surface::Fixed, "core.crypto.random", "bytes").class,
         Class::Boundary
@@ -1660,11 +1675,10 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let covered = records.iter().filter(|record| record.class == Class::Covered).count();
     let pending = records.iter().filter(|record| record.class == Class::PurePending).count();
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
-    // Honest pending count includes the twelve explicit KNOWN_OPEN_GAPS rows
-    // (six crypto.expert + six encoding.xml) plus View/ViewMut.join value ports.
-    // Prior false-green asserted pending=0 while crypto rows sat under a broad
-    // Boundary match.
-    assert_eq!((records.len(), covered, pending, boundaries), (1_208, 843, 14, 351));
+    // #722 closed the twelve KNOWN_OPEN_GAPS ports; remaining PurePending is
+    // View/ViewMut.join only (#743). Secret.from_bytes is Covered (needed by
+    // argon2id); a few ambient Boundary rows also moved once exact arms landed.
+    assert_eq!((records.len(), covered, pending, boundaries), (1_208, 859, 2, 347));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1672,7 +1686,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        13224497936691574135,
+        17762160720318830830,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }

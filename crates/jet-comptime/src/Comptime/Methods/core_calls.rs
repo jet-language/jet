@@ -1249,6 +1249,32 @@ pub fn apply_core_call(
                 Err(error) => Ok(CtValue::ResErr(Box::new(error))),
             }
         }
+        // D-ENCXML-PROJECTION1=A: focused helpers (shared foundation projection).
+        ("core.encoding.xml", "root") => {
+            match super::super::EncodingLite::xml_root(one(0)?) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+            }
+        }
+        ("core.encoding.xml", "expanded_name") => {
+            match super::super::EncodingLite::xml_expanded_name(one(0)?) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+            }
+        }
+        ("core.encoding.xml", "attribute") => {
+            let name = as_string(one(1)?, span)?;
+            match super::super::EncodingLite::xml_attribute(one(0)?, name) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+            }
+        }
+        ("core.encoding.xml", "content") => {
+            match super::super::EncodingLite::xml_content(one(0)?) {
+                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+            }
+        }
         // --- core.encoding.cbor (ported verbatim, `EncodingLite.rs`) ---
         // D-ENC-CBOR-SURFACE1: current whole-value names return the same
         // Result shape as AOT. Edition compatibility names remain below.

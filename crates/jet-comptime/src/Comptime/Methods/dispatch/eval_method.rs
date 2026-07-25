@@ -425,13 +425,123 @@ impl<'a> Interp<'a> {
                         })),
                     });
                 }
+                // D-ENCXML-PROJECTION1: typed `decode`/`decode_bytes` → project → Decode.
+                if module == "core.encoding.xml"
+                    && matches!(method, "decode" | "decode_bytes")
+                    && !type_args.is_empty()
+                {
+                    let document = if method == "decode_bytes" {
+                        let bytes = match argv.first() {
+                            Some(value) => as_bytes(value, span)?,
+                            None => {
+                                return Err(unsupported(
+                                    "core.encoding.xml.decode_bytes(): missing arg 0",
+                                    span,
+                                ))
+                            }
+                        };
+                        match super::super::super::EncodingLite::xml_parse_bytes(
+                            &bytes,
+                            argv.get(1),
+                        ) {
+                            Ok(tree) => tree,
+                            Err(error) => {
+                                return Ok(CtValue::ResErr(Box::new(
+                                    super::super::super::EncodingLite::xml_source_error_value(
+                                        error,
+                                    ),
+                                )))
+                            }
+                        }
+                    } else {
+                        let text = match argv.first() {
+                            Some(CtValue::Str(s)) => s.as_str(),
+                            _ => {
+                                return Err(unsupported(
+                                    "core.encoding.xml.decode(): expected a string argument",
+                                    span,
+                                ))
+                            }
+                        };
+                        let parsed = match argv.get(1) {
+                            Some(options) => {
+                                super::super::super::EncodingLite::xml_parse_with(text, options)
+                            }
+                            None => super::super::super::EncodingLite::xml_parse(text),
+                        };
+                        match parsed {
+                            Ok(tree) => tree,
+                            Err(error) => {
+                                return Ok(CtValue::ResErr(Box::new(
+                                    super::super::super::EncodingLite::xml_error_value(error),
+                                )))
+                            }
+                        }
+                    };
+                    let projected =
+                        match super::super::super::EncodingLite::xml_project_for_decode(&document) {
+                            Ok(tree) => tree,
+                            Err(error) => return Ok(CtValue::ResErr(Box::new(error))),
+                        };
+                    return match self.typed_decode_top(&type_args[0], &projected, span) {
+                        Ok((value, _)) => Ok(CtValue::ResOk(Box::new(value))),
+                        Err(error) => {
+                            let (path, reason) = match error {
+                                CtValue::Struct { fields, .. } => {
+                                    let path = fields
+                                        .iter()
+                                        .find_map(|(name, value)| match (name.as_str(), value) {
+                                            ("path", CtValue::Str(value)) => Some(value.clone()),
+                                            _ => None,
+                                        })
+                                        .unwrap_or_else(|| "$".to_string());
+                                    let reason = fields
+                                        .iter()
+                                        .find_map(|(name, value)| match (name.as_str(), value) {
+                                            ("reason", CtValue::Str(value)) => Some(value.clone()),
+                                            _ => None,
+                                        })
+                                        .unwrap_or_else(|| {
+                                            "XML value does not match requested type".to_string()
+                                        });
+                                    (path, reason)
+                                }
+                                _ => (
+                                    "$".to_string(),
+                                    "XML value does not match requested type".to_string(),
+                                ),
+                            };
+                            Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                                type_name: "XMLError".to_string(),
+                                fields: vec![
+                                    (
+                                        "kind".to_string(),
+                                        CtValue::Enum {
+                                            type_name: "XMLReason".to_string(),
+                                            variant: "Shape".to_string(),
+                                            args: Vec::new(),
+                                        },
+                                    ),
+                                    ("byte_offset".to_string(), CtValue::None(Type::Int)),
+                                    ("line".to_string(), CtValue::None(Type::Int)),
+                                    ("column".to_string(), CtValue::None(Type::Int)),
+                                    ("path".to_string(), CtValue::Str(path)),
+                                    ("reason".to_string(), CtValue::Str(reason)),
+                                ],
+                            })))
+                        }
+                    };
+                }
                 // D-MIGRATE3=A / D-SERDE6: `decode<T>`/`decode_traced<T>` — typed
                 // Decode dispatch. Untyped `.decode()` (no turbofish, D-JSON3
                 // lenient form) keeps its existing `apply_core_call` arm below.
                 if matches!(
                     (module.as_str(), method),
                     (
-                        "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml",
+                        "core.encoding.json"
+                            | "core.encoding.csv"
+                            | "core.encoding.toml"
+                            | "core.encoding.yaml",
                         "decode" | "decode_traced",
                     )
                 ) && !type_args.is_empty()
