@@ -932,8 +932,8 @@ impl LowerCtx<'_, '_> {
                 start,
                 end,
                 step,
+                exclusive,
                 body,
-                ..
             } => {
                 let start_val = self.lower_expr(start)?;
                 let end_val = self.lower_expr(end)?;
@@ -950,7 +950,15 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(header);
                 let cur = self.b.use_var(loop_var);
-                let past_end = self.b.ins().icmp(IntCC::SignedGreaterThan, cur, end_val);
+                // Inclusive `..` stops after `end`; exclusive `..<` stops at `end`
+                // (D-RANGE-EXCL1=C).
+                let past_end = if *exclusive {
+                    self.b
+                        .ins()
+                        .icmp(IntCC::SignedGreaterThanOrEqual, cur, end_val)
+                } else {
+                    self.b.ins().icmp(IntCC::SignedGreaterThan, cur, end_val)
+                };
                 self.b.ins().brif(past_end, exit, &[], body_block, &[]);
 
                 self.loop_stack.push(LoopTargets {
@@ -1130,16 +1138,15 @@ impl LowerCtx<'_, '_> {
                     None => self.b.ins().iconst(types::I64, 1),
                 };
                 if let Some(value_name) = var2 {
-                    if !matches!(
+                    let map_pairs = matches!(
                         &collection.ty,
                         Type::Map { key, .. } if matches!(key.as_ref(), Type::String)
-                    ) {
+                    );
+                    let list_elem_ty = jit_list_iter_elem_type(&collection.ty)
+                        .or_else(|| jit_closure_elem_type(&collection.ty));
+                    if !map_pairs && list_elem_ty.is_none() {
                         return Err("jit for-in map pairs unsupported".to_string());
                     }
-                    let value_ty = match &collection.ty {
-                        Type::Map { value, .. } => value.as_ref().clone(),
-                        _ => unreachable!(),
-                    };
                     let coll_val = self.lower_expr(source)?;
                     let coll_var = self.fresh_var(types::I64);
                     self.b.def_var(coll_var, coll_val);
@@ -1155,9 +1162,12 @@ impl LowerCtx<'_, '_> {
                     self.b.switch_to_block(header);
                     let idx = self.b.use_var(idx_var);
                     let coll = self.b.use_var(coll_var);
-                    let len_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.map_len, self.b.func);
+                    let len_id = if map_pairs {
+                        self.host.coll.map_len
+                    } else {
+                        self.host.coll.list_len
+                    };
+                    let len_ref = self.module.declare_func_in_func(len_id, self.b.func);
                     let len_call = self.b.ins().call(len_ref, &[coll]);
                     let len = self.b.inst_results(len_call)[0];
                     let done = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
@@ -1171,38 +1181,75 @@ impl LowerCtx<'_, '_> {
                     });
                     self.b.switch_to_block(body_block);
                     self.b.seal_block(body_block);
-                    let key_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.map_key_at, self.b.func);
-                    let key_call = self.b.ins().call(key_ref, &[coll, idx]);
-                    let key_val = self.b.inst_results(key_call)[0];
-                    let val_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.map_value_at, self.b.func);
-                    let val_call = self.b.ins().call(val_ref, &[coll, idx]);
-                    let val_raw = self.b.inst_results(val_call)[0];
-                    let key_var = self.fresh_var(types::I64);
-                    self.b.def_var(key_var, key_val);
-                    self.vars.insert(TIR::local_place(var), key_var);
-                    self.var_tys.insert(TIR::local_place(var), Type::String);
-                    let val_clif = self.meta.clif_ty(&value_ty).ok_or_else(|| {
-                        format!("jit for-in map value type unsupported: {value_ty:?}")
-                    })?;
-                    let val_coerced = match val_clif {
-                        types::I32 => self.b.ins().ireduce(types::I32, val_raw),
-                        types::I8 => self.b.ins().ireduce(types::I8, val_raw),
-                        types::F64 => self.b.ins().bitcast(
-                            types::F64,
-                            Self::scalar_bitcast_memflags(),
-                            val_raw,
-                        ),
-                        _ => val_raw,
-                    };
-                    let val_var = self.fresh_var(val_clif);
-                    self.b.def_var(val_var, val_coerced);
-                    self.vars.insert(TIR::local_place(value_name), val_var);
-                    self.var_tys
-                        .insert(TIR::local_place(value_name), value_ty);
+                    if map_pairs {
+                        let value_ty = match &collection.ty {
+                            Type::Map { value, .. } => value.as_ref().clone(),
+                            _ => unreachable!(),
+                        };
+                        let key_ref = self
+                            .module
+                            .declare_func_in_func(self.host.coll.map_key_at, self.b.func);
+                        let key_call = self.b.ins().call(key_ref, &[coll, idx]);
+                        let key_val = self.b.inst_results(key_call)[0];
+                        let val_ref = self
+                            .module
+                            .declare_func_in_func(self.host.coll.map_value_at, self.b.func);
+                        let val_call = self.b.ins().call(val_ref, &[coll, idx]);
+                        let val_raw = self.b.inst_results(val_call)[0];
+                        let key_var = self.fresh_var(types::I64);
+                        self.b.def_var(key_var, key_val);
+                        self.vars.insert(TIR::local_place(var), key_var);
+                        self.var_tys.insert(TIR::local_place(var), Type::String);
+                        let val_clif = self.meta.clif_ty(&value_ty).ok_or_else(|| {
+                            format!("jit for-in map value type unsupported: {value_ty:?}")
+                        })?;
+                        let val_coerced = match val_clif {
+                            types::I32 => self.b.ins().ireduce(types::I32, val_raw),
+                            types::I8 => self.b.ins().ireduce(types::I8, val_raw),
+                            types::F64 => self.b.ins().bitcast(
+                                types::F64,
+                                Self::scalar_bitcast_memflags(),
+                                val_raw,
+                            ),
+                            _ => val_raw,
+                        };
+                        let val_var = self.fresh_var(val_clif);
+                        self.b.def_var(val_var, val_coerced);
+                        self.vars.insert(TIR::local_place(value_name), val_var);
+                        self.var_tys
+                            .insert(TIR::local_place(value_name), value_ty);
+                    } else {
+                        // D-RANGE-EXCL1=C: sequence two-binding → index then item.
+                        let elem_ty = list_elem_ty.expect("list pair elem");
+                        let idx_bind = self.fresh_var(types::I64);
+                        self.b.def_var(idx_bind, idx);
+                        self.vars.insert(TIR::local_place(var), idx_bind);
+                        self.var_tys.insert(TIR::local_place(var), Type::Int);
+                        let line = self.b.ins().iconst(types::I32, 1);
+                        let get_ref = self.module.declare_func_in_func(
+                            match elem_ty {
+                                Type::Float => self.host.coll.list_get_f64,
+                                _ => self.host.coll.list_get,
+                            },
+                            self.b.func,
+                        );
+                        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+                        let elem = self.b.inst_results(get_call)[0];
+                        self.emit_trap_check()?;
+                        let elem_clif = self.meta.clif_ty(&elem_ty).ok_or_else(|| {
+                            format!("jit for-in list pair elem unsupported: {elem_ty:?}")
+                        })?;
+                        let elem = match elem_clif {
+                            types::I32 => self.b.ins().ireduce(types::I32, elem),
+                            types::I8 => self.b.ins().ireduce(types::I8, elem),
+                            _ => elem,
+                        };
+                        let item_var = self.fresh_var(elem_clif);
+                        self.b.def_var(item_var, elem);
+                        self.vars.insert(TIR::local_place(value_name), item_var);
+                        self.var_tys
+                            .insert(TIR::local_place(value_name), elem_ty);
+                    }
                     self.lower_stmts_scoped(body)?;
                     self.loop_stack.pop();
                     if !self.dead {
@@ -3471,7 +3518,20 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::Windows => {
                 self.lower_iter_adapter(self.host.coll.iter_windows, recv_val, Some(&args[0]), None)
             }
-            TBuiltinOp::Indexed { .. } | TBuiltinOp::Indexes => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Indexes => {
+                // AOT: `jet_iter_indexes(recv.len())` — JIT materializes list.
+                let len_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_len, self.b.func);
+                let len_call = self.b.ins().call(len_ref, &[recv_val]);
+                let n = self.b.inst_results(len_call)[0];
+                let idx_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_indexes, self.b.func);
+                let idx_call = self.b.ins().call(idx_ref, &[n]);
+                Ok(self.b.inst_results(idx_call)[0])
+            }
+            TBuiltinOp::Indexed { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Zip { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::OptionZip { tuple_struct, elem_ty } => {
                 let other = args
