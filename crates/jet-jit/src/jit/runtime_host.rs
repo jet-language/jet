@@ -1025,6 +1025,7 @@ pub(crate) struct HostFns {
     pub(crate) text: crate::Text::TextHostFns,
     pub(crate) sketch: crate::Sketch::SketchHostFns,
     pub(crate) args: crate::Args::ArgsHostFns,
+    pub(crate) db: crate::Db::DbHostFns,
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -1161,6 +1162,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Text::register_text_symbols(&mut builder);
     crate::Sketch::register_sketch_symbols(&mut builder);
     crate::Args::register_args_symbols(&mut builder);
+    crate::Db::register_db_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
@@ -1177,6 +1179,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let text = crate::Text::declare_text_host_fns(&mut module)?;
     let sketch = crate::Sketch::declare_sketch_host_fns(&mut module)?;
     let args = crate::Args::declare_args_host_fns(&mut module)?;
+    let db = crate::Db::declare_db_host_fns(&mut module)?;
     let host = declare_host_fns(
         &mut module,
         coll,
@@ -1194,6 +1197,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         text,
         sketch,
         args,
+        db,
     )?;
     Ok((module, host))
 }
@@ -1215,6 +1219,7 @@ fn declare_host_fns(
     text: crate::Text::TextHostFns,
     sketch: crate::Sketch::SketchHostFns,
     args: crate::Args::ArgsHostFns,
+    db: crate::Db::DbHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -1487,5 +1492,6 @@ fn declare_host_fns(
         text,
         sketch,
         args,
+        db,
     })
 }

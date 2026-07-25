@@ -3790,6 +3790,24 @@ impl LowerCtx<'_, '_> {
                     self.emit_print(&args[0])?;
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
+                if module == "core.io" && method == "input" && args.len() <= 1 {
+                    let (has_prompt, prompt) = if args.is_empty() {
+                        (
+                            self.b.ins().iconst(types::I8, 0),
+                            self.b.ins().iconst(types::I64, 0),
+                        )
+                    } else {
+                        (
+                            self.b.ins().iconst(types::I8, 1),
+                            self.lower_expr(&args[0])?,
+                        )
+                    };
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.core.io_input, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[has_prompt, prompt]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.os" && args.is_empty() {
                     let host_id = match method.as_str() {
                         "name" => self.host.core.os_name,
@@ -4906,6 +4924,22 @@ impl LowerCtx<'_, '_> {
                         .map(|_| self.b.inst_results(call)[0])
                         .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
                 }
+                if module == "jet.db" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "open_memory" if args.is_empty() => {
+                            (self.host.db.open_memory, Vec::new())
+                        }
+                        "open" if args.len() == 1 => {
+                            (self.host.db.open, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 Err(format!("jit core call unsupported: {module}.{method}"))
             }
             TExprKind::CoreClosureCall { kind } => match kind {
@@ -5032,8 +5066,24 @@ impl LowerCtx<'_, '_> {
                         TOrFallback::ContinueLabel(name) => {
                             self.emit_loop_fallback(Some(name), "continue", true)?;
                         }
-                        TOrFallback::Return(_) | TOrFallback::Panic { .. } => {
-                            return Err("jit option fallback unsupported".to_string());
+                        TOrFallback::Return(None) => {
+                            self.emit_shield_leaves_to(0);
+                            self.b.ins().return_(&[]);
+                        }
+                        TOrFallback::Return(Some(e)) => {
+                            let val = self.lower_expr(e)?;
+                            self.emit_shield_leaves_to(0);
+                            self.b.ins().return_(&[val]);
+                        }
+                        TOrFallback::Panic { .. } => {
+                            let zero = self.b.ins().iconst(types::I64, 0);
+                            let host_ref = self
+                                .module
+                                .declare_func_in_func(self.host.trap_panic, self.b.func);
+                            self.b.ins().call(host_ref, &[zero]);
+                            self.emit_trap_check()?;
+                            let dummy = self.b.ins().iconst(types::I64, 0);
+                            self.b.ins().jump(merge, &[dummy]);
                         }
                     }
                     self.b.switch_to_block(merge);
@@ -5490,7 +5540,20 @@ impl LowerCtx<'_, '_> {
                 Err("jit precise numeric builtin unsupported".to_string())
             }
             TExprKind::Drop(_) => Err("jit drop expression unsupported".to_string()),
-            TExprKind::AmbientInput { .. } => Err("jit ambient input unsupported".to_string()),
+            TExprKind::AmbientInput { prompt } => {
+                let (has_prompt, prompt_v) = match prompt {
+                    None => (
+                        self.b.ins().iconst(types::I8, 0),
+                        self.b.ins().iconst(types::I64, 0),
+                    ),
+                    Some(p) => (self.b.ins().iconst(types::I8, 1), self.lower_expr(p)?),
+                };
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.io_input, self.b.func);
+                let call = self.b.ins().call(host_ref, &[has_prompt, prompt_v]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TExprKind::RequireStop { .. } => Err("jit require/panic stop unsupported".to_string()),
             TExprKind::LayoutCompare { .. } => Err("jit layout compare unsupported".to_string()),
             TExprKind::LayoutLit { .. } => Err("jit layout literal unsupported".to_string()),
@@ -5513,7 +5576,55 @@ impl LowerCtx<'_, '_> {
                     }
                 }
             }
-            TExprKind::DbValueLit { .. } => Err("jit DbValue literal unsupported".to_string()),
+            TExprKind::DbValueLit { variant, arg } => {
+                let disc = match variant.as_str() {
+                    "Null" => 0i64,
+                    "Int" => 1,
+                    "Float" => 2,
+                    "Text" => 3,
+                    "Bool" => 4,
+                    _ => {
+                        return Err(format!("jit DbValue lit `DbValue::{variant}`"))
+                    }
+                };
+                match arg.as_ref() {
+                    None => {
+                        let disc_v = self.b.ins().iconst(types::I64, disc);
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        let host_ref = self
+                            .module
+                            .declare_func_in_func(self.host.db.dbvalue_pack, self.b.func);
+                        let call = self.b.ins().call(host_ref, &[disc_v, zero]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    Some(boxed) => {
+                        let (expr, _) = boxed.as_ref();
+                        let payload_ty = expr.ty.clone();
+                        let payload = self.lower_expr(expr)?;
+                        let payload_bits = match self.meta.clif_ty(&payload_ty) {
+                            Some(types::F64) => self.b.ins().bitcast(
+                                types::I64,
+                                Self::scalar_bitcast_memflags(),
+                                payload,
+                            ),
+                            Some(types::I8) => self.b.ins().uextend(types::I64, payload),
+                            Some(types::I32) => self.b.ins().sextend(types::I64, payload),
+                            Some(types::I64) => payload,
+                            other => {
+                                return Err(format!(
+                                    "jit DbValue payload type unsupported: {payload_ty:?} ({other:?})"
+                                ))
+                            }
+                        };
+                        let disc_v = self.b.ins().iconst(types::I64, disc);
+                        let host_ref = self
+                            .module
+                            .declare_func_in_func(self.host.db.dbvalue_pack, self.b.func);
+                        let call = self.b.ins().call(host_ref, &[disc_v, payload_bits]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                }
+            }
             TExprKind::ListSpread { .. } => Err("jit list spread unsupported".to_string()),
             TExprKind::ColumnarListLit { .. } => {
                 Err("jit columnar list literal unsupported".to_string())
@@ -7590,18 +7701,96 @@ impl LowerCtx<'_, '_> {
             THandleOp::UiBackendMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::DevServerMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::WebAppMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbQuery => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbQueryOne => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbExecute => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbBegin => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbCommit => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbRollback => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbClose => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbValueInt => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbValueFloat => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbValueText => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbValueBool => Err("jit handle method unsupported".to_string()),
-            THandleOp::DbValueIsNull => Err("jit handle method unsupported".to_string()),
+            THandleOp::DbQuery => {
+                let sql = self.lower_expr(&args[0])?;
+                let params = self.lower_expr(&args[1])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.query, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbQueryOne => {
+                let sql = self.lower_expr(&args[0])?;
+                let params = self.lower_expr(&args[1])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.query_one, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbExecute => {
+                let sql = self.lower_expr(&args[0])?;
+                let params = self.lower_expr(&args[1])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.execute, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbBegin => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.begin, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbCommit => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.commit, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbRollback => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.rollback, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbClose => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.close, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbValueInt => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.dbvalue_int, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbValueFloat => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.dbvalue_float, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbValueText => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.dbvalue_text, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbValueBool => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.dbvalue_bool, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DbValueIsNull => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.db.dbvalue_is_null, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::PluginCall => Err("jit handle method unsupported".to_string()),
             THandleOp::PluginCallInt => Err("jit handle method unsupported".to_string()),
             THandleOp::ReaderOver => Err("jit handle method unsupported".to_string()),

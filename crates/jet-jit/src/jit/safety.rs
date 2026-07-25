@@ -82,6 +82,15 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         {
             Some(inner.as_ref().clone())
         }
+        // `List<Map<String, V>>` (db query rows) — map handles are i64.
+        Type::List(inner) | Type::FixedList { elem: inner, .. }
+            if matches!(
+                inner.as_ref(),
+                Type::Map { key, .. } if matches!(key.as_ref(), Type::String)
+            ) =>
+        {
+            Some(inner.as_ref().clone())
+        }
         // JIT ABI: `Iter<T>` / `View<T>` / `ViewMut<T>` producers materialize list
         // handles — scalar elems share list for-in / join / len; record elems too.
         Type::Apply { name, args }

@@ -1006,6 +1006,28 @@ extern "C" fn jet_jit_process_exit(code: i64) {
     std::process::exit(code as i32);
 }
 
+// ── core.io.input / ambient input() — mirrors jet_std_io_input ───────────────
+
+extern "C" fn jet_jit_io_input(has_prompt: i8, prompt: i64) -> i64 {
+    use std::io::Write;
+    if has_prompt != 0 {
+        let p = clone_heap_string(prompt);
+        print!("{p}");
+        if let Err(e) = std::io::stdout().flush() {
+            return result_err_msg(&format!("flush stdout: {e}"));
+        }
+    }
+    let mut s = String::new();
+    if let Err(e) = std::io::stdin().read_line(&mut s) {
+        return result_err_msg(&format!("read stdin: {e}"));
+    }
+    while s.ends_with('\n') || s.ends_with('\r') {
+        s.pop();
+    }
+    let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+    result_ok_bits(sid as u64)
+}
+
 pub(crate) struct CoreHostFns {
     pub os_name: cranelift_module::FuncId,
     pub os_family: cranelift_module::FuncId,
@@ -1071,6 +1093,7 @@ pub(crate) struct CoreHostFns {
     pub math_lcm: cranelift_module::FuncId,
     pub env_get: cranelift_module::FuncId,
     pub process_exit: cranelift_module::FuncId,
+    pub io_input: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -1150,6 +1173,7 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_math_lcm", jet_jit_math_lcm as *const u8);
     builder.symbol("jet_jit_env_get", jet_jit_env_get as *const u8);
     builder.symbol("jet_jit_process_exit", jet_jit_process_exit as *const u8);
+    builder.symbol("jet_jit_io_input", jet_jit_io_input as *const u8);
 }
 
 pub(crate) fn declare_core_host_fns(
@@ -1215,6 +1239,11 @@ pub(crate) fn declare_core_host_fns(
     sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
     sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
     sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+
+    let mut sig_i8_i64_i64 = Signature::new(cc);
+    sig_i8_i64_i64.params.push(AbiParam::new(types::I8));
+    sig_i8_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_i8_i64_i64.returns.push(AbiParam::new(types::I64));
 
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
@@ -1287,5 +1316,6 @@ pub(crate) fn declare_core_host_fns(
         math_lcm: import("jet_jit_math_lcm", &sig_i64_i64_i64)?,
         env_get: import("jet_jit_env_get", &sig_unary_i64)?,
         process_exit: import("jet_jit_process_exit", &sig_void_i64)?,
+        io_input: import("jet_jit_io_input", &sig_i8_i64_i64)?,
     })
 }

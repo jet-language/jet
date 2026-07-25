@@ -173,6 +173,14 @@ pub(crate) fn clif_ty_with_distinct(
     if jit_list_native_type(&ty)
         || jit_list_of_int_list_type(&ty)
         || matches!(&ty, Type::List(inner) if jit_list_native_type(inner))
+        || matches!(
+            &ty,
+            Type::List(inner)
+                if matches!(
+                    inner.as_ref(),
+                    Type::Map { key, .. } if matches!(key.as_ref(), Type::String)
+                )
+        )
         || jit_list_task_int_type(&ty)
         || jit_list_record_type(&ty)
         || jit_list_iter_elem_type(&ty).is_some()
@@ -183,6 +191,17 @@ pub(crate) fn clif_ty_with_distinct(
         return Some(types::I64);
     }
     if matches!(&ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String)) {
+        return Some(types::I64);
+    }
+    // Option of Map / list / named handle — packed Option ABI (0 / bits+1).
+    if matches!(
+        &ty,
+        Type::Option(inner)
+            if matches!(
+                inner.as_ref(),
+                Type::Map { key, .. } if matches!(key.as_ref(), Type::String)
+            ) || matches!(inner.as_ref(), Type::List(_) | Type::Named(_))
+    ) {
         return Some(types::I64);
     }
     if jit_optional_scalar_type(&ty) {

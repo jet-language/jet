@@ -17,6 +17,7 @@ mod Collections;
 mod Compress;
 mod Concurrency;
 mod CoreHost;
+mod Db;
 mod Encoding;
 mod enc_stream;
 mod Fmt;
