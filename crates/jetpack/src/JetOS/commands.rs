@@ -397,15 +397,6 @@ pub(super) fn cmd_migrate(theme: &Theme, args: &[String], flags: &OsFlags) -> i3
         );
         return 2;
     }
-    if flags.offline {
-        theme.error_coded(
-            "E1276",
-            "NixOS comparison needs online migration tools",
-            "The explicit migration command runs `nix build` against the pinned nixpkgs input.",
-            "drop `--offline`, then run `jet os migrate compare-nixos <host> --out <dir>`.",
-        );
-        return 2;
-    }
     let Some((plan, system)) = load_target(theme, &target) else {
         return 2;
     };

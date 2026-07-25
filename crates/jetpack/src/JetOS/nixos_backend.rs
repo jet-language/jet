@@ -42,6 +42,51 @@ struct NixosMapping {
     desktop_shell_process: String,
 }
 
+fn locked_inputs(mapping: &NixosMapping) -> Vec<String> {
+    let mut inputs = vec![format!(
+        "github:{}/{}/{}",
+        mapping.nixpkgs_owner, mapping.nixpkgs_repo, mapping.nixpkgs_rev
+    )];
+    if let Some((owner, repo, rev)) = &mapping.kernel_input {
+        inputs.push(format!("github:{owner}/{repo}/{rev}"));
+    }
+    inputs
+}
+
+enum OfflineInputError {
+    Missing(String),
+    Tool(String),
+}
+
+fn require_offline_inputs(
+    dir: &Path,
+    mapping: &NixosMapping,
+) -> Result<(), OfflineInputError> {
+    let result = Command::new("nix")
+        .args(["flake", "metadata", "--offline", "--json", "path:."])
+        .current_dir(dir)
+        .output()
+        .map_err(|error| {
+            OfflineInputError::Tool(format!(
+                "checking the composed comparison inputs with `nix flake metadata --offline` failed: {error}"
+            ))
+        })?;
+    if result.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    if let Some(input) = locked_inputs(mapping)
+        .into_iter()
+        .find(|input| stderr.contains(input))
+    {
+        return Err(OfflineInputError::Missing(input));
+    }
+    Err(OfflineInputError::Tool(format!(
+        "`nix flake metadata --offline path:.` exited {}; private resolver output was suppressed",
+        result.status
+    )))
+}
+
 fn nix_string(value: &str) -> String {
     let mut out = String::from("\"");
     for ch in value.chars() {
@@ -903,31 +948,17 @@ fn write_migration_plan(
     dir: &Path,
     system: &SystemPlan,
     disk: &str,
+    offline: bool,
 ) -> std::io::Result<PathBuf> {
     let log_path = dir.join("nixos-comparison.serial.log");
     let sock_path = dir.join("nixos-comparison.qmp.sock");
     let ovmf_code = dir.join("firmware/FV/OVMF_CODE.fd");
     let ovmf_vars = dir.join("OVMF_VARS.fd");
     let build_commands: [(&str, Vec<String>); 2] = [
-        (
-            "nix-build-disk",
-            vec![
-                "nix".to_string(),
-                "build".to_string(),
-                "path:.#disk".to_string(),
-                "--no-link".to_string(),
-                "--print-out-paths".to_string(),
-            ],
-        ),
+        ("nix-build-disk", nix_build_argv("disk", offline)),
         (
             "nix-build-firmware",
-            vec![
-                "nix".to_string(),
-                "build".to_string(),
-                "path:.#firmware".to_string(),
-                "--no-link".to_string(),
-                "--print-out-paths".to_string(),
-            ],
+            nix_build_argv("firmware", offline),
         ),
     ];
     let mut commands_json = build_commands
@@ -988,15 +1019,6 @@ pub(super) fn cmd_migrate_compare_nixos(
             return 2;
         }
     };
-    if flags.offline {
-        theme.error_coded(
-            "E1276",
-            "NixOS comparison needs online migration tools",
-            "The explicit migration command runs `nix build` against the pinned nixpkgs input.",
-            "drop `--offline`, then run `jet os migrate compare-nixos <host> --out <dir>`.",
-        );
-        return 2;
-    }
     if let Err(error) = require_real_vm_tools() {
         theme.error_coded(
             "E1290",
@@ -1029,34 +1051,86 @@ pub(super) fn cmd_migrate_compare_nixos(
         return 2;
     }
     let disk = stage.join(format!("nixos-{}.qcow2", system.name));
+    if let Err(error) = write_nixos_backend(&stage, system, &mapping) {
+        let error = finish_private_stage(
+            &stage,
+            Err(format!("writing private NixOS inputs failed: {error}")),
+        )
+        .unwrap_err();
+        return report_migration_failure(theme, system, &error);
+    }
+    if flags.offline {
+        match require_offline_inputs(&stage, &mapping) {
+            Ok(()) => {}
+            Err(error) => {
+                if let Err(cleanup) = finish_private_stage(&stage, Ok(())) {
+                    return report_migration_failure(theme, system, &cleanup);
+                }
+                match error {
+                    OfflineInputError::Missing(input) => theme.error_coded(
+                        "E1276",
+                        &format!("migration comparison unavailable offline: {input}"),
+                        "The locked Nix input is not present in the local Nix store.",
+                        "run the migration once online to fetch the locked input, then retry with `--offline`.",
+                    ),
+                    OfflineInputError::Tool(error) => theme.error_coded(
+                        "E1290",
+                        "NixOS comparison needs real migration tools",
+                        &error,
+                        "put real `nix` and QEMU tools on PATH, then run the migration command again.",
+                    ),
+                }
+                return 2;
+            }
+        }
+    }
     let result = (|| -> Result<(), String> {
-        write_nixos_backend(&stage, system, &mapping)
-            .map_err(|error| format!("writing private NixOS inputs failed: {error}"))?;
-        let plan = write_migration_plan(&stage, system, &disk.display().to_string())
+        let plan = write_migration_plan(
+            &stage,
+            system,
+            &disk.display().to_string(),
+            flags.offline,
+        )
             .map_err(|error| format!("writing migration plan failed: {error}"))?;
-        let run = run_migration_build_and_boot(&stage, &disk)?;
+        let run = run_migration_build_and_boot(&stage, &disk, flags.offline)?;
         publish_migration_bundle(out, system, &mapping, &disk, &plan, &run)
     })();
     let result = finish_private_stage(&stage, result);
     match result {
         Ok(()) => {
-            theme.ok(&format!(
-                "published proved NixOS comparison for {}",
-                theme.bold(&system.name)
-            ));
-            theme.detail(&out.display().to_string());
+            let host = out.join("nixos").join(&system.name);
+            let image = host.join("system.qcow2");
+            let proof = host.join("proof.json");
+            let receipt = host.join("receipt.json");
+            if flags.json {
+                println!(
+                    "{{\"kind\":\"nixos.migration.comparison\",\"state\":\"proved\",\"host\":{},\"image\":{},\"proof\":{},\"receipt\":{}}}",
+                    JSON::quote(&system.name),
+                    JSON::quote(&image.display().to_string()),
+                    JSON::quote(&proof.display().to_string()),
+                    JSON::quote(&receipt.display().to_string()),
+                );
+            } else {
+                println!("built NixOS comparison: {}", image.display());
+                println!("boot proof: {}", proof.display());
+                println!("receipt: {}", receipt.display());
+            }
             0
         }
         Err(error) => {
-            theme.error_coded(
-                "E1285",
-                "NixOS comparison guest proof has not run",
-                &format!("the NixOS build and boot for `{}` failed: {error}.", system.name),
-                "fix the build or guest failure, then run the explicit migration command again.",
-            );
-            2
+            report_migration_failure(theme, system, &error)
         }
     }
+}
+
+fn report_migration_failure(theme: &Theme, system: &SystemPlan, error: &str) -> i32 {
+    theme.error_coded(
+        "E1285",
+        "NixOS comparison guest proof has not run",
+        &format!("the NixOS build and boot for `{}` failed: {error}.", system.name),
+        "fix the build or guest failure, then run the explicit migration command again.",
+    );
+    2
 }
 
 fn create_private_stage(stage: &Path) -> std::io::Result<()> {
@@ -1128,9 +1202,10 @@ struct MigrationRun {
 fn run_migration_build_and_boot(
     dir: &Path,
     disk: &Path,
+    offline: bool,
 ) -> Result<MigrationRun, String> {
-    let disk_out = nix_build(dir, "disk")?;
-    let firmware_out = nix_build(dir, "firmware")?;
+    let disk_out = nix_build(dir, "disk", offline)?;
+    let firmware_out = nix_build(dir, "firmware", offline)?;
     let built_qcow2 = find_qcow2(&disk_out)?;
     let disk_path = disk;
     if let Some(parent) = disk_path.parent() {
@@ -1192,16 +1267,26 @@ fn run_migration_build_and_boot(
     })
 }
 
-fn nix_build(dir: &Path, target: &str) -> Result<PathBuf, String> {
+fn nix_build_argv(target: &str, offline: bool) -> Vec<String> {
+    let mut argv = vec![
+        "nix".to_string(),
+        "build".to_string(),
+        format!("path:.#{target}"),
+        "--no-link".to_string(),
+        "--print-out-paths".to_string(),
+    ];
+    if offline {
+        argv.push("--offline".to_string());
+    }
+    argv
+}
+
+fn nix_build(dir: &Path, target: &str, offline: bool) -> Result<PathBuf, String> {
     // `path:` keeps the generated flake usable when the backend dir sits
     // inside a user git repo (a bare `.#` ref would demand git-tracked files).
-    let out = Command::new("nix")
-        .args([
-            "build",
-            &format!("path:.#{target}"),
-            "--no-link",
-            "--print-out-paths",
-        ])
+    let argv = nix_build_argv(target, offline);
+    let out = Command::new(&argv[0])
+        .args(&argv[1..])
         .current_dir(dir)
         .output()
         .map_err(|e| format!("starting `nix build path:.#{target}` failed: {e}"))?;
@@ -1430,9 +1515,15 @@ fn publish_migration_bundle(
     create_private_stage(&publish)
         .map_err(|error| format!("creating `{}` failed: {error}", publish.display()))?;
     let result = (|| -> Result<(), String> {
-        let image = publish.join("system-image.qcow2");
-        let screenshot = publish.join("boot.png");
-        let plan = publish.join("build-boot-plan.json");
+        let nixos = publish.join("nixos");
+        create_private_stage(&nixos)
+            .map_err(|error| format!("creating `{}` failed: {error}", nixos.display()))?;
+        let host = nixos.join(&system.name);
+        create_private_stage(&host)
+            .map_err(|error| format!("creating `{}` failed: {error}", host.display()))?;
+        let image = host.join("system.qcow2");
+        let screenshot = host.join("boot.png");
+        let plan = host.join("build-boot-plan.json");
         fs::copy(disk, &image)
             .map_err(|error| format!("publishing system image failed: {error}"))?;
         make_writable(&image)?;
@@ -1449,10 +1540,10 @@ fn publish_migration_bundle(
             JSON::quote(&observed.banner),
             run.report.trim()
         );
-        fs::write(publish.join("guest-fact.json"), &guest_fact)
+        fs::write(host.join("guest-fact.json"), &guest_fact)
             .map_err(|error| format!("writing guest fact failed: {error}"))?;
         let proof = format!(
-            "{{\"kind\":\"nixos.migration.boot-proof\",\"state\":\"passed\",\"host\":{},\"image\":\"system-image.qcow2\",\"disk_sha256\":{},\"screenshot\":\"boot.png\",\"guest_fact\":\"guest-fact.json\",\"qemu_argv\":[{}]}}\n",
+            "{{\"kind\":\"nixos.migration.boot-proof\",\"state\":\"passed\",\"host\":{},\"image\":\"system.qcow2\",\"disk_sha256\":{},\"screenshot\":\"boot.png\",\"guest_fact\":\"guest-fact.json\",\"qemu_argv\":[{}]}}\n",
             JSON::quote(&system.name),
             JSON::quote(&disk_sha),
             run.argv
@@ -1461,17 +1552,17 @@ fn publish_migration_bundle(
                 .collect::<Vec<_>>()
                 .join(",")
         );
-        fs::write(publish.join("boot-proof.json"), proof)
+        fs::write(host.join("proof.json"), proof)
             .map_err(|error| format!("writing boot proof failed: {error}"))?;
         let receipt = format!(
-            "{{\"kind\":\"nixos.migration.receipt\",\"state\":\"proved\",\"command\":\"jet os migrate compare-nixos\",\"host\":{},\"nixpkgs\":{},\"image\":\"system-image.qcow2\",\"boot_proof\":\"boot-proof.json\",\"guest_fact\":\"guest-fact.json\"}}\n",
+            "{{\"kind\":\"nixos.migration.receipt\",\"state\":\"proved\",\"command\":\"jet os migrate compare-nixos\",\"host\":{},\"nixpkgs\":{},\"image\":\"system.qcow2\",\"boot_proof\":\"proof.json\",\"guest_fact\":\"guest-fact.json\"}}\n",
             JSON::quote(&system.name),
             JSON::quote(&format!(
                 "github:{}/{}/{}",
                 mapping.nixpkgs_owner, mapping.nixpkgs_repo, mapping.nixpkgs_rev
             ))
         );
-        fs::write(publish.join("receipt.json"), receipt)
+        fs::write(host.join("receipt.json"), receipt)
             .map_err(|error| format!("writing migration receipt failed: {error}"))?;
         fs::rename(&publish, out)
             .map_err(|error| format!("publishing `{}` failed: {error}", out.display()))
@@ -1686,7 +1777,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir_root);
         fs::create_dir_all(&dir_root).unwrap();
         let system = full_system();
-        let path = write_migration_plan(&dir_root, &system, "halcyon.qcow2").unwrap();
+        let path = write_migration_plan(&dir_root, &system, "halcyon.qcow2", false).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"kind\":\"nixos.migration.plan\""));
         assert!(text.contains("\"phase\":\"nix-build-disk\""));
@@ -1725,16 +1816,17 @@ mod tests {
         };
         let out = root.join("published");
         publish_migration_bundle(&out, &system, &mapping, &disk, &plan, &run).unwrap();
-        let fact = fs::read_to_string(out.join("guest-fact.json")).unwrap();
+        let host = out.join("nixos/halcyon-gnome");
+        let fact = fs::read_to_string(host.join("guest-fact.json")).unwrap();
         assert!(fact.contains("\"kind\":\"nixos.migration.vmtest.guest-fact\""));
         assert!(fact.contains("\"os_release\":\"NixOS\""));
         assert!(fact.contains("\"prompt\":\"NixOS observed-profile\""));
         assert!(!fact.contains("\"prompt\":\"NixOS halcyon-gnome\""));
         assert!(fact.contains("\"banner\":\"NixOS comparison guest\""));
         assert!(!fact.to_ascii_lowercase().contains("jetos"));
-        assert!(out.join("system-image.qcow2").is_file());
-        assert!(out.join("boot-proof.json").is_file());
-        assert!(out.join("receipt.json").is_file());
+        assert!(host.join("system.qcow2").is_file());
+        assert!(host.join("proof.json").is_file());
+        assert!(host.join("receipt.json").is_file());
         let _ = fs::remove_dir_all(&root);
     }
 

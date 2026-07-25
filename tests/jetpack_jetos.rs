@@ -3127,9 +3127,11 @@ fn os_vm_prove_real_tier_is_retired_to_explicit_migration() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
     let root = Scratch::new("os-migrate-nixos-root");
+    let (path, outputs) = build_nixos_migration_test_tools(&root.path);
     let out_dir = root.join("published");
     let out = jet()
         .args([
@@ -3146,6 +3148,13 @@ fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
         )
         .env("JETPACK_ROOT", &root.path)
+        .env("JET_TEST_TOOL_ROOT", outputs)
+        .env(
+            "JET_TEST_MISSING_LOCKED_INPUT",
+            "github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51",
+        )
+        .env("JET_TEST_REQUIRE_COMPOSED_METADATA", "1")
+        .env("PATH", path)
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -3155,11 +3164,9 @@ fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
         "stdout: {}\nstderr: {stderr}",
         String::from_utf8_lossy(&out.stdout)
     );
-    assert!(stderr.contains("NixOS comparison needs online migration tools"), "{stderr}");
-    assert!(
-        stderr.contains("jet os migrate compare-nixos <host> --out <dir>"),
-        "{stderr}"
-    );
+    assert!(stderr.contains(
+        "migration comparison unavailable offline: github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51"
+    ), "{stderr}");
     assert!(
         !out_dir.exists(),
         "comparison artifacts must not publish before guest proof"
@@ -3299,8 +3306,23 @@ static void write_file(const char *path, const char *text) {
 
 static int run_nix(int argc, char **argv) {
     const char *root = getenv("JET_TEST_TOOL_ROOT");
+    const char *missing = getenv("JET_TEST_MISSING_LOCKED_INPUT");
     char dir[PATH_MAX], path[PATH_MAX];
     int disk = 0;
+    int offline = 0;
+    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--offline")) offline = 1;
+    if (getenv("JET_TEST_REQUIRE_OFFLINE") && !offline) return 24;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "metadata")) {
+            if (getenv("JET_TEST_REQUIRE_COMPOSED_METADATA") && strcmp(argv[argc - 1], "path:.")) return 25;
+            if (missing) {
+                fprintf(stderr, "cannot fetch input '%s' because offline mode is enabled\n", missing);
+                return 1;
+            }
+            puts("{}");
+            return 0;
+        }
+    }
     for (int i = 1; i < argc; i++) if (strstr(argv[i], "#disk")) disk = 1;
     if (disk) {
         snprintf(dir, sizeof(dir), "%s/disk", root);
@@ -3414,6 +3436,7 @@ fn traced_nixos_migration(
     path: &std::ffi::OsStr,
     outputs: &Path,
     collide_publish: bool,
+    json: bool,
 ) -> std::process::Output {
     let jet_program = jet().get_program().to_owned();
     let mut command = Command::new("strace");
@@ -3430,16 +3453,22 @@ fn traced_nixos_migration(
             "--out",
             out_dir.to_str().unwrap(),
             "--no-color",
+            "--offline",
         ])
         .current_dir(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
         )
         .env("JETPACK_ROOT", &root.path)
         .env("JET_TEST_TOOL_ROOT", outputs)
+        .env("JET_TEST_REQUIRE_OFFLINE", "1")
+        .env("JET_TEST_REQUIRE_COMPOSED_METADATA", "1")
         .env("TMPDIR", "/tmp")
         .env("PATH", path);
     if collide_publish {
         command.env("JET_TEST_COLLIDE_PUBLISH", &root.path);
+    }
+    if json {
+        command.arg("--json");
     }
     command.output().unwrap()
 }
@@ -3458,6 +3487,7 @@ fn nixos_migration_publish_stage_is_private_and_collision_safe() {
         &success_trace,
         &path,
         &outputs,
+        false,
         false,
     );
     assert!(
@@ -3483,7 +3513,10 @@ fn nixos_migration_publish_stage_is_private_and_collision_safe() {
         .unwrap_or_else(|| panic!("private publish verification missing:\n{trace}"));
     let first_output = lines
         .iter()
-        .position(|line| line.contains(marker) && line.contains("/system-image.qcow2"))
+        .position(|line| {
+            line.contains(marker)
+                && line.contains("/nixos/halcyon-gnome/system.qcow2")
+        })
         .unwrap_or_else(|| panic!("private publish output missing:\n{trace}"));
     assert!(mkdir < protected && protected < first_output, "{trace}");
     #[cfg(unix)]
@@ -3494,6 +3527,56 @@ fn nixos_migration_publish_stage_is_private_and_collision_safe() {
             0o700
         );
     }
+    let host = published.join("nixos/halcyon-gnome");
+    let image = host.join("system.qcow2");
+    let proof = host.join("proof.json");
+    let receipt = host.join("receipt.json");
+    assert!(image.is_file());
+    assert!(proof.is_file());
+    assert!(receipt.is_file());
+    assert!(
+        fs::read_to_string(&proof)
+            .unwrap()
+            .contains("\"image\":\"system.qcow2\"")
+    );
+    assert!(
+        fs::read_to_string(&receipt)
+            .unwrap()
+            .contains("\"boot_proof\":\"proof.json\"")
+    );
+    let plan = fs::read_to_string(host.join("build-boot-plan.json")).unwrap();
+    assert_eq!(plan.matches("\"--offline\"").count(), 2, "{plan}");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    for path in [&image, &proof, &receipt] {
+        assert!(stdout.contains(&path.display().to_string()), "{stdout}");
+    }
+
+    let json_out_dir = root.join("json-output");
+    let json_trace = root.join("publish-json.trace");
+    let out = traced_nixos_migration(
+        &root,
+        &json_out_dir,
+        &json_trace,
+        &path,
+        &outputs,
+        false,
+        true,
+    );
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        format!(
+            "{{\"kind\":\"nixos.migration.comparison\",\"state\":\"proved\",\"host\":\"halcyon-gnome\",\"image\":\"{}\",\"proof\":\"{}\",\"receipt\":\"{}\"}}\n",
+            json_out_dir.join("nixos/halcyon-gnome/system.qcow2").display(),
+            json_out_dir.join("nixos/halcyon-gnome/proof.json").display(),
+            json_out_dir.join("nixos/halcyon-gnome/receipt.json").display(),
+        )
+    );
 
     let collision_out = root.join("collision-output");
     let collision_trace = root.join("publish-collision.trace");
@@ -3504,6 +3587,7 @@ fn nixos_migration_publish_stage_is_private_and_collision_safe() {
         &path,
         &outputs,
         true,
+        false,
     );
     assert_eq!(out.status.code(), Some(2));
     assert!(!collision_out.exists());
