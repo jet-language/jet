@@ -367,6 +367,105 @@
         pub mean: f64,
     }
 
+    // D-DATAFLOW1=A: typed streaming + invalid-data policy (edition 2027 surface).
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum DataErrorKind {
+        Decode,
+        Limit,
+        IO,
+        Empty,
+        InvalidArgument,
+        NonFinite,
+        Overflow,
+        State,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct DataError {
+        pub kind: DataErrorKind,
+        pub operation: String,
+        pub row: Option<i64>,
+        pub column: Option<i64>,
+        pub index: Option<i64>,
+        pub reason: String,
+        pub cause: Option<EncodingError>,
+    }
+    impl DataError {
+        fn display_text(&self) -> String {
+            let mut out = format!("{:?} {}", self.kind, self.operation);
+            if let Some(row) = self.row {
+                out.push_str(&format!(", row {row}"));
+            }
+            if let Some(column) = self.column {
+                out.push_str(&format!(", column {column}"));
+            }
+            if let Some(index) = self.index {
+                out.push_str(&format!(", index {index}"));
+            }
+            out.push_str(&format!(": {}", self.reason));
+            out
+        }
+    }
+    impl std::fmt::Display for DataError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.display_text())
+        }
+    }
+    impl super::JetShow for DataError {
+        fn jet_show(&self) -> String {
+            self.display_text()
+        }
+    }
+    impl super::JetDisplay for DataError {
+        fn jet_display(&self) -> String {
+            self.display_text()
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct DataLimits {
+        pub encoding: EncodingLimits,
+        pub max_groups: i64,
+        pub max_sort_rows: i64,
+        pub max_join_rows: i64,
+        pub max_output_rows: i64,
+    }
+    impl DataLimits {
+        pub fn safe() -> Self {
+            Self {
+                encoding: EncodingLimits::safe(),
+                max_groups: 100_000,
+                max_sort_rows: 1_000_000,
+                max_join_rows: 1_000_000,
+                max_output_rows: 1_000_000,
+            }
+        }
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DataPivotCell {
+        pub row_key: String,
+        pub column_key: String,
+        pub count: i64,
+        pub sum: f64,
+        pub mean: f64,
+    }
+    pub enum DataStreamInner {
+        Csv {
+            reader: CSVReader,
+            headers: Option<Vec<String>>,
+        },
+        Json {
+            reader: JSONReader,
+            array_started: bool,
+            array_done: bool,
+        },
+    }
+    pub struct DataStream {
+        pub(crate) inner: DataStreamInner,
+        pub(crate) limits: DataLimits,
+        pub(crate) terminal: Option<DataError>,
+        pub(crate) eof: bool,
+        pub(crate) row_index: i64,
+    }
+
     /// D-DATAFRAME1=A: one typed column in a `Table`/`Series` schema.
     #[derive(Clone, Debug, PartialEq)]
     pub struct DataColumn {

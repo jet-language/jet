@@ -225,6 +225,13 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.data" => &[
             "csv",
             "json",
+            "csv_reader",
+            "json_reader",
+            "DataLimits",
+            "DataError",
+            "DataErrorKind",
+            "DataStream",
+            "DataPivotCell",
             "count",
             "table",
             "rows",
