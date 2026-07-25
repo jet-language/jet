@@ -200,6 +200,164 @@ extern "C" fn jet_jit_map_value_at(map: i64, idx: i64) -> i64 {
     })
 }
 
+/// Eager materialization of AOT `jet_iter_*` adapters over list handles.
+///
+/// Cranelift can't host true `JetIter` values; producers already store the same
+/// element sequence in a list handle. Adapters rewrite that sequence into a
+/// fresh list so observable `to_list` / for-in / print values match AOT.
+fn clone_list_ints(list: i64) -> Vec<i64> {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_int_list(list)
+            .expect("jit iter adapter: bad list handle")
+    })
+}
+
+fn alloc_from_ints(xs: &[i64]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let out = rt.heap.alloc_empty_list();
+        for &v in xs {
+            rt.heap
+                .list_push_int(out, v)
+                .expect("jit iter adapter: push");
+        }
+        out
+    })
+}
+
+fn string_elems_eq(a: i64, b: i64) -> bool {
+    if a == b {
+        return true;
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        match (rt.heap.get_string(a), rt.heap.get_string(b)) {
+            (Some(sa), Some(sb)) => sa == sb,
+            _ => false,
+        }
+    })
+}
+
+extern "C" fn jet_jit_iter_take(list: i64, n: i64) -> i64 {
+    let xs = clone_list_ints(list);
+    let n = n.max(0) as usize;
+    alloc_from_ints(&xs[..n.min(xs.len())])
+}
+
+extern "C" fn jet_jit_iter_skip(list: i64, n: i64) -> i64 {
+    let xs = clone_list_ints(list);
+    let n = n.max(0) as usize;
+    if n >= xs.len() {
+        alloc_from_ints(&[])
+    } else {
+        alloc_from_ints(&xs[n..])
+    }
+}
+
+extern "C" fn jet_jit_iter_step_by(list: i64, n: i64) -> i64 {
+    let xs = clone_list_ints(list);
+    if n <= 0 {
+        return alloc_from_ints(&[]);
+    }
+    let stepped: Vec<i64> = xs.into_iter().step_by(n as usize).collect();
+    alloc_from_ints(&stepped)
+}
+
+/// `string_elems != 0` → compare string contents (handles may differ); else i64 eq.
+extern "C" fn jet_jit_iter_dedup(list: i64, string_elems: i64) -> i64 {
+    let xs = clone_list_ints(list);
+    let string_elems = string_elems != 0;
+    let mut out = Vec::new();
+    let mut prev: Option<i64> = None;
+    for x in xs {
+        let dup = match prev {
+            Some(p) if !string_elems => p == x,
+            Some(p) => string_elems_eq(p, x),
+            None => false,
+        };
+        if dup {
+            continue;
+        }
+        prev = Some(x);
+        out.push(x);
+    }
+    alloc_from_ints(&out)
+}
+
+extern "C" fn jet_jit_iter_chunks(list: i64, n: i64) -> i64 {
+    let xs = clone_list_ints(list);
+    let size = n.max(1) as usize;
+    Concurrency::with_runtime_mut(|rt| {
+        let out = rt.heap.alloc_empty_list();
+        let mut i = 0usize;
+        while i < xs.len() {
+            let end = (i + size).min(xs.len());
+            let chunk = rt.heap.alloc_empty_list();
+            for &v in &xs[i..end] {
+                rt.heap
+                    .list_push_int(chunk, v)
+                    .expect("jit iter chunks: push");
+            }
+            rt.heap
+                .list_push_int(out, chunk)
+                .expect("jit iter chunks: outer push");
+            i = end;
+        }
+        out
+    })
+}
+
+extern "C" fn jet_jit_iter_windows(list: i64, n: i64) -> i64 {
+    let xs = clone_list_ints(list);
+    let size = n.max(1) as usize;
+    if xs.len() < size {
+        return alloc_from_ints(&[]);
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let out = rt.heap.alloc_empty_list();
+        for start in 0..=(xs.len() - size) {
+            let win = rt.heap.alloc_empty_list();
+            for &v in &xs[start..start + size] {
+                rt.heap
+                    .list_push_int(win, v)
+                    .expect("jit iter windows: push");
+            }
+            rt.heap
+                .list_push_int(out, win)
+                .expect("jit iter windows: outer push");
+        }
+        out
+    })
+}
+
+extern "C" fn jet_jit_list_sum_i64(list: i64) -> i64 {
+    clone_list_ints(list).into_iter().sum()
+}
+
+/// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
+/// `string_elems != 0` → elements are string handles; else raw i64.
+extern "C" fn jet_jit_print_list(list: i64, string_elems: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let xs = rt
+            .heap
+            .clone_int_list(list)
+            .expect("jit print list: bad handle");
+        let mut parts = Vec::with_capacity(xs.len());
+        if string_elems != 0 {
+            for id in xs {
+                parts.push(rt.heap.clone_string(id).unwrap_or_default());
+            }
+        } else {
+            for v in xs {
+                parts.push(v.to_string());
+            }
+        }
+        rt.stdout.push('[');
+        rt.stdout.push_str(&parts.join(", "));
+        rt.stdout.push(']');
+        rt.stdout.push('\n');
+    });
+}
+
 pub(crate) struct CollectionsHostFns {
     pub list_new: cranelift_module::FuncId,
     pub list_push: cranelift_module::FuncId,
@@ -222,6 +380,14 @@ pub(crate) struct CollectionsHostFns {
     pub map_len: cranelift_module::FuncId,
     pub map_key_at: cranelift_module::FuncId,
     pub map_value_at: cranelift_module::FuncId,
+    pub iter_take: cranelift_module::FuncId,
+    pub iter_skip: cranelift_module::FuncId,
+    pub iter_step_by: cranelift_module::FuncId,
+    pub iter_dedup: cranelift_module::FuncId,
+    pub iter_chunks: cranelift_module::FuncId,
+    pub iter_windows: cranelift_module::FuncId,
+    pub list_sum_i64: cranelift_module::FuncId,
+    pub print_list: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -246,6 +412,14 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_map_len", jet_jit_map_len as *const u8);
     builder.symbol("jet_jit_map_key_at", jet_jit_map_key_at as *const u8);
     builder.symbol("jet_jit_map_value_at", jet_jit_map_value_at as *const u8);
+    builder.symbol("jet_jit_iter_take", jet_jit_iter_take as *const u8);
+    builder.symbol("jet_jit_iter_skip", jet_jit_iter_skip as *const u8);
+    builder.symbol("jet_jit_iter_step_by", jet_jit_iter_step_by as *const u8);
+    builder.symbol("jet_jit_iter_dedup", jet_jit_iter_dedup as *const u8);
+    builder.symbol("jet_jit_iter_chunks", jet_jit_iter_chunks as *const u8);
+    builder.symbol("jet_jit_iter_windows", jet_jit_iter_windows as *const u8);
+    builder.symbol("jet_jit_list_sum_i64", jet_jit_list_sum_i64 as *const u8);
+    builder.symbol("jet_jit_print_list", jet_jit_print_list as *const u8);
 }
 
 pub(crate) fn declare_collections_host_fns(
@@ -290,6 +464,8 @@ pub(crate) fn declare_collections_host_fns(
     let sig_map_get = sig_get.clone();
     let sig_map_get_opt = sig_get_opt.clone();
     let sig_map_at = sig_get_opt.clone();
+    let mut sig_print_list = sig_get_opt.clone();
+    sig_print_list.returns.clear();
 
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
@@ -319,5 +495,13 @@ pub(crate) fn declare_collections_host_fns(
         map_len: import("jet_jit_map_len", &sig_len)?,
         map_key_at: import("jet_jit_map_key_at", &sig_map_at)?,
         map_value_at: import("jet_jit_map_value_at", &sig_map_at)?,
+        iter_take: import("jet_jit_iter_take", &sig_get_opt)?,
+        iter_skip: import("jet_jit_iter_skip", &sig_get_opt)?,
+        iter_step_by: import("jet_jit_iter_step_by", &sig_get_opt)?,
+        iter_dedup: import("jet_jit_iter_dedup", &sig_get_opt)?,
+        iter_chunks: import("jet_jit_iter_chunks", &sig_get_opt)?,
+        iter_windows: import("jet_jit_iter_windows", &sig_get_opt)?,
+        list_sum_i64: import("jet_jit_list_sum_i64", &sig_len)?,
+        print_list: import("jet_jit_print_list", &sig_print_list)?,
     })
 }

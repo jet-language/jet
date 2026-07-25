@@ -442,6 +442,20 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && resident_safe_expr(else_value, callees)
         }
         TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
+        TExprKind::ClosureMethod { recv, op, args } => {
+            // Native Map/Filter over Int list/Iter; other closure ops remain gaps.
+            matches!(
+                op,
+                TIR::TClosureOp::Map | TIR::TClosureOp::MapMut | TIR::TClosureOp::Filter
+            ) && matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+                && resident_safe_expr(recv, callees)
+                && args.len() == 1
+                && matches!(&args[0].kind, TExprKind::Lambda(lam)
+                    if lam.prep.is_empty()
+                        && lam.source_params.len() == 1
+                        && matches!(&lam.executable, TIR::TLambdaBody::Expr(e)
+                            if resident_safe_expr(e, callees)))
+        }
         TExprKind::TaskGroupAll { tasks } => {
             jit_list_int_type(&expr.ty) && resident_safe_task_list_expr(tasks, callees)
         }
@@ -582,6 +596,17 @@ fn resident_safe_builtin_op(
         // JIT ABI: Iter producers already materialize list handles.
         TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
             jit_list_iter_elem_type(&recv.ty).is_some() && args.is_empty()
+        }
+        TBuiltinOp::Take | TBuiltinOp::Skip | TBuiltinOp::StepBy | TBuiltinOp::Chunks
+        | TBuiltinOp::Windows => {
+            jit_list_iter_elem_type(&recv.ty).is_some()
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Dedup => jit_list_iter_elem_type(&recv.ty).is_some() && args.is_empty(),
+        TBuiltinOp::Sum { float: false } => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) && args.is_empty()
         }
         _ => false,
     }
