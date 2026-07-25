@@ -26,6 +26,8 @@ impl<'a> Checker<'a> {
                         param_conv: None,
                         decl_loop_depth: self.loop_depth,
                         sendable: true,
+                        reactive_local: false,
+                        reactive_shared: false,
                         task_lint_span: None,
                         single_use_span: None,
                         constant_value: None,

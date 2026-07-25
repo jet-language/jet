@@ -9,7 +9,7 @@
 //! owner in docs/spec/syntax-decisions.md.
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, ATTR_TARGET,
 // ATTR_LAYOUT, ATTR_CODABLE, APPLIED_RULES, KW_CAPS, KW_GRANT,
-// KW_COMPTIME, KW_DERIVE, ATTR_TRACK. Constants live in the private modules
+// KW_COMPTIME, KW_DERIVE, ATTR_TRACK, ATTR_LOCAL, ATTR_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
 //

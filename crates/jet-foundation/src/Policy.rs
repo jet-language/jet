@@ -199,7 +199,7 @@ pub fn applied_rule_registry() -> Vec<AppliedRule> {
             "Codable" | "Encode" | "Decode" | "PublishedSchema" | "Summarize" | "Comparable" | "Numeric" | "Printable" | "CodableAsBase" | "Cli" | "Patchable" | "UnitFamily" | "SingleUse" | "Invariant" | "Layout" => (NO_POLICY_SCOPES, TYPE_SITE, false),
             "Redact" | "Rename" | "Skip" | "Default" | "Flatten" => (NO_POLICY_SCOPES, FIELD_SITE, false),
             "RenameAll" | "DenyUnknownFields" | "Tag" | "Untagged" => (NO_POLICY_SCOPES, TYPE_SITE, false),
-            "Persist" | "Track" => (NO_POLICY_SCOPES, DECLARATION_SITE, false),
+            "Persist" | "Track" | "Local" | "Shared" => (NO_POLICY_SCOPES, DECLARATION_SITE, false),
             "Meta" => (NO_POLICY_SCOPES, &[RuleSite::Function, RuleSite::Declaration, RuleSite::Constant][..], false),
             "Doc" | "Flag" => (NO_POLICY_SCOPES, FIELD_SITE, false),
             "Todo" => (NO_POLICY_SCOPES, EXPR_SITE, false),

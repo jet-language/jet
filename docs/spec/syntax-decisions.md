@@ -2843,11 +2843,16 @@ platform-signal providers ship in Epoch 3 (D-ADAPTRT1=C,
 D-ADAPT-PROVIDER1=A).
 
 **Reactive, events & UI stack** *(D-REACT1, D-REACTCORE1, D-SIGNAL1, D-EVENT1,
-D-RENDERTGT1/2, D-UITREE1, D-STYLESHAPE1, D-MOTIONTIME1, D-LAYOUT1,
+D-DATARACE1=C, D-RENDERTGT1/2, D-UITREE1, D-STYLESHAPE1, D-MOTIONTIME1, D-LAYOUT1,
 D-OWNCOMP1, D-A11Y1, D-NATIVEUI1/2)*: reactivity is a library + explicit
 `#Reactive` scope marker (E2914) lowering onto `core.reactive` — `Signal<T>`
 (`.get()/.set(v)`), `Computed<T>`, `Effect`; explicit-by-read subscription;
-pure std runtime (E2910–E2913). Events and hooks are compiler-known Core values
+pure std runtime (E2910–E2913). D-DATARACE1=C: reactive boxes use lock-ordered
+`Arc` storage so task/channel crossings cannot data-race or lean on rustc
+`Send`. Expert pins `#Local` / `#Shared` are registered (ATTR_LOCAL /
+ATTR_SHARED): `#Local` rejects task/channel/parallel crossings (E1102);
+`#Shared` and automatic boundary crossings list synchronized-form upgrades
+in generated Rust (`/* jet-reactive-upgrade: … */`) and `jet report`. Events and hooks are compiler-known Core values
 in `core.event`: `Event<T>`, `Hook<T, R>`, `Subscription`, `EventScope`,
 `EventPolicy`, and `EventTrace`. Render backends implement measure/layout/paint
 (`JetBackend`; `NullBackend`/`TuiBackend` shipped). UI trees are typed dot-construction

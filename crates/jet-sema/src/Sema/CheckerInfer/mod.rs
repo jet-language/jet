@@ -15,8 +15,10 @@ pub(crate) fn contains_tuple_type(ty: &Type) -> bool {
     }
 }
 
-/// D-REACT1=B: a reactive handle type `Signal<T>`/`Derived<T>` — an Rc-backed shared
-/// value whose "copy" shares the same reactive cell (so L0801 doesn't apply).
+/// D-REACT1=B / D-DATARACE1=C: a reactive handle type `Signal<T>`/`Derived<T>`/
+/// `Computed<T>` — an Arc-backed shared value whose "copy" shares the same
+/// reactive cell (so L0801 doesn't apply). Lock-ordered so task/channel
+/// crossings do not lean on rustc `Send`.
 pub(crate) fn is_reactive_handle_ty(ty: &Type) -> bool {
     matches!(
         ty,

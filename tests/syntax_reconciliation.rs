@@ -498,6 +498,8 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "KW_COMPTIME",
         "KW_DERIVE",
         "ATTR_TRACK",
+        "ATTR_LOCAL",
+        "ATTR_SHARED",
     ] {
         assert!(
             syntax.contains(syntax_anchor),

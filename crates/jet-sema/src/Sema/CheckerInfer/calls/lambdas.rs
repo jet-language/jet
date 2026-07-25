@@ -272,15 +272,47 @@ impl<'a> Checker<'a> {
                             }
                         }
                     } else if is_reactive_handle_ty(&cap_ty) || matches!(cap_ty, Type::Shared(_)) {
-                        // D-REACT1=B: a reactive `Signal`/`Derived` is an Rc-backed shared
-                        // handle — capturing a "copy" shares the same reactive cell (that is
-                        // the whole point: a derived/effect reads the live signal, and the
-                        // outer code still `.set`s it). No silent-data-copy to warn about, so
-                        // L0801 is suppressed. The capture is still recorded as a clone so
-                        // codegen moves an Rc clone into the closure.
+                        // D-REACT1=B / D-DATARACE1=C: a reactive handle is an Arc-backed
+                        // shared cell — capturing a "copy" shares the same reactive cell.
+                        // No silent-data-copy to warn about, so L0801 is suppressed. The
+                        // capture is still recorded as a clone so codegen moves an Arc
+                        // clone into the closure. Lock-ordered storage makes the clone
+                        // Send without leaning on rustc.
                         // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is the same shape — an
                         // Arc-backed "copyable door" meant to be captured freely across
                         // `tasks.spawn` closures with no `take`; suppress the same lint.
+                        if is_reactive_handle_ty(&cap_ty) {
+                            if let Some(info) = self.lookup(name) {
+                                if info.reactive_local {
+                                    self.diags.push(Diagnostic::error(
+                                        "E1102",
+                                        format!(
+                                            "`{name}` is pinned `#{}` and can't cross into a task",
+                                            crate::Syntax::ATTR_LOCAL
+                                        ),
+                                        format!(
+                                            "`#{}` keeps `{}` in the fast one-thread form",
+                                            crate::Syntax::ATTR_LOCAL,
+                                            cap_ty.name()
+                                        ),
+                                        format!(
+                                            "remove `#{}`, or send owned values through a channel",
+                                            crate::Syntax::ATTR_LOCAL
+                                        ),
+                                        Some(lam.span),
+                                    ));
+                                    continue;
+                                }
+                                let crossing = if info.reactive_shared {
+                                    "#Shared pin + task"
+                                } else {
+                                    "task"
+                                };
+                                self.note_reactive_upgrade(name, &cap_ty, crossing);
+                            } else {
+                                self.note_reactive_upgrade(name, &cap_ty, "task");
+                            }
+                        }
                         lam.meta.cloned_captures.push(name.clone());
                     } else if !taken {
                         lam.meta.cloned_captures.push(name.clone());
@@ -318,6 +350,8 @@ impl<'a> Checker<'a> {
                             .then_some(AccessConvention::Read),
                         decl_loop_depth: self.loop_depth,
                         sendable: true,
+                        reactive_local: false,
+                        reactive_shared: false,
                         task_lint_span: None,
                         single_use_span: None,
                         constant_value: None,

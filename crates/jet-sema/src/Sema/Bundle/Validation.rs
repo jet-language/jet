@@ -1571,6 +1571,7 @@ pub(crate) fn check_module_bodies(
                     unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
+                reactive_upgrades: Vec::new(),
                     is_replayable: false,
                     replayable_span: None,
                     is_task: false,
@@ -1639,6 +1640,7 @@ pub(crate) fn check_module_bodies(
                     unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
+                reactive_upgrades: Vec::new(),
                     is_replayable: false,
                     replayable_span: None,
                     is_task: false,
@@ -1765,6 +1767,7 @@ pub(crate) fn check_module_bodies(
                     unsafe_span: None,
                     is_pure: false,
                     is_reactive: false,
+                reactive_upgrades: Vec::new(),
                     is_replayable: false,
                     replayable_span: None,
                     is_task: false,
@@ -1998,6 +2001,8 @@ pub(crate) fn check_func_body_bundle(
         lambda_param_mutable: false,
         lambda_param_is_secret_loan: false,
         view_capture_tasks: HashSet::new(),
+        reactive_upgrades: Vec::new(),
+        reactive_upgrade_names: HashSet::new(),
         view_borrow_escape_tasks: HashSet::new(),
         current_binding_name: None,
         lambda_binding: None,
@@ -2036,6 +2041,9 @@ pub(crate) fn check_func_body_bundle(
         }
     }
     ck.check_params_and_body(f, owner_type);
+    apply_reactive_upgrade_flags(&mut f.body, &ck.reactive_upgrade_names);
+    // D-DATARACE1=C: drain upgrade-report lines onto the function for codegen/`jet report`.
+    f.reactive_upgrades = std::mem::take(&mut ck.reactive_upgrades);
     f.return_view_provenance = ck.return_view_provenance.clone();
     if let Some(owner) = owner_type {
         if let (Some(signature), Some(provenance)) =
@@ -2124,6 +2132,74 @@ pub(crate) fn check_func_body_bundle(
         },
     );
     ck.diags
+}
+
+/// D-DATARACE1=C: mark reactive bindings that crossed a concurrency boundary so
+/// codegen can emit the upgrade report comments.
+fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::HashSet<String>) {
+    fn walk(stmts: &mut [Stmt], names: &std::collections::HashSet<String>) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Val(b) => {
+                    if names.contains(&b.name) || b.reactive_shared {
+                        b.reactive_upgrade = true;
+                    }
+                }
+                Stmt::While { body, .. }
+                | Stmt::For { body, .. }
+                | Stmt::Loop { body, .. }
+                | Stmt::CountedLoop { body, .. }
+                | Stmt::Unsafe { body, .. }
+                | Stmt::Impure { body, .. }
+                | Stmt::Reactive { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Policy { body, .. }
+                | Stmt::TaskGroup { body, .. }
+                | Stmt::Caps { body, .. }
+                | Stmt::Grant { body, .. }
+                | Stmt::ComptimeBlock { body, .. }
+                | Stmt::ContextBlock { body, .. }
+                | Stmt::Live { body, .. }
+                | Stmt::AssumeDet { body, .. }
+                | Stmt::Transact { body, .. }
+                | Stmt::Off { body, .. }
+                | Stmt::DebugOnly { body, .. } => walk(body, names),
+                Stmt::If(i) => {
+                    walk(&mut i.then_body, names);
+                    match &mut i.else_branch {
+                        Some(ElseBranch::Else(body)) => walk(body, names),
+                        Some(ElseBranch::ElseIf(inner)) => {
+                            walk(&mut inner.then_body, names);
+                            // nested else handled by recursive structure if present
+                        }
+                        None => {}
+                    }
+                }
+                Stmt::Switch { arms, else_body, .. }
+                | Stmt::ComptimeSwitch { arms, else_body, .. } => {
+                    for arm in arms.iter_mut() {
+                        walk(&mut arm.body, names);
+                    }
+                    if let Some(else_body) = else_body {
+                        walk(else_body, names);
+                    }
+                }
+                Stmt::ComptimeIf {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    walk(then_body, names);
+                    if let Some(else_body) = else_body {
+                        walk(else_body, names);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    walk(stmts, names);
 }
 
 pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {

@@ -379,6 +379,7 @@ mod tests {
             is_pure: false,
             is_sanitizer: false,
             is_reactive: false,
+                reactive_upgrades: Vec::new(),
             declared_effects: None,
             effect_via: None,
             state_requires: None,

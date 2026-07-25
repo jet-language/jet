@@ -187,6 +187,8 @@ impl<'a> Checker<'a> {
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable: true,
+                    reactive_local: false,
+                    reactive_shared: false,
                     task_lint_span: None,
                     single_use_span: None,
                     constant_value: None,
@@ -604,16 +606,22 @@ impl<'a> Checker<'a> {
                 b.name_span,
                 LocalInfo {
                     def_span: b.name_span,
-                    ty: final_ty,
+                    ty: final_ty.clone(),
                     mutable: b.mutable && !b.is_comptime,
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable: binding_sendable,
+                    reactive_local: b.reactive_local,
+                    reactive_shared: b.reactive_shared,
                     task_lint_span,
                     single_use_span,
                     constant_value,
                 },
             );
+            if b.reactive_shared && crate::Sema::CheckerInfer::is_reactive_handle_ty(&final_ty) {
+                self.note_reactive_upgrade(&b.name, &final_ty, "#Shared pin");
+                b.reactive_upgrade = true;
+            }
             if let Some(value) = concrete_unit_value {
                 self.concrete_unit_values
                     .last_mut()

@@ -1297,6 +1297,33 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
+            TokKind::Hash
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LOCAL) =>
+            {
+                let marker_span = self.peek().span;
+                self.bump(); // `#`
+                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_LOCAL))?;
+                let mut binding = self.sigil_binding()?;
+                binding.reactive_local = true;
+                binding.reactive_local_span =
+                    Some(Span::new(marker_span.start, name_span.end));
+                self.finish_stmt()?;
+                Ok(Stmt::Val(binding))
+            }
+            TokKind::Hash
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_SHARED) =>
+            {
+                let marker_span = self.peek().span;
+                self.bump(); // `#`
+                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_SHARED))?;
+                let mut binding = self.sigil_binding()?;
+                binding.reactive_shared = true;
+                binding.reactive_shared_span =
+                    Some(Span::new(marker_span.start, name_span.end));
+                binding.reactive_upgrade = true;
+                self.finish_stmt()?;
+                Ok(Stmt::Val(binding))
+            }
             // D-BIND-BARE1: a sigil binding `name (:: | :=) expr` — no leading
             // keyword. Detected before the general Ident statement path.
             _ if self.looks_like_sigil_binding() => {

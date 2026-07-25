@@ -1431,6 +1431,20 @@ fn run() {
 }
 
 #[test]
+fn fmt_preserves_local_and_shared_reactive_pins() {
+    let src = "\
+use core.reactive as reactive
+
+fn run() {
+    #Local pending := reactive.signal(0)
+    #Shared shared := reactive.signal(1)
+    print(\"{pending.get()} {shared.get()}\")
+}
+";
+    assert_fmt_stable(src, "#Local/#Shared reactive pins");
+}
+
+#[test]
 fn fmt_write_sigil_d_mem1_stability() {
     // D-MEM1 (S1): `&T` is the write sigil (param + call-site mirror), `&self`
     // is the write receiver, `^T`/`^self` (take/move) are unchanged, and plain

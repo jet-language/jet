@@ -842,6 +842,8 @@ pub struct Func {
     pub state_transition: Option<StateTransition>,
     /// D-REACTCORE1: `#Reactive fn` — reactive effect scope; must not return a value.
     pub is_reactive: bool,
+    /// D-DATARACE1=C: upgrade-report lines for reactive boxes that crossed a boundary.
+    pub reactive_upgrades: Vec<String>,
     /// D-REPLAY1: `#Replayable fn` — the reachable effect set must not include
     /// ambient Time/Rand/Net/Io unless routed through deterministic capabilities.
     pub is_replayable: bool,

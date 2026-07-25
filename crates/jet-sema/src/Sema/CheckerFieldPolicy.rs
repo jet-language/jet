@@ -379,6 +379,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         unsafe_span: None,
         is_pure: false,
         is_reactive: false,
+                reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         is_task: false,

@@ -115,6 +115,10 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     } else {
         tir.generics.clone()
     };
+    // D-DATARACE1=C: surface synchronized-form upgrades before the Rust fn.
+    for line in &tir.reactive_upgrades {
+        out.push_str(&format!("/* jet-reactive-upgrade: {line} */\n"));
+    }
     out.push_str(&format!(
         "{inline_attr}{vis}{unsafe_kw}{abi}fn {name}{gen}({params}){ret} {{\n",
         name = cx.mangle_name(&tir.name),
@@ -288,6 +292,9 @@ pub(crate) fn emit_tir_method(
     };
     // E2-M12 D-OBS1: track the current function name for rich panic reports.
     *cx.current_fn.borrow_mut() = tir.name.clone();
+    for line in &tir.reactive_upgrades {
+        out.push_str(&format!("{pad}/* jet-reactive-upgrade: {line} */\n"));
+    }
     out.push_str(&format!(
         "{inline_attr}{pad}pub {unsafe_kw}fn {name}{view_generic}({params}){ret}{where_clause} {{\n",
         name = mangle(&tir.name),
