@@ -15,6 +15,7 @@ mod Collections;
 mod Concurrency;
 mod CoreHost;
 mod Numeric;
+mod Random;
 mod Solver;
 
 // I6: Cranelift crates live here, not in the compiler `jet` crate (`Source/`).
@@ -62,7 +63,7 @@ pub(crate) fn program_args() -> Vec<String> {
 /// pass one i64 handle for every `Result<T, E>`; payload bits stay exact and
 /// are decoded using the statically checked TIR payload type.
 #[derive(Clone, Copy)]
-struct JitResultValue {
+pub(crate) struct JitResultValue {
     ok: bool,
     bits: u64,
 }

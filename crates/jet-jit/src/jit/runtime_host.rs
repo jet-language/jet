@@ -8,7 +8,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Collections, Concurrency, CoreHost, JitResultValue, Numeric, Solver, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Collections, Concurrency, CoreHost, JitResultValue, Numeric, Random, Solver,
+    TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
@@ -54,6 +55,7 @@ pub(crate) struct JitRuntime {
     /// bits are interpreted from checked TIR types, never dynamically guessed.
     pub(crate) results: Vec<JitResultValue>,
     pub(crate) solvers: Vec<Solver::SolverState>,
+    pub(crate) rngs: Vec<crate::Random::RngState>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -276,6 +278,13 @@ extern "C" fn jet_jit_str_push_str(buf_id: i64, str_id: i64) {
 extern "C" fn jet_jit_str_eq(a: i64, b: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| match (rt.heap.get_string(a), rt.heap.get_string(b)) {
         (Some(x), Some(y)) => i8::from(x == y),
+        _ => 0,
+    })
+}
+
+extern "C" fn jet_jit_str_contains(hay: i64, needle: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| match (rt.heap.get_string(hay), rt.heap.get_string(needle)) {
+        (Some(h), Some(n)) => i8::from(h.contains(n)),
         _ => 0,
     })
 }
@@ -851,6 +860,7 @@ pub(crate) struct HostFns {
     pub(crate) str_push_char: FuncId,
     pub(crate) str_push_str: FuncId,
     pub(crate) str_eq: FuncId,
+    pub(crate) str_contains: FuncId,
     pub(crate) str_clone: FuncId,
     pub(crate) str_len: FuncId,
     pub(crate) str_trim: FuncId,
@@ -910,6 +920,7 @@ pub(crate) struct HostFns {
     pub(crate) core: CoreHost::CoreHostFns,
     pub(crate) num: Numeric::NumericHostFns,
     pub(crate) solver: Solver::SolverHostFns,
+    pub(crate) random: Random::RandomHostFns,
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -932,6 +943,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_push_char", jet_jit_str_push_char as *const u8);
     builder.symbol("jet_jit_str_push_str", jet_jit_str_push_str as *const u8);
     builder.symbol("jet_jit_str_eq", jet_jit_str_eq as *const u8);
+    builder.symbol("jet_jit_str_contains", jet_jit_str_contains as *const u8);
     builder.symbol("jet_jit_str_clone", jet_jit_str_clone as *const u8);
     builder.symbol("jet_jit_str_len", jet_jit_str_len as *const u8);
     builder.symbol("jet_jit_str_trim", jet_jit_str_trim as *const u8);
@@ -1030,13 +1042,15 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     CoreHost::register_core_host_symbols(&mut builder);
     Numeric::register_numeric_symbols(&mut builder);
     Solver::register_solver_symbols(&mut builder);
+    Random::register_random_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
     let core = CoreHost::declare_core_host_fns(&mut module)?;
     let num = Numeric::declare_numeric_host_fns(&mut module)?;
     let solver = Solver::declare_solver_host_fns(&mut module)?;
-    let host = declare_host_fns(&mut module, coll, conc, core, num, solver)?;
+    let random = Random::declare_random_host_fns(&mut module)?;
+    let host = declare_host_fns(&mut module, coll, conc, core, num, solver, random)?;
     Ok((module, host))
 }
 
@@ -1047,6 +1061,7 @@ fn declare_host_fns(
     core: CoreHost::CoreHostFns,
     num: Numeric::NumericHostFns,
     solver: Solver::SolverHostFns,
+    random: Random::RandomHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -1241,6 +1256,7 @@ fn declare_host_fns(
         str_push_char: import("jet_jit_str_push_char", &sig_str_push_char)?,
         str_push_str: import("jet_jit_str_push_str", &sig_str_push_lit)?,
         str_eq: import("jet_jit_str_eq", &sig_str_eq)?,
+        str_contains: import("jet_jit_str_contains", &sig_str_eq)?,
         str_clone: import("jet_jit_str_clone", &sig_str_unary_i64)?,
         str_len: import("jet_jit_str_len", &sig_str_unary_i64)?,
         str_trim: import("jet_jit_str_trim", &sig_str_unary_i64)?,
@@ -1300,5 +1316,6 @@ fn declare_host_fns(
         core,
         num,
         solver,
+        random,
     })
 }

@@ -2,15 +2,15 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
 use jet_codegen::Codegen::TIR::{
-    JitProgram, SerdeCodec, TExpr, TExprKind, TFunc, TFuncKind, TNumericOp,
+    JitProgram, SerdeCodec, TExpr, TExprKind, TFunc, TFuncKind, THandleOp, TNumericOp,
 };
 use jet_foundation::AST::Type;
 use std::collections::HashMap;
 
 use super::safety::{
     jit_concurrency_type, jit_enum_type, jit_list_iter_elem_type, jit_list_native_type,
-    jit_list_of_int_list_type, jit_list_task_int_type, jit_optional_scalar_type,
-    jit_result_payload_type, jit_struct_type, jit_tuple_type,
+    jit_list_of_int_list_type, jit_list_record_type, jit_list_task_int_type,
+    jit_optional_scalar_type, jit_result_payload_type, jit_struct_type, jit_tuple_type,
 };
 
 pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Type, String> {
@@ -18,6 +18,35 @@ pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Ty
         return meta
             .clif_ty(base)
             .ok_or_else(|| format!("jit distinct base unsupported: {base:?}"));
+    }
+    // TIR may stamp Unit on Rng handle methods; recover ABI from the op.
+    if let TExprKind::HandleMethod { op, .. } = &init.kind {
+        match op {
+            THandleOp::RngFloat
+            | THandleOp::RngFloatRange
+            | THandleOp::RngNormal
+            | THandleOp::RngExponential => return Ok(types::F64),
+            THandleOp::RngBool | THandleOp::RngBoolP => return Ok(types::I8),
+            THandleOp::RngInt
+            | THandleOp::RngBytes
+            | THandleOp::RngSplit
+            | THandleOp::RngSample
+            | THandleOp::RngWeightedPick
+            | THandleOp::RngPick
+            | THandleOp::RngShuffle => return Ok(types::I64),
+            _ => {}
+        }
+    }
+    if let TExprKind::CoreCall { module, method, .. } = &init.kind {
+        if module == "core.random" {
+            match method.as_str() {
+                "float_range" | "normal" | "exponential" => return Ok(types::F64),
+                "bool" => return Ok(types::I8),
+                "bytes" | "sample" | "rng" | "weighted_pick" => return Ok(types::I64),
+                "seed" => return Ok(types::I8),
+                _ => {}
+            }
+        }
     }
     if let TExprKind::DistinctConvert {
         arg,
@@ -88,6 +117,7 @@ pub(crate) fn clif_ty_with_distinct(
     if jit_list_native_type(&ty)
         || jit_list_of_int_list_type(&ty)
         || jit_list_task_int_type(&ty)
+        || jit_list_record_type(&ty)
         || jit_list_iter_elem_type(&ty).is_some()
         || (jit_struct_type(&ty) && !distinct_bases.contains_key(ty.name().as_str()))
         || jit_tuple_type(&ty)
@@ -204,11 +234,17 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn struct_field_index(&self, type_name: &str, field: &str) -> Option<usize> {
-        let fields = self.struct_fields.get(type_name)?;
-        let mangled = format!("user_{field}");
-        fields
-            .iter()
-            .position(|f| f == field || f == &mangled || f.strip_prefix("user_") == Some(field))
+        if let Some(fields) = self.struct_fields.get(type_name) {
+            let mangled = format!("user_{field}");
+            if let Some(i) = fields.iter().position(|f| {
+                f == field || f == &mangled || f.strip_prefix("user_") == Some(field)
+            }) {
+                return Some(i);
+            }
+        }
+        // Core prelude structs are not user `Item::Struct`s, so TIR Program
+        // omits them — fall back to declaration order from jet_std CommonTypes.
+        core_struct_field_index(type_name, field)
     }
 
     /// Mangled field names + parallel types for `user_Type { user_f: … }` Debug show.
@@ -262,4 +298,28 @@ impl<'a> JitMeta<'a> {
         self.enum_variants.keys()
     }
 
+}
+
+/// Field order mirrors `jet_std` CommonTypes / sema `core_struct_field`.
+fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
+    let fields: &[&str] = match type_name {
+        "DirEntry" => &["name", "path", "is_dir"],
+        "Stat" => &[
+            "size",
+            "modified_ms",
+            "created_ms",
+            "readonly",
+            "is_file",
+            "is_dir",
+            "is_symlink",
+            "kind",
+        ],
+        "WalkEntry" => &["path", "relative", "is_dir", "depth"],
+        "TempDir" | "TempFile" | "FileLock" => &["path"],
+        "LogField" => &["key", "value", "kind", "redacted"],
+        "LogSpan" => &["id", "name"],
+        "Rng" => &["state"],
+        _ => return None,
+    };
+    fields.iter().position(|f| *f == field)
 }

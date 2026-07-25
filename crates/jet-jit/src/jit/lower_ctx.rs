@@ -463,7 +463,13 @@ impl LowerCtx<'_, '_> {
                     }
                 }
                 let val = self.lower_expr(init)?;
-                let ty = init_clif_ty(init, self.meta)?;
+                // TIR often stamps `Unit` on void calls and some handle results;
+                // prefer the Cranelift value's real ABI over guessing I8 vs I64.
+                let ty = if matches!(&init.ty, Type::Named(n) if n == "Unit" || n == "Void") {
+                    self.b.func.dfg.value_type(val)
+                } else {
+                    init_clif_ty(init, self.meta)?
+                };
                 let val_ty = self.b.func.dfg.value_type(val);
                 if val_ty != ty {
                     return Err(format!("jit let `{name}` lowering type mismatch"));
@@ -2154,6 +2160,7 @@ impl LowerCtx<'_, '_> {
         let idx = self
             .meta
             .struct_field_index(type_name, field)
+            .or_else(|| core_struct_field_index(type_name, field))
             .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?
             as i64;
         let idx_val = self.b.ins().iconst(types::I64, idx);
@@ -2473,23 +2480,143 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "jet.log" {
-                    let (host_id, need_arg) = match method.as_str() {
-                        "set_level" if args.len() == 1 => (self.host.core.log_set_level, true),
-                        "setup" if args.len() == 1 => (self.host.core.log_setup, true),
-                        "debug" if args.len() == 1 => (self.host.core.log_debug, true),
-                        "info" if args.len() == 1 => (self.host.core.log_info, true),
-                        "warn" if args.len() == 1 => (self.host.core.log_warn, true),
-                        "error" if args.len() == 1 => (self.host.core.log_error, true),
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "set_level" if args.len() == 1 => {
+                            (self.host.core.log_set_level, vec![self.lower_expr(&args[0])?])
+                        }
+                        "setup" if args.len() == 1 => {
+                            (self.host.core.log_setup, vec![self.lower_expr(&args[0])?])
+                        }
+                        "debug" if args.len() == 1 => {
+                            (self.host.core.log_debug, vec![self.lower_expr(&args[0])?])
+                        }
+                        "info" if args.len() == 1 => {
+                            (self.host.core.log_info, vec![self.lower_expr(&args[0])?])
+                        }
+                        "warn" if args.len() == 1 => {
+                            (self.host.core.log_warn, vec![self.lower_expr(&args[0])?])
+                        }
+                        "error" if args.len() == 1 => {
+                            (self.host.core.log_error, vec![self.lower_expr(&args[0])?])
+                        }
+                        "set_trace_id" if args.len() == 1 => (
+                            self.host.core.log_set_trace_id,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "field" if args.len() == 2 => (
+                            self.host.core.log_field,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "int" if args.len() == 2 => (
+                            self.host.core.log_int_field,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "bool" if args.len() == 2 => (
+                            self.host.core.log_bool_field,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "counter" if args.len() == 2 => (
+                            self.host.core.log_counter,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "span" if args.len() == 1 => {
+                            (self.host.core.log_span, vec![self.lower_expr(&args[0])?])
+                        }
+                        "enter" if args.len() == 1 => {
+                            (self.host.core.log_enter, vec![self.lower_expr(&args[0])?])
+                        }
+                        "close" if args.len() == 1 => {
+                            (self.host.core.log_close, vec![self.lower_expr(&args[0])?])
+                        }
+                        "info_fields" if args.len() == 2 => (
+                            self.host.core.log_info_fields,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
                         _ => return Err("jit core call unsupported".to_string()),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    if need_arg {
-                        let msg = self.lower_expr(&args[0])?;
-                        let _ = self.b.ins().call(host_ref, &[msg]);
-                    } else {
-                        let _ = self.b.ins().call(host_ref, &[]);
-                    }
-                    return Ok(self.b.ins().iconst(types::I8, 0));
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(clif_ty(&expr.ty)
+                        .map(|_| self.b.inst_results(call)[0])
+                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+                }
+                if module == "core.files" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "exists" if args.len() == 1 => {
+                            (self.host.core.fs_exists, vec![self.lower_expr(&args[0])?])
+                        }
+                        "read" if args.len() == 1 => {
+                            (self.host.core.fs_read, vec![self.lower_expr(&args[0])?])
+                        }
+                        "write" if args.len() == 2 => (
+                            self.host.core.fs_write,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "create_dir" | "create_dir_all" if args.len() == 1 => {
+                            (self.host.core.fs_create_dir, vec![self.lower_expr(&args[0])?])
+                        }
+                        "list_dir" if args.len() == 1 => {
+                            (self.host.core.fs_list_dir, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.path" && method == "join" && args.len() == 2 {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.core.path_join, self.b.func);
+                    let a0 = self.lower_expr(&args[0])?;
+                    let a1 = self.lower_expr(&args[1])?;
+                    let call = self.b.ins().call(host_ref, &[a0, a1]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.random" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "seed" if args.len() == 1 => {
+                            (self.host.random.seed, vec![self.lower_expr(&args[0])?])
+                        }
+                        "bool" if args.len() == 1 => {
+                            (self.host.random.bool_p, vec![self.lower_expr(&args[0])?])
+                        }
+                        "float_range" if args.len() == 2 => (
+                            self.host.random.float_range,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "normal" if args.len() == 2 => (
+                            self.host.random.normal,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "exponential" if args.len() == 1 => {
+                            (self.host.random.exponential, vec![self.lower_expr(&args[0])?])
+                        }
+                        "bytes" if args.len() == 1 => {
+                            (self.host.random.bytes, vec![self.lower_expr(&args[0])?])
+                        }
+                        "weighted_pick" if args.len() == 2 => (
+                            self.host.random.weighted_pick,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "sample" if args.len() == 2 => (
+                            self.host.random.sample,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "rng" if args.len() == 1 => {
+                            (self.host.random.rng_new, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => return Err("jit core call unsupported".to_string()),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    // Prefer method return shape over TIR `expr.ty` (can be Unit).
+                    let ret_ty = self
+                        .expr_arith_type_from_op(expr)
+                        .unwrap_or_else(|| expr.ty.clone());
+                    return Ok(clif_ty(&ret_ty)
+                        .map(|_| self.b.inst_results(call)[0])
+                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
                 }
                 if module == "core.math" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
@@ -2797,10 +2924,15 @@ impl LowerCtx<'_, '_> {
                     .unwrap_result()
                     .map(|(ok, _)| ok.clone())
                     .ok_or_else(|| "jit result ?? operand is not Result".to_string())?;
-                let ret_ty = self
-                    .meta
-                    .clif_ty(&expr.ty)
-                    .ok_or("jit result ?? type unsupported")?;
+                let is_unit = matches!(&expr.ty, Type::Named(n) if n == "Unit" || n == "Void")
+                    || matches!(&ok_ty, Type::Named(n) if n == "Unit" || n == "Void");
+                let ret_ty = if is_unit {
+                    types::I8
+                } else {
+                    self.meta.clif_ty(&expr.ty).or_else(|| clif_ty(&expr.ty)).ok_or_else(|| {
+                        format!("jit result ?? type unsupported: {:?}", expr.ty)
+                    })?
+                };
                 let status_ref = self
                     .module
                     .declare_func_in_func(self.host.result_is_ok, self.b.func);
@@ -3264,6 +3396,20 @@ impl LowerCtx<'_, '_> {
         if matches!(&value.ty, Type::Option(_)) {
             return self.lower_expr(value);
         }
+        // `core.random.weighted_pick` / `Rng.weighted_pick` return the same
+        // packed Option encoding; TIR sometimes erases the Option wrapper.
+        if let TExprKind::CoreCall { module, method, .. } = &value.kind {
+            if module == "core.random" && method == "weighted_pick" {
+                return self.lower_expr(value);
+            }
+        }
+        if let TExprKind::HandleMethod {
+            op: THandleOp::RngWeightedPick,
+            ..
+        } = &value.kind
+        {
+            return self.lower_expr(value);
+        }
         Err("jit list get_opt status unsupported".to_string())
     }
 
@@ -3406,7 +3552,18 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::First => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Last => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Contains => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Contains => {
+                // String.contains(needle) — list Contains stays unsupported.
+                if !matches!(&recv.ty, Type::String) {
+                    return Err("jit builtin method unsupported".to_string());
+                }
+                let needle = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_contains, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, needle]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::IndexOf => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Reverse => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Sum { float: false } => {
@@ -4228,18 +4385,70 @@ impl LowerCtx<'_, '_> {
             THandleOp::ClockTick => Err("jit handle method unsupported".to_string()),
             THandleOp::ClockAdvance => Err("jit handle method unsupported".to_string()),
             THandleOp::ClockWait => Err("jit handle method unsupported".to_string()),
-            THandleOp::RngInt => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngInt => {
+                let lo = self.lower_expr(&args[0])?;
+                let hi = self.lower_expr(&args[1])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_int, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, lo, hi]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::RngFloat => Err("jit handle method unsupported".to_string()),
-            THandleOp::RngFloatRange => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngFloatRange => {
+                let lo = self.lower_expr(&args[0])?;
+                let hi = self.lower_expr(&args[1])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_float_range, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, lo, hi]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::RngBool => Err("jit handle method unsupported".to_string()),
-            THandleOp::RngBoolP => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngBoolP => {
+                let p = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_bool_p, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, p]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::RngNormal => Err("jit handle method unsupported".to_string()),
             THandleOp::RngExponential => Err("jit handle method unsupported".to_string()),
-            THandleOp::RngBytes => Err("jit handle method unsupported".to_string()),
-            THandleOp::RngSplit => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngBytes => {
+                let n = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_bytes, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, n]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::RngSplit => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_split, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::RngPick => Err("jit handle method unsupported".to_string()),
-            THandleOp::RngWeightedPick => Err("jit handle method unsupported".to_string()),
-            THandleOp::RngSample => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngWeightedPick => {
+                let items = self.lower_expr(&args[0])?;
+                let weights = self.lower_expr(&args[1])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_weighted_pick, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, items, weights]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::RngSample => {
+                let items = self.lower_expr(&args[0])?;
+                let k = self.lower_expr(&args[1])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_sample, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, items, k]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::RngShuffle => Err("jit handle method unsupported".to_string()),
             THandleOp::SolverNew => {
                 let host = self.module.declare_func_in_func(self.host.solver.new, self.b.func);
@@ -4676,6 +4885,11 @@ impl LowerCtx<'_, '_> {
         if let Some(t) = self.expr_field_type(expr) {
             return self.erase_distinct_ty(&t);
         }
+        // TIR `handle_method_return_ty` falls through to Unit for several Rng
+        // draws; recover the real scalar from the op so compares type-check.
+        if let Some(ty) = self.expr_arith_type_from_op(expr) {
+            return ty;
+        }
         if let TExprKind::Binary { lhs, rhs, .. } = &expr.kind {
             let lt = self.expr_arith_type(lhs);
             let rt = self.expr_arith_type(rhs);
@@ -4685,6 +4899,86 @@ impl LowerCtx<'_, '_> {
             if lt == Type::Int && rt == Type::Int {
                 return Type::Int;
             }
+        }
+        self.erase_distinct_ty(&expr.ty)
+    }
+
+    fn expr_arith_type_from_op(&self, expr: &TExpr) -> Option<Type> {
+        match &expr.kind {
+            TExprKind::CoreCall { module, method, .. } if module == "core.random" => {
+                match method.as_str() {
+                    "float_range" | "normal" | "exponential" => Some(Type::Float),
+                    "bool" => Some(Type::Bool),
+                    _ => None,
+                }
+            }
+            TExprKind::HandleMethod { op, .. } => match op {
+                THandleOp::RngFloat
+                | THandleOp::RngFloatRange
+                | THandleOp::RngNormal
+                | THandleOp::RngExponential => Some(Type::Float),
+                THandleOp::RngInt => Some(Type::Int),
+                THandleOp::RngBool | THandleOp::RngBoolP => Some(Type::Bool),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Print dispatch type — recover Bool/Float/Int when TIR left `Unit` on
+    /// compare results or Rng draws (same hole as `expr_arith_type`).
+    fn print_result_ty(&self, expr: &TExpr) -> Type {
+        if let TExprKind::Binary { op, lhs, rhs, .. } = &expr.kind {
+            if matches!(
+                op,
+                BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::Lt
+                    | BinOp::Gt
+                    | BinOp::Le
+                    | BinOp::Ge
+                    | BinOp::And
+                    | BinOp::Or
+            ) {
+                return Type::Bool;
+            }
+            let lt = self.expr_arith_type(lhs);
+            let rt = self.expr_arith_type(rhs);
+            if lt == Type::Float || rt == Type::Float {
+                return Type::Float;
+            }
+            if lt == Type::Int && rt == Type::Int {
+                return Type::Int;
+            }
+        }
+        if let TExprKind::OrFallback { value, fallback, .. } = &expr.kind {
+            if let Type::Option(inner) = &value.ty {
+                return self.erase_distinct_ty(inner);
+            }
+            if let TOrFallback::Value(fb) = fallback {
+                let fb_ty = self.print_result_ty(fb);
+                if !matches!(&fb_ty, Type::Named(n) if n == "Unit" || n == "Void") {
+                    return fb_ty;
+                }
+            }
+            // weighted_pick Option<String> when TIR erased the Option wrapper.
+            if let TExprKind::CoreCall { module, method, .. } = &value.kind {
+                if module == "core.random" && method == "weighted_pick" {
+                    return Type::String;
+                }
+            }
+            if matches!(
+                &value.kind,
+                TExprKind::HandleMethod {
+                    op: THandleOp::RngWeightedPick,
+                    ..
+                }
+            ) {
+                return Type::String;
+            }
+        }
+        if let Some(ty) = self.expr_arith_type_from_op(expr) {
+            return ty;
         }
         self.erase_distinct_ty(&expr.ty)
     }
@@ -4855,7 +5149,7 @@ impl LowerCtx<'_, '_> {
             }
             _ => {
                 let val = self.lower_expr(inner)?;
-                let print_ty = self.erase_distinct_ty(&inner.ty);
+                let print_ty = self.print_result_ty(inner);
                 // List / materialized Iter — same jet_show `[a, b, c]` AOT uses.
                 if let Some(elem) = jit_list_iter_elem_type(&print_ty) {
                     let string_elems = matches!(elem, Type::String);
@@ -4870,8 +5164,8 @@ impl LowerCtx<'_, '_> {
                     return Ok(());
                 }
                 // `T?` — packed `0` / `value+1`; show matches AOT Option jet_show.
-                if let Type::Option(inner) = &print_ty {
-                    let kind = match inner.as_ref() {
+                if let Type::Option(inner_ty) = &print_ty {
+                    let kind = match inner_ty.as_ref() {
                         Type::Int => 0i64,
                         Type::String => 1,
                         Type::Float => 2,
@@ -6012,6 +6306,30 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(header);
         self.b.seal_block(exit);
         Ok(self.b.use_var(out_var))
+    }
+}
+
+fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
+    match type_name {
+        "DirEntry" => match field {
+            "name" => Some(0),
+            "path" => Some(1),
+            "is_dir" => Some(2),
+            _ => None,
+        },
+        "LogField" => match field {
+            "key" => Some(0),
+            "value" => Some(1),
+            "kind" => Some(2),
+            "redacted" => Some(3),
+            _ => None,
+        },
+        "LogSpan" => match field {
+            "id" => Some(0),
+            "name" => Some(1),
+            _ => None,
+        },
+        _ => None,
     }
 }
 

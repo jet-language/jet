@@ -60,6 +60,7 @@ covered:
   devloop/schedule_every
   devloop/task_runner
   effects/effect_caps
+  effects/effect_grant
   effects/effect_prohibition
   effects/effect_trait_bound
   effects/effect_tree
@@ -70,18 +71,23 @@ covered:
   effects/self_mutation
   effects/share_boundary
   effects/single_use
+  errors/discard_fallible
   errors/fallible_run
   errors/qq_control
   functions/lambda_bare_params
   functions/lambda_inference
   io/cli_args
+  io/dir_entry
+  io/files
   io/log
   io/log_human
+  io/log_structured
   io/no_prelude
   io/os_facts
   lowlevel/cross
   lowlevel/layout_c
   math/math_audit
+  math/random_audit
   memory/copy_verb
   memory/gc_cyclic
   memory/place_windows
@@ -150,8 +156,8 @@ gaps:
   cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
   collections/deque: run: jit static `std::collections::VecDeque::new`
-  collections/fixed_arrays: run: jit let type unsupported: FixedList { elem: IntN { signed: false, bits: 8 }, len: 3, len_symbol: None }
-  collections/index_hook: Grid::get: jit field type unsupported: List(Named("Cell"))
+  collections/fixed_arrays: run: jit print type unsupported
+  collections/index_hook: run: jit index-hook assign unsupported
   collections/iter_hook: run: jit for-in method-call collection unsupported
   collections/iter_tools_audit: run: jit builtin method unsupported
   collections/list_remove_bounds: run: jit builtin method unsupported
@@ -164,7 +170,7 @@ gaps:
   concurrency/deadline_context: run: jit context block unsupported
   concurrency/detached_task: run: jit handle method unsupported
   concurrency/parallel_iter: run: jit closure method unsupported
-  concurrency/parallel_scan: scan_one: jit core call unsupported
+  concurrency/parallel_scan: paths_from_args: jit if-let pattern unsupported
   concurrency/task_controls: run: jit handle method unsupported
   concurrency/task_runtime_audit: run: jit core call unsupported
   crypto/auth_tokens: run: jit core call unsupported
@@ -182,7 +188,6 @@ gaps:
   effects/asset_pipeline: run: jit call arg wrapper unsupported
   effects/capability_sigils: run: jit call arg wrapper unsupported
   effects/determinism: roll_at: jit handle method unsupported
-  effects/effect_grant: run: jit core call unsupported
   effects/effect_higher_order: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
   effects/effect_levers: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: Some([]) }
   effects/infer_capability: run: jit call arg wrapper unsupported
@@ -191,7 +196,6 @@ gaps:
   effects/single_use_discard: run: jit unsafe region unsupported
   effects/smart_context: run: automatic resource cleanup uses AOT fallback
   effects/taint: run: jit core call unsupported
-  errors/discard_fallible: run: jit core call unsupported
   errors/error_context: load_config: jit host/default/uninit/ct-lit unsupported
   errors/errors: run: jit enum arm is not a variant pattern
   errors/must_use: run: jit scope guard closure unsupported
@@ -210,12 +214,9 @@ gaps:
   io/db: run: automatic resource cleanup uses AOT fallback
   io/db_checked_sql: run: automatic resource cleanup uses AOT fallback
   io/db_read_footprint: person_count: jit handle method unsupported
-  io/dir_entry: run: jit core call unsupported
   io/env_overlay: run: jit host/default/uninit/ct-lit unsupported
-  io/files: run: jit core call unsupported
   io/files_depth: run: jit core call unsupported
   io/io_prelude: greet: jit ambient input unsupported
-  io/log_structured: run: jit core call unsupported
   io/path: run: jit handle method unsupported
   io/process_builder: run: jit core call unsupported
   io/scope_guard: with_guards: jit scope guard closure unsupported
@@ -228,7 +229,7 @@ gaps:
   lowlevel/freestanding: run: jit core call unsupported
   lowlevel/inline_asm: add_registers: jit function missing return
   lowlevel/inline_c: add: jit function missing return
-  lowlevel/layout_columnar: jit param type unsupported: List(Named("Particle"))
+  lowlevel/layout_columnar: total_mass: jit for-in columnar unsupported
   lowlevel/linalg_simd: run: jit math builtin unsupported
   lowlevel/lowlevel: run: jit unsafe region unsupported
   lowlevel/os_target_gating: run: jit inline comptime branch unsupported
@@ -238,7 +239,6 @@ gaps:
   lowlevel/swizzle: run: jit math builtin unsupported
   lowlevel/target_profile_board: run: jit core call unsupported
   lowlevel/unsafe_obligations: run: jit unsafe region unsupported
-  math/random_audit: run: jit core call unsupported
   memory/arena: run: automatic resource cleanup uses AOT fallback
   memory/arena_parse: run: automatic resource cleanup uses AOT fallback
   memory/arena_regions: run: automatic resource cleanup uses AOT fallback
@@ -321,7 +321,7 @@ gaps:
   tooling/data_json: run: jit core call unsupported
   tooling/data_pipeline: must_stay_deferred: jit require/panic stop unsupported
   tooling/data_schema: run: jit core call unsupported
-  tooling/data_stream_bounds: run: jit core call unsupported
+  tooling/data_stream_bounds: run: automatic resource cleanup uses AOT fallback
   tooling/debug_native: run: jit core call unsupported
   tooling/fuzz_demo: reverse: jit builtin method unsupported
   tooling/panic_report: summarize: jit require/panic stop unsupported
@@ -350,14 +350,14 @@ gaps:
   ui/reactive: run: jit core call unsupported
   ui/reactive_scope: run: jit core call unsupported
   ui/ui_a11y: run: jit core call unsupported
-  ui/ui_component_kit: jit param type unsupported: List(Named("UiNode"))
+  ui/ui_component_kit: label_view: jit core call unsupported
   ui/ui_motion: motion_node: jit core call unsupported
   ui/ui_native_linux: run: jit inline comptime branch unsupported
   ui/ui_null_backend: run: jit core call unsupported
   ui/ui_tui_reactive: run: jit core call unsupported
   ui/ui_typed_style: styled_text: jit core call unsupported
-  ui/ui_view_tree: jit param type unsupported: List(Named("UiNode"))
-  web/ui_showcase: jit param type unsupported: List(Named("UiNode"))
+  ui/ui_view_tree: repaint: jit core call unsupported
+  web/ui_showcase: stat_line: jit core call unsupported
   web/ui_web_click: dev: jit core call unsupported
   web/ui_web_reactive: run: jit core call unsupported
   web/web_app: dev: jit core call unsupported

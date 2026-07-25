@@ -1,9 +1,10 @@
-//! Host shims for `core.os`, `jet.log`, and `core.math` CoreCalls (#729).
-//! Behavior mirrors AOT helpers in the CoreLib prelude (`jet_std_os_*`,
-//! `jet_ring_log_*`, `jet_std_math_*`) — thin std/libm wrappers, not a third algorithm.
+//! Host shims for `core.os`, `jet.log`, `core.math`, `core.files`, and
+//! `core.path` CoreCalls (#729). Behavior mirrors AOT helpers in the CoreLib
+//! prelude (`jet_std_os_*`, `jet_ring_log_*`, `jet_std_math_*`, `jet_std_fs_*`,
+//! `jet_std_path_*`) — thin std wrappers, not a third algorithm.
 
 use super::Concurrency;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 // ── core.os (mirrors jet_std_os_* in FsIoEnvOsTesting.rs) ────────────────────
 
@@ -64,6 +65,15 @@ extern "C" fn jet_jit_os_hostname() -> i64 {
 thread_local! {
     static JIT_LOG_LEVEL: Cell<u8> = const { Cell::new(1) };
     static JIT_LOG_FORMAT: Cell<u8> = const { Cell::new(0) };
+    static JIT_LOG_TRACE_ID: RefCell<String> = const { RefCell::new(String::new()) };
+    static JIT_LOG_SPANS: RefCell<Vec<(i64, String)>> = const { RefCell::new(Vec::new()) };
+    static JIT_LOG_NEXT_SPAN: Cell<i64> = const { Cell::new(1) };
+}
+
+struct JitLogField {
+    key: String,
+    value: String,
+    kind: String,
 }
 
 fn jit_log_set_level_str(level: &str) {
@@ -154,7 +164,25 @@ fn clone_heap_string(id: i64) -> String {
     Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
 }
 
-fn jit_log_emit(level: &str, msg: &str) {
+fn result_ok_bits(bits: u64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.results.push(super::JitResultValue { ok: true, bits });
+        rt.results.len() as i64
+    })
+}
+
+fn result_err_msg(msg: &str) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let sid = rt.heap.alloc_string(msg.to_string());
+        rt.results.push(super::JitResultValue {
+            ok: false,
+            bits: sid as u64,
+        });
+        rt.results.len() as i64
+    })
+}
+
+fn jit_log_emit(level: &str, msg: &str, fields: &[JitLogField]) {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -169,14 +197,59 @@ fn jit_log_emit(level: &str, msg: &str) {
             "error" => "ERROR",
             _ => level,
         };
-        format!("[{level_tag}] {y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z | {msg}")
+        let mut line = format!("[{level_tag}] {y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z | {msg}");
+        for field in fields {
+            line.push_str(&format!(" {}={}", field.key, field.value));
+        }
+        line
     } else {
-        format!(
-            "{{\"level\":\"{}\",\"body\":\"{}\",\"ts\":{}}}",
-            level,
-            jit_log_json_escape(msg),
-            ts
-        )
+        let mut fields_json = String::new();
+        for field in fields {
+            fields_json.push_str(",\"");
+            fields_json.push_str(&jit_log_json_escape(&field.key));
+            fields_json.push_str("\":");
+            if matches!(field.kind.as_str(), "int" | "float" | "bool" | "counter") {
+                fields_json.push_str(&field.value);
+            } else {
+                fields_json.push('"');
+                fields_json.push_str(&jit_log_json_escape(&field.value));
+                fields_json.push('"');
+            }
+        }
+        let spans_json = JIT_LOG_SPANS.with(|s| {
+            let spans = s.borrow();
+            if spans.is_empty() {
+                String::new()
+            } else {
+                let names = spans
+                    .iter()
+                    .map(|(_, name)| format!("\"{}\"", jit_log_json_escape(name)))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(",\"spans\":[{names}]")
+            }
+        });
+        let trace = JIT_LOG_TRACE_ID.with(|t| t.borrow().clone());
+        if trace.is_empty() {
+            format!(
+                "{{\"level\":\"{}\",\"body\":\"{}\",\"ts\":{}{}{}}}",
+                level,
+                jit_log_json_escape(msg),
+                ts,
+                fields_json,
+                spans_json
+            )
+        } else {
+            format!(
+                "{{\"level\":\"{}\",\"body\":\"{}\",\"trace_id\":\"{}\",\"ts\":{}{}{}}}",
+                level,
+                jit_log_json_escape(msg),
+                jit_log_json_escape(&trace),
+                ts,
+                fields_json,
+                spans_json
+            )
+        }
     };
     Concurrency::with_runtime_mut(|rt| {
         rt.stderr.push_str(&line);
@@ -194,26 +267,230 @@ extern "C" fn jet_jit_log_setup(msg: i64) {
 
 extern "C" fn jet_jit_log_debug(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 0 {
-        jit_log_emit("debug", &clone_heap_string(msg));
+        jit_log_emit("debug", &clone_heap_string(msg), &[]);
     }
 }
 
 extern "C" fn jet_jit_log_info(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 1 {
-        jit_log_emit("info", &clone_heap_string(msg));
+        jit_log_emit("info", &clone_heap_string(msg), &[]);
     }
 }
 
 extern "C" fn jet_jit_log_warn(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 2 {
-        jit_log_emit("warn", &clone_heap_string(msg));
+        jit_log_emit("warn", &clone_heap_string(msg), &[]);
     }
 }
 
 extern "C" fn jet_jit_log_error(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 3 {
-        jit_log_emit("error", &clone_heap_string(msg));
+        jit_log_emit("error", &clone_heap_string(msg), &[]);
     }
+}
+
+extern "C" fn jet_jit_log_set_trace_id(msg: i64) {
+    let id = clone_heap_string(msg);
+    JIT_LOG_TRACE_ID.with(|t| *t.borrow_mut() = id);
+}
+
+fn alloc_log_field(key: String, value: String, kind: &str, redacted: bool) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let rec = rt.heap.alloc_record(4);
+        let k = rt.heap.alloc_string(key);
+        let v = rt.heap.alloc_string(value);
+        let kd = rt.heap.alloc_string(kind.to_string());
+        let _ = rt.heap.record_set_string(rec, 0, k);
+        let _ = rt.heap.record_set_string(rec, 1, v);
+        let _ = rt.heap.record_set_string(rec, 2, kd);
+        let _ = rt.heap.record_set_bool(rec, 3, redacted);
+        rec
+    })
+}
+
+extern "C" fn jet_jit_log_field(key: i64, value: i64) -> i64 {
+    alloc_log_field(clone_heap_string(key), clone_heap_string(value), "string", false)
+}
+
+extern "C" fn jet_jit_log_int_field(key: i64, value: i64) -> i64 {
+    alloc_log_field(clone_heap_string(key), value.to_string(), "int", false)
+}
+
+extern "C" fn jet_jit_log_bool_field(key: i64, value: i8) -> i64 {
+    alloc_log_field(
+        clone_heap_string(key),
+        if value != 0 { "true" } else { "false" }.to_string(),
+        "bool",
+        false,
+    )
+}
+
+extern "C" fn jet_jit_log_counter(name: i64, value: i64) -> i64 {
+    alloc_log_field(
+        format!("metric.counter.{}", clone_heap_string(name)),
+        value.to_string(),
+        "counter",
+        false,
+    )
+}
+
+extern "C" fn jet_jit_log_span(name: i64) -> i64 {
+    let id = JIT_LOG_NEXT_SPAN.with(|n| {
+        let id = n.get();
+        n.set(id + 1);
+        id
+    });
+    let name_s = clone_heap_string(name);
+    Concurrency::with_runtime_mut(|rt| {
+        let rec = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(rec, 0, id);
+        let sid = rt.heap.alloc_string(name_s);
+        let _ = rt.heap.record_set_string(rec, 1, sid);
+        rec
+    })
+}
+
+extern "C" fn jet_jit_log_enter(span: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let id = rt.heap.record_get_int(span, 0).unwrap_or(0);
+        let name = rt
+            .heap
+            .record_get_string(span, 1)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        JIT_LOG_SPANS.with(|s| s.borrow_mut().push((id, name)));
+    });
+}
+
+extern "C" fn jet_jit_log_close(span: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let id = rt.heap.record_get_int(span, 0).unwrap_or(0);
+        JIT_LOG_SPANS.with(|s| {
+            let mut spans = s.borrow_mut();
+            if let Some(pos) = spans.iter().rposition(|(sid, _)| *sid == id) {
+                spans.remove(pos);
+            }
+        });
+    });
+}
+
+fn read_log_fields(list: i64) -> Vec<JitLogField> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        let mut out = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            let rec = rt.heap.list_get_int(list, i).unwrap_or(0);
+            let key = rt
+                .heap
+                .record_get_string(rec, 0)
+                .and_then(|sid| rt.heap.clone_string(sid))
+                .unwrap_or_default();
+            let value = rt
+                .heap
+                .record_get_string(rec, 1)
+                .and_then(|sid| rt.heap.clone_string(sid))
+                .unwrap_or_default();
+            let kind = rt
+                .heap
+                .record_get_string(rec, 2)
+                .and_then(|sid| rt.heap.clone_string(sid))
+                .unwrap_or_else(|| "string".to_string());
+            out.push(JitLogField { key, value, kind });
+        }
+        out
+    })
+}
+
+extern "C" fn jet_jit_log_info_fields(msg: i64, fields: i64) {
+    if JIT_LOG_LEVEL.with(|l| l.get()) <= 1 {
+        let fs = read_log_fields(fields);
+        jit_log_emit("info", &clone_heap_string(msg), &fs);
+    }
+}
+
+// ── core.files / core.path (mirrors jet_std_fs_* / jet_std_path_*) ───────────
+
+extern "C" fn jet_jit_fs_exists(path: i64) -> i8 {
+    let p = clone_heap_string(path);
+    i8::from(std::path::Path::new(&p).exists())
+}
+
+extern "C" fn jet_jit_fs_read(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    match std::fs::read_to_string(&p) {
+        Ok(text) => {
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
+            result_ok_bits(sid as u64)
+        }
+        Err(e) => result_err_msg(&format!("read {p}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
+    let p = clone_heap_string(path);
+    let t = clone_heap_string(text);
+    match std::fs::write(&p, t) {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => result_err_msg(&format!("write {p}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_fs_create_dir(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    match std::fs::create_dir_all(&p) {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => result_err_msg(&format!("create_dir {p}: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_path_join(base: i64, part: i64) -> i64 {
+    let b = clone_heap_string(base);
+    let p = clone_heap_string(part);
+    let joined = std::path::Path::new(&b)
+        .join(p)
+        .to_string_lossy()
+        .to_string();
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(joined))
+}
+
+extern "C" fn jet_jit_fs_list_dir(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    let rd = match std::fs::read_dir(&p) {
+        Ok(rd) => rd,
+        Err(e) => return result_err_msg(&format!("list_dir {p}: {e}")),
+    };
+    let mut entries = Vec::new();
+    for entry in rd {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => return result_err_msg(&format!("list_dir {p}: {e}")),
+        };
+        let name = entry.file_name().to_string_lossy().to_string();
+        let full_path = std::path::Path::new(&p)
+            .join(&name)
+            .to_string_lossy()
+            .to_string();
+        let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        entries.push((name, full_path, is_dir));
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for (name, full_path, is_dir) in entries {
+            let rec = rt.heap.alloc_record(3);
+            let n = rt.heap.alloc_string(name);
+            let fp = rt.heap.alloc_string(full_path);
+            let _ = rt.heap.record_set_string(rec, 0, n);
+            let _ = rt.heap.record_set_string(rec, 1, fp);
+            let _ = rt.heap.record_set_bool(rec, 2, is_dir);
+            let _ = rt.heap.list_push_int(list, rec);
+        }
+        rt.results.push(super::JitResultValue {
+            ok: true,
+            bits: list as u64,
+        });
+        rt.results.len() as i64
+    })
 }
 
 // ── core.math (mirrors jet_std_math_* / f64 methods in Process.rs emit) ───────
@@ -314,6 +591,21 @@ pub(crate) struct CoreHostFns {
     pub log_info: cranelift_module::FuncId,
     pub log_warn: cranelift_module::FuncId,
     pub log_error: cranelift_module::FuncId,
+    pub log_set_trace_id: cranelift_module::FuncId,
+    pub log_field: cranelift_module::FuncId,
+    pub log_int_field: cranelift_module::FuncId,
+    pub log_bool_field: cranelift_module::FuncId,
+    pub log_counter: cranelift_module::FuncId,
+    pub log_span: cranelift_module::FuncId,
+    pub log_enter: cranelift_module::FuncId,
+    pub log_close: cranelift_module::FuncId,
+    pub log_info_fields: cranelift_module::FuncId,
+    pub fs_exists: cranelift_module::FuncId,
+    pub fs_read: cranelift_module::FuncId,
+    pub fs_write: cranelift_module::FuncId,
+    pub fs_create_dir: cranelift_module::FuncId,
+    pub fs_list_dir: cranelift_module::FuncId,
+    pub path_join: cranelift_module::FuncId,
     pub math_sin: cranelift_module::FuncId,
     pub math_cos: cranelift_module::FuncId,
     pub math_exp: cranelift_module::FuncId,
@@ -347,6 +639,27 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_log_info", jet_jit_log_info as *const u8);
     builder.symbol("jet_jit_log_warn", jet_jit_log_warn as *const u8);
     builder.symbol("jet_jit_log_error", jet_jit_log_error as *const u8);
+    builder.symbol(
+        "jet_jit_log_set_trace_id",
+        jet_jit_log_set_trace_id as *const u8,
+    );
+    builder.symbol("jet_jit_log_field", jet_jit_log_field as *const u8);
+    builder.symbol("jet_jit_log_int_field", jet_jit_log_int_field as *const u8);
+    builder.symbol("jet_jit_log_bool_field", jet_jit_log_bool_field as *const u8);
+    builder.symbol("jet_jit_log_counter", jet_jit_log_counter as *const u8);
+    builder.symbol("jet_jit_log_span", jet_jit_log_span as *const u8);
+    builder.symbol("jet_jit_log_enter", jet_jit_log_enter as *const u8);
+    builder.symbol("jet_jit_log_close", jet_jit_log_close as *const u8);
+    builder.symbol(
+        "jet_jit_log_info_fields",
+        jet_jit_log_info_fields as *const u8,
+    );
+    builder.symbol("jet_jit_fs_exists", jet_jit_fs_exists as *const u8);
+    builder.symbol("jet_jit_fs_read", jet_jit_fs_read as *const u8);
+    builder.symbol("jet_jit_fs_write", jet_jit_fs_write as *const u8);
+    builder.symbol("jet_jit_fs_create_dir", jet_jit_fs_create_dir as *const u8);
+    builder.symbol("jet_jit_fs_list_dir", jet_jit_fs_list_dir as *const u8);
+    builder.symbol("jet_jit_path_join", jet_jit_path_join as *const u8);
     builder.symbol("jet_jit_math_sin", jet_jit_math_sin as *const u8);
     builder.symbol("jet_jit_math_cos", jet_jit_math_cos as *const u8);
     builder.symbol("jet_jit_math_exp", jet_jit_math_exp as *const u8);
@@ -384,6 +697,29 @@ pub(crate) fn declare_core_host_fns(
     sig_i64.returns.push(AbiParam::new(types::I64));
     let mut sig_void_str = Signature::new(cc);
     sig_void_str.params.push(AbiParam::new(types::I64));
+    let mut sig_str_str_str = Signature::new(cc);
+    sig_str_str_str.params.push(AbiParam::new(types::I64));
+    sig_str_str_str.params.push(AbiParam::new(types::I64));
+    sig_str_str_str.returns.push(AbiParam::new(types::I64));
+    let mut sig_str_i64_str = Signature::new(cc);
+    sig_str_i64_str.params.push(AbiParam::new(types::I64));
+    sig_str_i64_str.params.push(AbiParam::new(types::I64));
+    sig_str_i64_str.returns.push(AbiParam::new(types::I64));
+    let mut sig_str_i8_str = Signature::new(cc);
+    sig_str_i8_str.params.push(AbiParam::new(types::I64));
+    sig_str_i8_str.params.push(AbiParam::new(types::I8));
+    sig_str_i8_str.returns.push(AbiParam::new(types::I64));
+    let mut sig_void_i64 = Signature::new(cc);
+    sig_void_i64.params.push(AbiParam::new(types::I64));
+    let mut sig_void_i64_i64 = Signature::new(cc);
+    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+    let mut sig_unary_i64 = Signature::new(cc);
+    sig_unary_i64.params.push(AbiParam::new(types::I64));
+    sig_unary_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_i64_i8 = Signature::new(cc);
+    sig_i64_i8.params.push(AbiParam::new(types::I64));
+    sig_i64_i8.returns.push(AbiParam::new(types::I8));
     let mut sig_f64_f64 = Signature::new(cc);
     sig_f64_f64.params.push(AbiParam::new(types::F64));
     sig_f64_f64.returns.push(AbiParam::new(types::F64));
@@ -428,6 +764,21 @@ pub(crate) fn declare_core_host_fns(
         log_info: import("jet_jit_log_info", &sig_void_str)?,
         log_warn: import("jet_jit_log_warn", &sig_void_str)?,
         log_error: import("jet_jit_log_error", &sig_void_str)?,
+        log_set_trace_id: import("jet_jit_log_set_trace_id", &sig_void_str)?,
+        log_field: import("jet_jit_log_field", &sig_str_str_str)?,
+        log_int_field: import("jet_jit_log_int_field", &sig_str_i64_str)?,
+        log_bool_field: import("jet_jit_log_bool_field", &sig_str_i8_str)?,
+        log_counter: import("jet_jit_log_counter", &sig_str_i64_str)?,
+        log_span: import("jet_jit_log_span", &sig_unary_i64)?,
+        log_enter: import("jet_jit_log_enter", &sig_void_i64)?,
+        log_close: import("jet_jit_log_close", &sig_void_i64)?,
+        log_info_fields: import("jet_jit_log_info_fields", &sig_void_i64_i64)?,
+        fs_exists: import("jet_jit_fs_exists", &sig_i64_i8)?,
+        fs_read: import("jet_jit_fs_read", &sig_unary_i64)?,
+        fs_write: import("jet_jit_fs_write", &sig_i64_i64_i64)?,
+        fs_create_dir: import("jet_jit_fs_create_dir", &sig_unary_i64)?,
+        fs_list_dir: import("jet_jit_fs_list_dir", &sig_unary_i64)?,
+        path_join: import("jet_jit_path_join", &sig_i64_i64_i64)?,
         math_sin: import("jet_jit_math_sin", &sig_f64_f64)?,
         math_cos: import("jet_jit_math_cos", &sig_f64_f64)?,
         math_exp: import("jet_jit_math_exp", &sig_f64_f64)?,

@@ -30,8 +30,14 @@ fn jit_scalar_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_list_int_type(ty: &Type) -> bool {
-    matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::Int))
-        || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Int))
+    // IntN (U8/…) shares the i64 list ABI — bytes / write_at / random.bytes.
+    matches!(
+        ty,
+        Type::List(inner) if matches!(inner.as_ref(), Type::Int | Type::IntN { .. })
+    ) || matches!(
+        ty,
+        Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Int | Type::IntN { .. })
+    )
 }
 
 pub(crate) fn jit_list_float_type(ty: &Type) -> bool {
