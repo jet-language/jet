@@ -38,6 +38,11 @@ const LENSES: &[Lens] = &[
         summary: "transitive no_alloc / zero_rc / arena_bounded facts (D-MEM-FACTS1)",
         render: render_memory,
     },
+    Lens {
+        name: "web",
+        summary: "D-WEBAPP1 application graph facts (routes/actions/policy)",
+        render: render_web,
+    },
 ];
 
 pub(crate) fn run_expand(args: &[String], _json: bool) {
@@ -169,6 +174,21 @@ fn render_memory(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<St
         .collect::<Vec<_>>();
     lines.sort();
     lines
+}
+
+fn render_web(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<String> {
+    let Some(graph) = facts.web_app.as_ref() else {
+        return Vec::new();
+    };
+    if graph.entry_file.is_empty()
+        && graph.routes.is_empty()
+        && graph.actions.is_empty()
+        && graph.mounts.is_empty()
+        && graph.routes_from.is_empty()
+    {
+        return Vec::new();
+    }
+    graph.explain_lines()
 }
 
 /// D-METHODMACRO1=A: every `#Inline`/`#InlineAlways` fn or method in the

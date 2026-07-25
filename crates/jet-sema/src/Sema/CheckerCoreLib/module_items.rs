@@ -688,7 +688,10 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // D-FLAGSHIP-WEBAPI1=A: browser events and storage. The intermediate
         // `storage` module exists so `web.storage.local.get(...)` resolves as a
         // real nested core module, not a magic field.
-        "core.web" => &["on", "value", "storage"],
+        // D-WEBAPP1=D / D-WEBAUTHOR1=D: full-stack application builder + browser APIs.
+        "core.web" => &[
+            "on", "value", "storage", "app", "page", "App", "Page", "Context", "Mount",
+        ],
         "core.web.storage" => &["local", "session"],
         "core.web.storage.local" | "core.web.storage.session" => &["get", "set", "remove", "clear"],
         // c-devserver (owner-directed 2026-07-01): `jet dev` server builder.
@@ -755,5 +758,7 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         | ("jet.http" | "core.http.client" | "core.http.server",
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
             | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HttpError" | "Client" | "Proxy")
+        // D-WEBAPP1=D: namespaced `web.App` / `web.Page` / `web.Context` / `web.Mount`.
+        | ("core.web", "App" | "Page" | "Context" | "Mount")
     )
 }

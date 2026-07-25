@@ -218,6 +218,7 @@ pub(super) fn eval_handle(
         THandleOp::PathWalk => Err(unsupported("handle `PathWalk`", span)),
         THandleOp::UiBackendMethod { .. } => Err(unsupported("handle `UiBackendMethod`", span)),
         THandleOp::DevServerMethod { .. } => Err(unsupported("handle `DevServerMethod`", span)),
+        THandleOp::WebAppMethod { .. } => Err(unsupported("handle `WebAppMethod`", span)),
         THandleOp::DbQuery => Err(unsupported("handle `DbQuery`", span)),
         THandleOp::DbQueryOne => Err(unsupported("handle `DbQueryOne`", span)),
         THandleOp::DbExecute => Err(unsupported("handle `DbExecute`", span)),

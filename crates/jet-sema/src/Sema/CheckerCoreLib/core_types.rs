@@ -225,6 +225,11 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // c-devserver (owner-directed 2026-07-01): the configurable `jet dev`
         // server value returned by `core.web.devserver.for_app(...)`.
         | "DevServer"
+        // D-WEBAPP1=D: full-stack application builder types.
+        | "WebApp"
+        | "WebPage"
+        | "WebContext"
+        | "WebMount"
         // D-APPROX1=A: approximate sketch data structures.
         | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.

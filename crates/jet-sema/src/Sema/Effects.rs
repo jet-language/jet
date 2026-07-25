@@ -629,6 +629,8 @@ pub struct SemIndexEffectFacts {
     /// `(module path, reference start, reference end)`. Tooling may copy these
     /// facts but must never independently resolve by spelling or proximity.
     pub reference_anchors: HashMap<(String, usize, usize), DefinitionAnchorFact>,
+    /// D-WEBAPP1=D: statically known `fn app()` application graph (Tower #438).
+    pub web_app: Option<jet_foundation::WebApp::WebAppGraph>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

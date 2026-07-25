@@ -2541,6 +2541,39 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "serve" => format!("({}).serve()", recv),
                     _ => format!("({}).{}()", recv, method),
                 },
+                // D-WEBAPP1=D: WebApp builder methods — Rust names match Jet.
+                THandleOp::WebAppMethod { method } => match method.as_str() {
+                    "route" | "page" | "layout" | "action" | "form" | "data" => format!(
+                        "({}).{}(({}).clone(), {{ let _ = &({}); String::new() }})",
+                        recv,
+                        method,
+                        a(0),
+                        a(1)
+                    ),
+                    "mount" => match args.len() {
+                        2 => format!(
+                            "({}).mount(({}).clone(), {{ let _ = &({}); String::new() }})",
+                            recv,
+                            a(0),
+                            a(1)
+                        ),
+                        _ => format!(
+                            "({}).mount(({}).clone(), {{ let _ = &({}); String::new() }})",
+                            recv,
+                            a(0),
+                            a(1)
+                        ),
+                    },
+                    "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y"
+                    | "adapter" => {
+                        format!("({}).{}(({}).clone())", recv, method, a(0))
+                    }
+                    "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev"
+                    | "hydration_release" | "facts_json" | "serve" => {
+                        format!("({}).{}()", recv, method)
+                    }
+                    _ => format!("({}).{}()", recv, method),
+                },
                 // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client method call.
                 // "body"/"header" dispatch by arity: 0-arg=response accessor, 1-arg=request builder.
                 THandleOp::HttpClientMethod { kind, method } => {

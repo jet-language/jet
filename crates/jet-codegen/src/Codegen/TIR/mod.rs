@@ -3307,6 +3307,10 @@ pub enum THandleOp {
     DevServerMethod {
         method: String,
     },
+    /// D-WEBAPP1=D: `WebApp` builder methods (`.route`/`.action`/`.mount`/…).
+    WebAppMethod {
+        method: String,
+    },
     /// D-DBDRIVER1: `conn.query(sql, params)` → `Result<Vec<Row>, DbError>`. Encodes
     /// `params` via `jet_std::jet_db_encode_params`, calls the FFI bridge's
     /// `jet_db_query`, decodes the wire result via `jet_std::jet_db_decode_query_result`.
