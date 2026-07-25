@@ -3136,13 +3136,15 @@ fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
             "os",
             "migrate",
             "compare-nixos",
-            "halcyon",
+            "halcyon-gnome",
             "--out",
             out_dir.to_str().unwrap(),
             "--no-color",
             "--offline",
         ])
-        .current_dir(config_example_dir())
+        .current_dir(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
+        )
         .env("JETPACK_ROOT", &root.path)
         .output()
         .unwrap();
@@ -3186,6 +3188,75 @@ fn nixos_migration_prompt_probe_executes_interactive_shell_init() {
     assert_eq!(
         String::from_utf8(out.stdout).unwrap(),
         "NixOS comparison $ "
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn nixos_migration_protects_stage_before_writing_inputs() {
+    let root = Scratch::new("nixos-private-stage");
+    let out_dir = root.join("published");
+    let trace = root.join("stage.trace");
+    let jet_program = jet().get_program().to_owned();
+
+    let out = Command::new("strace")
+        .args(["-f", "-s", "4096", "-o"])
+        .arg(&trace)
+        .args(["-e", "trace=%file", "--"])
+        .arg(jet_program)
+        .args([
+            "os",
+            "migrate",
+            "compare-nixos",
+            "halcyon-gnome",
+            "--out",
+            out_dir.to_str().unwrap(),
+            "--no-color",
+        ])
+        .current_dir(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
+        )
+        .env("JETPACK_ROOT", &root.path)
+        .env("NIX_REMOTE", "invalid")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!out_dir.exists());
+
+    let trace = fs::read_to_string(trace).unwrap();
+    let marker = "/.nixos-comparison-halcyon-gnome-";
+    let lines = trace.lines().collect::<Vec<_>>();
+    let mkdir = lines
+        .iter()
+        .position(|line| line.contains("mkdir(") && line.contains(marker) && line.contains("0700"))
+        .unwrap_or_else(|| panic!("private 0700 mkdir missing:\n{trace}"));
+    let protected = lines
+        .iter()
+        .position(|line| {
+            line.contains(marker)
+                && line.contains("AT_SYMLINK_NOFOLLOW")
+                && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700"))
+        })
+        .unwrap_or_else(|| panic!("no-follow 0700 verification missing:\n{trace}"));
+    let first_input = lines
+        .iter()
+        .position(|line| {
+            line.contains(marker)
+                && (line.contains("/flake.nix")
+                    || line.contains("/configuration.nix")
+                    || line.contains("/input-facts.json"))
+        })
+        .unwrap_or_else(|| panic!("private input creation missing:\n{trace}"));
+    let insecure = lines.iter().find(|line| {
+        line.contains(marker)
+            && (line.contains("st_mode=S_IFDIR|") || line.contains("stx_mode=S_IFDIR|"))
+            && !line.contains("S_IFDIR|0700")
+    });
+    assert!(insecure.is_none(), "stage mode widened: {insecure:?}");
+    assert!(mkdir < protected, "mode checked before mkdir:\n{trace}");
+    assert!(
+        protected < first_input,
+        "private input opened before mode/no-follow verification:\n{trace}"
     );
 }
 

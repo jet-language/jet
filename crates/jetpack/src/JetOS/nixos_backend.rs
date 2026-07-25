@@ -833,7 +833,7 @@ fn write_nixos_backend(
     system: &SystemPlan,
     mapping: &NixosMapping,
 ) -> std::io::Result<()> {
-    fs::create_dir_all(dir)?;
+    verify_private_stage(dir)?;
     fs::write(dir.join("flake.nix"), render_flake_nix(&system.name, mapping))?;
     fs::write(
         dir.join("configuration.nix"),
@@ -1020,11 +1020,11 @@ pub(super) fn cmd_migrate_compare_nixos(
         system.name,
         std::process::id()
     ));
-    if stage.exists() {
+    if let Err(error) = create_private_stage(&stage) {
         theme.error(
-            "NixOS comparison staging path already exists",
-            &format!("`{}` blocks this run.", stage.display()),
-            "remove the stale staging path, then run the migration command again.",
+            "could not protect the NixOS comparison staging path",
+            &format!("creating private `{}` failed: {error}.", stage.display()),
+            "choose a private writable output parent and remove any stale staging path.",
         );
         return 2;
     }
@@ -1057,6 +1057,41 @@ pub(super) fn cmd_migrate_compare_nixos(
             2
         }
     }
+}
+
+fn create_private_stage(stage: &Path) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    // Non-recursive mkdir is atomic and fails if any file, directory, or
+    // symlink already occupies the leaf.
+    builder.create(stage)?;
+
+    verify_private_stage(stage)
+}
+
+fn verify_private_stage(stage: &Path) -> std::io::Result<()> {
+    let metadata = fs::symlink_metadata(stage)?;
+    if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+        return Err(std::io::Error::other(
+            "private staging path is not a no-follow directory",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = metadata.permissions().mode() & 0o777;
+        if mode != 0o700 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("private staging mode is {mode:o}, expected 700"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn finish_private_stage(stage: &Path, result: Result<(), String>) -> Result<(), String> {
@@ -1392,7 +1427,7 @@ fn publish_migration_bundle(
         system.name,
         std::process::id()
     ));
-    fs::create_dir(&publish)
+    create_private_stage(&publish)
         .map_err(|error| format!("creating `{}` failed: {error}", publish.display()))?;
     let result = (|| -> Result<(), String> {
         let image = publish.join("system-image.qcow2");
