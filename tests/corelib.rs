@@ -992,7 +992,7 @@ fn run() {{
 
     bytes_output :: files.create("{}") ?? panic("create bytes")
     bytes_writer :: json.writer(^bytes_output, encoding.EncodingLimits.safe(), true) ?? panic("bytes writer")
-    bytes :: [U8].{ U8.from_int(1) ?? panic("byte") }
+    bytes :: [U8].{{ U8.from_int(1) ?? panic("byte") }}
     if bytes_writer.write(encoding.DataEvent.Bytes(bytes)) == {{
         Ok(_) -> print("bytes accepted")
         Err(error) -> print(error.reason)
@@ -1968,7 +1968,7 @@ fn run() {{
     write_unfinished("{partial}")
     // Same-path reopen after Drop: incomplete leftover still here (empty wire).
     leftover :: files.read_bytes("{partial}") ?? panic("same-path read after Drop")
-    empty :: [U8].{}
+    empty :: [U8].{{}}
     print(leftover == empty)
     // Same-path recreate: Drop must have released the unfinished writer handle.
     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
@@ -1976,7 +1976,7 @@ fn run() {{
     reopen_writer.write(encoding.DataEvent.Null) ?? panic("reopen write")
     reopen_writer.finish() ?? panic("reopen finish")
     finished :: files.read_bytes("{partial}") ?? panic("same-path read after finish")
-    null_wire :: [U8].{ 246 }
+    null_wire :: [U8].{{ 246 }}
     print(finished == null_wire)
     // Honesty: unfinished Drop wire ≠ finished complete root.
     print(leftover != finished)
@@ -2287,7 +2287,7 @@ fn run() {{
     float_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("float array end")
     float_writer.finish() ?? panic("float finish")
     whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
-    expected_whole :: [U8].{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }
+    expected_whole :: [U8].{{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }}
     print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
     after :: writer.write(encoding.DataEvent.Null)
     if after == {{
@@ -4787,7 +4787,7 @@ fn run() {{
         Ok(_) -> panic("expired readiness succeeded")
         Err(error) -> print(net.error_operation(error))
     }}
-    payload :: [U8].{ 7 }
+    payload :: [U8].{{ 7 }}
     client.write_all(payload, deadline: budget) ?? panic("write")
     print(server.read(1, deadline: budget) ?? panic("read"))
     client.close() ?? panic("close")
@@ -5324,10 +5324,10 @@ fn invalid_alpn() -> [String] {{
 }}
 
 fn run() {{
-    ca :: [U8].{ {} }
-    client_cert :: [U8].{ {} }
-    client_key :: [U8].{ {} }
-    wrong_key :: [U8].{ {} }
+    ca :: [U8].{{ {} }}
+    client_cert :: [U8].{{ {} }}
+    client_key :: [U8].{{ {} }}
+    wrong_key :: [U8].{{ {} }}
     roots :: tls.RootCertificates.from_pem(ca) ?? panic("root validation")
     identity :: tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: client_key) ?? panic("identity validation")
     if tls.ClientIdentity.from_pem(cert_chain: client_cert, private_key: wrong_key) == {{
@@ -5364,11 +5364,11 @@ fn run() {{
     print(peer.leaf.valid_from_unix_ms < peer.leaf.valid_until_unix_ms)
     print(peer.leaf.subject.contains("CN=T") && peer.leaf.subject.contains("\\xc3"))
     print(peer.leaf.issuer.len() > 0)
-    request :: [U8].{ 71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10 }
+    request :: [U8].{{ 71, 69, 84, 32, 47, 32, 72, 84, 84, 80, 47, 49, 46, 48, 13, 10, 13, 10 }}
     secure.write_all(request, deadline: budget) ?? panic("request")
     secure.close_write(deadline: budget) ?? panic("close write")
     secure.close_write(deadline: budget) ?? panic("repeat close write")
-    one :: [U8].{ 1 }
+    one :: [U8].{{ 1 }}
     if secure.write_all(one, deadline: budget) == {{
         Ok(_) -> panic("write after close_write succeeded")
         Err(error) -> if error == {{
@@ -5888,7 +5888,7 @@ fn run() {
 
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "email_mime", src, &[], None);
-    assert_eq!(code, 0, "stderr: }\n{stderr}");
+    assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{stdout}");
     let file = dir.join("email_mime.jet");
     fs::write(&file, src).unwrap();
@@ -7950,7 +7950,7 @@ use core.encoding.xml as xml
 use core.files as files
 
 fn run() {{
-    paths :: [String].{ {boundary_paths} }
+    paths :: [String].{{ {boundary_paths} }}
     passed := 0
     loop path; paths {{
         input :: files.open(path) ?? panic("open boundary")
