@@ -388,6 +388,24 @@ fn all_example_stems() -> Vec<String> {
     stems
 }
 
+/// Stems the corpus gate already classifies as frontend-rejected (compile errors).
+/// Interpreter parity batteries skip them — they cannot run or hit an interpreter boundary.
+fn frontend_rejected_stems() -> std::collections::HashSet<String> {
+    parse_corpus_gate_manifest()
+        .into_iter()
+        .filter(|r| r.class == CorpusGateClass::FrontendRejected)
+        .map(|r| r.stem)
+        .collect()
+}
+
+fn interpreter_example_stems() -> Vec<String> {
+    let rejected = frontend_rejected_stems();
+    all_example_stems()
+        .into_iter()
+        .filter(|stem| !rejected.contains(stem))
+        .collect()
+}
+
 fn typechecked_example_stems() -> Vec<String> {
     all_example_stems()
         .into_iter()
@@ -924,7 +942,8 @@ fn interpreter_matches_compiled_binary() {
     let dir = std::env::temp_dir().join(format!("jet_dev_diff_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     let (_, _, manifested_divergences) = parse_jit_gap_manifest();
-    let stats = run_interpreter_battery_parallel(all_example_stems(), dir, manifested_divergences);
+    let stats =
+        run_interpreter_battery_parallel(interpreter_example_stems(), dir, manifested_divergences);
     eprintln!(
         "c77 battery: {} ran ({} interp==compiled, {} manifested divergences), {} boundary-asserted, {} total",
         stats.ran,
@@ -1117,7 +1136,7 @@ fn task_runner_named_tasks_match_expected_golden() {
 fn interpreter_matches_expected_golden() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut checked = 0usize;
-    for stem in all_example_stems() {
+    for stem in interpreter_example_stems() {
         let file = example_path(&stem);
         // D-JPK-TASKRUN1 / R12 (card #476): task_runner's meaningful entries are
         // its `#Task` fns, not the `fn run()` usage hint. Mirror golden.rs's
