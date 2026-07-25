@@ -544,7 +544,7 @@ impl JetBackend for JetTuiBackendState {
 }
 
 /// D-RENDERTGT2=A (c133 M2): reactive UI render loop — re-runs the body when signals change.
-pub fn jet_ui_reactive_render<F: Fn() + 'static>(body: F) {
+pub fn jet_ui_reactive_render<F: Fn() + Send + Sync + 'static>(body: F) {
     jet_std::jet_reactive_effect_rooted(body);
 }
 

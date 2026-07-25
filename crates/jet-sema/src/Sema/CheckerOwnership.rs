@@ -1664,6 +1664,17 @@ impl<'a> Checker<'a> {
         self.sendability_problem(ty, closure_taken)
     }
 
+    pub(crate) fn note_reactive_upgrade(&mut self, name: &str, ty: &Type, crossing: &str) {
+        self.reactive_upgrade_names.insert(name.to_string());
+        let line = format!(
+            "{name}: {} synchronized for {crossing} crossing",
+            ty.show()
+        );
+        if !self.reactive_upgrades.iter().any(|existing| existing == &line) {
+            self.reactive_upgrades.push(line);
+        }
+    }
+
     pub(crate) fn report_unsendable(
         &mut self,
         value: &str,
@@ -1941,6 +1952,34 @@ impl<'a> Checker<'a> {
                     arg.expr.span(),
                 );
                 sendability_failed = true;
+            } else if crate::Sema::CheckerInfer::is_reactive_handle_ty(&got) {
+                match &arg.expr {
+                    Expr::Ident(name, _) => {
+                        if self.lookup(name).is_some_and(|info| info.reactive_local) {
+                            self.diags.push(Diagnostic::error(
+                                "E1102",
+                                format!(
+                                    "`{name}` is pinned `#{}` and can't be sent on a channel",
+                                    crate::Syntax::ATTR_LOCAL
+                                ),
+                                format!(
+                                    "`#{}` keeps `{}` in the fast one-thread form",
+                                    crate::Syntax::ATTR_LOCAL,
+                                    got.name()
+                                ),
+                                format!(
+                                    "remove `#{}`, or send an owned copy of the value",
+                                    crate::Syntax::ATTR_LOCAL
+                                ),
+                                Some(arg.expr.span()),
+                            ));
+                            sendability_failed = true;
+                        } else {
+                            self.note_reactive_upgrade(name, &got, "channel");
+                        }
+                    }
+                    _ => self.note_reactive_upgrade("this value", &got, "channel"),
+                }
             }
         }
         if !sendability_failed {

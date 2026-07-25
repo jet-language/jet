@@ -17,9 +17,9 @@ impl<'a> Checker<'a> {
                 owner_hint: Option<usize>,
                 seen: &mut HashSet<(usize, String)>,
             ) -> bool {
-                if checker.sendability_problem(ty, true).is_some()
-                    || super::super::is_reactive_handle_ty(ty)
-                {
+                // D-DATARACE1=C: reactive handles are lock-ordered Arc and may cross
+                // parallel adapters; `#Local` pins are rejected at capture time.
+                if checker.sendability_problem(ty, true).is_some() {
                     return false;
                 }
                 match ty {
@@ -191,6 +191,31 @@ impl<'a> Checker<'a> {
                     .map(|info| (info.ty.clone(), info.sendable))
                     .or_else(|| self.consts.get(&name).cloned().map(|ty| (ty, true)));
                 let Some((ty, sendable)) = captured else { continue };
+                if let Some(info) = self.lookup(&name) {
+                    if info.reactive_local && super::super::is_reactive_handle_ty(&ty) {
+                        self.diags.push(Diagnostic::error(
+                            "E1102",
+                            format!(
+                                "`{name}` is pinned `#{}` and can't cross into a parallel worker",
+                                Syntax::ATTR_LOCAL
+                            ),
+                            format!(
+                                "`#{}` keeps `{}` in the fast one-thread form",
+                                Syntax::ATTR_LOCAL,
+                                ty.name()
+                            ),
+                            format!(
+                                "remove `#{}`, or keep the reactive graph off the parallel path",
+                                Syntax::ATTR_LOCAL
+                            ),
+                            Some(lam.span),
+                        ));
+                        continue;
+                    }
+                }
+                if super::super::is_reactive_handle_ty(&ty) {
+                    self.note_reactive_upgrade(&name, &ty, "parallel");
+                }
                 if !sendable || self.is_view(&name) || !self.para_type_is_transferable(&ty)
                 {
                     self.diags.push(Diagnostic::error(

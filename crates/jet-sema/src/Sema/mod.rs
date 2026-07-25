@@ -628,6 +628,10 @@ pub(crate) struct LocalInfo {
     /// Whether this local can cross a task/channel boundary. For ordinary
     /// values this follows the type; for lambdas it also includes captures.
     sendable: bool,
+    /// D-DATARACE1=C: `#Local` pin on a reactive binding.
+    reactive_local: bool,
+    /// D-DATARACE1=C: `#Shared` pin on a reactive binding.
+    reactive_shared: bool,
     /// Binding span for a Task value that must be consumed with `.join()`.
     task_lint_span: Option<Span>,
     /// D-LIN1 (ratified 2026-06-21): set (to the binding name's span) when this
@@ -1213,6 +1217,10 @@ pub(crate) struct Checker<'a> {
     /// D-DETACH1: task names whose spawn lambda had a non-view sendability error (E1102 fired).
     /// At `.detach()`, if the task is in this set and NOT in view_borrow_escape_tasks, E1103 fires.
     view_capture_tasks: HashSet<String>,
+    /// D-DATARACE1=C: human-readable upgrade lines for `jet report` / CompileOutput.
+    reactive_upgrades: Vec<String>,
+    /// D-DATARACE1=C: binding names that crossed a concurrency boundary this function.
+    reactive_upgrade_names: HashSet<String>,
     /// D-DETACH1: task names whose spawn lambda captured a `view` borrow specifically (E1102/ViewBorrow).
     /// At `.detach()`, if the task is in this set, E1106 fires instead of E1103.
     view_borrow_escape_tasks: HashSet<String>,

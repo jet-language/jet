@@ -829,6 +829,8 @@ pub struct TFunc {
     pub is_pure: bool,
     /// D-REACTCORE1: `#Reactive fn` — the body is emitted inside `jet_reactive_effect`.
     pub is_reactive: bool,
+    /// D-DATARACE1=C: upgrade-report lines for reactive boxes that crossed a boundary.
+    pub reactive_upgrades: Vec<String>,
     /// D-METHODMACRO1=A: `#Inline fn` — emits `#[inline]`. Soft hint; sema never
     /// rejects it.
     pub is_inline: bool,

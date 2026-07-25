@@ -34,7 +34,9 @@ policy: zero telemetry; no network transmission\n\
 target: {}\n\
 os: {}\n\
 arch: {}\n\
-{}",
+{}\n\
+reactive: D-DATARACE1=C — Signal/Derived/Computed use lock-ordered Arc storage\n\
+reactive-upgrade: every reactive box uses the synchronized form (fast-path pin surface follows)\n",
         env!("JET_BUILD_TARGET"),
         std::env::consts::OS,
         std::env::consts::ARCH,

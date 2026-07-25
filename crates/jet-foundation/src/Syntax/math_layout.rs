@@ -86,6 +86,11 @@ pub const TYPE_DERIVED: &str = "Derived";
 pub const TYPE_COMPUTED: &str = "Computed";
 /// D-SIGNAL1: the runtime value created by `#Reactive` / `reactive.effect`.
 pub const TYPE_EFFECT: &str = "Effect";
+/// D-DATARACE1=C: pin a reactive box to the fast one-thread form. Crossing a
+/// task/channel/parallel boundary is E1102.
+pub const ATTR_LOCAL: &str = "Local";
+/// D-DATARACE1=C: pin a reactive box to the lock-guarded synchronized form.
+pub const ATTR_SHARED: &str = "Shared";
 /// D-EVENT1 (ratified 2026-07-07): first-party typed Event/Hook family.
 /// Library values, compiler-known for typing/tooling; no new syntax.
 pub const EVENT_MODULE: &str = "core.event";

@@ -758,6 +758,12 @@ impl<'a> Fmt<'a> {
         if b.track {
             self.write(&format!("#{} ", Syntax::ATTR_TRACK));
         }
+        if b.reactive_local {
+            self.write(&format!("#{} ", Syntax::ATTR_LOCAL));
+        }
+        if b.reactive_shared {
+            self.write(&format!("#{} ", Syntax::ATTR_SHARED));
+        }
         // S57: comptime stays keyword-led (`comptime name = …`). D-BIND4: ordinary
         // bindings are sigil-led (`name :: …` / `name := …`), no leading keyword.
         if b.is_comptime {

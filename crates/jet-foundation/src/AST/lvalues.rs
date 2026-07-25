@@ -154,6 +154,16 @@ pub struct Binding {
     /// meaning in the later tracking slice.
     pub track: bool,
     pub track_span: Option<Span>,
+    /// D-DATARACE1=C: `#Local` pin — reactive box must not cross a task/channel/
+    /// parallel boundary (E1102).
+    pub reactive_local: bool,
+    pub reactive_local_span: Option<Span>,
+    /// D-DATARACE1=C: `#Shared` pin — reactive box is explicitly synchronized.
+    pub reactive_shared: bool,
+    pub reactive_shared_span: Option<Span>,
+    /// D-DATARACE1=C: sema proved this reactive binding crosses a concurrency
+    /// boundary (or `#Shared` pinned it). Codegen/report list the upgrade.
+    pub reactive_upgrade: bool,
     /// D-CANVASMETA1=B: `#Meta(category: "…", tunable)` for Canvas/tooling.
     pub meta: Option<MetaAttr>,
     pub name: String,

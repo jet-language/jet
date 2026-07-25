@@ -74,16 +74,12 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 A data race is two tasks that access the same memory at the same time when at
 least one access writes and the accesses do not use a synchronization rule.
 
-D-DATARACE1=C is law. Safe Jet must make a data race impossible to compile:
-every reactive box starts in the fast one-thread form; when a box crosses a
-task, task group, channel, task result, or parallel boundary, the compiler
-rebuilds that box in a lock-guarded form. `#Local` pins the fast form and turns
-a crossing into E1102. `#Shared` pins the synchronized form. `jet report` lists
-every upgraded box. Until that upgrade ships, the proved surface below is the
-honest bound.
+D-DATARACE1=C is law. Safe Jet must make a data race impossible to compile for
+the covered concurrency surface. Sema owns every user-facing check (I3); a
+native build must not lean on rustc `Send` as the backstop (I2).
 
-Sema already closes these non-reactive paths
-(`tests/concurrency_boundaries.rs` and the matching UI snapshots):
+Covered mechanisms (`tests/concurrency_boundaries.rs` and matching UI
+snapshots):
 
 - A task created by `tasks.spawn` or `g.task` owns or copies its captures.
   Sema rejects a mutable capture, a borrowed view, or another value that cannot
@@ -97,12 +93,12 @@ Sema already closes these non-reactive paths
 - `Shared<T>` is the explicit shared-mutation path. Its `read` and `edit`
   closures use a lock-scoped view. `#Transact` uses the same handles and commits
   their changes atomically.
-
-`Signal<T>`, `Derived<T>`, `Computed<T>`, and `Effect` are still single-thread
-handles backed by `Rc` and `RefCell`. Sema can still copy them into a task or
-channel today; a native build then leans on rustc `Send` and can ICE (I2/I3).
-Card #752 owns shipping D-DATARACE1=C for those handles. Until that lands, Jet
-must not claim that every safe program is data-race free.
+- `Signal<T>`, `Derived<T>`, and `Computed<T>` use lock-ordered `Arc` storage
+  with the same public API. A handle may cross a task, task group, channel, or
+  parallel adapter without a data race and without a rustc `Send` ICE.
+- `#Local` pins the fast one-thread form; a crossing is E1102.
+- `#Shared` pins the synchronized form (today every reactive box already uses
+  that form). Crossing sites are recorded for the upgrade report.
 
 Code inside an `#Unsafe("reason")` region, a foreign implementation, or a
 vetted runtime internal must also uphold its boundary contract.

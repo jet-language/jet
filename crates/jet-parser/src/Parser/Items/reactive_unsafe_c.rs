@@ -250,6 +250,7 @@ impl<'a> Parser<'a> {
                 is_pure: false,
                 is_sanitizer: false,
                 is_reactive: false,
+                reactive_upgrades: Vec::new(),
                 is_replayable: false,
                 replayable_span: None,
                 is_task: false,

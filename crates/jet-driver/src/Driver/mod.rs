@@ -2625,6 +2625,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         state_requires: None,
         state_transition: None,
         is_reactive: false,
+                reactive_upgrades: Vec::new(),
         is_replayable: false,
         replayable_span: None,
         is_task: false,

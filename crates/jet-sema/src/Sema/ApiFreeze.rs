@@ -677,6 +677,7 @@ mod tests {
             unsafe_span: None,
             is_pure: false,
             is_reactive: false,
+                reactive_upgrades: Vec::new(),
             is_replayable: false,
             replayable_span: None,
             is_task: false,

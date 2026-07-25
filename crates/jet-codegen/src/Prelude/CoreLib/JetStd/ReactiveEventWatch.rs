@@ -1,78 +1,104 @@
-    // ── D-REACT1=B: opt-in reactive runtime (signals / derived / effects) ──────
+    // ── D-REACT1=B + D-DATARACE1=C: opt-in reactive runtime ───────────────────
     // Reactivity is a LIBRARY, not core semantics (option B): ordinary bindings are
-    // unchanged; these types are the explicit, opt-in surface. Pure std — no external
-    // crate (I6) and no raw-memory tier (interior mutability via Rc/RefCell). Dependency
-    // tracking is explicit-by-read: a `.get()` evaluated while an observer (a derived
-    // recompute or an effect run) is on the thread-local stack subscribes that
-    // observer to the signal. A `.set(v)` re-runs every subscribed observer.
+    // unchanged; these types are the explicit, opt-in surface. Pure std (I6).
+    //
+    // D-DATARACE1=C: reactive boxes use lock-ordered Arc storage so a task/channel
+    // crossing cannot data-race and cannot lean on rustc Send (I2/I3).
+    // Every Signal/Derived/Computed uses the synchronized form; `#Local` rejects
+    // crossings (E1102) and `#Shared`/boundary crossings emit upgrade-report lines.
     use std::cell::RefCell;
-    use std::rc::{Rc, Weak};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex, RwLock, Weak};
 
-    type Observer = Rc<ReactiveObserver>;
+    type Observer = Arc<ReactiveObserver>;
     type WeakObserver = Weak<ReactiveObserver>;
-    type DependencyCleanup = Box<dyn Fn()>;
+    type DependencyCleanup = Box<dyn Fn() + Send + Sync>;
+    type ObserverBody = Arc<dyn Fn() + Send + Sync>;
 
     struct ReactiveObserver {
         id: u64,
-        active: std::cell::Cell<bool>,
-        running: std::cell::Cell<bool>,
-        body: RefCell<Option<Rc<dyn Fn()>>>,
-        dependencies: RefCell<Vec<DependencyCleanup>>,
+        active: AtomicBool,
+        running: AtomicBool,
+        body: Mutex<Option<ObserverBody>>,
+        dependencies: Mutex<Vec<DependencyCleanup>>,
     }
 
+    static JET_REACTIVE_NEXT_OBSERVER: AtomicU64 = AtomicU64::new(1);
+
     impl ReactiveObserver {
-        fn new(body: Rc<dyn Fn()>) -> Observer {
-            let id = JET_REACTIVE_NEXT_OBSERVER.with(|next| {
-                let id = next.get();
-                next.set(id.saturating_add(1));
-                id
-            });
-            Rc::new(ReactiveObserver {
+        fn new(body: ObserverBody) -> Observer {
+            let id = JET_REACTIVE_NEXT_OBSERVER.fetch_add(1, Ordering::Relaxed);
+            Arc::new(ReactiveObserver {
                 id,
-                active: std::cell::Cell::new(true),
-                running: std::cell::Cell::new(false),
-                body: RefCell::new(Some(body)),
-                dependencies: RefCell::new(Vec::new()),
+                active: AtomicBool::new(true),
+                running: AtomicBool::new(false),
+                body: Mutex::new(Some(body)),
+                dependencies: Mutex::new(Vec::new()),
             })
         }
 
         fn clear_dependencies(&self) {
-            let cleanups = self.dependencies.replace(Vec::new());
+            let cleanups = {
+                let mut deps = self.dependencies.lock().unwrap_or_else(|e| e.into_inner());
+                std::mem::take(&mut *deps)
+            };
             for cleanup in cleanups {
                 cleanup();
             }
         }
 
         fn run(self: &Observer) {
-            if !self.active.get() || self.running.replace(true) {
+            if !self.active.load(Ordering::Acquire)
+                || self
+                    .running
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_err()
+            {
                 return;
             }
             self.clear_dependencies();
             JET_REACTIVE_OBSERVERS.with(|stack| stack.borrow_mut().push(self.clone()));
-            if let Some(body) = self.body.borrow().clone() {
+            let body = self
+                .body
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            if let Some(body) = body {
                 body();
             }
             JET_REACTIVE_OBSERVERS.with(|stack| {
                 stack.borrow_mut().pop();
             });
-            self.running.set(false);
+            self.running.store(false, Ordering::Release);
         }
 
         fn track(&self, cleanup: DependencyCleanup) {
-            self.dependencies.borrow_mut().push(cleanup);
+            self.dependencies
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(cleanup);
         }
 
         fn dispose(&self) {
-            if self.active.replace(false) {
+            if self
+                .active
+                .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
                 self.clear_dependencies();
-                self.body.borrow_mut().take();
+                *self.body.lock().unwrap_or_else(|e| e.into_inner()) = None;
             }
         }
     }
 
     impl Drop for ReactiveObserver {
         fn drop(&mut self) {
-            let cleanups = self.dependencies.get_mut().drain(..).collect::<Vec<_>>();
+            let cleanups = self
+                .dependencies
+                .get_mut()
+                .unwrap_or_else(|e| e.into_inner())
+                .drain(..)
+                .collect::<Vec<_>>();
             for cleanup in cleanups {
                 cleanup();
             }
@@ -82,7 +108,7 @@
     #[derive(Clone)]
     pub struct JetReactiveEffect {
         observer: Observer,
-        owners: Rc<()>,
+        owners: Arc<()>,
     }
 
     impl JetReactiveEffect {
@@ -91,22 +117,21 @@
         }
 
         pub fn active(&self) -> bool {
-            self.observer.active.get()
+            self.observer.active.load(Ordering::Acquire)
         }
     }
 
     impl Drop for JetReactiveEffect {
         fn drop(&mut self) {
-            if Rc::strong_count(&self.owners) == 1 {
+            if Arc::strong_count(&self.owners) == 1 {
                 self.unsubscribe();
             }
         }
     }
 
     thread_local! {
-        // The stack of observers currently (re)computing. The top is the active one.
+        // Per-thread observer stack (which observer is recomputing on THIS thread).
         static JET_REACTIVE_OBSERVERS: RefCell<Vec<Observer>> = const { RefCell::new(Vec::new()) };
-        static JET_REACTIVE_NEXT_OBSERVER: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
         // Marker/UI fire-and-retain scopes have a runtime owner. Public
         // `reactive.effect` returns its own Effect handle instead.
         static JET_REACTIVE_ROOT_EFFECTS: RefCell<Vec<JetReactiveEffect>> = const { RefCell::new(Vec::new()) };
@@ -124,7 +149,7 @@
     }
 
     pub struct JetSignal<T> {
-        cell: Rc<RefCell<SignalCell<T>>>,
+        cell: Arc<RwLock<SignalCell<T>>>,
     }
 
     impl<T> Clone for JetSignal<T> {
@@ -135,10 +160,10 @@
         }
     }
 
-    impl<T: Clone + 'static> JetSignal<T> {
+    impl<T: Clone + Send + Sync + 'static> JetSignal<T> {
         pub fn new(initial: T) -> JetSignal<T> {
             JetSignal {
-                cell: Rc::new(RefCell::new(SignalCell {
+                cell: Arc::new(RwLock::new(SignalCell {
                     value: initial,
                     subs: Vec::new(),
                 })),
@@ -147,30 +172,37 @@
         pub fn get(&self) -> T {
             if let Some(obs) = jet_reactive_active_observer() {
                 let added = {
-                    let mut c = self.cell.borrow_mut();
+                    let mut c = self.cell.write().unwrap_or_else(|e| e.into_inner());
                     c.subs.retain(|(_, weak)| weak.strong_count() > 0);
                     if c.subs.iter().any(|(id, _)| *id == obs.id) {
                         false
                     } else {
-                        c.subs.push((obs.id, Rc::downgrade(&obs)));
+                        c.subs.push((obs.id, Arc::downgrade(&obs)));
                         true
                     }
                 };
                 if added {
-                    let weak_cell = Rc::downgrade(&self.cell);
+                    let weak_cell = Arc::downgrade(&self.cell);
                     let id = obs.id;
                     obs.track(Box::new(move || {
                         if let Some(cell) = weak_cell.upgrade() {
-                            cell.borrow_mut().subs.retain(|(sub_id, _)| *sub_id != id);
+                            cell.write()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .subs
+                                .retain(|(sub_id, _)| *sub_id != id);
                         }
                     }));
                 }
             }
-            self.cell.borrow().value.clone()
+            self.cell
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .value
+                .clone()
         }
         pub fn set(&self, value: T) {
             let subs = {
-                let mut c = self.cell.borrow_mut();
+                let mut c = self.cell.write().unwrap_or_else(|e| e.into_inner());
                 c.value = value;
                 c.subs.retain(|(_, weak)| weak.strong_count() > 0);
                 c.subs
@@ -189,7 +221,7 @@
     // recomputes. The `_observer` it registers with its source signals recomputes the
     // value and then notifies the derived's own subscribers.
     pub struct JetDerived<T> {
-        cell: Rc<RefCell<SignalCell<T>>>,
+        cell: Arc<RwLock<SignalCell<T>>>,
         _observer: Observer,
     }
 
@@ -202,20 +234,20 @@
         }
     }
 
-    impl<T: Clone + 'static> JetDerived<T> {
-        pub fn new<F: Fn() -> T + 'static>(compute: F) -> JetDerived<T> {
-            let compute = Rc::new(compute);
-            let cell: Rc<RefCell<SignalCell<T>>> = Rc::new(RefCell::new(SignalCell {
+    impl<T: Clone + Send + Sync + 'static> JetDerived<T> {
+        pub fn new<F: Fn() -> T + Send + Sync + 'static>(compute: F) -> JetDerived<T> {
+            let compute = Arc::new(compute);
+            let cell: Arc<RwLock<SignalCell<T>>> = Arc::new(RwLock::new(SignalCell {
                 value: (compute)(),
                 subs: Vec::new(),
             }));
             // The observer recomputes the value, then notifies the derived's own subs.
             let cell_for_obs = cell.clone();
             let compute_for_obs = compute.clone();
-            let observer = ReactiveObserver::new(Rc::new(move || {
+            let observer = ReactiveObserver::new(Arc::new(move || {
                 let v = (compute_for_obs)();
                 let subs = {
-                    let mut c = cell_for_obs.borrow_mut();
+                    let mut c = cell_for_obs.write().unwrap_or_else(|e| e.into_inner());
                     c.value = v;
                     c.subs.retain(|(_, weak)| weak.strong_count() > 0);
                     c.subs
@@ -238,51 +270,62 @@
             // Reading a derived inside an observer subscribes that observer to it.
             if let Some(obs) = jet_reactive_active_observer() {
                 let added = {
-                    let mut c = self.cell.borrow_mut();
+                    let mut c = self.cell.write().unwrap_or_else(|e| e.into_inner());
                     c.subs.retain(|(_, weak)| weak.strong_count() > 0);
                     if c.subs.iter().any(|(id, _)| *id == obs.id) {
                         false
                     } else {
-                        c.subs.push((obs.id, Rc::downgrade(&obs)));
+                        c.subs.push((obs.id, Arc::downgrade(&obs)));
                         true
                     }
                 };
                 if added {
-                    let weak_cell = Rc::downgrade(&self.cell);
+                    let weak_cell = Arc::downgrade(&self.cell);
                     let id = obs.id;
                     obs.track(Box::new(move || {
                         if let Some(cell) = weak_cell.upgrade() {
-                            cell.borrow_mut().subs.retain(|(sub_id, _)| *sub_id != id);
+                            cell.write()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .subs
+                                .retain(|(sub_id, _)| *sub_id != id);
                         }
                     }));
                 }
             }
-            self.cell.borrow().value.clone()
+            self.cell
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .value
+                .clone()
         }
     }
 
     /// `reactive.effect(body)` — run `body` now, then re-run when a signal it read
     /// changes. The returned owner detaches on `unsubscribe()` or final-handle drop.
-    pub fn jet_reactive_effect<F: Fn() + 'static>(body: F) -> JetReactiveEffect {
-        let observer = ReactiveObserver::new(Rc::new(body));
+    pub fn jet_reactive_effect<F: Fn() + Send + Sync + 'static>(body: F) -> JetReactiveEffect {
+        let observer = ReactiveObserver::new(Arc::new(body));
         observer.run();
-        JetReactiveEffect { observer, owners: Rc::new(()) }
+        JetReactiveEffect {
+            observer,
+            owners: Arc::new(()),
+        }
     }
 
-    pub fn jet_reactive_effect_rooted<F: Fn() + 'static>(body: F) {
+    pub fn jet_reactive_effect_rooted<F: Fn() + Send + Sync + 'static>(body: F) {
         let effect = jet_reactive_effect(body);
         JET_REACTIVE_ROOT_EFFECTS.with(|effects| effects.borrow_mut().push(effect));
     }
 
     /// D-REACTCORE1: `#Reactive` scope marker with runtime-owned lifetime.
-    pub fn jet_reactive_scope<F: Fn() + 'static>(body: F) {
+    pub fn jet_reactive_scope<F: Fn() + Send + Sync + 'static>(body: F) {
         jet_reactive_effect_rooted(body);
     }
 
     // D-EVENT1: first-party typed Event/Hook family. Values are ordinary Core
     // handles; the compiler knows their generic payload/result types.
     use std::cell::Cell;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::rc::Rc;
+    // AtomicU64/Ordering already imported above for the reactive runtime.
 
     static JET_EVENT_NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
