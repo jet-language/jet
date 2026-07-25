@@ -424,17 +424,6 @@ forms and foreign optional spellings receive ordinary current name/parse
 errors; E0020's teaching path is retired. **D-RESULT-OPTION-CANON1**: `T?`
 always means Optional; fallible is spaced `T ? E` / `T ?` (S34).
 
-**D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified
-2026-07-24, card #746)*: for a direct immutable local or parameter of type
-`T?`, `x != None` narrows `x` to `T` in the true branch, and `x == None`
-narrows `x` to `T` in the false branch. The fact reaches the right side of
-short-circuit `&&`, but not `||`, and ends at the branch boundary. Mutable
-locals, field paths, indexes, aliases, and calls never narrow. `x == Val(v)`
-keeps its existing S31 binding behavior. Sema records each proven unwrap in
-typed IR as an S31 Present / `IfLet` fact; codegen performs no proof or
-speculative check. Teach the `None` check for a direct stable name and the
-binding pattern for every other case.
-
 **S33 — Generic type arguments**: `Type<Args>` angle brackets; `[]` is
 reserved for collections/indexing/shorthands. No call-site type args in
 general positions (exception: `decode<T>` turbofish blessed as general
@@ -4913,12 +4902,6 @@ proof-free. Implemented on card #746.
 body of a typed literal — `name := Type.{ uninit }`. Amends D-UNINIT-SENTINEL1
 (retires `name: Type := uninit`). Flow proof E0420/E0423/E0424 and
 `use core.mem` unchanged. Implemented on card #782.
-
-**2026-07-25 — D-FLOWTYPE1=A**: after a stable immutable `T?` name is checked
-with `x != None` (true) or `x == None` (false/else), that name refines to `T`
-in the proven branch. Facts reach `&&` RHS only; mutable storage, fields,
-indexes, aliases, and calls stay `T?` (use `x == Val(v)`). Sema records the
-unwrap for TIR; no new spelling. Implemented on card #746.
 
 **2026-07-19 — D-SHAPE-OUTPUT-CALLABLE1=A,
 D-ECO-OUTPUT-CALLCONTRACT1=A**: typed runnable Outputs now parse and format as
