@@ -609,6 +609,48 @@ impl<'a> Fmt<'a> {
                 }
                 self.write("}");
             }
+            Expr::TypedLit { head, body, .. } => {
+                // D-DOTCTOR3: print the head (when present) and the body shape.
+                if let Some(head) = head {
+                    self.fmt_type(head);
+                }
+                self.write(".{");
+                match body {
+                    crate::AST::TypedLitBody::Empty => {}
+                    crate::AST::TypedLitBody::Fields(fields) => {
+                        for (i, (name, _, expr)) in fields.iter().enumerate() {
+                            if i > 0 {
+                                self.write(", ");
+                            }
+                            self.write(name);
+                            self.write(": ");
+                            self.fmt_expr(expr, Prec::OrFallback);
+                        }
+                    }
+                    crate::AST::TypedLitBody::Elements(elems) => {
+                        for (i, expr) in elems.iter().enumerate() {
+                            if i > 0 {
+                                self.write(", ");
+                            }
+                            self.fmt_expr(expr, Prec::OrFallback);
+                        }
+                    }
+                    crate::AST::TypedLitBody::Entries(entries) => {
+                        for (i, (key, val)) in entries.iter().enumerate() {
+                            if i > 0 {
+                                self.write(", ");
+                            }
+                            self.fmt_expr(key, Prec::OrFallback);
+                            self.write(": ");
+                            self.fmt_expr(val, Prec::OrFallback);
+                        }
+                    }
+                    crate::AST::TypedLitBody::Value(expr) => {
+                        self.fmt_expr(expr, Prec::OrFallback);
+                    }
+                }
+                self.write("}");
+            }
             Expr::EnumLit {
                 type_name,
                 variant,

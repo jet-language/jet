@@ -377,6 +377,15 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
         Expr::StructLit { fields, .. } => fields
             .iter()
             .any(|(_, _, v)| expr_references_ident(v, name)),
+        Expr::TypedLit { body, .. } => {
+            let mut hit = false;
+            body.for_each_expr(|v| {
+                if expr_references_ident(v, name) {
+                    hit = true;
+                }
+            });
+            hit
+        }
         Expr::TupleLit(fields, _, _) => fields.iter().any(|(_, v)| expr_references_ident(v, name)),
         Expr::EnumLit { args, .. } => args.iter().any(|a| {
             let e = match a {

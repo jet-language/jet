@@ -171,6 +171,69 @@ pub enum PlaceAccess {
     Write,
 }
 
+/// D-DOTCTOR3=A: body of a universal `Type.{ … }` / inferred `.{ … }` literal.
+#[derive(Debug, Clone)]
+pub enum TypedLitBody {
+    /// Record fields: `Point.{ x: 1, y: 2 }` / punning `.{ x, y }`.
+    Fields(Vec<(String, Span, Expr)>),
+    /// List / fixed-array elements: `[U8].{ 1, 2 }` / `.{ 1, 2 }`.
+    Elements(Vec<Expr>),
+    /// Map entries: `[String: Int].{ "a": 1 }`.
+    Entries(Vec<(Expr, Expr)>),
+    /// One expression: scalar `U8.{ 250 }` or assertion `Int.{ fetch_rows() }`.
+    Value(Box<Expr>),
+    /// Explicit empty: `[T].{}` / `[K: V].{}` / `.{}`.
+    Empty,
+}
+
+impl TypedLitBody {
+    pub fn for_each_expr<'a>(&'a self, mut f: impl FnMut(&'a Expr)) {
+        match self {
+            TypedLitBody::Fields(fields) => {
+                for (_, _, e) in fields {
+                    f(e);
+                }
+            }
+            TypedLitBody::Elements(elems) => {
+                for e in elems {
+                    f(e);
+                }
+            }
+            TypedLitBody::Entries(entries) => {
+                for (k, v) in entries {
+                    f(k);
+                    f(v);
+                }
+            }
+            TypedLitBody::Value(e) => f(e),
+            TypedLitBody::Empty => {}
+        }
+    }
+
+    pub fn for_each_expr_mut(&mut self, mut f: impl FnMut(&mut Expr)) {
+        match self {
+            TypedLitBody::Fields(fields) => {
+                for (_, _, e) in fields {
+                    f(e);
+                }
+            }
+            TypedLitBody::Elements(elems) => {
+                for e in elems {
+                    f(e);
+                }
+            }
+            TypedLitBody::Entries(entries) => {
+                for (k, v) in entries {
+                    f(k);
+                    f(v);
+                }
+            }
+            TypedLitBody::Value(e) => f(e),
+            TypedLitBody::Empty => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Expr {
     /// String literal, possibly with interpolation parts.
@@ -328,6 +391,16 @@ pub enum Expr {
         inferred: bool,
         span: Span,
     },
+    /// D-DOTCTOR3=A: universal typed-literal head `Type.{ body }` (and inferred
+    /// `.{ body }` when the body is not a record field list). Sema elaborates
+    /// the body against `head` like an expected-type position and rewrites this
+    /// node to the ordinary ListLit / MapLit / StructLit / value shape.
+    TypedLit {
+        /// `None` for inferred `.{ body }`; `Some` for an explicit head.
+        head: Option<Type>,
+        body: TypedLitBody,
+        span: Span,
+    },
     /// S30: `Type.Variant(args)`.
     EnumLit {
         type_name: String,
@@ -476,6 +549,7 @@ impl Expr {
             | Expr::Field(_, _, s)
             | Expr::OptField { span: s, .. }
             | Expr::StructLit { span: s, .. }
+            | Expr::TypedLit { span: s, .. }
             | Expr::EnumLit { span: s, .. }
             | Expr::Tainted(_, _, s)
             | Expr::Present(_, s)

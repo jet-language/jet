@@ -1014,6 +1014,9 @@ impl<'a> Checker<'a> {
                         path.pop();
                     }
                 }
+                Expr::TypedLit { body, .. } => {
+                    body.for_each_expr(|value| walk(checker, value, path));
+                }
                 Expr::TupleLit(fields, ..) => {
                     for (field, value) in fields {
                         path.push(field.clone());

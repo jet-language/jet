@@ -16,8 +16,8 @@ use crate::AST::{
     GenericModuleDef, GenericModuleParam, IfStmt, ImplDef, Item, LValue, Lambda, LambdaBody,
     LambdaMeta, LambdaParam, Marker, MetaAttr, MetaField, ModuleAliasDef, ModuleArg, ModuleDecl,
     Namespace, OrFallback, Param, Pattern, Program, Stmt, StrMatchPart, StrPart, StructDef,
-    SwitchArm, TagDef, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam, UnOp,
-    Variant, VariantField, VariantPayload,
+    SwitchArm, TagDef, TraitDef, TraitImplBlock, TraitMethodSig, TryConvert, Type, TypeParam,
+    TypedLitBody, UnOp, Variant, VariantField, VariantPayload,
 };
 
 mod Expressions;

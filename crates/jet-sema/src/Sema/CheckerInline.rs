@@ -363,6 +363,9 @@ impl<'a> InlineAlwaysScan<'a> {
                     self.scan_expr(e);
                 }
             }
+            Expr::TypedLit { body, .. } => {
+                body.for_each_expr(|e| self.scan_expr(e));
+            }
             Expr::EnumLit { args, .. } => {
                 for a in args {
                     match a {

@@ -2026,6 +2026,11 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                 for (_, _, expr) in fields { collect_expr(expr, mp, ctx); }
             });
         }
+        AST::Expr::TypedLit { body, .. } => {
+            structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| {
+                body.for_each_expr(|expr| collect_expr(expr, mp, ctx));
+            });
+        }
         AST::Expr::EnumLit { args, .. } => {
             structural_slot(ctx, "args", StructuralSlotKind::List, |ctx| {
                 for arg in args {

@@ -1,0 +1,34 @@
+// D-DOTCTOR3=A: universal typed-literal head Type.{ body }.
+// Body elaborates against the head; it never converts.
+// Run with `jet build` + binary (JIT U8 interp / place-borrow gaps are #777).
+
+fn fetch_rows() -> Int {
+    return 7
+}
+
+fn run() {
+    // Scalar head + literal body (range-checked for fixed widths).
+    limit :: U8.{ 250 }
+    print("{limit}")
+
+    // List head + element body.
+    packet :: [U8].{ 42, 0, 0 }
+    print("{packet[0]} {packet[1]} {packet[2]}")
+
+    // Fixed-array head.
+    rgb :: [U8#3].{ 255, 128, 0 }
+    print("{rgb[0]} {rgb[1]} {rgb[2]}")
+
+    // Explicit empty map (amends D-EMPTYLIT1).
+    scores := [String: Int].{}
+    scores["a"] = 1
+    print("{scores["a"]}")
+
+    // One-expression assertion — body must already be Int.
+    count :: Int.{ fetch_rows() }
+    print("{count}")
+
+    // Nested list: inner bodies may be bare .{ … } or plain [ … ].
+    grid :: [[U8]].{ .{ 1, 0 }, [0, 1] }
+    print("{grid[0][0]} {grid[0][1]} {grid[1][0]} {grid[1][1]}")
+}

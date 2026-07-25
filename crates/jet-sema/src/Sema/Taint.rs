@@ -141,6 +141,15 @@ impl<'a> TaintCtx<'a> {
             Expr::StructLit { fields, .. } => {
                 fields.iter().any(|(_, _, f)| self.is_credential_tainted(f))
             }
+            Expr::TypedLit { body, .. } => {
+                let mut hit = false;
+                body.for_each_expr(|f| {
+                    if self.is_credential_tainted(f) {
+                        hit = true;
+                    }
+                });
+                hit
+            }
             Expr::MethodCall { receiver, args, recv_type, method, .. } => {
                 if let Some(ty) = recv_type {
                     if self.sanitizers.contains(&format!("{ty}::{method}")) {
@@ -213,6 +222,15 @@ impl<'a> TaintCtx<'a> {
                 .any(|(k, v)| self.is_tainted(k) || self.is_tainted(v)),
             Expr::TupleLit(fields, _, _) => fields.iter().any(|(_, e)| self.is_tainted(e)),
             Expr::StructLit { fields, .. } => fields.iter().any(|(_, _, f)| self.is_tainted(f)),
+            Expr::TypedLit { body, .. } => {
+                let mut hit = false;
+                body.for_each_expr(|f| {
+                    if self.is_tainted(f) {
+                        hit = true;
+                    }
+                });
+                hit
+            },
             Expr::EnumLit { args, .. } => args.iter().any(|a| match a {
                 EnumLitArg::Positional(e) => self.is_tainted(e),
                 EnumLitArg::Named { expr, .. } => self.is_tainted(expr),
@@ -371,6 +389,9 @@ impl<'a> TaintCtx<'a> {
             Expr::TupleLit(fields, _, _) => fields.iter().for_each(|(_, e)| self.check_expr(e)),
             Expr::StructLit { fields, .. } => {
                 fields.iter().for_each(|(_, _, f)| self.check_expr(f))
+            }
+            Expr::TypedLit { body, .. } => {
+                body.for_each_expr(|f| self.check_expr(f))
             }
             Expr::EnumLit { args, .. } => args.iter().for_each(|a| match a {
                 EnumLitArg::Positional(e) => self.check_expr(e),

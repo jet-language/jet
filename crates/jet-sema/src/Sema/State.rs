@@ -566,6 +566,9 @@ impl<'a> StateCtx<'a> {
             Expr::StructLit { fields, .. } => {
                 fields.iter().for_each(|(_, _, f)| self.check_expr(f))
             }
+            Expr::TypedLit { body, .. } => {
+                body.for_each_expr(|f| self.check_expr(f))
+            }
             Expr::EnumLit { args, .. } => args.iter().for_each(|a| match a {
                 crate::AST::EnumLitArg::Positional(e) => self.check_expr(e),
                 crate::AST::EnumLitArg::Named { expr, .. } => self.check_expr(expr),

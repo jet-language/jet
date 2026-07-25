@@ -349,6 +349,7 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
             for arg in args { expr_names(&arg.expr, out); }
         }
         Expr::StructLit { fields, .. } => for (_, _, value) in fields { expr_names(value, out); },
+        Expr::TypedLit { body, .. } => body.for_each_expr(|value| expr_names(value, out)),
         Expr::EnumLit { args, .. } => for arg in args {
             match arg {
                 EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } =>

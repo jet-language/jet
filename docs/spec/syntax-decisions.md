@@ -428,12 +428,24 @@ refinement of `[T]`, lowered to a **real stack array**. `::` + literal/fan-out
 ⇒ `[T#N]`; widens one-way to `[T]` (by copy); `.map` preserves N; `.len` is a
 compile-time constant; length-changing ops rejected (E0963–E0965).
 
-**S29 / D-DOTCTOR1 / D-DOTCTOR2 — Construction**: the only struct-literal
-spellings are **`Type.{ field: expr, … }`** (named) and **`.{ … }`**
-(type inferred from expected type — the D-DOTCTOR2 expected-type elaboration, now
-dot-spelled). Dotless `Type { … }` is E0320. Every field exactly once, any
-order; flush style `Point.{x: 3.0, y: 4.0}` (S29-FLUSH). `.{}` constructs an
-empty/unit value.
+**S29 / D-DOTCTOR1 / D-DOTCTOR2 / D-DOTCTOR3 — Construction**: the only
+struct-literal spellings are **`Type.{ field: expr, … }`** (named) and
+**`.{ … }`** (type inferred from expected type — the D-DOTCTOR2 expected-type
+elaboration, now dot-spelled). Dotless `Type { … }` is E0320. Every field
+exactly once, any order; flush style `Point.{x: 3.0, y: 4.0}` (S29-FLUSH).
+`.{}` constructs an empty/unit value.
+**D-DOTCTOR3=A** *(ratified 2026-07-24)*: the same `Type.{ body }` head is
+universal for every type. The body uses that type's own literal notation —
+elements for lists, entries for maps, one value for scalars — and elaborates
+against the head exactly like an expected-type position. It never converts; a
+mismatched body is the ordinary type error (teach `from_*` when a conversion
+was intended). Scalar literal bodies keep comptime range checks in the E0135 /
+E1003 family (D-RANGETYPE1 / D-SG9). Nested list bodies may be bare `.{ … }` or
+plain `[ … ]`; both elaborate against the element type. Examples:
+`U8.{ 250 }`, `[U8].{ 42, 0, 0 }`, `[U8#3].{ 255, 128, 0 }`,
+`[String: Int].{}`, `Int.{ fetch_rows() }`, `[[U8]].{ .{ 1, 0 }, [0, 1] }`.
+Amends D-EMPTYLIT1: `[T].{}` / `[K: V].{}` is the explicit empty collection;
+bare `[]` stays contextual.
 
 **S30 — Enums**:
 
@@ -676,6 +688,9 @@ list and map — type-directed from the expected-type context (a `[K: V]`
 binding/field/return/arg makes empty `[]` a map, same as `[T]` makes it a
 list). `[:]` is retired; `[` immediately followed by `:` is an ordinary
 parse error (E0003), no special-cased teaching text.
+**D-DOTCTOR3=A** *(ratified 2026-07-24)* amends this: `[T].{}` and
+`[K: V].{}` are the explicit empty forms that name the collection type on the
+value; bare `[]` keeps working wherever context already supplies the type.
 
 **S65 — List type shorthand**: `[T]` is the canonical list-type spelling.
 
@@ -4835,6 +4850,11 @@ D-LOOP-CONTINUE2=A, D-LOOP-CONTROLWORD1=B**: loop-only `in`, loop-only `step`,
 and source `continue` retired. Semicolon clauses now name every multi-part loop
 header; controller-specific advancement is the third clause; `next` enters that
 edge before retesting. Implemented end to end on card #681.
+
+**2026-07-24 — D-DOTCTOR3=A**: universal typed-literal head `Type.{ body }` for
+every type. Body elaborates against the head with no silent conversion;
+`[T].{}` is the explicit empty; bare `[]` stays contextual. Amends S29 /
+D-DOTCTOR1 / D-DOTCTOR2 and D-EMPTYLIT1. Implemented on card #780.
 
 **2026-07-19 — D-SHAPE-OUTPUT-CALLABLE1=A,
 D-ECO-OUTPUT-CALLCONTRACT1=A**: typed runnable Outputs now parse and format as

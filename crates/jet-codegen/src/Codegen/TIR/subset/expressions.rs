@@ -376,6 +376,16 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             }
             fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals))
         }
+        // D-DOTCTOR3: should be elaborated away in sema; if present, walk body.
+        Expr::TypedLit { body, .. } => {
+            let mut ok = true;
+            body.for_each_expr(|e| {
+                if ok {
+                    ok = expr_in_subset(e, cx, locals);
+                }
+            });
+            ok
+        }
         // c109 Phase 3: a struct field *read*. A non-Copy owning read was already
         // rewritten to a `.clone()` MethodCall by sema (which the subset excludes,
         // via the `MethodCall` arm below being absent — `_ => false`); what reaches

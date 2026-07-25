@@ -184,6 +184,9 @@ pub(crate) fn walk_expr_for_const_refs(
                 walk_expr_for_const_refs(e, const_names, taken);
             }
         }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr(|e| walk_expr_for_const_refs(e, const_names, taken));
+        }
         Expr::EnumLit { args, .. } => {
             for a in args {
                 match a {
@@ -353,6 +356,15 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
             .iter()
             .any(|(k, v)| expr_refs_name(k, name) || expr_refs_name(v, name)),
         Expr::StructLit { fields, .. } => fields.iter().any(|(_, _, f)| expr_refs_name(f, name)),
+        Expr::TypedLit { body, .. } => {
+            let mut hit = false;
+            body.for_each_expr(|f| {
+                if expr_refs_name(f, name) {
+                    hit = true;
+                }
+            });
+            hit
+        },
         Expr::EnumLit { args, .. } => args.iter().any(|a| match a {
             EnumLitArg::Positional(e) => expr_refs_name(e, name),
             EnumLitArg::Named { expr, .. } => expr_refs_name(expr, name),
@@ -674,6 +686,9 @@ pub(crate) fn expr_collect_captures(
             for (_, _, f) in fields {
                 expr_collect_captures(f, bound, read, mut_cap);
             }
+        }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr(|f| expr_collect_captures(f, bound, read, mut_cap));
         }
         Expr::EnumLit { args, .. } => {
             for a in args {

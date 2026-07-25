@@ -890,6 +890,9 @@ pub(crate) fn collect_core_expr(
                 collect_core_expr(e, imports, used, spans, ffi_cb);
             }
         }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr(|e| collect_core_expr(e, imports, used, spans, ffi_cb));
+        }
         Expr::EnumLit { args, .. } => {
             for arg in args {
                 match arg {

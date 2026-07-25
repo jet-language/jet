@@ -270,6 +270,9 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
                 rewrite_field_refs(e, names, receiver);
             }
         }
+        Expr::TypedLit { body, .. } => {
+            body.for_each_expr_mut(|e| rewrite_field_refs(e, names, receiver));
+        }
         Expr::EnumLit { args, .. } => {
             for a in args {
                 match a {

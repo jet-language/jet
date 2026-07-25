@@ -162,6 +162,12 @@ pub(super) fn substitute_expr(
                 .iter_mut()
                 .for_each(|(_, _, value)| substitute_expr(value, types, values));
         }
+        Expr::TypedLit { head, body, .. } => {
+            if let Some(h) = head {
+                *h = crate::Generics::substitute_type(h, types);
+            }
+            body.for_each_expr_mut(|e| substitute_expr(e, types, values));
+        }
         Expr::EnumLit {
             type_name, args, ..
         } => {
