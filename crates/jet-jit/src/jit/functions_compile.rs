@@ -10,6 +10,32 @@ use super::lower_ctx::LowerCtx;
 use super::runtime_host::HostFns;
 use super::types_meta::{clif_ty, func_has_receiver, func_signature, jit_fn_name, JitMeta};
 use super::JitRuntime;
+use crate::Collections;
+
+fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
+    Collections::clear_packed_enum_show();
+    for enum_name in meta.enum_names() {
+        if !meta.enum_packed_showable(enum_name) {
+            continue;
+        }
+        let Some(variants) = meta.enum_variant_names(enum_name) else {
+            continue;
+        };
+        let mut rows = Vec::new();
+        for variant in variants {
+            let vname = variant.strip_prefix("user_").unwrap_or(variant.as_str());
+            let payloads = meta.enum_variant_payload_types(enum_name, vname).unwrap_or(&[]);
+            let (kind, nested) = match payloads {
+                [] => (0u8, String::new()),
+                [Type::Int] => (1u8, String::new()),
+                [Type::Named(inner)] => (2u8, inner.clone()),
+                _ => continue,
+            };
+            rows.push((variant.clone(), kind, nested));
+        }
+        Collections::register_packed_enum_show(enum_name, rows);
+    }
+}
 
 fn spawn_lambda_signature(module: &JITModule, lam: &TJitSpawnLambda) -> Signature {
     let cc = module.target_config().default_call_conv;
@@ -278,6 +304,7 @@ pub(crate) fn compile_program_tiered(
     }
     runtime.source_file = program.source_file.clone();
     let meta = JitMeta::from_program(program);
+    register_packed_enum_show_table(&meta);
 
     let spawn_lambdas = &program.spawn_lambdas;
     let mut spawn_func_ids: Vec<FuncId> = Vec::new();

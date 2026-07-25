@@ -430,6 +430,74 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
     });
 }
 
+/// Packed-enum JetShow table: variant mangled names + payload kind codes.
+/// kind: 0 = unit, 1 = Int (>>8), 2 = nested packed enum (>>8, same table via name id).
+#[derive(Clone)]
+struct PackedEnumShow {
+    variants: Vec<(String, u8, String)>, // (user_Variant, kind, nested_enum_name)
+}
+
+thread_local! {
+    static PACKED_ENUM_SHOW: std::cell::RefCell<std::collections::HashMap<String, PackedEnumShow>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+pub(crate) fn clear_packed_enum_show() {
+    PACKED_ENUM_SHOW.with(|t| t.borrow_mut().clear());
+}
+
+pub(crate) fn register_packed_enum_show(
+    enum_name: &str,
+    variants: Vec<(String, u8, String)>,
+) {
+    PACKED_ENUM_SHOW.with(|t| {
+        t.borrow_mut().insert(
+            enum_name.to_string(),
+            PackedEnumShow { variants },
+        );
+    });
+}
+
+fn show_packed_enum(packed: i64, enum_name: &str) -> String {
+    PACKED_ENUM_SHOW.with(|t| {
+        let table = t.borrow();
+        let Some(def) = table.get(enum_name) else {
+            return format!("<enum {enum_name}>");
+        };
+        let disc = (packed & 0xff) as usize;
+        let Some((vname, kind, nested)) = def.variants.get(disc) else {
+            return format!("<bad disc {disc}>");
+        };
+        match kind {
+            0 => vname.clone(),
+            1 => format!("{vname}({})", packed >> 8),
+            2 => {
+                let inner = show_packed_enum(packed >> 8, nested);
+                format!("{vname}({inner})")
+            }
+            _ => format!("<{vname}?>"),
+        }
+    })
+}
+
+/// Print a packed i64 enum. `name_ptr`/`name_len` are a UTF-8 view of the Jet
+/// enum name (stable for the process — not a heap string handle).
+extern "C" fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let name = if name_ptr == 0 || name_len <= 0 {
+            String::new()
+        } else {
+            let slice = unsafe {
+                std::slice::from_raw_parts(name_ptr as *const u8, name_len as usize)
+            };
+            String::from_utf8_lossy(slice).into_owned()
+        };
+        let text = show_packed_enum(packed, &name);
+        rt.stdout.push_str(&text);
+        rt.stdout.push('\n');
+    });
+}
+
 pub(crate) struct CollectionsHostFns {
     pub list_new: cranelift_module::FuncId,
     pub list_push: cranelift_module::FuncId,
@@ -463,6 +531,7 @@ pub(crate) struct CollectionsHostFns {
     pub list_sort_by_i64_keys: cranelift_module::FuncId,
     pub print_list: cranelift_module::FuncId,
     pub print_opt: cranelift_module::FuncId,
+    pub print_enum: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -501,6 +570,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     );
     builder.symbol("jet_jit_print_list", jet_jit_print_list as *const u8);
     builder.symbol("jet_jit_print_opt", jet_jit_print_opt as *const u8);
+    builder.symbol("jet_jit_print_enum", jet_jit_print_enum as *const u8);
 }
 
 pub(crate) fn declare_collections_host_fns(
@@ -529,12 +599,26 @@ pub(crate) fn declare_collections_host_fns(
     sig_get_f64.returns.push(AbiParam::new(types::F64));
     let mut sig_get_opt = sig_len.clone();
     sig_get_opt.params.push(AbiParam::new(types::I64));
-    let sig_set = sig_get.clone();
-    let mut sig_set_f64 = sig_get_f64.clone();
-    sig_set_f64.returns.clear();
+    // list_set(list, idx, val, line)
+    let mut sig_set = Signature::new(cc);
+    sig_set.params.push(AbiParam::new(types::I64));
+    sig_set.params.push(AbiParam::new(types::I64));
+    sig_set.params.push(AbiParam::new(types::I64));
+    sig_set.params.push(AbiParam::new(types::I32));
+    // list_set_f64(list, idx, val, line)
+    let mut sig_set_f64 = Signature::new(cc);
+    sig_set_f64.params.push(AbiParam::new(types::I64));
+    sig_set_f64.params.push(AbiParam::new(types::I64));
+    sig_set_f64.params.push(AbiParam::new(types::F64));
+    sig_set_f64.params.push(AbiParam::new(types::I32));
     let mut sig_sort = sig_len.clone();
     sig_sort.returns.clear();
-    let mut sig_slice = sig_get.clone();
+    // list_slice(list, start, end, line) -> id
+    let mut sig_slice = Signature::new(cc);
+    sig_slice.params.push(AbiParam::new(types::I64));
+    sig_slice.params.push(AbiParam::new(types::I64));
+    sig_slice.params.push(AbiParam::new(types::I64));
+    sig_slice.params.push(AbiParam::new(types::I32));
     sig_slice.returns.push(AbiParam::new(types::I64));
     let mut sig_join = sig_len.clone();
     sig_join.params.push(AbiParam::new(types::I64));
@@ -547,6 +631,10 @@ pub(crate) fn declare_collections_host_fns(
     let sig_map_at = sig_get_opt.clone();
     let mut sig_print_list = sig_get_opt.clone();
     sig_print_list.returns.clear();
+    let mut sig_print_enum = Signature::new(cc);
+    sig_print_enum.params.push(AbiParam::new(types::I64));
+    sig_print_enum.params.push(AbiParam::new(types::I64));
+    sig_print_enum.params.push(AbiParam::new(types::I64));
     let mut sig_sort_by_keys = sig_get_opt.clone();
     sig_sort_by_keys.returns.clear();
 
@@ -589,5 +677,6 @@ pub(crate) fn declare_collections_host_fns(
         list_sort_by_i64_keys: import("jet_jit_list_sort_by_i64_keys", &sig_sort_by_keys)?,
         print_list: import("jet_jit_print_list", &sig_print_list)?,
         print_opt: import("jet_jit_print_opt", &sig_print_list)?,
+        print_enum: import("jet_jit_print_enum", &sig_print_enum)?,
     })
 }

@@ -86,6 +86,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
 
 pub(crate) fn resident_teardown() {
     clear_deopt_state();
+    crate::Collections::clear_packed_enum_show();
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = None);
     Concurrency::set_active_runtime(None);

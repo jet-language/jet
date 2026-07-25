@@ -428,6 +428,40 @@ impl LowerCtx<'_, '_> {
         }
         match stmt {
             TStmt::Let { name, init, .. } => {
+                // Mutable field place (`left :: &counters.left`) → write-through
+                // handle `[struct, field_idx]` so later `left = 3` updates the owner.
+                if let TExprKind::Borrow {
+                    place,
+                    mutable: true,
+                } = &init.kind
+                {
+                    if let TExprKind::Field {
+                        recv,
+                        field,
+                        boxed: false,
+                    } = &place.kind
+                    {
+                        let structure = self.lower_expr(recv)?;
+                        let type_name = record_type_key(&recv.ty).ok_or_else(|| {
+                            format!("jit field-mut recv type unsupported: {:?}", recv.ty)
+                        })?;
+                        let index = self
+                            .meta
+                            .struct_field_index(&type_name, field)
+                            .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?;
+                        let handle = self.emit_field_mut(structure, index as i64)?;
+                        let ty = Type::Apply {
+                            name: "__JetFieldMut".to_string(),
+                            args: vec![init.ty.clone()],
+                        };
+                        let clif = types::I64;
+                        let var = self.fresh_var(clif);
+                        self.b.def_var(var, handle);
+                        self.vars.insert(TIR::local_place(name), var);
+                        self.var_tys.insert(TIR::local_place(name), ty);
+                        return Ok(());
+                    }
+                }
                 let val = self.lower_expr(init)?;
                 let ty = init_clif_ty(init, self.meta)?;
                 let val_ty = self.b.func.dfg.value_type(val);
@@ -439,8 +473,77 @@ impl LowerCtx<'_, '_> {
                 self.vars.insert(TIR::local_place(name), var);
                 self.var_tys.insert(TIR::local_place(name), init.ty.clone());
             }
-            TStmt::SplitViews { .. } => {
-                return Err("jit split views unsupported".to_string());
+            TStmt::SplitViews {
+                owner,
+                root,
+                name,
+                start,
+                end,
+                single,
+                write,
+                line,
+                ..
+            } => {
+                // Disjoint borrow splitting is an AOT lifetime fact. JIT keeps one
+                // shared list handle; write windows are `[list,start,end]` records
+                // (same ABI as ViewMutNew) so IndexAssign / deref Assign write through.
+                if let Some(owner_expr) = owner {
+                    let val = self.lower_expr(owner_expr)?;
+                    let var = self.fresh_var(types::I64);
+                    self.b.def_var(var, val);
+                    self.vars.insert(root.clone(), var);
+                    self.var_tys
+                        .insert(root.clone(), Type::List(Box::new(Type::Int)));
+                }
+                let list_var = *self
+                    .vars
+                    .get(root)
+                    .ok_or_else(|| format!("jit split views missing owner `{root}`"))?;
+                let list = self.b.use_var(list_var);
+                let start_v = self.b.ins().iconst(types::I64, *start);
+                let end_v = self.b.ins().iconst(types::I64, *end);
+                let line_c = self.b.ins().iconst(types::I32, *line as i64);
+                let (bound, bound_ty) = if *write {
+                    let handle = self.emit_view_mut_window(list, start_v, end_v)?;
+                    (
+                        handle,
+                        Type::Apply {
+                            name: "ViewMut".to_string(),
+                            args: vec![Type::Int],
+                        },
+                    )
+                } else if *single {
+                    let get_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                    let call = self.b.ins().call(get_ref, &[list, start_v, line_c]);
+                    let result = self.b.inst_results(call)[0];
+                    self.emit_trap_check()?;
+                    (result, Type::Int)
+                } else {
+                    let end_excl = self.b.ins().iconst(types::I64, *end + 1);
+                    let slice_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_slice, self.b.func);
+                    let call = self
+                        .b
+                        .ins()
+                        .call(slice_ref, &[list, start_v, end_excl, line_c]);
+                    let result = self.b.inst_results(call)[0];
+                    self.emit_trap_check()?;
+                    (
+                        result,
+                        Type::Apply {
+                            name: "View".to_string(),
+                            args: vec![Type::Int],
+                        },
+                    )
+                };
+                let place = TIR::local_place(name);
+                let var = self.fresh_var(types::I64);
+                self.b.def_var(var, bound);
+                self.vars.insert(place.clone(), var);
+                self.var_tys.insert(place, bound_ty);
             }
             // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()`. The coverage gate
             // (`resident_safe_stmt`) admitted only this exact shape: a 2-element
@@ -530,9 +633,29 @@ impl LowerCtx<'_, '_> {
                     .ok_or_else(|| format!("jit assign to unknown place `{}`", local.name))?;
                 // D-MUTSELF1: `(*self) = New{…}` must write through the receiver
                 // handle, not replace the local SSA pointer (AOT: `(*self) = …`).
+                // ViewMut / field-mut places use the same deref bit for element/
+                // field write-through.
                 if local.deref && op.is_none() {
                     let dst = self.b.use_var(var);
                     let src = self.lower_expr(value)?;
+                    if self.var_tys.get(&key).is_some_and(Self::is_view_mut_ty) {
+                        let (list, start, _) = self.unpack_view_mut(dst)?;
+                        let line = self.b.ins().iconst(types::I32, 1);
+                        let set = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_set, self.b.func);
+                        self.b.ins().call(set, &[list, start, src, line]);
+                        self.emit_trap_check()?;
+                        return Ok(());
+                    }
+                    if self.var_tys.get(&key).is_some_and(Self::is_field_mut_ty) {
+                        let (structure, idx) = self.unpack_field_mut(dst)?;
+                        let set = self
+                            .module
+                            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                        self.b.ins().call(set, &[structure, idx, src]);
+                        return Ok(());
+                    }
                     let assign = self
                         .module
                         .declare_func_in_func(self.host.struct_assign, self.b.func);
@@ -928,6 +1051,23 @@ impl LowerCtx<'_, '_> {
                         .declare_func_in_func(self.host.coll.map_insert, self.b.func);
                     self.b.ins().call(host_ref, &[map, key, val]);
                 } else {
+                    // ViewMut write-through: absolute index = window.start + idx.
+                    if Self::is_view_mut_ty(&base.ty) {
+                        let handle = self.lower_expr(base)?;
+                        let (list, start, _) = self.unpack_view_mut(handle)?;
+                        let idx = self.lower_expr(index)?;
+                        let abs = self.b.ins().iadd(start, idx);
+                        let val = self.lower_expr(value)?;
+                        let line = self.b.ins().iconst(types::I32, 1);
+                        let host_id = match &value.ty {
+                            Type::Float => self.host.coll.list_set_f64,
+                            _ => self.host.coll.list_set,
+                        };
+                        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                        self.b.ins().call(host_ref, &[list, abs, val, line]);
+                        self.emit_trap_check()?;
+                        return Ok(());
+                    }
                     let list = self.lower_expr(base)?;
                     let idx = self.lower_expr(index)?;
                     let val = self.lower_expr(value)?;
@@ -1091,12 +1231,14 @@ impl LowerCtx<'_, '_> {
                     let elem_ty = if matches!(method_kind, Some(TForInMethod::Chars)) {
                         Type::Char
                     } else {
-                        jit_list_iter_elem_type(&collection.ty).ok_or_else(|| {
-                            format!(
-                                "jit for-in collection type unsupported: {:?}",
-                                collection.ty
-                            )
-                        })?
+                        jit_list_iter_elem_type(&collection.ty)
+                            .or_else(|| jit_closure_elem_type(&collection.ty))
+                            .ok_or_else(|| {
+                                format!(
+                                    "jit for-in collection type unsupported: {:?}",
+                                    collection.ty
+                                )
+                            })?
                     };
                     // The collection value is computed once, before the loop header, so it
                     // dominates both the header and the body.
@@ -1639,6 +1781,87 @@ impl LowerCtx<'_, '_> {
         local.rust_name()
     }
 
+    fn is_view_mut_ty(ty: &Type) -> bool {
+        matches!(ty, Type::Apply { name, .. } if name == "ViewMut")
+    }
+
+    fn is_field_mut_ty(ty: &Type) -> bool {
+        matches!(ty, Type::Apply { name, .. } if name == "__JetFieldMut")
+    }
+
+    /// Write-through window: heap record `[list, start, end]` (inclusive ends).
+    fn emit_view_mut_window(
+        &mut self,
+        list: Value,
+        start: Value,
+        end: Value,
+    ) -> Result<Value, String> {
+        let n = self.b.ins().iconst(types::I64, 3);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let call = self.b.ins().call(new_ref, &[n]);
+        let handle = self.b.inst_results(call)[0];
+        let set = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let two = self.b.ins().iconst(types::I64, 2);
+        self.b.ins().call(set, &[handle, zero, list]);
+        self.b.ins().call(set, &[handle, one, start]);
+        self.b.ins().call(set, &[handle, two, end]);
+        Ok(handle)
+    }
+
+    fn unpack_view_mut(&mut self, handle: Value) -> Result<(Value, Value, Value), String> {
+        let get = self
+            .module
+            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let two = self.b.ins().iconst(types::I64, 2);
+        let call0 = self.b.ins().call(get, &[handle, zero]);
+        let list = self.b.inst_results(call0)[0];
+        let call1 = self.b.ins().call(get, &[handle, one]);
+        let start = self.b.inst_results(call1)[0];
+        let call2 = self.b.ins().call(get, &[handle, two]);
+        let end = self.b.inst_results(call2)[0];
+        Ok((list, start, end))
+    }
+
+    /// Write-through field place: heap record `[struct, field_index]`.
+    fn emit_field_mut(&mut self, structure: Value, field_idx: i64) -> Result<Value, String> {
+        let n = self.b.ins().iconst(types::I64, 2);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let call = self.b.ins().call(new_ref, &[n]);
+        let handle = self.b.inst_results(call)[0];
+        let set = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let idx = self.b.ins().iconst(types::I64, field_idx);
+        self.b.ins().call(set, &[handle, zero, structure]);
+        self.b.ins().call(set, &[handle, one, idx]);
+        Ok(handle)
+    }
+
+    fn unpack_field_mut(&mut self, handle: Value) -> Result<(Value, Value), String> {
+        let get = self
+            .module
+            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let call0 = self.b.ins().call(get, &[handle, zero]);
+        let structure = self.b.inst_results(call0)[0];
+        let call1 = self.b.ins().call(get, &[handle, one]);
+        let idx = self.b.inst_results(call1)[0];
+        Ok((structure, idx))
+    }
+
     fn load_local(&mut self, local: &TLocal) -> Result<Value, String> {
         let key = Self::local_key(local);
         let var = self
@@ -1646,7 +1869,31 @@ impl LowerCtx<'_, '_> {
             .get(&key)
             .copied()
             .ok_or_else(|| format!("jit unknown local `{}`", local.name))?;
-        Ok(self.b.use_var(var))
+        let raw = self.b.use_var(var);
+        if !local.deref {
+            return Ok(raw);
+        }
+        let ty = self.var_tys.get(&key).cloned();
+        if ty.as_ref().is_some_and(Self::is_view_mut_ty) {
+            let (list, start, _) = self.unpack_view_mut(raw)?;
+            let line = self.b.ins().iconst(types::I32, 1);
+            let get = self
+                .module
+                .declare_func_in_func(self.host.coll.list_get, self.b.func);
+            let call = self.b.ins().call(get, &[list, start, line]);
+            let result = self.b.inst_results(call)[0];
+            self.emit_trap_check()?;
+            return Ok(result);
+        }
+        if ty.as_ref().is_some_and(Self::is_field_mut_ty) {
+            let (structure, idx) = self.unpack_field_mut(raw)?;
+            let get = self
+                .module
+                .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+            let call = self.b.ins().call(get, &[structure, idx]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        Ok(raw)
     }
 
     /// `TExprKind::MethodCall`'s `func_ids` lookup key: JIT compiles user
@@ -1910,7 +2157,11 @@ impl LowerCtx<'_, '_> {
             TExprKind::CharLit(v) => Ok(self.b.ins().iconst(types::I32, *v as i64)),
             TExprKind::StrLit(parts) => self.lower_string_lit(parts),
             TExprKind::Local(local) => self.load_local(local),
-            TExprKind::Borrow { .. } => Err("jit place borrow unsupported".to_string()),
+            TExprKind::Borrow { place, .. } => {
+                // JIT has no borrow ABI — materialize the place value (scalar /
+                // field / already-materialized view handle).
+                self.lower_expr(place)
+            }
             TExprKind::Unary { op, operand } => {
                 let inner = self.lower_expr(operand)?;
                 Ok(match op {
@@ -2351,6 +2602,12 @@ impl LowerCtx<'_, '_> {
                 let list = self.lower_expr(base)?;
                 let idx = self.lower_expr(index)?;
                 let line_const = self.b.ins().iconst(types::I32, *line as i64);
+                let (list, idx) = if Self::is_view_mut_ty(&base.ty) {
+                    let (inner, start, _) = self.unpack_view_mut(list)?;
+                    (inner, self.b.ins().iadd(start, idx))
+                } else {
+                    (list, idx)
+                };
                 let host_id = match &expr.ty {
                     Type::Float => self.host.coll.list_get_f64,
                     _other => self.host.coll.list_get,
@@ -2370,11 +2627,14 @@ impl LowerCtx<'_, '_> {
                 let list = self.lower_expr(base)?;
                 let s = self.lower_expr(start)?;
                 let e = self.lower_expr(end)?;
+                // Jet ranges are inclusive; heap list_slice is exclusive-end.
+                let one = self.b.ins().iconst(types::I64, 1);
+                let end_excl = self.b.ins().iadd(e, one);
                 let line_const = self.b.ins().iconst(types::I32, *line as i64);
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.list_slice, self.b.func);
-                let call = self.b.ins().call(host_ref, &[list, s, e, line_const]);
+                let call = self.b.ins().call(host_ref, &[list, s, end_excl, line_const]);
                 let result = self.b.inst_results(call)[0];
                 self.emit_trap_check()?;
                 Ok(result)
@@ -2487,10 +2747,17 @@ impl LowerCtx<'_, '_> {
             TExprKind::CtLit(jet_foundation::AST::CtValue::Int(v)) => {
                 Ok(self.b.ins().iconst(types::I64, *v))
             }
-            TExprKind::CtLit(_)
-            | TExprKind::HostCall(_)
-            | TExprKind::DefaultLit
-            | TExprKind::Uninit => Err("jit host/default/uninit/ct-lit unsupported".to_string()),
+            TExprKind::Uninit => {
+                // D-UNINIT1 / GC promote: placeholder overwritten before read.
+                match self.meta.clif_ty(&expr.ty).or_else(|| clif_ty(&expr.ty)) {
+                    Some(ty) if ty == types::F64 => Ok(self.b.ins().f64const(0.0)),
+                    Some(ty) => Ok(self.b.ins().iconst(ty, 0)),
+                    None => Err(format!("jit uninit type unsupported: {:?}", expr.ty)),
+                }
+            }
+            TExprKind::CtLit(_) | TExprKind::HostCall(_) | TExprKind::DefaultLit => {
+                Err("jit host/default/uninit/ct-lit unsupported".to_string())
+            }
             TExprKind::ConstRef(_) => Err("jit const ref unsupported".to_string()),
             TExprKind::DataEntriesToMap(_) => Err("jit data-entries-to-map unsupported".to_string()),
             TExprKind::PoolSlot { .. } => Err("jit pool slot unsupported".to_string()),
@@ -2773,6 +3040,12 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TBuiltinOp::LenList => {
+                if Self::is_view_mut_ty(&recv.ty) {
+                    let (_, start, end) = self.unpack_view_mut(recv_val)?;
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    let span = self.b.ins().isub(end, start);
+                    return Ok(self.b.ins().iadd(span, one));
+                }
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.list_len, self.b.func);
@@ -2985,8 +3258,42 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::DequePeekFront => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::DequePeekBack => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::TryCollect => self.lower_try_collect(recv),
-            TBuiltinOp::ViewNew { .. } => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::ViewMutNew { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ViewNew { line } => {
+                // Inclusive window → exclusive list_slice end. Materialized list
+                // handle matches Iter/View JIT ABI (safety.rs).
+                let start = args
+                    .first()
+                    .ok_or_else(|| "jit view needs start".to_string())?;
+                let end = args
+                    .get(1)
+                    .ok_or_else(|| "jit view needs end".to_string())?;
+                let s = self.lower_expr(start)?;
+                let e = self.lower_expr(end)?;
+                let one = self.b.ins().iconst(types::I64, 1);
+                let end_excl = self.b.ins().iadd(e, one);
+                let line_c = self.b.ins().iconst(types::I32, *line as i64);
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_slice, self.b.func);
+                let call = self
+                    .b
+                    .ins()
+                    .call(host_ref, &[recv_val, s, end_excl, line_c]);
+                let result = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(result)
+            }
+            TBuiltinOp::ViewMutNew { .. } => {
+                let start = args
+                    .first()
+                    .ok_or_else(|| "jit view-mut needs start".to_string())?;
+                let end = args
+                    .get(1)
+                    .ok_or_else(|| "jit view-mut needs end".to_string())?;
+                let s = self.lower_expr(start)?;
+                let e = self.lower_expr(end)?;
+                self.emit_view_mut_window(recv_val, s, e)
+            }
             // D-ITERTOOLS1=A: JIT ABI can't carry true JetIter handles. Producers
             // (String.split, list adapters) already return list handles of the same
             // pieces AOT would yield lazily — to_list / collect is identity.
@@ -3125,10 +3432,12 @@ impl LowerCtx<'_, '_> {
             let call = self.b.ins().call(host_ref, &[val]);
             return Ok(self.b.inst_results(call)[0]);
         }
-        // Named user structs — allocate a fresh record and assign field slots.
-        // Do not use `jit_struct_type` here: it also matches Apply names like
-        // `Sender`/`Task`, which have dedicated host clones below.
-        if matches!(&inner.ty, Type::Named(_)) {
+        // Named user enums — packed i64 ABI: clone is a bitwise copy (Link trees
+        // embed nested payloads in the same word). Named structs allocate fresh.
+        if let Type::Named(name) = &inner.ty {
+            if self.meta.is_enum(name) {
+                return self.lower_expr(inner);
+            }
             return self.lower_clone_struct(inner);
         }
         if jit_tuple_type(&inner.ty) {
@@ -4255,6 +4564,21 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().call(host_ref, &[val, flag]);
                     return Ok(());
                 }
+                // Packed enums — JetShow `user_Variant(…)` matching AOT `{:?}`.
+                if let Type::Named(name) = &print_ty {
+                    if self.meta.is_enum(name) && self.meta.enum_packed_showable(name) {
+                        // Leak the type name once: heap string handles die on
+                        // resident reset between compile and run.
+                        let leaked: &'static str = Box::leak(name.clone().into_boxed_str());
+                        let ptr = self.b.ins().iconst(types::I64, leaked.as_ptr() as i64);
+                        let len = self.b.ins().iconst(types::I64, leaked.len() as i64);
+                        let host_ref = self
+                            .module
+                            .declare_func_in_func(self.host.coll.print_enum, self.b.func);
+                        self.b.ins().call(host_ref, &[val, ptr, len]);
+                        return Ok(());
+                    }
+                }
                 let host_id = match &print_ty {
                     Type::Int => self.host.print_i64,
                     Type::String => self.host.print_str,
@@ -4298,7 +4622,7 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
     ) -> Result<Value, String> {
         match op {
-            TClosureOp::Map | TClosureOp::MapMut | TClosureOp::OptionMap => {
+            TClosureOp::Map | TClosureOp::MapMut | TClosureOp::OptionMap | TClosureOp::ViewMap => {
                 if let Type::Option(inner) = &recv.ty {
                     return self.lower_option_map(recv, args, inner);
                 }
@@ -4309,7 +4633,9 @@ impl LowerCtx<'_, '_> {
             TClosureOp::SortBy => self.lower_iter_sort_by(recv, args),
             TClosureOp::TakeWhile => self.lower_iter_take_skip_while(recv, args, false),
             TClosureOp::SkipWhile => self.lower_iter_take_skip_while(recv, args, true),
-            TClosureOp::Fold | TClosureOp::Reduce => self.lower_iter_fold(recv, args),
+            TClosureOp::Fold | TClosureOp::Reduce | TClosureOp::ViewFold => {
+                self.lower_iter_fold(recv, args)
+            }
             TClosureOp::Position => self.lower_iter_position(recv, args),
             TClosureOp::MinBy => self.lower_iter_min_max_by(recv, args, false),
             TClosureOp::MaxBy => self.lower_iter_min_max_by(recv, args, true),
@@ -4974,9 +5300,10 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_iter_fold(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
-        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+        let elem_ty = jit_closure_elem_type(&recv.ty)
+            .or_else(|| jit_list_iter_elem_type(&recv.ty))
             .ok_or_else(|| "jit closure method unsupported".to_string())?;
-        if !matches!(elem_ty, Type::Int) || args.len() < 2 {
+        if !matches!(elem_ty, Type::Int | Type::Named(_)) || args.len() < 2 {
             return Err("jit closure method unsupported".to_string());
         }
         let seed = self.lower_expr(&args[0])?;
@@ -5032,9 +5359,9 @@ impl LowerCtx<'_, '_> {
         let acc = self.b.use_var(acc_var);
 
         let next_acc = self.with_bound_local(&acc_place, Type::Int, acc, |this| {
-
-            this.with_bound_local(&elem_place, Type::Int, elem, |inner| inner.lower_expr(body_expr))
-
+            this.with_bound_local(&elem_place, elem_ty.clone(), elem, |inner| {
+                inner.lower_expr(body_expr)
+            })
         })?;
         self.b.def_var(acc_var, next_acc);
         self.b.ins().jump(step, &[]);
