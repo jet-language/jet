@@ -188,6 +188,24 @@ impl SemanticSymbolIndex {
             .collect()
     }
 
+    /// Members of a Core module path (`core.math`, …) for REPL/LSP completion.
+    ///
+    /// Names come from the canonical Sema catalog (`core_module_items`) so
+    /// completion, diagnostics, and codegen stay on one list.
+    pub fn complete_core_module(module: &str, prefix: &str) -> Vec<SemanticSymbol> {
+        core_module_member_symbols(module)
+            .into_iter()
+            .filter(|symbol| symbol.name.starts_with(prefix))
+            .collect()
+    }
+
+    /// One Core module member by exact name, or `None` when absent.
+    pub fn lookup_core_module_member(module: &str, name: &str) -> Option<SemanticSymbol> {
+        core_module_member_symbols(module)
+            .into_iter()
+            .find(|symbol| symbol.name == name)
+    }
+
     /// Complete visible spellings once while retaining every symbol by
     /// identity and every explicitly qualified owner path.
     pub fn complete_visible(&self, prefix: &str, owner: Option<&str>) -> Vec<&SemanticSymbol> {
@@ -790,6 +808,31 @@ fn source_docs(source: &str, def_start: usize) -> (String, Vec<String>) {
         }
     }
     (summary, examples)
+}
+
+fn core_module_member_symbols(module: &str) -> Vec<SemanticSymbol> {
+    jet_sema::Sema::core_module_items(module)
+        .into_iter()
+        .map(|name| {
+            let qualified_name = format!("{module}.{name}");
+            SemanticSymbol {
+                identity: format!("builtin:module:{qualified_name}"),
+                name: name.clone(),
+                qualified_name: qualified_name.clone(),
+                owner: None,
+                module_path: module.to_string(),
+                kind: SemanticSymbolKind::Function,
+                signature: qualified_name,
+                summary: String::new(),
+                examples: Vec::new(),
+                provenance: SemanticProvenance::Builtin {
+                    module: module.to_string(),
+                },
+                span: None,
+                lexical_scope: None,
+            }
+        })
+        .collect()
 }
 
 fn language_symbols() -> Vec<SemanticSymbol> {

@@ -2715,6 +2715,7 @@ fn help_text(color: bool) -> String {
     writeln!(out).unwrap();
     writeln!(out, "{}", bold("Interactive terminal only", color)).unwrap();
     writeln!(out, "  {}             complete the current name", bold("Tab", color)).unwrap();
+    writeln!(out, "  {}              docs for the name under the cursor", bold("F1", color)).unwrap();
     writeln!(out, "  {}              search successful submission history", bold("F3", color)).unwrap();
     writeln!(out, "  {}              pin or unpin the latest turn", bold("^P", color)).unwrap();
     writeln!(out, "  {}              fold or unfold the latest turn", bold("^F", color)).unwrap();

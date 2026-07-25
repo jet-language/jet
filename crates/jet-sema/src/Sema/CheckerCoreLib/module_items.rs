@@ -1,6 +1,7 @@
 use crate::Syntax;
 
-pub(crate) fn core_module_items(module: &str) -> Vec<String> {
+/// Canonical Core module member names (completion, help, diagnostics).
+pub fn core_module_items(module: &str) -> Vec<String> {
     let normalized_module =
         Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     let module = normalized_module.as_str();
