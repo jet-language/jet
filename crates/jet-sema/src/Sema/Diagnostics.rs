@@ -1210,6 +1210,7 @@ mod tests {
                 usize::from(marker == CORE_CRYPTO_NOMINAL_MARKER)
                     + count_core_crypto_markers(inner)
             }
+            Type::Union(members) => members.iter().map(count_core_crypto_markers).sum(),
             Type::Int
             | Type::Float
             | Type::Bool
